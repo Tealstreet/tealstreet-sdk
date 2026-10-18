@@ -29021,5 +29021,2034 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_coinbase::cdp_signing::CdpAsync": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "T"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioFailure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioFailure",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "T"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Signing-host outcome: immediate retained failure or a shared completion Promise; not raw input parsing.",
+    "evidence": "One exact compiler-authenticated instantiation: <bool>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
+  },
+  "safe_cex_venue_coinbase::order_sync::SyncedOrderRoot": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "I",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": {
+                "resolved_path": {
+                  "path": "safe_cex_venue_coinbase::market_position_reads::ReadItem",
+                  "args": null
+                }
+              },
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::order_sync::SyncedOrder",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "I"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::order_sync::SyncedOrder",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "I"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared mutable synchronized-order model and original info root; no Deserialize implementation on SyncedOrder, no wire decoder.",
+    "evidence": "One exact compiler-authenticated instantiation: <crate::market_position_reads::ReadItem>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
+  },
+  "safe_cex_venue_coinbase::order_sync::SyncedOrders": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "I",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": {
+                "resolved_path": {
+                  "path": "safe_cex_venue_coinbase::market_position_reads::ReadItem",
+                  "args": null
+                }
+              },
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_coinbase::order_sync::SyncedOrderRoot",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "I"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "core::cell::RefCell",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "safe_cex_venue_coinbase::order_sync::SyncedOrder",
+                                                                    "args": {
+                                                                      "angle_bracketed": {
+                                                                        "args": [
+                                                                          {
+                                                                            "type": {
+                                                                              "generic": "I"
+                                                                            }
+                                                                          }
+                                                                        ],
+                                                                        "constraints": []
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Shared mutable ordered vector of synchronized-order roots; preserves model and info identity and is not a raw frame decoder.",
+    "evidence": "One exact compiler-authenticated instantiation: <crate::market_position_reads::ReadItem>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
+  },
+  "safe_cex_venue_coinbase::public_market_reads::PublicReadAsync": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "T"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioFailure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioFailure",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "T"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Public read-host outcome: immediate retained failure or a shared completion Promise; not a wire collection decoder.",
+    "evidence": "One exact compiler-authenticated instantiation: <bool>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
+  },
+  "safe_cex_venue_coinbase::exchange_lifecycle::LifecycleAsync": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "T"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioFailure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioFailure",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "T"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Lifecycle host outcome: immediate retained failure or an owned asynchronous completion; not a raw event decoder.",
+    "evidence": "One exact compiler-authenticated instantiation: <bool>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
+  },
+  "safe_cex_venue_coinbase::exchange_tick::TickAsync": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "T"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioFailure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioFailure",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "T"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Polling host outcome: immediate retained failure or a shared completion Promise; not ticker parsing.",
+    "evidence": "One exact compiler-authenticated instantiation: <bool>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
+  },
+  "safe_cex_venue_coinbase::order_sync::OrderSyncAsync": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "T"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioFailure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioFailure",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "T"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Order synchronization host outcome: immediate retained failure or a shared completion Promise; raw orders are decoded on separate paths.",
+    "evidence": "One exact compiler-authenticated instantiation: <bool>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
+  },
+  "safe_cex_venue_coinbase::order_edit::EditAsync": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "T"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioFailure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioFailure",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "T"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Amendment host outcome: immediate retained failure or a shared completion Promise; not amendment-input admission.",
+    "evidence": "One exact compiler-authenticated instantiation: <bool>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
+  },
+  "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbaseSessionFailure": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbaseSessionError",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbaseSessionError",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Reference-counted inert Starbase tagged request/coercion failure; no raw error parsing or fallback decoder.",
+    "evidence": "One exact compiler-authenticated instantiation: <bool>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
+  },
+  "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbaseAuthPromise": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::result::Result",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbaseAuthResultHandle",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbaseSessionFailure",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::result::Result",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbaseAuthResultHandle",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::rc::Rc",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbaseSessionError",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "E"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Inert Starbase shared authentication completion capability; error identity is retained rather than decoded from JSON.",
+    "evidence": "One exact compiler-authenticated instantiation: <bool>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
+  },
+  "safe_cex_venue_coinbase::starbase_ws_controller::CoinbaseStarbaseActivationPromise": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::result::Result",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "tuple": []
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbaseSessionFailure",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::result::Result",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "tuple": []
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::rc::Rc",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbaseSessionError",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "E"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Inert Starbase shared activation completion capability; a unit result or retained session failure, not a protocol decoder.",
+    "evidence": "One exact compiler-authenticated instantiation: <bool>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
+  },
+  "safe_cex_venue_coinbase::classes::ClassFindMethod": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "safe_cex_venue_coinbase::class_methods::BoundClassMethod",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::classes::CoinbaseExchange",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::classes::ClassFindResult",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "safe_cex_venue_coinbase::class_methods::BoundClassMethod",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::classes::CoinbaseExchange",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "core::cell::RefCell",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioState",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Production bound portfolio-selection arrow value, retaining its original Coinbase receiver; no raw-function deserialization.",
+    "evidence": "One exact compiler-authenticated instantiation: <crate::binding::rt::Host>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
+  },
+  "safe_cex_venue_coinbase::classes::ClassSupportedMethod": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "safe_cex_venue_coinbase::class_methods::BoundClassMethod",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::classes::CoinbaseExchange",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::classes::ClassSupportedResult",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "safe_cex_venue_coinbase::class_methods::BoundClassMethod",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::classes::CoinbaseExchange",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_coinbase::starbase_auth::CoinbaseStarbasePromise",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "core::cell::RefCell",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "alloc::vec::Vec",
+                                                                    "args": {
+                                                                      "angle_bracketed": {
+                                                                        "args": [
+                                                                          {
+                                                                            "type": {
+                                                                              "resolved_path": {
+                                                                                "path": "alloc::string::String",
+                                                                                "args": null
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                        ],
+                                                                        "constraints": []
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "safe_cex_venue_coinbase::portfolios_balances::PortfolioThrown",
+                                                        "args": null
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "reason": "Production bound supported-types arrow value, retaining its original Coinbase receiver; no raw-function deserialization.",
+    "evidence": "One exact compiler-authenticated instantiation: <crate::binding::rt::Host>. Native tests in tests/support/generic_alias_native.rs execute the real Promise on NativeRuntime, preserve retained order/info roots and number bits, and capture both method aliases from actual Coinbase constructors with the production Host. These observations establish native carrier/handle behavior; the alias trait receipt is an explicit non-decoder classification, not callback execution, raw decoder coverage, arbitrary generic arguments or complete source algorithm equivalence. Unknown generic aliases retain the existing identity fallback refusal."
   }
+
 }

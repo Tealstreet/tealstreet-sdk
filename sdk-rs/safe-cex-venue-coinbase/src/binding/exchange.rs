@@ -40,6 +40,11 @@ pub struct CoinbaseExchange {
     class: Rc<classes::CoinbaseExchange<Host>>,
     capabilities: ExchangeCapabilities,
 }
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/generic_alias_native.rs"]
+mod generic_alias_native;
 fn result<'a, T: Clone + 'static>(
     promise: Result<Promise<Result<T, PortfolioFailure>>, PortfolioFailure>,
 ) -> ExchangeFuture<'a, T> {

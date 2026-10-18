@@ -43,7 +43,7 @@ fn thrown(error: PublicFailure) -> Thrown {
 }
 
 #[derive(Clone)]
-pub(super) struct SocketHost {
+pub(crate) struct SocketHost {
     host: Host,
     socket: Js,
     handles: Rc<RefCell<Vec<(PublicSocket, Js)>>>,
