@@ -135,34 +135,13 @@ fn binary(op: &str, left: Js, right: Js) -> Result<Js, Thrown> {
     })
 }
 
-/// `new f(...args)`: derived classes run their body; `new Promise(executor)` is
-/// built here because the runtime's Promise global is a plain namespace.
+/// Source new dispatch uses the class body or canonical native construction.
 pub(crate) fn construct(weak: &Weak<Shared>, f: Js, args: Vec<Js>) -> Result<Js, Thrown> {
     let rt = scope(weak)?;
     if let Some(class) = class_of(&rt, &f) {
         return (class.body)(f.clone(), f, args);
     }
-    if rt.global("Promise").is_ok_and(|p| p.same_reference(&f)) {
-        let runtime = rt.exchange_runtime();
-        let promise = Promise::pending(&runtime);
-        let (resolve, reject) = (promise.clone(), promise.clone());
-        let executor = arg(&args, 0);
-        executor.call(
-            Js::Undefined,
-            vec![
-                Js::function("resolve", move |_, a| {
-                    resolve.settle(Ok(arg(&a, 0)));
-                    Ok(Js::Undefined)
-                }),
-                Js::function("reject", move |_, a| {
-                    reject.settle(Err(Thrown::new(arg(&a, 0))));
-                    Ok(Js::Undefined)
-                }),
-            ],
-        )?;
-        return Ok(Js::Promise(promise));
-    }
-    f.call(Js::Undefined, args)
+    f.construct(args, None)
 }
 
 // Retain the actual IteratorRecord: GetIterator and Get(next) happen once,
@@ -270,7 +249,7 @@ fn noop_runtime() -> Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> {
             }
             Box::new(Never)
         }
-        fn console(&self, _: &str, _: &str) {}
+        fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
         fn unique_id(&self) -> String {
             String::new()
         }
@@ -286,7 +265,12 @@ fn noop_runtime() -> Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> {
             _: &serde_json::Value,
         ) {
         }
-        fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {}
+        fn report_raw_exception(
+            &self,
+            _: &safe_cex_exchange::js_runtime::value::Js,
+            _: &serde_json::Value,
+        ) {
+        }
         fn execute_worker_request(
             &self,
             _: serde_json::Value,

@@ -15,8 +15,20 @@ function evaluate(relative,extra,params,values,names) {
 const provider={publicCorsProxy:()=>undefined,serverProxyUrl:()=>undefined};
 let warnings=[];
 const account=evaluate('packages/safe-cex/src/createExchangeFromAccount.ts','',['getExchangeMetadata','resolveAccountTransport','normalizeBybitSiteId','getTransport','createExchange','process','console'],[metadata.getExchangeMetadata,routing.resolveAccountTransport,site.normalizeBybitSiteId,()=>provider,()=>{throw Error('unexpected constructor')},{env:{}},{warn:message=>warnings.push(message)}]);
+if(process.argv.includes('--hyro-modes')) {
+ const rows=[];
+ for(const exchange of ['hyrotrader','bybit'])for(const demo of ['absent',false,true])for(const override of ['absent','undefined','demo','production']) {
+  const input={exchange,name:'hyro-mode-account',apiKey:'fixture-key',apiSecret:'fixture-secret',...(demo==='absent'?{}:{hyrotraderDemo:demo})};
+  const patch=override==='absent'?undefined:{extra:{hyrotraderMode:override==='undefined'?undefined:override}};
+  const result=account.accountToExchangeOptions(input,patch);
+  rows.push({account:input,override,extra:result.extra??null});
+ }
+ assert.equal(rows.length,24);
+ process.stdout.write(JSON.stringify(rows));
+ process.exit(0);
+}
 const fields=['enableSpotMarkets','enableOptionMarkets','enableInverseMarkets'];
-const names=Object.keys(metadata.exchangeMetadata);assert.equal(names.length,48,'all declared exchange metadata entries');
+const names=Object.keys(metadata.exchangeMetadata);assert.equal(names.length,49,'all declared exchange metadata entries');
 const rows=[];
 for(const exchange of names)for(const field of fields)for(const enabled of ['absent',false,true])for(const override of ['absent','undefined',false,true]){
  const input={exchange,name:'toggle-witness',apiKey:'',apiSecret:'',...(enabled==='absent'?{}:{[field]:enabled})};
@@ -26,7 +38,7 @@ for(const exchange of names)for(const field of fields)for(const enabled of ['abs
  const expected=Object.fromEntries(fields.filter(key=>Object.hasOwn(value,key)&&value[key]!==undefined).map(key=>[key,value[key]]));
  rows.push({account:input,field,override,expected,warnings});
 }
-assert.equal(rows.length,1728,'48 venues x 3 independent toggles x 3 inputs x 4 override states');
+assert.equal(rows.length,1764,'49 venues x 3 independent toggles x 3 inputs x 4 override states');
 assert.equal(rows.some(row=>row.field==='enableOptionMarkets'&&row.expected.enableOptionMarkets===true),true);
 assert.equal(rows.some(row=>row.field==='enableInverseMarkets'&&row.expected.enableInverseMarkets===true),true);
 process.stdout.write(JSON.stringify(rows));

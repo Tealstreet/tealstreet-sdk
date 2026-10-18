@@ -204,13 +204,13 @@ fn query_profile(value: &Value) -> Result<String, String> {
     )
     .map_err(|e| e.message.to_owned())
 }
-fn body_value(body: RestResponseBody) -> Value {
-    match body {
-        RestResponseBody::Encoded(bytes) => serde_json::from_slice(&bytes)
-            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned())),
-        RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => v,
-    }
+fn body_value(body: RestResponseBody) -> Result<Value, ExchangeError> {
+    body.transform_axios_response()
+        .map_err(|error| ExchangeError::new(error.to_string()))?
+        .json_value()
+        .map_err(|error| ExchangeError::new(error.to_string()))
 }
+
 fn signature_rejected(data: &Value) -> Result<bool, ExchangeError> {
     crate::api::is_bitunix_signature_rejection(data).map_err(|e| ExchangeError::new(e.message))
 }
@@ -283,7 +283,12 @@ impl Client {
                     base_url: Some(lane.base_url.clone()),
                     timeout_ms: Some(timeout as i64),
                     params: params.clone(),
-                    body: body.clone().map(RestBody::Untransformed),
+                    body: body
+                        .clone()
+                        .map(safe_cex_types::retained_json::RetainedJsonInput::from_value)
+                        .transpose()
+                        .map_err(|error| ExchangeError::new(error.to_string()))?
+                        .map(RestBody::Untransformed),
                     ..Default::default()
                 };
                 let mut signed_headers = headers.clone();
@@ -327,7 +332,7 @@ impl Client {
                         let rejected = !signature_retried
                             && match &failure.response {
                                 Some(response) => {
-                                    signature_rejected(&body_value(response.body.clone()))?
+                                    signature_rejected(&body_value(response.body.clone())?)?
                                 }
                                 None => false,
                             };
@@ -344,7 +349,7 @@ impl Client {
                     Ok(response) => response,
                 };
                 let status = response.status;
-                let data = body_value(response.body);
+                let data = body_value(response.body)?;
                 // ts: resendOnSignatureRejection in the response interceptor.
                 if !signature_retried && signature_rejected(&data)? {
                     signature_retried = true;

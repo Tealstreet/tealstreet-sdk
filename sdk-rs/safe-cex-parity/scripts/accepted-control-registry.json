@@ -35,7 +35,13 @@
     "accepted-contract-files.test.mjs": [
       "per-crate contracts preserve every legacy value and explicit fixture file",
       "contract directories reject missing malformed misplaced duplicate and hidden inputs",
-      "contract shard namespace and complete merge checks reject executed mutations"
+      "contract shard namespace and complete merge checks reject executed mutations",
+      "authored JSON tokens retain integer key order, numbers and escaped keys",
+      "generated case wrappers retain nested and primitive authored input tokens",
+      "raw contract and dispatch token retention reject executed loader mutations",
+      "source-aware JSON rejects duplicate decoded keys at every nesting level",
+      "source-aware JSON retains programmatic and edited negative zero",
+      "source-aware JSON retains authored integer-key order after edits"
     ],
     "accepted-contract-order-native.test.mjs": [
       "authored integer-key order reaches the maintained native decoder probe"
@@ -54,7 +60,8 @@
       "self-only Visitor unit witnesses cannot invent varying input or exempt data methods",
       "reviewed host operations bind exact compiler bodies and cannot exempt cache decoders",
       "reviewed serializer constants pin compiler source adapters and witnesses",
-      "reviewed direct transport constant pins raw compiler source and native capability observations"
+      "reviewed direct transport constant pins raw compiler source and native capability observations",
+      "multi-entry dispatch carries authored raw case tokens into native contracts"
     ],
     "accepted-controls.test.mjs": [
       "private Cargo targets cannot execute a stale default scanner in production or history",
@@ -145,6 +152,9 @@
       "receiver item hashes preserve Unicode columns and refuse invalid spans",
       "compiler receiver item pins survive unrelated edits and refuse changes inside the impl"
     ],
+    "accepted-json-source-native.test.mjs": [
+      "authored JSON order detects removal of actual Aster query key sorting"
+    ],
     "accepted-loader-future-native.test.mjs": [
       "loader future actual compiler coverage refuses removal and restores the named assertion"
     ],
@@ -169,6 +179,11 @@
     ],
     "accepted-model-record-native.test.mjs": [
       "model record visitors have executed native field observations"
+    ],
+    "accepted-napi-alias.test.mjs": [
+      "NAPI callbacks retain their exact compiler signatures and Cargo identities",
+      "unknown NAPI callback aliases keep the existing refusal",
+      "NAPI alias compiler and artifact guards are load bearing"
     ],
     "accepted-node-probes.test.mjs": [
       "real Node probe execution is restricted to the production FFI addon profile",
@@ -407,6 +422,13 @@
     "transport HOW auth wire token",
     "transport relay close code",
     "transport registry instance precedence",
-    "transport provider foreign URL refusal"
+    "transport provider foreign URL refusal",
+    "NAPI alias source identity",
+    "NAPI alias expanded signature",
+    "NAPI alias nested Cargo identity",
+    "NAPI alias caller redirection",
+    "authored JSON contract source retention",
+    "authored JSON dispatch token retention",
+    "authored JSON native key ordering"
   ]
 }

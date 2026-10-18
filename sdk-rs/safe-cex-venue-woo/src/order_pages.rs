@@ -1,6 +1,7 @@
 //! Recursive order-page phases over the supplied REST boundary.
 use safe_cex_exchange::{
-    error_reporting::ExchangeErrorInput, exchange::BaseExchange, runtime::ExchangeError,
+    error_reporting::ExchangeErrorInput, exchange::BaseExchange, js_runtime::value::from_json,
+    runtime::ExchangeError,
 };
 use safe_cex_num::{js_number, js_truthy};
 use safe_cex_transport::{RestAdapter, RestRequest};
@@ -44,9 +45,12 @@ pub async fn fetch_orders_recursively(
             return Ok(result);
         }
         let data = match response.body.into_data() {
-            Value::String(text) => safe_cex_transport::how::json_parse(&text),
+            RetainedJsonInput::Text(text) => {
+                RetainedJsonInput::parse_json(&text).unwrap_or(RetainedJsonInput::Null)
+            }
             native => native,
         };
+        let data = data.into_value()?;
         let object = data
             .as_object()
             .ok_or_else(|| refusal("order page requires an object response"))?;
@@ -60,12 +64,10 @@ pub async fn fetch_orders_recursively(
                         .and_then(|meta| meta.get("message"))
                         .filter(|value| js_truthy(Some(value)))
                 });
-            let message = match message {
-                Some(Value::String(message)) => message.clone(),
-                None => "Failed to fetch orders".into(),
-                Some(_) => return Err(refusal("order page reporter requires a string message")),
-            };
-            base.emit_and_log_error(ExchangeErrorInput::Message(message), None, None)?;
+            let message = message
+                .cloned()
+                .unwrap_or_else(|| Value::String("Failed to fetch orders".into()));
+            base.emit_and_log_error(ExchangeErrorInput::Raw(from_json(&message)), None, None)?;
             return Ok(result);
         }
         let data = object

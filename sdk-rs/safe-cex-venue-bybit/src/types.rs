@@ -236,6 +236,29 @@ pub static HYROTRADER_SIMULATOR_WS_URL: LazyLock<Value> = LazyLock::new(|| {
     serde_json::json!({"public":{"linear":{"livenet":public,"testnet":public},"inverse":{"livenet":"","testnet":""}},"private":{"livenet":private,"testnet":private}})
 });
 
+pub static HYROTRADER_PROD_URL: LazyLock<Value> = LazyLock::new(|| {
+    let origin = normalize_configured_origin(option_env!("NEXT_PUBLIC_HYROTRADER_PROD_REST_URL"));
+    serde_json::json!({"livenet": origin, "testnet": origin})
+});
+pub static HYROTRADER_PROD_WS_URL: LazyLock<Value> = LazyLock::new(|| {
+    let origin = normalize_configured_origin(option_env!("NEXT_PUBLIC_HYROTRADER_PROD_REST_URL"));
+    let public =
+        normalize_configured_origin(option_env!("NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL"));
+    let private =
+        normalize_configured_origin(option_env!("NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL"));
+    let public = if public.is_empty() {
+        rest_origin_to_ws_url(&origin, "/v5/public/linear")
+    } else {
+        public
+    };
+    let private = if private.is_empty() {
+        rest_origin_to_ws_url(&origin, "/v5/private")
+    } else {
+        private
+    };
+    serde_json::json!({"public":{"linear":{"livenet":public,"testnet":public},"inverse":{"livenet":"","testnet":""}},"private":{"livenet":private,"testnet":private}})
+});
+
 // Private derived decoder supplies canonical serde spelling metadata. Only the
 // string-required public Deserialize implementation can construct the public type.
 #[derive(Serialize, Deserialize)]

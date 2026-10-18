@@ -46,7 +46,9 @@ impl WsSocket for Socket {
         if self.fail.get() {
             let mut e = ExchangeError::new("fixture send");
             e.name = "RangeError".into();
-            e.metadata.code = Some(json!("send-code"));
+            e.metadata.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(
+                "send-code"
+            )));
             Err(e)
         } else {
             Ok(())
@@ -79,7 +81,7 @@ impl ExchangeRuntime for Runtime {
     fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         Box::new(Task)
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -89,7 +91,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.0
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
@@ -277,7 +283,9 @@ fn private_open_matches_source_through_core() {
                 {
                     let mut error = ExchangeError::new("fixture fetch");
                     error.name = "TypeError".into();
-                    error.metadata.code = Some(json!("fetch-code"));
+                    error.metadata.code = Some(safe_cex_exchange::js_runtime::value::from_json(
+                        &json!("fetch-code"),
+                    ));
                     Err(error)
                 }
             } else {
@@ -291,11 +299,24 @@ fn private_open_matches_source_through_core() {
         };
         let error = result
             .err()
-            .map(|e| json!({"name":e.name, "message":e.message, "code":e.metadata.code}));
+            .map(|e| json!({"name":e.name, "message":e.message, "code":observed_error_code(&e.metadata.code)}));
         assert_eq!(
             json!({"trace":*observed.borrow(), "flags":{"resync":resync.get(),"opened":opened.get()}, "error":error}),
             json!({"trace":c["trace"],"flags":c["flags"],"error":c["error"]}),
             "private onOpen case {index}: {c}"
         );
     }
+}
+
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
 }

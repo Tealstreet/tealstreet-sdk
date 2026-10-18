@@ -2,6 +2,7 @@
 #[allow(dead_code)]
 mod support;
 use safe_cex_exchange::exchange::Exchange;
+use safe_cex_exchange::js_runtime::value::to_typed;
 use safe_cex_store::Store;
 use safe_cex_types::*;
 use serde_json::{Value, json};
@@ -11,6 +12,7 @@ include!("support/binding_streams.rs");
 include!("support/binding_failures.rs");
 include!("support/binding_factory.rs");
 include!("support/private_lifecycle.rs");
+include!("support/start_continuation.rs");
 include!("support/placement_parity.rs");
 
 fn raw_order() -> Value {
@@ -300,15 +302,14 @@ fn market_field_refusal_case(field: &str, wire_field: &str) {
             let refusals = logs
                 .iter()
                 .filter(|args| {
-                    args[0]
-                        .as_str()
+                    to_typed::<String>(&args[0])
                         .unwrap()
                         .contains("Refused ApexOmni market row")
                 })
                 .collect::<Vec<_>>();
             assert_eq!(refusals.len(), 1, "visible per-row refusal");
-            assert_eq!(refusals[0][1], "warning");
-            let message = refusals[0][0].as_str().unwrap();
+            assert_eq!(to_typed::<String>(&refusals[0][1]).unwrap(), "warning");
+            let message = to_typed::<String>(&refusals[0][0]).unwrap();
             assert!(
                 message.contains("row 1") && message.contains(&format!("{field}=")),
                 "{message}"

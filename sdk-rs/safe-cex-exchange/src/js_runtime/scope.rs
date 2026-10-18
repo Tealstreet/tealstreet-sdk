@@ -4,7 +4,7 @@ use super::{
     client::JsHttpHost,
     promise::{JsFuture, Promise},
     sockets::JsSocketContext,
-    value::{Js, Thrown},
+    value::{Js, ObjectData, Prop, Thrown, utf16},
 };
 use crate::{
     exchange::BaseExchange,
@@ -14,6 +14,7 @@ use crate::{
 use safe_cex_store::Store;
 use std::{
     cell::{OnceCell, RefCell},
+    collections::HashMap,
     rc::Rc,
 };
 
@@ -27,6 +28,7 @@ pub struct ScopeShared<X> {
     pub exchange: RefCell<Js>,
     pub timers: Timers,
     pub extra: X,
+    native_modules: RefCell<HashMap<&'static str, Rc<ObjectData>>>,
 }
 
 impl<X> ScopeShared<X> {
@@ -39,6 +41,22 @@ impl<X> ScopeShared<X> {
     ) -> Self {
         let sockets = JsSocketContext::new(runtime.clone());
         *sockets.http.borrow_mut() = Some(http.clone());
+        let mut native_modules = HashMap::new();
+        if let Js::Object(data) = &globals {
+            let props = data.props.borrow();
+            for name in super::library::NATIVE_MODULE_ROOTS {
+                if let Some(
+                    Prop::Data(Js::Object(module))
+                    | Prop::DataDescriptor {
+                        value: Js::Object(module),
+                        ..
+                    },
+                ) = props.get(&utf16(name))
+                {
+                    native_modules.insert(name, module.clone());
+                }
+            }
+        }
         Self {
             sockets,
             runtime,
@@ -49,7 +67,21 @@ impl<X> ScopeShared<X> {
             exchange: RefCell::new(Js::Undefined),
             timers: RefCell::default(),
             extra,
+            native_modules: RefCell::new(native_modules),
         }
+    }
+    pub(crate) fn native_module(&self, name: &str) -> Option<Js> {
+        self.native_modules
+            .borrow()
+            .get(name)
+            .cloned()
+            .map(Js::Object)
+    }
+    pub(crate) fn retain_native_module(&self, name: &'static str, module: Rc<ObjectData>) {
+        self.native_modules
+            .borrow_mut()
+            .entry(name)
+            .or_insert(module);
     }
 }
 
@@ -188,21 +220,30 @@ impl<X> Scope<X> {
         let fired = Rc::new(std::cell::Cell::new(false));
         let (shared, own, done) = (Rc::downgrade(&self.shared), handle.clone(), fired.clone());
         let reporter = runtime.clone();
-        let task = runtime.spawn_local(Box::pin(async move {
-            let slept = reporter.sleep(delay).await;
-            done.set(true);
-            if let Some(shared) = shared.upgrade() {
-                drop(take_timers(&shared.timers, &own));
-            }
-            let outcome = match slept {
-                // A host timer that fails never fires; say so rather than run early.
-                Err(error) => Err((error, "setTimeout sleep")),
-                Ok(()) => callback().map_err(|error| (error.to_exchange_error(), "setTimeout")),
-            };
-            if let Err((error, source)) = outcome {
-                reporter.report_exception(&error, &serde_json::json!({ "source": source }));
-            }
-        }));
+        let deadline = runtime.monotonic_now_ms() + delay as f64;
+        let task = super::jobs::for_runtime(&(runtime.clone() as Rc<dyn ExchangeRuntime>)).timer(
+            deadline,
+            Box::pin(async move {
+                let remaining = (deadline - reporter.monotonic_now_ms()).max(0.0).ceil() as u64;
+                let slept = if remaining == 0 {
+                    Ok(())
+                } else {
+                    reporter.sleep(remaining).await
+                };
+                done.set(true);
+                if let Some(shared) = shared.upgrade() {
+                    drop(take_timers(&shared.timers, &own));
+                }
+                let outcome = match slept {
+                    // A host timer that fails never fires; say so rather than run early.
+                    Err(error) => Err((error, "setTimeout sleep")),
+                    Ok(()) => callback().map_err(|error| (error.to_exchange_error(), "setTimeout")),
+                };
+                if let Err((error, source)) = outcome {
+                    reporter.report_exception(&error, &serde_json::json!({ "source": source }));
+                }
+            }),
+        );
         // An inline host may already have run the timer: never register a dead task.
         if !fired.get() {
             self.shared.timers.borrow_mut().push((handle.clone(), task));

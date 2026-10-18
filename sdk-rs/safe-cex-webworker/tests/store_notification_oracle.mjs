@@ -78,7 +78,7 @@ for(const path of ['positions-full','positions-partial','positions-dispatch-full
  }
  if(path==='bbo')assert.equal(posts[0].op,'listenOrderBook','NOTIFICATION book post precedes ticker failure');
  assert.equal(exchange.isDisposed,dispose,'NOTIFICATION disposal occurred inside subscriber');
- rows.push({path,fail,kind,dispose,events,posts:posts.map(p=>({op:p.op,success:p.data.success,result:p.data.result,reason:p.data.reason})),state:view(store),thrown:thrown?.message});
+ rows.push({path,fail,kind,dispose,events,codeJson:JSON.stringify(error.code),posts:posts.map(p=>({op:p.op,success:p.data.success,result:p.data.result,reason:p.data.reason})),state:view(store),thrown:thrown?.message});
 }
 assert.equal(rows.length,36,'NOTIFICATION path inventory');
 const leverageSymbols=[];

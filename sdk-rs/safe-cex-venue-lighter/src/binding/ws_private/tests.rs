@@ -31,11 +31,13 @@ use std::{
     pin::Pin,
     rc::{Rc, Weak},
     sync::Arc,
-    task::{Context, Poll, Waker},
+    task::{Context, Poll},
 };
 
 const START: f64 = 1_700_000_000_000.0;
 const URL: &str = "wss://lighter.test/stream";
+
+use super::super::test_time::{SleepWakers, WakeSignal};
 
 type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 
@@ -43,6 +45,7 @@ type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 struct Runtime {
     now: Rc<Cell<f64>>,
     jobs: RefCell<Vec<Job>>,
+    sleepers: SleepWakers,
     sockets: RefCell<Vec<(String, Rc<Io>)>>,
     reports: RefCell<Vec<String>>,
 }
@@ -59,12 +62,14 @@ impl Drop for Task {
 }
 impl Runtime {
     fn pump(&self) {
+        let signal = Arc::new(WakeSignal::default());
+        let waker = signal.waker();
         for _ in 0..256 {
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
             if jobs.is_empty() {
                 return;
             }
-            let mut cx = Context::from_waker(Waker::noop());
+            let mut cx = Context::from_waker(&waker);
             let mut pending = vec![];
             let mut progressed = false;
             for (mut future, cancelled) in jobs {
@@ -76,13 +81,15 @@ impl Runtime {
             }
             let spawned = !self.jobs.borrow().is_empty();
             self.jobs.borrow_mut().extend(pending);
-            if !progressed && !spawned {
+            self.sleepers.wake_due(self.now.get());
+            if !progressed && !spawned && !signal.take() {
                 return;
             }
         }
     }
     fn advance(&self, ms: f64) {
         self.now.set(self.now.get() + ms);
+        self.sleepers.wake_due(self.now.get());
         self.pump();
     }
     fn socket(&self, index: usize) -> Rc<Io> {
@@ -103,13 +110,15 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         let now = self.now.clone();
         let at = now.get() + ms as f64;
+        let sleep_waker = self.sleepers.register(at);
         let mut turned = false;
-        Box::pin(std::future::poll_fn(move |_| {
+        Box::pin(std::future::poll_fn(move |cx| {
             let ready = turned && now.get() >= at;
             turned = true;
             if ready {
                 Poll::Ready(Ok(()))
             } else {
+                *sleep_waker.borrow_mut() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -119,7 +128,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((future, flag.clone()));
         Box::new(Task(flag))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "id".into()
     }
@@ -129,8 +138,10 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.0
     }
-    fn report_raw_exception(&self, error: &Value, _: &Value) {
-        self.reports.borrow_mut().push(error.to_string());
+    fn report_raw_exception(&self, error: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
+        self.reports
+            .borrow_mut()
+            .push(safe_cex_exchange::runtime::exception_text(error));
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
         self.reports.borrow_mut().push(error.to_string());
@@ -387,7 +398,7 @@ fn world_with_token(token: impl FnOnce(&Rc<dyn ExchangeRuntime>) -> Js) -> World
     let calls: Calls = Rc::default();
     let parent = parent(&runtime, &store, &calls, token(&exchange_runtime));
     let class = realm.global("LighterPrivateWebsocket").unwrap();
-    let socket = class.call(Js::Undefined, vec![parent]).unwrap();
+    let socket = class.construct(vec![parent], None).unwrap();
     World {
         runtime,
         store,

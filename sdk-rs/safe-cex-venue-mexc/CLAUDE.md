@@ -360,3 +360,36 @@ Production private dispatch remains in sockets::PrivateProtocol; public book
 subscriptions remain in ws_public::MexcPublicSocket. The assembly oracle now
 covers only its seven live exchange-body groups (61 source cases). Manifest
 rows cite those live owners and retain explicit coverage findings.
+
+The constructed ticker corpus in `tests/exchange_trait.rs` covers 160 cases / 480 frames with every numeric alias, distinct fallback values and per-market contract sizes. Source Date parsing and native local-time conversion use the explicit UTC host profile.
+It drives the production constructor/socket protocol and actual DefaultStore,
+checking native number bits against maintained TS classes and DefaultStore.
+Independent null, string, NaN-producing, object, overflow, signed-zero and false
+inputs accompany distinct good rows, with finite Store resets before every case.
+The shared `ticker-native-controls.py` compiles live field-publication faults,
+requires named native failures, restores exact bytes and requires passing tests.
+
+Reporting regressions retain the actual Error at the production worker post sink:
+read `name`/`message` before JSON projection, and compare the shared JS stringifier
+separately against actual source `JSON.stringify`. Numeric reports compare IEEE
+bits rather than serde's integer/float storage variants. The 120 reporting cases
+and six throwing-listener cases retain their original call and fallback floors.
+`../safe-cex-parity/examples/mexc_reporting_worker_host.rs` constructs the real MEXC venue and drives
+all three failing REST readers through `install_exchange_event_bridge` and
+`WorkerDataPost::for_browser`. Build that tooling example for wasm32, run wasm-bindgen
+with `--target nodejs`, then run `../safe-cex-parity/tests/mexc-reporting-worker-host.mjs <generated-js>`
+with `SAFE_CEX_TYPESCRIPT_PATH` set. Its six cases compare actual source readers
+and worker registration to the native browser post and UI structured clone.
+A cloned Error keeps its message but resets a custom name, matching JavaScript.
+
+The cross-layer MEXC/worker proof lives in parity tooling. The venue has no
+worker dependency, including dev-dependencies; architectural layer checks include
+test-only edges. All six browser-post and UI-clone cases remain mandatory in the
+relocated witness.
+
+The 120-case reporting-values/worker bridge corpus lives in tooling at
+`safe-cex-parity/tests/mexc_reporting_worker.rs`, using the public MEXC constructor.
+The MEXC unit target retains the six throwing-listener observations and primitive
+reporting helpers. `venue-oracle:mexc` runs both targets; worker dependencies never
+belong in this venue. Browser Error/structuredClone proof remains in the tooling
+example and Node runner documented above.

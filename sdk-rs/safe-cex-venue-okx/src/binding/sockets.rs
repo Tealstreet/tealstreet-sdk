@@ -80,9 +80,9 @@ fn region_and_testnet(this: &Js) -> Result<(OkxRegion, bool), Thrown> {
 
 /// `jsonParse(data)`.
 fn json_parse(data: &Js) -> Result<Js, Thrown> {
-    Ok(from_json(&safe_cex_transport::how::json_parse(&text(
-        data,
-    )?)))
+    Ok(safe_cex_exchange::js_runtime::value::from_retained_input(
+        safe_cex_transport::how::json_parse(&text(data)?),
+    ))
 }
 
 /// `error instanceof Error ? error : new Error(String(error))`.
@@ -1022,7 +1022,7 @@ pub(crate) fn register(g: &Js, weak: Weak<OkxShared>) {
         let w = weak.clone();
         let _ = g.define(
             name,
-            Js::constructor(name, move |_, a| {
+            Js::constructor(name, None, move |_, a| {
                 let scope = scope_of(&w)?;
                 let socket = base_websocket(&scope.shared.sockets, arg(&a, 0));
                 let s = scope.with_this(socket.clone());

@@ -286,8 +286,8 @@ rows directly, without serialization. Active pagination requires an empty page;
 49 populated pages followed by empty succeeds, while50 populated pages refuses
 without returning a partial snapshot. Cursor type/progress and extra-query spread
 precedence follow the source. Retry reads start all three families and preserve
-Store orders on complete failure, returning owned snapshots; independently running
-JS promises can outlive rejection, whereas native futures drop. Clock callbacks
+Store orders on complete failure, returning owned snapshots. The concrete native
+adapter retains independently running requests after a reader rejects. Clock callbacks
 are infallible/non-mutating and retry sleep takes the exact native Number argument.
 History reads preserve the source's distinct code checks, public/unknown-market
 shortcuts, seconds/milliseconds normalization, strict fill numeric aliases,
@@ -350,3 +350,17 @@ all-features inventories (cancellation6+export-ignore, override7+live-TS-ignore,
 binding25), parity7459/16581 and extraction0 pass after normal master refresh.
 Logs: /tmp/blofin-gone-{native-red,final-native,native-clippy,wasm-clippy,
 inventories,parity,extract}.log. No reviewed fixture or source corpus replaced.
+
+The constructed ticker census in `tests/native_ping_latency.rs` drives 64
+field-independent cases through 192 real public ticker/funding frames. Null,
+strings, NaN-producing values, malformed objects, overflow, signed zero and
+false are checked with distinct good rows and finite Store resets. All native
+Ticker numeric bits match the constructed TS exchange and DefaultStore. The
+shared control runner misroutes the live last-price field and requires compiled
+failure followed by exact-restored success.
+
+The concrete native secondary-key adapter launches each configured REST request
+as an exchange-owned shared operation, preserving its original RestFailure.
+Caller rejection drops only waiters. The real registry proxy regression holds
+both sibling order responses across all three retries, then observes all nine
+response-interceptor events after the first requests have settled.

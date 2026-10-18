@@ -85,7 +85,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push((future, cancelled.clone()));
         Box::new(Task(cancelled))
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "registry".into()
     }
@@ -98,7 +98,7 @@ impl ExchangeRuntime for Runtime {
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
         panic!("unexpected exception report: {}", error.message)
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {
         panic!("unexpected raw exception report")
     }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
@@ -182,7 +182,9 @@ impl RestAdapter for Wire {
                 status: 200,
                 reason: None,
                 headers: BTreeMap::new(),
-                body: RestResponseBody::Untransformed(body),
+                body: RestResponseBody::Untransformed(
+                    safe_cex_types::retained_json::RetainedJsonInput::from_value(body).unwrap(),
+                ),
             })
         })
     }
@@ -754,6 +756,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Asterdex,
             ExchangeName::Backpack,
             ExchangeName::Binance,
+            ExchangeName::Binanceinverse,
             ExchangeName::Binancepm,
             ExchangeName::Binancespot,
             // BingX is now assembled on js_runtime and tested on the native host.

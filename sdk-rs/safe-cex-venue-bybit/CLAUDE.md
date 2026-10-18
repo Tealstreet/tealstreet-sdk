@@ -757,8 +757,8 @@ canonical shared String.prototype.localeCompare implementation.
 
 ## Native HyroTrader composition
 
-`BybitExchange::create(Hyrotrader, ...)` selects its explicit simulator origin,
-source receiver overrides and private acknowledgement/reconciliation protocol.
+`BybitExchange::create(Hyrotrader, ...)` selects its configured production or
+simulator origins, source receiver overrides and private acknowledgement/reconciliation protocol.
 The registry reuses the existing Bybit dependency edge. Missing build-time REST
 configuration returns the source error before IO; public/private WS origins use
 the existing build-time tables and REST-derived defaults. Never route Hyro to
@@ -798,12 +798,31 @@ primary/demo. Spot keeps the branded base handlers, as does dedicated Inverse
 order history. `history_capability_binding` exercises the actual capability calls
 and signed HTTP; direct trait coverage alone does not witness this dispatch path.
 
+The production `SpotExchangeHost::destructure` consumes the shared JS iterator
+protocol for candle tuples, interval splits and guarded balance arrays. It reads
+only the requested elements, skips value reads for elisions, pads exhausted
+iterators and closes bounded iteration. `native_host_bybit` proves string KLINE
+tuples through the real registry and HTTP reader for all four account variants;
+the maintained TS source check is imported by the Spot read oracle. Noniterable
+rows remain failures. The old array-only adapter compiled but failed this actual
+registry witness at `234567 is not iterable`.
+
 HyroTrader inherits all three option-read methods but its optionsEnabled override
 always returns false. Route those trait and dynamic calls through the inherited
 receiver so they preserve the source options-disabled Error before HTTP, including
 when the account option-market flag is true. hyro_binding compares all six paths
 with maintained Bybit methods and the actual Hyro guard; spot/inverse family
 routing remains independently defined.
+
+API response diagnostics can invoke fallible error listeners. Preserve the original
+name/message/code through the canonical owned callback transport cause and the
+Bybit HTTP receiver; do not stringify this rejection or attach a replacement
+request config. The owned-value capture profile explicitly refuses unsupported
+code values. `native_host_bybit` drives this path through signed native HTTP for
+all four account constructors, including NaN and own undefined inside code. The
+response-boundaries source oracle executes maintained createAPI with actual
+Axios/retry/qs and asserts the injected diagnostic throw is the identical final
+rejection after one physical attempt.
 
 Margin and position-mode control bodies forward the generic fetched batch without
 inspecting it. The production binding carries Js directly into Store publication;
@@ -836,6 +855,15 @@ The real HTTP regression sends a rejected first split lot with a non-coercible
 error code and verifies later lots still place; a single order without a caller
 ID also skips classification, while a caller-ID control still reaches it.
 
+The retained HTTP body carries lone UTF-16 surrogate units through the common
+response hook. The legacy api_factory typed response view still refuses those
+strings visibly under the strict-output decision; its RestFailure retains the
+original response and effective request. This is a post-response consumer
+refusal, not a network failure. The native factory observer records canonical
+retained input, and its compiled control fails if the original response is lost.
+Numeric fixture comparisons check exact binary64 bits and source JSON spelling,
+rather than serde number lexemes.
+
 The remaining generic callback dispatchers take closed per-module `Callback`
 selectors. Native routing converts only the original fixed factory tags; all
 matches are exhaustive. Their former unknown-callback intrinsic arms had no
@@ -843,3 +871,39 @@ production route and are deleted. Hyro socket disposal uses the existing concret
 PrivateProtocol hook followed by shared BaseWebSocket cleanup; the uncalled
 generic dispose wrapper and its three synthetic-only cases are removed. Preserve
 the actual constructor/socket/Store witnesses and the remaining439 session cases.
+
+Hyro defaults to production account classification; only the exact optional
+`extra.hyrotraderMode: "demo"` sets isDemo. Production uses configured PROD REST/WS
+origins, or borrows configured simulator origins while remaining production.
+Missing REST configuration reports the selected family and source hint. The
+local REST order-lifecycle fallback stays enabled in both modes through the
+actual protected-method receiver override, including the typed lifecycle callers.
+The shared option is a closed demo|production enum with ordinary optional-field
+and string-union admission; it does not add credential fallbacks.
+
+`tests/hyro_mode_binding.rs` compares the maintained constructor/hooks with real
+construction, signed HTTP dispatch, public/private socket dials and cancellation
+Store retirement. Its serialized child builds exercise production REST-derived
+WS, explicit WS overrides and simulator-backed production, each with absent,
+explicit demo and explicit production modes. The ordinary unconfigured profile
+checks the exact source refusal. All Cargo subprocesses use jobs1 and a timeout.
+
+The top-level account `hyrotraderDemo` boolean maps to the Hyro mode before
+presence-aware extra overrides, matching accountToExchangeOptions; other venues
+keep their existing extra shape. The 24 source/native account cases cover absent,
+false and true flags with absent, undefined, demo and production overrides.
+The live metadata snapshot keeps Hyro disabled in normal/preview discovery while
+enabledInDev remains true, matching the source rather than account-mode selection.
+The snapshot URL component oracle explicitly selects demo and executes the new
+source configuration methods; actual default production/fallback routing is covered
+separately through the constructed binding matrix.
+
+The constructed ticker census in `public_stream_binding` compares primary/demo
+linear and inverse categories, dedicated inverse and Spot with their maintained
+TS exchanges and DefaultStores. The configured Hyro constructor uses the same
+shared live helper from `hyro_binding`. Across616 cases and1848 real frames,
+all11 source numeric inputs vary independently beside distinct good rows, with
+finite Store resets and native binary64 assertions. Spot's ignored funding time
+and truthy rate-to-zero behavior remain source-equal. The shared control runner
+must fail all four family witnesses and the configured Hyro witness under live
+last/bid misrouting, then pass after exact source restoration.

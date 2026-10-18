@@ -2,6 +2,7 @@
 // shared JavaScript functions/promises, with HTTP as the sole scripted leaf.
 #[allow(dead_code)]
 mod clock {
+    pub use virtual_time::WakeSignal;
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../safe-cex-exchange/tests/support/runtime.rs"
@@ -162,14 +163,18 @@ struct Fixture {
 impl Fixture {
     fn run<T>(&self, future: impl Future<Output = T>) -> T {
         let mut future = Box::pin(future);
+        let signal = Arc::new(clock::WakeSignal::default());
+        let waker = signal.waker();
         for _ in 0..512 {
-            if let Poll::Ready(value) = future
-                .as_mut()
-                .poll(&mut Context::from_waker(Waker::noop()))
-            {
+            signal.take();
+            if let Poll::Ready(value) = future.as_mut().poll(&mut Context::from_waker(&waker)) {
                 return value;
             }
-            self.runtime.advance(self.runtime.now.get() + 25);
+            // Promise reactions are ready work, not elapsed timer intervals.
+            self.runtime.advance(self.runtime.now.get());
+            if !signal.take() {
+                self.runtime.advance(self.runtime.now.get() + 25);
+            }
         }
         panic!("production binding exceeded 512 deterministic polls")
     }
@@ -455,21 +460,28 @@ fn http_failure_preserves_axios_code_and_config() {
         }))
         .unwrap_err();
     assert_eq!(failure.name, "AxiosError");
-    assert_eq!(failure.code, Some(json!("ECONNABORTED")));
+    assert_eq!(
+        observed_error_code(&failure.code),
+        Some(json!("ECONNABORTED"))
+    );
     assert!(failure.is_axios_error);
     assert_eq!(failure.config.as_ref().unwrap()["url"], "instruments/query");
 }
 
 #[test]
 fn poll_loop_uses_source_fallback_and_disables_infinity() {
-    for delay in [
+    let source = scheduling_source();
+    for (index, delay) in [
         None,
         Some(0.0),
         Some(-1.0),
         Some(f64::NAN),
         Some(125.0),
         Some(f64::INFINITY),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let f = fixture();
         let calls = Rc::new(Cell::new(0));
         let observed = calls.clone();
@@ -483,7 +495,10 @@ fn poll_loop_uses_source_fallback_and_disables_infinity() {
                 delay,
             )
             .unwrap();
+        let source = &source["loops"][index];
         if delay == Some(f64::INFINITY) {
+            assert_eq!(source, &json!({"disabled":true,"calls":0}));
+            assert_eq!(calls.get(), 0);
             assert_eq!(
                 f.runtime.tasks.borrow().len(),
                 before,
@@ -491,13 +506,16 @@ fn poll_loop_uses_source_fallback_and_disables_infinity() {
             );
             continue;
         }
-        let deadline = if delay == Some(125.0) { 125 } else { 5000 };
+        let deadline = source["sleep_ms"].as_u64().unwrap();
+        assert_eq!(source["queued_calls"], 0);
+        assert_eq!(source["callback_ms"], 0);
         f.runtime.advance(0);
         assert_eq!(calls.get(), 0, "poll loop must not run immediately");
         f.runtime.advance(deadline - 1);
         assert_eq!(calls.get(), 0, "source interval must elapse");
         f.runtime.advance(deadline);
-        assert_eq!(calls.get(), 0, "source enqueues callback after sleep");
+        // advance drains all ready turns, including the source's zero timer.
+        assert_eq!(calls.get(), source["drained_calls"].as_u64().unwrap());
         f.runtime.advance(deadline);
         assert_eq!(calls.get(), 1, "deferred callback runs exactly once");
         f.exchange.dispose().unwrap();
@@ -681,7 +699,34 @@ pub fn accepted_refusal_fetch_public_trades(input: &Value) -> Value {
         .unwrap_err()
     })
 }
-fn expected_inherited_refusal() -> Value {
+#[cfg(test)]
+fn scheduling_source() -> &'static Value {
+    static SOURCE: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    SOURCE.get_or_init(|| {
+        let result = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/binding_scheduling_source.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let source: Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(source["defaults"].as_object().unwrap().len(), 5);
+        assert_eq!(source["loops"].as_array().unwrap().len(), 6);
+        source
+    })
+}
+#[cfg(test)]
+fn expected_inherited_refusal(method: &str) -> Value {
+    assert_eq!(
+        scheduling_source()["defaults"][method],
+        json!({"error":"Not implemented","error_name":"Error","timers":0})
+    );
     json!({"error":"Not implemented","error_name":"Error","metadata_default":true,"http":0,"state_unchanged":true,"notifications":0,"errors_emitted":0,"now_unchanged":true,"tasks_unchanged":true,"reports_unchanged":true,"login_handle_unchanged":true,"limited_client_unchanged":true,"unlimited_client_unchanged":true,"socket_handle_unchanged":true})
 }
 fn inherited_refusal_cases() -> [Value; 2] {
@@ -695,7 +740,7 @@ fn inherited_max_leverage_retains_native_state_without_http() {
     for input in inherited_refusal_cases() {
         assert_eq!(
             accepted_refusal_fetch_symbol_max_leverage(&input),
-            expected_inherited_refusal()
+            expected_inherited_refusal("fetchSymbolMaxLeverage")
         );
     }
 }
@@ -704,7 +749,7 @@ fn inherited_set_leverage_retains_native_state_without_http() {
     for input in inherited_refusal_cases() {
         assert_eq!(
             accepted_refusal_set_leverage(&input),
-            expected_inherited_refusal()
+            expected_inherited_refusal("setLeverage")
         );
     }
 }
@@ -713,7 +758,7 @@ fn inherited_position_mode_retains_native_state_without_http() {
     for input in inherited_refusal_cases() {
         assert_eq!(
             accepted_refusal_change_position_mode(&input),
-            expected_inherited_refusal()
+            expected_inherited_refusal("changePositionMode")
         );
     }
 }
@@ -722,7 +767,7 @@ fn inherited_margin_type_retains_native_state_without_http() {
     for input in inherited_refusal_cases() {
         assert_eq!(
             accepted_refusal_change_margin_type(&input),
-            expected_inherited_refusal()
+            expected_inherited_refusal("changeMarginType")
         );
     }
 }
@@ -731,7 +776,7 @@ fn inherited_public_trades_retains_native_state_without_http() {
     for input in inherited_refusal_cases() {
         assert_eq!(
             accepted_refusal_fetch_public_trades(&input),
-            expected_inherited_refusal()
+            expected_inherited_refusal("fetchPublicTrades")
         );
     }
 }
@@ -764,6 +809,7 @@ fn malformed_market_mapping(field: &str, value: Value, cause: &str) {
     f.exchange.base.on(
         "error",
         Rc::new(move |_, value| {
+            let value = safe_cex_exchange::js_runtime::value::to_json(value).unwrap();
             observed.borrow_mut().push(value.clone());
             Ok(())
         }),
@@ -1192,6 +1238,19 @@ fn real_trait_candles_invalid_date_refuses_before_marketdata_post() {
     f.exchange.dispose().unwrap();
 }
 
+fn observed_error_code(
+    code: &Option<safe_cex_exchange::js_runtime::value::Js>,
+) -> Option<serde_json::Value> {
+    code.as_ref().map(|value| {
+        let finite =
+            safe_cex_exchange::js_runtime::value::to_json(value).expect("finite JSON code fixture");
+        let text = safe_cex_num::js_json_stringify(&finite.into())
+            .expect("source JSON code fixture")
+            .expect("defined code fixture");
+        serde_json::from_str(&text).expect("JSON code observation")
+    })
+}
+
 #[test]
 fn ticker_reads_ignore_missing_unused_declaration_fields() {
     let f = fixture();
@@ -1236,7 +1295,7 @@ fn malformed_ticker_fallback(prefix: Value) {
     )
     .unwrap();
     let cached = f.store.tickers().to_vec();
-    let errors = Rc::new(RefCell::new(Vec::<Value>::new()));
+    let errors = Rc::new(RefCell::new(Vec::<Js>::new()));
     let observed = errors.clone();
     f.exchange.base.on(
         "error",
@@ -1253,9 +1312,13 @@ fn malformed_ticker_fallback(prefix: Value) {
     assert_eq!(f.store.tickers().as_ref(), cached.as_slice());
     assert_eq!(errors.borrow().len(), 1);
     assert!(
-        errors.borrow()[0]
-            .to_string()
-            .contains("Cannot read properties of null (reading 'symbol')")
+        String::from_utf16(
+            errors.borrow()[0]
+                .as_str()
+                .expect("source error event is a string")
+        )
+        .expect("fixture error message is valid UTF-16")
+        .contains("Cannot read properties of null (reading 'symbol')")
     );
 }
 
@@ -1437,7 +1500,7 @@ fn ticker_reads_defer_scalar_projection_until_source_mapping_completes() {
     );
 }
 
-fn portfolio_error_log(f: &Fixture) -> Rc<RefCell<Vec<Value>>> {
+fn portfolio_error_log(f: &Fixture) -> Rc<RefCell<Vec<Js>>> {
     let errors = Rc::new(RefCell::new(Vec::new()));
     let observed = errors.clone();
     f.exchange.base.on(
@@ -1465,9 +1528,13 @@ fn portfolio_orders_defer_projection_until_source_mapping_completes() {
     assert!(rows.is_empty());
     assert_eq!(errors.borrow().len(), 1);
     assert!(
-        errors.borrow()[0]
-            .to_string()
-            .contains("Cannot read properties of null (reading 'orderCode')")
+        String::from_utf16(
+            errors.borrow()[0]
+                .as_str()
+                .expect("source error event is a string")
+        )
+        .expect("fixture error message is valid UTF-16")
+        .contains("Cannot read properties of null (reading 'orderCode')")
     );
 }
 
@@ -1486,9 +1553,13 @@ fn portfolio_positions_defer_projection_until_source_mapping_completes() {
     assert!(rows.is_empty());
     assert_eq!(errors.borrow().len(), 1);
     assert!(
-        errors.borrow()[0]
-            .to_string()
-            .contains("Cannot read properties of null (reading 'side')")
+        String::from_utf16(
+            errors.borrow()[0]
+                .as_str()
+                .expect("source error event is a string")
+        )
+        .expect("fixture error message is valid UTF-16")
+        .contains("Cannot read properties of null (reading 'side')")
     );
 }
 
@@ -1691,8 +1762,7 @@ fn amendment_preserves_caller_id_and_refuses_replacement_after_cancellation() {
             let emitted = emitted.borrow();
             assert_eq!(emitted.len(), 1, "one visible refusal {label}");
             assert!(
-                emitted[0][0]
-                    .as_str()
+                String::from_utf16(emitted[0][0].as_str().unwrap().as_ref())
                     .unwrap()
                     .contains(case["result"]["error"].as_str().unwrap()),
                 "visible caller-ID refusal {label}: {emitted:?}"

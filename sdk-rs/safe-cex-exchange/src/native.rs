@@ -68,9 +68,28 @@ impl ExchangeTask for LocalTask {
     }
 }
 
+struct HostTask {
+    future: Pin<Box<dyn Future<Output = ()>>>,
+    runtime: Weak<NativeRuntime>,
+}
+impl Future for HostTask {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+        if let Some(runtime) = self.runtime.upgrade() {
+            crate::js_runtime::jobs::checkpoint(runtime);
+        }
+        let result = self.future.as_mut().poll(cx);
+        if let Some(runtime) = self.runtime.upgrade() {
+            crate::js_runtime::jobs::checkpoint(runtime);
+        }
+        result
+    }
+}
+
 /// `ExchangeRuntime` + `WsRuntime` on the current tokio `LocalSet`.
 pub struct NativeRuntime {
     origin: Instant,
+    owner: Weak<NativeRuntime>,
     transport: Arc<dyn TransportProvider>,
     tunnel: Rc<dyn TunnelHost>,
     min_reconnection_delay_ms: f64,
@@ -110,8 +129,9 @@ fn runtime_over(
     tunnel: Rc<dyn TunnelHost>,
 ) -> Rc<NativeRuntime> {
     let random = random_unit();
-    Rc::new(NativeRuntime {
+    Rc::new_cyclic(|owner| NativeRuntime {
         origin: Instant::now(),
+        owner: owner.clone(),
         transport,
         tunnel,
         min_reconnection_delay_ms: 1000.0 + random * 2000.0,
@@ -240,9 +260,14 @@ impl ExchangeRuntime for NativeRuntime {
         })
     }
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
-        Box::new(LocalTask(spawn_local_task(future)))
+        Box::new(LocalTask(spawn_local_task(Box::pin(HostTask {
+            future,
+            runtime: self.owner.clone(),
+        }))))
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[crate::js_runtime::value::Js]) {
+        let rendered = crate::runtime::console_text(message);
+        let message = rendered.as_str();
         eprintln!("[safe-cex {severity}] {message}");
     }
     fn unique_id(&self) -> String {
@@ -260,8 +285,9 @@ impl ExchangeRuntime for NativeRuntime {
             error.name, error.message
         );
     }
-    fn report_raw_exception(&self, error: &Value, context: &Value) {
-        eprintln!("[safe-cex uncaught] {error} {context}");
+    fn report_raw_exception(&self, error: &crate::js_runtime::value::Js, context: &Value) {
+        let description = crate::runtime::console_text(std::slice::from_ref(error));
+        eprintln!("[safe-cex uncaught] {description} {context}");
     }
     fn execute_worker_request(&self, _request: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async {
@@ -417,8 +443,16 @@ impl HttpHost for NativeHttpHost {
             .ok_or_else(|| format!("native HTTP host has no exchange to emit {event}"))?;
         exchange
             .base()
-            .emit(event, Value::String(message.into()))
+            .emit(event, crate::js_runtime::value::Js::str(message))
             .map_err(|error| error.message)
+    }
+    fn note_response(&self, response: &RestResponse, request: &RestRequest) {
+        if let Some(exchange) = self.events.borrow().as_ref().and_then(Weak::upgrade) {
+            exchange.base().note_http_response(
+                &serde_json::json!({"status":response.status,"statusText":response.reason}),
+                Some(&request.url),
+            );
+        }
     }
     fn note_success(&self, _exchange: &ExchangeName, _response: &RestResponse) {}
     fn note_failure(&self, _exchange: &ExchangeName, _error: &RestFailure) {}

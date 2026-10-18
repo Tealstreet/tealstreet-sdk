@@ -148,7 +148,9 @@ pub fn on_message(
         socket.handle_pong_event(5_000)?;
         return Ok(());
     }
-    let data = safe_cex_transport::how::big_int_as_string_json_parse(text);
+    let data = safe_cex_transport::how::big_int_as_string_json_parse(text)
+        .into_value()
+        .map_err(|error| ExchangeError::new(error.to_string()))?;
     if data.is_null() || data.get("event").and_then(Value::as_str) == Some("subscribe") {
         return Ok(());
     }

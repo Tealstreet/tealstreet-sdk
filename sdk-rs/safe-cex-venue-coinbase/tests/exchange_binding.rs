@@ -1031,3 +1031,66 @@ fn credential_binding_refuses_organization_slash_before_http() {
         );
     }
 }
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("coinbase");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 56);
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let h = harness(name, options(), script);
+        h.drive(h.venue().start()).unwrap();
+        h.runtime.pump();
+        let socket = h
+            .runtime
+            .sockets
+            .borrow()
+            .iter()
+            .find(|(url, _)| url == "wss://advanced-trade-ws.coinbase.com")
+            .expect("constructed public socket")
+            .1
+            .clone();
+        for case in source["cases"].as_array().unwrap() {
+            Store::update(
+                h.store.as_ref(),
+                StoreUpdate {
+                    tickers: Some(ticker_coercion::seed("coinbase")),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+            for frame in case["frames"].as_array().unwrap() {
+                socket
+                    .events
+                    .borrow_mut()
+                    .push_back(WsEvent::Message(SocketFrame::Text(
+                        frame.as_str().unwrap().into(),
+                    )));
+                h.runtime.pump();
+            }
+            ticker_coercion::assert_native(&h.store.tickers(), case);
+        }
+        assert_eq!(
+            h.runtime
+                .console
+                .borrow()
+                .iter()
+                .filter(|(level, message)| level == "error"
+                    && message == "No handler for channel ticker_batch")
+                .count(),
+            56,
+            "native ticker unsupported channel must be reported"
+        );
+        assert!(
+            h.runtime.reports.borrow().is_empty(),
+            "{:?}",
+            h.runtime.reports.borrow()
+        );
+        h.venue().dispose().unwrap();
+    }
+}

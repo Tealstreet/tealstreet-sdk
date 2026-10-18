@@ -7,8 +7,10 @@ use crate::rust_venues::rust_constructor;
 use safe_cex_exchange::{
     client_order_id::ClientOrderLookup,
     exchange::Exchange,
+    js_runtime::value::{Js, Thrown},
     native::{ProxyTokenSource, native_runtime, native_tealstreet_runtime},
     runtime::{Cleanup, ExchangeError, ListenerCleanup, RemoteSigner},
+    throttle::{ThrottleManager, symbol_metadata_throttler},
     websocket::WsRuntime,
 };
 use safe_cex_store::Store;
@@ -30,7 +32,7 @@ use std::{
     sync::Arc,
 };
 
-pub type NativeAccountFuture<T> = Pin<Box<dyn Future<Output = Result<T, Value>>>>;
+pub type NativeAccountFuture<T> = Pin<Box<dyn Future<Output = Result<T, NativeValue>>>>;
 
 // The JSON command surface admits object records. Flattened ignored fields keep
 // its existing surplus-field behavior while refusing Serde positional structs.
@@ -65,6 +67,8 @@ pub struct NativeAccount {
     signer: Option<Rc<HostSigner>>,
     streams: RefCell<BTreeMap<u32, NativeStream>>,
     next_stream: Cell<u32>,
+    startup_token: Cell<u64>,
+    symbol_metadata_throttler: Rc<ThrottleManager<String>>,
     store_deliveries: Rc<RefCell<Vec<Weak<NativeStoreDelivery>>>>,
     stream_listeners: Rc<RefCell<Vec<Rc<dyn Fn(&str, &NativeValue)>>>>,
 }
@@ -74,6 +78,14 @@ struct NativeStream {
     cleanup: Option<ListenerCleanup>,
 }
 impl NativeAccount {
+    pub fn exchange_name(&self) -> ExchangeName {
+        self.exchange.base().name.clone()
+    }
+    /// Invalidate startup delivery before an asynchronous host disposal is polled.
+    pub fn cancel_startup(&self) {
+        self.startup_token
+            .set(self.startup_token.get().wrapping_add(1));
+    }
     fn dispose_streams(&self) -> Result<(), ExchangeError> {
         let streams = std::mem::take(&mut *self.streams.borrow_mut());
         // Stop every host callback before invoking any potentially reentrant cleanup.
@@ -101,20 +113,25 @@ struct HostSigner {
     listeners: AvailabilityListeners,
     next: Cell<u64>,
 }
-fn error_text(error: &Value) -> String {
-    error["message"]
-        .as_str()
-        .map_or_else(|| error.to_string(), str::to_owned)
+fn error_text(error: &NativeValue) -> String {
+    match error.get("message") {
+        Some(NativeValue::String(message)) => String::from_utf16_lossy(message),
+        _ => format!("{error:?}"),
+    }
 }
+fn callback_error(error: NativeValue) -> TransportError {
+    TransportError::Rejected(safe_cex_transport::provider::TransportErrorOrigin::new(
+        safe_cex_exchange::js_runtime::value::owned::OwnedCallbackError::new(error),
+    ))
+}
+
 impl safe_cex_transport::signing::RemoteSigner for HostSigner {
     fn sign(&self, request: RemoteSignerRequest) -> TransportFuture<'_, RemoteSignerResponse> {
         let sign = self.sign.clone();
         Box::pin(async move {
             let wire =
                 NativeValue::encode(&request).map_err(|e| TransportError::Host(e.to_string()))?;
-            let response = sign(wire)
-                .await
-                .map_err(|error| TransportError::Host(error_text(&error)))?;
+            let response = sign(wire).await.map_err(callback_error)?;
             match request {
                 RemoteSignerRequest::Http(_) => response.decode().map(RemoteSignerResponse::Http),
                 RemoteSignerRequest::WsAuth { .. } => {
@@ -140,9 +157,7 @@ impl safe_cex_transport::signing::RemoteSigner for HostSigner {
                     "signing request must be an object".into(),
                 ));
             }
-            let response = sign(wire)
-                .await
-                .map_err(|error| TransportError::Host(error_text(&error)))?;
+            let response = sign(wire).await.map_err(callback_error)?;
             response
                 .decode()
                 .map_err(|error| TransportError::Host(error.to_string()))
@@ -166,19 +181,40 @@ impl RemoteSigner for HostSigner {
     }
 }
 
-fn exchange_error(error: &ExchangeError) -> Value {
-    let mut value = json!({"name": error.name, "message": error.message});
-    if let Some(code) = &error.code {
-        value["code"] = code.clone();
+fn exchange_error(error: &ExchangeError) -> NativeValue {
+    let projected = Thrown::from(error.clone()).value;
+    let mut fields = Vec::with_capacity(3);
+    for field in ["name", "message"] {
+        let value = match projected.get(field) {
+            Ok(value) => value,
+            Err(cause) => {
+                return host_error(format!("cannot read native error {field}: {cause:?}"));
+            }
+        };
+        match NativeValue::from_js(&value) {
+            Ok(value) => fields.push((field, value)),
+            Err(cause) => {
+                return host_error(format!("cannot retain native error {field}: {cause}"));
+            }
+        }
     }
-    value
+    if let Some(code) = &error.code {
+        match NativeValue::from_js(code) {
+            Ok(code) => fields.push(("code", code)),
+            Err(cause) => return host_error(format!("cannot retain native error code: {cause}")),
+        }
+    }
+    NativeValue::object(fields)
 }
-fn host_error(message: impl Into<String>) -> Value {
-    json!({"name": "Error", "message": message.into()})
+fn host_error(message: impl Into<String>) -> NativeValue {
+    NativeValue::object([
+        ("name", NativeValue::string("Error")),
+        ("message", NativeValue::string(&message.into())),
+    ])
 }
 
 /// Build an account through its bound registry Rust constructor.
-pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>, Value> {
+pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>, NativeValue> {
     let name: ExchangeName = serde_json::from_value(Value::String(spec.exchange.clone()))
         .map_err(|e| host_error(e.to_string()))?;
     let options: ExchangeOptions = spec
@@ -229,12 +265,15 @@ pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>,
         .construct(name, options, store.clone())
         .map_err(|error| exchange_error(&error))?;
     bind_http_events(&host, &exchange);
+    let symbol_metadata_throttler = symbol_metadata_throttler(exchange.clone());
     Ok(Rc::new(NativeAccount {
         exchange,
         store,
         signer,
         streams: RefCell::default(),
         next_stream: Cell::new(1),
+        startup_token: Cell::new(0),
+        symbol_metadata_throttler,
         store_deliveries: Rc::default(),
         stream_listeners: Rc::default(),
     }))
@@ -273,6 +312,15 @@ const NATIVE_ACCOUNT_ARGS_EVENTS: &[&str] = &[
     "grafana-pws",
     "grafana-pws-sub",
 ];
+/// Packages one event for the native worker boundary.
+pub fn native_account_event(event: &str, data: &NativeValue) -> NativeValue {
+    let mut fields = vec![("event", NativeValue::string(event))];
+    if event != "ws-reconnected" {
+        fields.push(("data", data.clone()));
+    }
+    NativeValue::object(fields)
+}
+
 /// Forwards emitter events and worker Store payloads until cleanup runs.
 pub fn native_account_watch(
     account: &NativeAccount,
@@ -316,10 +364,11 @@ pub fn native_account_watch(
             let active = active.clone();
             let unsubscribe = unsubscribe.clone();
             let delivery = delivery.clone();
+            let metadata = Rc::downgrade(&account.symbol_metadata_throttler);
             let exchange = Rc::downgrade(&account.exchange);
             let id = base.on_args(
                 event,
-                Rc::new(move |name: &str, args: &[Value]| {
+                Rc::new(move |name: &str, args: &[Js]| {
                     if !active.get() {
                         return Ok(());
                     }
@@ -327,6 +376,9 @@ pub fn native_account_watch(
                         // ExchangeWorker clears its delivery pipeline before disposal,
                         // including the Store reset that disposal performs.
                         active.set(false);
+                        if let Some(metadata) = metadata.upgrade() {
+                            metadata.clear();
+                        }
                         delivery.cancel();
                         unsubscribe();
                         if let Some(exchange) = exchange.upgrade() {
@@ -336,11 +388,15 @@ pub fn native_account_watch(
                         return Ok(());
                     }
                     let data = if forwards_args {
-                        NativeValue::Array(args.iter().cloned().map(NativeValue::from).collect())
+                        NativeValue::Array(
+                            args.iter()
+                                .map(NativeValue::from_js)
+                                .collect::<Result<_, _>>()?,
+                        )
                     } else {
                         args.first()
-                            .cloned()
-                            .map(NativeValue::from)
+                            .map(NativeValue::from_js)
+                            .transpose()?
                             .unwrap_or(NativeValue::Null)
                     };
                     forward(name, &data);
@@ -369,16 +425,16 @@ pub fn native_account_watch(
     })
 }
 
-fn arg<T: DeserializeOwned>(args: &[NativeValue], index: usize) -> Result<T, Value> {
+fn arg<T: DeserializeOwned>(args: &[NativeValue], index: usize) -> Result<T, NativeValue> {
     args.get(index)
         .unwrap_or(&NativeValue::Undefined)
         .decode()
         .map_err(|e| host_error(format!("Invalid argument {index}: {e}")))
 }
-fn encode<T: Serialize>(value: T) -> Result<NativeValue, Value> {
+fn encode<T: Serialize>(value: T) -> Result<NativeValue, NativeValue> {
     NativeValue::encode(&value).map_err(|e| host_error(e.to_string()))
 }
-fn done<T>(result: Result<T, ExchangeError>) -> Result<T, Value> {
+fn done<T>(result: Result<T, ExchangeError>) -> Result<T, NativeValue> {
     result.map_err(|error| exchange_error(&error))
 }
 
@@ -388,7 +444,7 @@ fn listen(
     account: &Rc<NativeAccount>,
     method: &'static str,
     args: &[NativeValue],
-) -> Result<NativeValue, Value> {
+) -> Result<NativeValue, NativeValue> {
     let id = account.next_stream.get();
     let next = id
         .checked_add(1)
@@ -465,7 +521,11 @@ pub fn native_account_call(
         let base = venue.base();
         match method.as_str() {
             "start" => {
+                let token = account.startup_token.get();
                 done(venue.start().await)?;
+                if token != account.startup_token.get() || base.is_disposed() {
+                    return Ok(NativeValue::Bool(false));
+                }
                 let deliveries: Vec<_> = account
                     .store_deliveries
                     .borrow()
@@ -475,9 +535,11 @@ pub fn native_account_call(
                 for delivery in deliveries {
                     done(delivery.snapshot())?;
                 }
-                Ok(NativeValue::Null)
+                Ok(NativeValue::Bool(true))
             }
             "dispose" => {
+                account.cancel_startup();
+                account.symbol_metadata_throttler.clear();
                 let streams = account.dispose_streams();
                 let disposed = venue.dispose();
                 for delivery in account
@@ -669,13 +731,86 @@ pub fn native_account_call(
                 done(venue.fetch_historical_orders(arg(&args, 0)?).await).and_then(encode)
             }
             "updateSymbolMetadata" => {
-                done(venue.update_symbol_metadata(arg(&args, 0)?).await).map(|_| NativeValue::Null)
+                account.symbol_metadata_throttler.call(arg(&args, 0)?);
+                Ok(NativeValue::Null)
             }
             other => Err(host_error(format!("Unknown method {other}"))),
         }
     })
 }
 
+#[cfg(test)]
+mod emitter_error_tests {
+    use super::{NativeAccountFuture, NativeValue, exchange_error, host_error};
+    use safe_cex_exchange::{js_runtime::value::Js, runtime::ExchangeError};
+    use std::{future::Future, pin::Pin};
+
+    #[test]
+    fn account_error_envelope_retains_native_code_presence_and_bits() {
+        let cases = [
+            None,
+            Some(Js::Undefined),
+            Some(Js::Null),
+            Some(Js::Number(-0.0)),
+            Some(Js::Number(f64::from_bits(0x7ff8_0000_0000_0042))),
+            Some(Js::Number(f64::INFINITY)),
+            Some(Js::Number(f64::NEG_INFINITY)),
+            Some(Js::String(vec![0xd800].into())),
+            Some(Js::object(vec![("missing", Js::Undefined)])),
+        ];
+        for code in cases {
+            let mut error = ExchangeError::new("native failure");
+            error.name = "TypeError".into();
+            error.code = code.clone();
+            let wire = exchange_error(&error);
+            assert_eq!(wire.get("name"), Some(&NativeValue::string("TypeError")));
+            assert_eq!(
+                wire.get("message"),
+                Some(&NativeValue::string("native failure"))
+            );
+            match code {
+                None => assert!(wire.get("code").is_none()),
+                Some(Js::Number(expected)) => assert_eq!(
+                    wire.get("code").unwrap().as_f64().unwrap().to_bits(),
+                    expected.to_bits()
+                ),
+                Some(Js::Undefined) => {
+                    assert!(matches!(wire.get("code"), Some(NativeValue::Undefined)))
+                }
+                Some(Js::Null) => assert!(matches!(wire.get("code"), Some(NativeValue::Null))),
+                Some(Js::String(_)) => {
+                    assert_eq!(wire.get("code"), Some(&NativeValue::String(vec![0xd800])))
+                }
+                Some(Js::Object(_)) => assert_eq!(
+                    wire.get("code"),
+                    Some(&NativeValue::object([("missing", NativeValue::Undefined)]))
+                ),
+                Some(_) => panic!("unexpected authored code fixture"),
+            }
+        }
+        let host = host_error("literal host failure");
+        assert_eq!(host.get("name"), Some(&NativeValue::string("Error")));
+        assert_eq!(
+            host.get("message"),
+            Some(&NativeValue::string("literal host failure"))
+        );
+        assert!(host.get("code").is_none());
+    }
+
+    #[test]
+    fn account_future_returns_owned_native_error_without_json() {
+        let future: NativeAccountFuture<bool> =
+            Box::pin(async { Err(NativeValue::Number(f64::from_bits(0x7ff8_0000_0000_0042))) });
+        let mut expected: Pin<Box<dyn Future<Output = Result<bool, NativeValue>>>> = future;
+        let context = &mut std::task::Context::from_waker(std::task::Waker::noop());
+        match expected.as_mut().poll(context) {
+            std::task::Poll::Ready(Err(NativeValue::Number(number))) => {
+                assert_eq!(number.to_bits(), 0x7ff8_0000_0000_0042);
+            }
+            _ => panic!("native account future must retain its actual error type"),
+        }
+    }
+}
 #[cfg(test)]
 #[path = "native_account_events_tests.rs"]
 mod event_protocol_tests;

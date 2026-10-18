@@ -733,6 +733,10 @@ rs = "safe-cex-types/src/lib.rs::ExchangeOptionsExtra"
 reason = "C3 inline representation of the anonymous TS field ExchangeOptions.extra; adds no exported TS name or behavior. See safe-cex-types/TYPE_PARITY.md."
 
 [[exempt]]
+rs = "safe-cex-types/src/lib.rs::ExchangeOptionsExtraHyrotraderMode"
+reason = "C3 inline representation of the anonymous TS literal union ExchangeOptions.extra.hyrotraderMode; accepts exactly demo|production and adds no exported TS enum name or policy. Strict wire/source union checks and the full live type-shape comparator cover admission. Mode selection remains mapped on the concrete Hyro class. See safe-cex-types/TYPE_PARITY.md."
+
+[[exempt]]
 rs = "safe-cex-types/src/lib.rs::ExchangeOptionsExtraAsterdexApiVersion"
 reason = "C3 inline representation of the anonymous TS field ExchangeOptions.extra.asterdexApiVersion; adds no exported TS name or behavior. See safe-cex-types/TYPE_PARITY.md."
 
@@ -7123,7 +7127,7 @@ reason = "FFI boundary glue: napi export calling an account's Exchange method by
 
 [[exempt]]
 rs = "safe-cex-ffi/src/native_exchange.rs::signer_available"
-reason = "FFI boundary glue: napi export pushing remote-signer availability from the JS session, with no TypeScript counterpart."
+reason = "FFI boundary glue: napi export acknowledging remote-signer availability from the JS session with Promise<void>, with no TypeScript counterpart. Actual Node native-account-signer-availability regressions verify ordered unavailable/available transitions, closed/never-issued rejection and dispose-retained handles."
 
 [[exempt]]
 rs = "safe-cex-ffi/src/native_exchange.rs::native_account_close"
@@ -7326,50 +7330,141 @@ rs = "safe-cex-num/src/json_stringify.rs::js_retained_truthy"
 reason = "C3: ECMAScript Boolean conversion on canonical retained data before wire JSON projection; retains undefined/nonfinite/signed-zero truthiness. No standalone TypeScript declaration."
 
 [[exempt]]
+rs = "safe-cex-types/src/js_coercion.rs::js_retained_string_utf16"
+reason = "C3: canonical retained-tree String(any) glue for Axios form encoding. Shares existing object refusal and number spelling, preserves UTF-16 text, and has no standalone TypeScript declaration; real native request/signing regressions exercise the consumer."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::response_json_view"
+reason = "C3: explicit legacy Rust Error JSON-view boundary, approved by overseer for phase 2. JSON projection loses native nonfinite values and replaces lone units only in this view; the original RestFailure in ExchangeError.origin remains authoritative. Not a new TypeScript behavior or native-body fallback."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/library.rs::qs_stringify"
+reason = "C3: direct entry to the existing shared native npm qs binding for typed WOO signer composition. WOO and imported runtime calls execute the same implementation; no standalone TypeScript SDK declaration or second query algorithm."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/globals.rs::stringify_json"
+reason = "C3: shared native JSON.stringify entry delegates the existing production SerializeJSONProperty implementation without a replacer. MEXC normalization uses it directly so native BigInt throws remain covered without a second serializer or JSON carrier."
+
+[[exempt]]
 rs = "safe-cex-registry/src/native_value.rs::NativeValue"
 reason = "FFI boundary glue (MANIFEST-SPEC section 5): owned structured data carrier between the JS runtime, native account thread and napi. Retains undefined, binary64 bits, UTF-16 strings/keys and BigInt words without JSON. It is not a separately declared TypeScript SDK model; executable values, cycles and depth beyond 512 are explicitly refused by this approved native tree profile. Real napi lossless-value regressions cover the boundary."
 
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue"
+reason = "FFI boundary glue (MANIFEST-SPEC section 5): owned structured data carrier between the JS runtime, native account thread and napi. Retains undefined, binary64 bits, UTF-16 strings/keys and BigInt words without JSON. It is not a separately declared TypeScript SDK model; executable values, cycles and depth beyond 512 are explicitly refused by this approved native tree profile. Real napi lossless-value regressions cover the boundary."
 
 [[exempt]]
-rs = "safe-cex-registry/src/native_value.rs::NativeValue::string"
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::string"
 reason = "FFI data construction: copies a native diagnostic string into the owned UTF-16 carrier. No venue policy or independent TypeScript declaration."
 
-
 [[exempt]]
-rs = "safe-cex-registry/src/native_value.rs::NativeValue::object"
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::object"
 reason = "FFI data construction: builds ordered owned field pairs for native results/error envelopes. No TypeScript object policy beyond the native tree representation."
 
-
 [[exempt]]
-rs = "safe-cex-registry/src/native_value.rs::NativeValue::as_f64"
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::as_f64"
 reason = "FFI data observation: returns the stored binary64 only for the Number variant; does not coerce JavaScript inputs or normalize nonfinite bits. No independent source SDK method."
 
-
 [[exempt]]
-rs = "safe-cex-registry/src/native_value.rs::NativeValue::get"
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::get"
 reason = "FFI data observation: selects a named field from the already captured ordered native object. Does not invoke getters or add source property semantics; runtime capture and typed admission remain separate tested boundaries."
 
-
 [[exempt]]
-rs = "safe-cex-registry/src/native_value.rs::NativeValue::encode"
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::encode"
 reason = "FFI typed-value bridge: delegates the existing native serde codec into the runtime JS carrier, then captures the owned tree. Native ModelField presence and numeric/UTF-16 observations remain with their canonical codecs and real account-value tests; no JSON encoding path or extra TypeScript API."
 
-
 [[exempt]]
-rs = "safe-cex-registry/src/native_value.rs::NativeValue::decode"
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::decode"
 reason = "FFI typed-value bridge: materializes the owned runtime value and delegates canonical typed admission. It does not widen required arguments or add a venue coercion policy. Existing native account decoder/lossless tests own this host boundary."
 
-
 [[exempt]]
-rs = "safe-cex-registry/src/native_value.rs::NativeValue::from_js"
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::from_js"
 reason = "FFI capture glue: copies supported runtime values into the shared owned tree with cycle and 512-depth refusal, preserving own undefined and numeric/UTF-16 data. The approved tree profile is documented by the actual napi value/guard regressions; no independent TypeScript helper declaration is claimed."
 
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedJsValue::to_js"
+reason = "FFI materialization glue: reconstructs the shared runtime value directly from the owned carrier, including own data properties and BigInt words. It does not JSON-roundtrip payloads or expose a new SDK operation; real napi and signer regressions exercise this seam."
 
 [[exempt]]
-rs = "safe-cex-registry/src/native_value.rs::NativeValue::to_js"
-reason = "FFI materialization glue: reconstructs the shared runtime value directly from the owned carrier, including own data properties and BigInt words. It does not JSON-roundtrip payloads or expose a new SDK operation; real napi account-value regressions exercise this seam."
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedCallbackError"
+reason = "Native error boundary glue: std::error::Error carrier holding an already captured owned callback rejection so Send/Sync transport errors can retain structured name/message/code. It adds no TypeScript error class or venue failure policy; real signer callback prove-fail regressions cover materialization."
 
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedCallbackError::new"
+reason = "Native error boundary construction: stores the supplied owned callback rejection without interpretation, JSON or venue policy. The carrier has no independent source declaration."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value/owned.rs::OwnedCallbackError::value"
+reason = "Native error boundary observation: borrows the unchanged owned rejection for canonical runtime reconstruction. No independent TypeScript SDK operation."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_callback.rs::Callback"
+reason = "napi ABI glue: typed JavaScript function handle for the host signer/proxy callback, accepting structured JsData. This names the native function signature, not an additional exchange method."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_callback.rs::Request"
+reason = "napi ABI glue: thread-safe handle to the wrapped host callback. Account ownership and close release the handle; the existing callback/close regressions exercise the real napi path. No independently declared TypeScript SDK type."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_callback.rs::CallbackFuture"
+reason = "napi ABI glue: receiver future for one host callback settlement, adapting synchronous values/throws and Promise fulfillment/rejection to the native executor. It preserves the structured captured error envelope and reports dropped settlement. Real signer callback regressions cover both synchronous and Promise paths; no separate TypeScript SDK class."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_callback.rs::wrap"
+reason = "napi boundary glue: invokes the real host callback on the JS thread and adapts values/throws/Promises into CallbackFuture, retaining name/message/code and inspecting throwing rejection getters with the explicit eight-exception guard. Real napi signer/proxy callback and natural-exit regressions own these semantics; this adds no venue algorithm or parallel JSON path."
 
 [[exempt]]
 rs = "safe-cex-ffi/src/native_value.rs::JsData"
 reason = "napi ABI glue: FromNapiValue/ToNapiValue wrapper for the shared owned tree, preserving own undefined, numeric bits, UTF-16 keys/strings and BigInt across the addon boundary. It applies the same explicit cycle/depth/unsupported-value profile; actual Node account-value regressions cover it. No independently declared TypeScript model."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_account.rs::NativeAccount::cancel_startup"
+reason = "Native host lifecycle glue: invalidate pending startup delivery synchronously before an asynchronously dispatched disposal; no standalone TypeScript API. Actual Node native-account-startup tests prove cancellation and suppression of a late full snapshot."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_account.rs::NativeAccount::exchange_name"
+reason = "Typed native-account identity accessor for host worker logging, with no standalone TypeScript declaration. Reads the actual constructed exchange name instead of decoding it again or adding a prohibited bindings-to-types dependency. Actual native-account-startup tests assert the exchange/account error context."
+
+[[exempt]]
+rs = "safe-cex-registry/src/native_value.rs::NativeValue"
+reason = "Native account ABI alias of the shared OwnedJsValue tree. Re-export preserves the registry/FFI seam after moving the implementation into exchange; it adds no data policy, serializer or independently declared TypeScript type."
+
+[[exempt]]
+rs = "safe-cex-transport/src/provider.rs::TransportErrorOrigin"
+reason = "Native std::error::Error plumbing: opaque Arc origin retains an owned Send/Sync callback rejection through transport failure without imposing a new TypeScript error class. Canonical exchange error reconstruction and real napi signer regressions own its use."
+
+[[exempt]]
+rs = "safe-cex-transport/src/provider.rs::TransportErrorOrigin::new"
+reason = "Native origin construction: retains the supplied Send/Sync error in Arc, without translating its fields or introducing venue policy. No separate TypeScript SDK constructor."
+
+[[exempt]]
+rs = "safe-cex-transport/src/provider.rs::TransportErrorOrigin::error"
+reason = "Native origin observation: borrows the retained std::error::Error for canonical downcast/materialization. No independent TypeScript SDK operation or error classification."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeRuntime::console_values"
+reason = "Host console capability: receives the original ordered local Js argument list, including Error references. Mapped BaseExchange::emit_and_log_error and installed console select arguments/policy; this required host declaration adds no SDK behavior. The typed console helper delegates to this same capability. Real Hyro hosted-auth and installed BaseExchange/console identity witnesses cover the direct cutover."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::console_text"
+reason = "Native terminal presentation after the console capability receives retained Js values, rather than a replacement source console algorithm. Reads native Error data descriptors without executing getters; this is not a JSON or rich telemetry boundary. Installed console and raw reporter witnesses retain original references and compare Error name/message first lines with the maintained TS console."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::exception_text"
+reason = "Text-only recording-host observation for existing fixture report lists after report_raw_exception receives the original Js exception. Native Error messages remain visible; non-Error finite fixture views preserve their prior explicit JSON observation. Production NativeRuntime reports through console_text, and rich sinks retain Js directly. The unchanged KuCoin default-binding witness and separate native identity assertions cover these distinct observations."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::host_object"
+reason = "Native host ABI allocation: stores an already existing opaque Rc<dyn Any> on the canonical ordinary object referent. Client/socket/cache/wallet algorithms keep their source mappings; this Rust storage operation has no standalone TypeScript declaration. Actual native identity, type, hidden-slot and lifetime witnesses cover the retention capability."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::resource"
+reason = "Native host ABI typed lookup: clones and downcasts only this ordinary object's immutable opaque Rc attachment, preserving the original native owner and returning None for wrong types or other receivers. This Rust type-erasure observation has no standalone TypeScript declaration; inherited properties and object spread do not transfer it."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::WriteObserver"
+reason = "Native host callback signature over an existing ordinary receiver, UTF-16 property key and unchanged assigned value. It publishes a successful write to native readers after the canonical property operation; TypeScript shares that object directly and declares no separate callback ABI. Actual compiler alias root/conversion probes and source-visible native identity, error and lifetime witnesses remain required."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::set_write_observer"
+reason = "Native host ABI for installing or clearing the single fallible write observer on an ordinary canonical object; refuses other receiver kinds. This is native synchronization of an already shared source options object, without a separate TypeScript method or wire decoder. The source constructor and immediate native account reader tests verify its observable role, plus callback release, reentry and original failure propagation."

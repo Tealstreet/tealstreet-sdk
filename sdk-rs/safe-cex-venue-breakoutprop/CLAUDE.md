@@ -312,3 +312,9 @@ first, then unsupported caller IDs (including the empty string) emit one refusal
 and prevent replacement HTTP. The binding regression compares absent, own
 undefined, nonempty and empty IDs against actual source updateOrder/placeOrder
 and BaseExchange guard bodies, preserving valid cancel-then-place controls.
+
+The production binding fixture drains ready promise reactions before advancing
+its virtual timer. `tests/binding_scheduling_source.cjs` executes the five actual
+BaseExchange rejection bodies and the maintained loop/sleep bodies: rejection
+needs no timer, and a complete ready-turn drain includes the loop's zero-delay
+callback. Clock/state/handle assertions remain native and unchanged.

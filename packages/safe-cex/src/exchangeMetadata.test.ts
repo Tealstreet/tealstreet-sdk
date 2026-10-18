@@ -234,6 +234,17 @@ describe('exchangeMetadata', () => {
       expect(coinbaseSpot.enableInPreview).toBe(true);
     });
 
+    it('should keep HyroTrader dev-only until the private relay or HTTPS path is ready', () => {
+      // Plain HTTP simulator private REST/WS works for local dev, but preview
+      // and prod need Hyro HTTPS/WSS private endpoints or a Tealstreet relay.
+      const hyrotrader = exchangeMetadata.hyrotrader;
+
+      expect(hyrotrader.exchangeName).toBe('hyrotrader');
+      expect(hyrotrader.enabled).toBe(false);
+      expect(hyrotrader.enabledInDev).toBe(true);
+      expect(hyrotrader.enableInPreview).toBe(false);
+    });
+
     it('should keep Robinhood Lighter enabled for preview without production rollout', () => {
       const lighterRobinhood = exchangeMetadata['lighter-robinhood'];
 
@@ -325,6 +336,7 @@ describe('exchangeMetadata', () => {
         'apexomni',
         'asterdex',
         'binance',
+        'binanceinverse',
         'binancespot',
         'binancepm',
         'bingx',
@@ -386,6 +398,7 @@ describe('exchangeMetadata', () => {
       });
 
       [
+        'binanceinverse',
         'bitgetinverse',
         'bitgetusdc',
         'hyrotrader',
@@ -409,6 +422,12 @@ describe('exchangeMetadata', () => {
           false,
         );
       });
+    });
+
+    it('keeps Binance inverse hidden until COIN-M private and history surfaces are certified', () => {
+      expect(exchangeMetadata.binanceinverse.supportsTestnet).toBe(false);
+      expect(exchangeMetadata.binanceinverse.requiresTickersForMarketsLoaded).toBe(true);
+      expect(exchangeMetadata.binanceinverse.latencyDomain).toBe('dapi.binance.com');
     });
   });
 });

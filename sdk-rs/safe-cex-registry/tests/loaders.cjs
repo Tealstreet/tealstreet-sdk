@@ -45,7 +45,7 @@ function registry(native, host) {
       return native ? namespace : Promise.resolve(namespace);
     };
     const entries = registry(native, host);
-    assert.equal(Object.keys(entries).length, 48, 'independent assigned source loader count');
+    assert.equal(Object.keys(entries).length, 49, 'independent assigned source loader count');
     for (const [name, loader] of Object.entries(entries)) {
       let calls = 0;
       function Constructor() { calls++; }

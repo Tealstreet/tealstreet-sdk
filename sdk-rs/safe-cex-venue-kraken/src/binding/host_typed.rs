@@ -122,7 +122,7 @@ impl StartupHost for Rt {
         };
         let socket = self
             .global(class)
-            .and_then(|c| c.call(Js::Undefined, vec![self.this.clone()]))
+            .and_then(|c| c.construct(vec![self.this.clone()], None))
             .map_err(ex)?;
         self.this.set(slot, socket.clone()).map_err(ex)?;
         Ok(Rc::new(socket))
@@ -205,8 +205,9 @@ impl TickHost for Rt {
         )))
     }
     fn promise_all(&self, tasks: Vec<Js>) -> Result<ExchangeFuture<'static, ()>, ExchangeError> {
+        let promise = all(&self.exchange_runtime(), tasks);
         Ok(Box::pin(async move {
-            all(tasks).await.map_err(ex)?;
+            promise.wait().await.map_err(ex)?;
             Ok(())
         }))
     }

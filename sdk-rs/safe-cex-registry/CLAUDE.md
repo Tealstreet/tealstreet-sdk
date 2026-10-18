@@ -281,3 +281,26 @@ lifetime/type argument, or the behavior of a module/browser/transport host.
 
 
 
+
+MEXC native construction uses the shared secondary-key option derivation. Its
+source xhr.get reads use the secondary credentials/proxy; writes remain primary.
+Both clients retain their signing, retry and receipt behavior. The actual account
+HTTP/HMAC witness is tests/native_account_mexc_secondary.rs.
+Its success and physical403 cases observe the selected signed effective receipt,
+response and native signed-zero extensions. The Node companion uses direct
+structured options/arguments/results through the actual addon.
+
+Native metadata updates share CallMethodHandler's symbol_metadata_throttler
+constructor, acknowledge without awaiting venue work, and clear keyed trailing
+calls on disposal/deactivation. Keep watch references to that manager weak.
+
+Native account notifications use `native_account_event` for the outbound packet.
+The worker's `ws-reconnected` notification has no `data` property; other events
+retain their scalar/variadic NativeValue payload. The MEXC native-host socket
+witness exercises its source `onOpen` notification and packet construction.
+
+Fulfilled native HTTP failures populate BaseExchange's once-consumed recent-HTTP
+correlation slot before venue error reporting. The JS factory reads primitive
+status/reason metadata without serializing response bodies; signing captures do
+not replace the slot, and successful responses clear it. `native_host_tunnel`
+exercises real WOO/Bybit HOW 404 reports and cyclic/nonfinite metadata profiles.

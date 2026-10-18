@@ -1,6 +1,9 @@
 //! Configured REST execution and open-interest ownership. API construction and
 //! the complete exchange lifecycle remain separate manifest rows.
-use crate::{builder, exchange_helpers as h, helpers, types::*};
+use crate::{
+    builder, exchange_helpers as h, helpers,
+    types::{AsterDEXAPIVersion, AsterDEXPlaceOrderOpts, AsterDEXStpMode},
+};
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
@@ -20,12 +23,51 @@ use std::{
 pub(crate) const OPEN_INTEREST_POLL_INTERVAL_MS: f64 = 15000.;
 pub(crate) const OPEN_INTEREST_BATCH_SIZE: usize = 25;
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ExecutionOrder {
-    #[serde(flatten)]
     pub opts: AsterDEXPlaceOrderOpts,
-    #[serde(rename = "postOnly", default)]
     pub post_only: Option<bool>,
+}
+#[derive(serde::Deserialize)]
+#[serde(remote = "ExecutionOrder")]
+struct ExecutionOrderWire {
+    #[serde(flatten)]
+    opts: AsterDEXPlaceOrderOpts,
+    #[serde(rename = "postOnly", default)]
+    post_only: Option<bool>,
+}
+
+// A private typed projection lets the shared guard check every numeric output
+// without adding a serialization API to the workflow input owner.
+#[derive(serde::Serialize)]
+struct ExecutionOrderOutput {
+    #[serde(flatten)]
+    opts: AsterDEXPlaceOrderOpts,
+    #[serde(rename = "postOnly")]
+    post_only: Option<bool>,
+}
+impl safe_cex_num::numeric_ingress::JsNumberOutput for ExecutionOrderOutput {
+    fn check_number_output(&self) {
+        safe_cex_num::numeric_ingress::JsNumberOutput::check_number_output(&self.opts);
+    }
+}
+impl<'de> serde::Deserialize<'de> for ExecutionOrder {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?
+            .decode_with(|d| {
+                let value =
+                    ExecutionOrderWire::deserialize(safe_cex_types::strict_decode::object(d))?;
+                Ok(ExecutionOrderOutput {
+                    opts: value.opts,
+                    post_only: value.post_only,
+                })
+            })
+            .map(|value| Self {
+                opts: value.opts,
+                post_only: value.post_only,
+            })
+            .map_err(serde::de::Error::custom)
+    }
 }
 /// Venue-only fields decorate the shared prepared carrier; the public extended
 /// PlaceOrderOpts and its decoder retain their strict validation contract.
@@ -138,7 +180,11 @@ impl OrderExecution {
         let mut request = RestRequest {
             method: method.into(),
             url,
-            body: body.map(RestBody::Untransformed),
+            body: body
+                .map(safe_cex_types::retained_json::RetainedJsonInput::from_value)
+                .transpose()
+                .map_err(|error| ExchangeError::new(error.to_string()))?
+                .map(RestBody::Untransformed),
             params,
             ..Default::default()
         };
@@ -149,22 +195,20 @@ impl OrderExecution {
             );
         }
         let response = adapter.execute(request).await.map_err(|failure| {
-            let mut e = ExchangeError::new(failure.message);
+            let method = failure.request.method.clone();
+            let url = failure.request.url.clone();
+            let mut e: ExchangeError = failure.into();
             e.is_axios_error = true;
-            e.code = failure.code.map(Value::String);
-            e.context = failure.context.map(|c| *c);
-            e.method = Some(failure.request.method);
-            e.url = Some(failure.request.url);
-            if let Some(r) = failure.response {
-                e.response =
-                    Some(json!({"status":r.status,"data":r.body.into_data(),"headers":r.headers}));
-            }
+            e.method = Some(method);
+            e.url = Some(url);
             e
         })?;
-        Ok(response
+        response
             .body
+            .transform_axios_response()
+            .map_err(|error| ExchangeError::new(error.to_string()))?
             .json_value()
-            .unwrap_or_else(|_| response.body.into_data()))
+            .map_err(|error| ExchangeError::new(error.to_string()))
     }
     // ts: AsterDEXExchange.validateAccount
     pub async fn validate_account(
@@ -697,10 +741,12 @@ impl OrderExecution {
             })
             .await
             .map_err(|e| ExchangeError::new(e.message))?;
-        Ok(response
+        response
             .body
+            .transform_axios_response()
+            .map_err(|error| ExchangeError::new(error.to_string()))?
             .json_value()
-            .unwrap_or_else(|_| response.body.into_data()))
+            .map_err(|error| ExchangeError::new(error.to_string()))
     }
     async fn interest(
         &self,

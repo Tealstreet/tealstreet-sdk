@@ -139,6 +139,18 @@ impl BuiltinReference {
     pub fn realm(&self) -> &Rc<PrototypeRealm> {
         &self.realm
     }
+    /// Actual parent identity, independent of shadowable string properties.
+    pub fn prototype(&self) -> Option<Self> {
+        let member = match self.member {
+            BuiltinIdentity::Object(ProtoMember::Prototype) => return None,
+            BuiltinIdentity::FunctionPrototype => BuiltinIdentity::Object(ProtoMember::Prototype),
+            _ => BuiltinIdentity::FunctionPrototype,
+        };
+        Some(Self {
+            realm: self.realm.clone(),
+            member,
+        })
+    }
     pub fn get(&self, key: &str) -> PrototypeValue {
         self.realm.reference_get(self.member, key)
     }

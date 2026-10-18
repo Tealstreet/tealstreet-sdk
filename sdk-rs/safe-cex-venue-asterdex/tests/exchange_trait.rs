@@ -14,6 +14,114 @@ mod exchange_data;
 use exchange_data::script;
 
 #[test]
+fn constructed_aster_rejection_keeps_native_string_code_units() {
+    use safe_cex_exchange::{
+        js_runtime::{
+            client::JsHttpHost,
+            promise::JsFuture,
+            value::{Js, Thrown, error_object},
+        },
+        runtime::ExchangeRuntime,
+    };
+    use safe_cex_store::store::DefaultStore;
+    use safe_cex_venue_asterdex::native_exchange::{AsterDEXDependencies, AsterDEXExchange};
+    use std::cell::Cell;
+    struct RejectingHost {
+        runtime: Rc<support::Runtime>,
+        code: Vec<u16>,
+        calls: Rc<Cell<usize>>,
+    }
+    impl JsHttpHost for RejectingHost {
+        fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
+            self.runtime.clone()
+        }
+        fn send(&self, config: Js) -> JsFuture<'static> {
+            let code = self.code.clone();
+            let calls = self.calls.clone();
+            let now = self.runtime.now.get();
+            Box::pin(async move {
+                if config.get("url")?.to_display().contains("/time") {
+                    return Ok(Js::object(vec![
+                        ("status", Js::Number(200.0)),
+                        ("data", Js::object(vec![("serverTime", Js::Number(now))])),
+                        ("config", config),
+                    ]));
+                }
+                assert!(config.get("url")?.to_display().contains("/openOrders"));
+                calls.set(calls.get() + 1);
+                let error = error_object("AxiosError", "native Aster rejection");
+                error.define("code", Js::utf16(&code))?;
+                error.define("isAxiosError", Js::Bool(true))?;
+                error.define("config", config)?;
+                Err(Thrown::new(error))
+            })
+        }
+    }
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/rejection-code-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let codes: Vec<Vec<u16>> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(codes.len(), 3);
+    for code in codes {
+        let runtime = support::runtime_fixture();
+        let calls = Rc::new(Cell::new(0));
+        let host = Rc::new(RejectingHost {
+            runtime: runtime.clone(),
+            code: code.clone(),
+            calls: calls.clone(),
+        });
+        let venue = AsterDEXExchange::new(
+            safe_cex_types::ExchangeName::Asterdex,
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            Rc::new(DefaultStore::new()),
+            AsterDEXDependencies {
+                runtime: runtime.clone(),
+                http: Rc::new(move |_| Ok(host.clone())),
+                external_public_data: None,
+            },
+        )
+        .unwrap();
+        let error = drive(&runtime, venue.fetch_orders(None)).unwrap_err();
+        assert_eq!(
+            calls.get(),
+            4,
+            "actual Aster read reaches terminal HTTP host with its three source retries"
+        );
+        let Some(Js::String(actual)) = error.code.as_ref() else {
+            panic!(
+                "native rejection code remains a JS string: {:?}",
+                error.code
+            );
+        };
+        assert_eq!(
+            actual.as_ref(),
+            code,
+            "real Aster rejection retains exact code units"
+        );
+        let origin = error
+            .origin
+            .as_ref()
+            .unwrap()
+            .error()
+            .downcast_ref::<safe_cex_transport::RestFailure>()
+            .unwrap();
+        assert_eq!(origin.request.method, "GET");
+        assert!(origin.request.url.contains("/openOrders"));
+        assert!(origin.response.is_none());
+        venue.dispose().unwrap();
+    }
+}
+
+#[test]
 fn candle_reads_follow_source_fields_without_decoding_unused_tuple_columns() {
     use std::io::Write;
     let cases = json!([
@@ -264,6 +372,7 @@ fn cancel_already_gone(status: u16) {
     venue.base().on(
         "error",
         Rc::new(move |_, args| {
+            let args = safe_cex_exchange::js_runtime::value::to_json(args).unwrap();
             capture.borrow_mut().push(args.clone());
             Ok(())
         }),
@@ -883,6 +992,59 @@ fn stream_fixture() -> (
     }
     (venue, rt, store, wire)
 }
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_store::{Store, StoreUpdate};
+    let corpus = ticker_coercion::source("asterdex");
+    let cases = corpus["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 252);
+    ticker_coercion::assert_case_counts(cases, 372, 12);
+    let (venue, rt, store, _) = stream_fixture();
+    let socket = rt
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| !url.ends_with("/ws/fixture-listen-key"))
+        .unwrap()
+        .1
+        .clone();
+    for case in cases {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("asterdex")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        rt.console.borrow_mut().clear();
+        rt.errors.borrow_mut().clear();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+                    safe_cex_transport::socket::SocketFrame::Text(frame.as_str().unwrap().into()),
+                ));
+            for _ in 0..8 {
+                rt.pump();
+            }
+        }
+        ticker_coercion::assert_native(&store.tickers(), case);
+        ticker_coercion::assert_refusals(&rt.console.borrow().join("\n"), case);
+        assert!(
+            rt.errors.borrow().is_empty(),
+            "native ticker {:?}",
+            rt.errors.borrow()
+        );
+    }
+    venue.dispose().unwrap();
+}
 #[test]
 fn public_frames_preserve_partial_depth_and_candle_semantics() {
     use safe_cex_exchange::websocket::WsEvent;
@@ -1073,6 +1235,7 @@ fn production_private_fill_frame_updates_store_and_emits_fill() {
     venue.base().on(
         "fill",
         Rc::new(move |_, data| {
+            let data = safe_cex_exchange::js_runtime::value::to_json(data).unwrap();
             saved.borrow_mut().push(data.clone());
             Ok(())
         }),
@@ -1568,4 +1731,78 @@ fn mark_price_falsey_time_and_unknown_targets_keep_source_behavior() {
     assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
     drop(tickers);
     venue.dispose().unwrap();
+}
+
+#[test]
+fn alternate_typed_preparation_keeps_all_native_fields_and_presence() {
+    use safe_cex_types::{
+        ModelField, OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType,
+    };
+    use safe_cex_venue_asterdex::{
+        order_execution::{ExecutionOrder, PreparedExecutionOrder},
+        types::{AsterDEXPlaceOrderOpts, AsterDEXStpMode},
+    };
+    for (amount, reduce_only, post_only) in [
+        (1.25, Some(false), Some(true)),
+        (-0.0, Some(true), Some(false)),
+        (2.5, None, None),
+    ] {
+        let order = PlaceOrderOpts {
+            symbol: "BTCUSDT".into(),
+            r#type: OrderType::Limit,
+            side: OrderSide::Sell,
+            amount,
+            price: Some(-0.0),
+            trigger_price: Some(3.25),
+            stop_loss: Some(4.5),
+            take_profit: Some(5.75),
+            reduce_only,
+            time_in_force: Some(OrderTimeInForce::PostOnly),
+            trigger_type: Some(OrderStopTriggerType::MarkPrice),
+            tp_trigger_type: Some(OrderStopTriggerType::LastPrice),
+            sl_trigger_type: Some(OrderStopTriggerType::IndexPrice),
+            client_order_id: Some("native-λ".into()),
+            max_slippage_pct: Some(0.125),
+            close: Some(false),
+            implied_volatility: Some(0.25),
+        };
+        let venue: AsterDEXPlaceOrderOpts = order.clone().into();
+        assert_eq!(venue.order, order);
+        assert!(
+            venue.stp_mode.is_none(),
+            "shared-to-venue conversion does not invent STP"
+        );
+        let input = ExecutionOrder {
+            opts: AsterDEXPlaceOrderOpts {
+                order: order.clone(),
+                stp_mode: Some(AsterDEXStpMode::V2),
+            },
+            post_only,
+        };
+        let borrowed = PreparedExecutionOrder::from(&input);
+        let owned = PreparedExecutionOrder::from(input.clone());
+        let copied = PreparedExecutionOrder::from(&borrowed);
+        for prepared in [&borrowed, &owned, &copied] {
+            let got = &prepared.opts.order;
+            assert_eq!(got.symbol, order.symbol);
+            assert_eq!(got.r#type, ModelField::Value(order.r#type));
+            assert_eq!(got.side, ModelField::Value(order.side));
+            assert_eq!(got.amount.to_bits(), amount.to_bits());
+            assert_eq!(got.price.unwrap().to_bits(), (-0.0_f64).to_bits());
+            assert_eq!(got.trigger_price, order.trigger_price);
+            assert_eq!(got.stop_loss, order.stop_loss);
+            assert_eq!(got.take_profit, order.take_profit);
+            assert_eq!(got.reduce_only, ModelField::from(reduce_only));
+            assert_eq!(got.time_in_force, order.time_in_force);
+            assert_eq!(got.trigger_type, order.trigger_type);
+            assert_eq!(got.tp_trigger_type, order.tp_trigger_type);
+            assert_eq!(got.sl_trigger_type, order.sl_trigger_type);
+            assert_eq!(got.client_order_id, order.client_order_id);
+            assert_eq!(got.max_slippage_pct, order.max_slippage_pct);
+            assert_eq!(got.close, order.close);
+            assert_eq!(got.implied_volatility, order.implied_volatility);
+            assert_eq!(prepared.opts.stp_mode, Some(AsterDEXStpMode::V2));
+            assert_eq!(prepared.post_only, post_only);
+        }
+    }
 }

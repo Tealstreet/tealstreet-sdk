@@ -1011,6 +1011,8 @@ pub struct HistoricalTradeOptions {
 #[ts(optional_fields)]
 pub struct OHLCVOptions {
     pub symbol: String,
+    // The TS declaration is narrower than the source worker's runtime interval domain.
+    #[ts(as = "Timeframe")]
     pub interval: AnyTimeframe,
     #[serde(
         default,
@@ -1366,6 +1368,8 @@ pub enum ExchangeName {
     Backpack,
     #[serde(rename = "binance")]
     Binance,
+    #[serde(rename = "binanceinverse")]
+    Binanceinverse,
     #[serde(rename = "binancespot")]
     Binancespot,
     #[serde(rename = "binancepm")]
@@ -1679,6 +1683,14 @@ pub struct ExchangeAccountConfig {
     )]
     pub proxy_region: Option<String>,
     /// @ts-mutable
+    #[serde(rename = "hyrotraderDemo")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub hyrotrader_demo: Option<bool>,
+    /// @ts-mutable
     #[serde(rename = "useExtensionDirect")]
     #[serde(
         default,
@@ -1890,6 +1902,15 @@ pub struct ExchangeOptionsExtraKucoinBroker {
     pub verify: Option<bool>,
 }
 
+/// @ts-union
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+pub enum ExchangeOptionsExtraHyrotraderMode {
+    #[serde(rename = "demo")]
+    Demo,
+    #[serde(rename = "production")]
+    Production,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(optional_fields)]
 pub struct ExchangeOptionsExtra {
@@ -1967,6 +1988,15 @@ pub struct ExchangeOptionsExtra {
         skip_serializing_if = "Option::is_none"
     )]
     pub lighter_stop_slippage_pct: Option<f64>,
+    /// @ts-mutable
+    #[serde(rename = "hyrotraderMode")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(inline)]
+    pub hyrotrader_mode: Option<ExchangeOptionsExtraHyrotraderMode>,
     /// @ts-mutable
     #[serde(rename = "kucoinBroker")]
     #[serde(
@@ -3100,16 +3130,16 @@ mod strict_codecs {
         ExchangeName, ExchangeOptionsAuth, ExchangeOptionsBybitSiteId,
         ExchangeOptionsExternalPublicData, ExchangeOptionsExternalPublicDataVariant0Type,
         ExchangeOptionsExternalPublicDataVariant1Type, ExchangeOptionsExtra,
-        ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraKucoinBroker,
-        ExchangeOptionsExtraLighterBuilderFeeMode, ExchangeOptionsHyperliquidBuilder,
-        ExchangeOptionsTuning, ExecutionPositionSide, IncomeCategory, MarginType, MarketLimits,
-        MarketLimitsAmount, MarketLimitsLeverage, MarketLimitsPrice, MarketPrecision, ModelField,
-        OptionGreeks, OptionRight, OptionTerms, OptionTermsSettlement, OptionTermsStyle, Order,
-        OrderBookOrders, OrderExtra, OrderRejectReason, OrderSide, OrderStatus,
-        OrderStopTriggerType, OrderTimeInForce, OrderType, PayloadSignerCapability, PositionExtra,
-        PositionMode, PositionOption, PositionSide, PublicDataSourceCapability,
-        RemoteSignerCapability, Timeframe, TransportCapability, True, UpdateOrderOptsUpdate,
-        deserialize_present,
+        ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraHyrotraderMode,
+        ExchangeOptionsExtraKucoinBroker, ExchangeOptionsExtraLighterBuilderFeeMode,
+        ExchangeOptionsHyperliquidBuilder, ExchangeOptionsTuning, ExecutionPositionSide,
+        IncomeCategory, MarginType, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage,
+        MarketLimitsPrice, MarketPrecision, ModelField, OptionGreeks, OptionRight, OptionTerms,
+        OptionTermsSettlement, OptionTermsStyle, Order, OrderBookOrders, OrderExtra,
+        OrderRejectReason, OrderSide, OrderStatus, OrderStopTriggerType, OrderTimeInForce,
+        OrderType, PayloadSignerCapability, PositionExtra, PositionMode, PositionOption,
+        PositionSide, PublicDataSourceCapability, RemoteSignerCapability, Timeframe,
+        TransportCapability, True, UpdateOrderOptsUpdate, deserialize_present,
     };
     #[derive(serde::Deserialize)]
     #[serde(remote = "super::OrderStatus")]
@@ -4756,6 +4786,8 @@ mod strict_codecs {
         Backpack,
         #[serde(rename = "binance")]
         Binance,
+        #[serde(rename = "binanceinverse")]
+        Binanceinverse,
         #[serde(rename = "binancespot")]
         Binancespot,
         #[serde(rename = "binancepm")]
@@ -5067,6 +5099,13 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         proxy_region: Option<String>,
+        #[serde(rename = "hyrotraderDemo")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        hyrotrader_demo: Option<bool>,
         #[serde(rename = "useExtensionDirect")]
         #[serde(
             default,
@@ -5367,6 +5406,23 @@ mod strict_codecs {
     }
 
     #[derive(serde::Deserialize)]
+    #[serde(remote = "super::ExchangeOptionsExtraHyrotraderMode")]
+    enum WireExchangeOptionsExtraHyrotraderMode {
+        #[serde(rename = "demo")]
+        Demo,
+        #[serde(rename = "production")]
+        Production,
+    }
+    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsExtraHyrotraderMode {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = String::deserialize(deserializer)?;
+            WireExchangeOptionsExtraHyrotraderMode::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(value),
+            )
+        }
+    }
+
+    #[derive(serde::Deserialize)]
     #[serde(remote = "super::ExchangeOptionsExtra")]
     struct WireExchangeOptionsExtra {
         #[serde(rename = "tickInterval")]
@@ -5432,6 +5488,13 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         lighter_stop_slippage_pct: Option<f64>,
+        #[serde(rename = "hyrotraderMode")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        hyrotrader_mode: Option<ExchangeOptionsExtraHyrotraderMode>,
         #[serde(rename = "kucoinBroker")]
         #[serde(
             default,
@@ -6948,6 +7011,11 @@ mod strict_codecs {
                         .as_str()
                         .unwrap()
                         .to_owned(),
+                    serde_json::to_value(ExchangeName::Binanceinverse)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
                     serde_json::to_value(ExchangeName::Binancespot)
                         .unwrap()
                         .as_str()
@@ -7184,6 +7252,7 @@ mod strict_codecs {
             crate::strict_decode::tests::record::<ExchangeOptionsExtraKucoinBroker>(
                 "ExchangeOptionsExtraKucoinBroker",
             );
+            crate::strict_decode::tests::string_union::<ExchangeOptionsExtraHyrotraderMode>("ExchangeOptionsExtraHyrotraderMode", WireExchangeOptionsExtraHyrotraderMode::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeOptionsExtraHyrotraderMode::Demo).unwrap().as_str().unwrap().to_owned(), serde_json::to_value(ExchangeOptionsExtraHyrotraderMode::Production).unwrap().as_str().unwrap().to_owned()]);
             crate::strict_decode::tests::record::<ExchangeOptionsExtra>("ExchangeOptionsExtra");
             crate::strict_decode::tests::string_union::<ExchangeOptionsExternalPublicDataVariant0Type>("ExchangeOptionsExternalPublicDataVariant0Type", WireExchangeOptionsExternalPublicDataVariant0Type::deserialize(serde::de::value::StringDeserializer::<crate::strict_decode::tests::Inventory>::new("__unknown_inventory__".into())).err().unwrap().0, vec![serde_json::to_value(ExchangeOptionsExternalPublicDataVariant0Type::Websocket).unwrap().as_str().unwrap().to_owned()]);
             crate::strict_decode::tests::record::<ExchangeOptionsExternalPublicDataVariant0>(

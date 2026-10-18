@@ -46,7 +46,9 @@ impl safe_cex_transport::signing::RemoteSigner for BrowserSigner {
                     Some(Value::Object(map)) => map,
                     _ => Default::default(),
                 };
-                if let Some(Value::Object(body)) = request.config.data {
+                if let Some(Value::Object(body)) =
+                    request.config.data.map(|value| value.into_value().unwrap())
+                {
                     params.extend(body);
                 }
                 params.insert("timestamp".into(), json!(1_700_000_000_000u64));
@@ -466,5 +468,103 @@ fn hosted_signing_precedes_query_serialization_and_retains_signed_config() {
                 .to_display(),
             hmac_hex("GET /private")
         );
+    });
+}
+
+#[test]
+fn okx_native_order_reads_handle_rejection_after_successful_aggregation() {
+    run_local(async {
+        let reject = Rc::new(Cell::new(false));
+        let response = reject.clone();
+        let h = venue_harness(
+            safe_cex_types::ExchangeName::Okx,
+            Rc::new(move |request| Some(match request.path.as_str() {
+                "/api/v5/trade/orders-pending" if response.get() => {
+                    json!({"code":"51000","msg":"native order read refused","data":[]})
+                }
+                "/api/v5/trade/orders-pending" => json!({"code":"0","data":[{
+                    "instId":"BTC-USDT-SWAP","instType":"SWAP","ordId":"native-order","clOrdId":"native-client",
+                    "side":"buy","posSide":"net","ordType":"limit","px":"49000","sz":"10",
+                    "accFillSz":"0","state":"live","reduceOnly":"false","lever":"10",
+                    "ccy":"","cTime":"1700000000000","uTime":"1700000000000"
+                }]}),
+                _ => json!({"code":"0","data":[]}),
+            })),
+            json!({"key":"hosted-key","secret":"","passphrase":"hosted-passphrase"}),
+            Some((Rc::new(AccountRelay::default()), Some("hosted-account".into()))),
+            safe_cex_exchange::native::native_runtime(),
+        ).await;
+        h.store.update(serde_json::from_value(json!({"markets":[{
+            "id":"BTC-USDT-SWAP","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,
+            "precision":{"amount":0.01,"price":0.1},
+            "limits":{"amount":{"min":0.01,"max":1000},"leverage":{"min":1,"max":100}},
+            "info":{"ctVal":"0.01","ctValCcy":"BTC","settleCcy":"USDT"}
+        }]})).unwrap(), false).unwrap();
+        let errors = Rc::new(RefCell::new(Vec::new()));
+        let observed = errors.clone();
+        h.exchange.base().on(
+            "error",
+            Rc::new(move |_, value| {
+                observed
+                    .borrow_mut()
+                    .push(safe_cex_exchange::js_runtime::value::to_json(value).unwrap());
+                Ok(())
+            }),
+        );
+        let orders = h.exchange.fetch_orders(None).await.unwrap();
+        assert_eq!(
+            orders.len(),
+            1,
+            "native normal order survives all five groups"
+        );
+        assert_eq!(orders[0].id, "native-order");
+        assert_eq!(orders[0].symbol, "BTCUSDT");
+        assert!(h.store.orders().is_empty(), "source fetchOrders is a read");
+        let algorithm_requests = h
+            .seen
+            .borrow()
+            .iter()
+            .filter(|request| request.path == "/api/v5/trade/orders-algo-pending")
+            .map(|request| request.query.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(algorithm_requests.len(), 4);
+        for (query, kind) in
+            algorithm_requests
+                .iter()
+                .zip(["oco", "conditional", "trigger", "move_order_stop"])
+        {
+            assert!(
+                query.contains(&format!("ordType={kind}")),
+                "actual request {query}"
+            );
+        }
+        h.store
+            .update(
+                safe_cex_store::StoreUpdate {
+                    orders: Some(orders.clone()),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+        reject.set(true);
+        let restored = h.exchange.fetch_orders(None).await.unwrap();
+        assert_eq!(
+            restored, orders,
+            "TS catch returns the existing Store orders"
+        );
+        assert_eq!(
+            &*errors.borrow(),
+            &[json!("Exchange Error: native order read refused")]
+        );
+        assert_eq!(
+            h.seen
+                .borrow()
+                .iter()
+                .filter(|request| request.path == "/api/v5/trade/orders-pending")
+                .count(),
+            2
+        );
+        h.exchange.dispose().unwrap();
     });
 }

@@ -153,7 +153,7 @@ impl SessionHost for Rt {
                     }
                 }
             }
-            "construct" => arg(&args, 0).call(Js::Undefined, args.into_iter().skip(1).collect()),
+            "construct" => arg(&args, 0).construct(args.into_iter().skip(1).collect(), None),
             "iterable spread" => Ok(Js::array(arg(&args, 0).iterable_values()?)),
             "Number.isFinite" => self
                 .shared
@@ -161,7 +161,7 @@ impl SessionHost for Rt {
                 .get("Number")?
                 .call_method("isFinite", args),
             "Number" => self.shared.globals.get("Number")?.call(Js::Undefined, args),
-            "new Map" => self.shared.globals.get("Map")?.call(Js::Undefined, args),
+            "new Map" => self.shared.globals.get("Map")?.construct(args, None),
             "Promise.resolve" => Ok(Js::Promise(Promise::settled(
                 &self.exchange_runtime(),
                 Ok(arg(&args, 0)),
@@ -176,7 +176,7 @@ impl SessionHost for Rt {
                         .collect(),
                 ))
             }
-            "new Set" => self.shared.globals.get("Set")?.call(Js::Undefined, args),
+            "new Set" => self.shared.globals.get("Set")?.construct(args, None),
             "super.mapPosition" => {
                 super::members::mapping::map_position(self, &arg(&args, 0), &arg(&args, 1))
             }
@@ -474,19 +474,45 @@ impl crate::variant_account_refresh::AccountRefreshHost for Rt {
         promise.call_method("then", vec![fulfilled])
     }
     fn all(&self, promises: Vec<Js>) -> Result<Js, Thrown> {
-        Ok(self.spawn(Box::pin(super::promise::all(promises))))
+        Ok(Js::Promise(super::promise::all(
+            &self.exchange_runtime(),
+            promises,
+        )))
     }
 }
 
 impl crate::spot_exchange_reads::SpotExchangeHost for Rt {
     fn destructure(&self, value: Js, skip: usize, count: usize) -> Result<Vec<Js>, Thrown> {
-        // These bindings consume wire arrays (candle tuples and split strings).
-        let values = value.array_values().ok_or_else(|| {
-            Thrown::type_error(&format!("{} is not iterable", value.to_display()))
-        })?;
-        Ok((skip..skip + count)
-            .map(|index| values.get(index).cloned().unwrap_or(Js::Undefined))
-            .collect())
+        let iterator = value.iterator()?;
+        let next = iterator.get("next")?;
+        let mut done = false;
+        let mut values = Vec::with_capacity(count);
+        for index in 0..skip + count {
+            let value = if done {
+                Js::Undefined
+            } else {
+                let step = next.call(iterator.clone(), vec![])?;
+                if !step.is_object() {
+                    return Err(Thrown::type_error("Iterator result is not an object"));
+                }
+                done = step.get("done")?.truthy();
+                if done || index < skip {
+                    Js::Undefined
+                } else {
+                    step.get("value")?
+                }
+            };
+            if index >= skip {
+                values.push(value);
+            }
+        }
+        if !done {
+            let close = iterator.get("return")?;
+            if !close.is_nullish() && !close.call(iterator.clone(), vec![])?.is_object() {
+                return Err(Thrown::type_error("Iterator result is not an object"));
+            }
+        }
+        Ok(values)
     }
     fn for_each<F>(&self, method: Js, mut body: F) -> Result<(), Thrown>
     where

@@ -70,7 +70,7 @@ impl JsNumberOutput for safe_cex_types::DataProvenance {
 
 impl JsNumberOutput for safe_cex_types::ExchangeName {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, enum { Apexomni, Asterdex, Backpack, Binance, Binancespot, Binancepm, Bingx, Bitget, Bitgetinverse, Bitgetusdc, Bitrue, Bitunix, Blofin, Breakoutprop, Bybit, Bybitdemo, Bybitinverse, Bybitspot, Hyrotrader, Coinbase, Coinbasespot, Cryptocom, Grvt, Hyperliquid, Hyperliquidspot, Lighter, LighterRobinhood, Mexc, Okx, Okxdemo, Okxeu, Okxeudemo, Paradex, Phemex, Polymarket, Kodiakfi, Mode, Salsadex, TealstreetDex, Txflow, What, Weex, Woo, Woofi, Kucoin, Kucoinspot, Kraken, Krakenspot });
+        crate::js_number_output!(self, enum { Apexomni, Asterdex, Backpack, Binance, Binanceinverse, Binancespot, Binancepm, Bingx, Bitget, Bitgetinverse, Bitgetusdc, Bitrue, Bitunix, Blofin, Breakoutprop, Bybit, Bybitdemo, Bybitinverse, Bybitspot, Hyrotrader, Coinbase, Coinbasespot, Cryptocom, Grvt, Hyperliquid, Hyperliquidspot, Lighter, LighterRobinhood, Mexc, Okx, Okxdemo, Okxeu, Okxeudemo, Paradex, Phemex, Polymarket, Kodiakfi, Mode, Salsadex, TealstreetDex, Txflow, What, Weex, Woo, Woofi, Kucoin, Kucoinspot, Kraken, Krakenspot });
     }
 }
 
@@ -106,7 +106,7 @@ impl JsNumberOutput for safe_cex_types::ExchangeOptionsExternalPublicDataVariant
 
 impl JsNumberOutput for safe_cex_types::ExchangeOptionsExtra {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { tick_interval, recv_window, asterdex_api_version, aster_builder_address, aster_builder_fee_rate_maker, aster_builder_fee_rate_taker, lighter_builder_fee_mode, lighter_integrator_account_index, lighter_stop_slippage_pct, kucoin_broker });
+        crate::js_number_output!(self, struct { hyrotrader_mode, tick_interval, recv_window, asterdex_api_version, aster_builder_address, aster_builder_fee_rate_maker, aster_builder_fee_rate_taker, lighter_builder_fee_mode, lighter_integrator_account_index, lighter_stop_slippage_pct, kucoin_broker });
     }
 }
 
@@ -434,5 +434,11 @@ impl<T: JsNumberOutput> JsNumberOutput for safe_cex_types::ModelField<T> {
 impl JsNumberOutput for safe_cex_types::PreparedOrderOpts {
     fn check_number_output(&self) {
         crate::js_number_output!(self, struct { symbol, r#type, side, amount, price, trigger_price, stop_loss, take_profit, reduce_only, time_in_force, trigger_type, tp_trigger_type, sl_trigger_type, client_order_id, max_slippage_pct, close, implied_volatility });
+    }
+}
+
+impl JsNumberOutput for safe_cex_types::ExchangeOptionsExtraHyrotraderMode {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, enum { Demo, Production });
     }
 }

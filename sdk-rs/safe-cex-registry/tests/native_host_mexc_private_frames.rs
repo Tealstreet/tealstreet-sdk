@@ -116,7 +116,9 @@ fn native_mexc_fill_frame_emits_the_production_fill_event() {
         h.exchange.base().on(
             "fill",
             Rc::new(move |_, payload| {
-                capture.borrow_mut().push(payload.clone());
+                capture
+                    .borrow_mut()
+                    .push(safe_cex_exchange::js_runtime::value::to_json(payload).unwrap());
                 Ok(())
             }),
         );

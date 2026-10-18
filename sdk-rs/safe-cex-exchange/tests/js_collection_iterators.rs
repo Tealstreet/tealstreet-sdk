@@ -310,7 +310,7 @@ fn collection_iterators_feed_live_array_from_and_collection_constructors() {
     let copy = globals
         .get("Map")
         .unwrap()
-        .call(Js::Undefined, vec![map.iterator().unwrap()])
+        .construct(vec![map.iterator().unwrap()], None)
         .unwrap();
     assert_eq!(
         copy.call_method("get", vec![Js::str("key")])
@@ -323,7 +323,7 @@ fn collection_iterators_feed_live_array_from_and_collection_constructors() {
     let copy = globals
         .get("Set")
         .unwrap()
-        .call(Js::Undefined, vec![set.iterator().unwrap()])
+        .construct(vec![set.iterator().unwrap()], None)
         .unwrap();
     assert_eq!(
         to_json(&Js::array(copy.iterable_values().unwrap())).unwrap(),

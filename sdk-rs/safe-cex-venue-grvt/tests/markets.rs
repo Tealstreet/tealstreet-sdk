@@ -201,7 +201,9 @@ fn fetch_markets_native_source_outcomes() {
                 ]);
                 std::future::ready(Ok(safe_cex_transport::how::json_parse(
                     row["raw"].as_str().unwrap(),
-                )))
+                )
+                .into_value()
+                .unwrap()))
             },
             |message, severity| {
                 logs += 1;

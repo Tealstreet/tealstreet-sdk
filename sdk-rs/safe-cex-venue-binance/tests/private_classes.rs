@@ -75,7 +75,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push(f);
         Box::new(Task)
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "fixture".into()
     }
@@ -85,7 +85,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+    fn report_raw_exception(
+        &self,
+        _: &safe_cex_exchange::js_runtime::value::Js,
+        _: &serde_json::Value,
+    ) {
         panic!("unexpected raw exception report in this test runtime");
     }
     fn report_exception(&self, error: &ExchangeError, _: &Value) {
@@ -2549,7 +2553,7 @@ fn exchange_class_sdk_external_listener_setup_and_cleanup_keep_errors() {
     let owner = class_owner(Venue::Futures, Rc::new(Imports::default()), runtime);
     let exchange = sdk_class(Venue::Futures, owner.clone());
     let mut error = ExchangeError::new("authored external listener error");
-    error.code = Some(json!(731));
+    error.code = Some(safe_cex_exchange::js_runtime::value::from_json(&json!(731)));
     let provider = Rc::new(ThrowingExternal {
         error: error.clone(),
         setup_fails: Cell::new(false),
@@ -3454,6 +3458,7 @@ fn native_fill_events(owner: &ExchangeOwner) -> Rc<RefCell<Vec<Value>>> {
     owner.base.on(
         "fill",
         Rc::new(move |_, payload| {
+            let payload = safe_cex_exchange::js_runtime::value::to_json(payload).unwrap();
             saved.borrow_mut().push(payload.clone());
             Ok(())
         }),
@@ -4292,7 +4297,8 @@ fn market_asset_refusal_case(venue: Venue) {
                 );
                 let errors = errors.borrow();
                 assert_eq!(errors.len(), 1, "one visible row refusal");
-                let message = errors[0].as_str().unwrap();
+                let message = String::from_utf16(errors[0].as_str().unwrap())
+                    .expect("market refusal is a scalar Unicode message");
                 let expected = value
                     .as_ref()
                     .map_or_else(|| "undefined".into(), Value::to_string);
@@ -4424,7 +4430,7 @@ fn market_field_refusal_case(venue: Venue, leverage: bool) {
             );
             let errors = errors.borrow();
             assert_eq!(errors.len(), 1);
-            let message = errors[0].as_str().unwrap();
+            let message = String::from_utf16(errors[0].as_str().unwrap()).unwrap();
             let expected = value
                 .as_ref()
                 .map_or_else(|| "undefined".into(), Value::to_string);
@@ -4655,5 +4661,347 @@ fn production_depth_binding_preserves_the_source_type_error_and_recovers() {
         assert_eq!(books.borrow()[2].bids[0].amount, 8.0);
         cleanup().unwrap();
         exchange.dispose().unwrap();
+    }
+}
+
+#[cfg(feature = "native")]
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[cfg(feature = "native")]
+fn native_ticker_coercion(venue: Venue, name: &str, count: usize) {
+    use safe_cex_store::{Store, StoreUpdate};
+    let source = ticker_coercion::source(name);
+    assert_eq!(source["cases"].as_array().unwrap().len(), count);
+    let owner = production_native_owner(venue);
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            owner.base.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed(name)),
+                positions: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let socket = if venue != Venue::Spot && case["channel"] != "bookTicker" {
+            owner
+                .public
+                .market_websocket
+                .get()
+                .expect("production market socket")
+        } else {
+            &owner.public
+        };
+        for frame in case["frames"].as_array().unwrap() {
+            socket.on_message(frame.as_str().unwrap()).unwrap();
+        }
+        ticker_coercion::assert_native(&owner.base.store.tickers(), case);
+    }
+    owner.base.dispose().unwrap();
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_futures_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::Futures, "binance", 80);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_pm_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::PM, "binancepm", 80);
+}
+#[test]
+#[cfg(feature = "native")]
+fn production_ticker_coercion_spot_matches_constructed_typescript() {
+    native_ticker_coercion(Venue::Spot, "binancespot", 48);
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_request_weight_callbacks_observe_success_and_rejection() {
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use std::sync::{Arc, Mutex};
+    struct Response {
+        status: u16,
+        header: &'static str,
+        value: &'static str,
+        requests: Arc<Mutex<Vec<RestRequest>>>,
+    }
+    impl RestAdapter for Response {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.requests.lock().unwrap().push(request);
+            let response = RestResponse {
+                status: self.status,
+                reason: None,
+                headers: [(self.header.into(), self.value.into())]
+                    .into_iter()
+                    .collect(),
+                body: RestResponseBody::Encoded(if self.status == 200 {
+                    b"[]".to_vec()
+                } else {
+                    br#"{"code":-1003,"msg":"weight limit"}"#.to_vec()
+                }),
+            };
+            Box::pin(async move { Ok(response) })
+        }
+    }
+    for (status, header, value, duration) in [
+        (200, "x-mbx-used-weight-1m", "1920", 60_000.0),
+        (429, "retry-after", "2.5", 2_500.0),
+        (429, "retry-after", "invalid", 60_000.0),
+    ] {
+        let runtime = Rc::new(Runtime::default());
+        runtime.now.set(1_000.0);
+        let requests = Arc::<Mutex<Vec<RestRequest>>>::default();
+        let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            Arc::new(Response {
+                status,
+                header,
+                value,
+                requests: requests.clone(),
+            }),
+            Rc::new(|_, _| panic!("no external provider is configured")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let imports = dependencies.imports.clone();
+        let owner = ExchangeOwner::new(
+            Venue::Futures,
+            safe_cex_types::ExchangeName::Binance,
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            dependencies,
+        )
+        .unwrap();
+        let request = imports
+            .request(
+                owner.clients.get("xhr").unwrap().clone(),
+                safe_cex_venue_binance::exchange_classes::HttpMethod::Get,
+                "/fapi/v1/openOrders",
+                None,
+            )
+            .unwrap();
+        let result = run(&runtime, request).result;
+        if status == 200 {
+            assert!(
+                matches!(result.unwrap(), EventValue::Array(ref rows) if rows.borrow().is_empty())
+            );
+        } else {
+            let error = result.unwrap_err();
+            let response = error
+                .response
+                .as_ref()
+                .expect("the original HTTP response is retained");
+            assert_eq!(response["status"], 429);
+            assert_eq!(response["data"]["code"], -1003);
+        }
+        assert_eq!(
+            owner.paused_until.get(),
+            1_000.0 + duration,
+            "native request-weight observer must run on HTTP status {status}"
+        );
+        assert!(owner.paused());
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        let (path, query) = requests[0]
+            .url
+            .split_once('?')
+            .expect("the native signer serializes its query");
+        assert_eq!(path, "/fapi/v1/openOrders");
+        assert!(query.contains("timestamp="));
+        assert!(query.contains("signature="));
+        owner.dispose().unwrap();
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_position_fetch_starter_runs_real_http_and_store() {
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use safe_cex_venue_binance::position_refresh::PositionFetchStarter;
+    use std::sync::{Arc, Mutex};
+    struct Positions(Arc<Mutex<Vec<String>>>);
+    impl RestAdapter for Positions {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.0.lock().unwrap().push(request.url);
+            Box::pin(async {
+                Ok(RestResponse {
+                    status: 200,
+                    reason: None,
+                    headers: Default::default(),
+                    body: RestResponseBody::Encoded(b"[]".to_vec()),
+                })
+            })
+        }
+    }
+    for delayed in [false, true] {
+        let runtime = Rc::new(Runtime::default());
+        let requests = Arc::<Mutex<Vec<String>>>::default();
+        let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+            runtime.clone(),
+            Arc::new(Positions(requests.clone())),
+            Rc::new(|_, _| panic!("no external provider is configured")),
+            None,
+            safe_cex_exchange::native::NativeHttpEvents::default(),
+        );
+        let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let owner = ExchangeOwner::new(
+            Venue::Futures,
+            safe_cex_types::ExchangeName::Binance,
+            serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+            store,
+            dependencies,
+        )
+        .unwrap();
+        owner
+            .private
+            .position
+            .last_fetch_time
+            .set(if delayed { 0.0 } else { -10_000.0 });
+        owner.private.position.pending_events.set(true);
+        let private = owner.private.clone();
+        let positions_before = owner.base.store.update_ids().positions;
+        let starter: PositionFetchStarter<Failure> = Rc::new(move || private.throttled_positions());
+        starter().unwrap();
+        if delayed {
+            runtime.pump();
+            assert!(owner.private.position.scheduled.get());
+            assert!(requests.lock().unwrap().is_empty());
+            assert_eq!(owner.base.store.update_ids().positions, positions_before);
+            let deadline = owner.private.position.throttle_ms.get();
+            assert_eq!(*runtime.sleeps.borrow(), [deadline as u64]);
+            runtime.now.set(deadline);
+            runtime.sleep_clock.set(deadline);
+        }
+        for _ in 0..32 {
+            runtime.pump();
+        }
+        let mut paths: Vec<_> = requests
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|url| url.split('?').next().unwrap().to_owned())
+            .collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            ["/fapi/v1/symbolConfig", "/fapi/v3/positionRisk"],
+            "the actual starter reaches both configured native REST requests"
+        );
+        assert_eq!(
+            owner.base.store.update_ids().positions,
+            positions_before + 1.0,
+            "the actual refresh publishes one complete position snapshot"
+        );
+        assert!(!owner.private.position.scheduled.get());
+        assert!(!owner.private.position.pending_events.get());
+        assert!(!owner.private.position.in_flight.get());
+        assert_eq!(
+            owner.private.position.last_fetch_time.get(),
+            runtime.now.get()
+        );
+        owner.dispose().unwrap();
+    }
+}
+
+#[test]
+#[cfg(feature = "native")]
+fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations() {
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_venue_binance::ticker_capture::{Capture, Dictionary, TickerReference};
+
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let owner = production_native_owner(venue);
+        let capture = Capture::new(owner.base.store.clone());
+        let initial: Dictionary = capture.dictionary();
+        let row: TickerReference = initial.borrow().get("BTCUSDT").unwrap().clone();
+        assert!(
+            Rc::ptr_eq(&initial, &capture.dictionary()),
+            "same dictionary generation {venue:?}"
+        );
+        assert_eq!(row.borrow().last.to_bits(), 100.0_f64.to_bits());
+
+        owner
+            .public
+            .on_message(r#"{"e":"bookTicker","s":"BTCUSDT","b":"-0","a":"123.25"}"#)
+            .unwrap();
+        let patched: Dictionary = capture.dictionary();
+        assert!(
+            Rc::ptr_eq(&initial, &patched),
+            "patch retains Dictionary identity {venue:?}"
+        );
+        assert!(
+            Rc::ptr_eq(&row, patched.borrow().get("BTCUSDT").unwrap()),
+            "patch retains TickerReference identity {venue:?}"
+        );
+        assert_eq!(
+            row.borrow().bid.to_bits(),
+            (-0.0_f64).to_bits(),
+            "retained row sees native signed zero {venue:?}"
+        );
+        assert_eq!(row.borrow().ask.to_bits(), 123.25_f64.to_bits());
+        assert_eq!(
+            owner.base.store.tickers()[0].bid.to_bits(),
+            (-0.0_f64).to_bits(),
+            "real Store receives native frame {venue:?}"
+        );
+
+        let mut replacement = owner.base.store.tickers()[0].clone();
+        replacement.id = "fresh-BTCUSDT".into();
+        replacement.last = 77.5;
+        Store::update(
+            owner.base.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(vec![replacement]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let replaced: Dictionary = capture.dictionary();
+        let fresh: TickerReference = replaced.borrow().get("BTCUSDT").unwrap().clone();
+        assert!(
+            !Rc::ptr_eq(&initial, &replaced),
+            "replacement creates Dictionary generation {venue:?}"
+        );
+        assert!(
+            !Rc::ptr_eq(&row, &fresh),
+            "replacement creates TickerReference generation {venue:?}"
+        );
+        assert_eq!(fresh.borrow().id, "fresh-BTCUSDT");
+        assert_eq!(fresh.borrow().last.to_bits(), 77.5_f64.to_bits());
+        assert_eq!(
+            row.borrow().last.to_bits(),
+            100.0_f64.to_bits(),
+            "captured prior generation retains original fields {venue:?}"
+        );
+
+        owner
+            .public
+            .on_message(r#"{"e":"bookTicker","s":"BTCUSDT","b":"6.25","a":"7.5"}"#)
+            .unwrap();
+        assert!(Rc::ptr_eq(&replaced, &capture.dictionary()));
+        assert_eq!(
+            fresh.borrow().bid.to_bits(),
+            6.25_f64.to_bits(),
+            "native class patches replacement id {venue:?}"
+        );
+        assert_eq!(
+            owner.base.store.tickers()[0].bid.to_bits(),
+            6.25_f64.to_bits()
+        );
+        assert_eq!(
+            row.borrow().bid.to_bits(),
+            (-0.0_f64).to_bits(),
+            "prior row stays detached after replacement {venue:?}"
+        );
+        owner.base.dispose().unwrap();
     }
 }

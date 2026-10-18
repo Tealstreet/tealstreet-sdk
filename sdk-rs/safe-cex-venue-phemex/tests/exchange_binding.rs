@@ -1,6 +1,7 @@
 //! E2E calls the production PhemexExchange through the typed Exchange contract.
 #[path = "support/binding_harness.rs"]
 mod support;
+use safe_cex_exchange::js_runtime::value::{Js, from_json};
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use serde_json::{Value, json};
@@ -118,6 +119,75 @@ fn bound_chart_history_fetches_and_maps_real_rest_rows() {
         calls[0].params,
         json!({"symbol":SYMBOL,"resolution":"60","from":1700000000_f64,"to":1700000060_f64})
     );
+}
+#[test]
+fn bound_daily_chart_history_ends_at_previous_utc_midnight() {
+    use std::{cell::RefCell, rc::Rc};
+    let h = chart_venue();
+    seed(&h);
+    let errors = Rc::new(RefCell::new(Vec::new()));
+    let seen = errors.clone();
+    h.venue().base().on(
+        "error",
+        Rc::new(move |_, v| {
+            seen.borrow_mut().push(v.clone());
+            Ok(())
+        }),
+    );
+    h.http.ok(
+        "GET",
+        "/exchange/public/md/v2/kline/list",
+        json!({"data":{"rows":[[1709856000,86400,0,"10","15","9","12","3"]]}}),
+    );
+    let opts = serde_json::from_value(
+        json!({"symbol":SYMBOL,"interval":"1d","from":1709856000000_f64,"to":1710083045678_f64}),
+    )
+    .unwrap();
+    let candles = h.drive(h.venue().fetch_ohlcv(opts)).unwrap();
+    // TS: dayjs((dayjs(to).utcOffset(0).startOf('date').unix() - 86400) * 1000) => 1709942400000.
+    let calls = h.http.calls("/exchange/public/md/v2/kline/list");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].params,
+        json!({"symbol":SYMBOL,"resolution":"86400","from":1709856000_f64,"to":1709942400_f64})
+    );
+    assert_eq!(
+        (candles.len(), candles[0].timestamp, candles[0].close),
+        (1, 1709856000.0, 12.0)
+    );
+    assert!(
+        errors.borrow().is_empty(),
+        "no error emitted: {:?}",
+        errors.borrow()
+    );
+}
+#[test]
+fn bound_chart_history_failure_emits_venue_message_and_returns_no_candles() {
+    use std::{cell::RefCell, rc::Rc};
+    let h = chart_venue();
+    seed(&h);
+    let errors = Rc::new(RefCell::new(Vec::new()));
+    let seen = errors.clone();
+    h.venue().base().on(
+        "error",
+        Rc::new(move |_, v| {
+            seen.borrow_mut().push(v.clone());
+            Ok(())
+        }),
+    );
+    h.http.route(
+        "GET",
+        "/exchange/public/md/v2/kline/list",
+        400.0,
+        json!({"code":10001,"msg":"kline backend busy"}),
+    );
+    let opts = serde_json::from_value(json!({"symbol":SYMBOL,"interval":"1m"})).unwrap();
+    // TS catch: this.emitter.emit('error', err?.response?.data?.msg || err.message); return [].
+    let candles = h.drive(h.venue().fetch_ohlcv(opts)).unwrap();
+    assert!(candles.is_empty());
+    let errors = errors.borrow();
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].strict_equals(&Js::str("kline backend busy")));
 }
 #[test]
 fn bound_chart_candles_subscribe_deliver_and_unsubscribe() {
@@ -515,7 +585,7 @@ fn disposal_during_start_ignores_late_market_reply() {
 }
 #[derive(Default)]
 struct Signer {
-    released: std::rc::Rc<std::cell::Cell<bool>>,
+    released: support::release::Release,
     fail: std::cell::Cell<bool>,
     requests: std::cell::RefCell<Vec<Value>>,
 }
@@ -528,17 +598,10 @@ impl safe_cex_transport::signing::RemoteSigner for Signer {
         self.requests
             .borrow_mut()
             .push(serde_json::to_value(request).unwrap());
-        let ready = self.released.clone();
+        let ready = self.released.wait();
         let fail = self.fail.get();
         Box::pin(async move {
-            std::future::poll_fn(move |_| {
-                if ready.get() {
-                    std::task::Poll::Ready(())
-                } else {
-                    std::task::Poll::Pending
-                }
-            })
-            .await;
+            ready.await;
             Ok(safe_cex_transport::signing::RemoteSignerResponse::WsAuth(
                 safe_cex_types::ws_auth::WsAuthResponse {
                     id: None,
@@ -600,6 +663,26 @@ fn private_socket_waits_for_remote_signature_then_auth_ack() {
         serde_json::from_str(sent.iter().find(|m| m.contains("user.auth")).unwrap()).unwrap();
     assert_eq!(auth["params"][2], "remote-signature");
     assert!(!sent.iter().any(|m| m.contains("aop_p.subscribe")));
+    drop(sent);
+    socket
+        .events
+        .borrow_mut()
+        .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(
+                json!({"id":999,"error":null,"result":{"status":"success"}}).to_string(),
+            ),
+        ));
+    h.runtime.pump();
+    assert_eq!(
+        socket
+            .sent
+            .borrow()
+            .iter()
+            .filter(|m| m.contains("aop_p.subscribe"))
+            .count(),
+        1,
+        "source subscription starts only after successful auth acknowledgement"
+    );
 }
 #[test]
 fn remote_signing_failure_sends_no_auth_or_subscription_and_is_nonterminal() {
@@ -684,7 +767,10 @@ fn dispose_runs_source_super_cleanup() {
         h.venue().base().is_disposed(),
         "source super call sets shared state"
     );
-    h.venue().base().emit("update", json!({})).unwrap();
+    h.venue()
+        .base()
+        .emit("update", from_json(&json!({})))
+        .unwrap();
     assert_eq!(
         observed.get(),
         0,
@@ -867,5 +953,107 @@ fn production_ticker_coercion_matches_constructed_typescript() {
         "{:?}",
         h.runtime.reports.borrow()
     );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn bound_chart_snapshot_warning_uses_error_message_and_retries() {
+    use std::{cell::RefCell, rc::Rc};
+    let h = chart_venue();
+    // Reject terminal I/O with the real harness Error; all socket, HTTP-client,
+    // snapshot and logging behavior stays in the constructed production venue.
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, path, _)| path != "/md/v2/fullbook");
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let received = Rc::new(RefCell::new(Vec::<OrderBook>::new()));
+    let seen = received.clone();
+    let cleanup = h
+        .venue()
+        .listen_order_book(
+            SYMBOL.into(),
+            Rc::new(move |book| seen.borrow_mut().push(book)),
+        )
+        .unwrap();
+    h.runtime.pump();
+    let frame =
+        json!({"symbol":SYMBOL,"orderbook_p":{"sequence":101,"bids":[["100","4"]],"asks":[]}});
+    let warning = "[Phemex] Orderbook snapshot request failed for BTCUSDT; waiting for next delta to retry: unscripted request GET /md/v2/fullbook";
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/snapshot-warning-source.cjs"
+        ))
+        .output()
+        .expect("maintained TS source oracle");
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        source["error"],
+        json!([[warning, "warning"], [warning, "warning"]])
+    );
+    for attempt in 0..3 {
+        if attempt == 1 {
+            // Markets/tickers plus the first snapshot consumed the real
+            // three-per-second read budget. Advance its clock, not its policy.
+            h.runtime.advance(1_000.);
+        }
+        if attempt == 2 {
+            h.runtime.advance(30_000.);
+        }
+        public_frame(&h, frame.clone());
+        for _ in 0..8 {
+            h.runtime.pump();
+        }
+        assert_eq!(
+            h.http.calls("/md/v2/fullbook").len(),
+            attempt + 1,
+            "failed snapshot must retry on the next delta"
+        );
+        let logs: Vec<_> = h
+            .runtime
+            .console
+            .borrow()
+            .iter()
+            .filter(|(_, msg)| msg.contains("Orderbook snapshot request failed"))
+            .cloned()
+            .collect();
+        assert_eq!(
+            logs.len(),
+            if attempt == 2 { 2 } else { 1 },
+            "PHEMEX-SNAPSHOT-WARNING must reach parent.log and throttle/reopen; reports: {:?}",
+            h.runtime.reports.borrow()
+        );
+        for (severity, message) in logs {
+            assert_eq!(severity, "warning");
+            assert_eq!(
+                message, warning,
+                "PHEMEX-SNAPSHOT-WARNING must use Error.message, matching maintained TS"
+            );
+        }
+        assert!(received.borrow().is_empty());
+    }
+    h.http.ok("GET", "/md/v2/fullbook", json!({"result":{"sequence":100,"orderbook_p":{"bids":[["100","2"]],"asks":[["102","3"]]}}}));
+    public_frame(&h, frame);
+    for _ in 0..8 {
+        h.runtime.pump();
+    }
+    assert_eq!(
+        received.borrow().len(),
+        1,
+        "a later valid snapshot must recover"
+    );
+    assert_eq!(received.borrow()[0].bids[0].amount, 4.);
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "snapshot failure must be handled by its warning path"
+    );
+    cleanup().unwrap();
     h.venue().dispose().unwrap();
 }

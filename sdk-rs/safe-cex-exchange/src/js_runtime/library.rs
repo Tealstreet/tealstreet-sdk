@@ -13,6 +13,8 @@ use std::{
     rc::{Rc, Weak},
 };
 
+pub(crate) const NATIVE_MODULE_ROOTS: [&str; 1] = ["p-iteration"];
+
 fn text(v: &Js) -> Result<String, Thrown> {
     Ok(String::from_utf16_lossy(&v.to_js_string()?))
 }
@@ -55,7 +57,38 @@ fn iteratee(f: &Js, value: Js) -> Result<Js, Thrown> {
     Ok(out)
 }
 
-fn in_operator(obj: &Js, key: &str) -> Result<bool, Thrown> {
+/// Imported lodash groupBy for native data collections and the existing
+/// function/property iteratee profile. Values remain the original referents.
+pub fn group_by(collection: &Js, by: &Js) -> Result<Js, Thrown> {
+    let result = Js::object(vec![]);
+    if collection.is_nullish() {
+        return Ok(result);
+    }
+    let length = if collection.is_callable() {
+        Js::Undefined
+    } else {
+        collection.get("length")?
+    };
+    let keys: Box<dyn Iterator<Item = Vec<u16>>> = match length {
+        Js::Number(n) if n >= 0.0 && n.fract() == 0.0 && n <= 9_007_199_254_740_991.0 => {
+            Box::new((0..n as usize).map(|index| index.to_string().encode_utf16().collect()))
+        }
+        _ => Box::new(collection.own_keys().into_iter().map(|key| key.to_vec())),
+    };
+    for key in keys {
+        let value = collection.get_key(&key)?;
+        let key = iteratee(by, value.clone())?.to_js_string()?;
+        if result.own_keys().iter().any(|own| **own == *key) {
+            result.get_key(&key)?.call_method("push", vec![value])?;
+        } else {
+            // lodash baseAssignValue defines an own __proto__ data property.
+            result.define_key(&key, Js::array(vec![value]))?;
+        }
+    }
+    Ok(result)
+}
+
+pub fn in_operator(obj: &Js, key: &str) -> Result<bool, Thrown> {
     if !obj.is_object() {
         let rhs = if matches!(obj, Js::SymbolIterator) {
             "Symbol(Symbol.iterator)".to_owned()
@@ -635,19 +668,7 @@ fn dayjs_add(ms: f64, amount: f64, unit: &str) -> f64 {
     if !ms.is_finite() {
         return f64::NAN;
     }
-    let unit = match unit {
-        "M" => "month",
-        "y" => "year",
-        "w" => "week",
-        "d" => "day",
-        "D" => "date",
-        "h" => "hour",
-        "m" => "minute",
-        "s" => "second",
-        "ms" => "millisecond",
-        other => other.trim_end_matches('s'),
-    }
-    .to_lowercase();
+    let unit = pretty_unit(unit);
     let days = ms.div_euclid(DAY_MS) as i64;
     let in_day = ms.rem_euclid(DAY_MS);
     let (y, m, d) = civil_from_days(days);
@@ -701,6 +722,14 @@ fn dayjs_ms(v: &Js, now: f64) -> Result<f64, Thrown> {
     })
 }
 
+/// `dayjs(input)`: a facade input is cloned with its utc-plugin state, as `clone()` does.
+fn dayjs_from(v: &Js, now: f64) -> Result<Js, Thrown> {
+    if let Some(state) = DayjsState::of(v)? {
+        return Ok(dayjs_with(state));
+    }
+    Ok(dayjs(dayjs_ms(v, now)?))
+}
+
 /// `YYYY-MM-DD[THH:mm[:ss[.sss]]][Z]`, read as UTC.
 fn parse_iso(s: &str) -> Option<f64> {
     let s = s.trim_end_matches('Z');
@@ -722,9 +751,174 @@ fn parse_iso(s: &str) -> Option<f64> {
     Some(ms)
 }
 
+/// dayjs + utc plugin instance fields in a UTC host zone: `$d` is the wall clock,
+/// `$offset`/`$u`/`$x.$localOffset` follow dayjs 1.11 `plugin/utc` exactly.
+#[derive(Clone)]
+struct DayjsState {
+    wall: f64,
+    offset: Option<Js>,
+    utc: bool,
+    local_offset: Option<f64>,
+}
+
+impl DayjsState {
+    const FIELDS: [&'static str; 4] = ["$d", "$offset", "$u", "$localOffset"];
+
+    fn plain(ms: f64) -> Self {
+        DayjsState {
+            wall: safe_cex_num::js_time_clip(ms),
+            offset: None,
+            utc: false,
+            local_offset: None,
+        }
+    }
+    /// utc plugin `valueOf`: offset addition retains ordinary JS coercion.
+    fn value_of(&self) -> Result<f64, Thrown> {
+        let Some(offset) = &self.offset else {
+            return Ok(self.wall);
+        };
+        let local = self
+            .local_offset
+            .filter(|v| *v != 0.0 && !v.is_nan())
+            .unwrap_or(if self.wall.is_nan() { f64::NAN } else { 0.0 });
+        let total = super::ops::add(offset, &Js::Number(local))?.to_number()?;
+        Ok(self.wall - total * 60_000.0)
+    }
+    fn utc_offset(&self) -> Js {
+        if self.utc {
+            Js::Number(0.0)
+        } else if let Some(offset) = &self.offset {
+            offset.clone()
+        } else {
+            Js::Number(if self.wall.is_nan() { f64::NAN } else { -0.0 })
+        }
+    }
+    fn timezone_offset(&self) -> Result<f64, Thrown> {
+        Ok(if self.value_of()?.is_finite() {
+            0.0
+        } else {
+            f64::NAN
+        })
+    }
+    fn with_wall(&self, wall: f64) -> Self {
+        DayjsState {
+            wall: safe_cex_num::js_time_clip(wall),
+            ..self.clone()
+        }
+    }
+    fn of(v: &Js) -> Result<Option<Self>, Thrown> {
+        if !matches!(v, Js::Object(o) if o.class == "Dayjs") {
+            return Ok(None);
+        }
+        let [wall, offset, utc, local_offset] = Self::FIELDS.map(|key| v.get(key));
+        let optional = |v: Js| (!v.is_undefined()).then(|| v.to_number()).transpose();
+        Ok(Some(DayjsState {
+            wall: wall?.to_number()?,
+            offset: {
+                let value = offset?;
+                (!value.is_undefined()).then_some(value)
+            },
+            utc: utc?.truthy(),
+            local_offset: optional(local_offset?)?,
+        }))
+    }
+}
+
+/// dayjs `prettyUnit`: shorthand table, else lowercase with one trailing `s` removed.
+fn pretty_unit(unit: &str) -> String {
+    match unit {
+        "M" => "month".into(),
+        "y" => "year".into(),
+        "w" => "week".into(),
+        "d" => "day".into(),
+        "D" => "date".into(),
+        "h" => "hour".into(),
+        "m" => "minute".into(),
+        "s" => "second".into(),
+        "ms" => "millisecond".into(),
+        "Q" => "quarter".into(),
+        other => {
+            let lower = other.to_lowercase();
+            lower.strip_suffix('s').map_or(lower.clone(), str::to_owned)
+        }
+    }
+}
+
+/// dayjs `startOf(unit)` on the wall clock; en locale weeks start on Sunday and
+/// units without a core case (quarter, isoWeek, unknown) return a clone.
+fn dayjs_start_of(wall: f64, unit: &str, start: bool) -> f64 {
+    if !wall.is_finite() {
+        return f64::NAN;
+    }
+    let days = wall.div_euclid(DAY_MS) as i64;
+    let in_day = wall.rem_euclid(DAY_MS);
+    let (y, m, _) = civil_from_days(days);
+    let day = |d: i64| d as f64 * DAY_MS;
+    let (begin, next) = match unit {
+        "year" => (
+            day(days_from_civil(y, 1, 1)),
+            day(days_from_civil(y + 1, 1, 1)),
+        ),
+        "month" => (
+            day(days_from_civil(y, m, 1)),
+            day(days_from_civil(
+                y + i64::from(m == 12),
+                if m == 12 { 1 } else { m + 1 },
+                1,
+            )),
+        ),
+        "week" => {
+            let first = days - (days + 4).rem_euclid(7);
+            (day(first), day(first + 7))
+        }
+        "day" | "date" => (day(days), day(days + 1)),
+        "hour" | "minute" | "second" => {
+            let length = match unit {
+                "hour" => 3_600_000.0,
+                "minute" => 60_000.0,
+                _ => 1_000.0,
+            };
+            let begin = day(days) + in_day - in_day % length;
+            (begin, begin + length)
+        }
+        _ => return wall,
+    };
+    if start { begin } else { next - 1.0 }
+}
+
+fn dayjs_offset(input: &[u16]) -> Option<f64> {
+    let digit = |unit: u16| (48..=57).contains(&unit);
+    let index = (0..input.len()).find(|&i| {
+        matches!(input[i], 43 | 45)
+            && input.get(i + 1).is_some_and(|v| digit(*v))
+            && input.get(i + 2).is_some_and(|v| digit(*v))
+    })?;
+    let hour = f64::from((input[index + 1] - 48) * 10 + input[index + 2] - 48);
+    let minute = index + 3 + usize::from(input.get(index + 3) == Some(&58));
+    if !input.get(minute).is_some_and(|v| digit(*v))
+        || !input.get(minute + 1).is_some_and(|v| digit(*v))
+    {
+        return Some(f64::NAN);
+    }
+    let total = hour * 60.0 + f64::from((input[minute] - 48) * 10 + input[minute + 1] - 48);
+    Some(if total == 0.0 || input[index] == 43 {
+        total
+    } else {
+        -total
+    })
+}
+
 fn dayjs(ms: f64) -> Js {
-    let at = |f: fn(f64) -> f64| func("", move |_| Ok(Js::Number(f(ms))));
+    dayjs_with(DayjsState::plain(ms))
+}
+
+fn dayjs_with(state: DayjsState) -> Js {
+    let at = |f: fn(f64) -> f64| {
+        let state = state.clone();
+        func("", move |_| Ok(Js::Number(f(state.value_of()?))))
+    };
     let shift = |sign: f64| {
+        let state = state.clone();
         func("", move |a| {
             let amount = arg(&a, 0).to_number()?;
             let unit = arg(&a, 1);
@@ -733,16 +927,92 @@ fn dayjs(ms: f64) -> Js {
             } else {
                 text(&unit)?
             };
-            Ok(dayjs(dayjs_add(ms, sign * amount, &unit)))
+            Ok(dayjs_with(state.with_wall(dayjs_add(
+                state.wall,
+                sign * amount,
+                &unit,
+            ))))
         })
     };
     let order = |want: Ordering| {
+        let state = state.clone();
         func("", move |a| {
             let other = dayjs_ms(&arg(&a, 0), f64::NAN)?;
-            Ok(Js::Bool(ms.partial_cmp(&other) == Some(want)))
+            Ok(Js::Bool(
+                state.value_of()?.partial_cmp(&other) == Some(want),
+            ))
         })
     };
-    Js::object_with_class(
+    let offset_state = state.clone();
+    let utc_offset = Js::function("utcOffset", move |this, a| {
+        let state = &offset_state;
+        let input = match arg(&a, 0) {
+            Js::Undefined => return Ok(state.utc_offset()),
+            Js::String(value) => match dayjs_offset(&value) {
+                Some(offset) => Js::Number(offset),
+                None => return Ok(this),
+            },
+            value => value,
+        };
+        let offset = if input.to_number()?.abs() <= 16.0 {
+            Js::Number(input.to_number()? * 60.0)
+        } else {
+            input
+        };
+        let keep_local_time = arg(&a, 1).truthy();
+        if offset.strict_equals(&Js::Number(0.0)) {
+            let utc = DayjsState {
+                utc: true,
+                ..DayjsState::plain(state.value_of()?)
+            };
+            return Ok(dayjs_with(if keep_local_time {
+                utc.with_wall(dayjs_add(
+                    utc.wall,
+                    state.utc_offset().to_number()?,
+                    "minute",
+                ))
+            } else {
+                utc
+            }));
+        }
+        if keep_local_time {
+            return Ok(dayjs_with(DayjsState {
+                offset: Some(offset),
+                utc: false,
+                ..state.clone()
+            }));
+        }
+        let local_timezone_offset = if state.utc {
+            state.timezone_offset()?
+        } else {
+            -state.utc_offset().to_number()?
+        };
+        let local = DayjsState::plain(state.value_of()?);
+        let amount = super::ops::add(&offset, &Js::Number(local_timezone_offset))?.to_number()?;
+        Ok(dayjs_with(DayjsState {
+            wall: safe_cex_num::js_time_clip(dayjs_add(local.wall, amount, "minute")),
+            offset: Some(offset),
+            utc: false,
+            local_offset: Some(local_timezone_offset),
+        }))
+    });
+    let start_state = state.clone();
+    let start_of = func("startOf", move |a| {
+        let unit = arg(&a, 0);
+        let unit = if unit.is_undefined() {
+            String::new()
+        } else {
+            text(&unit)?
+        };
+        let flag = arg(&a, 1);
+        Ok(dayjs_with(start_state.with_wall(dayjs_start_of(
+            start_state.wall,
+            &pretty_unit(&unit),
+            flag.is_undefined() || flag.truthy(),
+        ))))
+    });
+    let iso_state = state.clone();
+    let object = Js::object_with_class(
         "Dayjs",
         vec![
             ("_isDayjs", Js::Bool(true)),
@@ -752,16 +1022,40 @@ fn dayjs(ms: f64) -> Js {
             ("subtract", shift(-1.0)),
             ("isBefore", order(Ordering::Less)),
             ("isAfter", order(Ordering::Greater)),
+            ("utcOffset", utc_offset),
+            ("startOf", start_of),
             (
                 "toISOString",
                 func("toISOString", move |_| {
-                    iso_string(ms)
+                    iso_string(iso_state.value_of()?)
                         .map(|s| Js::str(&s))
                         .ok_or_else(|| Thrown::error("RangeError", "Invalid time value"))
                 }),
             ),
         ],
-    )
+    );
+    let optional = |v: Option<f64>| v.map_or(Js::Undefined, Js::Number);
+    let fields = [
+        Js::Number(state.wall),
+        state.offset.unwrap_or(Js::Undefined),
+        Js::Bool(state.utc),
+        optional(state.local_offset),
+    ];
+    if let Js::Object(data) = &object {
+        let mut props = data.props.borrow_mut();
+        for (key, value) in DayjsState::FIELDS.into_iter().zip(fields) {
+            props.insert(
+                key.encode_utf16().collect::<Vec<u16>>().into(),
+                super::value::Prop::DataDescriptor {
+                    value,
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+        }
+    }
+    object
 }
 
 // The option-bearing qs calls used by venue signers and params serializers.
@@ -882,7 +1176,7 @@ fn qs_pairs(
     }
     Ok(())
 }
-fn qs_stringify(value: &Js, options: &Js) -> Result<String, Thrown> {
+pub fn qs_stringify(value: &Js, options: &Js) -> Result<String, Thrown> {
     let options = QsOptions::read(options)?;
     let mut out = vec![];
     if matches!(value, Js::Object(_) | Js::Array(_)) {
@@ -1199,44 +1493,77 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             Ok(Js::array(out))
         })))
     });
+    let module = rt
+        .upgrade()
+        .and_then(|scope| scope.native_module("p-iteration"))
+        .unwrap_or_else(|| Js::object(vec![]));
+    let Js::Object(module_data) = &module else {
+        unreachable!()
+    };
+    if let Some(scope) = rt.upgrade() {
+        scope.retain_native_module("p-iteration", module_data.clone());
+    }
+    let module_weak = Rc::downgrade(module_data);
     let series = |collect: bool| {
         let rt = rt.clone();
+        let module_weak = module_weak.clone();
         Js::function("series", move |_, a| {
             let s = scope_of(&rt)?;
             let array = arg(&a, 0);
-            let f = arg(&a, 1);
+            let callback = arg(&a, 1);
+            let runtime = s.exchange_runtime();
+            let supplied = arg(&a, 2);
+            let receiver = if supplied.truthy() {
+                supplied
+            } else {
+                Js::Object(
+                    module_weak
+                        .upgrade()
+                        .ok_or_else(|| Thrown::error("Error", "p-iteration module unavailable"))?,
+                )
+            };
             Ok(s.spawn(Box::pin(async move {
-                let mut out = vec![];
-                let len = list(&array).len();
-                for i in 0..len {
-                    let Some(Some(v)) = array.array_items().and_then(|xs| xs.get(i).cloned())
-                    else {
-                        out.push(Js::Undefined);
-                        continue;
-                    };
-                    out.push(
-                        await_js(call(&f, vec![v, Js::Number(i as f64), array.clone()])?).await?,
-                    );
+                let out = Js::array(vec![]);
+                let mut index = 0usize;
+                while ops::less_than(&Js::Number(index as f64), &array.get("length")?)? {
+                    let key = index.to_string();
+                    if in_operator(&array, &key)? {
+                        let call = callback.get("call")?;
+                        let value =
+                            await_js(Js::Promise(Promise::resolve(&runtime, array.get(&key)?)))
+                                .await?;
+                        let pending = call.call(
+                            callback.clone(),
+                            vec![
+                                receiver.clone(),
+                                value,
+                                Js::Number(index as f64),
+                                array.clone(),
+                            ],
+                        )?;
+                        let value =
+                            await_js(Js::Promise(Promise::resolve(&runtime, pending))).await?;
+                        if collect {
+                            out.set(&key, value)?;
+                        }
+                    }
+                    index += 1;
                 }
-                Ok(if collect {
-                    Js::array(out)
-                } else {
-                    Js::Undefined
-                })
+                Ok(if collect { out } else { Js::Undefined })
             })))
         })
     };
     let (map_series, for_each_series) = (series(true), series(false));
     def("mapSeries", map_series.clone());
     def("forEachSeries", for_each_series.clone());
-    def(
-        "p-iteration",
-        Js::object(vec![
-            ("map", p_map),
-            ("mapSeries", map_series),
-            ("forEachSeries", for_each_series),
-        ]),
-    );
+    for (name, value) in [
+        ("map", p_map),
+        ("mapSeries", map_series),
+        ("forEachSeries", for_each_series),
+    ] {
+        define_on(&module, name, value);
+    }
+    def("p-iteration", module);
 
     let numeric = |name: &'static str, f: fn(f64, f64) -> f64| {
         func(name, move |a| {
@@ -1462,7 +1789,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             } else {
                 f64::NAN
             };
-            Ok(dayjs(dayjs_ms(&input, now)?))
+            dayjs_from(&input, now)
         })
     });
     if let Ok(clock) = g.get("virtualClock") {

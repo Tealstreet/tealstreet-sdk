@@ -484,6 +484,15 @@ compiles a live-mapper null-refusal control that must fail its named order-count
 assertion; decoder-only tests are not evidence
 for this production path.
 
+The production WOO signer now receives and returns the original native runtime
+config through `api` and `factory`. Shallow copies retain nested data identity,
+callables and own properties. V1 reuses the shared runtime qs serializer; V3 uses
+the existing native JSON.stringify operation at its signing boundary, retaining
+source BigInt throws and toJSON callbacks before any data-only transport capture. The constructed
+exchange regression in `native_signing_retention` observes NaN and Infinity in
+actual HMAC preimages before the terminal wire projection. Finite JSON fixture
+views in older tests are explicit observations after signing.
+
 The configured fetchOrders member admits mapped rows individually before either
 the Exchange trait or startup Store write. Order.amount/filled must be numbers;
 reduceOnly admits absent, own undefined and booleans. A malformed row emits its
@@ -499,3 +508,16 @@ The constructed clientOrderIdRule retains its source Number(input) conversion an
 uses the shared noncoercing Number.isSafeInteger builtin. The actual-rule witness
 compares26 maintained-source identifiers, including safe-range and canonical-decimal
 boundaries, without replacing the rule or its operation table.
+
+The live order-page reader passes truthy message/meta.message values directly to
+the shared Raw(Js) reporter. Non-string errors must retain completed pages;
+`binding_orders` covers actual signed pagination, original emitted text and fallbacks.
+
+The constructed ticker census in `tests/binding_streams.rs::production_ticker_coercion_matches_constructed_typescript`
+uses the maintained TS exchange and DefaultStore via `parity/scripts/ticker-strict-source.cjs`.
+72 packed three-row frames cover every copied ticker/BBO/mark numeric field. Fifty-four malformed rows are visibly refused while their good siblings retain source-equal native values.
+The corpus includes null, strings, NaN-producing inputs, objects, booleans, missing
+fields, raw numeric overflow and signed zero. It compares all eleven native number
+fields before JSON; approved decision-3 refusal preserves the entire bad row.
+`parity/scripts/ticker-native-controls.py` separately disables mapping and refusal
+behavior, requiring a compiled native failure and exact restored pass.

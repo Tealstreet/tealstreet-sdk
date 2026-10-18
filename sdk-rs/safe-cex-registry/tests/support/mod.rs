@@ -259,8 +259,8 @@ impl ExchangeRuntime for LocalDial {
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         self.inner.spawn_local(future)
     }
-    fn console(&self, severity: &str, message: &str) {
-        self.inner.console(severity, message)
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.inner.console_values(severity, message)
     }
     fn unique_id(&self) -> String {
         self.inner.unique_id()
@@ -274,7 +274,11 @@ impl ExchangeRuntime for LocalDial {
     fn report_exception(&self, error: &ExchangeError, context: &Value) {
         self.inner.report_exception(error, context)
     }
-    fn report_raw_exception(&self, error: &Value, context: &Value) {
+    fn report_raw_exception(
+        &self,
+        error: &safe_cex_exchange::js_runtime::value::Js,
+        context: &Value,
+    ) {
         self.inner.report_raw_exception(error, context)
     }
     fn execute_worker_request(&self, request: Value) -> ExchangeFuture<'static, Value> {
@@ -429,8 +433,8 @@ pub async fn venue_harness(
             safe_cex_registry::native_host::hyperliquid_rate_limiter(),
         ),
     };
-    let constructor =
-        rust_constructor(&name, host).expect("a Rust-constructed venue in the registry table");
+    let constructor = rust_constructor(&name, host.clone())
+        .expect("a Rust-constructed venue in the registry table");
     let options = serde_json::from_value(options).unwrap();
     let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
     let exchange = constructor
@@ -441,6 +445,7 @@ pub async fn venue_harness(
                 e.message
             )
         });
+    safe_cex_registry::native_host::bind_http_events(&host, &exchange);
     Harness {
         exchange,
         store,

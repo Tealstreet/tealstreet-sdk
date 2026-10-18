@@ -1,6 +1,8 @@
 //! Binance family implementation; shared behavioral contracts live in exchange-core.
 #[path = "generated/binance.rs"]
 pub mod binance_types;
+#[path = "generated/binanceinverse.rs"]
+pub mod binanceinverse_types;
 #[path = "generated/binancepm.rs"]
 pub mod binancepm_types;
 #[path = "generated/binancespot.rs"]
@@ -13,6 +15,8 @@ where
 {
     T::deserialize(deserializer).map(Some)
 }
+
+pub mod inverse;
 
 pub mod account_fetch;
 pub mod account_leverage_overlay;

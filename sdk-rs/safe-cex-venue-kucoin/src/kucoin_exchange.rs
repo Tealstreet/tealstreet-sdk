@@ -28,6 +28,10 @@ use safe_cex_types::{
 };
 use std::{cell::RefCell, rc::Rc};
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "../tests/support/native_reconnect.rs"]
+mod native_reconnect_tests;
+
 /// Host collaborators of both KuCoin classes.
 pub struct KucoinDependencies {
     pub runtime: Rc<dyn WsRuntime>,
@@ -115,7 +119,7 @@ fn assemble(
     let weak = Rc::downgrade(&shared);
     let class = define_classes(&weak, spot).map_err(err)?;
     let this = class
-        .call(Js::Undefined, vec![name, options, store])
+        .construct(vec![name, options, store], None)
         .map_err(err)?;
     *shared.exchange.borrow_mut() = this.clone();
     Ok(Assembly { shared, this })

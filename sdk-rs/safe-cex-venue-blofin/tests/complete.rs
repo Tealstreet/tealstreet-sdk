@@ -87,7 +87,7 @@ fn effects(n: &Value, e: &Value) {
         _ => assert_eq!(n, e, "effect after native assertions"),
     }
 }
-fn native(r: &Runtime, s: &BlofinPrivateWebsocket<Socket>, e: &Value) {
+fn native(r: &Runtime, e: &Value) {
     let orders = r.store.orders();
     let expected = e["orders"].as_array().unwrap();
     assert_eq!(orders.len(), expected.len(), "native orders count");
@@ -208,12 +208,6 @@ fn native(r: &Runtime, s: &BlofinPrivateWebsocket<Socket>, e: &Value) {
         e["parentDisposed"].as_bool().unwrap(),
         "independent parent disposal state"
     );
-    let dedupe = s.topics.last_filled_size_by_order_id.borrow();
-    let expected = e["dedupe"].as_array().unwrap();
-    assert_eq!(dedupe.len(), expected.len(), "native dedupe count");
-    for row in expected {
-        number(dedupe[row[0].as_str().unwrap()], &row[1]);
-    }
 }
 fn run(e: &Value) -> (Rc<Runtime>, Rc<BlofinPrivateWebsocket<Socket>>, Vec<String>) {
     let r = Runtime::new(corpus(), &e["initial"]);
@@ -261,8 +255,8 @@ fn group(name: &str, floor: usize) {
         .filter(|e| e["group"] == name)
     {
         count += 1;
-        let (r, s, errors) = run(e);
-        native(&r, &s, e);
+        let (r, _, errors) = run(e);
+        native(&r, e);
         assert_eq!(
             errors,
             e["errors"]
@@ -286,14 +280,13 @@ fn orders_native() {
         .iter()
         .find(|e| e["group"] == "orders-mapper-alias")
         .unwrap();
-    let (r, s, _) = run(e);
+    let (r, _, _) = run(e);
     assert_eq!(
         r.fills.borrow()[0].amount,
         0.25,
         "native immutable mapper input retains2 contracts"
     );
     number(0.5, &e["fills"][0]["amount"]);
-    assert_eq!(s.topics.last_filled_size_by_order_id.borrow()["o1"], 2.0);
 }
 #[test]
 fn terminal_reconciliation_native() {
@@ -343,7 +336,7 @@ fn private_facade_native() {
     number(20.0, &e["balance"]["total"]);
     assert!(r.any_pong.get(), "private constructor keepalive field");
     assert!(s.core.orders_throttle_timeout.borrow().is_none());
-    // Emitter re-entry observes an already committed dedupe map; no RefCell guard spans emission.
+    // Emitter re-entry observes the already committed cumulative fill; no RefCell guard spans emission.
     let r = Runtime::new(corpus(), &json!({}));
     let s = BlofinPrivateWebsocket::new(Rc::new(Socket {
         runtime: r.clone(),
@@ -363,9 +356,10 @@ fn private_facade_native() {
     assert_eq!(
         r.fills.borrow().len(),
         1,
-        "reentry sees dedupe committed before emitter"
+        "reentry sees the cumulative fill committed before emitter"
     );
-    assert_eq!(s.topics.last_filled_size_by_order_id.borrow()["o1"], 2.0);
+    s.handle_order_topic(&data).unwrap();
+    assert_eq!(r.fills.borrow().len(), 1, "replayed frame emits nothing");
 }
 fn first_source_signature() -> String {
     corpus()["signedRequest"]["headers"]["ACCESS-SIGN"]

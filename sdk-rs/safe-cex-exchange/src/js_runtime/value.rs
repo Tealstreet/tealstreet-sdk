@@ -1,15 +1,24 @@
 //! Native JS value model handed to host-trait-generic ported venue bodies.
 //! Strings are UTF-16, arrays keep holes, objects keep own-key order and accessors.
+pub mod owned;
+pub use owned::OwnedJsValue;
+
 use crate::runtime::ExchangeError;
 use indexmap::IndexMap;
 use safe_cex_num::{JsCoercionError, js_number_string, parse_float};
-use std::{cell::RefCell, fmt, rc::Rc};
+use std::{
+    any::Any,
+    cell::{Cell, RefCell},
+    fmt,
+    rc::Rc,
+};
 mod typed;
 
 pub type Str = Rc<[u16]>;
 pub type NativeFn = Rc<dyn Fn(Js, Vec<Js>) -> Result<Js, Thrown>>;
 pub type Getter = Rc<dyn Fn(&Js) -> Result<Js, Thrown>>;
 pub type Setter = Rc<dyn Fn(&Js, Js) -> Result<(), Thrown>>;
+pub type WriteObserver = Rc<dyn Fn(&Js, &[u16], &Js) -> Result<(), Thrown>>;
 
 /// The `i`th call argument, `undefined` when absent.
 pub fn arg(args: &[Js], i: usize) -> Js {
@@ -29,21 +38,47 @@ pub enum Prop {
         enumerable: bool,
         configurable: bool,
     },
-    Accessor(Option<Getter>, Option<Setter>),
+    Accessor {
+        get: Option<Js>,
+        set: Option<Js>,
+        enumerable: bool,
+        configurable: bool,
+    },
+}
+
+fn same_optional_value(left: &Option<Js>, right: &Option<Js>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => same_value(left, right),
+        _ => false,
+    }
 }
 
 pub struct ObjectData {
+    write_observer: RefCell<Option<WriteObserver>>,
+    resource: Option<Rc<dyn Any>>,
+    extensible: Cell<bool>,
     pub class: &'static str,
     pub(crate) iterator_next: RefCell<Option<NativeFn>>,
     pub(crate) symbol_iterator: RefCell<Option<Prop>>,
     pub props: RefCell<IndexMap<Str, Prop>>,
+    /// None is an explicit null prototype; ordinary allocations store their realm parent.
     pub proto: RefCell<Option<Js>>,
 }
 
 pub struct FunctionData {
+    extensible: Cell<bool>,
     pub name: Str,
     pub call: NativeFn,
     pub props: RefCell<IndexMap<Str, Prop>>,
+    pub proto: RefCell<Option<Js>>,
+    construct: Option<Construct>,
+    realm: Rc<safe_cex_num::PrototypeRealm>,
+}
+
+enum Construct {
+    Native(NativeFn),
+    Bound { target: Js, args: Vec<Js> },
 }
 
 #[derive(Clone)]
@@ -56,7 +91,7 @@ pub enum Js {
     Number(f64),
     BigInt(Rc<num_bigint::BigInt>),
     /// Retained native intrinsic referent shared with core socket statistics.
-    /// This is a data/reference capability, not an executable JS function body.
+    /// Function call/bind/toString and the empty Function prototype execute here.
     Builtin(safe_cex_num::BuiltinReference),
     String(Str),
     Array(Rc<RefCell<Vec<Option<Js>>>>),
@@ -112,16 +147,13 @@ impl Thrown {
     }
     pub fn to_exchange_error(&self) -> ExchangeError {
         let mut error = self.error_fields();
-        if self.native.is_some() || !self.value.is_object() {
+        if !self.value.is_object() {
             return error;
         }
-        let code = self.value.get("code").and_then(|code| {
-            if code.is_undefined() {
-                Ok(None)
-            } else {
-                to_json(&code).map(Some)
-            }
-        });
+        let code = self
+            .value
+            .get("code")
+            .map(|code| (self.value.has_own("code") || !code.is_undefined()).then_some(code));
         match code {
             Ok(code) => error.code = code,
             Err(cause) => return cause.error_fields(),
@@ -139,6 +171,30 @@ impl fmt::Debug for Thrown {
 impl From<ExchangeError> for Thrown {
     fn from(error: ExchangeError) -> Self {
         let value = error_object(&error.name, &error.message);
+        if let Some(failure) = error.origin.as_ref().and_then(|origin| {
+            origin
+                .error()
+                .downcast_ref::<safe_cex_transport::RestFailure>()
+        }) && let Some(safe_cex_transport::TransportError::Rejected(origin)) =
+            failure.transport_error.as_deref()
+            && let Some(cause) = origin.error().downcast_ref::<owned::OwnedCallbackError>()
+        {
+            for (field, projected) in [("name", &error.name), ("message", &error.message)] {
+                if let Some(OwnedJsValue::String(units)) = cause.value().get(field)
+                    && String::from_utf16(units).is_err()
+                    && String::from_utf16_lossy(units) == *projected
+                {
+                    value
+                        .set(field, Js::String(units.clone().into()))
+                        .expect("fresh error metadata property");
+                }
+            }
+        }
+        if let Some(code) = &error.code {
+            value
+                .define("code", code.clone())
+                .expect("fresh error code property");
+        }
         Self {
             value,
             native: Some(Rc::new(error)),
@@ -235,7 +291,7 @@ pub fn error_object(name: &str, message: &str) -> Js {
 }
 
 pub(super) fn error_constructor(name: &'static str) -> Js {
-    Js::constructor(name, move |_, args| {
+    let body: NativeFn = Rc::new(move |_, args| {
         let message = arg(&args, 0);
         let message = if message.is_undefined() {
             None
@@ -243,7 +299,31 @@ pub(super) fn error_constructor(name: &'static str) -> Js {
             Some(message.to_js_string()?)
         };
         Ok(make_error_object(name, message))
-    })
+    });
+    let call = body.clone();
+    let constructor = Js::constructor(name, Some(call), move |target, args| {
+        let prototype = target.get("prototype")?;
+        let error = body(Js::Undefined, args)?;
+        if prototype.is_object()
+            && let Js::Object(data) = &error
+        {
+            *data.proto.borrow_mut() = Some(prototype);
+        }
+        Ok(error)
+    });
+    let Js::Function(function) = &constructor else {
+        unreachable!()
+    };
+    function.props.borrow_mut().insert(
+        utf16("prototype"),
+        Prop::DataDescriptor {
+            value: error_prototype(name).0,
+            writable: false,
+            enumerable: false,
+            configurable: false,
+        },
+    );
+    constructor
 }
 
 fn error_string(error: &Js) -> Result<Str, Thrown> {
@@ -296,7 +376,7 @@ impl fmt::Debug for Js {
                         Prop::Data(v) | Prop::DataDescriptor { value: v, .. } => {
                             map.entry(&String::from_utf16_lossy(k), v)
                         }
-                        Prop::Accessor(..) => {
+                        Prop::Accessor { .. } => {
                             map.entry(&String::from_utf16_lossy(k), &"<accessor>")
                         }
                     };
@@ -340,7 +420,26 @@ impl Js {
         Js::object_with_class("Object", fields)
     }
     pub fn object_with_class(class: &'static str, fields: Vec<(&str, Js)>) -> Js {
+        Self::object_with_resource(class, fields, None)
+    }
+    pub fn host_object(resource: Rc<dyn Any>) -> Js {
+        Self::object_with_resource("Object", vec![], Some(resource))
+    }
+    pub fn resource<T: Any>(&self) -> Option<Rc<T>> {
+        let Js::Object(object) = self else {
+            return None;
+        };
+        object.resource.as_ref()?.clone().downcast::<T>().ok()
+    }
+    fn object_with_resource(
+        class: &'static str,
+        fields: Vec<(&str, Js)>,
+        resource: Option<Rc<dyn Any>>,
+    ) -> Js {
         Js::Object(Rc::new(ObjectData {
+            write_observer: RefCell::new(None),
+            resource,
+            extensible: Cell::new(true),
             class,
             iterator_next: RefCell::new(None),
             symbol_iterator: RefCell::new(None),
@@ -350,25 +449,121 @@ impl Js {
                     .map(|(k, v)| (utf16(k), Prop::Data(v)))
                     .collect(),
             ),
-            proto: RefCell::new(None),
+            proto: RefCell::new(Some(Js::Builtin(
+                safe_cex_num::PrototypeRealm::current()
+                    .reference(safe_cex_num::ProtoMember::Prototype),
+            ))),
         }))
     }
     pub fn function(name: &str, call: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static) -> Js {
+        let realm = safe_cex_num::PrototypeRealm::current();
         Js::Function(Rc::new(FunctionData {
+            extensible: Cell::new(true),
             name: utf16(name),
             call: Rc::new(call),
             props: RefCell::new(IndexMap::new()),
+            proto: RefCell::new(
+                realm
+                    .reference(safe_cex_num::ProtoMember::Constructor)
+                    .prototype()
+                    .map(Js::Builtin),
+            ),
+            construct: None,
+            realm,
         }))
     }
     pub fn constructor(
         name: &str,
-        call: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static,
+        call: Option<NativeFn>,
+        construct: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static,
     ) -> Js {
-        Js::Function(Rc::new(FunctionData {
-            name: utf16(name),
-            call: Rc::new(call),
-            props: RefCell::new(IndexMap::new()),
-        }))
+        let class_name = name.to_owned();
+        let mut value = Self::function(name, move |this, args| match &call {
+            Some(call) => call(this, args),
+            None => Err(Thrown::type_error(&format!(
+                "Class constructor {class_name} cannot be invoked without 'new'"
+            ))),
+        });
+        let Js::Function(function) = &mut value else {
+            unreachable!()
+        };
+        Rc::get_mut(function)
+            .expect("unpublished constructor")
+            .construct = Some(Construct::Native(Rc::new(construct)));
+        value
+    }
+
+    pub fn is_constructor(&self) -> bool {
+        matches!(self, Js::Function(function) if function.construct.is_some())
+    }
+
+    /// GetSuperConstructor reads metadata, without the shadowable `__proto__` property.
+    pub fn super_constructor(&self) -> Result<Js, Thrown> {
+        if !self.is_callable() {
+            return Err(Thrown::type_error("Active class must be a function"));
+        }
+        Ok(self.prototype().unwrap_or(Js::Null))
+    }
+
+    /// The native construct body receives original new.target, then arguments.
+    pub fn construct(&self, args: Vec<Js>, new_target: Option<&Js>) -> Result<Js, Thrown> {
+        let Js::Function(function) = self else {
+            return Err(Thrown::type_error("Value is not a constructor"));
+        };
+        let Some(construct) = &function.construct else {
+            return Err(Thrown::type_error("Value is not a constructor"));
+        };
+        let new_target = new_target.unwrap_or(self);
+        if !new_target.is_constructor() {
+            return Err(Thrown::type_error("new.target is not a constructor"));
+        }
+        let value = match construct {
+            Construct::Native(body) => body(new_target.clone(), args)?,
+            Construct::Bound {
+                target,
+                args: prefix,
+            } => {
+                let mut combined = prefix.clone();
+                combined.extend(args);
+                let new_target = if new_target.same_reference(self) {
+                    target
+                } else {
+                    new_target
+                };
+                target.construct(combined, Some(new_target))?
+            }
+        };
+        if !value.is_object() {
+            return Err(Thrown::type_error(
+                "Constructor returned a non-object value",
+            ));
+        }
+        Ok(value)
+    }
+
+    /// OrdinaryCreateFromConstructor for native class bodies allocating `this`.
+    pub fn allocate_instance(&self) -> Result<Js, Thrown> {
+        let Js::Function(function) = self else {
+            return Err(Thrown::type_error("new.target is not a constructor"));
+        };
+        if !self.is_constructor() {
+            return Err(Thrown::type_error("new.target is not a constructor"));
+        }
+        let prototype = self.get("prototype")?;
+        let object = Js::object(vec![]);
+        let Js::Object(data) = &object else {
+            unreachable!()
+        };
+        *data.proto.borrow_mut() = Some(if prototype.is_object() {
+            prototype
+        } else {
+            Js::Builtin(
+                function
+                    .realm
+                    .reference(safe_cex_num::ProtoMember::Prototype),
+            )
+        });
+        Ok(object)
     }
     pub fn new_map() -> Js {
         Js::Map(Rc::default())
@@ -404,19 +599,12 @@ impl Js {
     }
     /// Consume the shared iterator protocol for spread/Array.from adapters.
     pub fn iterable_values(&self) -> Result<Vec<Js>, Thrown> {
-        let iterator = self.iterator()?;
-        let next = iterator.get("next")?;
+        let iterator = super::iterator::IteratorRecord::get(self)?;
         let mut values = vec![];
-        loop {
-            let item = next.call(iterator.clone(), vec![])?;
-            if !item.is_object() {
-                return Err(Thrown::type_error("Iterator result is not an object"));
-            }
-            if item.get("done")?.truthy() {
-                return Ok(values);
-            }
-            values.push(item.get("value")?);
+        while let Some(value) = iterator.step_value()? {
+            values.push(value);
         }
+        Ok(values)
     }
     pub fn is_undefined(&self) -> bool {
         matches!(self, Js::Undefined)
@@ -513,21 +701,7 @@ impl Js {
     }
     pub(super) fn ordinary_to_primitive(&self, names: [&str; 2]) -> Result<Js, Thrown> {
         for name in names {
-            let declared = self.has_property(&utf16(name));
-            // None is the value model's implicit stock prototype. An
-            // explicit null prototype contributes no inherited methods.
-            let method = if !declared && self.string_prototype_is_null() {
-                Js::Undefined
-            } else {
-                self.get(name)?
-            };
-            if name == "toString"
-                && !declared
-                && method.is_undefined()
-                && self.has_implicit_string_prototype()
-            {
-                return self.intrinsic_string().map(Js::String);
-            }
+            let method = self.get(name)?;
             if !method.is_callable() {
                 continue;
             }
@@ -577,28 +751,6 @@ impl Js {
         Err(Thrown::type_error(
             "Cannot convert object to primitive value",
         ))
-    }
-    fn has_implicit_string_prototype(&self) -> bool {
-        match self {
-            Js::Object(object) => object
-                .proto
-                .borrow()
-                .as_ref()
-                .is_none_or(Js::has_implicit_string_prototype),
-            Js::Function(_) => true,
-            _ => false,
-        }
-    }
-    fn string_prototype_is_null(&self) -> bool {
-        match self {
-            Js::Object(object) => object
-                .proto
-                .borrow()
-                .as_ref()
-                .is_some_and(Js::string_prototype_is_null),
-            Js::Null => true,
-            _ => false,
-        }
     }
     /// Stock intrinsic conversion after primitive coercion dispatch.
     fn intrinsic_string(&self) -> Result<Str, Thrown> {
@@ -703,6 +855,63 @@ impl Js {
         }
     }
 
+    fn prototype(&self) -> Option<Js> {
+        match self {
+            Js::Object(object) => object.proto.borrow().clone(),
+            Js::Function(function) => function.proto.borrow().clone(),
+            Js::Builtin(reference) => reference.prototype().map(Js::Builtin),
+            _ => None,
+        }
+    }
+
+    /// Ordinary [[SetPrototypeOf]], shared by the legacy setter and Object facade.
+    /// The target's own properties and opaque native resource remain untouched.
+    pub(super) fn set_prototype(&self, value: Js) -> Result<Js, Thrown> {
+        if self.is_nullish() {
+            return Err(Thrown::type_error(
+                "Cannot convert undefined or null to object",
+            ));
+        }
+        if !value.is_object() && !matches!(value, Js::Null) {
+            return Err(Thrown::type_error(
+                "Object prototype may only be an Object or null",
+            ));
+        }
+        if !self.is_object() {
+            return Ok(self.clone());
+        }
+        let parent = (!matches!(value, Js::Null)).then_some(value);
+        let target = match self {
+            Js::Object(object) => &object.proto,
+            Js::Function(function) => &function.proto,
+            Js::Builtin(_) if same_optional_value(&self.prototype(), &parent) => {
+                return Ok(self.clone());
+            }
+            _ => {
+                return Err(Thrown::type_error(
+                    "Prototype mutation requires an ordinary object or function",
+                ));
+            }
+        };
+        if same_optional_value(&target.borrow(), &parent) {
+            return Ok(self.clone());
+        }
+        if !self.is_extensible()? {
+            return Err(Thrown::type_error(
+                "Cannot change prototype of a non-extensible object",
+            ));
+        }
+        let mut candidate = parent.clone();
+        while let Some(ancestor) = candidate {
+            if ancestor.same_reference(self) {
+                return Err(Thrown::type_error("Cyclic __proto__ value"));
+            }
+            candidate = ancestor.prototype();
+        }
+        *target.borrow_mut() = parent;
+        Ok(self.clone())
+    }
+
     /// [[Get]] including array/string length and index, accessors and prototype.
     pub fn get(&self, key: &str) -> Result<Js, Thrown> {
         self.get_key(&utf16(key))
@@ -713,19 +922,12 @@ impl Js {
     fn get_key_receiver(&self, key: &[u16], receiver: &Js) -> Result<Js, Thrown> {
         match self {
             Js::Builtin(reference) => {
-                let key = String::from_utf16(key).map_err(|_| {
-                    Thrown::type_error("lone UTF-16 surrogate at an intrinsic boundary")
-                })?;
+                let Ok(key) = String::from_utf16(key) else {
+                    return Ok(Js::Undefined);
+                };
                 // Object.prototype's legacy accessor observes the original receiver.
-                if key == "__proto__"
-                    && !self.same_reference(receiver)
-                    && reference.member()
-                        == safe_cex_num::BuiltinIdentity::Object(
-                            safe_cex_num::ProtoMember::Prototype,
-                        )
-                    && let Js::Object(object) = receiver
-                {
-                    return Ok(object.proto.borrow().clone().unwrap_or(Js::Null));
+                if key == "__proto__" && !reference.own_fields().contains_key(&key) {
+                    return Ok(receiver.prototype().unwrap_or(Js::Null));
                 }
                 return Ok(Js::from_prototype(reference.get(&key)));
             }
@@ -788,24 +990,18 @@ impl Js {
         let prop = props.borrow().get(key).cloned();
         match prop {
             Some(Prop::Data(v) | Prop::DataDescriptor { value: v, .. }) => Ok(v),
-            Some(Prop::Accessor(Some(getter), _)) => getter(receiver),
-            Some(Prop::Accessor(None, _)) => Ok(Js::Undefined),
+            Some(Prop::Accessor {
+                get: Some(getter), ..
+            }) => getter.call(receiver.clone(), vec![]),
+            Some(Prop::Accessor { get: None, .. }) => Ok(Js::Undefined),
             None => {
                 if let Js::Function(function) = self {
                     if key == utf16("name").as_ref() {
                         return Ok(Js::String(function.name.clone()));
                     }
-                    return Ok(super::builtins::member(self, key).unwrap_or(Js::Undefined));
                 }
-                if let Js::Object(o) = self
-                    && let Some(proto) = o.proto.borrow().clone()
-                {
+                if let Some(proto) = self.prototype() {
                     return proto.get_key_receiver(key, receiver);
-                }
-                if let Js::Function(f) = self
-                    && key == utf16("name").as_ref()
-                {
-                    return Ok(Js::String(f.name.clone()));
                 }
                 Ok(Js::Undefined)
             }
@@ -827,7 +1023,28 @@ impl Js {
     pub fn set(&self, key: &str, value: Js) -> Result<(), Thrown> {
         self.set_key(&utf16(key), value)
     }
+    pub fn set_write_observer(&self, observer: Option<WriteObserver>) -> Result<(), Thrown> {
+        let Js::Object(object) = self else {
+            return Err(Thrown::type_error(
+                "Write observers require an ordinary object",
+            ));
+        };
+        let previous = object.write_observer.replace(observer);
+        drop(previous);
+        Ok(())
+    }
     pub fn set_key(&self, key: &[u16], value: Js) -> Result<(), Thrown> {
+        self.set_property(key, value.clone())?;
+        let observer = match self {
+            Js::Object(object) => object.write_observer.borrow().clone(),
+            _ => None,
+        };
+        if let Some(observer) = observer {
+            observer(self, key, &value)?;
+        }
+        Ok(())
+    }
+    fn set_property(&self, key: &[u16], value: Js) -> Result<(), Thrown> {
         if let Js::Builtin(reference) = self {
             let key = String::from_utf16(key).map_err(|_| {
                 Thrown::type_error("lone UTF-16 surrogate at an intrinsic boundary")
@@ -887,35 +1104,19 @@ impl Js {
             )));
         };
         let existing = props.borrow().get(key).cloned();
-        if existing.is_none()
-            && key == utf16("__proto__").as_ref()
-            && let Js::Object(object) = self
-            && matches!(&*object.proto.borrow(), Some(Js::Builtin(reference))
-                if reference.member() == safe_cex_num::BuiltinIdentity::Object(safe_cex_num::ProtoMember::Prototype))
-        {
-            if value.is_object() || matches!(value, Js::Null) {
-                *object.proto.borrow_mut() = if matches!(value, Js::Null) {
-                    None
-                } else {
-                    Some(value)
-                };
-            }
-            return Ok(());
-        }
         // Inherited setters receive the original receiver; inherited read-only data
         // properties refuse an own shadow, as ordinary strict-mode [[Set]] does.
         if existing.is_none() {
-            let mut ancestor = match self {
-                Js::Object(object) => object.proto.borrow().clone(),
-                _ => None,
-            };
+            let mut ancestor = self.prototype();
             while let Some(parent) = ancestor {
                 let inherited = parent
                     .own_props()
                     .and_then(|p| p.borrow().get(key).cloned());
                 match inherited {
-                    Some(Prop::Accessor(_, Some(setter))) => return setter(self, value),
-                    Some(Prop::Accessor(_, None))
+                    Some(Prop::Accessor {
+                        set: Some(setter), ..
+                    }) => return setter.call(self.clone(), vec![value]).map(|_| ()),
+                    Some(Prop::Accessor { set: None, .. })
                     | Some(Prop::DataDescriptor {
                         writable: false, ..
                     }) => {
@@ -924,15 +1125,38 @@ impl Js {
                     Some(_) => break,
                     None => {}
                 }
-                ancestor = match parent {
-                    Js::Object(object) => object.proto.borrow().clone(),
-                    _ => None,
-                };
+                if let Js::Builtin(reference) = &parent {
+                    if String::from_utf16(key)
+                        .is_ok_and(|key| reference.own_fields().contains_key(&key))
+                    {
+                        break;
+                    }
+                    if key == utf16("__proto__").as_ref()
+                        && reference.member()
+                            == safe_cex_num::BuiltinIdentity::Object(
+                                safe_cex_num::ProtoMember::Prototype,
+                            )
+                    {
+                        if !value.is_object() && !matches!(value, Js::Null) {
+                            return Ok(());
+                        }
+                        self.set_prototype(value)?;
+                        return Ok(());
+                    }
+                }
+                ancestor = parent.prototype();
             }
         }
+        if existing.is_none() && !self.is_extensible()? {
+            return Err(Thrown::type_error(
+                "Cannot add a property to a non-extensible object",
+            ));
+        }
         match existing {
-            Some(Prop::Accessor(_, Some(setter))) => setter(self, value),
-            Some(Prop::Accessor(_, None))
+            Some(Prop::Accessor {
+                set: Some(setter), ..
+            }) => setter.call(self.clone(), vec![value]).map(|_| ()),
+            Some(Prop::Accessor { set: None, .. })
             | Some(Prop::DataDescriptor {
                 writable: false, ..
             }) => Err(Thrown::type_error("Cannot assign to read only property")),
@@ -969,26 +1193,148 @@ impl Js {
         if let Some(props) = self.own_props() {
             if matches!(
                 props.borrow().get(key),
-                Some(Prop::DataDescriptor {
-                    configurable: false,
-                    ..
-                })
+                Some(
+                    Prop::DataDescriptor {
+                        configurable: false,
+                        ..
+                    } | Prop::Accessor {
+                        configurable: false,
+                        ..
+                    }
+                )
             ) {
                 return Err(Thrown::type_error("Cannot redefine property"));
+            }
+            if !props.borrow().contains_key(key) && !self.is_extensible()? {
+                return Err(Thrown::type_error(
+                    "Cannot define a property on a non-extensible object",
+                ));
             }
             props.borrow_mut().insert(key.into(), Prop::Data(value));
         }
         Ok(())
     }
-    /// Object.defineProperty's ordinary-object data-descriptor profile.
-    /// Absence differs from an explicit undefined value and flags use ToBoolean.
+    fn extensible_flag(&self) -> Option<&Cell<bool>> {
+        match self {
+            Js::Object(object) => Some(&object.extensible),
+            Js::Function(function) => Some(&function.extensible),
+            _ => None,
+        }
+    }
+    pub(super) fn is_extensible(&self) -> Result<bool, Thrown> {
+        match self.extensible_flag() {
+            Some(flag) => Ok(flag.get()),
+            None if !self.is_object() => Ok(false),
+            None => Err(Thrown::type_error(
+                "Extensibility requires an ordinary object or function",
+            )),
+        }
+    }
+    pub(super) fn prevent_extensions(&self) -> Result<Js, Thrown> {
+        match self.extensible_flag() {
+            Some(flag) => flag.set(false),
+            None if !self.is_object() => return Ok(self.clone()),
+            None => {
+                return Err(Thrown::type_error(
+                    "Extensibility requires an ordinary object or function",
+                ));
+            }
+        }
+        Ok(self.clone())
+    }
+    pub(super) fn freeze(&self) -> Result<Js, Thrown> {
+        self.prevent_extensions()?;
+        if let Some(props) = self.own_props() {
+            for property in props.borrow_mut().values_mut() {
+                match property {
+                    Prop::Data(value) => {
+                        *property = Prop::DataDescriptor {
+                            value: value.clone(),
+                            writable: false,
+                            enumerable: true,
+                            configurable: false,
+                        }
+                    }
+                    Prop::DataDescriptor {
+                        writable,
+                        configurable,
+                        ..
+                    } => {
+                        *writable = false;
+                        *configurable = false;
+                    }
+                    Prop::Accessor { configurable, .. } => *configurable = false,
+                }
+            }
+        }
+        Ok(self.clone())
+    }
+    pub(super) fn is_frozen(&self) -> Result<bool, Thrown> {
+        if !self.is_object() {
+            return Ok(true);
+        }
+        if self.is_extensible()? {
+            return Ok(false);
+        }
+        Ok(self
+            .own_props()
+            .expect("ordinary property storage")
+            .borrow()
+            .values()
+            .all(|property| match property {
+                Prop::Data(_) => false,
+                Prop::DataDescriptor {
+                    writable,
+                    configurable,
+                    ..
+                } => !writable && !configurable,
+                Prop::Accessor { configurable, .. } => !configurable,
+            }))
+    }
+    pub(super) fn own_property_descriptor(&self, key: &[u16]) -> Result<Js, Thrown> {
+        let props = self.own_props().ok_or_else(|| {
+            Thrown::type_error("Descriptor reflection requires an ordinary object or function")
+        })?;
+        Ok(match props.borrow().get(key) {
+            None => Js::Undefined,
+            Some(Prop::Data(value)) => Js::object(vec![
+                ("value", value.clone()),
+                ("writable", Js::Bool(true)),
+                ("enumerable", Js::Bool(true)),
+                ("configurable", Js::Bool(true)),
+            ]),
+            Some(Prop::DataDescriptor {
+                value,
+                writable,
+                enumerable,
+                configurable,
+            }) => Js::object(vec![
+                ("value", value.clone()),
+                ("writable", Js::Bool(*writable)),
+                ("enumerable", Js::Bool(*enumerable)),
+                ("configurable", Js::Bool(*configurable)),
+            ]),
+            Some(Prop::Accessor {
+                get,
+                set,
+                enumerable,
+                configurable,
+            }) => Js::object(vec![
+                ("get", get.clone().unwrap_or(Js::Undefined)),
+                ("set", set.clone().unwrap_or(Js::Undefined)),
+                ("enumerable", Js::Bool(*enumerable)),
+                ("configurable", Js::Bool(*configurable)),
+            ]),
+        })
+    }
+    /// ToPropertyDescriptor observes fields in order and retains accessor identities.
     pub(super) fn define_property(&self, key: &[u16], descriptor: &Js) -> Result<(), Thrown> {
         let props = self.own_props().ok_or_else(|| {
             Thrown::type_error(
                 "Object.defineProperty target must be an ordinary object or function",
             )
         })?;
-        if descriptor.own_props().is_none() {
+        if !descriptor.is_object() {
             return Err(Thrown::type_error("Property description must be an object"));
         }
         let read = |name: &str| -> Result<Option<Js>, Thrown> {
@@ -998,58 +1344,123 @@ impl Js {
                 Ok(None)
             }
         };
-        // ToPropertyDescriptor read order is observable through getters.
-        let enumerable = read("enumerable")?.map(|v| v.truthy());
-        let configurable = read("configurable")?.map(|v| v.truthy());
+        let enumerable = read("enumerable")?.map(|value| value.truthy());
+        let configurable = read("configurable")?.map(|value| value.truthy());
         let value = read("value")?;
-        let writable = read("writable")?.map(|v| v.truthy());
+        let writable = read("writable")?.map(|value| value.truthy());
         let get = read("get")?;
+        if get
+            .as_ref()
+            .is_some_and(|value| !value.is_undefined() && !value.is_callable())
+        {
+            return Err(Thrown::type_error("Getter must be a function"));
+        }
         let set = read("set")?;
-        if get.is_some() || set.is_some() {
+        if set
+            .as_ref()
+            .is_some_and(|value| !value.is_undefined() && !value.is_callable())
+        {
+            return Err(Thrown::type_error("Setter must be a function"));
+        }
+        let accessor = get.is_some() || set.is_some();
+        let data = value.is_some() || writable.is_some();
+        if accessor && data {
             return Err(Thrown::type_error(
-                "Object.defineProperty accessor descriptors are not bound",
+                "Invalid mixed data and accessor descriptor",
             ));
         }
         let existing = props.borrow().get(key).cloned();
-        let (old_value, old_writable, old_enumerable, old_configurable) = match existing {
-            Some(Prop::Data(value)) => (value, true, true, true),
-            Some(Prop::DataDescriptor {
-                value,
-                writable,
-                enumerable,
-                configurable,
-            }) => (value, writable, enumerable, configurable),
-            Some(Prop::Accessor(..)) => {
-                if value.is_none() && writable.is_none() {
-                    if enumerable.is_none() && configurable.is_none() {
-                        return Ok(());
-                    }
-                    return Err(Thrown::type_error("Accessor attributes are not bound"));
+        if existing.is_none() && !self.is_extensible()? {
+            return Err(Thrown::type_error(
+                "Cannot define a property on a non-extensible object",
+            ));
+        }
+        let (old_enumerable, old_configurable) = match &existing {
+            Some(Prop::Data(_)) => (true, true),
+            Some(
+                Prop::DataDescriptor {
+                    enumerable,
+                    configurable,
+                    ..
                 }
-                (Js::Undefined, false, true, true)
-            }
-            None => (Js::Undefined, false, false, false),
+                | Prop::Accessor {
+                    enumerable,
+                    configurable,
+                    ..
+                },
+            ) => (*enumerable, *configurable),
+            None => (false, false),
         };
-        if props.borrow().contains_key(key) && !old_configurable {
-            if configurable == Some(true) || enumerable.is_some_and(|v| v != old_enumerable) {
-                return Err(Thrown::type_error("Cannot redefine property"));
-            }
-            if !old_writable
-                && (writable == Some(true)
-                    || value.as_ref().is_some_and(|v| !same_value(v, &old_value)))
+        let old_accessor = matches!(existing, Some(Prop::Accessor { .. }));
+        if existing.is_some() && !old_configurable {
+            if configurable == Some(true)
+                || enumerable.is_some_and(|value| value != old_enumerable)
+                || (accessor && !old_accessor)
+                || (data && old_accessor)
             {
                 return Err(Thrown::type_error("Cannot redefine property"));
             }
+            match &existing {
+                Some(Prop::DataDescriptor {
+                    value: previous,
+                    writable: false,
+                    ..
+                }) if writable == Some(true)
+                    || value
+                        .as_ref()
+                        .is_some_and(|value| !same_value(value, previous)) =>
+                {
+                    return Err(Thrown::type_error("Cannot redefine property"));
+                }
+                Some(Prop::Accessor {
+                    get: previous_get,
+                    set: previous_set,
+                    ..
+                }) => {
+                    let getter_changed = get.as_ref().is_some_and(|get| {
+                        !same_value(get, previous_get.as_ref().unwrap_or(&Js::Undefined))
+                    });
+                    let setter_changed = set.as_ref().is_some_and(|set| {
+                        !same_value(set, previous_set.as_ref().unwrap_or(&Js::Undefined))
+                    });
+                    if getter_changed || setter_changed {
+                        return Err(Thrown::type_error("Cannot redefine property"));
+                    }
+                }
+                _ => {}
+            }
         }
-        props.borrow_mut().insert(
-            key.into(),
-            Prop::DataDescriptor {
-                value: value.unwrap_or(old_value),
-                writable: writable.unwrap_or(old_writable),
+        let next = if accessor || (old_accessor && !data) {
+            let (previous_get, previous_set) = match existing {
+                Some(Prop::Accessor { get, set, .. }) => (get, set),
+                _ => (None, None),
+            };
+            Prop::Accessor {
+                get: get
+                    .map(|value| (!value.is_undefined()).then_some(value))
+                    .unwrap_or(previous_get),
+                set: set
+                    .map(|value| (!value.is_undefined()).then_some(value))
+                    .unwrap_or(previous_set),
                 enumerable: enumerable.unwrap_or(old_enumerable),
                 configurable: configurable.unwrap_or(old_configurable),
-            },
-        );
+            }
+        } else {
+            let (previous_value, previous_writable) = match existing {
+                Some(Prop::Data(value)) => (value, true),
+                Some(Prop::DataDescriptor {
+                    value, writable, ..
+                }) => (value, writable),
+                _ => (Js::Undefined, false),
+            };
+            Prop::DataDescriptor {
+                value: value.unwrap_or(previous_value),
+                writable: writable.unwrap_or(previous_writable),
+                enumerable: enumerable.unwrap_or(old_enumerable),
+                configurable: configurable.unwrap_or(old_configurable),
+            }
+        };
+        props.borrow_mut().insert(key.into(), next);
         Ok(())
     }
     fn has_property(&self, key: &[u16]) -> bool {
@@ -1060,19 +1471,34 @@ impl Js {
             return true;
         }
         match self {
-            Js::Object(object) => object
-                .proto
-                .borrow()
-                .as_ref()
-                .is_some_and(|p| p.has_property(key)),
-            _ => false,
+            Js::Function(_) if key == utf16("name").as_ref() => true,
+            Js::Builtin(reference) => String::from_utf16(key).is_ok_and(|key| {
+                reference.own_fields().contains_key(&key)
+                    || !matches!(reference.get(&key), safe_cex_num::PrototypeValue::Undefined)
+            }),
+            _ => self
+                .prototype()
+                .is_some_and(|parent| parent.has_property(key)),
         }
     }
     pub fn define_accessor(&self, key: &str, getter: Option<Getter>, setter: Option<Setter>) {
         if let Some(props) = self.own_props() {
-            props
-                .borrow_mut()
-                .insert(utf16(key), Prop::Accessor(getter, setter));
+            let get = getter.map(|get| Js::function("get", move |this, _| get(&this)));
+            let set = setter.map(|set| {
+                Js::function("set", move |this, args| {
+                    set(&this, arg(&args, 0))?;
+                    Ok(Js::Undefined)
+                })
+            });
+            props.borrow_mut().insert(
+                utf16(key),
+                Prop::Accessor {
+                    get,
+                    set,
+                    enumerable: true,
+                    configurable: true,
+                },
+            );
         }
     }
     pub fn delete(&self, key: &[u16]) {
@@ -1088,10 +1514,15 @@ impl Js {
                 if let Some(props) = self.own_props() {
                     if !matches!(
                         props.borrow().get(key),
-                        Some(Prop::DataDescriptor {
-                            configurable: false,
-                            ..
-                        })
+                        Some(
+                            Prop::DataDescriptor {
+                                configurable: false,
+                                ..
+                            } | Prop::Accessor {
+                                configurable: false,
+                                ..
+                            }
+                        )
                     ) {
                         props.borrow_mut().shift_remove(key);
                     }
@@ -1130,6 +1561,9 @@ impl Js {
                             Prop::DataDescriptor {
                                 enumerable: false,
                                 ..
+                            } | Prop::Accessor {
+                                enumerable: false,
+                                ..
                             }
                         )
                     })
@@ -1145,6 +1579,34 @@ impl Js {
                 out
             }
         }
+    }
+    /// Object.getOwnPropertyNames: own string keys, enumerable or not, in
+    /// OrdinaryOwnPropertyKeys order; array and string `length` follows the indices.
+    pub fn own_property_names(&self) -> Result<Vec<Str>, Thrown> {
+        Ok(match self {
+            Js::Array(_) | Js::String(_) => {
+                let mut keys = self.own_keys();
+                keys.push(utf16("length"));
+                keys
+            }
+            Js::Object(o) => {
+                let keys: Vec<Str> = o.props.borrow().keys().cloned().collect();
+                let mut indexed: Vec<(usize, Str)> = keys
+                    .iter()
+                    .filter_map(|k| array_index(k).map(|i| (i, k.clone())))
+                    .collect();
+                indexed.sort_by_key(|(i, _)| *i);
+                let mut out: Vec<Str> = indexed.into_iter().map(|(_, k)| k).collect();
+                out.extend(keys.into_iter().filter(|k| array_index(k).is_none()));
+                out
+            }
+            Js::Function(_) | Js::Builtin(_) => {
+                return Err(Thrown::type_error(
+                    "Object.getOwnPropertyNames does not model function or intrinsic keys",
+                ));
+            }
+            _ => vec![],
+        })
     }
     /// Object spread / Object.assign source read: own enumerable values in key order.
     pub fn own_entries(&self) -> Result<Vec<(Str, Js)>, Thrown> {
@@ -1193,6 +1655,69 @@ impl Js {
     pub fn call(&self, this: Js, args: Vec<Js>) -> Result<Js, Thrown> {
         match self {
             Js::Function(f) => (f.call)(this, args),
+            Js::Builtin(reference) => match reference.member() {
+                safe_cex_num::BuiltinIdentity::FunctionPrototype => Ok(Js::Undefined),
+                safe_cex_num::BuiltinIdentity::FunctionMethod(
+                    safe_cex_num::FunctionMethod::Call,
+                ) => {
+                    if !this.is_callable() {
+                        return Err(Thrown::type_error(
+                            "Function.prototype.call requires a callable receiver",
+                        ));
+                    }
+                    this.call(arg(&args, 0), args.into_iter().skip(1).collect())
+                }
+                safe_cex_num::BuiltinIdentity::FunctionMethod(
+                    safe_cex_num::FunctionMethod::Bind,
+                ) => {
+                    if !this.is_callable() {
+                        return Err(Thrown::type_error("Bind must be called on a function"));
+                    }
+                    let proto = this.prototype();
+                    let bound_this = arg(&args, 0);
+                    let bound_args: Vec<Js> = args.into_iter().skip(1).collect();
+                    let target_name = this.get("name")?;
+                    let mut name: Vec<u16> = "bound ".encode_utf16().collect();
+                    if let Js::String(target_name) = target_name {
+                        name.extend_from_slice(&target_name);
+                    }
+                    let construct = this.is_constructor().then(|| Construct::Bound {
+                        target: this.clone(),
+                        args: bound_args.clone(),
+                    });
+                    let realm = match &this {
+                        Js::Function(function) => function.realm.clone(),
+                        Js::Builtin(reference) => reference.realm().clone(),
+                        _ => unreachable!(),
+                    };
+                    Ok(Js::Function(Rc::new(FunctionData {
+                        extensible: Cell::new(true),
+                        name: name.into(),
+                        call: Rc::new(move |_, args| {
+                            let mut combined = bound_args.clone();
+                            combined.extend(args);
+                            this.call(bound_this.clone(), combined)
+                        }),
+                        props: RefCell::default(),
+                        proto: RefCell::new(proto),
+                        construct,
+                        realm,
+                    })))
+                }
+                safe_cex_num::BuiltinIdentity::FunctionMethod(
+                    safe_cex_num::FunctionMethod::ToString,
+                ) => {
+                    if !this.is_callable() {
+                        return Err(Thrown::type_error(
+                            "Function.prototype.toString requires a callable receiver",
+                        ));
+                    }
+                    this.intrinsic_string().map(Js::String)
+                }
+                _ => Err(Thrown::type_error(
+                    "Intrinsic function execution is not bound",
+                )),
+            },
             other => Err(Thrown::type_error(&format!(
                 "{} is not a function",
                 other.to_display()
@@ -1326,7 +1851,7 @@ pub fn from_typed<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown>
 pub fn to_retained_input(
     value: &Js,
 ) -> Result<safe_cex_types::retained_json::RetainedJsonInput, Thrown> {
-    typed::capture(value, 0, false)
+    typed::capture(value, 0, false, true)
 }
 /// Restore the canonical retained data carrier without a JSON roundtrip.
 pub fn from_retained_input(value: safe_cex_types::retained_json::RetainedJsonInput) -> Js {

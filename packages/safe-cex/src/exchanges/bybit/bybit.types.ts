@@ -60,6 +60,11 @@ const HYROTRADER_SIMULATOR_PUBLIC_WS_URL = normalizeConfiguredOrigin(
 const HYROTRADER_SIMULATOR_PRIVATE_WS_URL = normalizeConfiguredOrigin(
   process.env.NEXT_PUBLIC_HYROTRADER_SIMULATOR_PRIVATE_WS_URL,
 );
+const HYROTRADER_PROD_REST_ORIGIN = normalizeConfiguredOrigin(process.env.NEXT_PUBLIC_HYROTRADER_PROD_REST_URL);
+const HYROTRADER_PROD_PUBLIC_WS_URL = normalizeConfiguredOrigin(process.env.NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL);
+const HYROTRADER_PROD_PRIVATE_WS_URL = normalizeConfiguredOrigin(
+  process.env.NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL,
+);
 
 export const HYROTRADER_SIMULATOR_URL = {
   livenet: HYROTRADER_SIMULATOR_REST_ORIGIN,
@@ -82,6 +87,28 @@ export const HYROTRADER_SIMULATOR_WS_URL = {
   private: {
     livenet: HYROTRADER_SIMULATOR_PRIVATE_WS_URL || restOriginToWsUrl(HYROTRADER_SIMULATOR_REST_ORIGIN, '/v5/private'),
     testnet: HYROTRADER_SIMULATOR_PRIVATE_WS_URL || restOriginToWsUrl(HYROTRADER_SIMULATOR_REST_ORIGIN, '/v5/private'),
+  },
+};
+
+export const HYROTRADER_PROD_URL = {
+  livenet: HYROTRADER_PROD_REST_ORIGIN,
+  testnet: HYROTRADER_PROD_REST_ORIGIN,
+};
+
+export const HYROTRADER_PROD_WS_URL = {
+  public: {
+    linear: {
+      livenet: HYROTRADER_PROD_PUBLIC_WS_URL || restOriginToWsUrl(HYROTRADER_PROD_REST_ORIGIN, '/v5/public/linear'),
+      testnet: HYROTRADER_PROD_PUBLIC_WS_URL || restOriginToWsUrl(HYROTRADER_PROD_REST_ORIGIN, '/v5/public/linear'),
+    },
+    inverse: {
+      livenet: '',
+      testnet: '',
+    },
+  },
+  private: {
+    livenet: HYROTRADER_PROD_PRIVATE_WS_URL || restOriginToWsUrl(HYROTRADER_PROD_REST_ORIGIN, '/v5/private'),
+    testnet: HYROTRADER_PROD_PRIVATE_WS_URL || restOriginToWsUrl(HYROTRADER_PROD_REST_ORIGIN, '/v5/private'),
   },
 };
 

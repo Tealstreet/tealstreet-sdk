@@ -155,6 +155,7 @@ fn private_fill_frame_updates_order_and_emits_original_fill_fields() {
     live.venue.base().on(
         "fill",
         std::rc::Rc::new(move |_, data| {
+            let data = safe_cex_exchange::js_runtime::value::to_json(data).unwrap();
             saved.borrow_mut().push(data.clone());
             Ok(())
         }),
@@ -177,6 +178,63 @@ fn private_fill_frame_updates_order_and_emits_original_fill_fields() {
     );
 }
 #[test]
+fn cumulative_private_fills_emit_execution_prices_and_suppress_terminal_replays() {
+    let live = Live::new();
+    let fills = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let saved = fills.clone();
+    live.venue.base().on(
+        "fill",
+        std::rc::Rc::new(move |_, data| {
+            saved.borrow_mut().push(data.clone());
+            Ok(())
+        }),
+    );
+    for (quantity, average, state) in [
+        ("0.1", "100", "partially_filled"),
+        ("0.6", "101.5", "partially_filled"),
+        ("0.1", "100", "partially_filled"),
+        ("0.9", "102", "partially_filled"),
+        ("1", "102.4", "filled"),
+        ("1", "102.4", "filled"),
+    ] {
+        let mut row = order_row();
+        row["state"] = json!(state);
+        row["filledSize"] = json!(quantity);
+        row["averagePrice"] = json!(average);
+        row["fillTime"] = json!("1710000000000");
+        live.frame("orders", json!([row]));
+    }
+    let fills = fills.borrow();
+    assert_eq!(
+        fills.len(),
+        4,
+        "older and terminal replay frames emit nothing"
+    );
+    for (fill, (price, amount)) in fills.iter().zip([
+        (100.0_f64, 0.0001_f64),
+        (101.8, 0.0005),
+        (103.0, 0.0003),
+        (106.0, 0.0001),
+    ]) {
+        assert_eq!(
+            fill.get("price").unwrap().as_f64().unwrap().to_bits(),
+            price.to_bits(),
+            "per-execution price"
+        );
+        assert_eq!(
+            fill.get("amount").unwrap().as_f64().unwrap().to_bits(),
+            amount.to_bits(),
+            "base execution quantity without subtraction noise"
+        );
+        assert_eq!(
+            fill.get("orderId").unwrap().as_str().unwrap().as_ref(),
+            &"o1".encode_utf16().collect::<Vec<_>>()
+        );
+        assert_eq!(fill.get("timestamp").unwrap().as_f64(), Some(1710000000.0));
+    }
+}
+
+#[test]
 fn private_positions_frame_updates_positions_and_balance() {
     let live = Live::new();
     live.frame("positions", json!([{"positionId":"p1","instId":"BTC-USDT","instType":"SWAP","marginMode":"cross","positionSide":"net","positions":"2","availablePositions":"2","averagePrice":"100","markPrice":"102","liquidationPrice":"50","unrealizedPnl":"1.23","maintenanceMargin":"0.01","leverage":"10"}]));
@@ -197,5 +255,51 @@ fn private_account_frame_updates_balance() {
     assert_eq!(
         (b.total, b.free, b.used, b.upnl),
         (123.45, 123.45, 0.0, 0.0)
+    );
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("blofin");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 64);
+    let live = Live::new();
+    let index = live
+        .rt
+        .dials
+        .borrow()
+        .iter()
+        .position(|url| url.contains("/public"))
+        .expect("production public socket");
+    let socket = live.rt.opened.borrow()[index].clone();
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            live.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("blofin")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            live.rt.pump();
+        }
+        ticker_coercion::assert_native(&live.store.tickers(), case);
+    }
+    assert!(
+        live.rt.errors.borrow().is_empty(),
+        "{:?}",
+        live.rt.errors.borrow()
     );
 }

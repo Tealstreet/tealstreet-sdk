@@ -1,7 +1,5 @@
 // Included as a child of the production binding to observe the installed receiver.
-#[allow(dead_code)]
-#[path = "binding_harness.rs"]
-mod harness;
+use super::binding_harness as harness;
 use harness::*;
 use safe_cex_exchange::js_runtime::value::{Js, Thrown, from_json};
 use safe_cex_store::{Store, StoreUpdate};
@@ -156,7 +154,8 @@ fn actual_history_read_reports_the_callback_error_and_returns_no_rows() {
     h.venue().base().on(
         "error",
         Rc::new(move |_, data| {
-            sink.borrow_mut().push(data.as_str().unwrap().to_owned());
+            sink.borrow_mut()
+                .push(String::from_utf16(data.as_str().unwrap().as_ref()).unwrap());
             Ok(())
         }),
     );

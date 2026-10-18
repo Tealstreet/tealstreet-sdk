@@ -67,7 +67,7 @@ fn err(e: Thrown) -> ExchangeError {
 /// The `BaseExchange` binding the class extends: the shared JS base over the
 /// Rust core, whose handle is kept for `Exchange::base()`.
 fn base_exchange_class(weak: Weak<Shared>, name: ExchangeName, options: ExchangeOptions) -> Js {
-    let class = Js::constructor("BaseExchange", move |_, a| {
+    let class = Js::constructor("BaseExchange", None, move |_, a| {
         let shared = weak
             .upgrade()
             .ok_or_else(|| Thrown::error("Error", "Lighter scope was dropped"))?;
@@ -165,13 +165,13 @@ impl LighterNativeExchange {
         let dyn_venue: Rc<dyn Exchange> = venue.clone();
         *shared.sockets.venue.borrow_mut() = Some(Rc::downgrade(&dyn_venue));
         let this = to_js(&class)
-            .call(
-                Js::Undefined,
+            .construct(
                 vec![
                     from_typed(&name).map_err(err)?,
                     from_typed(&options).map_err(err)?,
                     store::facade(store),
                 ],
+                None,
             )
             .map_err(err)?;
         *shared.exchange.borrow_mut() = this.clone();
@@ -453,7 +453,7 @@ mod tests {
         fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
             panic!("runtime used while installing globals")
         }
-        fn console(&self, _: &str, _: &str) {}
+        fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
         fn unique_id(&self) -> String {
             panic!("runtime used while installing globals")
         }
@@ -464,7 +464,12 @@ mod tests {
             panic!("runtime used while installing globals")
         }
         fn report_exception(&self, _: &ExchangeError, _: &serde_json::Value) {}
-        fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {}
+        fn report_raw_exception(
+            &self,
+            _: &safe_cex_exchange::js_runtime::value::Js,
+            _: &serde_json::Value,
+        ) {
+        }
         fn execute_worker_request(
             &self,
             _: serde_json::Value,

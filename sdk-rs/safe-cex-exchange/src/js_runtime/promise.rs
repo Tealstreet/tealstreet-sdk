@@ -1,10 +1,13 @@
 //! Native promise: an async body starts eagerly to its first suspension and the
 //! runtime owns the rest, independently of whoever later awaits the handle.
-use super::value::{Js, Thrown};
-use crate::runtime::{ExchangeRuntime, ExchangeTask};
+use super::{
+    jobs::{self, Jobs},
+    value::{Js, Thrown, arg},
+};
+use crate::runtime::ExchangeRuntime;
 use std::{
-    cell::RefCell,
-    future::{Future, poll_fn},
+    cell::{Cell, RefCell},
+    future::Future,
     pin::Pin,
     rc::Rc,
     task::{Context, Poll, Waker},
@@ -14,10 +17,11 @@ pub type JsFuture<'a> = Pin<Box<dyn Future<Output = Result<Js, Thrown>> + 'a>>;
 
 struct State {
     result: Option<Result<Js, Thrown>>,
+    handled: bool,
     /// One entry per pending `PromiseWait`, removed by that wait's Drop.
     waiters: Vec<(u64, Waker)>,
     next_waiter: u64,
-    task: Option<Box<dyn ExchangeTask>>,
+    jobs: Rc<Jobs>,
     runtime: Rc<dyn ExchangeRuntime>,
 }
 
@@ -30,15 +34,24 @@ impl Promise {
     }
     pub fn settled(runtime: &Rc<dyn ExchangeRuntime>, result: Result<Js, Thrown>) -> Self {
         let promise = Self::pending(runtime);
-        promise.0.borrow_mut().result = Some(result);
+        promise.settle(result);
+        promise
+    }
+    pub(super) fn resolve(runtime: &Rc<dyn ExchangeRuntime>, value: Js) -> Self {
+        if let Js::Promise(promise) = value {
+            return promise;
+        }
+        let promise = Self::pending(runtime);
+        resolve_promise(promise.clone(), value);
         promise
     }
     pub fn pending(runtime: &Rc<dyn ExchangeRuntime>) -> Self {
         Self(Rc::new(RefCell::new(State {
             result: None,
+            handled: false,
             waiters: vec![],
             next_waiter: 0,
-            task: None,
+            jobs: jobs::for_runtime(runtime),
             runtime: runtime.clone(),
         })))
     }
@@ -47,17 +60,44 @@ impl Promise {
     }
     /// Settle once; later settlements are ignored like a resolved promise's.
     pub fn settle(&self, result: Result<Js, Thrown>) {
-        let (waiters, task) = {
+        let (waiters, jobs, rejected) = {
             let mut state = self.0.borrow_mut();
             if state.result.is_some() {
                 return;
             }
+            let rejected = result.is_err();
             state.result = Some(result);
-            (std::mem::take(&mut state.waiters), state.task.take())
+            (
+                std::mem::take(&mut state.waiters),
+                state.jobs.clone(),
+                rejected,
+            )
         };
-        drop(task);
         for (_, waiter) in waiters {
             waiter.wake();
+        }
+        if rejected {
+            let owner = self.0.clone();
+            jobs.after_checkpoint(Box::new(move || {
+                let report = {
+                    let state = owner.borrow();
+                    if state.handled {
+                        None
+                    } else {
+                        state
+                            .result
+                            .as_ref()
+                            .and_then(|result| result.as_ref().err())
+                            .map(|error| (state.runtime.clone(), error.clone()))
+                    }
+                };
+                if let Some((runtime, error)) = report {
+                    runtime.report_exception(
+                        &error.to_exchange_error(),
+                        &serde_json::json!({"source":"unhandledRejection"}),
+                    );
+                }
+            }));
         }
     }
     pub fn result(&self) -> Option<Result<Js, Thrown>> {
@@ -67,25 +107,24 @@ impl Promise {
     /// A fulfilled promise value is adopted, as an async function's return is.
     pub fn spawn(runtime: &Rc<dyn ExchangeRuntime>, body: JsFuture<'static>) -> Self {
         let promise = Promise::pending(runtime);
-        let mut body: JsFuture<'static> = Box::pin(adopt(body));
-        if let Poll::Ready(result) = body.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
-            promise.settle(result);
-            return promise;
-        }
         let driver = promise.clone();
-        let task = runtime.spawn_local(Box::pin(async move {
-            let result = body.await;
-            driver.settle(result);
+        let jobs = promise.0.borrow().jobs.clone();
+        jobs.start(Box::pin(async move {
+            driver.settle(adopt(body).await);
         }));
-        if promise.0.borrow().result.is_none() {
-            promise.0.borrow_mut().task = Some(task);
-        }
         promise
     }
     pub fn wait(&self) -> PromiseWait {
+        let mut wait = self.reaction();
+        wait.defer_settled = true;
+        wait
+    }
+    pub(super) fn reaction(&self) -> PromiseWait {
+        self.0.borrow_mut().handled = true;
         PromiseWait {
             state: self.0.clone(),
             registration: None,
+            defer_settled: false,
         }
     }
 }
@@ -95,15 +134,25 @@ impl Promise {
 pub struct PromiseWait {
     state: Rc<RefCell<State>>,
     registration: Option<u64>,
+    defer_settled: bool,
 }
 impl Future for PromiseWait {
     type Output = Result<Js, Thrown>;
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let registration = self.registration;
-        let mut state = self.state.borrow_mut();
+        let owner = self.state.clone();
+        let mut state = owner.borrow_mut();
         if let Some(result) = &state.result {
+            if self.defer_settled {
+                let jobs = state.jobs.clone();
+                drop(state);
+                self.defer_settled = false;
+                jobs.wake(cx.waker().clone());
+                return Poll::Pending;
+            }
             return Poll::Ready(result.clone());
         }
+        self.defer_settled = false;
         let replaced = match registration
             .and_then(|id| state.waiters.iter_mut().find(|(entry, _)| *entry == id))
         {
@@ -138,10 +187,77 @@ impl Drop for PromiseWait {
     }
 }
 
+// CreateResolvingFunctions shares one lock for resolve/reject, including while
+// resolving to a still-pending promise or thenable.
+pub(super) fn resolving_functions(promise: Promise) -> (Js, Js, Rc<Cell<bool>>) {
+    let called = Rc::new(Cell::new(false));
+    let resolved = called.clone();
+    let rejected = called.clone();
+    let target = promise.clone();
+    let resolve = Js::function("", move |_, args| {
+        if !resolved.replace(true) {
+            resolve_promise(target.clone(), arg(&args, 0));
+        }
+        Ok(Js::Undefined)
+    });
+    let reject = Js::function("", move |_, args| {
+        if !rejected.replace(true) {
+            promise.settle(Err(Thrown::new(arg(&args, 0))));
+        }
+        Ok(Js::Undefined)
+    });
+    (resolve, reject, called)
+}
+fn resolve_promise(promise: Promise, value: Js) {
+    if let Js::Promise(other) = &value {
+        if promise.ptr_eq(other) {
+            promise.settle(Err(Thrown::type_error(
+                "Chaining cycle detected for promise",
+            )));
+            return;
+        }
+    }
+    if !matches!(
+        &value,
+        Js::Array(_)
+            | Js::Object(_)
+            | Js::Function(_)
+            | Js::Promise(_)
+            | Js::Map(_)
+            | Js::Set(_)
+            | Js::Builtin(_)
+    ) {
+        promise.settle(Ok(value));
+        return;
+    }
+    // Get then synchronously, but invoke it as a promise job after this stack.
+    let then = match value.get("then") {
+        Ok(then) if then.is_callable() => then,
+        Ok(_) => {
+            promise.settle(Ok(value));
+            return;
+        }
+        Err(error) => {
+            promise.settle(Err(error));
+            return;
+        }
+    };
+    let runtime = promise.runtime();
+    super::jobs::for_runtime(&runtime).spawn(Box::pin(async move {
+        let (resolve, reject, called) = resolving_functions(promise.clone());
+        if let Err(error) = then.call(value, vec![resolve, reject]) {
+            if !called.replace(true) {
+                promise.settle(Err(error));
+            }
+        }
+    }));
+}
+
 async fn adopt(body: JsFuture<'static>) -> Result<Js, Thrown> {
     let mut value = body.await?;
     while let Js::Promise(inner) = &value {
         let inner = inner.clone();
+        jobs::yield_current().await;
         value = inner.wait().await?;
     }
     Ok(value)
@@ -149,6 +265,9 @@ async fn adopt(body: JsFuture<'static>) -> Result<Js, Thrown> {
 
 /// `await value`: promises are awaited, any other value resolves to itself.
 pub async fn await_js(value: Js) -> Result<Js, Thrown> {
+    if !matches!(value, Js::Promise(_)) {
+        jobs::yield_current().await;
+    }
     let mut value = value;
     while let Js::Promise(promise) = &value {
         let promise = promise.clone();
@@ -157,59 +276,62 @@ pub async fn await_js(value: Js) -> Result<Js, Thrown> {
     Ok(value)
 }
 
-/// Promise.all over already-started promises: fulfillment order, first rejection.
-pub async fn all(values: Vec<Js>) -> Result<Js, Thrown> {
-    let mut out = Vec::with_capacity(values.len());
-    let promises: Vec<Js> = values;
-    // A later rejection that settles first must win, so poll every promise each turn.
-    let mut results: Vec<Option<Js>> = vec![None; promises.len()];
-    // Each pending promise keeps one wait registered across turns.
-    let mut waits: Vec<Option<PromiseWait>> = promises.iter().map(|_| None).collect();
-    poll_fn(|cx| {
-        let mut pending = false;
-        for (i, value) in promises.iter().enumerate() {
-            if results[i].is_some() {
-                continue;
-            }
-            match value {
-                Js::Promise(p) => match p.result() {
-                    Some(Ok(v)) => results[i] = Some(v),
-                    Some(Err(e)) => return Poll::Ready(Err(e)),
-                    None => {
-                        let wait = waits[i].get_or_insert_with(|| p.wait());
-                        let _ = Pin::new(wait).poll(cx);
-                        pending = true;
-                    }
-                },
-                other => results[i] = Some(other.clone()),
-            }
-        }
-        if pending {
-            Poll::Pending
-        } else {
-            Poll::Ready(Ok(()))
-        }
-    })
-    .await?;
-    for value in results {
-        let mut value = value.unwrap_or(Js::Undefined);
-        while let Js::Promise(p) = &value {
-            let p = p.clone();
-            value = p.wait().await?;
-        }
-        out.push(value);
-    }
-    Ok(Js::array(out))
+/// Promise.all registers every element's resolution reaction synchronously.
+pub fn all(runtime: &Rc<dyn ExchangeRuntime>, values: Vec<Js>) -> Promise {
+    combine(runtime, values, false)
 }
 
-/// Promise.allSettled result records.
-pub async fn all_settled(values: Vec<Js>) -> Result<Js, Thrown> {
-    let mut out = Vec::with_capacity(values.len());
-    for value in values {
-        out.push(match await_js(value).await {
-            Ok(v) => Js::object(vec![("status", Js::str("fulfilled")), ("value", v)]),
-            Err(e) => Js::object(vec![("status", Js::str("rejected")), ("reason", e.value)]),
-        });
+/// Promise.allSettled keeps fulfillment order and original rejection values.
+pub fn all_settled(runtime: &Rc<dyn ExchangeRuntime>, values: Vec<Js>) -> Promise {
+    combine(runtime, values, true)
+}
+
+fn combine(runtime: &Rc<dyn ExchangeRuntime>, values: Vec<Js>, settled: bool) -> Promise {
+    let result = Promise::pending(runtime);
+    if values.is_empty() {
+        result.settle(Ok(Js::array(vec![])));
+        return result;
     }
-    Ok(Js::array(out))
+    let remaining = Rc::new(std::cell::Cell::new(values.len()));
+    let output = Rc::new(RefCell::new(vec![None; values.len()]));
+    for (index, value) in values.into_iter().enumerate() {
+        let input = match value {
+            Js::Promise(promise) => promise,
+            other => Promise::settled(runtime, Ok(other)),
+        };
+        let result = result.clone();
+        let remaining = remaining.clone();
+        let output = output.clone();
+        Promise::spawn(
+            runtime,
+            Box::pin(async move {
+                let value = match input.wait().await {
+                    Ok(value) if settled => {
+                        Js::object(vec![("status", Js::str("fulfilled")), ("value", value)])
+                    }
+                    Ok(value) => value,
+                    Err(error) if settled => Js::object(vec![
+                        ("status", Js::str("rejected")),
+                        ("reason", error.value),
+                    ]),
+                    Err(error) => {
+                        result.settle(Err(error));
+                        return Ok(Js::Undefined);
+                    }
+                };
+                output.borrow_mut()[index] = Some(value);
+                remaining.set(remaining.get() - 1);
+                if remaining.get() == 0 {
+                    let values = output
+                        .borrow()
+                        .iter()
+                        .map(|value| value.clone().expect("every fulfilled combinator slot"))
+                        .collect();
+                    result.settle(Ok(Js::array(values)));
+                }
+                Ok(Js::Undefined)
+            }),
+        );
+    }
+    result
 }

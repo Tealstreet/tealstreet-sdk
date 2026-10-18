@@ -7,7 +7,11 @@ pub fn source(venue: &str) -> Value {
         .args([
             "--import",
             "tsx",
-            "sdk-rs/parity/scripts/ticker-native-source.cjs",
+            if ["asterdex", "orderly", "woo"].contains(&venue) {
+                "sdk-rs/parity/scripts/ticker-strict-source.cjs"
+            } else {
+                "sdk-rs/parity/scripts/ticker-native-source.cjs"
+            },
             venue,
         ])
         .output()
@@ -25,15 +29,37 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
         .into_iter()
         .map(|asset| {
             let (id, symbol) = match venue {
+                "asterdex" | "woo" => (format!("{asset}USDT"), format!("{asset}USDT")),
+                "orderly" => (format!("PERP_{asset}_USDC"), format!("{asset}USDC")),
+                "bingx" => (format!("{asset}-USDT"), format!("{asset}USDT")),
+                "bitget" => (format!("{asset}-bitget-market"), format!("{asset}USDT")),
+                "grvt" => (format!("{asset}_USDT_Perp"), format!("{asset}_USDT_PERP")),
+                "kraken" => (
+                    format!("{asset}/USD"),
+                    format!("PF_{}USD", if asset == "BTC" { "XBT" } else { asset }),
+                ),
+                "krakenspot" => (format!("{asset}-spot-pair"), format!("{asset}/USD")),
+                "mexc" => (format!("{asset}_USDT"), format!("{asset}USDT")),
+                "okx" => (format!("{asset}-USDT-SWAP"), format!("{asset}USDT")),
+                "backpack" => (format!("{asset}_USDC_PERP"), format!("{asset}_USDC_PERP")),
+                "paradex" => (format!("{asset}-USD-PERP"), format!("{asset}-USD-PERP")),
+                "polymarket" => (format!("{asset}-token"), format!("{asset}-Yes")),
                 "bitunix" => (format!("{asset}/USDT"), format!("{asset}USDT")),
                 "bitrue" => (format!("E-{asset}-USDT"), format!("E-{asset}-USDT")),
                 "apexomni" => (format!("{asset}-USDC"), format!("{asset}USDC")),
-                "weex" | "phemex" => (format!("{asset}USDT"), format!("{asset}USDT")),
+                "weex" | "phemex" | "binance" | "binancepm" | "binancespot" | "bybit"
+                | "bybitdemo" | "bybitspot" | "hyrotrader" => {
+                    (format!("{asset}USDT"), format!("{asset}USDT"))
+                }
                 "kucoin" => (
                     format!("{}USDTM", if asset == "BTC" { "XBT" } else { asset }),
                     format!("{asset}USDT"),
                 ),
                 "kucoinspot" => (format!("{asset}-USDT"), format!("{asset}-USDT")),
+                "bybitinverse" => (format!("{asset}USD"), format!("{asset}USD")),
+                "blofin" => (format!("{asset}-USDT"), format!("{asset}USDT")),
+                "cryptocom" => (format!("{asset}USD-PERP"), format!("{asset}USD-PERP")),
+                "coinbase" => (format!("{asset}-USDC"), format!("{asset}-USDC")),
                 "hyperliquid" => (asset.to_string(), format!("{asset}/USDC")),
                 "hyperliquidspot" => (
                     format!(
@@ -67,6 +93,53 @@ pub fn seed(venue: &str) -> Vec<Ticker> {
             ticker
         })
         .collect()
+}
+
+#[allow(dead_code)] // Only strict-field corpora observe refusals.
+pub fn assert_refusals(reports: &str, case: &Value) {
+    let refusals = case["refusals"].as_array().unwrap();
+    if refusals.is_empty() {
+        assert!(
+            reports.is_empty(),
+            "native ticker unexpected reports {case}: {reports}"
+        );
+    } else {
+        for refusal in refusals {
+            let symbol = refusal["symbol"].as_str().unwrap();
+            let field = refusal["field"].as_str().unwrap();
+            let value = refusal["value"].as_str().unwrap();
+            let expected = match case["venue"].as_str().unwrap() {
+                "woo" => format!(
+                    "Refused WOO ticker row symbol={symbol:?}: {field}={value}: expected number"
+                ),
+                "asterdex" => format!(
+                    "AsterDEX ticker {symbol} typed field {field} requires a number; received {value}"
+                ),
+                "orderly" => format!(
+                    "Orderly ticker {symbol} typed field {field} requires a number; received {value}"
+                ),
+                venue => panic!("unsupported strict ticker venue {venue}"),
+            };
+            assert!(
+                reports.lines().any(|row| row.ends_with(&expected)),
+                "native ticker missing refusal tuple {expected}: {reports}"
+            );
+        }
+    }
+}
+
+#[allow(dead_code)] // Only strict-field corpora have a refusal floor.
+pub fn assert_case_counts(cases: &[Value], frames: usize, refusals: usize) {
+    for (key, expected) in [("frames", frames), ("refusals", refusals)] {
+        assert_eq!(
+            cases
+                .iter()
+                .map(|case| case[key].as_array().unwrap().len())
+                .sum::<usize>(),
+            expected,
+            "native ticker corpus {key} floor"
+        );
+    }
 }
 
 pub fn assert_native(tickers: &[Ticker], case: &Value) {

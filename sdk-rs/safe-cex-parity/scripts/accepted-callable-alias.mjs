@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { identityAliasProbe } from './accepted-identity-alias.mjs';
 import { reviewedGenericAliasProbe } from './accepted-reviewed-aliases.mjs';
 import { reviewedFunctionPointerAliasProbe } from './accepted-function-pointer-alias.mjs';
+import { reviewedNapiAliasProbe } from './accepted-napi-alias.mjs';
 import { weexKlineTupleProbe } from './accepted-weex-kline-alias.mjs';
 import { localFutureAliasProbe } from './accepted-future-alias.mjs';
 import { loaderFutureAliasProbe } from './accepted-loader-future.mjs';
@@ -21,17 +22,19 @@ function callableRoot(type) {
   if (!signature || !Array.isArray(signature.inputs) || !signature.output) return undefined;
   return root;
 }
-function boundedAst(node, parameter) {
+function boundedAst(node, parameters) {
   if (node === null || typeof node !== 'object') return;
-  if (Array.isArray(node)) { for (const value of node) boundedAst(value, parameter); return; }
+  if (Array.isArray(node)) { for (const value of node) boundedAst(value, parameters); return; }
   // This initial family does not prove binder substitution or borrowed types.
-  if (Object.hasOwn(node, 'generic')) assert.equal(node.generic, parameter, `${PREFIX}: unrelated generic`);
+  if (Object.hasOwn(node, 'generic')) assert.ok(parameters.includes(node.generic), `${PREFIX}: unrelated generic`);
   if (node.dyn_trait) assert.equal(node.dyn_trait.traits?.length, 1, `${PREFIX}: multiple dyn bounds unsupported`);
   if (Object.hasOwn(node, 'generic_params')) assert.deepEqual(node.generic_params, [], `${PREFIX}: higher-ranked parameters unsupported`);
   if (Object.hasOwn(node, 'lifetime')) assert.equal(node.lifetime, null, `${PREFIX}: explicit lifetimes unsupported`);
-  for (const value of Object.values(node)) boundedAst(value, parameter);
+  for (const value of Object.values(node)) boundedAst(value, parameters);
 }
 export function genericAliasProbe(alias, contract, context) {
+  const napi = reviewedNapiAliasProbe(alias, contract, context);
+  if (napi) return napi;
   const hosted = hostedSignerTupleProbe(alias, contract, context);
   if (hosted) return hosted;
   const weex = weexKlineTupleProbe(alias, contract, context);
@@ -59,20 +62,20 @@ export function genericAliasProbe(alias, contract, context) {
   }
   const label = `${alias.name}: ${PREFIX}`;
   const parameters = alias.generics.params;
-  assert.equal(parameters.length, 1, `${label}: exactly one unbounded type parameter required`);
-  const parameter = parameters[0];
-  assert.ok(parameter.name && !parameter.name.startsWith("'"), `${label}: named type parameter required`);
-  assert.deepEqual(alias.generics, { params: [{ name: parameter.name, kind: { type: { bounds: [], default: null, is_synthetic: false } } }], where_predicates: [] }, `${label}: bounds/defaults/lifetimes/const/where clauses unsupported`);
-  boundedAst(alias.rawTarget, parameter.name);
-  boundedAst(alias.target, parameter.name);
+  assert.ok(parameters.length === 1 || parameters.length === 2, `${label}: one or two unbounded type parameters required`);
+  const names = parameters.map(parameter => parameter.name);
+  assert.ok(names.every(name => name && !name.startsWith("'")) && new Set(names).size === names.length, `${label}: distinct named type parameters required`);
+  assert.deepEqual(alias.generics, { params: names.map(name => ({ name, kind: { type: { bounds: [], default: null, is_synthetic: false } } })), where_predicates: [] }, `${label}: bounds/defaults/lifetimes/const/where clauses unsupported`);
+  boundedAst(alias.rawTarget, names);
+  boundedAst(alias.target, names);
   assert.equal(contract?.category, 'non-decoder', `${label}: only explicit non-decoder classification supported`);
   assert.ok(contract.evidence?.trim() && contract.reason?.trim(), `${label}: bounded classification evidence required`);
   assert.equal(contract.instantiation, undefined, `${label}: caller cannot redirect the production alias`);
   assert.deepEqual(contract.generics, alias.generics, `${label}: compiler generics changed`);
   assert.deepEqual(contract.rawTarget, alias.rawTarget, `${label}: compiler source target changed`);
   assert.deepEqual(contract.target, alias.target, `${label}: compiler expanded target changed`);
-  const probe = { suffix: '<::serde_json::Value>', canonical: 'alloc::rc::Rc', callable: true,
-    monomorphization: 'one fixed serde_json::Value actual callable-alias probe; no claim for every I' };
+  const probe = { suffix: `<${names.map(() => '::serde_json::Value').join(',')}>`, canonical: 'alloc::rc::Rc', callable: true,
+    monomorphization: `one fixed ${names.map(() => 'serde_json::Value').join('/')} actual callable-alias probe; no claim for every I` };
   assert.ok(context && Array.isArray(context.macroOrigins) && Array.isArray(context.externalTypeAliases), `${label}: actual compiler origin context required`);
   requireCallableCompilerIdentity(alias, probe, context.externalTypeAliases, context.macroOrigins);
   return probe;

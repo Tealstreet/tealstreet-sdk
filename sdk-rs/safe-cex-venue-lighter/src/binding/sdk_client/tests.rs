@@ -43,7 +43,7 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push(future);
         Box::new(Task)
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
     fn unique_id(&self) -> String {
         "id".into()
     }
@@ -54,7 +54,7 @@ impl ExchangeRuntime for Runtime {
         0.5
     }
     fn report_exception(&self, _: &ExchangeError, _: &Value) {}
-    fn report_raw_exception(&self, _: &Value, _: &Value) {}
+    fn report_raw_exception(&self, _: &safe_cex_exchange::js_runtime::value::Js, _: &Value) {}
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
     }
@@ -387,7 +387,7 @@ fn order_api_order_book_orders_merges_params_and_normalizes() {
         .realm
         .global("OrderApi")
         .unwrap()
-        .call(Js::Undefined, vec![w.client.clone()])
+        .construct(vec![w.client.clone()], None)
         .unwrap();
     assert!(api.get("client").unwrap().same_reference(&w.client));
     w.reply(json!({ "code": 200, "bids": [{ "price": "1" }], "timestamp": 77 }));
@@ -427,7 +427,7 @@ fn candlestick_api_retains_its_client() {
         .realm
         .global("CandlestickApi")
         .unwrap()
-        .call(Js::Undefined, vec![w.client.clone()])
+        .construct(vec![w.client.clone()], None)
         .unwrap();
     assert!(api.get("client").unwrap().same_reference(&w.client));
     assert!(api.get("getCandlesticks").unwrap().is_callable());
@@ -493,7 +493,7 @@ fn construct(w: &World, class: &str) -> Js {
     w.realm
         .global(class)
         .unwrap()
-        .call(Js::Undefined, vec![w.client.clone()])
+        .construct(vec![w.client.clone()], None)
         .unwrap()
 }
 
@@ -607,7 +607,7 @@ fn candlestick_api_reads_and_lighter_api_error() {
         "GET_FUNDINGS_FAILED"
     );
     let class = w.realm.global("LighterApiError").unwrap();
-    let error = class.call(Js::Undefined, vec![Js::str("m")]).unwrap();
+    let error = class.construct(vec![Js::str("m")], None).unwrap();
     assert_eq!(error.get("code").unwrap().to_display(), "UNKNOWN_ERROR");
     assert!(error.get("details").unwrap().is_undefined());
 }
@@ -691,11 +691,11 @@ fn transaction_client_retains_native_flags_while_signing_their_truthiness() {
         .unwrap()
         .call(Js::Undefined, vec![])
         .unwrap();
-    let client=w.realm.global("TransactionClient").unwrap().call(Js::Undefined,vec![Js::object(vec![
+    let client=w.realm.global("TransactionClient").unwrap().construct(vec![Js::object(vec![
         ("chainId",Js::Number(304.)),("accountIndex",big(42)),("apiKeyIndex",Js::Number(3.)),
         ("privateKey",Js::str("01000000000000000000000000000000000000000000000000000000000000000000000000000000")),
         ("httpClient",w.client.clone()),("crypto",crypto),
-    ])]).unwrap();
+    ])], None).unwrap();
     w.reply(json!({"code":200,"nonce":7}));
     let mut singles = vec![];
     for case in source["singles"].as_array().unwrap() {
@@ -1000,11 +1000,11 @@ fn transaction_client_preserves_source_nullish_and_unknown_enum_defaults() {
         .unwrap()
         .call(Js::Undefined, vec![])
         .unwrap();
-    let client = w.realm.global("TransactionClient").unwrap().call(Js::Undefined,vec![Js::object(vec![
+    let client = w.realm.global("TransactionClient").unwrap().construct(vec![Js::object(vec![
         ("chainId",Js::Number(304.)),("accountIndex",big(42)),("apiKeyIndex",Js::Number(3.)),
         ("privateKey",Js::str("01000000000000000000000000000000000000000000000000000000000000000000000000000000")),
         ("httpClient",w.client.clone()),("crypto",crypto),
-    ])]).unwrap();
+    ])], None).unwrap();
     w.reply(json!({"code":200,"nonce":7}));
     let mut actual = vec![];
     for case in cases {
@@ -1103,11 +1103,11 @@ fn transaction_client_preserves_raw_l1_signature_metadata_and_wire_truthiness() 
         .unwrap()
         .call(Js::Undefined, vec![])
         .unwrap();
-    let client=w.realm.global("TransactionClient").unwrap().call(Js::Undefined,vec![Js::object(vec![
+    let client=w.realm.global("TransactionClient").unwrap().construct(vec![Js::object(vec![
         ("chainId",Js::Number(304.)),("accountIndex",big(42)),("apiKeyIndex",Js::Number(3.)),
         ("privateKey",Js::str("01000000000000000000000000000000000000000000000000000000000000000000000000000000")),
         ("httpClient",w.client.clone()),("crypto",crypto),
-    ])]).unwrap();
+    ])], None).unwrap();
     w.reply(json!({"code":200,"nonce":7}));
 
     let mut results = vec![];

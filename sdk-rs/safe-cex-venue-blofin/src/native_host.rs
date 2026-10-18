@@ -21,7 +21,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
-    RestAdapter, RestExecution, RestFuture, RestRequest, RestResponse, RoutingOptions,
+    RestAdapter, RestExecution, RestFailure, RestFuture, RestRequest, RestResponse, RoutingOptions,
     TransportError, TransportFuture, rate_limit::RateLimitClock, secondary::SecondaryKeyClients,
     socket::SocketFrame,
 };
@@ -239,7 +239,10 @@ impl BlofinExchangeHost for NativeHost {
                 None,
             )
             .map_err(transport_error)?;
-        Ok(Rc::new(SecondaryRouter(clients)))
+        Ok(Rc::new(StartedRequests {
+            base: base.clone(),
+            client: Rc::new(SecondaryRouter(clients)),
+        }))
     }
     fn assign_xhr(&self, _: &NativeBase, _: Rc<dyn RestAdapter>) -> Result<(), ExchangeError> {
         Ok(())
@@ -335,7 +338,7 @@ impl BlofinExchangeHost for NativeHost {
         message: Option<&Value>,
     ) -> Result<(), ExchangeError> {
         let input = message.map_or(ExchangeErrorInput::Missing, |v| {
-            ExchangeErrorInput::Raw(v.clone())
+            ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(v))
         });
         base.get().emit_and_log_error(input, None, None)
     }
@@ -513,6 +516,32 @@ impl crate::api::ApiRuntime for ApiClock {
     }
 }
 
+struct StartedRequests {
+    base: Rc<BaseExchange>,
+    client: Rc<dyn RestAdapter>,
+}
+impl RestAdapter for StartedRequests {
+    fn query_in_url(&self) -> bool {
+        self.client.query_in_url()
+    }
+    fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+        let pending = self.execute_with_receipt(request);
+        Box::pin(async move { pending.await.map(|receipt| receipt.response) })
+    }
+    fn execute_with_receipt(&self, request: RestRequest) -> RestFuture<'_, RestExecution> {
+        let client = self.client.clone();
+        let cancelled = request.clone();
+        let pending = self.base.start_shared_operation(move |_| async move {
+            Ok(client.execute_with_receipt(request).await)
+        });
+        Box::pin(async move {
+            pending
+                .wait()
+                .await
+                .map_err(|error| RestFailure::pre_transmit(error.message, cancelled))?
+        })
+    }
+}
 /// Rc venue API behind the shared Arc-based secondary-key composition.
 struct Shared(Rc<dyn RestAdapter>);
 impl RestAdapter for Shared {
@@ -607,7 +636,10 @@ impl WsParent for Parent {
         self.live()?.log(message, severity.as_str())
     }
     fn emit(&self, event: &str, message: &str) -> Result<(), ExchangeError> {
-        self.live()?.emit(event, Value::String(message.into()))
+        self.live()?.emit(
+            event,
+            safe_cex_exchange::js_runtime::value::Js::str(message),
+        )
     }
     fn sync_socket_health_to_store(&self) -> Result<(), ExchangeError> {
         self.live()?.sync_socket_health_to_store()
@@ -777,15 +809,14 @@ impl PublicStreamHost for PublicHost {
                 let Some(stream) = stream.borrow().upgrade() else {
                     return Ok(());
                 };
-                let added: Vec<String> = data
-                    .get("added")
-                    .and_then(Value::as_array)
-                    .map(|rows| {
-                        rows.iter()
-                            .filter_map(|m| m.get("id").and_then(Value::as_str).map(str::to_owned))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let added = data
+                    .get("added")?
+                    .array_values()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|row| row.get("id").ok())
+                    .filter_map(|id| id.as_str().map(|units| String::from_utf16_lossy(units)))
+                    .collect::<Vec<_>>();
                 stream.on_markets_changed(&added).map_err(public_error)
             }),
         );
@@ -820,7 +851,13 @@ impl PublicStreamHost for PublicHost {
     fn emit_warning(&self, message: &str, force_toast: bool) -> Result<(), ExchangeError> {
         self.base()?.emit_args(
             "warning",
-            &[json!(message), json!({"forceToast": force_toast})],
+            &[
+                safe_cex_exchange::js_runtime::value::Js::str(message),
+                safe_cex_exchange::js_runtime::value::Js::object(vec![(
+                    "forceToast",
+                    safe_cex_exchange::js_runtime::value::Js::Bool(force_toast),
+                )]),
+            ],
         )
     }
 }
@@ -1103,7 +1140,7 @@ impl PrivateDataHost for PrivateHost {
     fn emit_fill(&self, fill: PrivateFill) -> Result<(), ExchangeError> {
         self.base()?.emit(
             "fill",
-            serde_json::to_value(fill).map_err(|e| ExchangeError::new(e.to_string()))?,
+            safe_cex_exchange::js_runtime::value::from_typed(&fill)?,
         )
     }
 

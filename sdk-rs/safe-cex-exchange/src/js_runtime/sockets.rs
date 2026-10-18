@@ -360,6 +360,14 @@ fn binary_data(bytes: &[u8], runtime: Rc<dyn crate::runtime::ExchangeRuntime>) -
 }
 
 impl WsProtocol for JsProtocol {
+    fn reconnect(&self, _socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        let core = self.core()?;
+        let this = core.this.borrow().clone();
+        this.call_method("reconnect", vec![])
+            .map(|_| ())
+            .map_err(core_error)
+    }
+
     fn recovers_after_offline(&self) -> bool {
         JsProtocol::recovers_after_offline(self)
     }
@@ -589,7 +597,7 @@ fn base_prototype(context: &Rc<JsSocketContext>) -> Js {
 /// every socket of this context.
 pub fn base_websocket_class(context: &Rc<JsSocketContext>) -> Js {
     let ctx = context.clone();
-    let class = Js::constructor("BaseWebSocket", move |_, a| {
+    let class = Js::constructor("BaseWebSocket", None, move |_, a| {
         Ok(base_websocket(&ctx, arg(&a, 0)))
     });
     let _ = class.define("prototype", base_prototype(context));
@@ -831,7 +839,7 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
         def(
             "reconnect",
             Js::function("reconnect", move |_, _| {
-                core.base()?.reconnect().map_err(ex)?;
+                core.base()?.reconnect_base().map_err(ex)?;
                 Ok(Js::Undefined)
             }),
         );

@@ -211,27 +211,42 @@ impl RustVenueHost for NativeVenueHost {
             retry_clock: Rc::new(NativeRetryClock(self.runtime.clone())),
         })
     }
+    #[expect(clippy::arc_with_non_send_sync)]
     fn mexc(
         &self,
         options: &safe_cex_types::ExchangeOptions,
     ) -> Result<crate::rust_venues::MexcDependencies, ExchangeError> {
         let current_time_ms: Rc<dyn Fn() -> f64> =
             Rc::new(|| safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms());
-        let http = safe_cex_venue_mexc::client::create_api(
-            native_http_options(
-                &self.runtime,
-                (self.adapter)()?,
-                safe_cex_types::ExchangeName::Mexc,
-                options,
-                safe_cex_transport::RestRequest::default(),
-                self.remote.clone(),
-                &self.http_events,
-            ),
-            &safe_cex_transport::TransportRegistry::default(),
-            Rc::new(NativeRetryClock(self.runtime.clone())),
-            current_time_ms.clone(),
+        let registry = safe_cex_transport::TransportRegistry::default();
+        let clients = safe_cex_transport::secondary::create_api_with_secondary_key(
+            options,
+            self.runtime.transport().as_ref(),
+            None,
+            |options| {
+                let adapter = (self.adapter)()
+                    .map_err(|error| safe_cex_transport::TransportError::Host(error.to_string()))?;
+                let api = safe_cex_venue_mexc::client::create_api(
+                    native_http_options(
+                        &self.runtime,
+                        adapter,
+                        safe_cex_types::ExchangeName::Mexc,
+                        options,
+                        safe_cex_transport::RestRequest::default(),
+                        self.remote.clone(),
+                        &self.http_events,
+                    ),
+                    &registry,
+                    Rc::new(NativeRetryClock(self.runtime.clone())),
+                    current_time_ms.clone(),
+                )?;
+                Ok(Arc::new(api) as Arc<dyn RestAdapter>)
+            },
+            None,
+            None,
         )
-        .map_err(|e| ExchangeError::new(e.to_string()))?;
+        .map_err(|error| ExchangeError::new(error.to_string()))?;
+        let http = MexcHttp(clients);
         Ok(crate::rust_venues::MexcDependencies {
             current_time_ms,
             runtime: self.runtime.clone(),
@@ -590,6 +605,21 @@ impl RustVenueHost for NativeVenueHost {
         })
     }
 
+    fn binanceinverse(
+        &self,
+    ) -> Result<safe_cex_venue_binance::inverse::BinanceInverseDependencies, ExchangeError> {
+        Ok(
+            safe_cex_venue_binance::inverse::BinanceInverseDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                    self.runtime.clone(),
+                    (self.adapter)()?,
+                    self.remote.clone(),
+                ),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError> {
         Ok(safe_cex_venue_binance::native_host::native_dependencies(
             self.runtime.clone(),
@@ -715,6 +745,31 @@ impl RustVenueHost for NativeVenueHost {
                 external_public_data: Some(gateway_factory(self.runtime.clone())),
             },
         )
+    }
+}
+
+// MEXC production GETs represent source xhr.get calls; other methods stay primary.
+struct MexcHttp(safe_cex_transport::secondary::SecondaryKeyClients);
+impl RestAdapter for MexcHttp {
+    fn execute(
+        &self,
+        request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        Box::pin(async move {
+            self.execute_with_receipt(request)
+                .await
+                .map(|execution| execution.response)
+        })
+    }
+    fn execute_with_receipt(
+        &self,
+        request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestExecution> {
+        if request.method.eq_ignore_ascii_case("get") {
+            self.0.get_with_receipt(request)
+        } else {
+            self.0.request_with_receipt(request)
+        }
     }
 }
 

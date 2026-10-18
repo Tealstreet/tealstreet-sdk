@@ -205,6 +205,14 @@ pub trait RustVenueHost {
         ))
     }
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
+    fn binanceinverse(
+        &self,
+    ) -> Result<safe_cex_venue_binance::inverse::BinanceInverseDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Binance inverse dependencies were not supplied by this host",
+        ))
+    }
+
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError>;
     /// OKX, OKX Demo, OKX EU and OKX EU Demo share one input set.
     fn okx(&self) -> Result<OkxDependencies, ExchangeError>;
@@ -243,6 +251,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Asterdex, asterdex_constructor),
     (ExchangeName::Backpack, backpack_constructor),
     (ExchangeName::Binance, binance_constructor),
+    (ExchangeName::Binanceinverse, binanceinverse_constructor),
     (ExchangeName::Binancepm, binancepm_constructor),
     (ExchangeName::Binancespot, binancespot_constructor),
     (ExchangeName::Bingx, bingx_constructor),
@@ -387,8 +396,7 @@ pub fn mexc_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
                     if let Some(parent) = fill_parent.borrow().upgrade() {
                         parent.base().emit(
                             "fill",
-                            serde_json::to_value(fill)
-                                .map_err(|e| ExchangeError::new(e.to_string()))?,
+                            safe_cex_exchange::js_runtime::value::from_typed(&fill)?,
                         )?;
                     }
                     Ok(())
@@ -467,6 +475,18 @@ pub fn binance_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
         let exchange = BinanceExchange::new(name, options, store, host.binance()?)
             .map_err(Rc::unwrap_or_clone)?;
         Ok(Rc::new(exchange))
+    })
+}
+
+pub fn binanceinverse_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = safe_cex_venue_binance::inverse::BinanceInverseExchange::new(
+            name,
+            options,
+            store,
+            host.binanceinverse()?,
+        )?;
+        Ok(exchange)
     })
 }
 

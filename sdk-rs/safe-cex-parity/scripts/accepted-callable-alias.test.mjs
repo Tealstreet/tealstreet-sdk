@@ -209,3 +209,41 @@ test('hosted signer tuple retains its exact native type and compiler roles', asy
   console.log('hosted signer tuple expanded target: named assertion; process exit 1');
   assert.equal(execute(false).status, 0);
 });
+
+function twoParameterCallable(original) {
+  const alias = structuredClone(original);
+  const output = alias.generics.params[0].name;
+  alias.generics.params.push({name:'E',kind:{type:{bounds:[],default:null,is_synthetic:false}}});
+  const signature = {
+    inputs:[{generic:'E'}],
+    output:{resolved_path:{path:'core::result::Result',args:{angle_bracketed:{
+      args:[{type:{generic:output}},{type:{generic:'E'}}],constraints:[],
+    }}}},
+  };
+  for(const target of [alias.rawTarget,alias.target]) {
+    target.resolved_path.args.angle_bracketed.args[0].type.dyn_trait.traits[0].trait.args={parenthesized:structuredClone(signature)};
+  }
+  return alias;
+}
+
+test('two unbounded callable parameters use the same fixed native Value family',()=>fixture(f=>{
+  const alias=twoParameterCallable(f.aliases[0]);
+  const probe=genericAliasProbe(alias,contract(alias),f.context);
+  assert.equal(probe.suffix,'<::serde_json::Value,::serde_json::Value>');
+  assert.equal(probe.canonical,'alloc::rc::Rc');
+  assert.equal(probe.callable,true);
+  assert.match(probe.monomorphization,/no claim for every/);
+}));
+
+test('two-parameter callable family still refuses unrelated generics and more parameters',()=>fixture(f=>{
+  const original=twoParameterCallable(f.aliases[0]);
+  const unknown=structuredClone(original);
+  unknown.target.resolved_path.args.angle_bracketed.args[0].type.dyn_trait.traits[0].trait.args.parenthesized.inputs=[{generic:'Unreviewed'}];
+  assert.throws(()=>genericAliasProbe(unknown,contract(unknown),f.context),/unrelated generic/);
+  const third=structuredClone(original);
+  third.generics.params.push({name:'Other',kind:{type:{bounds:[],default:null,is_synthetic:false}}});
+  assert.throws(()=>genericAliasProbe(third,contract(third),f.context),/one or two unbounded type parameters/);
+  const bounded=structuredClone(original);
+  bounded.generics.params[1].kind.type.bounds=[{trait_bound:{trait:{path:'Copy'}}}];
+  assert.throws(()=>genericAliasProbe(bounded,contract(bounded),f.context),/bounds\/defaults\/lifetimes/);
+}));

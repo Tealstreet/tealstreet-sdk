@@ -4,6 +4,8 @@ use safe_cex_crypto::lighter::{
 };
 use serde_json::Value;
 use std::process::Command;
+#[path = "support/lighter_source_pin.rs"]
+mod source_pin;
 fn capture() -> Value {
     static CAPTURE: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
     CAPTURE
@@ -36,10 +38,14 @@ fn capture() -> Value {
             ))
             .unwrap();
             for (file, pin) in pins.as_object().unwrap() {
-                assert_eq!(
-                    normalized["sources"][file], pin["currentSha256"],
-                    "unreviewed independent source drift: {file}"
-                );
+                if pin.get("declarationsSha256").is_some() {
+                    source_pin::verify(file, Some(normalized["sources"][file].as_str().unwrap()));
+                } else {
+                    assert_eq!(
+                        normalized["sources"][file], pin["currentSha256"],
+                        "unreviewed independent source drift: {file}"
+                    );
+                }
                 normalized["sources"][file] = pin["originalSha256"].clone();
             }
             if std::env::var_os("LIGHTER_SIGNING_IDENTITY_MUTATION").is_none() {
