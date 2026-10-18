@@ -5106,6 +5106,16 @@ fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations
             .public
             .on_message(r#"{"e":"bookTicker","s":"BTCUSDT","b":"-0","a":"123.25"}"#)
             .unwrap();
+        assert_eq!(
+            row.borrow().bid.to_bits(),
+            (-0.0_f64).to_bits(),
+            "constructor subscription updates captured bid before dictionary reread {venue:?}"
+        );
+        assert_eq!(
+            row.borrow().ask.to_bits(),
+            123.25_f64.to_bits(),
+            "constructor subscription updates captured ask before dictionary reread {venue:?}"
+        );
         let patched: Dictionary = capture.dictionary();
         assert!(
             Rc::ptr_eq(&initial, &patched),
@@ -5183,6 +5193,10 @@ fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations
 #[cfg(feature = "native")]
 #[path = "support/snapshot_aliases.rs"]
 mod snapshot_aliases;
+
+#[cfg(feature = "native")]
+#[path = "support/public_dispatch_contracts.rs"]
+mod public_dispatch_contracts;
 
 #[test]
 #[cfg(feature = "native")]
