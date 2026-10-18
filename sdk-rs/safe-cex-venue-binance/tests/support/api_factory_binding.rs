@@ -53,6 +53,8 @@ impl RestAdapter for ApiHttp {
 }
 #[test]
 fn native_factory_retries_unsigned_listen_post_and_encodes_signed_query() {
+    use safe_cex_store::Store;
+
     let runtime = Rc::new(Runtime::default());
     let http = Arc::new(ApiHttp {
         sent: Mutex::new(vec![]),
@@ -64,16 +66,20 @@ fn native_factory_retries_unsigned_listen_post_and_encodes_signed_query() {
         None,
         safe_cex_exchange::native::NativeHttpEvents::default(),
     );
+    let store = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
     let owner = ExchangeOwner::new(
         Venue::Futures,
         safe_cex_types::ExchangeName::Binance,
         serde_json::from_value(json!({"key":"factory-key","secret":"factory-secret"})).unwrap(),
-        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
+        store.clone(),
         deps,
     )
     .unwrap();
     let key = run(&runtime, owner.private.fetch_listen_key()).unwrap();
     assert!(key.strict_equals(&EventValue::str("factory-key")));
+    let counts = store.request_stats().unwrap().unwrap();
+    assert_eq!(counts.ok, 1.0);
+    assert_eq!(counts.network, 1.0, "the failed attempt is counted once");
     let calls = http.sent.lock().unwrap();
     assert_eq!(
         calls.len(),
@@ -108,5 +114,8 @@ fn native_factory_retries_unsigned_listen_post_and_encodes_signed_query() {
     assert!(calls[2].url.contains("limit=17"));
     assert!(calls[2].url.contains("signature="));
     drop(calls);
+    let counts = store.request_stats().unwrap().unwrap();
+    assert_eq!(counts.ok, 2.0, "the signed request advances the same Store");
+    assert_eq!(counts.network, 1.0);
     owner.dispose().unwrap();
 }
