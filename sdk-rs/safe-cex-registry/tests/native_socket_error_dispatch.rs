@@ -46,6 +46,7 @@ async fn observe(name: ExchangeName, rejected_handshake: bool, expected: &Value)
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}", listener.local_addr().unwrap());
     let (release, released) = oneshot::channel();
+    let (close, closed) = oneshot::channel();
     let server = tokio::task::spawn_local(async move {
         let (tcp, _) = listener.accept().await.unwrap();
         if rejected_handshake {
@@ -66,6 +67,7 @@ async fn observe(name: ExchangeName, rejected_handshake: bool, expected: &Value)
             tcp.shutdown().await.unwrap();
         } else {
             let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            closed.await.unwrap();
             socket
                 .send(Message::Close(Some(CloseFrame {
                     code: CloseCode::Away,
@@ -106,61 +108,71 @@ async fn observe(name: ExchangeName, rejected_handshake: bool, expected: &Value)
     );
     let socket = venue.base().get_socket(SocketSlot::Public).unwrap();
     socket.start_websocket(url, vec![], None);
+    if !rejected_handshake {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while socket.diagnostics().last_connected_at == 0.0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("actual native open");
+        socket.handle_web_socket_error("native transport failed").unwrap();
+        assert_eq!(socket.diagnostics().on_close_count, expected["afterError"].as_u64().unwrap() as usize);
+        assert!(!logs.borrow().iter().any(|line| line.contains("Reconnecting in")),
+            "error alone must not schedule reconnect");
+        close.send(()).unwrap();
+    }
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let done = if rejected_handshake {
-                logs.borrow()
-                    .iter()
-                    .any(|line| line.contains("WebSocket error:"))
+                logs.borrow().iter().any(|line| line.contains("WebSocket error:"))
             } else {
                 socket.diagnostics().on_close_count > 0
             };
-            if done {
-                break;
-            }
+            if done { break; }
             tokio::task::yield_now().await;
         }
     })
     .await
     .expect("actual native transport event");
-    // Error logging happens inside the same synchronous dispatch as the venue hook.
-    let count = socket.diagnostics().on_close_count;
+    let health = socket.diagnostics();
+    let actual = json!({
+        "count": health.on_close_count,
+        "lastCloseCode": health.last_close_code,
+        "reconnectScheduled": logs.borrow().iter().any(|line| line.contains("Reconnecting in")),
+    });
     venue.dispose().unwrap();
     release.send(()).unwrap();
     server.await.unwrap();
-    assert_eq!(
-        count,
-        expected.as_u64().unwrap() as usize,
-        "{name:?}: base error listener suppresses later handlers; actual close still runs"
-    );
-    if rejected_handshake {
-        assert!(
-            !logs
-                .borrow()
-                .iter()
-                .any(|line| line.contains("Reconnecting in")),
-            "error alone must not schedule reconnect"
-        );
-    }
+    let expected = if rejected_handshake { expected } else { &expected["closed"] };
+    assert_eq!(actual, *expected, "{name:?}: independent error suppression and close recovery");
 }
 
-fn check(name: ExchangeName, source_name: &str) {
+fn check(name: ExchangeName, source_name: &str, failed_upgrade: bool) {
     let expected = source(source_name);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
     tokio::task::LocalSet::new().block_on(&runtime, async {
-        observe(name.clone(), true, &expected["afterError"]).await;
-        observe(name, false, &expected["afterClose"]).await;
+        let key = if failed_upgrade { "failedUpgrade" } else { "live" };
+        observe(name, failed_upgrade, &expected[key]).await;
     });
 }
 
 #[test]
 fn aster_native_error_dispatch_stops_later_close_handler() {
-    check(ExchangeName::Asterdex, "asterdex");
+    check(ExchangeName::Asterdex, "asterdex", false);
 }
 #[test]
 fn bitunix_native_error_dispatch_stops_later_close_handler() {
-    check(ExchangeName::Bitunix, "bitunix");
+    check(ExchangeName::Bitunix, "bitunix", false);
+}
+#[test]
+fn aster_failed_upgrade_delivers_abnormal_close_and_reconnect() {
+    check(ExchangeName::Asterdex, "asterdex", true);
+}
+#[test]
+fn bitunix_failed_upgrade_delivers_abnormal_close_and_reconnect() {
+    check(ExchangeName::Bitunix, "bitunix", true);
 }
