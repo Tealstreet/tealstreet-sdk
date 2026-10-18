@@ -1679,3 +1679,77 @@ fn mark_price_falsey_time_and_unknown_targets_keep_source_behavior() {
     drop(tickers);
     venue.dispose().unwrap();
 }
+
+#[test]
+fn alternate_typed_preparation_keeps_all_native_fields_and_presence() {
+    use safe_cex_types::{
+        ModelField, OrderSide, OrderStopTriggerType, OrderTimeInForce, OrderType,
+    };
+    use safe_cex_venue_asterdex::{
+        order_execution::{ExecutionOrder, PreparedExecutionOrder},
+        types::{AsterDEXPlaceOrderOpts, AsterDEXStpMode},
+    };
+    for (amount, reduce_only, post_only) in [
+        (1.25, Some(false), Some(true)),
+        (-0.0, Some(true), Some(false)),
+        (2.5, None, None),
+    ] {
+        let order = PlaceOrderOpts {
+            symbol: "BTCUSDT".into(),
+            r#type: OrderType::Limit,
+            side: OrderSide::Sell,
+            amount,
+            price: Some(-0.0),
+            trigger_price: Some(3.25),
+            stop_loss: Some(4.5),
+            take_profit: Some(5.75),
+            reduce_only,
+            time_in_force: Some(OrderTimeInForce::PostOnly),
+            trigger_type: Some(OrderStopTriggerType::MarkPrice),
+            tp_trigger_type: Some(OrderStopTriggerType::LastPrice),
+            sl_trigger_type: Some(OrderStopTriggerType::IndexPrice),
+            client_order_id: Some("native-λ".into()),
+            max_slippage_pct: Some(0.125),
+            close: Some(false),
+            implied_volatility: Some(0.25),
+        };
+        let venue: AsterDEXPlaceOrderOpts = order.clone().into();
+        assert_eq!(venue.order, order);
+        assert!(
+            venue.stp_mode.is_none(),
+            "shared-to-venue conversion does not invent STP"
+        );
+        let input = ExecutionOrder {
+            opts: AsterDEXPlaceOrderOpts {
+                order: order.clone(),
+                stp_mode: Some(AsterDEXStpMode::V2),
+            },
+            post_only,
+        };
+        let borrowed = PreparedExecutionOrder::from(&input);
+        let owned = PreparedExecutionOrder::from(input.clone());
+        let copied = PreparedExecutionOrder::from(&borrowed);
+        for prepared in [&borrowed, &owned, &copied] {
+            let got = &prepared.opts.order;
+            assert_eq!(got.symbol, order.symbol);
+            assert_eq!(got.r#type, ModelField::Value(order.r#type));
+            assert_eq!(got.side, ModelField::Value(order.side));
+            assert_eq!(got.amount.to_bits(), amount.to_bits());
+            assert_eq!(got.price.unwrap().to_bits(), (-0.0_f64).to_bits());
+            assert_eq!(got.trigger_price, order.trigger_price);
+            assert_eq!(got.stop_loss, order.stop_loss);
+            assert_eq!(got.take_profit, order.take_profit);
+            assert_eq!(got.reduce_only, ModelField::from(reduce_only));
+            assert_eq!(got.time_in_force, order.time_in_force);
+            assert_eq!(got.trigger_type, order.trigger_type);
+            assert_eq!(got.tp_trigger_type, order.tp_trigger_type);
+            assert_eq!(got.sl_trigger_type, order.sl_trigger_type);
+            assert_eq!(got.client_order_id, order.client_order_id);
+            assert_eq!(got.max_slippage_pct, order.max_slippage_pct);
+            assert_eq!(got.close, order.close);
+            assert_eq!(got.implied_volatility, order.implied_volatility);
+            assert_eq!(prepared.opts.stp_mode, Some(AsterDEXStpMode::V2));
+            assert_eq!(prepared.post_only, post_only);
+        }
+    }
+}

@@ -154,3 +154,8 @@ columns and missing-volume NaN against the maintained fetchOHLCV method.
 companions and their direct shape/native-value witnesses. The focused
 `scripts/accepted-wire-contracts.mjs` retains all 608 observations and every
 compiler field, including each separately executed public-wrapper boundary.
+
+`ALTERNATE_OWNER_CONTRACT_REVIEW.md` records the assigned thirty-three-owner
+cohort: eleven Deserialize carriers, fourteen raw-input runtime owners and eight
+explicitly typed APIs. The selected runner uses CI's actual native probe path;
+constructor/conversion receipts remain distinct from decoder execution.
