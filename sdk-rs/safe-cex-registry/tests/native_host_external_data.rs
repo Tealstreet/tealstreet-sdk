@@ -23,6 +23,108 @@ fn subscribed(h: &Harness, channel: &str) -> bool {
 }
 
 #[test]
+fn gateway_type_audit_uses_channel_fields_without_envelope_validation() {
+    run_local(async {
+        let options = json!({"key":"","secret":"","publicDataOnly":true,
+            "externalPublicData":{"type":"websocket","url":"ws://gateway.local/gateway",
+                "exchangeId":"binance","authToken":"audit-token"}});
+        let h = Rc::new(binance_harness_with(Rc::new(|_| None), options).await);
+        let gateway = h.clone();
+        tokio::task::spawn_local(async move {
+            eventually("audit gateway subscriptions", || {
+                subscribed(&gateway, "tickers") && subscribed(&gateway, "market")
+            })
+            .await;
+            let push = gateway_peer(&gateway).unwrap();
+            let market = json!({"id":"GWUSDT","symbol":"GWUSDT","base":"GW","quote":"USDT","active":true,
+                "precision":{"amount":0.1,"price":0.01},"limits":{"amount":{"min":0.1,"max":100},"leverage":{"min":1,"max":20}}});
+            let ticker = json!({"id":"GWUSDT","symbol":"GWUSDT","bid":9.9,"ask":10.1,"last":10,"mark":10,"index":10,
+                "percentage":1,"openInterest":0,"fundingRate":0,"fundingTime":0,"volume":1,"quoteVolume":10});
+            push.send(
+                json!({"type":"subscribed","exchangeId":"binance","channel":"auth"}).to_string(),
+            )
+            .unwrap();
+            push.send(
+                json!({"type":"future-type","exchangeId":"binance","channel":"future-channel"})
+                    .to_string(),
+            )
+            .unwrap();
+            push.send(json!({"type":"data","exchangeId":"binance","channel":"future-channel","data":null}).to_string()).unwrap();
+            for (channel, data) in [("market", market), ("tickers", ticker)] {
+                let frame = json!({"type":"data","exchangeId":"binance","channel":channel,"data":[data],
+                    "symbol":null,"interval":{"unused":true},"error":17,"requestId":false,"extra":{"keep":"unused"}});
+                assert!(
+                    serde_json::from_value::<safe_cex_types::gateway::GatewayMessage>(
+                        frame.clone()
+                    )
+                    .is_err(),
+                    "GATEWAY_ENVELOPE declaration refuses unused fields for {channel}"
+                );
+                push.send(frame.to_string()).unwrap();
+            }
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(5), h.exchange.start())
+            .await
+            .expect("GATEWAY_ENVELOPE raw ingress must not require the strict envelope decoder")
+            .unwrap();
+        assert_eq!(
+            h.store.markets().unwrap().len(),
+            1,
+            "GATEWAY_ENVELOPE market admitted"
+        );
+        assert_eq!(h.store.markets().unwrap()[0].symbol, "GWUSDT");
+        assert_eq!(
+            h.store.tickers().unwrap().len(),
+            1,
+            "GATEWAY_ENVELOPE ticker admitted"
+        );
+        assert_eq!(
+            h.store.tickers().unwrap()[0].last.to_bits(),
+            10.0_f64.to_bits()
+        );
+        assert!(
+            h.seen.borrow().is_empty(),
+            "GATEWAY_ENVELOPE no venue REST fallback"
+        );
+        let sent: Vec<serde_json::Value> = h
+            .received
+            .borrow()
+            .iter()
+            .map(|frame| serde_json::from_str(frame).unwrap())
+            .collect();
+        assert_eq!(
+            sent[0],
+            json!({"type":"subscribe","exchangeId":"binance","channel":"auth","data":{"token":"audit-token"}}),
+            "GATEWAY_AUTH actual native socket sends the source auth extension"
+        );
+        let auth: safe_cex_types::gateway::GatewayMessage =
+            serde_json::from_value(sent[0].clone()).unwrap();
+        assert_eq!(
+            auth.channel,
+            Some(safe_cex_types::gateway::GatewayChannel::Auth)
+        );
+        h.exchange.dispose().unwrap();
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/public-data.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            source["gatewayTypeAudit"],
+            json!({"auth":true,"markets":1,"tickers":1,"last":10})
+        );
+    });
+}
+
+#[test]
 fn binance_starts_on_a_public_data_gateway_over_websocket() {
     run_local(async {
         let options = json!({"key":"native-key","secret":SECRET,

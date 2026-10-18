@@ -1,5 +1,9 @@
 # Shared types
 
+The two gateway non-UTF-8 audit verdicts are in `per-row-rulings.md`. Production
+gateway ingress reads raw frames by channel; the stricter standalone
+GatewayMessage decoder must not become a precondition for that ingress.
+
 The bottom layer: every crate above — venues, store, transport, crypto,
 exchange core — reads its wire vocabulary from here, so a type added anywhere
 else is a second copy by definition. Naming, literal-union identifiers and
