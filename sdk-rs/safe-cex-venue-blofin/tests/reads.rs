@@ -13,6 +13,132 @@ use std::{
     rc::Rc,
     task::{Context, Poll, Waker},
 };
+#[allow(dead_code)]
+#[path = "support/native_runtime.rs"]
+mod retained_native_support;
+
+#[test]
+fn maintained_ticker_info_capture() {
+    let output = Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/retained_ticker_source.cjs"
+            ),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        rows,
+        json!([
+            {"native":false,"textUnits":[55296],"keyUnits":[56320],"overflow":"infinity","negativeZero":true,"ownUndefined":false,"nan":false},
+            {"native":true,"textUnits":[55296],"keyUnits":[56320],"overflow":"infinity","negativeZero":true,"ownUndefined":true,"nan":true}
+        ])
+    );
+}
+
+#[test]
+fn native_ticker_fetch_retains_opaque_info_before_projection() {
+    use safe_cex_exchange::exchange::Exchange;
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    for phase in 0..3 {
+        let (venue, rt, store, wire) = retained_native_support::fixture();
+        let market: Market = serde_json::from_value(json!({"id":"BTC-USDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"amount":0.001,"price":0.1},"limits":{"amount":{"min":0.001,"max":1000},"leverage":{"min":1,"max":50}}})).unwrap();
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                markets: Some(vec![market]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let raw = r#"{"code":"0","data":[{"instId":"BTC-USDT","open24h":"100","last":"110","bidPrice":"109","askPrice":"111","volCurrency24h":"12","vol24h":"1320","opaque":{"text":"\ud800","\udc00":"opaque-key-value","overflow":1e400,"negativeZero":-0}}]}"#;
+        let mut input = Input::parse_json(&raw.encode_utf16().collect::<Vec<_>>()).unwrap();
+        if phase > 0 {
+            let opaque = input.get_mut("data").unwrap().as_array_mut().unwrap()[0]
+                .get_mut("opaque")
+                .unwrap();
+            if let Input::Object(fields) = opaque {
+                fields.push(("nan".encode_utf16().collect(), Input::Float(f64::NAN)));
+                fields.push(("ownUndefined".encode_utf16().collect(), Input::Undefined));
+            } else {
+                panic!("opaque fixture must be object");
+            }
+        }
+        let body = match phase {
+            0 => RestResponseBody::Encoded(raw.as_bytes().to_vec()),
+            1 => RestResponseBody::Untransformed(input),
+            _ => RestResponseBody::Transformed(input),
+        };
+        wire.retained_bodies
+            .borrow_mut()
+            .insert("/api/v1/market/tickers".into(), body);
+        let mut pending = venue.fetch_tickers();
+        let result = (0..64)
+            .find_map(|_| {
+                match pending
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop()))
+                {
+                    Poll::Ready(value) => Some(value),
+                    Poll::Pending => {
+                        rt.pump();
+                        None
+                    }
+                }
+            })
+            .expect("actual native ticker fetch must settle")
+            .expect("opaque info must not refuse native ticker response");
+        assert_eq!(
+            result.len(),
+            1,
+            "native phase{phase}: opaque row must survive"
+        );
+        assert_eq!(result[0].last, 110.0);
+        let opaque = result[0].info.as_ref().unwrap().get("opaque").unwrap();
+        assert_eq!(
+            opaque.get("text").unwrap().as_text(),
+            Some([0xd800].as_slice())
+        );
+        assert!(
+            opaque
+                .as_object()
+                .unwrap()
+                .iter()
+                .any(|(key, value)| key == &[0xdc00] && value.text_equals("opaque-key-value"))
+        );
+        assert_eq!(
+            opaque.get("overflow").unwrap().as_f64(),
+            Some(f64::INFINITY)
+        );
+        assert_eq!(
+            opaque
+                .get("negativeZero")
+                .unwrap()
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            (-0.0f64).to_bits()
+        );
+        if phase > 0 {
+            assert!(opaque.get("nan").unwrap().as_f64().unwrap().is_nan());
+            assert!(matches!(opaque.get("ownUndefined"), Some(Input::Undefined)));
+        }
+        assert_eq!(wire.requests.borrow().len(), 1, "real configured REST path");
+        venue.dispose().unwrap();
+        rt.pump();
+    }
+}
 fn bits(value: f64) -> Value {
     json!({"number":if value.is_nan(){"nan".into()}else{format!("{:016x}",value.to_bits())}})
 }
@@ -255,9 +381,7 @@ fn live_reads_corpus() {
                     };
                     let result = if method == 0 {
                         run(fetch_tickers_raw(&adapter, emitter)).map(|raw| {
-                            raw.map_or(json!({"undefined":true}), |v| {
-                                info(v.retained().clone().into())
-                            })
+                            raw.map_or(json!({"undefined":true}), |v| info(v.retained().clone()))
                         })
                     } else {
                         run(fetch_tickers(&adapter, &store, emitter))
@@ -354,9 +478,7 @@ fn live_reads_corpus() {
                 panic!("READ phase must not emit")
             }))
             .unwrap();
-            let native = result.map_or(json!({"undefined":true}), |v| {
-                info(v.retained().clone().into())
-            });
+            let native = result.map_or(json!({"undefined":true}), |v| info(v.retained().clone()));
             if i == 1 {
                 assert_eq!(
                     native.as_array().unwrap().len(),
@@ -384,15 +506,25 @@ fn live_reads_corpus() {
             fixture: json!({"body":corpus["boundaries"][i],"fail":false}),
             requests: RefCell::new(Vec::new()),
         };
-        assert!(
-            matches!(
-                run(fetch_tickers_raw(&adapter, |_| -> Result<(), ()> {
-                    panic!("READ ingress must not emit")
-                })),
-                Err(ReadError::Ingress(_))
+        let result = run(fetch_tickers_raw(&adapter, |_| -> Result<(), ()> {
+            panic!("READ ingress must not emit")
+        }));
+        match i {
+            0 | 1 => assert!(
+                matches!(result, Err(ReadError::Ingress(_))),
+                "READ malformed encoded JSON boundary {i}"
             ),
-            "READ explicit ingress boundary {i}"
-        );
+            2 => assert_eq!(
+                result.unwrap().unwrap().retained().as_text(),
+                Some([0xd800].as_slice()),
+                "READ native opaque source units"
+            ),
+            3 => assert!(
+                result.unwrap().is_none(),
+                "READ source deep-array missing data"
+            ),
+            _ => unreachable!(),
+        }
         assert_eq!(
             adapter.requests.borrow().len(),
             1,

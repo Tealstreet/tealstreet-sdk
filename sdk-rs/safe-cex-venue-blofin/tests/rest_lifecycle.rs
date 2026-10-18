@@ -583,12 +583,12 @@ impl LifecycleHost for Life<'_> {
     }
     fn fetch_tickers_raw(
         &self,
-    ) -> LifecycleFuture<'_, Option<safe_cex_venue_blofin::utility::UtilityInput>, String> {
+    ) -> LifecycleFuture<'_, Option<safe_cex_venue_blofin::tickers::TickerInput>, String> {
         self.fetched("raw", Some(js_from_value(json!(["raw"])).unwrap()))
     }
     fn format_tickers(
         &self,
-        _: Option<safe_cex_venue_blofin::utility::UtilityInput>,
+        _: Option<safe_cex_venue_blofin::tickers::TickerInput>,
     ) -> Result<Vec<Ticker>, ServiceError<String>> {
         self.trace.borrow_mut().push(json!(["format"]));
         Ok(js_from_value(json!([corpus()["models"]["ticker"]])).unwrap())

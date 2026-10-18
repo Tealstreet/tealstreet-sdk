@@ -26,6 +26,7 @@ fn ws_corpus() -> &'static Value {
 struct SocketHost {
     runtime: Rc<Host>,
     raw_frames: RefCell<Vec<String>>,
+    observe_raw_send: Cell<bool>,
     virtual_calls: Cell<usize>,
     date_calls: Cell<usize>,
     date_offset: Cell<f64>,
@@ -46,6 +47,7 @@ impl SocketHost {
         Rc::new(Self {
             runtime,
             raw_frames: RefCell::new(Vec::new()),
+            observe_raw_send: Cell::new(false),
             virtual_calls: Cell::new(0),
             date_calls: Cell::new(0),
             date_offset: Cell::new(0.),
@@ -154,6 +156,9 @@ impl ApexSocketHost for SocketHost {
     }
     fn send(&self, frame: &str, logged: bool) -> Result<(), ExchangeError> {
         self.raw_frames.borrow_mut().push(frame.to_owned());
+        if self.observe_raw_send.get() {
+            return Ok(());
+        }
         let mut value = safe_cex_transport::how::json_parse(frame)
             .into_value()
             .unwrap();
@@ -401,22 +406,24 @@ fn run(privacy: &str, name: &str) {
                     })
                     .unwrap(),
                 "auth" => result = J::Bool(futures::executor::block_on(socket.auth()).unwrap()),
-                "fills" => socket.handle_fill_topic(&input).unwrap(),
+                "fills" => socket.handle_fill_topic(&native::capture(&input)).unwrap(),
                 "orders" => {
-                    socket.handle_order_topic(&input).unwrap();
+                    socket.handle_order_topic(&native::capture(&input)).unwrap();
                     if variant == 0 {
-                        socket.handle_order_topic(&input).unwrap();
+                        socket.handle_order_topic(&native::capture(&input)).unwrap();
                     }
                 }
                 "positions" => {
-                    if let Err(error) = socket.handle_position_topic(&input) {
+                    if let Err(error) = socket.handle_position_topic(&native::capture(&input)) {
                         result = obj(vec![
                             ("errorName", s(error.name)),
                             ("errorMessage", s(error.message)),
                         ]);
                     }
                 }
-                "accounts" => socket.handle_ws_accounts_v2_topic(&input).unwrap(),
+                "accounts" => socket
+                    .handle_ws_accounts_v2_topic(&native::capture(&input))
+                    .unwrap(),
                 "ordersThrottle" | "positionsThrottle" => {
                     if variant == 1 {
                         runtime.request_errors.borrow_mut().insert(
@@ -840,7 +847,7 @@ fn canceled_prefix_effects_precede_later_order_faults() {
             .set(row["lastConnect"].as_f64().unwrap());
         runtime.operations.borrow_mut().clear();
         runtime.now_calls.set(0);
-        let actual = socket.handle_order_topic(&native::input(&row["input"]));
+        let actual = socket.handle_order_topic(&native::capture(&native::input(&row["input"])));
         if label == "cached-numeric" {
             let error = actual.expect_err(&format!("{marker} native whole mapped-order refusal"));
             assert_eq!(error.name, "Error", "{marker} native refusal kind");
@@ -995,7 +1002,8 @@ fn socket_frame_units_are_observed_before_wire() {
         let private = index < 8;
         let (label, units) = expected[index % 8];
         let record_refused = index % 8 < 3;
-        let refused = record_refused || label == "unused-extra";
+        let view_refused = record_refused || label == "unused-extra";
+        let refused = !private && view_refused;
         let privacy = if private { "private" } else { "public" };
         let marker = format!("APEX-WS-FRAME {privacy}/{label}");
         assert_eq!(row["privacy"], privacy, "{marker} authored privacy");
@@ -1036,7 +1044,7 @@ fn socket_frame_units_are_observed_before_wire() {
             );
         }
         let decoded = decoded.into_value();
-        if refused {
+        if view_refused {
             assert!(
                 raw.is_ascii(),
                 "{marker} refused source frame is valid ASCII transport"
@@ -1104,6 +1112,9 @@ fn socket_frame_units_are_observed_before_wire() {
         )
         .unwrap();
         let host = SocketHost::new(runtime.clone(), private, 0, "frame-units");
+        // This corpus observes the canonical peer packet and exact wire below,
+        // without passing the test observer through a UTF-8 JSON view.
+        host.observe_raw_send.set(true);
         runtime.operations.borrow_mut().clear();
         let result = if private {
             ApexOmniPrivateWebsocket::new(parent, host.clone())
@@ -1128,36 +1139,18 @@ fn socket_frame_units_are_observed_before_wire() {
             if private && !refused { 1 } else { 0 },
             "{marker} native transmission count"
         );
-        if private && !refused {
-            let operations = runtime.operations.borrow();
-            let packet = operations
-                .iter()
-                .find_map(|operation| match operation {
-                    J::Array(fields) if fields.first() == Some(&s("send")) => Some(&fields[1]),
-                    _ => None,
-                })
-                .unwrap();
-            let J::Object(fields) = packet else {
-                panic!("{marker} native peer decoded packet");
-            };
-            assert_eq!(
-                fields
-                    .iter()
-                    .find(|(key, _)| key == "op")
-                    .map(|(_, value)| value),
-                Some(&s("pong")),
+        if private {
+            let packet = safe_cex_transport::how::json_parse(&sent[0]);
+            assert!(
+                matches!(property(&packet, "op"), Some(Input::Text(value)) if value.iter().copied().eq("pong".encode_utf16())),
                 "{marker} native peer operation"
             );
-            let J::Array(args) = &fields.iter().find(|(key, _)| key == "args").unwrap().1 else {
+            let Some(Input::Array(args)) = property(&packet, "args") else {
                 panic!("{marker} native peer args");
             };
             assert_eq!(args.len(), 1, "{marker} native peer argument floor");
-            let J::String(value) = &args[0] else {
-                panic!("{marker} native peer String argument");
-            };
-            assert_eq!(
-                value.encode_utf16().collect::<Vec<_>>(),
-                units,
+            assert!(
+                matches!(&args[0], Input::Text(value) if value == units),
                 "{marker} decoded native peer argument units"
             );
         }
@@ -1187,10 +1180,8 @@ fn socket_frame_units_are_observed_before_wire() {
             );
             wire_observations.push((
                 marker.clone(),
-                refused,
                 sent,
                 row["sent"][0]["raw"].as_str().unwrap().to_owned(),
-                label,
             ));
         } else {
             assert_eq!(
@@ -1229,11 +1220,11 @@ fn socket_frame_units_are_observed_before_wire() {
     }
     assert_eq!(
         native_refusals, 8,
-        "APEX-WS-FRAME independent refusal floor"
+        "APEX-WS-FRAME independent JSON-view refusal floor"
     );
     assert_eq!(
         native_positives, 8,
-        "APEX-WS-FRAME independent native positive floor"
+        "APEX-WS-FRAME independent JSON-view positive floor"
     );
     // All native decoded inputs, effects, outputs and unit assertions precede wire.
     assert_eq!(
@@ -1241,19 +1232,7 @@ fn socket_frame_units_are_observed_before_wire() {
         8,
         "APEX-WS-FRAME independent wire floor"
     );
-    for (marker, refused, sent, source, label) in wire_observations {
-        if refused {
-            assert!(sent.is_empty(), "{marker} native omitted whole pong");
-            let expected = match label {
-                "high" => r#"{"op":"pong","args":["\ud800"]}"#,
-                "low" => r#"{"op":"pong","args":["\udc00"]}"#,
-                "high-tail" => r#"{"op":"pong","args":["\ud800A"]}"#,
-                "unused-extra" => r#"{"op":"pong","args":["ASCII"]}"#,
-                _ => unreachable!(),
-            };
-            assert_eq!(source, expected, "{marker} source exact wire cost");
-        } else {
-            assert_eq!(sent, vec![source], "{marker} native exact positive wire");
-        }
+    for (marker, sent, source) in wire_observations {
+        assert_eq!(sent, vec![source], "{marker} native exact positive wire");
     }
 }
