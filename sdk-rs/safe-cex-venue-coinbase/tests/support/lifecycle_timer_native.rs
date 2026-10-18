@@ -3,8 +3,8 @@ use crate::{
     cdp_signing::CdpSigningCache,
     exchange_lifecycle::{LifecycleHost, LifecycleTimer},
 };
-use safe_cex_exchange::{js_runtime::client, native::native_runtime};
 use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_exchange::{js_runtime::client, native::native_runtime};
 use safe_cex_types::ExchangeName;
 use serde_json::json;
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};

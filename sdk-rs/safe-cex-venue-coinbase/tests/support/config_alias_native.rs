@@ -15,6 +15,7 @@ use base64::{
     Engine,
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
 };
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     js_runtime::{
         client,
@@ -22,7 +23,6 @@ use safe_cex_exchange::{
     },
     native::native_runtime,
 };
-use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_types::{
     AnyTimeframe, ExchangeName, OHLCVOptions, Timeframe, retained_json::RetainedJsonInput as Input,
 };

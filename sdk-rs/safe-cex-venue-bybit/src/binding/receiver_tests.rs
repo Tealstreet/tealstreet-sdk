@@ -3,6 +3,7 @@ use crate::{
     core_snapshot_readers::SnapshotHost, exchange::BybitExchange,
     hyro_private_session::SessionHost, variant_account_refresh::AccountRefreshHost,
 };
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     js_runtime::{
         promise::await_js,
@@ -10,7 +11,6 @@ use safe_cex_exchange::{
     },
     native::{NativeHttpHost, native_runtime},
 };
-use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_store::virtual_clock::VirtualClock;
 use safe_cex_transport::{
     RestAdapter, RestFuture, RestRequest, RestResponse, TransportFuture, rate_limit::RateLimitClock,
