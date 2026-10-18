@@ -10839,5 +10839,319 @@
         }
       }
     }
+  },
+  "safe_cex_venue_binance::position_snapshots::Emit": {
+    "category": "non-decoder",
+    "evidence": "Maintained BinanceExchange.fetchPositions and BinancePMExchange.fetchPositions catches call emitAndLogError and return current Store positions. tests/private_classes.rs::snapshot_aliases::emit_alias_reports_native_position_failure_and_propagates_listener_error constructs actual native_dependencies/ExchangeOwner for Futures and PM, runs signed native HTTP through both positions paths, observes Base error events plus typed reporter, then invokes the captured alias and checks listener-error propagation. scripts/snapshot-alias-controls.py independently suppresses the production captured callback, requires the named runtime test to fail after successful compilation, restores exact source and passes. scripts/snapshot-alias-contracts.mjs authenticates fresh compiler declarations/artifacts and separately checks the native alias classification; that receipt alone does not execute the callback.",
+    "reason": "Captured executable position-failure reporting capability. It accepts an existing native Js value and returns callback success/failure; it does not decode raw input into an owner.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_binance::request_weight::Failure",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
+  },
+  "safe_cex_venue_binance::position_snapshots::Log": {
+    "category": "non-decoder",
+    "evidence": "Maintained BinanceExchange.fetchPositionsAndBalance logs its first nonempty balance aggregation with LogSeverity.Info. tests/private_classes.rs::snapshot_aliases::log_alias_delivers_balance_severity_once_and_propagates_listener_error constructs actual native_dependencies/ExchangeOwner, runs two signed native account requests, observes the native balance bits and exactly one Base log event, then invokes the captured alias with Warning and verifies listener-error propagation. scripts/snapshot-alias-controls.py independently corrupts production severity forwarding, requires the named runtime test to fail after successful compilation, restores exact source and passes. scripts/snapshot-alias-contracts.mjs authenticates fresh compiler declarations/artifacts and separately checks native alias classification; no Wasm or unrelated alias equivalence is claimed.",
+    "reason": "Captured executable balance logging capability. It accepts an already-produced String and typed LogSeverity, forwards them to the owning BaseExchange, and propagates listener failure; it is not a decoder.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::runtime::LogSeverity",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_binance::request_weight::Failure",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::runtime::LogSeverity",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
   }
 }
