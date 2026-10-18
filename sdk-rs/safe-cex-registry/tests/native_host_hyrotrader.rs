@@ -23,7 +23,7 @@ fn hyrotrader_native_registry_preserves_configuration_and_signed_reads() {
             name,
             serde_json::from_value(json!({"key":"native-bybit-key","secret":support::SECRET}))
                 .unwrap(),
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         );
         let error = match result {
             Ok(_) => panic!("unconfigured HyroTrader must refuse before IO"),

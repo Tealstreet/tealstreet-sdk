@@ -184,14 +184,14 @@ impl BingxPlacement {
             .reads
             .base
             .store
-            .markets_by_symbol()
+            .markets_by_symbol()?
             .get(&opts.symbol)
             .cloned();
         let ticker = self
             .reads
             .base
             .store
-            .tickers_by_symbol()
+            .tickers_by_symbol()?
             .get(&opts.symbol)
             .cloned();
         let pside = if opts.side == OrderSide::Buy {
@@ -203,7 +203,7 @@ impl BingxPlacement {
             .reads
             .base
             .store
-            .positions()
+            .positions()?
             .iter()
             .find(|p| p.symbol == opts.symbol && p.side == pside)
             .cloned();
@@ -265,7 +265,7 @@ impl BingxPlacement {
             .reads
             .base
             .store
-            .markets_by_symbol()
+            .markets_by_symbol()?
             .get(&opts.symbol)
             .cloned()
             .ok_or_else(|| ExchangeError::new(format!("Market {} not found", opts.symbol)))?;
@@ -273,7 +273,7 @@ impl BingxPlacement {
             .reads
             .base
             .store
-            .positions()
+            .positions()?
             .iter()
             .find(|p| p.symbol == opts.symbol)
             .and_then(|p| (p.position_mode).into_value());
@@ -307,7 +307,7 @@ impl BingxPlacement {
             } else {
                 PositionSide::Long
             };
-            let found = self.reads.base.store.positions().iter().any(|p| {
+            let found = self.reads.base.store.positions()?.iter().any(|p| {
                 p.symbol == opts.symbol
                     && p.side == opposite
                     && p.contracts > 0.0
@@ -565,7 +565,7 @@ impl BingxPlacement {
                         .unwrap_or_else(|| Input::Object(vec![]));
                     let order = map_order(
                         &raw,
-                        &self.reads.base.store.orders(),
+                        &self.reads.base.store.orders()?,
                         safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms(),
                     )?;
                     if let Some(order) = order

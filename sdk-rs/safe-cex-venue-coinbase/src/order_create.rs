@@ -23,6 +23,7 @@ use std::{cell::RefCell, rc::Rc, task::Poll};
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoinbaseOrderFailure {
     pub value: Option<Value>,
+    pub native: Option<safe_cex_exchange::runtime::ExchangeError>,
 }
 
 /// Exchange-owned polling field, retaining JavaScript's f64 comparisons.
@@ -129,10 +130,13 @@ async fn source_yield() {
 /// Transport capabilities execute invocation effects eagerly and return their pending result.
 pub trait CoinbaseOrderHost {
     fn now_ms(&mut self) -> f64;
-    fn orders_loaded(&mut self) -> bool;
-    fn orders(&mut self) -> Vec<Rc<Order>>;
-    fn market_by_symbol(&mut self, symbol: &str) -> Option<Rc<Market>>;
-    fn markets_by_id(&mut self) -> &IndexMap<String, Rc<Market>>;
+    fn orders_loaded(&mut self) -> Result<bool, CoinbaseOrderFailure>;
+    fn orders(&mut self) -> Result<Vec<Rc<Order>>, CoinbaseOrderFailure>;
+    fn market_by_symbol(
+        &mut self,
+        symbol: &str,
+    ) -> Result<Option<Rc<Market>>, CoinbaseOrderFailure>;
+    fn markets_by_id(&mut self) -> Result<&IndexMap<String, Rc<Market>>, CoinbaseOrderFailure>;
     fn resolve_caller_client_order_id(
         &mut self,
         opts: &PreparedOrderOpts,
@@ -169,12 +173,14 @@ pub trait CoinbaseOrderHost {
 fn error(message: impl Into<String>) -> CoinbaseOrderFailure {
     CoinbaseOrderFailure {
         value: Some(json!({"name":"Error", "message":message.into()})),
+        native: None,
     }
 }
 
 fn coercion(e: safe_cex_num::JsCoercionError) -> CoinbaseOrderFailure {
     CoinbaseOrderFailure {
         value: Some(json!({"name":e.name,"message":e.message})),
+        native: None,
     }
 }
 
@@ -190,27 +196,27 @@ fn message(err: Option<&Value>) -> Option<&Value> {
 pub fn should_poll_orders(
     state: &mut CoinbaseOrderPolling,
     host: &mut impl CoinbaseOrderHost,
-) -> bool {
-    if host.orders_loaded() {
-        return false;
+) -> Result<bool, CoinbaseOrderFailure> {
+    if host.orders_loaded()? {
+        return Ok(false);
     }
     let now = host.now_ms();
     if now >= state.next_orders_poll_at {
         state.next_orders_poll_at = now + 10_000.0;
-        return true;
+        return Ok(true);
     }
-    false
+    Ok(false)
 }
 
 // ts: CoinbaseExchange.mergeRestOrdersWithFreshWsState
 pub fn merge_rest_orders_with_fresh_ws_state(
     host: &mut impl CoinbaseOrderHost,
     rest: Rc<Vec<Rc<Order>>>,
-) -> Rc<Vec<Rc<Order>>> {
+) -> Result<Rc<Vec<Rc<Order>>>, CoinbaseOrderFailure> {
     let rest_ids: std::collections::HashSet<_> = rest.iter().map(|o| o.id.as_str()).collect();
     let now = host.now_ms();
     let preserved: Vec<_> = host
-        .orders()
+        .orders()?
         .into_iter()
         .filter(|existing| {
             !rest_ids.contains(existing.id.as_str())
@@ -219,24 +225,24 @@ pub fn merge_rest_orders_with_fresh_ws_state(
         })
         .collect();
     if preserved.is_empty() {
-        return rest;
+        return Ok(rest);
     }
-    Rc::new(rest.iter().cloned().chain(preserved).collect())
+    Ok(Rc::new(rest.iter().cloned().chain(preserved).collect()))
 }
 
 // ts: CoinbaseExchange.resolveMarketByCoinbaseProductId
 pub fn resolve_market_by_coinbase_product_id(
     host: &mut impl CoinbaseOrderHost,
     product_id: &str,
-) -> Option<Rc<Market>> {
-    let markets = host.markets_by_id();
+) -> Result<Option<Rc<Market>>, CoinbaseOrderFailure> {
+    let markets = host.markets_by_id()?;
     let exact = markets.get(product_id);
     let alias_id = get_coinbase_usd_equivalent_alias_product_id(product_id);
     let alias = alias_id.as_ref().and_then(|id| markets.get(id));
     if product_id.ends_with("-USD") && alias.is_some() {
-        return alias.cloned();
+        return Ok(alias.cloned());
     }
-    exact.or(alias).cloned()
+    Ok(exact.or(alias).cloned())
 }
 
 // ts: CoinbaseExchange.formatCreateOrder
@@ -245,7 +251,7 @@ pub fn format_create_order(
     opts: &PreparedOrderOpts,
 ) -> Result<PlaceOrderRequest, CoinbaseOrderFailure> {
     let market = host
-        .market_by_symbol(&opts.symbol)
+        .market_by_symbol(&opts.symbol)?
         .ok_or_else(|| error(format!("Market {} not found", opts.symbol)))?;
     let p_price = market.precision.price;
     let p_amount = market.precision.amount;
@@ -324,7 +330,7 @@ pub fn build_optimistic_order_from_create(
     if payload.product_id.is_empty() {
         return Ok(None);
     }
-    let Some(market) = resolve_market_by_coinbase_product_id(host, &payload.product_id) else {
+    let Some(market) = resolve_market_by_coinbase_product_id(host, &payload.product_id)? else {
         return Ok(None);
     };
     if market.is_spot != Some(true)

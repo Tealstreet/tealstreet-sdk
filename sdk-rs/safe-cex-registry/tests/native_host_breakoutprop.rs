@@ -33,7 +33,7 @@ fn breakoutprop_registry_logs_in_reads_places_and_cancels_over_native_http() {
             json!({"error":""})
         );
         h.exchange.start().await.unwrap();
-        assert_eq!(h.store.markets().len(), 1);
+        assert_eq!(h.store.markets().unwrap().len(), 1);
         assert_eq!(h.exchange.fetch_tickers().await.unwrap()[0].last, 99.0);
         let positions = h.exchange.fetch_positions(None).await.unwrap();
         assert_eq!(

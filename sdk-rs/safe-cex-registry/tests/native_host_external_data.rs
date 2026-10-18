@@ -60,6 +60,7 @@ fn binance_starts_on_a_public_data_gateway_over_websocket() {
         assert_eq!(
             h.store
                 .markets()
+                .unwrap()
                 .iter()
                 .map(|m| m.symbol.clone())
                 .collect::<Vec<_>>(),
@@ -69,6 +70,7 @@ fn binance_starts_on_a_public_data_gateway_over_websocket() {
         assert!(
             h.store
                 .tickers()
+                .unwrap()
                 .iter()
                 .any(|t| t.symbol == "GWUSDT" && t.last == 10.0),
             "tickers came from the gateway"
@@ -194,6 +196,7 @@ async fn starts_on_gateway(name: safe_cex_types::ExchangeName, exchange_id: &'st
     assert_eq!(
         h.store
             .markets()
+            .unwrap()
             .iter()
             .map(|m| m.symbol.clone())
             .collect::<Vec<_>>(),
@@ -203,6 +206,7 @@ async fn starts_on_gateway(name: safe_cex_types::ExchangeName, exchange_id: &'st
     assert!(
         h.store
             .tickers()
+            .unwrap()
             .iter()
             .any(|t| t.symbol == "GWUSDT" && t.last == 10.0),
         "tickers came from the gateway"

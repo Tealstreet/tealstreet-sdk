@@ -123,7 +123,7 @@ impl<Token: AsRef<str> + 'static> TelegramWorker<Token, Result<Rc<dyn Exchange>,
                 let text = exchange
                     .base()
                     .store
-                    .positions()
+                    .positions()?
                     .iter()
                     .map(|position| {
                         format!(

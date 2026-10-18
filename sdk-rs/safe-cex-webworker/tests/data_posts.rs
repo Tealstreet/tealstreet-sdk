@@ -5,12 +5,13 @@ mod error_post_support;
 #[allow(dead_code)]
 mod runtime;
 use safe_cex_exchange::js_runtime::value::Js;
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
     runtime::{ExchangeError, ExchangeFuture, ListenerCleanup},
 };
-use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::*;
 use safe_cex_webworker::data_post::WorkerDataPost;
 use safe_cex_webworker::{

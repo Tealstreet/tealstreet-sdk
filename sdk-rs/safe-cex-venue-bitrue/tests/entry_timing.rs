@@ -1,6 +1,6 @@
 //! Own-entry effects and post-await work are observed separately.
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_store::{Store, store::DefaultStore};
 use safe_cex_types::PositionSide;
 use safe_cex_venue_bitrue::{
     account_helpers::AccountPositionSnapshot, account_reads, leverage_reads, position_metadata,
@@ -35,19 +35,29 @@ fn native_entry_phases_match_actual_typescript() {
     let store = DefaultStore::default();
     let mut rows = Vec::new();
     macro_rules! leverage {
-  ($method:ident,$name:literal,$expected:expr) => {{
+  ($method:ident,$name:literal,$expected:expr,$value:expr) => {{
    let calls=Cell::new(0);let polls=Cell::new(0);
    let future=leverage_reads::$method(&store,"BTC",false,|_,_|Ok(request(&calls,&polls,None)));
    assert_eq!(calls.get(),1,concat!("ENTRY-",$name));assert_eq!(polls.get(),0,"ENTRY-NO-EAGER-POLL");
-   let result=ready(future);assert_eq!(result,$expected,concat!("ENTRY-RESULT-",$name));assert_eq!(polls.get(),1);
+   let result=($value)(ready(future));assert_eq!(result,$expected,concat!("ENTRY-RESULT-",$name));assert_eq!(polls.get(),1);
    let observed=serde_json::to_value(result).unwrap();
             let observed=observed.as_f64().map(|v|json!(format!("{:016x}",v.to_bits()))).unwrap_or(observed);
             rows.push(json!({"name":$name,"callsAtReturn":1,"result":observed}));
   }};
  }
-    leverage!(fetch_and_sync_symbol_max_leverage, "sync", None::<f64>);
-    leverage!(fetch_symbol_max_leverage, "leverage", 1.0);
-    leverage!(update_symbol_metadata, "update", ());
+    leverage!(
+        fetch_and_sync_symbol_max_leverage,
+        "sync",
+        None::<f64>,
+        |value: Option<f64>| value
+    );
+    leverage!(
+        fetch_symbol_max_leverage,
+        "leverage",
+        1.0,
+        |value: Result<f64, ExchangeError>| value.unwrap()
+    );
+    leverage!(update_symbol_metadata, "update", (), |value: ()| value);
     let calls = Cell::new(0);
     let polls = Cell::new(0);
     let emits = Cell::new(0);
@@ -67,7 +77,7 @@ fn native_entry_phases_match_actual_typescript() {
     rows.push(json!({"name":"raw","callsAtReturn":1,"result":{"code":0,"tag":17}}));
     let calls = Cell::new(0);
     let polls = Cell::new(0);
-    let before = store.balance_handle();
+    let before = store.balance_handle().unwrap();
     let future = account_reads::fetch_balance(
         &store,
         || Ok(request(&calls, &polls, None)),
@@ -77,7 +87,16 @@ fn native_entry_phases_match_actual_typescript() {
     assert_eq!(polls.get(), 0, "ENTRY-BALANCE-NO-POLL");
     let balance = ready(future).unwrap();
     assert!(
-        std::sync::Arc::ptr_eq(&before, &balance),
+        before
+            .native_value()
+            .downcast::<safe_cex_exchange::js_runtime::value::Js>()
+            .unwrap()
+            .same_reference(
+                &balance
+                    .native_value()
+                    .downcast::<safe_cex_exchange::js_runtime::value::Js>()
+                    .unwrap()
+            ),
         "ENTRY-BALANCE-OLD-HANDLE"
     );
     assert_eq!(polls.get(), 1);

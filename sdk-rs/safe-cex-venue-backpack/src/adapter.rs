@@ -390,7 +390,7 @@ impl reads::Host for Frame {
         self.owner
             .base
             .store
-            .markets()
+            .markets()?
             .iter()
             .find(|m| m.symbol == s)
             .map(|m| {
@@ -405,7 +405,7 @@ impl reads::Host for Frame {
             .owner
             .base
             .store
-            .markets()
+            .markets()?
             .iter()
             .map(|m| {
                 serde_json::to_value(m)
@@ -450,7 +450,7 @@ impl reads::Host for Frame {
             .map_err(|e| ExchangeError::new(e.to_string()))?;
         crate::order_utils::map_order(
             &order,
-            |s, side, n| Ok(self.determine(s, side, n)),
+            |s, side, n| self.determine(s, side, n),
             |m, severity| self.owner.base.log(m, severity),
         )
     }
@@ -461,28 +461,33 @@ impl reads::Host for Frame {
         side: OrderSide,
         n: f64,
     ) -> Result<OrderType, ExchangeError> {
-        Ok(self.determine(&symbol.utf8()?, side, n))
+        self.determine(&symbol.utf8()?, side, n)
     }
     fn trigger_by(&mut self, tp: bool) -> Result<JsString, ExchangeError> {
         Ok(self.reference(tp, None))
     }
 }
 impl Frame {
-    fn determine(&self, symbol: &str, side: OrderSide, trigger: f64) -> OrderType {
+    fn determine(
+        &self,
+        symbol: &str,
+        side: OrderSide,
+        trigger: f64,
+    ) -> Result<OrderType, ExchangeError> {
         let tickers = self
             .owner
             .base
             .store
-            .tickers()
+            .tickers()?
             .iter()
             .map(|t| (t.symbol.clone(), Some(t.last), Some(t.mark)))
             .collect::<Vec<_>>();
-        crate::private_order_utils::determine_trigger_order_type(
+        Ok(crate::private_order_utils::determine_trigger_order_type(
             &tickers,
             &symbol.to_owned(),
             side,
             Some(trigger),
-        )
+        ))
     }
     fn reference(&self, tp: bool, explicit: Option<OrderStopTriggerType>) -> JsString {
         let v = crate::order_utils::get_trigger_by(
@@ -528,7 +533,7 @@ impl actions::Host for Frame {
             .owner
             .base
             .store
-            .markets()
+            .markets()?
             .iter()
             .find(|m| m.symbol == symbol)
             .cloned())
@@ -612,7 +617,7 @@ impl actions::Host for Frame {
             .owner
             .base
             .store
-            .orders()
+            .orders()?
             .iter()
             .find(|o| o.id == id)
             .cloned()
@@ -665,7 +670,7 @@ impl BackpackExchange {
                 Ok(owner
                     .base
                     .store
-                    .markets()
+                    .markets()?
                     .iter()
                     .find(|m| m.symbol == symbol)
                     .map(|m| m.id.clone()))
@@ -697,7 +702,7 @@ impl BackpackExchange {
                 Ok(owner
                     .base
                     .store
-                    .markets()
+                    .markets()?
                     .iter()
                     .find(|m| m.symbol == s)
                     .map(|m| m.id.clone()))
@@ -797,7 +802,7 @@ impl BackpackExchange {
         };
         crate::order_utils::map_order(
             order,
-            |s, side, n| Ok(frame.determine(s, side, n)),
+            |s, side, n| frame.determine(s, side, n),
             |m, s| self.base.log(m, s),
         )
     }
@@ -815,7 +820,7 @@ impl BackpackExchange {
         symbol: &str,
         side: OrderSide,
         n: f64,
-    ) -> OrderType {
+    ) -> Result<OrderType, ExchangeError> {
         Frame {
             owner: self.clone(),
         }

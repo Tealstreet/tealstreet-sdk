@@ -1,8 +1,9 @@
+use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     runtime::*,
 };
-use safe_cex_store::{Store, store::DefaultStore};
+use safe_cex_store::Store;
 use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};
 use std::{
@@ -130,7 +131,7 @@ fn real_store_commit_preserves_listener_failure_and_stops_both_fanouts() {
     );
     let error = store.set_setting("isHedged", true).unwrap_err();
     assert!(
-        store.options().is_hedged,
+        store.options().unwrap().is_hedged,
         "mutation must remain committed after listener failure"
     );
     assert_eq!(

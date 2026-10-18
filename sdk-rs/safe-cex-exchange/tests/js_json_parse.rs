@@ -80,7 +80,7 @@ fn json_builtin_retains_lone_surrogate_units_and_matches_native_parse() {
         let shared = Rc::new(ScopeShared::new(
             runtime,
             http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));
@@ -155,7 +155,7 @@ fn real_http_json_response_retains_lone_surrogate_fields_and_rows() {
 #[test]
 fn real_http_surrogate_market_batch_reaches_the_production_store() {
     use safe_cex_exchange::js_runtime::{store, value::to_retained_input};
-    use safe_cex_store::store::DefaultStore;
+    use safe_cex_exchange::native_store::DefaultStore;
     use safe_cex_types::retained_json::RetainedJsonInput as Input;
 
     let output = Command::new("node")
@@ -209,7 +209,7 @@ fn real_http_surrogate_market_batch_reaches_the_production_store() {
             ]),
         );
         let production = Rc::new(DefaultStore::new());
-        let facade = store::facade(production.clone());
+        let facade = store::facade(production.clone()).unwrap();
         for case in cases {
             let pending = xhr.call_method("get", vec![Js::str("/markets")]).unwrap();
             let response = await_js(&runtime, pending).await.unwrap();
@@ -236,7 +236,7 @@ fn real_http_surrogate_market_batch_reaches_the_production_store() {
             facade
                 .call_method("update", vec![Js::object(vec![("markets", data)])])
                 .expect("lone surrogate in one typed String must not reject the market batch");
-            let rows = production.markets();
+            let rows = production.markets().unwrap();
             assert_eq!(
                 rows.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(),
                 ["before", "middle", "after"]
@@ -325,7 +325,7 @@ fn json_builtin_preserves_every_escaped_utf16_code_unit() {
         let shared = Rc::new(ScopeShared::new(
             runtime,
             http,
-            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
             Js::object(vec![]),
             (),
         ));

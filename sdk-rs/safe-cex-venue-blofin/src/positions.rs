@@ -25,6 +25,7 @@ impl JsNumberOutput for PositionsInput {
 }
 #[derive(Debug)]
 pub enum PositionMapError<E> {
+    Store(safe_cex_types::StoreReadError),
     Coercion(JsCoercionError),
     Emitter(E),
 }
@@ -99,7 +100,7 @@ pub fn map_positions<E>(
     let mut out = Vec::new();
     for p in supported {
         let key = js_string(p.get("instId"))?;
-        let markets = store.markets_by_id();
+        let markets = store.markets_by_id()?;
         let Some(market) = markets.get(&key) else {
             if matches!(
                 js_table_lookup::<&str, ()>(&[], &key),
@@ -171,7 +172,7 @@ pub fn map_positions<E>(
             _ => {}
         }
         let id = create_position_id(&market.symbol, Some(side), Some(mode));
-        let positions = store.positions();
+        let positions = store.positions()?;
         let existing = positions.iter().find(|sp| sp.id == id);
         let parsed_leverage = number(p.get("leverage"))?;
         let mut leverage = if parsed_leverage.is_finite() && parsed_leverage > 0.0 {
@@ -183,7 +184,7 @@ pub fn map_positions<E>(
             if let Some(existing) = existing.filter(|p| p.leverage > 0.0) {
                 leverage = existing.leverage;
             } else {
-                let fetched = store.fetched_leverage();
+                let fetched = store.fetched_leverage()?;
                 if let Some(fetched) = fetched.get(&market.symbol) {
                     if fetched.is_fetching != Some(true) {
                         leverage = if side == PositionSide::Long {
@@ -262,5 +263,11 @@ pub fn map_positions<E>(
 impl PositionsInput {
     pub(crate) fn from_retained(value: Value) -> Self {
         Self { value }
+    }
+}
+
+impl<E> From<safe_cex_types::StoreReadError> for PositionMapError<E> {
+    fn from(error: safe_cex_types::StoreReadError) -> Self {
+        Self::Store(error)
     }
 }

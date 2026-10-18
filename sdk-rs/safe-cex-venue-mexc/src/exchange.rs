@@ -390,6 +390,51 @@ fn failure_message(error: &RestFailure) -> Result<String, ExchangeError> {
     }
 }
 
+// The source catch still receives its original JSON throw, or the exact native
+// Store read failure. Only the legacy HTTP diagnostic arm is a JSON view.
+enum ReadFailure {
+    Value(Value),
+    Store(safe_cex_types::StoreReadError),
+}
+impl From<Value> for ReadFailure {
+    fn from(value: Value) -> Self {
+        Self::Value(value)
+    }
+}
+impl From<String> for ReadFailure {
+    fn from(value: String) -> Self {
+        Self::Value(Value::String(value))
+    }
+}
+impl From<&str> for ReadFailure {
+    fn from(value: &str) -> Self {
+        Self::Value(Value::String(value.into()))
+    }
+}
+impl From<safe_cex_types::StoreReadError> for ReadFailure {
+    fn from(value: safe_cex_types::StoreReadError) -> Self {
+        Self::Store(value)
+    }
+}
+impl ReadFailure {
+    fn raw(self) -> safe_cex_exchange::js_runtime::value::Js {
+        match self {
+            Self::Value(value) => safe_cex_exchange::js_runtime::value::from_json(&value),
+            Self::Store(error) => safe_cex_exchange::js_runtime::value::Thrown::from(error).value,
+        }
+    }
+}
+fn native_failure_message(error: &ExchangeError) -> Result<String, ExchangeError> {
+    match error
+        .origin
+        .as_ref()
+        .and_then(|origin| origin.error().downcast_ref::<RestFailure>())
+    {
+        Some(original) => failure_message(original),
+        None => Ok(error.message.clone()),
+    }
+}
+
 fn failure_report_value(error: &RestFailure) -> Value {
     error
         .response
@@ -421,7 +466,7 @@ impl MexcExchange {
         local_to_utc: Rc<dyn Fn(f64) -> f64>,
         sockets: crate::sockets::MexcSocketDependencies,
         external: ExternalPublicDataFactory,
-    ) -> Rc<Self> {
+    ) -> Result<Rc<Self>, ExchangeError> {
         let exchange = Rc::new(Self {
             base: Rc::new(base),
             external,
@@ -437,7 +482,9 @@ impl MexcExchange {
             public_socket: RefCell::default(),
             binding: std::cell::OnceCell::new(),
         });
-        let _ = exchange.binding.set(binding::Host::new(&exchange));
+        let _ = exchange
+            .binding
+            .set(binding::Host::new(&exchange).map_err(|error| error.to_exchange_error())?);
         let public = crate::ws_public::MexcPublicProtocol::bind(
             &exchange,
             sockets.runtime.clone(),
@@ -491,7 +538,7 @@ impl MexcExchange {
             safe_cex_exchange::socket_lifecycle::SocketSlot::Private,
             Some(private),
         );
-        exchange
+        Ok(exchange)
     }
     pub(crate) fn login_signature(
         self: &Rc<Self>,
@@ -892,7 +939,7 @@ impl MexcExchange {
             for row in extract_rows(Some(&payload), &["orders".into(), "items".into()]) {
                 // The source reads the Store getter once per row, before reading
                 // row.symbol. Release its borrow before entering the normalizer.
-                let markets = self.base.store.markets_by_symbol();
+                let markets = self.base.store.markets_by_symbol()?;
                 if row.is_null() {
                     let mut error =
                         ExchangeError::new("Cannot read properties of null (reading 'symbol')");
@@ -984,18 +1031,17 @@ impl MexcExchange {
                     .map_err(|error| failure_report_value(&error))?;
                 let payload: Value =
                     parse_response_json(&response.body).map_err(|error| error.to_string())?;
-                let requested_symbols = symbols
-                    .as_ref()
-                    .filter(|symbols| !symbols.is_empty())
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        self.base
-                            .store
-                            .markets()
-                            .iter()
-                            .map(|market| market.symbol.clone())
-                            .collect()
-                    });
+                let requested_symbols = match symbols.as_ref().filter(|symbols| !symbols.is_empty())
+                {
+                    Some(symbols) => symbols.clone(),
+                    None => self
+                        .base
+                        .store
+                        .markets()?
+                        .iter()
+                        .map(|market| market.symbol.clone())
+                        .collect(),
+                };
                 let requested: HashSet<_> = requested_symbols.iter().cloned().collect();
 
                 // Match source .map(...).filter(...): normalize every source row
@@ -1003,7 +1049,7 @@ impl MexcExchange {
                 let mut open_positions = Vec::new();
                 for row in extract_rows(Some(&payload), &[]) {
                     let market = {
-                        let markets = self.base.store.markets_by_symbol();
+                        let markets = self.base.store.markets_by_symbol()?;
                         if row.is_null() {
                             return Err("Cannot read properties of null (reading 'symbol')".into());
                         }
@@ -1033,7 +1079,7 @@ impl MexcExchange {
                     .collect();
                 let mut all_positions = open_positions;
                 for symbol in requested_symbols {
-                    let market = self.base.store.markets_by_symbol().get(&symbol).cloned();
+                    let market = self.base.store.markets_by_symbol()?.get(&symbol).cloned();
                     let Some(market) = market else {
                         continue;
                     };
@@ -1077,7 +1123,7 @@ impl MexcExchange {
                     }
                     _ => {}
                 }
-                Ok::<_, Value>(all_positions)
+                Ok::<_, ReadFailure>(all_positions)
             }
             .await;
 
@@ -1085,13 +1131,11 @@ impl MexcExchange {
                 Ok(positions) => Ok(positions),
                 Err(message) => {
                     self.base.emit_and_log_error(
-                        ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(
-                            &message,
-                        )),
+                        ExchangeErrorInput::Raw(message.raw()),
                         None,
                         None,
                     )?;
-                    let positions = self.base.store.positions();
+                    let positions = self.base.store.positions()?;
                     Ok(match symbols {
                         Some(symbols) => positions
                             .iter()
@@ -1193,7 +1237,7 @@ impl MexcExchange {
                     rows.insert(id, object.clone());
                 }
                 let mut tickers = Vec::new();
-                for market in self.base.store.markets().iter() {
+                for market in self.base.store.markets()?.iter() {
                     if let Some(raw) = rows.get(&market.id) {
                         tickers.push(
                             normalize_ticker(raw, market, self.local_to_utc.as_ref())
@@ -1201,7 +1245,7 @@ impl MexcExchange {
                         );
                     }
                 }
-                Ok::<_, Value>(tickers)
+                Ok::<_, ReadFailure>(tickers)
             }
             .await;
 
@@ -1209,13 +1253,11 @@ impl MexcExchange {
                 Ok(tickers) => Ok(tickers),
                 Err(message) => {
                     self.base.emit_and_log_error(
-                        ExchangeErrorInput::Raw(safe_cex_exchange::js_runtime::value::from_json(
-                            &message,
-                        )),
+                        ExchangeErrorInput::Raw(message.raw()),
                         None,
                         None,
                     )?;
-                    Ok(self.base.store.tickers().to_vec())
+                    Ok(self.base.store.tickers()?.to_vec())
                 }
             }
         })
@@ -1237,7 +1279,7 @@ impl MexcExchange {
             // declared choice for Market (see CLAUDE.md on
             // owned-snapshot-vs-live-alias), so this is not a new divergence.
             let market = {
-                let markets = self.base.store.markets_by_symbol();
+                let markets = self.base.store.markets_by_symbol()?;
                 markets
                     .get(&symbol)
                     .ok_or_else(|| ExchangeError::new(format!("Market {symbol} not found")))?
@@ -1352,7 +1394,7 @@ impl MexcExchange {
                         None,
                         None,
                     )?;
-                    Ok(self.base.store.markets().to_vec())
+                    Ok(self.base.store.markets()?.to_vec())
                 }
             }
         })
@@ -1375,7 +1417,7 @@ impl MexcExchange {
         if self
             .base
             .store
-            .orders()
+            .orders()?
             .iter()
             .any(|order| order.id == clean_id && order.status != OrderStatus::Canceled)
         {
@@ -1431,12 +1473,12 @@ impl MexcExchange {
         let xhr = self.xhr.clone();
         let settings = self.symbol_settings.clone();
         let prepared = (|| -> Result<_, ExchangeError> {
-            let market = self.base.store.markets_by_symbol().get(&symbol).cloned();
+            let market = self.base.store.markets_by_symbol()?.get(&symbol).cloned();
             let config = self.symbol_settings.borrow().get(&symbol).cloned();
             let config = match config {
                 Some(config) => config,
                 None => {
-                    let positions = self.base.store.positions().to_vec();
+                    let positions = self.base.store.positions()?.to_vec();
                     derive_symbol_config(
                         &symbol,
                         &positions,
@@ -1618,7 +1660,7 @@ impl MexcExchange {
         symbol: &str,
         leverage: FetchedLeverage,
     ) -> Result<(), ExchangeError> {
-        let mut fetched = base.store.fetched_leverage().clone();
+        let mut fetched = base.store.fetched_leverage()?.clone();
         fetched.insert(symbol.to_owned(), leverage);
         base.store.update(
             StoreUpdate {
@@ -1677,7 +1719,10 @@ impl MexcExchange {
                     {
                         Ok(rows) => orders.extend(rows),
                         Err(error) => self.base.log(
-                            &format!("Failed to fetch MEXC {label}: {}", failure_message(&error)?),
+                            &format!(
+                                "Failed to fetch MEXC {label}: {}",
+                                native_failure_message(&error)?
+                            ),
                             "warning",
                         )?,
                     }
@@ -1695,7 +1740,7 @@ impl MexcExchange {
         url: String,
         params: Value,
         kind: OrderKind,
-    ) -> Result<Vec<Order>, RestFailure> {
+    ) -> Result<Vec<Order>, ExchangeError> {
         let request = RestRequest {
             method: "get".into(),
             url,
@@ -1712,7 +1757,8 @@ impl MexcExchange {
                 return Err(RestFailure::pre_transmit(
                     "Cannot read properties of null (reading 'symbol')".into(),
                     request.clone(),
-                ));
+                )
+                .into());
             }
             // JSON scalars/arrays have no symbol/id fields; source property
             // access boxes them and the mapper rejects the missing identity.
@@ -1720,7 +1766,7 @@ impl MexcExchange {
             let raw = row.as_object().unwrap_or(&empty);
             let symbol = from_mexc_symbol(raw.get("symbol"))
                 .map_err(|e| RestFailure::pre_transmit(e.message.into(), request.clone()))?;
-            let markets = self.base.store.markets_by_symbol();
+            let markets = self.base.store.markets_by_symbol()?;
             let market = markets.get(&symbol);
             let normalized = match kind {
                 OrderKind::Regular => normalize_order(raw, market, self.local_to_utc.as_ref()),
@@ -1762,7 +1808,7 @@ impl MexcExchange {
                     Err(error) => self.base.log(
                         &format!(
                             "Failed to fetch MEXC open orders: {}",
-                            failure_message(&error)?
+                            native_failure_message(&error)?
                         ),
                         "warning",
                     )?,
@@ -1803,12 +1849,12 @@ impl MexcExchange {
                         .filter(|o| o.symbol == symbol)
                         .cloned()
                         .collect();
-                    let merged = self.merge_snapshot(fetched, Some(&symbol), regular);
+                    let merged = self.merge_snapshot(fetched, Some(&symbol), regular)?;
                     self.base.store.set_orders_for_symbol(&symbol, merged)?;
                 }
             } else {
-                let merged = self.merge_snapshot(orders.clone(), None, regular);
-                let mut loaded = self.base.store.loaded().clone();
+                let merged = self.merge_snapshot(orders.clone(), None, regular)?;
+                let mut loaded = self.base.store.loaded()?.clone();
                 loaded.orders = true;
                 self.base.store.update(
                     StoreUpdate {
@@ -1827,10 +1873,10 @@ impl MexcExchange {
         fetched: Vec<Order>,
         symbol: Option<&str>,
         regular: bool,
-    ) -> Vec<Order> {
+    ) -> Result<Vec<Order>, ExchangeError> {
         let ids: HashSet<_> = fetched.iter().map(|o| o.id.as_str()).collect();
-        let stored = self.base.store.orders();
-        if regular {
+        let stored = self.base.store.orders()?;
+        Ok(if regular {
             let stops = stored
                 .iter()
                 .filter(|o| self.should_preserve_stop_like_order(o, symbol))
@@ -1885,7 +1931,7 @@ impl MexcExchange {
                 .cloned()
                 .collect();
             unique_orders(fetched.into_iter().chain(existing).chain(shields))
-        }
+        })
     }
     // ts: MexcExchange.shouldPreserveStopLikeOrder
     fn should_preserve_stop_like_order(&self, order: &Order, symbol: Option<&str>) -> bool {

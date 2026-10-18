@@ -26,10 +26,14 @@ use std::{cell::RefCell, rc::Rc};
 fn order_error(error: PortfolioFailure) -> CoinbaseOrderFailure {
     CoinbaseOrderFailure {
         value: error.value.clone(),
+        native: Some(super::error::exchange_error(&error)),
     }
 }
 fn portfolio_error(error: CoinbaseOrderFailure) -> PortfolioFailure {
-    Rc::new(PortfolioThrown::from_value(error.value))
+    match error.native {
+        Some(native) => failure(native),
+        None => Rc::new(PortfolioThrown::from_value(error.value)),
+    }
 }
 
 pub(super) struct OrderHost {
@@ -108,16 +112,18 @@ impl Host {
             next_orders_poll_at: class.next_orders_poll_at.get(),
         };
         let result =
-            order_create::should_poll_orders(&mut state, &mut OrderHost::new(self.clone()));
+            order_create::should_poll_orders(&mut state, &mut OrderHost::new(self.clone()))
+                .map_err(portfolio_error);
         class.next_orders_poll_at.set(state.next_orders_poll_at);
-        Ok(result)
+        result
     }
     pub(super) fn merge_rest(&self, orders: Frame) -> Result<Frame, PortfolioFailure> {
         let orders: Vec<Order> = to_typed(&to_js(&orders)).map_err(from_thrown)?;
         let merged = order_create::merge_rest_orders_with_fresh_ws_state(
             &mut OrderHost::new(self.clone()),
             Rc::new(orders.into_iter().map(Rc::new).collect()),
-        );
+        )
+        .map_err(portfolio_error)?;
         value::from_js(&from_typed(merged.as_ref()).map_err(from_thrown)?)?
             .ok_or_else(|| Host::json_error("Error", "Undefined merged orders"))
     }
@@ -142,38 +148,52 @@ impl CoinbaseOrderHost for OrderHost {
     fn now_ms(&mut self) -> f64 {
         self.host.now()
     }
-    fn orders_loaded(&mut self) -> bool {
-        self.host.shared.store.loaded().orders
+    fn orders_loaded(&mut self) -> Result<bool, CoinbaseOrderFailure> {
+        Ok(self
+            .host
+            .shared
+            .store
+            .loaded()
+            .map_err(|error| order_error(failure(error.into())))?
+            .orders)
     }
-    fn orders(&mut self) -> Vec<Rc<Order>> {
-        self.host
+    fn orders(&mut self) -> Result<Vec<Rc<Order>>, CoinbaseOrderFailure> {
+        Ok(self
+            .host
             .shared
             .store
             .orders()
+            .map_err(|error| order_error(failure(error.into())))?
             .iter()
             .cloned()
             .map(Rc::new)
-            .collect()
+            .collect())
     }
-    fn market_by_symbol(&mut self, symbol: &str) -> Option<Rc<Market>> {
-        self.host
+    fn market_by_symbol(
+        &mut self,
+        symbol: &str,
+    ) -> Result<Option<Rc<Market>>, CoinbaseOrderFailure> {
+        Ok(self
+            .host
             .shared
             .store
             .markets_by_symbol()
+            .map_err(|error| order_error(failure(error.into())))?
             .get(symbol)
             .cloned()
-            .map(Rc::new)
+            .map(Rc::new))
     }
-    fn markets_by_id(&mut self) -> &IndexMap<String, Rc<Market>> {
+    fn markets_by_id(&mut self) -> Result<&IndexMap<String, Rc<Market>>, CoinbaseOrderFailure> {
         self.markets = self
             .host
             .shared
             .store
             .markets_by_id()
+            .map_err(|error| order_error(failure(error.into())))?
             .iter()
             .map(|(key, value)| (key.clone(), Rc::new(value.clone())))
             .collect();
-        &self.markets
+        Ok(&self.markets)
     }
     fn resolve_caller_client_order_id(
         &mut self,
@@ -202,7 +222,7 @@ impl CoinbaseOrderHost for OrderHost {
             ),
         );
         let (promise, resolve) = Promise::pending();
-        request.observe(&self.host.shared.extra.spawn, move |result| { resolve.resolve(result.map_err(order_error).and_then(|data| data.as_object().map(|fields| CoinbaseOrderResponse::from_retained(fields.to_vec())).ok_or_else(|| CoinbaseOrderFailure { value: Some(json!({"name":"TypeError","message":"Coinbase create response is not a record"})) }))); });
+        request.observe(&self.host.shared.extra.spawn, move |result| { resolve.resolve(result.map_err(order_error).and_then(|data| data.as_object().map(|fields| CoinbaseOrderResponse::from_retained(fields.to_vec())).ok_or_else(|| CoinbaseOrderFailure { value: Some(json!({"name":"TypeError","message":"Coinbase create response is not a record"})) , native: None }))); });
         promise
     }
     fn post_cancel_orders(
@@ -349,6 +369,7 @@ impl OrderSnapshotHost for Host {
             &mut OrderHost::new(self.clone()),
             &product_id,
         )
+        .map_err(portfolio_error)?
         .map(|market| Rc::new(RefCell::new((*market).clone()))))
     }
     fn map_rest_order(
@@ -393,6 +414,7 @@ impl OrderEditHost for Host {
             self.shared
                 .store
                 .orders()
+                .map_err(|error| failure(error.into()))?
                 .iter()
                 .cloned()
                 .map(Self::synced_order)
@@ -404,6 +426,7 @@ impl OrderEditHost for Host {
             .shared
             .store
             .markets_by_symbol()
+            .map_err(|error| failure(error.into()))?
             .get(&symbol)
             .cloned()
             .map(|market| Rc::new(RefCell::new(market))))
