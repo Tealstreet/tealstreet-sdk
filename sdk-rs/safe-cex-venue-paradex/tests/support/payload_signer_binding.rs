@@ -3,13 +3,8 @@ use safe_cex_crypto::{
     Encoding, PayloadScheme, PayloadSigner, PayloadSignerRequest, PayloadSignerResult,
 };
 use safe_cex_exchange::{
-    js_runtime::{
-        client::{self, JsHttpHost},
-        promise::JsFuture,
-        value::to_json,
-    },
+    js_runtime::{client, value::to_json},
     native::native_runtime,
-    runtime::ExchangeRuntime,
 };
 use serde_json::{Value, json};
 use std::{
@@ -78,33 +73,21 @@ impl PayloadSigner for Signer {
         })
     }
 }
-struct ProviderHost {
-    wire: Rc<dyn JsHttpHost>,
-    signer: Rc<Signer>,
+struct OriginAdapter {
+    wire: Arc<dyn safe_cex_transport::RestAdapter>,
     origin: String,
 }
-impl JsHttpHost for ProviderHost {
-    fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
-        self.wire.runtime()
-    }
-    fn send(&self, config: Js) -> JsFuture<'static> {
-        let url = String::from_utf16(&config.get("url").unwrap().to_js_string().unwrap()).unwrap();
-        let (_, path) = url
+impl safe_cex_transport::RestAdapter for OriginAdapter {
+    fn execute(
+        &self,
+        mut request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        let (_, path) = request
+            .url
             .split_once(".paradex.trade")
             .expect("actual Paradex API origin");
-        config
-            .set("url", Js::str(&format!("{}{path}", self.origin)))
-            .unwrap();
-        self.wire.send(config)
-    }
-    fn configure_exchange(
-        &self,
-        name: ExchangeName,
-    ) -> Result<(), safe_cex_exchange::js_runtime::value::Thrown> {
-        self.wire.configure_exchange(name)
-    }
-    fn payload_signer(&self) -> Option<Rc<dyn PayloadSigner>> {
-        Some(self.signer.clone())
+        request.url = format!("{}{path}", self.origin);
+        self.wire.execute(request)
     }
 }
 struct Loopback {
@@ -181,9 +164,12 @@ impl Loopback {
 impl Drop for Loopback {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        if let Err(error)=self.thread.take().unwrap().join() {
-            if thread::panicking() { eprintln!("loopback server also panicked: {error:?}"); }
-            else { std::panic::resume_unwind(error); }
+        if let Err(error) = self.thread.take().unwrap().join() {
+            if thread::panicking() {
+                eprintln!("loopback server also panicked: {error:?}");
+            } else {
+                std::panic::resume_unwind(error);
+            }
         }
     }
 }
@@ -198,11 +184,9 @@ fn native_payload_provider_signs_real_paradex_order_modify_and_jwt() {
         let server=Loopback::new();
         let runtime=native_runtime();
         let signer=Rc::new(Signer {requests:RefCell::new(Vec::new()),reject:Cell::new(false)});
-        let host:Rc<dyn JsHttpHost>=Rc::new(ProviderHost {
-            wire:client::rest_http_host(runtime.clone(),Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap())),
-            signer:signer.clone(),
-            origin:server.url.clone(),
-        });
+        #[expect(clippy::arc_with_non_send_sync, reason="the production RestAdapter port is local-task compatible")]
+        let adapter=Arc::new(OriginAdapter {wire:Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),origin:server.url.clone()});
+        let host=client::rest_http_host_with_signers(runtime.clone(),adapter,None,Some(signer.clone()));
         let venue=ParadexExchange::new(ExchangeName::Paradex,
             serde_json::from_value(json!({"key":"hosted-key-reference","secret":"","paradexAddress":"0x1234","subkeyAddress":"0x456"})).unwrap(),
             Rc::new(safe_cex_store::store::DefaultStore::new()),
@@ -235,8 +219,16 @@ fn native_payload_provider_signs_real_paradex_order_modify_and_jwt() {
         assert!(output.status.success(),"Node SDK: {}",String::from_utf8_lossy(&output.stderr));
         let source:Value=serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(source["requests"],json!(*signer.requests.borrow()));
-        assert_eq!(source["outputs"],json!(outputs));
+        assert_eq!(source["outputs"].as_array().unwrap().len(),outputs.len());
+        for (native,source) in outputs.iter().zip(source["outputs"].as_array().unwrap()) {
+            assert_eq!(native.as_object().unwrap().len(),3);
+            assert_eq!(source.as_object().unwrap().len(),3);
+            assert_eq!(native["signature"],source["signature"]);
+            assert_eq!(native["headers"],source["headers"]);
+            assert_eq!(native["signature_timestamp"].as_f64().unwrap().to_bits(),source["signature_timestamp"].as_f64().unwrap().to_bits());
+        }
         assert_eq!(source["token"],"loopback-token");
+        {
         let http=server.requests.lock().unwrap(); assert_eq!(http.len(),3);
         assert_eq!(http[0]["path"],"/v1/system/config");
         for field in ["method","path"] {assert_eq!(http[1][field],http[2][field]);}
@@ -244,7 +236,15 @@ fn native_payload_provider_signs_real_paradex_order_modify_and_jwt() {
             assert!(http[1]["headers"][header].is_string(),"native header {header}");
             assert_eq!(http[1]["headers"][header],http[2]["headers"][header],"actual JWT {header}");
         }
-        drop(http);
+        }
+        let mut hmac=Vec::new();
+        for encoding in ["hex","base64"] {
+            let request=from_typed(&json!({"exchangeName":"bybit","key":"hosted-key-reference","scheme":"hmac-sha256","encoding":encoding,"payload":"native HMAC control"})).unwrap();
+            let result=await_js(&venue.rt.exchange_runtime(),options.call_method("payloadSigner",vec![request]).unwrap()).await.unwrap();
+            hmac.push(to_json(&result).unwrap());
+        }
+        assert_eq!(json!(hmac),source["hmacOutputs"]);
+        assert_eq!(json!(&signer.requests.borrow()[3..]),source["hmacRequests"]);
         assert!(venue.base().signers.payload_signer.as_ref().is_some_and(|v|Rc::ptr_eq(v,&(signer.clone() as Rc<dyn PayloadSigner>))));
         signer.reject.set(true);
         let failure=await_js(&venue.rt.exchange_runtime(),request_signer.call_method("signOrder",vec![from_typed(&parameters).unwrap()]).unwrap()).await.unwrap_err();
