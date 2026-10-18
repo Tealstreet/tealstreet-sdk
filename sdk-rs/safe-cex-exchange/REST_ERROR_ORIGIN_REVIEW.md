@@ -27,3 +27,11 @@ causes retain the existing visible owned-value refusal.
 The execute cancellation pin was reviewed against exported production syntax.
 Capture remains synchronous after the existing await; no task, waiter or owned
 reservation is introduced, so its no-owned-latch classification is unchanged.
+
+A raw-client host guard also retains string/number/null/undefined rejection
+diagnostics through typed projection, matching the underlying Axios rejection
+contract. This is separate from venue-factory error enhancement.
+
+The four production error-boundary files at compiled negative checkpoint
+a90413c80b are byte-identical to master fe96401062; subsequent base merges do not
+turn the name-loss regression into a historical-only failure.

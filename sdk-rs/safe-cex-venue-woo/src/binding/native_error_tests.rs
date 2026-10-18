@@ -167,3 +167,36 @@ fn constructed_woo_client_keeps_error_fields_through_typed_rest_adapter() {
     use safe_cex_exchange::exchange::Exchange;
     exchange.dispose().unwrap();
 }
+
+#[test]
+fn raw_client_primitive_rejections_keep_typed_diagnostics() {
+    for original in [
+        Js::str("primitive rejection"),
+        Js::Number(42.0),
+        Js::Null,
+        Js::Undefined,
+    ] {
+        let runtime = Rc::new(Runtime::default());
+        let host = Rc::new(Host {
+            runtime: runtime.clone(),
+            original: original.clone(),
+            requests: Rc::new(RefCell::new(vec![])),
+        });
+        let client = safe_cex_exchange::js_runtime::client::create(host, Js::object(vec![]));
+        let adapter = JsRestAdapter::new(runtime.clone(), client);
+        let failure = drive(
+            &runtime,
+            adapter.execute(RestRequest {
+                method: "GET".into(),
+                url: "/primitive".into(),
+                ..Default::default()
+            }),
+        )
+        .unwrap_err();
+        assert_eq!(
+            ExchangeError::from(failure).message,
+            original.to_display(),
+            "RAW-REST primitive diagnostic survives typed projection"
+        );
+    }
+}

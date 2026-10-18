@@ -23,6 +23,11 @@ const axios=require('axios');
     for(const key of ['name','message','code','stack','cause','response','isAxiosError'])assert.equal(caught[key],original[key]);
    }finally{venue.dispose();}
   }
+  for(const primitive of ['primitive rejection',42,null,undefined]){
+   const raw=axios.create();raw.defaults.adapter=async()=>{throw primitive;};
+   let rejected=false,rejection;try{await raw.get('/primitive');}catch(error){rejected=true;rejection=error;}
+   assert(rejected);assert.equal(rejection,primitive);
+  }
   process.stdout.write(JSON.stringify({asterdex:true,woo:true}));
  }finally{clock.stop();axios.defaults.adapter=prior;}
 })().catch(error=>{console.error(error);process.exitCode=1});

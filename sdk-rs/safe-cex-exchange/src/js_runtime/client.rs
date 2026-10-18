@@ -716,13 +716,19 @@ impl RestAdapter for JsRestAdapter {
                     let capture = (|| -> Result<_, crate::runtime::ExchangeError> {
                         let mut fields = Vec::new();
                         for field in ["name", "message", "code", "stack", "cause", "isAxiosError"] {
-                            let value = thrown.value.get(field)?;
+                            let value = optional(&thrown.value, field)?;
                             if !value.is_undefined() || thrown.value.has_own(field) {
                                 fields.push((
                                     field,
                                     super::value::owned::OwnedJsValue::from_js(&value)?,
                                 ));
                             }
+                        }
+                        if !fields.iter().any(|(field, _)| *field == "message") {
+                            fields.push((
+                                "message",
+                                super::value::owned::OwnedJsValue::string(&message),
+                            ));
                         }
                         Ok(super::value::owned::OwnedCallbackError::new(
                             super::value::owned::OwnedJsValue::object(fields),
