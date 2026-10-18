@@ -73,7 +73,7 @@ fn sorted(v: &Value) -> Value {
     }
 }
 fn ticker(v: &Ticker) -> Value {
-    json!({"id":v.id,"symbol":v.symbol,"bid":number(v.bid),"ask":number(v.ask),"last":number(v.last),"mark":number(v.mark),"index":number(v.index),"percentage":number(v.percentage),"fundingRate":number(v.funding_rate),"fundingTime":number(v.funding_time),"volume":number(v.volume),"quoteVolume":number(v.quote_volume),"openInterest":number(v.open_interest)})
+    json!({"id":v.id,"symbol":v.symbol,"bid":number(v.bid),"ask":number(v.ask),"last":number(v.last),"mark":number(v.mark),"index":v.index.map(number).unwrap_or(Value::Null),"percentage":number(v.percentage),"fundingRate":number(v.funding_rate),"fundingTime":number(v.funding_time),"volume":number(v.volume),"quoteVolume":number(v.quote_volume),"openInterest":number(v.open_interest)})
 }
 struct Host {
     input: Value,

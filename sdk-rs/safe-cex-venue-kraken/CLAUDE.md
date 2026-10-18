@@ -578,3 +578,9 @@ fills, every numeric bit and signed unwindowed/cursor requests. The constructed
 Scope test also checks exact native units and an unread throwing property.
 The standalone fills utility's separately documented profile is not broadened
 by this production binding fix.
+
+`TOPIC_ALIAS_REVIEW.md` records the UTF-16 collection decoder and physical public
+subscription boundary. Keep `Topic` units in canonical retained JSON until wire
+escaping; do not reintroduce a lossy String conversion. The `accepted_topic_alias`
+native witnesses, live-source script and compiled lossy-consumer control cover
+both Futures and Spot. `topic-alias-contracts.mjs` probes only this concrete alias.

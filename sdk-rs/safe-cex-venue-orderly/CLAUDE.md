@@ -257,3 +257,11 @@ live assembly; do not introduce a second host or an identity fallback.
 The four class/HTTP callable aliases are also registered with actual configured
 Host profiles and six-family invocation/REST observations in the same review.
 `class-alias-controls.py` faults these production capabilities independently.
+
+Ticker admission precedes raw native Store mutation: the material Store deliberately
+allows source-shaped fields, so its updateTicker cannot supply typed patch refusals.
+Orderly rejects a non-number patch only at an effective ticker target, defers its
+report until good siblings finish, and leaves the whole row unchanged. Numeric
+patches call the original Store method directly; later source and subscriber
+failures retain precedence and prethrow writes. The real exchange_trait cases
+check native graph slots before typed projection across all six families.

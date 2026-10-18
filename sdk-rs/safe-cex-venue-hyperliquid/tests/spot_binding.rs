@@ -127,7 +127,7 @@ fn bound_start_loads_spot_markets_balance_and_both_sockets() {
     );
     assert!(store.loaded().unwrap().markets && store.loaded().unwrap().tickers);
     assert!(
-        store.tickers().unwrap()[0].index.is_nan(),
+        store.tickers().unwrap()[0].index.unwrap().is_nan(),
         "source parseFloat(undefined) survives native Store"
     );
     assert!(
