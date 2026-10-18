@@ -709,3 +709,11 @@ canonical eager Promise waiter, so even ready/no-op/error results yield before
 an awaiting caller continues. Posting failures preserve earlier state commits
 and stop later cleanup/removal; tests compare actual source instances before
 polling as well as after settlement.
+
+
+Chaser module composition is scoped per host thread, matching independent worker
+module realms. Eager TS construction and lazy native construction only allocate
+an empty live list. The composition witness binds the singleton to the actual
+ChaserEngine and compares registration, cleanup and completion with maintained
+source; terminal host capabilities remain required. This accepts composition,
+not the separately tracked state, carrier, startup or method timing findings.
