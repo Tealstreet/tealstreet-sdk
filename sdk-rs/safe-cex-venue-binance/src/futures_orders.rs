@@ -127,7 +127,7 @@ pub fn format_futures_create_order(
         if reduce_only {
             insert(&mut request, "reduceOnly", "true");
         }
-        let max = market.limits.amount.max;
+        let max = safe_cex_num::numeric_value_to_number(&market.limits.amount.max);
         let lots = if amount > max {
             (amount / max).ceil()
         } else {

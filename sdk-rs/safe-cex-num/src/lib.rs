@@ -45,6 +45,14 @@ pub fn js_number_string(value: f64) -> String {
     safe_cex_types::js_coercion::js_number_string(value)
 }
 
+/// Number(value) at arithmetic consumers of a retained numeric runtime property.
+pub fn numeric_value_to_number(value: &safe_cex_types::NumericValue) -> f64 {
+    match value {
+        safe_cex_types::NumericValue::Number(value) => *value,
+        safe_cex_types::NumericValue::Text(value) => number_from_string(value),
+    }
+}
+
 pub fn js_to_fixed(value: f64, digits: f64) -> Result<String, &'static str> {
     use num_bigint::BigUint;
     let digits = if digits.is_nan() { 0.0 } else { digits.trunc() };

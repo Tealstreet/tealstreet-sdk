@@ -238,7 +238,7 @@ fn place_order(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
             if amount < min {
                 amount = min;
             }
-            let max = market.limits.amount.max;
+            let max = safe_cex_num::numeric_value_to_number(&market.limits.amount.max);
             if max != 0. && !max.is_nan() && amount > max {
                 amount = max;
             }
@@ -295,7 +295,7 @@ fn place_order(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
         for (key, value) in execution.own_entries()? {
             request.set_key(&key, value)?;
         }
-        let max = market.limits.amount.max;
+        let max = safe_cex_num::numeric_value_to_number(&market.limits.amount.max);
         let lots = if amount > max {
             safe_cex_num::divide(amount, max, None).ceil()
         } else {

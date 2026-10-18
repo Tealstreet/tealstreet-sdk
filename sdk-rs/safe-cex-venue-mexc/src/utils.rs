@@ -139,7 +139,10 @@ pub fn normalize_market(raw: &Input) -> Result<Market, JsCoercionError> {
         },
         limits: MarketLimits {
             cost: None,
-            amount: MarketLimitsAmount { min, max },
+            amount: MarketLimitsAmount {
+                min,
+                max: max.into(),
+            },
             leverage: MarketLimitsLeverage {
                 min: retained_number(raw.get("minLeverage"), Some(1.0))?,
                 max: retained_number(

@@ -45,7 +45,7 @@ fn optional(v: &mut Value, key: &str, x: Option<Value>) {
     }
 }
 fn market(m: &Market) -> Value {
-    let mut v = json!({"id":m.id,"symbol":m.symbol,"base":m.base,"quote":m.quote,"active":m.active,"precision":{"amount":number(m.precision.amount),"price":number(m.precision.price)},"limits":{"amount":{"min":number(m.limits.amount.min),"max":number(m.limits.amount.max)},"leverage":{"min":number(m.limits.leverage.min),"max":number(m.limits.leverage.max)}}});
+    let mut v = json!({"id":m.id,"symbol":m.symbol,"base":m.base,"quote":m.quote,"active":m.active,"precision":{"amount":number(m.precision.amount),"price":number(m.precision.price)},"limits":{"amount":{"min":number(m.limits.amount.min),"max":number(safe_cex_num::numeric_value_to_number(&m.limits.amount.max))},"leverage":{"min":number(m.limits.leverage.min),"max":number(m.limits.leverage.max)}}});
     optional(
         &mut v,
         "prettySymbol",

@@ -808,7 +808,7 @@ impl ApexOmniExchange {
                     cost: None,
                     amount: MarketLimitsAmount {
                         min: min_amount,
-                        max: max_amount,
+                        max: (max_amount).into(),
                     },
                     leverage: MarketLimitsLeverage {
                         min: min_leverage,

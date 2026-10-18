@@ -4302,6 +4302,7 @@ dependencies = [
  "safe-cex-types",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

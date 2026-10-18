@@ -87,7 +87,8 @@ where
                         cost: None,
                         amount: MarketLimitsAmount {
                             min: market_property(&details, "minOrderSize")?,
-                            max: market_property(&details.get("maxOrderSize")?, "value")?,
+                            max: (market_property::<f64>(&details.get("maxOrderSize")?, "value")?)
+                                .into(),
                         },
                         leverage: MarketLimitsLeverage {
                             min: 1.0,

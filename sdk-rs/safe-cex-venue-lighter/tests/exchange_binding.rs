@@ -166,7 +166,10 @@ fn fetch_markets_maps_perps_and_drops_spot_rows() {
     assert_eq!(btc.precision.amount, 0.0001);
     assert_eq!(btc.precision.price, 0.1);
     assert_eq!(btc.limits.amount.min, 0.0001);
-    assert_eq!(btc.limits.amount.max, 1000.0);
+    assert_eq!(
+        safe_cex_num::numeric_value_to_number(&btc.limits.amount.max),
+        1000.0
+    );
     assert_eq!(btc.limits.leverage.max, 50.0);
 }
 

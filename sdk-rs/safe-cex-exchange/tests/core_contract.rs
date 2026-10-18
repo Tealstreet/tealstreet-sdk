@@ -83,8 +83,12 @@ impl Exchange for Venue {
     }
 }
 fn venue() -> Venue {
+    venue_with_maximum(NumericValue::Number(5.0))
+}
+fn venue_with_maximum(maximum: NumericValue) -> Venue {
     let opts = serde_json::from_value(json!({"key":"k", "secret":"s"})).unwrap();
-    let market = serde_json::from_value(json!({"id":"BTC", "symbol":"BTC", "base":"BTC", "quote":"USDT", "active":true,"precision":{"amount":1,"price":0.1},"limits":{"amount":{"min":1,"max":5},"leverage":{"min":1,"max":100}}})).unwrap();
+    let mut market: Market = serde_json::from_value(json!({"id":"BTC", "symbol":"BTC", "base":"BTC", "quote":"USDT", "active":true,"precision":{"amount":1,"price":0.1},"limits":{"amount":{"min":1,"max":5},"leverage":{"min":1,"max":100}}})).unwrap();
+    market.limits.amount.max = maximum;
     let store = Rc::new(TestStore::new());
     store.data.borrow_mut().markets = vec![market];
     let settings = ExchangeSettings {
@@ -175,39 +179,43 @@ fn whole_batch_validates_before_any_venue_write_and_emits_before_rejection() {
 }
 #[test]
 fn zero_trigger_fields_are_present_and_split_checks_use_rounded_amount() {
-    let venue = venue();
-    let mut opts = order("good");
-    opts.stop_loss = Some(0.0);
-    assert!(venue.base.resolve_caller_client_order_id(&opts).is_err());
-    opts.stop_loss = None;
-    opts.amount = 5.49;
-    assert!(
-        venue.base.resolve_caller_client_order_id(&opts).is_ok(),
-        "caller split uses amount precision, not price precision"
-    );
-    opts.amount = 5.51;
-    assert!(venue.base.resolve_caller_client_order_id(&opts).is_err());
+    for maximum in [NumericValue::Number(5.0), NumericValue::Text("0005".into())] {
+        let venue = venue_with_maximum(maximum);
+        let mut opts = order("good");
+        opts.stop_loss = Some(0.0);
+        assert!(venue.base.resolve_caller_client_order_id(&opts).is_err());
+        opts.stop_loss = None;
+        opts.amount = 5.49;
+        assert!(
+            venue.base.resolve_caller_client_order_id(&opts).is_ok(),
+            "caller split uses amount precision, not price precision"
+        );
+        opts.amount = 5.51;
+        assert!(venue.base.resolve_caller_client_order_id(&opts).is_err());
+    }
 }
 #[test]
 fn minted_id_split_uses_amount_precision_identity() {
-    let mut venue = venue();
-    venue
-        .base
-        .settings
-        .client_order_id_rule
-        .as_mut()
-        .unwrap()
-        .mint = Some(Rc::new(|| "good-minted".into()));
-    let mut opts = order("good");
-    opts.client_order_id = None;
-    opts.amount = 5.49;
-    assert_eq!(
-        venue.base.mint_client_order_id(&opts).unwrap().as_deref(),
-        Some("good-minted"),
-        "mint split uses amount precision, not price precision"
-    );
-    opts.amount = 5.51;
-    assert_eq!(venue.base.mint_client_order_id(&opts).unwrap(), None);
+    for maximum in [NumericValue::Number(5.0), NumericValue::Text("0005".into())] {
+        let mut venue = venue_with_maximum(maximum);
+        venue
+            .base
+            .settings
+            .client_order_id_rule
+            .as_mut()
+            .unwrap()
+            .mint = Some(Rc::new(|| "good-minted".into()));
+        let mut opts = order("good");
+        opts.client_order_id = None;
+        opts.amount = 5.49;
+        assert_eq!(
+            venue.base.mint_client_order_id(&opts).unwrap().as_deref(),
+            Some("good-minted"),
+            "mint split uses amount precision, not price precision"
+        );
+        opts.amount = 5.51;
+        assert_eq!(venue.base.mint_client_order_id(&opts).unwrap(), None);
+    }
 }
 #[test]
 fn empty_response_and_fallback_brand_remain_distinguishable() {

@@ -390,7 +390,7 @@ impl OrderExecution {
                     .ok_or_else(|| {
                         ExchangeError::new(format!("Market {} not found", opts.symbol))
                     })?;
-                let max = market.limits.amount.max;
+                let max = safe_cex_num::numeric_value_to_number(&market.limits.amount.max);
                 if matches!(
                     opts.r#type.into_value(),
                     Some(OrderType::Limit | OrderType::Market)

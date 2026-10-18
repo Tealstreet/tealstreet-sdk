@@ -617,6 +617,24 @@ pub struct JsRestAdapter {
     rejection: RefCell<Option<Thrown>>,
 }
 
+fn native_query(value: &safe_cex_types::QueryValue) -> Js {
+    use safe_cex_types::QueryValue;
+    match value {
+        QueryValue::Undefined => Js::Undefined,
+        QueryValue::Null => Js::Null,
+        QueryValue::Bool(value) => Js::Bool(*value),
+        QueryValue::Number(value) => Js::Number(*value),
+        QueryValue::String(value) => Js::str(value),
+        QueryValue::Array(values) => Js::array(values.iter().map(native_query).collect()),
+        QueryValue::Object(values) => Js::object(
+            values
+                .iter()
+                .map(|(key, value)| (key.as_str(), native_query(value)))
+                .collect(),
+        ),
+    }
+}
+
 impl JsRestAdapter {
     pub fn new(runtime: Rc<dyn ExchangeRuntime>, xhr: Js) -> Self {
         Self {
@@ -626,13 +644,24 @@ impl JsRestAdapter {
         }
     }
     async fn send(&self, request: &RestRequest) -> Result<RestResponse, Thrown> {
+        let params = match (&request.query_params, &request.params) {
+            (Some(_), Some(_)) => {
+                return Err(Thrown::error(
+                    "TypeError",
+                    "Cannot combine legacy and native query parameters",
+                ));
+            }
+            (Some(params), None) => Some(native_query(params)),
+            (None, Some(params)) => Some(from_json(params)),
+            (None, None) => None,
+        };
         let config = Js::object(vec![]);
         for (name, value) in &request.config_extensions {
             config.define(name, from_retained_input(value.clone()))?;
         }
         // Typed parameters remain authoritative over an extension of that name.
-        if let Some(params) = &request.params {
-            config.define("params", from_json(params))?;
+        if let Some(params) = params {
+            config.define("params", params)?;
         }
         let url = Js::str(&request.url);
         // Axios normalizes the verb; RestRequest callers send "GET" as often as "get".

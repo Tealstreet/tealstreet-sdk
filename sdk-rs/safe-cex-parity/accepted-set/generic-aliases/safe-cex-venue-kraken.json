@@ -1,0 +1,310 @@
+{
+  "safe_cex_venue_kraken::rest_account::Handle": {
+    "canonical": "alloc::rc::Rc",
+    "expectedType": "::std::rc::Rc<::safe_cex_exchange::js_runtime::value::Js>",
+    "suffix": "<crate::binding::rt::Rt>",
+    "file": "safe-cex-venue-kraken/src/rest_account.rs",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "unsized": false
+  },
+  "safe_cex_venue_kraken::rest_account::ReadResult": {
+    "canonical": "core::result::Result",
+    "expectedType": "::std::result::Result<bool, ::safe_cex_exchange::js_runtime::value::Thrown>",
+    "suffix": "<crate::binding::rt::Rt, bool>",
+    "file": "safe-cex-venue-kraken/src/rest_account.rs",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "generic": "T"
+                }
+              },
+              {
+                "type": {
+                  "qualified_path": {
+                    "name": "Error",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "generic": "T"
+                }
+              },
+              {
+                "type": {
+                  "qualified_path": {
+                    "name": "Error",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "unsized": false
+  },
+  "safe_cex_venue_kraken::rest_account::Entries": {
+    "canonical": "alloc::vec::Vec",
+    "expectedType": "::std::vec::Vec<(::std::vec::Vec<u16>, ::std::rc::Rc<::safe_cex_exchange::js_runtime::value::Js>)>",
+    "suffix": "<crate::binding::rt::Rt>",
+    "file": "safe-cex-venue-kraken/src/rest_account.rs",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "u16"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_kraken::rest_account::Handle",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "H"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "u16"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "resolved_path": {
+                        "path": "alloc::rc::Rc",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "qualified_path": {
+                                    "name": "Value",
+                                    "args": null,
+                                    "self_type": {
+                                      "generic": "H"
+                                    },
+                                    "trait": {
+                                      "path": "safe_cex_venue_kraken::rest_account::ReadHost",
+                                      "args": null
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "unsized": false
+  }
+}

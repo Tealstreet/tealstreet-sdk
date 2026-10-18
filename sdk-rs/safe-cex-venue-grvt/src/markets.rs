@@ -103,7 +103,10 @@ fn project_instrument(inst: &Input) -> Result<Result<Market, ExchangeError>, Exc
         },
         limits: MarketLimits {
             cost: None,
-            amount: MarketLimitsAmount { min: min_size, max },
+            amount: MarketLimitsAmount {
+                min: min_size,
+                max: max.into(),
+            },
             leverage: MarketLimitsLeverage {
                 min: 1.0,
                 max: 100.0,

@@ -34,7 +34,7 @@ fn bits(v: f64) -> String {
     )
 }
 fn native(m: &Market) -> Value {
-    json!({"id":m.id,"symbol":m.symbol,"amountMin":bits(m.limits.amount.min),"amountMax":bits(m.limits.amount.max),"leverageMin":bits(m.limits.leverage.min),"leverageMax":bits(m.limits.leverage.max)})
+    json!({"id":m.id,"symbol":m.symbol,"amountMin":bits(m.limits.amount.min),"amountMax":bits(safe_cex_num::numeric_value_to_number(&m.limits.amount.max)),"leverageMin":bits(m.limits.leverage.min),"leverageMax":bits(m.limits.leverage.max)})
 }
 #[test]
 fn leverage_reads_match_actual_typescript() {

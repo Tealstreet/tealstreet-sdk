@@ -907,7 +907,7 @@ fn mexc_fetch_markets_matches_live_source() {
                     "amount": bits(market.precision.amount),
                     "price": bits(market.precision.price),
                     "min": bits(market.limits.amount.min),
-                    "max": bits(market.limits.amount.max),
+                    "max": bits(safe_cex_num::numeric_value_to_number(&market.limits.amount.max)),
                     "minLeverage": bits(market.limits.leverage.min),
                     "maxLeverage": bits(market.limits.leverage.max),
                 })
