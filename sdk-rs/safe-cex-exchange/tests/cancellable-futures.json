@@ -2139,12 +2139,17 @@
     {
       "owner": "src/loop_util.rs::loop_once",
       "boundaries": [
-        "async-function",
+        "future-signature",
+        "future-return",
+        "async-block",
+        "async-block",
+        "await",
         "await"
       ],
-      "producer_sha256": "33d11d745ccda28c77bcfc60bb6b62d94e616ebf028c29a56f263d3c86f43e9c",
-      "classification": "no-owned-latch",
-      "reason": "Owns one sleep and submits the callback after settlement with no later await. Warning deduplication is persistent bookkeeping, not an in-flight latch."
+      "producer_sha256": "9d43b54eefab0a8e32b3267f38c60d1cf9f644d5ae5df2cd83834b0efa9dbed1",
+      "classification": "delegated",
+      "delegate": "eager::start_eager / js_runtime::promise::Promise::spawn",
+      "reason": "Reviewed the eager outer loop and source sleep Promise: both delegate continuation ownership and waiter cleanup to the canonical runtime Promise driver. Dropping the returned waiter does not cancel sleep or scheduler submission; no loop-local latch or task registry exists. remaining_utils::loop_timing::real_loop_starts_sleep_before_poll_and_retains_dropped_continuation executes that native drop case, and the ready/rejection matrix pins the source await fence."
     },
     {
       "owner": "src/loop_util.rs::with_logged",
