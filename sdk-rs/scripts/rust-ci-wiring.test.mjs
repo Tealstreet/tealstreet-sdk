@@ -979,9 +979,9 @@ test('accepted-set control registry pins files and executed mutations', async ()
   // Glob-export coverage adds three tests and two mutations; literal-expression
   // macro coverage adds two mutations. Retain all earlier registrations.
   assert.equal(Object.values(registry.tests).flat().length, 179, 'registered accepted-set test count');
-  // Provider self coverage adds a same-file nested-definition refusal control;
-  // consumer recipe/route controls and every earlier mutation remain required.
-  assert.equal(registry.mutations.length, 196, 'registered accepted-set mutation count');
+  // The retired WOO book-array registration drops its orphan mutation; all
+  // remaining alias/runtime controls stay registered.
+  assert.equal(registry.mutations.length, 195, 'registered accepted-set mutation count');
   const output = [...Object.values(registry.tests).flat().map((name, i) => `ok ${i + 1} - ${name}`), ...registry.mutations.map(name => `# ${name}: named assertion; process exit 1`), '# fail 0', '# skipped 0', '# todo 0'].join('\n');
   verifyControls(output, registry);
   for (const name of registry.mutations) assert.throws(() => verifyControls(output.replace(`# ${name}: named assertion; process exit 1`, ''), registry), /mutation inventory/);

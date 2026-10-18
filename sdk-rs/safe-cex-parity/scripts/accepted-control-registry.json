@@ -276,8 +276,8 @@
       "native feature compiler provenance follows real reexports without passing foreign feature names to dependencies"
     ],
     "accepted-woo-alias.test.mjs": [
-      "exact WOO book array refuses slot root and caller redirects",
-      "WOO five structural aliases execute actual native traits and decoded values"
+      "retired WOO book array has no special alias permission",
+      "WOO four structural aliases execute actual native traits and decoded values"
     ]
   },
   "mutations": [
@@ -473,7 +473,6 @@
     "authored JSON native key ordering",
     "required feature actual native output",
     "required feature native dispatch removal",
-    "WOO array expanded slots",
     "Binance exact-method scope",
     "Binance native observer pin",
     "Binance source oracle pin"
