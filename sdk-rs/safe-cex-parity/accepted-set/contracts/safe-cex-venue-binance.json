@@ -3097,7 +3097,7 @@
         "positionSide",
         "updateTimeBits"
       ],
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"independent raw input\")) { Ok(d)=>serde_json::json!({\"ok\":true,\"symbol\":d.symbol,\"positionAmt\":d.position_amt,\"entryPrice\":d.entry_price,\"markPrice\":d.mark_price,\"unRealizedProfit\":d.un_realized_profit,\"liquidationPrice\":d.liquidation_price,\"leverage\":d.leverage,\"maxQty\":d.max_qty,\"marginType\":d.margin_type,\"isolatedMargin\":d.isolated_margin,\"positionSide\":d.position_side,\"updateTimeBits\":format!(\"{:016x}\",d.update_time.to_bits())}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { match serde_json::from_str::<$type>($value.as_str().expect(\"independent raw input\")) { Ok(d)=>serde_json::json!({\"ok\":true,\"symbol\":d.symbol,\"positionAmt\":d.position_amt,\"entryPrice\":d.entry_price,\"markPrice\":d.mark_price,\"unRealizedProfit\":d.un_realized_profit,\"liquidationPrice\":d.liquidation_price,\"leverage\":d.leverage,\"maxQty\":d.max_qty,\"marginType\":d.margin_type,\"isolatedMargin\":d.isolated_margin,\"positionSide\":d.position_side,\"updateTimeBits\":format!(\"{:016x}\",d.update_time.to_bits())}), Err(_)=>serde_json::json!({\"ok\":false}) } })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
       "cases": [
         {
           "input": "{\"symbol\":\"BTCUSD_PERP\",\"positionAmt\":\"2.5\",\"entryPrice\":\"40123.25\",\"markPrice\":\"40234.5\",\"unRealizedProfit\":\"7.75\",\"liquidationPrice\":\"20000.5\",\"leverage\":\"9\",\"maxQty\":\"100\",\"marginType\":\"isolated\",\"isolatedMargin\":\"11.25\",\"positionSide\":\"LONG\",\"updateTime\":-0}",
@@ -3236,7 +3236,7 @@
         "tranId",
         "tradeId"
       ],
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"independent raw input\")) { Ok(d)=>serde_json::json!({\"ok\":true,\"symbol\":d.symbol,\"incomeType\":d.income_type,\"income\":d.income,\"asset\":d.asset,\"info\":d.info,\"timeBits\":format!(\"{:016x}\",d.time.to_bits()),\"tranId\":d.tran_id,\"tradeId\":d.trade_id}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { match serde_json::from_str::<$type>($value.as_str().expect(\"independent raw input\")) { Ok(d)=>serde_json::json!({\"ok\":true,\"symbol\":d.symbol,\"incomeType\":d.income_type,\"income\":d.income,\"asset\":d.asset,\"info\":d.info,\"timeBits\":format!(\"{:016x}\",d.time.to_bits()),\"tranId\":d.tran_id,\"tradeId\":d.trade_id}), Err(_)=>serde_json::json!({\"ok\":false}) } })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
       "cases": [
         {
           "input": "{\"symbol\":\"BTCUSD_PERP\",\"incomeType\":\"FUNDING_FEE\",\"income\":\"-1.25\",\"asset\":\"BTC\",\"info\":\"fee-note\",\"time\":-0,\"tranId\":\"9007199254740993\",\"tradeId\":\"t-7\"}",
@@ -3428,7 +3428,7 @@
     "entrypoints": [],
     "evidence": "The actual public Vec<BinanceInversePositionRisk> alias retains ordered rows and executes each native field/bit observation directly. It has its own array admission and invalid-member refusals; this neither redirects the alias nor substitutes an expected compiler type. The generated declaration follows binanceinverse.types.ts and its private map-only numeric-ingress schema. Direct production Deserialize observations read every native field and f64 bits before projection. Independently authored valid positional arrays, missing/wrong fields and present-null optional values are refused; optional absence remains separate. This is the declared typed Rust wire boundary, not a TypeScript runtime validator; MANIFEST-SPEC.md numeric-ingress and closed-typed-output boundaries apply.",
     "observation": {
-      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"independent raw vector\")) { Ok(rows)=>serde_json::json!({\"ok\":true,\"len\":rows.len(),\"rows\":rows.iter().map(|d|serde_json::json!({\"ok\":true,\"symbol\":d.symbol,\"positionAmt\":d.position_amt,\"entryPrice\":d.entry_price,\"markPrice\":d.mark_price,\"unRealizedProfit\":d.un_realized_profit,\"liquidationPrice\":d.liquidation_price,\"leverage\":d.leverage,\"maxQty\":d.max_qty,\"marginType\":d.margin_type,\"isolatedMargin\":d.isolated_margin,\"positionSide\":d.position_side,\"updateTimeBits\":format!(\"{:016x}\",d.update_time.to_bits())})).collect::<Vec<_>>()}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { match serde_json::from_str::<$type>($value.as_str().expect(\"independent raw vector\")) { Ok(rows)=>serde_json::json!({\"ok\":true,\"len\":rows.len(),\"rows\":rows.iter().map(|d|serde_json::json!({\"ok\":true,\"symbol\":d.symbol,\"positionAmt\":d.position_amt,\"entryPrice\":d.entry_price,\"markPrice\":d.mark_price,\"unRealizedProfit\":d.un_realized_profit,\"liquidationPrice\":d.liquidation_price,\"leverage\":d.leverage,\"maxQty\":d.max_qty,\"marginType\":d.margin_type,\"isolatedMargin\":d.isolated_margin,\"positionSide\":d.position_side,\"updateTimeBits\":format!(\"{:016x}\",d.update_time.to_bits())})).collect::<Vec<_>>()}), Err(_)=>serde_json::json!({\"ok\":false}) } })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
       "cases": [
         {
           "input": "[{\"symbol\":\"BTCUSD_PERP\",\"positionAmt\":\"2.5\",\"entryPrice\":\"40123.25\",\"markPrice\":\"40234.5\",\"unRealizedProfit\":\"7.75\",\"liquidationPrice\":\"20000.5\",\"leverage\":\"9\",\"maxQty\":\"100\",\"marginType\":\"isolated\",\"isolatedMargin\":\"11.25\",\"positionSide\":\"LONG\",\"updateTime\":-0},{\"symbol\":\"ETHUSD_PERP\",\"positionAmt\":\"-3\",\"entryPrice\":\"2011\",\"markPrice\":\"1999\",\"unRealizedProfit\":\"-12\",\"liquidationPrice\":\"3000\",\"isolatedMargin\":\"4\",\"positionSide\":\"SHORT\",\"updateTime\":23}]",
@@ -3623,7 +3623,7 @@
       }
     },
     "evidence": "Source optional chaining guards nullish receiver only; present null and primitive/string reads remain native. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let source=witness::raw($value); witness::observe($type(&source,$value[\"key\"].as_str().unwrap())) }",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let source=witness::raw($value); witness::observe($type(&source,$value[\"key\"].as_str().unwrap())) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -3762,7 +3762,7 @@
       }
     },
     "evidence": "Source optional chaining guards nullish receiver only; present null and primitive/string reads remain native. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let source=witness::raw($value); witness::observe($type(&source,$value[\"key\"].as_str().unwrap())) }",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let source=witness::raw($value); witness::observe($type(&source,$value[\"key\"].as_str().unwrap())) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -3898,7 +3898,7 @@
       }
     },
     "evidence": "Actual in-operator delegation preserves own/inherited presence and primitive TypeError; no own-only substitute. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let source=witness::raw($value); match $type(&source,$value[\"key\"].as_str().unwrap()) { Ok(p)=>serde_json::json!({\"present\":p}),Err(e)=>witness::observe(Err(e)) } }",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let source=witness::raw($value); match $type(&source,$value[\"key\"].as_str().unwrap()) { Ok(p)=>serde_json::json!({\"present\":p}),Err(e)=>witness::observe(Err(e)) } })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -4058,7 +4058,7 @@
       }
     },
     "evidence": "The real installed global is resolved and invoked with exact arguments, including lookup failure. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value); let rt=witness::rt(&h); let args=$value[\"args\"].as_array().unwrap().iter().map(safe_cex_exchange::js_runtime::value::from_json).collect(); witness::observe($type(&rt,$value[\"name\"].as_str().unwrap(),args)) }",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value); let rt=witness::rt(&h); let args=$value[\"args\"].as_array().unwrap().iter().map(safe_cex_exchange::js_runtime::value::from_json).collect(); witness::observe($type(&rt,$value[\"name\"].as_str().unwrap(),args)) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -4192,7 +4192,7 @@
       }
     },
     "evidence": "Concrete installed source enum members are read without coercing or inventing missing values. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);witness::observe($type(&witness::rt(&h),$value[\"family\"].as_str().unwrap(),$value[\"key\"].as_str().unwrap())) }",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);witness::observe($type(&witness::rt(&h),$value[\"family\"].as_str().unwrap(),$value[\"key\"].as_str().unwrap())) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -4332,7 +4332,7 @@
       }
     },
     "evidence": "Actual installed get-key collaborator receives the original graph and field; signed-zero and missing remain distinct. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);let source=witness::raw($value);witness::observe($type(&witness::rt(&h),&source,$value[\"key\"].as_str().unwrap())) }",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);let source=witness::raw($value);witness::observe($type(&witness::rt(&h),&source,$value[\"key\"].as_str().unwrap())) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -4461,7 +4461,7 @@
       }
     },
     "evidence": "Production constructor and DefaultStore seed independent market/position rows; inspect actual facade rows, not a replacement Store mock. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);let v=$type(&witness::rt(&h),$value[\"key\"].as_str().unwrap()).unwrap();serde_json::json!({\"len\":v.array_values().unwrap().len(),\"id\":v.get(\"0\").unwrap().get(\"id\").unwrap().to_display()}) }",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);let v=$type(&witness::rt(&h),$value[\"key\"].as_str().unwrap()).unwrap();serde_json::json!({\"len\":v.array_values().unwrap().len(),\"id\":v.get(\"0\").unwrap().get(\"id\").unwrap().to_display()}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -4604,7 +4604,7 @@
       }
     },
     "evidence": "Source strict equality compares the raw property to the installed enum referent without Number/String coercion. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);let opts=safe_cex_exchange::js_runtime::value::from_json(&$value[\"options\"]);let same=$type(&witness::rt(&h),&opts,\"side\",\"OrderSide\",\"Buy\").unwrap();serde_json::json!({\"same\":same}) }",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);let opts=safe_cex_exchange::js_runtime::value::from_json(&$value[\"options\"]);let same=$type(&witness::rt(&h),&opts,\"side\",\"OrderSide\",\"Buy\").unwrap();serde_json::json!({\"same\":same}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -4740,7 +4740,7 @@
       }
     },
     "evidence": "The actual inverseObj global and native property-key read implement inverse table selection; missing entries stay undefined. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);witness::observe($type(&witness::rt(&h),$value[\"family\"].as_str().unwrap(),safe_cex_exchange::js_runtime::value::from_json(&$value[\"value\"]))) }",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);witness::observe($type(&witness::rt(&h),$value[\"family\"].as_str().unwrap(),safe_cex_exchange::js_runtime::value::from_json(&$value[\"value\"]))) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -4942,7 +4942,7 @@
       }
     },
     "evidence": "Registers a new test-only callback on the real assembled receiver. Calling with wrong this must retain lexical scope, argument count, opaque identity and actual eager Promise scheduling; no venue method is replaced. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);h.exchange.receiver().define(\"acceptedLabel\",safe_cex_exchange::js_runtime::value::from_json(&$value[\"label\"])).unwrap();$type(&witness::rt(&h),\"acceptedProbe\",witness::async_body).unwrap();witness::installed(&h,\"acceptedProbe\",$value) }",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);h.exchange.receiver().define(\"acceptedLabel\",safe_cex_exchange::js_runtime::value::from_json(&$value[\"label\"])).unwrap();$type(&witness::rt(&h),\"acceptedProbe\",witness::async_body).unwrap();witness::installed(&h,\"acceptedProbe\",$value) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -5145,7 +5145,7 @@
       }
     },
     "evidence": "Registers a new test-only callback on the real assembled receiver. Calling with wrong this must retain lexical scope, argument count, opaque identity and actual eager Promise scheduling; no venue method is replaced. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);h.exchange.receiver().define(\"acceptedLabel\",safe_cex_exchange::js_runtime::value::from_json(&$value[\"label\"])).unwrap();$type(&witness::rt(&h),\"acceptedProbe\",witness::sync_body).unwrap();witness::installed(&h,\"acceptedProbe\",$value) }",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);h.exchange.receiver().define(\"acceptedLabel\",safe_cex_exchange::js_runtime::value::from_json(&$value[\"label\"])).unwrap();$type(&witness::rt(&h),\"acceptedProbe\",witness::sync_body).unwrap();witness::installed(&h,\"acceptedProbe\",$value) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -5305,7 +5305,7 @@
       }
     },
     "evidence": "Actual signed client, HTTP transform, shared Promise and response-data selection execute before observing native decoded numbers; no Value-first projection. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);h.http.encoded(\"GET\",\"/dapi/v1/openOrders\",$value[\"raw\"].as_str().unwrap().as_bytes());let rt=witness::rt(&h);let result=h.drive(Box::pin(async move {Ok($type(&rt,\"xhr\",\"get\",\"OPEN_ORDERS\",vec![]).await)})).unwrap().unwrap();serde_json::json!({\"len\":result.array_values().unwrap().len(),\"first\":witness::number(result.get(\"0\").unwrap().as_f64().unwrap()),\"second\":witness::number(result.get(\"1\").unwrap().as_f64().unwrap()),\"requests\":h.http.calls(\"/dapi/v1/openOrders\").len()}) }",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let h=witness::make($value);h.http.encoded(\"GET\",\"/dapi/v1/openOrders\",$value[\"raw\"].as_str().unwrap().as_bytes());let rt=witness::rt(&h);let result=h.drive(Box::pin(async move {Ok($type(&rt,\"xhr\",\"get\",\"OPEN_ORDERS\",vec![]).await)})).unwrap().unwrap();serde_json::json!({\"len\":result.array_values().unwrap().len(),\"first\":witness::number(result.get(\"0\").unwrap().as_f64().unwrap()),\"second\":witness::number(result.get(\"1\").unwrap().as_f64().unwrap()),\"requests\":h.http.calls(\"/dapi/v1/openOrders\").len()}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -5424,7 +5424,7 @@
       }
     },
     "evidence": "Fixed serde_json::Value monomorphization exercises source table materialization with integer-key enumeration, duplicate last-write precedence and independent Boolean/null payloads; no all-Serialize-implementations claim. Actual production function, native graph/type/number observations before JSON. These bounded cases do not claim every executable getter or arbitrary implementation.",
-    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let rows=$value[\"rows\"].as_array().unwrap().iter().map(|r|(r[0].as_str().unwrap(),r[1].clone())).collect::<Vec<_>>();let v=$type(&rows).unwrap();serde_json::json!({\"keys\":v.own_keys(),\"first\":witness::observe(v.get($value[\"key\"].as_str().unwrap()))}) }",
+    "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } let rows=$value[\"rows\"].as_array().unwrap().iter().map(|r|(r[0].as_str().unwrap(),r[1].clone())).collect::<Vec<_>>();let v=$type(&rows).unwrap();serde_json::json!({\"keys\":v.own_keys(),\"first\":witness::observe(v.get($value[\"key\"].as_str().unwrap()))}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
     "cases": [
       {
         "input": {
@@ -5625,7 +5625,7 @@
         },
         "input": "observed",
         "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
-        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let (runtime,http,store,options)=witness::new_parts($value);let client=safe_cex_exchange::js_runtime::client::rest_http_host(runtime.clone(),http.clone());let venue=$type::new(safe_cex_types::ExchangeName::Binanceinverse,options,store,crate::inverse::BinanceInverseDependencies{runtime,http:client,external_public_data:None}).unwrap();let receiver=venue.receiver();serde_json::json!({\"publicBase\":receiver.get(\"publicXhr\").unwrap().get(\"defaults\").unwrap().get(\"baseURL\").unwrap().to_display(),\"class\":venue.class_name(),\"publicSocket\":venue.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public).is_some(),\"privateSocket\":venue.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Private).is_some(),\"requests\":http.sent.lock().unwrap().len()}) }",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let (runtime,http,store,options)=witness::new_parts($value);let client=safe_cex_exchange::js_runtime::client::rest_http_host(runtime.clone(),http.clone());let venue=$type::new(safe_cex_types::ExchangeName::Binanceinverse,options,store,crate::inverse::BinanceInverseDependencies{runtime,http:client,external_public_data:None}).unwrap();let receiver=venue.receiver();serde_json::json!({\"publicBase\":receiver.get(\"publicXhr\").unwrap().get(\"defaults\").unwrap().get(\"baseURL\").unwrap().to_display(),\"class\":venue.class_name(),\"publicSocket\":venue.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public).is_some(),\"privateSocket\":venue.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Private).is_some(),\"requests\":http.sent.lock().unwrap().len()}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
         "cases": [
           {
             "input": {
@@ -5756,7 +5756,7 @@
         },
         "input": "observed",
         "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
-        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.store.set_setting(\"isHedged\",$value[\"hedged\"].as_bool().unwrap()).unwrap();let rows=h.drive($type::fetch_positions(h.exchange.as_ref(),Some(vec![\"unused-source-selector\".into()]))).unwrap();let values=rows.iter().map(|p|serde_json::json!({\"symbol\":p.symbol,\"side\":match p.side.value().unwrap(){safe_cex_types::PositionSide::Long=>\"long\",safe_cex_types::PositionSide::Short=>\"short\"},\"mode\":match p.position_mode.value().unwrap(){safe_cex_types::PositionMode::Hedged=>\"hedged\",safe_cex_types::PositionMode::OneWay=>\"oneway\"},\"contracts\":witness::number(p.contracts),\"entry\":witness::number(p.entry_price)})).collect::<Vec<_>>();serde_json::json!({\"rows\":values,\"wire\":witness::wire(&h)}) }",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.store.set_setting(\"isHedged\",$value[\"hedged\"].as_bool().unwrap()).unwrap();let rows=h.drive($type::fetch_positions(h.exchange.as_ref(),Some(vec![\"unused-source-selector\".into()]))).unwrap();let values=rows.iter().map(|p|serde_json::json!({\"symbol\":p.symbol,\"side\":match p.side.value().unwrap(){safe_cex_types::PositionSide::Long=>\"long\",safe_cex_types::PositionSide::Short=>\"short\"},\"mode\":match p.position_mode.value().unwrap(){safe_cex_types::PositionMode::Hedged=>\"hedged\",safe_cex_types::PositionMode::OneWay=>\"oneway\"},\"contracts\":witness::number(p.contracts),\"entry\":witness::number(p.entry_price)})).collect::<Vec<_>>();serde_json::json!({\"rows\":values,\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
         "cases": [
           {
             "input": {
@@ -5918,7 +5918,7 @@
         },
         "input": "observed",
         "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
-        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.http.replace(\"GET\",\"/dapi/v1/openOrders\",serde_json::json!([{\"orderId\":$value[\"id\"],\"symbol\":\"BTCUSD_PERP\",\"type\":\"LIMIT\",\"side\":\"BUY\",\"price\":$value[\"price\"],\"origQty\":$value[\"amount\"],\"executedQty\":\"0.5\",\"reduceOnly\":false}]));let rows=h.drive($type::fetch_orders(h.exchange.as_ref(),None)).unwrap();serde_json::json!({\"rows\":rows.iter().map(|o|serde_json::json!({\"id\":o.id,\"symbol\":o.symbol,\"price\":witness::number(*o.price.value().unwrap()),\"amount\":witness::number(o.amount),\"filled\":witness::number(o.filled),\"remaining\":witness::number(o.remaining),\"buy\":matches!(o.side.value(),Some(safe_cex_types::OrderSide::Buy))})).collect::<Vec<_>>(),\"wire\":witness::wire(&h)}) }",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.http.replace(\"GET\",\"/dapi/v1/openOrders\",serde_json::json!([{\"orderId\":$value[\"id\"],\"symbol\":\"BTCUSD_PERP\",\"type\":\"LIMIT\",\"side\":\"BUY\",\"price\":$value[\"price\"],\"origQty\":$value[\"amount\"],\"executedQty\":\"0.5\",\"reduceOnly\":false}]));let rows=h.drive($type::fetch_orders(h.exchange.as_ref(),None)).unwrap();serde_json::json!({\"rows\":rows.iter().map(|o|serde_json::json!({\"id\":o.id,\"symbol\":o.symbol,\"price\":witness::number(*o.price.value().unwrap()),\"amount\":witness::number(o.amount),\"filled\":witness::number(o.filled),\"remaining\":witness::number(o.remaining),\"buy\":matches!(o.side.value(),Some(safe_cex_types::OrderSide::Buy))})).collect::<Vec<_>>(),\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
         "cases": [
           {
             "input": {
@@ -6073,7 +6073,7 @@
         },
         "input": "observed",
         "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
-        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);let rows=h.drive($type::fetch_public_trades(h.exchange.as_ref(),\"BTCUSD_PERP\".into(),Some($value[\"limit\"].as_f64().unwrap()))).unwrap();serde_json::json!({\"rows\":rows.iter().map(|p|serde_json::json!({\"id\":p.id,\"symbol\":p.symbol,\"price\":witness::number(p.price),\"qty\":witness::number(p.qty),\"quote\":witness::number(p.quote_qty.unwrap()),\"timestamp\":witness::number(p.timestamp),\"buy\":matches!(p.side,safe_cex_types::OrderSide::Buy)})).collect::<Vec<_>>(),\"wire\":witness::wire(&h)}) }",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);let rows=h.drive($type::fetch_public_trades(h.exchange.as_ref(),\"BTCUSD_PERP\".into(),Some($value[\"limit\"].as_f64().unwrap()))).unwrap();serde_json::json!({\"rows\":rows.iter().map(|p|serde_json::json!({\"id\":p.id,\"symbol\":p.symbol,\"price\":witness::number(p.price),\"qty\":witness::number(p.qty),\"quote\":witness::number(p.quote_qty.unwrap()),\"timestamp\":witness::number(p.timestamp),\"buy\":matches!(p.side,safe_cex_types::OrderSide::Buy)})).collect::<Vec<_>>(),\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
         "cases": [
           {
             "input": {
@@ -6244,7 +6244,7 @@
         },
         "input": "observed",
         "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
-        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);let socket=h.exchange.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public).unwrap();socket.connect_and_subscribe(false).unwrap();h.runtime.pump();let rows=std::rc::Rc::new(std::cell::RefCell::new(Vec::<safe_cex_types::OrderBook>::new()));let sink=rows.clone();let cleanup=$type::listen_order_book(h.exchange.as_ref(),\"BTCUSD_PERP\".into(),std::rc::Rc::new(move |b|sink.borrow_mut().push(b))).unwrap();let event=serde_json::json!({\"e\":\"depthUpdate\",\"s\":\"BTCUSD_PERP\",\"U\":11,\"u\":11,\"pu\":10,\"b\":[[\"101\",$value[\"amount\"]]],\"a\":[]});socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(event.to_string())).unwrap();h.runtime.pump();let (count,price,amount)={let values=rows.borrow();let b=&values[0];(values.len(),witness::number(b.bids[0].price),witness::number(b.bids[0].amount))};cleanup().unwrap();socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(serde_json::json!({\"e\":\"depthUpdate\",\"s\":\"BTCUSD_PERP\",\"U\":12,\"u\":12,\"pu\":11,\"b\":[[\"101\",\"99\"]],\"a\":[]}).to_string())).unwrap();h.runtime.pump();serde_json::json!({\"count\":count,\"price\":price,\"amount\":amount,\"afterCleanup\":rows.borrow().len()}) }",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);let socket=h.exchange.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public).unwrap();socket.connect_and_subscribe(false).unwrap();h.runtime.pump();let rows=std::rc::Rc::new(std::cell::RefCell::new(Vec::<safe_cex_types::OrderBook>::new()));let sink=rows.clone();let cleanup=$type::listen_order_book(h.exchange.as_ref(),\"BTCUSD_PERP\".into(),std::rc::Rc::new(move |b|sink.borrow_mut().push(b))).unwrap();let event=serde_json::json!({\"e\":\"depthUpdate\",\"s\":\"BTCUSD_PERP\",\"U\":11,\"u\":11,\"pu\":10,\"b\":[[\"101\",$value[\"amount\"]]],\"a\":[]});socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(event.to_string())).unwrap();h.runtime.pump();let (count,price,amount)={let values=rows.borrow();let b=&values[0];(values.len(),witness::number(b.bids[0].price),witness::number(b.bids[0].amount))};cleanup().unwrap();socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(serde_json::json!({\"e\":\"depthUpdate\",\"s\":\"BTCUSD_PERP\",\"U\":12,\"u\":12,\"pu\":11,\"b\":[[\"101\",\"99\"]],\"a\":[]}).to_string())).unwrap();h.runtime.pump();serde_json::json!({\"count\":count,\"price\":price,\"amount\":amount,\"afterCleanup\":rows.borrow().len()}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
         "cases": [
           {
             "input": {
@@ -6328,7 +6328,7 @@
         },
         "input": "observed",
         "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
-        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.drive($type::cancel_symbol_orders(h.exchange.as_ref(),$value[\"symbol\"].as_str().unwrap().into())).unwrap();serde_json::json!({\"ok\":true,\"wire\":witness::wire(&h)}) }",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.drive($type::cancel_symbol_orders(h.exchange.as_ref(),$value[\"symbol\"].as_str().unwrap().into())).unwrap();serde_json::json!({\"ok\":true,\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
         "cases": [
           {
             "input": {
@@ -6455,7 +6455,7 @@
         },
         "input": "observed",
         "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
-        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.drive($type::set_leverage(h.exchange.as_ref(),\"BTCUSD_PERP\".into(),$value[\"leverage\"].as_f64().unwrap(),None)).unwrap();serde_json::json!({\"ok\":true,\"wire\":witness::wire(&h)}) }",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.drive($type::set_leverage(h.exchange.as_ref(),\"BTCUSD_PERP\".into(),$value[\"leverage\"].as_f64().unwrap(),None)).unwrap();serde_json::json!({\"ok\":true,\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
         "cases": [
           {
             "input": {
@@ -6575,7 +6575,7 @@
         },
         "input": "observed",
         "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
-        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);safe_cex_store::Store::update(h.store.as_ref(),serde_json::from_value(serde_json::json!({\"positions\":[]})).unwrap(),false).unwrap();h.drive($type::change_position_mode(h.exchange.as_ref(),$value[\"hedged\"].as_bool().unwrap(),Some(\"BTCUSD_PERP\".into()))).unwrap();serde_json::json!({\"hedged\":h.store.options().is_hedged,\"wire\":witness::wire(&h)}) }",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);safe_cex_store::Store::update(h.store.as_ref(),serde_json::from_value(serde_json::json!({\"positions\":[]})).unwrap(),false).unwrap();h.drive($type::change_position_mode(h.exchange.as_ref(),$value[\"hedged\"].as_bool().unwrap(),Some(\"BTCUSD_PERP\".into()))).unwrap();serde_json::json!({\"hedged\":h.store.options().is_hedged,\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
         "cases": [
           {
             "input": {
@@ -6693,7 +6693,7 @@
         },
         "input": "observed",
         "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
-        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.drive($type::change_margin_type(h.exchange.as_ref(),$value[\"isolated\"].as_bool().unwrap(),Some(\"BTCUSD_PERP\".into()))).unwrap();serde_json::json!({\"ok\":true,\"wire\":witness::wire(&h)}) }",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);h.drive($type::change_margin_type(h.exchange.as_ref(),$value[\"isolated\"].as_bool().unwrap(),Some(\"BTCUSD_PERP\".into()))).unwrap();serde_json::json!({\"ok\":true,\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
         "cases": [
           {
             "input": {
@@ -6830,7 +6830,7 @@
         },
         "input": "observed",
         "reason": "Actual assembled native class and the indicated public entrypoint execute with scripted terminal IO. Native results, Store effects and sent request fields are independently specified; generic invoke/listen remain the original production implementations. No receiver member is replaced.",
-        "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);$type::after_method_called_in_worker(h.exchange.as_ref(),&serde_json::Value::Null,safe_cex_exchange::worker::CallableMethodsInWorker::ChangePositionMode,&[serde_json::Value::Bool($value[\"hedged\"].as_bool().unwrap()),serde_json::Value::String(\"BTCUSD_PERP\".into())]).unwrap();serde_json::json!({\"hedged\":h.store.options().is_hedged,\"wire\":witness::wire(&h)}) }",
+        "call": "std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/inverse-accepted-observers.rs\")); } use safe_cex_exchange::exchange::Exchange as _; let h=witness::make($value);$type::after_method_called_in_worker(h.exchange.as_ref(),&serde_json::Value::Null,safe_cex_exchange::worker::CallableMethodsInWorker::ChangePositionMode,&[serde_json::Value::Bool($value[\"hedged\"].as_bool().unwrap()),serde_json::Value::String(\"BTCUSD_PERP\".into())]).unwrap();serde_json::json!({\"hedged\":h.store.options().is_hedged,\"wire\":witness::wire(&h)}) })).unwrap_or_else(|_| serde_json::json!({\"unexpectedNativePanic\":true}))",
         "cases": [
           {
             "input": {

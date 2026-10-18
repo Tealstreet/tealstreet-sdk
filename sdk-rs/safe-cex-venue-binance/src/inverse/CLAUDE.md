@@ -23,3 +23,22 @@ it never supplies replacement venue methods. Its constructor control compiles th
 preserved pre-port body and must fail before the restored six-case target passes.
 `create_no_proxy` is the source public factory call at binanceinverse.api.ts:23;
 existing venues retain their own factory call sites.
+
+
+The non-socket accepted-owner review is scoped to the seventeen compiler-discovered
+owners in `scripts/inverse-accepted-owner-list.json`. Run
+`node safe-cex-venue-binance/scripts/inverse-accepted-contracts.mjs` from `sdk-rs`.
+It uses the maintained rustdoc inventory and native production probe generator;
+raw helper arguments and the exchange entrypoints require executed observations,
+not classification-only or blanket typed-input receipts. Generated records retain
+their object front gates, every field's native bits/presence, and the public Vec
+alias's member admission. The class witnesses use the existing primitive REST
+runtime with actual constructor, Store, signing, promises and callback bridge.
+
+`python3 safe-cex-venue-binance/scripts/inverse-accepted-controls.py`, also from
+`sdk-rs`, compiles isolated helper, record-front-gate and generic invoke/listen
+faults. Each must fail its named native observation, then exact source restoration
+must pass all seventeen owners. It never counts a compiler error as a runtime
+failure. This finite native/default corpus complements the actual-source REST,
+order and socket suites; it does not claim the full feature matrix or replace
+the separate socket-helper accepted-owner cohort.

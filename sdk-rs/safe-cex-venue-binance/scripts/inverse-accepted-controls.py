@@ -78,6 +78,8 @@ for label, before, after in [
     assert source.count(before) == 1, label
     run_fault(label, file, source.replace(before, after), ['safe_cex_venue_binance::inverse::BinanceInverseExchange'])
 
+expected_names = set(json.loads((crate / 'scripts/inverse-accepted-owner-list.json').read_text()))
+assert {name for control in receipt['controls'] for name in control['failures']} == expected_names
 assert all(p.read_bytes() == b for p, b in originals.items())
 assert execute('exact-restoration-green') == 0, 'exact restored production must pass all 17 owners'
 receipt['restoredAll17Pass'] = True
