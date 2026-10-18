@@ -4917,6 +4917,91 @@ fn production_native_position_fetch_starter_runs_real_http_and_store() {
 
 #[test]
 #[cfg(feature = "native")]
+fn production_native_class_future_completes_store_after_held_http() {
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    };
+    struct Held {
+        released: Arc<AtomicBool>,
+        completed: Arc<AtomicUsize>,
+        requests: Arc<Mutex<Vec<String>>>,
+    }
+    impl RestAdapter for Held {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.requests.lock().unwrap().push(request.url);
+            let released = self.released.clone();
+            let completed = self.completed.clone();
+            Box::pin(std::future::poll_fn(move |_| {
+                if released.load(Ordering::SeqCst) {
+                    completed.fetch_add(1, Ordering::SeqCst);
+                    Poll::Ready(Ok(RestResponse {
+                        status: 200,
+                        reason: None,
+                        headers: Default::default(),
+                        body: RestResponseBody::Encoded(b"[]".to_vec()),
+                    }))
+                } else {
+                    Poll::Pending
+                }
+            }))
+        }
+    }
+    let runtime = Rc::new(Runtime::default());
+    let released = Arc::new(AtomicBool::new(false));
+    let completed = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::<Mutex<Vec<String>>>::default();
+    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+        runtime.clone(),
+        Arc::new(Held {
+            released: released.clone(),
+            completed: completed.clone(),
+            requests: requests.clone(),
+        }),
+        Rc::new(|_, _| panic!("no external provider is configured")),
+        None,
+        safe_cex_exchange::native::NativeHttpEvents::default(),
+    );
+    let owner = ExchangeOwner::new(
+        Venue::Futures,
+        safe_cex_types::ExchangeName::Binance,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        dependencies,
+    )
+    .unwrap();
+    owner.private.position.last_fetch_time.set(-10_000.0);
+    owner.private.position.pending_events.set(true);
+    let before = owner.base.store.update_ids().positions;
+    owner.private.throttled_positions().unwrap();
+    for _ in 0..32 {
+        runtime.pump();
+    }
+    assert_eq!(owner.base.store.update_ids().positions, before);
+    assert!(owner.private.position.in_flight.get());
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    assert_eq!(completed.load(Ordering::SeqCst), 0);
+    released.store(true, Ordering::SeqCst);
+    for _ in 0..32 {
+        runtime.pump();
+    }
+    assert_eq!(
+        owner.base.store.update_ids().positions,
+        before + 1.0,
+        "the detached native class future publishes its completed position snapshot"
+    );
+    assert_eq!(completed.load(Ordering::SeqCst), 2);
+    assert!(!owner.private.position.in_flight.get());
+    assert!(!owner.private.position.pending_events.get());
+    assert!(runtime.reported.borrow().is_empty());
+    owner.dispose().unwrap();
+}
+
+#[test]
+#[cfg(feature = "native")]
 fn production_native_ticker_capture_aliases_retain_cells_and_replace_generations() {
     use safe_cex_store::{Store, StoreUpdate};
     use safe_cex_venue_binance::ticker_capture::{Capture, Dictionary, TickerReference};
@@ -5180,6 +5265,10 @@ fn production_native_public_rest_future_waits_and_preserves_candles_and_rejectio
         }
     }
 }
+
+#[cfg(feature = "native")]
+#[path = "support/order_throttle_binding.rs"]
+mod order_throttle_binding;
 
 #[test]
 #[cfg(feature = "native")]

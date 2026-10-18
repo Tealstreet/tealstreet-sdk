@@ -3,6 +3,7 @@
 //! Store facade. Venue crates keep their own class assembly and host impls.
 pub mod base_exchange;
 pub mod builtins;
+mod ccxt;
 pub mod client;
 pub mod globals;
 pub mod iterator;

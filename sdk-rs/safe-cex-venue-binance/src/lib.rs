@@ -37,7 +37,6 @@ pub mod order_history_native;
 pub mod order_logic;
 pub mod orderbook;
 pub mod orders_retry;
-pub mod orders_throttle;
 pub mod pm_order_logic;
 pub mod pm_orders;
 pub mod pm_position_mode;
