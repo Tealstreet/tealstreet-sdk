@@ -381,9 +381,7 @@ fn live_reads_corpus() {
                     };
                     let result = if method == 0 {
                         run(fetch_tickers_raw(&adapter, emitter)).map(|raw| {
-                            raw.map_or(json!({"undefined":true}), |v| {
-                                info(v.retained().clone().into())
-                            })
+                            raw.map_or(json!({"undefined":true}), |v| info(v.retained().clone()))
                         })
                     } else {
                         run(fetch_tickers(&adapter, &store, emitter))
@@ -480,9 +478,7 @@ fn live_reads_corpus() {
                 panic!("READ phase must not emit")
             }))
             .unwrap();
-            let native = result.map_or(json!({"undefined":true}), |v| {
-                info(v.retained().clone().into())
-            });
+            let native = result.map_or(json!({"undefined":true}), |v| info(v.retained().clone()));
             if i == 1 {
                 assert_eq!(
                     native.as_array().unwrap().len(),
@@ -510,15 +506,25 @@ fn live_reads_corpus() {
             fixture: json!({"body":corpus["boundaries"][i],"fail":false}),
             requests: RefCell::new(Vec::new()),
         };
-        assert!(
-            matches!(
-                run(fetch_tickers_raw(&adapter, |_| -> Result<(), ()> {
-                    panic!("READ ingress must not emit")
-                })),
-                Err(ReadError::Ingress(_))
+        let result = run(fetch_tickers_raw(&adapter, |_| -> Result<(), ()> {
+            panic!("READ ingress must not emit")
+        }));
+        match i {
+            0 | 1 => assert!(
+                matches!(result, Err(ReadError::Ingress(_))),
+                "READ malformed encoded JSON boundary {i}"
             ),
-            "READ explicit ingress boundary {i}"
-        );
+            2 => assert_eq!(
+                result.unwrap().unwrap().retained().as_text(),
+                Some([0xd800].as_slice()),
+                "READ native opaque source units"
+            ),
+            3 => assert!(
+                result.unwrap().is_none(),
+                "READ source deep-array missing data"
+            ),
+            _ => unreachable!(),
+        }
         assert_eq!(
             adapter.requests.borrow().len(),
             1,

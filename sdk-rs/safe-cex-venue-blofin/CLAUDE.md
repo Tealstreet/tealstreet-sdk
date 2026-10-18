@@ -174,12 +174,12 @@ prices do not establish coverage for future placement precision formatters.
 `src/reads.rs` ports fetchTickersRaw and fetchTickers against shared RestAdapter.
 Adapter construction/signing/retry remains the pending createAPI row. Raw data
 retains missing versus null, ordinary JSON values and numeric lexemes through
-TickerInput. An encoded JSON-only body profile explicitly refuses unparsed text, lone
-surrogates and excessive nesting before the source catch; this is a CHOSEN
-representation boundary with actual Axios/source admission probes, not an
-invented network error. The generic emitter error remains unchanged inside
-ReadError::Emitter. Native Untransformed/Transformed adapter values enter shared
-js_from_value_ref directly; strings are never reparsed to infer provenance.
+TickerInput. Encoded JSON parses once into canonical UTF-16/binary64 Input;
+opaque lone-surrogate text/keys and deeply nested arrays retain source admission.
+Malformed encoded JSON remains an explicit ingress refusal. The separate lexical
+typed decoder retains its depth guard. The generic emitter error remains unchanged inside
+ReadError::Emitter. Native Untransformed/Transformed adapter values remain Input directly; strings
+are never reparsed to infer provenance.
 Arbitrary truthy JSON error messages are not string-coerced.
 Reads return owned snapshots; the oracle observes the source response alias.
 
@@ -364,3 +364,9 @@ wrapper. Read numbers and UTF-16 fields directly before any JSON report; source
 computed numbers use `Float`. Consumer coercion uses the shared retained Number,
 parseFloat and String helpers. JSON rendering belongs at the explicit output
 boundary, with no alternate model-info carrier.
+
+Ticker REST responses, TickerInput, and the lifecycle handoff retain canonical
+Input through the final row info clone. The real native exchange regression in
+reads.rs exercises encoded and both native response phases, observing D800 text,
+DC00 keys, Infinity, negative zero, NaN and own undefined before JSON. Its
+maintained full-class source capture uses only terminal Axios responses.

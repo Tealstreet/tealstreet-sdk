@@ -12974,7 +12974,7 @@
   },
   "safe_cex_venue_blofin::tickers::TickerInput": {
     "shape": "json",
-    "evidence": "This specific transparent retained tickers::TickerInput boundary deliberately admits the JSON domain required by its source mapper, before projection. Direct native Value variants, every nested payload, field order and binary64 bits are independently observed; this is not a schema exemption for the downstream mapper. Existing UTF-8/depth and snapshot boundaries remain declared on its manifest.",
+    "evidence": "Transparent canonical RetainedJsonInput retained before ticker projection. Direct variants, nested payloads, ordered fields and numeric bits are observed without Serialize. Actual native BlofinNativeExchange encoded/untransformed/transformed regressions separately retain UTF-16 keys/text, overflow, signed zero, NaN and own undefined through final model info. Strict named Market IDs and lexical decoder depth remain explicit typed boundaries.",
     "entrypoints": [
       {
         "api": {
@@ -13001,7 +13001,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                     "args": null
                   }
                 }
@@ -13012,7 +13012,7 @@
         },
         "input": "observed",
         "reason": "Execute the actual borrowed retained-value accessor after production Deserialize; native variant payloads, ordering and numeric bits are observed without invoking Serialize.",
-        "call": "{fn observe(v:&serde_json::Value)->serde_json::Value {match v{serde_json::Value::Null=>serde_json::json!({\"kind\":\"null\",\"payload\":null}),serde_json::Value::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"payload\":v}),serde_json::Value::String(v)=>serde_json::json!({\"kind\":\"string\",\"payload\":v}),serde_json::Value::Number(v)=>serde_json::json!({\"kind\":\"number\",\"payload\":format!(\"{:016x}\",v.as_f64().unwrap().to_bits())}),serde_json::Value::Array(v)=>serde_json::json!({\"kind\":\"array\",\"payload\":v.iter().map(observe).collect::<Vec<_>>()}),serde_json::Value::Object(v)=>serde_json::json!({\"kind\":\"object\",\"payload\":v.iter().map(|(k,v)|serde_json::json!({\"key\":k,\"value\":observe(v)})).collect::<Vec<_>>()})}}let decoded=<$type as serde::Deserialize>::deserialize($value.clone()).unwrap();let observed=observe(decoded.retained());serde_json::json!({\"ok\":true,\"kind\":observed[\"kind\"],\"payload\":observed[\"payload\"]})}",
+        "call": "{fn observe(v:&safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value {use safe_cex_types::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"kind\":\"undefined\",\"payload\":null}),I::Null=>serde_json::json!({\"kind\":\"null\",\"payload\":null}),I::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"payload\":v}),I::Text(v)=>serde_json::json!({\"kind\":\"string\",\"payload\":String::from_utf16(v).unwrap()}),I::Lexeme(v)=>serde_json::json!({\"kind\":\"number\",\"payload\":format!(\"{:016x}\",v.parse::<f64>().unwrap().to_bits())}),I::Float(v)=>serde_json::json!({\"kind\":\"number\",\"payload\":format!(\"{:016x}\",v.to_bits())}),I::Array(v)=>serde_json::json!({\"kind\":\"array\",\"payload\":v.iter().map(observe).collect::<Vec<_>>()}),I::Object(v)=>serde_json::json!({\"kind\":\"object\",\"payload\":v.iter().map(|(k,v)|serde_json::json!({\"key\":String::from_utf16(k).unwrap(),\"value\":observe(v)})).collect::<Vec<_>>()})}}let decoded=<$type as serde::Deserialize>::deserialize($value.clone()).unwrap();let observed=observe(decoded.retained());serde_json::json!({\"ok\":true,\"kind\":observed[\"kind\"],\"payload\":observed[\"payload\"]})}",
         "nativeFields": [
           "kind",
           "payload"
@@ -13109,7 +13109,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{fn observe(v:&serde_json::Value)->serde_json::Value {match v{serde_json::Value::Null=>serde_json::json!({\"kind\":\"null\",\"payload\":null}),serde_json::Value::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"payload\":v}),serde_json::Value::String(v)=>serde_json::json!({\"kind\":\"string\",\"payload\":v}),serde_json::Value::Number(v)=>serde_json::json!({\"kind\":\"number\",\"payload\":format!(\"{:016x}\",v.as_f64().unwrap().to_bits())}),serde_json::Value::Array(v)=>serde_json::json!({\"kind\":\"array\",\"payload\":v.iter().map(observe).collect::<Vec<_>>()}),serde_json::Value::Object(v)=>serde_json::json!({\"kind\":\"object\",\"payload\":v.iter().map(|(k,v)|serde_json::json!({\"key\":k,\"value\":observe(v)})).collect::<Vec<_>>()})}}let decoded=<$type as serde::Deserialize>::deserialize($value.clone()).unwrap();let observed=observe(&decoded.value);serde_json::json!({\"ok\":true,\"kind\":observed[\"kind\"],\"payload\":observed[\"payload\"]})}",
+      "call": "{fn observe(v:&safe_cex_types::retained_json::RetainedJsonInput)->serde_json::Value {use safe_cex_types::retained_json::RetainedJsonInput as I;match v{I::Undefined=>serde_json::json!({\"kind\":\"undefined\",\"payload\":null}),I::Null=>serde_json::json!({\"kind\":\"null\",\"payload\":null}),I::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"payload\":v}),I::Text(v)=>serde_json::json!({\"kind\":\"string\",\"payload\":String::from_utf16(v).unwrap()}),I::Lexeme(v)=>serde_json::json!({\"kind\":\"number\",\"payload\":format!(\"{:016x}\",v.parse::<f64>().unwrap().to_bits())}),I::Float(v)=>serde_json::json!({\"kind\":\"number\",\"payload\":format!(\"{:016x}\",v.to_bits())}),I::Array(v)=>serde_json::json!({\"kind\":\"array\",\"payload\":v.iter().map(observe).collect::<Vec<_>>()}),I::Object(v)=>serde_json::json!({\"kind\":\"object\",\"payload\":v.iter().map(|(k,v)|serde_json::json!({\"key\":String::from_utf16(k).unwrap(),\"value\":observe(v)})).collect::<Vec<_>>()})}}let decoded=<$type as serde::Deserialize>::deserialize($value.clone()).unwrap();let observed=observe(&decoded.value);serde_json::json!({\"ok\":true,\"kind\":observed[\"kind\"],\"payload\":observed[\"payload\"]})}",
       "nativeFields": [
         "kind",
         "payload"

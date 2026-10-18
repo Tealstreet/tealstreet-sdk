@@ -515,3 +515,12 @@ HTTP/interceptor/host/model/Store paths and signs a placement after storing opaq
 contract config. The existing source loader's --retained-info mode executes the
 maintained TS methods for the same data classes; its ordinary driver marker stays
 stable for the existing controlled source corpora.
+
+Incoming private websocket frames remain canonical Input through order/position
+mapping and Store mutation. Partial position updates move info into the native
+ModelPatch slot before strict-field JSON projection, preserving opaque UTF-16,
+nonfinite bits and own undefined. Private pong frames use the shared retained
+writer at the wire boundary. The actual binding regression and maintained
+full-class source capture inspect order/position info before JSON; the existing
+16-row socket corpus now compares all eight private pong frames exactly, while
+keeping the separate public typed-frame refusal observations.
