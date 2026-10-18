@@ -45,6 +45,11 @@ pub struct CoinbaseExchange {
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "../../tests/support/generic_alias_native.rs"]
 mod generic_alias_native;
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../../tests/support/config_alias_native.rs"]
+mod config_alias_native;
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "../../tests/support/portfolio_alias_native.rs"]
