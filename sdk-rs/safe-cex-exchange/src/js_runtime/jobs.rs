@@ -354,9 +354,16 @@ pub(crate) fn pending_non_timer(runtime: Rc<dyn ExchangeRuntime>) -> usize {
     })
 }
 
-#[cfg(all(test, feature = "native", not(target_arch = "wasm32")))]
+#[cfg(test)]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 mod replay_receipt_tests {
-    use super::*;
+    use super::{checkpoint, for_runtime, pending_non_timer};
+    use crate::runtime::ExchangeRuntime;
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+        task::{Poll, Waker},
+    };
     #[test]
     fn pending_replay_receipt_includes_async_work_but_excludes_future_timers() {
         let host = tokio::runtime::Builder::new_current_thread()
