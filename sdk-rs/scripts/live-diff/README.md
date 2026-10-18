@@ -214,6 +214,9 @@ loaded snapshot even if another lane rebuilds the supplied addon path.
 
 ## Widened keyless REST reads
 
+The [registry sweep results](PUBLIC_REST_RESULTS.md) retain qualified coverage,
+provisional cells, routed differences and the exact pinned artifact references.
+
 `rest.mjs` captures each public response once, including its original bytes,
 headers and status, then runs an offline TS replay and two fresh napi replays.
 The replay proxy rejects uncaptured requests with HTTP409 and never forwards
