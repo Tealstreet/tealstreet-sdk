@@ -650,3 +650,12 @@ oracle-only test/control tail are removed; they had no production caller.
 The actual native ticker census in private_classes retains source comparisons for
 all three families; its production field-routing control requires three compiled
 failures and exact-restored passes.
+
+The private-construction Clone reviews in the Binance construction policy cover
+three reusable capabilities: the inverse listener retry context, shared class
+settlement observations and captured private arrows with their receiver/base
+leases. The disconnected candle-listener witness executes the actual retry
+clone before a real socket frame and cleanup; the native private-clone witness
+holds a listen-key request, drops the original settlement and observes both
+clones before invoking a cloned reconnect arrow. These reviews do not classify
+raw-input decoders or widen accepted representations.
