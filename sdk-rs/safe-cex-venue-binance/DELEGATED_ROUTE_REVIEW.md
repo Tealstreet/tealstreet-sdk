@@ -46,3 +46,20 @@ inventory establishes their absence. An absent `--module` selector correctly
 fails to match; it is not an executed zero-test success or a decoder waiver.
 Run the retained native witnesses separately. No classification is added for
 a dead helper and no TypeScript manifest status is promoted by this cleanup.
+
+## Checked retirement
+
+The canonical module measurement before deletion (source `bab9149238`) executes
+exactly four named missing-contract failures: the three book wrappers and the
+options alias. The full compiler inventory after deletion scans all 197 decoder
+owners and contains no retired-module reference. At `c36a7d0a48`, every other
+owner name is unchanged; the refreshed `02106979e4` inventory independently
+confirms absence against the newer shared runtime. No decoder classification is
+invented for removed code. The final master/#962 merges change only contract
+metadata, review-note ordering and docs from that tested production tree.
+
+The refreshed native candle, depth and history witnesses pass. The historical
+flag fault produces the named compiled wire failure and passes after exact
+restoration; strict native Clippy, fmt, extractor, full supplied-manifest and
+all-features cancellation checks also pass. This is scoped native evidence,
+not a claim for every venue operation or alternate host.
