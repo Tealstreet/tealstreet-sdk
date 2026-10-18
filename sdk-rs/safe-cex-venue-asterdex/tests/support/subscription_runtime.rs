@@ -1,3 +1,9 @@
+mod virtual_time {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../test-support/virtual_time.rs"
+    ));
+}
 use safe_cex_exchange::runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask};
 use serde_json::Value;
 use std::{
@@ -29,6 +35,7 @@ impl ExchangeTask for Task {
 }
 #[derive(Default)]
 pub struct Runtime {
+    sleep_wakers: virtual_time::SleepWakers,
     pub cancel_hook: CancelHook,
     pub wall: Cell<f64>,
     pub mono: Rc<Cell<f64>>,
@@ -39,6 +46,7 @@ pub struct Runtime {
 }
 impl Runtime {
     pub fn pump(&self) {
+        self.sleep_wakers.wake_due(self.mono.get());
         // A bounded deterministic microtask floor, not a claim about arbitrary
         // host scheduler progress. Scenarios require at most four chained awaits.
         for _ in 0..32 {
@@ -79,14 +87,16 @@ struct Sleep {
     mono: Rc<Cell<f64>>,
     deadline: f64,
     active: Rc<Cell<bool>>,
+    waker: virtual_time::SleepWaker,
 }
 impl Future for Sleep {
     type Output = Result<(), ExchangeError>;
-    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if self.mono.get() >= self.deadline {
             self.active.set(false);
             Poll::Ready(Ok(()))
         } else {
+            *self.waker.borrow_mut() = Some(cx.waker().clone());
             Poll::Pending
         }
     }
@@ -112,6 +122,7 @@ impl ExchangeRuntime for Runtime {
             mono: self.mono.clone(),
             deadline: self.mono.get() + delay as f64,
             active,
+            waker: self.sleep_wakers.register(self.mono.get() + delay as f64),
         })
     }
     fn spawn_local(&self, future: Work) -> Box<dyn ExchangeTask> {
@@ -145,4 +156,53 @@ impl ExchangeRuntime for Runtime {
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         panic!("unexpected worker")
     }
+}
+
+#[test]
+fn pending_sleep_registers_the_latest_waker_and_cancels_on_drop() {
+    let runtime = Runtime::default();
+    let first = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let latest = std::sync::Arc::new(virtual_time::WakeSignal::default());
+    let mut future = runtime.sleep(10);
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&first.waker()))
+            .is_pending()
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    runtime.mono.set(runtime.mono.get() + 9.0);
+    runtime.pump();
+    assert!(
+        !first.take() && !latest.take(),
+        "sleep woke before deadline"
+    );
+    runtime.mono.set(runtime.mono.get() + 1.0);
+    runtime.pump();
+    assert!(
+        !first.take() && latest.take(),
+        "expired sleep must wake latest waiter"
+    );
+    assert!(
+        future
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_ready()
+    );
+    let mut cancelled = runtime.sleep(10);
+    assert!(
+        cancelled
+            .as_mut()
+            .poll(&mut Context::from_waker(&latest.waker()))
+            .is_pending()
+    );
+    drop(cancelled);
+    runtime.mono.set(runtime.mono.get() + 10.0);
+    runtime.pump();
+    assert!(!latest.take(), "dropped sleep must not wake");
 }

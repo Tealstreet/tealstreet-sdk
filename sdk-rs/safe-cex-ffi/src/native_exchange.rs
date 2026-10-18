@@ -7,11 +7,12 @@
 use crate::{
     native_callback::{Callback, Request},
     native_lifecycle::NativeStartup,
-    native_value::JsData,
+    native_value::{JsData, check_status},
 };
 use napi::{
     Env, Status,
-    bindgen_prelude::{JsObjectValue, PromiseRaw, ToNapiValue, Unknown},
+    bindgen_prelude::{FromNapiValue, JsObjectValue, Object, PromiseRaw, ToNapiValue, Unknown},
+    sys,
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use safe_cex_registry::native_account::{
@@ -337,21 +338,20 @@ fn open(
 
 fn rejected(env: &Env, error: NativeValue) -> napi::Result<napi::Error> {
     let field = |name| match error.get(name) {
-        Some(NativeValue::String(value)) => String::from_utf16(value).map_err(|_| {
-            napi::Error::from_reason(format!("native error has invalid string {name}"))
-        }),
+        Some(value @ NativeValue::String(_)) => Ok(JsData(value.clone())),
         _ => Err(napi::Error::from_reason(format!(
             "native error has no string {name}"
         ))),
     };
-    let mut object = env.create_error(napi::Error::from_reason(field("message")?))?;
+    let message = unsafe { JsData::to_napi_value(env.raw(), field("message")?)? };
+    let mut raw = std::ptr::null_mut();
+    check_status(unsafe {
+        sys::napi_create_error(env.raw(), std::ptr::null_mut(), message, &mut raw)
+    })?;
+    let mut object = unsafe { Object::from_napi_value(env.raw(), raw)? };
     object.set_named_property("name", field("name")?)?;
     if let Some(code) = error.get("code") {
         object.set_named_property("code", JsData(code.clone()))?;
-    } else if !object.delete_named_property("code")? {
-        return Err(napi::Error::from_reason(
-            "cannot remove synthetic native error code",
-        ));
     }
     Ok(napi::Error::from_unknown_without_coercion(
         object.into_unknown(env)?,

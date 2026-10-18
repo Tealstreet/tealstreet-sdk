@@ -7,7 +7,7 @@ use crate::rust_venues::rust_constructor;
 use safe_cex_exchange::{
     client_order_id::ClientOrderLookup,
     exchange::Exchange,
-    js_runtime::value::Js,
+    js_runtime::value::{Js, Thrown},
     native::{ProxyTokenSource, native_runtime, native_tealstreet_runtime},
     runtime::{Cleanup, ExchangeError, ListenerCleanup, RemoteSigner},
     websocket::WsRuntime,
@@ -180,10 +180,22 @@ impl RemoteSigner for HostSigner {
 }
 
 fn exchange_error(error: &ExchangeError) -> NativeValue {
-    let mut fields = vec![
-        ("name", NativeValue::string(&error.name)),
-        ("message", NativeValue::string(&error.message)),
-    ];
+    let projected = Thrown::from(error.clone()).value;
+    let mut fields = Vec::with_capacity(3);
+    for field in ["name", "message"] {
+        let value = match projected.get(field) {
+            Ok(value) => value,
+            Err(cause) => {
+                return host_error(format!("cannot read native error {field}: {cause:?}"));
+            }
+        };
+        match NativeValue::from_js(&value) {
+            Ok(value) => fields.push((field, value)),
+            Err(cause) => {
+                return host_error(format!("cannot retain native error {field}: {cause}"));
+            }
+        }
+    }
     if let Some(code) = &error.code {
         match NativeValue::from_js(code) {
             Ok(code) => fields.push(("code", code)),

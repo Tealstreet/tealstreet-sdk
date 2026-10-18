@@ -65,7 +65,8 @@ The owned tree supports structured data, arrays and BigInts; cycles and function
 reject visibly. Native builds require Node-API 6 or later.
 Emitter payloads and error codes retain the shared core’s JS values through owned
 capture. Hosted signer throws and rejected promises preserve name, message and
-code, including own undefined and nonfinite or structured code values.
+code, including lone UTF-16 surrogates in name/message and own undefined,
+nonfinite or structured code values.
 `tests/native-account-values.test.mjs` and the Rust `native_account_values`
 target exercise actual signed Binance reads containing nonfinite prices.
 The signer-rejection Node and Rust targets drive failed signing through actual
