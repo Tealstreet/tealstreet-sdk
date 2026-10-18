@@ -811,8 +811,8 @@ fn assert_typed_snapshot_boundary() {
             .unwrap()
             .get("marker")
             .unwrap()
-            .as_u64(),
-        Some(71)
+            .as_f64(),
+        Some(71.0)
     );
     // Observe the canonical Order ingress directly. The retired typed venue
     // reconcile copy was an identity with an empty Store at this boundary.
@@ -827,8 +827,8 @@ fn assert_typed_snapshot_boundary() {
             .unwrap()
             .get("marker")
             .unwrap()
-            .as_u64(),
-        Some(71),
+            .as_f64(),
+        Some(71.0),
         "KUCOIN-BOOK typed ingress retains owned info snapshot"
     );
     assert_eq!(result[0].remaining.to_bits(), 2.5f64.to_bits());

@@ -403,7 +403,12 @@ impl BreakoutRuntime {
                 return Ok(());
             }
             if let Some(input) = input {
-                if js_truthy(Some(&raw_value(input.clone())?)) {
+                if input
+                    .clone()
+                    .decode::<safe_cex_types::retained_json::RetainedJsonInput>()
+                    .map_err(|error| ExchangeError::new(error.to_string()))?
+                    .is_truthy()
+                {
                     ctx.update_portfolio(&input)?;
                 }
             }
@@ -427,7 +432,12 @@ impl BreakoutRuntime {
                     return Ok(());
                 }
                 if let Some(input) = input {
-                    if js_truthy(Some(&raw_value(input.clone())?)) {
+                    if input
+                        .clone()
+                        .decode::<safe_cex_types::retained_json::RetainedJsonInput>()
+                        .map_err(|error| ExchangeError::new(error.to_string()))?
+                        .is_truthy()
+                    {
                         ctx.update_portfolio(&input)?;
                     }
                 }

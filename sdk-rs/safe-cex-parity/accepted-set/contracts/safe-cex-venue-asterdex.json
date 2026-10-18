@@ -5297,7 +5297,7 @@
                             "is_mutable": false,
                             "type": {
                               "resolved_path": {
-                                "path": "serde_json::value::Value",
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                 "args": null
                               }
                             }
@@ -5322,7 +5322,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ let kind = match $value[\"type\"].as_str().unwrap() { \"market\" => safe_cex_types::OrderType::Market, \"limit\" => safe_cex_types::OrderType::Limit, \"conditional\" => safe_cex_types::OrderType::Conditional, \"stop_market\" => safe_cex_types::OrderType::StopLoss, \"take_profit_market\" => safe_cex_types::OrderType::TakeProfit, \"trailing_stop_market\" => safe_cex_types::OrderType::TrailingStopLoss, _ => panic!(\"unreviewed order variant\") }; serde_json::json!($type(kind, $value.get(\"info\"))) }",
+    "call": "{ let kind = match $value[\"type\"].as_str().unwrap() { \"market\" => safe_cex_types::OrderType::Market, \"limit\" => safe_cex_types::OrderType::Limit, \"conditional\" => safe_cex_types::OrderType::Conditional, \"stop_market\" => safe_cex_types::OrderType::StopLoss, \"take_profit_market\" => safe_cex_types::OrderType::TakeProfit, \"trailing_stop_market\" => safe_cex_types::OrderType::TrailingStopLoss, _ => panic!(\"unreviewed order variant\") }; serde_json::json!($type(kind, $value.get(\"info\").cloned().map(safe_cex_types::retained_json::RetainedJsonInput::from).as_ref())) }",
     "cases": [
       {
         "input": {
@@ -5447,7 +5447,7 @@
         "output": false
       }
     ],
-    "evidence": "asterdex.exchange.ts:1541-1558: three native conditional order variants or five exact raw info.type strings, including absent/null/numeric raw-type rejection. Expectations are independently authored from the maintained TS body; fixtures adapt the actual typed function, without adding a production JSON API."
+    "evidence": "asterdex.exchange.ts:1541-1558: three native conditional order variants or five exact raw info.type strings, including absent/null/numeric raw-type rejection. Expectations are independently authored from the maintained TS body; fixtures adapt the actual typed function, without adding a production JSON API. Model-info parameter now consumes the canonical retained input directly; literal predicates compare UTF-16 units without a JSON projection."
   },
   "safe_cex_venue_asterdex::exchange_helpers::reverse_map_time_in_force": {
     "category": "decoder",
@@ -20419,7 +20419,7 @@
                             "is_mutable": false,
                             "type": {
                               "resolved_path": {
-                                "path": "serde_json::value::Value",
+                                "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                 "args": null
                               }
                             }
@@ -20444,7 +20444,7 @@
         "where_predicates": []
       }
     },
-    "call": "serde_json::json!($type($value.get(\"info\")))",
+    "call": "serde_json::json!($type($value.get(\"info\").cloned().map(safe_cex_types::retained_json::RetainedJsonInput::from).as_ref()))",
     "cases": [
       {
         "input": {},
@@ -22297,64 +22297,6 @@
                 }
               }
             }
-          ],
-          [
-            "fields",
-            {
-              "impl_trait": [
-                {
-                  "trait_bound": {
-                    "trait": {
-                      "path": "core::iter::traits::collect::IntoIterator",
-                      "args": {
-                        "angle_bracketed": {
-                          "args": [],
-                          "constraints": [
-                            {
-                              "name": "Item",
-                              "args": null,
-                              "binding": {
-                                "equality": {
-                                  "type": {
-                                    "tuple": [
-                                      {
-                                        "resolved_path": {
-                                          "path": "alloc::string::String",
-                                          "args": null
-                                        }
-                                      },
-                                      {
-                                        "resolved_path": {
-                                          "path": "core::option::Option",
-                                          "args": {
-                                            "angle_bracketed": {
-                                              "args": [
-                                                {
-                                                  "type": {
-                                                    "primitive": "f64"
-                                                  }
-                                                }
-                                              ],
-                                              "constraints": []
-                                            }
-                                          }
-                                        }
-                                      }
-                                    ]
-                                  }
-                                }
-                              }
-                            }
-                          ]
-                        }
-                      }
-                    },
-                    "generic_params": [],
-                    "modifier": "none"
-                  }
-                }
-              ]
-            }
           ]
         ],
         "output": {
@@ -22366,7 +22308,7 @@
                   {
                     "type": {
                       "resolved_path": {
-                        "path": "serde_json::value::Value",
+                        "path": "safe_cex_types::retained_json::RetainedJsonInput",
                         "args": null
                       }
                     }
@@ -22476,20 +22418,12 @@
         "where_predicates": []
       }
     },
-    "call": "{ let fields=$value[\"fields\"].as_array().unwrap().iter().map(|row|(row[0].as_str().unwrap().to_owned(),if row[1].is_null(){None}else{Some(row[1].as_f64().unwrap_or_else(||safe_cex_num::number_from_string(row[1].as_str().unwrap())))})).collect::<Vec<_>>();match $type(&$value[\"record\"],fields){Ok(info)=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",safe_cex_num::numeric_ingress::js_value_as_f64(&info[\"n\"]).unwrap().to_bits()),\"raw\":info.get(\"raw\")}),Err(error)=>serde_json::json!({\"ok\":false,\"message\":error.to_string()})} }",
+    "call": "{ #[derive(serde::Serialize)] struct Record<'a> { n:f64, raw:Option<&'a serde_json::Value> } let record=Record{n:safe_cex_num::number_from_string($value[\"number\"].as_str().unwrap()),raw:$value.get(\"raw\")}; match $type(&record){Ok(info)=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",info.get(\"n\").unwrap().as_f64().unwrap().to_bits()),\"raw\":info.get(\"raw\").cloned().unwrap().into_value().unwrap()}),Err(error)=>serde_json::json!({\"ok\":false,\"message\":error.to_string()})} }",
     "cases": [
       {
         "input": {
-          "record": {
-            "n": 1,
-            "raw": "keep"
-          },
-          "fields": [
-            [
-              "/n",
-              "-0"
-            ]
-          ]
+          "number": "-0",
+          "raw": "keep"
         },
         "output": {
           "ok": true,
@@ -22499,16 +22433,8 @@
       },
       {
         "input": {
-          "record": {
-            "n": 1,
-            "raw": false
-          },
-          "fields": [
-            [
-              "/n",
-              "Infinity"
-            ]
-          ]
+          "number": "Infinity",
+          "raw": false
         },
         "output": {
           "ok": true,
@@ -22518,15 +22444,7 @@
       },
       {
         "input": {
-          "record": {
-            "n": 4
-          },
-          "fields": [
-            [
-              "/missing",
-              null
-            ]
-          ]
+          "number": "4"
         },
         "output": {
           "ok": true,
@@ -22536,23 +22454,16 @@
       },
       {
         "input": {
-          "record": {
-            "n": 1
-          },
-          "fields": [
-            [
-              "/missing",
-              2
-            ]
-          ]
+          "number": "NaN"
         },
         "output": {
-          "ok": false,
-          "message": "Missing native metadata field /missing"
+          "ok": true,
+          "bits": "7ff8000000000000",
+          "raw": null
         }
       }
     ],
-    "evidence": "Reviewed generic retained_info serialization boundary: native numeric pointer overwrites preserve signed zero and infinity; unrelated metadata survives, None leaves the record untouched, and a missing target refuses visibly. Concrete Value plus native numeric descriptors exercise the real generic helper. Observations read the returned retained numeric bits directly, never serialize/redecode the owner. These Rust-only pointer invariants support the source raw-info preservation contract; they are not presented as a separate TypeScript API. Calls the actual compiled production function; fixtures adapt its typed arguments, never replace its body. Expected values are independently authored and cross-checked against maintained TypeScript where the shared output boundary permits."
+    "evidence": "Direct retained-info cutover: capture Serialize fields before JSON through the shared native capture. Concrete generic Record fields preserve signed zero, infinity and NaN; unrelated string/bool/null metadata survives. The former pointer-overwrite argument and missing-pointer refusal are removed with that obsolete API. Native numeric bits are observed directly before the report boundary; raw report fixtures are JSON-origin scalar controls. The production Aster mappers and constructed venue/Store regressions independently exercise the same carrier."
   },
   "safe_cex_venue_asterdex::exchange_helpers::assert_v3_feature": {
     "category": "decoder",

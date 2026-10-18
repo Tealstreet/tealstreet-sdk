@@ -1,4 +1,4 @@
-use safe_cex_num::numeric_ingress::{js_from_value, js_value_as_f64};
+use safe_cex_num::numeric_ingress::js_from_value;
 use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
@@ -231,7 +231,7 @@ fn live_reads_corpus() {
                     let sentinel = Rc::new("host:unique".to_owned());
                     let mut logs = Vec::new();
                     let emitter = |message: &Value| {
-                        logs.push(info(message.clone()));
+                        logs.push(info(message.clone().into()));
                         if mode == 2 {
                             let mut ticker = stored[0].clone();
                             ticker.id = "after-log".into();
@@ -255,7 +255,9 @@ fn live_reads_corpus() {
                     };
                     let result = if method == 0 {
                         run(fetch_tickers_raw(&adapter, emitter)).map(|raw| {
-                            raw.map_or(json!({"undefined":true}), |v| info(v.retained().clone()))
+                            raw.map_or(json!({"undefined":true}), |v| {
+                                info(v.retained().clone().into())
+                            })
                         })
                     } else {
                         run(fetch_tickers(&adapter, &store, emitter))
@@ -352,7 +354,9 @@ fn live_reads_corpus() {
                 panic!("READ phase must not emit")
             }))
             .unwrap();
-            let native = result.map_or(json!({"undefined":true}), |v| info(v.retained().clone()));
+            let native = result.map_or(json!({"undefined":true}), |v| {
+                info(v.retained().clone().into())
+            });
             if i == 1 {
                 assert_eq!(
                     native.as_array().unwrap().len(),

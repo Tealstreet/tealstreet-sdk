@@ -131,7 +131,14 @@ fn private_account_frame_merges_currency_balance_and_position_pnl() {
     assert_eq!(usdt.used, 50.0);
     assert_eq!(usdt.free, 450.0);
     assert_eq!(usdt.upnl, 20.0);
-    assert_eq!(usdt.info.as_ref().unwrap().get("marker").unwrap(), "private-account");
+    assert!(
+        usdt.info
+            .as_ref()
+            .unwrap()
+            .get("marker")
+            .unwrap()
+            .text_equals("private-account")
+    );
     assert_eq!(
         currencies.get("USDC"),
         previous.currencies.as_ref().unwrap().get("USDC")

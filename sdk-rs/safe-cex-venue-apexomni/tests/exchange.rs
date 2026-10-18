@@ -140,7 +140,7 @@ fn order(value: &Order) -> J {
         ("amount", n(value.amount)),
         ("filled", n(value.filled)),
         ("remaining", n(value.remaining)),
-        ("info", J::from(value.info.clone().unwrap())),
+        ("info", native::retained(value.info.as_ref().unwrap())),
         ("lastUpdate", source_clock_stamp(value.last_update)),
     ];
     match value.reduce_only {
@@ -221,7 +221,7 @@ fn market(value: &Market) -> J {
                 ),
             ]),
         ),
-        ("info", J::from(value.info.clone().unwrap())),
+        ("info", native::retained(value.info.as_ref().unwrap())),
     ];
     if let Some(expiring) = value.is_expiring {
         fields.push(("isExpiring", J::Bool(expiring)));
