@@ -7,7 +7,7 @@ use safe_cex_exchange::{
     },
     runtime::ExchangeError,
 };
-use safe_cex_types::*;
+use safe_cex_types::{Execution, ExecutionsOptions, OHLCVOptions, Order};
 use serde_json::{Value, json};
 use std::rc::Rc;
 
