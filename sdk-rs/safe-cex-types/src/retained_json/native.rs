@@ -249,7 +249,10 @@ impl<'de> Deserializer<'de> for NativeInput {
         }
         self.deserialize_any(visitor)
     }
-    fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
         if let Input::Text(units) = &self.0
             && units.len() <= 64
             && units.iter().all(|unit| *unit < 128)
