@@ -428,3 +428,7 @@ Independent null, string, NaN-producing, object, overflow, signed-zero and false
 inputs accompany distinct good rows, with finite Store resets before every case.
 The shared `ticker-native-controls.py` compiles live field-publication faults,
 requires named native failures, restores exact bytes and requires passing tests.
+
+Futures ticker and order reads capture native response data before coercion. Their
+raw info retains own Undefined, unpaired UTF-16 and nonfinite number bits; the
+constructed REST regression observes all of these before any JSON output.

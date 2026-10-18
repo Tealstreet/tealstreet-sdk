@@ -1,14 +1,12 @@
 //! Futures order read at the existing parsed-data, clock and shared Store boundaries.
-use crate::{helpers, types, wire};
+use crate::{helpers, types};
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{
-    js_date_parse, js_string, js_time_clip, js_truthy,
-    numeric_ingress::{JsNumberInput, js_value_as_f64},
-    parse_float,
+    js_date_parse, js_retained_string, js_time_clip, numeric_ingress::JsNumberInput, parse_float,
 };
 use safe_cex_store::Store;
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{Order, OrderSide, OrderStatus, OrderTimeInForce, OrderType};
-use serde_json::Value;
 use std::future::Future;
 
 fn type_error(message: impl Into<String>) -> ExchangeError {
@@ -17,21 +15,21 @@ fn type_error(message: impl Into<String>) -> ExchangeError {
     error
 }
 
-fn string(value: Option<&Value>) -> Result<String, ExchangeError> {
-    js_string(value).map_err(|error| type_error(error.message))
+fn string(value: Option<&Input>) -> Result<String, ExchangeError> {
+    js_retained_string(value).map_err(|error| type_error(error.message))
 }
 
-fn nullish<'a>(row: &'a Value, keys: &[&str]) -> Option<&'a Value> {
+fn nullish<'a>(row: &'a Input, keys: &[&str]) -> Option<&'a Input> {
     keys.iter()
-        .find_map(|key| row.get(*key).filter(|value| !value.is_null()))
+        .find_map(|key| row.get(*key).filter(|value| !value.is_nullish()))
 }
 
-fn truthy<'a>(row: &'a Value, keys: &[&str]) -> Option<&'a Value> {
+fn truthy<'a>(row: &'a Input, keys: &[&str]) -> Option<&'a Input> {
     keys.iter()
-        .find_map(|key| row.get(*key).filter(|value| js_truthy(Some(value))))
+        .find_map(|key| row.get(*key).filter(|value| value.is_truthy()))
 }
 
-fn number(value: Option<&Value>) -> Result<f64, ExchangeError> {
+fn number(value: Option<&Input>) -> Result<f64, ExchangeError> {
     value.map_or(Ok(0.0), |value| {
         string(Some(value)).map(|text| parse_float(&text))
     })
@@ -52,17 +50,17 @@ pub async fn fetch_orders<F: Future<Output = Result<Option<JsNumberInput>, Excha
             .1;
         let data = read(endpoint)?
             .await?
-            .map(wire::decode)
+            .map(JsNumberInput::decode::<Input>)
             .transpose()
             .map_err(|error| ExchangeError::new(error.to_string()))?;
         let empty = Vec::new();
         let rows = match data
             .as_ref()
             .and_then(|data| data.get("openOrders"))
-            .filter(|value| js_truthy(Some(value)))
+            .filter(|value| value.is_truthy())
         {
             None => &empty,
-            Some(Value::Array(rows)) => rows,
+            Some(Input::Array(rows)) => rows,
             _ => return Err(type_error("list.map is not a function")),
         };
         let mut orders = Vec::with_capacity(rows.len());
@@ -109,7 +107,7 @@ pub async fn fetch_orders<F: Future<Output = Result<Option<JsNumberInput>, Excha
                 .unwrap_or_default();
             let direction = row.get("direction");
             let side = if let Some(direction) = direction {
-                if js_value_as_f64(direction) == Some(0.0) || direction.as_str() == Some("buy") {
+                if direction.as_f64() == Some(0.0) || direction.text_equals("buy") {
                     OrderSide::Buy
                 } else {
                     OrderSide::Sell
@@ -155,8 +153,15 @@ pub async fn fetch_orders<F: Future<Output = Result<Option<JsNumberInput>, Excha
                     clipped
                 };
             let trigger = if triggered {
-                helpers::parse_trigger_signal(row.get("triggerSignal"))
-                    .map_err(|error| type_error(error.message))?
+                helpers::parse_trigger_signal(
+                    row.get("triggerSignal")
+                        .cloned()
+                        .map(Input::into_value)
+                        .transpose()
+                        .map_err(|cause| type_error(cause.to_string()))?
+                        .as_ref(),
+                )
+                .map_err(|error| type_error(error.message))?
             } else {
                 None
             };
@@ -172,11 +177,11 @@ pub async fn fetch_orders<F: Future<Output = Result<Option<JsNumberInput>, Excha
                 amount: unfilled + filled,
                 filled,
                 remaining: number(nullish(row, &["unfilledSize"]))?,
-                reduce_only: (js_truthy(row.get("reduceOnly"))
-                    || js_truthy(row.get("reduce_only")))
+                reduce_only: (row.get("reduceOnly").is_some_and(Input::is_truthy)
+                    || row.get("reduce_only").is_some_and(Input::is_truthy))
                 .into(),
                 close: (None).into(),
-                info: (Some(row.clone().into())).into(),
+                info: (Some(row.clone())).into(),
                 time_in_force: (Some(time_in_force)).into(),
                 last_update,
                 trigger_type: (None).into(),
@@ -210,6 +215,6 @@ pub async fn fetch_orders<F: Future<Output = Result<Option<JsNumberInput>, Excha
     }
 }
 
-fn string_value(value: &Value) -> Result<String, ExchangeError> {
+fn string_value(value: &Input) -> Result<String, ExchangeError> {
     string(Some(value))
 }

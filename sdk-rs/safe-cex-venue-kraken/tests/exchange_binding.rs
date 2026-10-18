@@ -1631,3 +1631,50 @@ fn production_ticker_coercion_futures_matches_constructed_typescript() {
 fn production_ticker_coercion_spot_matches_constructed_typescript() {
     ticker_corpus(ExchangeName::Krakenspot, "krakenspot", 40);
 }
+
+#[test]
+fn rest_models_retain_opaque_info_before_json_projection() {
+    use safe_cex_exchange::js_runtime::value::{Js, from_json, from_typed};
+    for (path, key, payload) in [
+        ("/v3/tickers", "tickers", tickers()),
+        ("/v3/openorders", "openOrders", open_orders()),
+    ] {
+        let h = futures(|_| {});
+        loaded(&h);
+        let raw = from_json(&payload);
+        let row = raw.get(key).unwrap().get("0").unwrap();
+        row.define("opaque", Js::utf16(&[0xd800, 65, 0xdc00]))
+            .unwrap();
+        row.define("infinity", Js::Number(f64::INFINITY)).unwrap();
+        row.define("nan", Js::Number(f64::NAN)).unwrap();
+        row.define("zero", Js::Number(-0.0)).unwrap();
+        row.define("undefined", Js::Undefined).unwrap();
+        h.http.routes.borrow_mut().retain(|(_, url, _)| url != path);
+        h.http.route_native("GET", path, 200., raw);
+        let models = if key == "tickers" {
+            let rows = h.drive(h.venue().fetch_tickers()).unwrap();
+            assert_eq!(rows.len(), 1, "actual REST ticker admission");
+            from_typed(&rows).unwrap()
+        } else {
+            let rows = h.drive(h.venue().fetch_orders(None)).unwrap();
+            assert_eq!(rows.len(), 1, "actual REST order admission");
+            from_typed(&rows).unwrap()
+        };
+        let info = models.get("0").unwrap().get("info").unwrap();
+        assert_eq!(
+            info.get("opaque").unwrap().as_str().unwrap().as_ref(),
+            &[0xd800, 65, 0xdc00]
+        );
+        assert_eq!(
+            info.get("infinity").unwrap().as_f64().unwrap().to_bits(),
+            f64::INFINITY.to_bits()
+        );
+        assert!(info.get("nan").unwrap().as_f64().unwrap().is_nan());
+        assert_eq!(
+            info.get("zero").unwrap().as_f64().unwrap().to_bits(),
+            (-0.0f64).to_bits()
+        );
+        assert!(info.has_own("undefined"));
+        assert!(info.get("undefined").unwrap().is_undefined());
+    }
+}
