@@ -3318,5 +3318,133 @@
         }
       }
     }
+  },
+  "safe_cex_venue_binance::ticker_capture::TickerReference": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::Ticker",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "Capture owns reference cells read by Target::id and PublicState::handle_stream; refresh patches a retained cell while the Store generation is unchanged and creates new cells for replacement rows. Native witness: tests/private_classes.rs::production_native_ticker_capture_aliases_retain_cells_and_replace_generations (features=native, all three family constructors). Source: public_classes.rs::handle_stream and ticker_capture.rs::Capture. No source-class equivalence beyond this finite state-reference corpus is claimed.",
+    "reason": "This alias is a retained mutable ticker state cell, not a decoder. Its producer takes an already typed Store ticker. Ordinary native alias probes enforce absence of raw decoding traits; the real native_dependencies frame/Store witness checks Rc identity and exact bid/ask/last bits before and after generation replacement."
+  },
+  "safe_cex_venue_binance::ticker_capture::Dictionary": {
+    "category": "non-decoder",
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::collections::btree::map::BTreeMap",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::rc::Rc",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "resolved_path": {
+                                                        "path": "core::cell::RefCell",
+                                                        "args": {
+                                                          "angle_bracketed": {
+                                                            "args": [
+                                                              {
+                                                                "type": {
+                                                                  "resolved_path": {
+                                                                    "path": "safe_cex_types::Ticker",
+                                                                    "args": null
+                                                                  }
+                                                                }
+                                                              }
+                                                            ],
+                                                            "constraints": []
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "The live PublicState::handle_stream obtains Capture::dictionary and uses the retained symbol table for native event lookup. Capture subscribes to the real Store, preserves the dictionary during in-place ticker patches, and replaces it on a ticker generation change. Native witness: tests/private_classes.rs::production_native_ticker_capture_aliases_retain_cells_and_replace_generations (features=native, all three family constructors). Source: public_classes.rs::handle_stream and ticker_capture.rs::Capture. No source-class equivalence beyond this finite state-reference corpus is claimed.",
+    "reason": "This alias is a shared mutable symbol-to-ticker reference table, not a parser or wire DTO. The public methods construct it from the typed Store; ordinary native alias probes enforce absence of declared raw decoders. The real native_dependencies constructor/frame/Store witness checks its pointer identity, replacement generation and readable row fields."
   }
 }

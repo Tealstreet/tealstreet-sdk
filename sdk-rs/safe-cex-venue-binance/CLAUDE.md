@@ -541,3 +541,15 @@ Native HTTP requests use the existing eager class settlement. Dropping a snapsho
 waiter after Promise.all rejection leaves its started sibling owned by the runtime,
 including response interceptors. Registry native_account_proxy_errors holds each
 orders/positions sibling response until after the first rejection to prove this.
+
+Ticker-capture aliases name retained state handles. The accepted alias review
+checks their actual compiler types and ordinary decoding/conversion traits;
+classification alone does not establish runtime reference behavior.
+`private_classes::production_native_ticker_capture_aliases_retain_cells_and_replace_generations`
+(`--features native`) constructs all three real native venues and dispatches
+book-ticker frames into their Store. It checks dictionary/cell identity, signed
+zero and replacement generations before serialization. The separate
+`scripts/ticker-alias-controls.py` corrupts dictionary reuse and retained-cell
+updates independently, requires the named native assertion to fail, restores exact
+source bytes and requires a pass after each fault. The selected alias inventory
+runner is `scripts/public-alias-contracts.mjs`; it does not waive other owners.
