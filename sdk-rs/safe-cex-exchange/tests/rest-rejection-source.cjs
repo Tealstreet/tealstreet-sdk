@@ -19,7 +19,7 @@ const axios=require('axios');
    client.defaults.adapter=async config=>{original.config=config;throw original;};
    try {
     let caught;try{await(name==='asterdex'?venue.syncPositionMode():client.get('/v3/accountinfo'));}catch(error){caught=error;}
-    assert.equal(caught,original);assert(caught instanceof Error);assert.equal(caught.name,original.name);
+    assert.equal(caught,original);assert(caught instanceof Error);assert(caught instanceof (name==='asterdex'?axios.AxiosError:TypeError));assert.equal(caught.name,original.name);
     for(const key of ['name','message','code','stack','cause','response','isAxiosError'])assert.equal(caught[key],original[key]);
    }finally{venue.dispose();}
   }

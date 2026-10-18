@@ -23,3 +23,7 @@ The overseer accepts original-object/prototype identity as an owned-tree
 residual under shared decision 2. Materialization recreates the Error class and
 data; it does not claim to preserve live references. Unsupported structured
 causes retain the existing visible owned-value refusal.
+
+The execute cancellation pin was reviewed against exported production syntax.
+Capture remains synchronous after the existing await; no task, waiter or owned
+reservation is introduced, so its no-owned-latch classification is unchanged.
