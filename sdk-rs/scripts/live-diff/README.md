@@ -300,3 +300,12 @@ retain their earlier, narrower qualification; do not promote them retroactively.
 asynchronous callback switch to finite work before entering that callback, so a
 later sleep inside it still blocks drain. Waking a reviewed idle task makes it
 blocking immediately, before its next poll; cancellation removes its receipt.
+
+The REST plan compares the public `Exchange` surface. Bybit's
+`fetchOptionMarkets`, `fetchTickersRaw` and `fetchTickersWithoutParse` are
+concrete-class helpers, absent from both `Exchange` and `CallableMethodsInWorker`.
+The worker's `CallMethodHandler` rejects all three even when the receiver has
+those properties. The hosted exchange-server forwards calls through this same
+worker dispatch. Both probe implementations therefore decline direct helper
+calls; public `fetchMarkets`/`refreshMarkets` and `fetchTickers` exercise their
+production callers. Option-chain and expiry reads remain in the options profile.
