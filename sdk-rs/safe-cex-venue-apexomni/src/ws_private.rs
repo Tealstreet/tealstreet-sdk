@@ -272,7 +272,8 @@ impl ApexOmniPrivateWebsocket {
     // ts: ApexOmniPrivateWebsocket.handleFillTopic
     pub fn handle_fill_topic(&self, data: &J) -> Result<(), ExchangeError> {
         for fill in crate::data::array(data).map_err(failure)? {
-            self.parent.record_ws_execution(fill)?;
+            self.parent
+                .record_ws_execution(&crate::exchange::retained_info(fill)?)?;
         }
         Ok(())
     }
@@ -306,7 +307,9 @@ impl ApexOmniPrivateWebsocket {
             {
                 continue;
             }
-            let orders = self.parent.map_order(row)?;
+            let orders = self
+                .parent
+                .map_order(&crate::exchange::retained_info(row)?)?;
             if orders.is_empty() {
                 continue;
             }
@@ -374,7 +377,8 @@ impl ApexOmniPrivateWebsocket {
                                 },
                             ),
                         ]);
-                        self.parent.record_ws_execution(&execution)?;
+                        self.parent
+                            .record_ws_execution(&crate::exchange::retained_info(&execution)?)?;
                     } else if delta == 0. && previous == 0. {
                         self.cumulative_filled
                             .borrow_mut()
@@ -476,11 +480,14 @@ impl ApexOmniPrivateWebsocket {
         for row in crate::data::array(data).map_err(failure)? {
             // TS binds the mapper to this socket, whose receiver has no `log`.
             // Preserve the mapper's evaluation order before the missing log call.
-            if let Some(position) = self.parent.map_position_with_log(row, |_| {
-                let mut error = failure("this.log is not a function".into());
-                error.name = "TypeError".into();
-                Err(error)
-            })? {
+            if let Some(position) =
+                self.parent
+                    .map_position_with_log(&crate::exchange::retained_info(row)?, |_| {
+                        let mut error = failure("this.log is not a function".into());
+                        error.name = "TypeError".into();
+                        Err(error)
+                    })?
+            {
                 let serde_json::Value::Object(fields) =
                     serde_json::to_value(&position).map_err(|e| failure(e.to_string()))?
                 else {

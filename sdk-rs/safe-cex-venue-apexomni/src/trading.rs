@@ -445,16 +445,26 @@ impl ApexOmniExchange {
         // The source maps IDs only after mapSeries finishes all submissions.
         let ids = responses
             .iter()
-            .filter(|response| !matches!(response, J::Undefined))
-            .map(|response| crate::data::property(get(response, "data"), "id").cloned())
+            .filter(|response| {
+                !matches!(
+                    response,
+                    safe_cex_types::retained_json::RetainedJsonInput::Undefined
+                )
+            })
+            .map(|response| {
+                crate::response::property(crate::response::get(response, "data"), "id").cloned()
+            })
             .collect::<Result<Vec<_>, _>>()?;
         services.throttle_fetch_orders()?;
         ids.into_iter()
             .map(|id| {
-                if matches!(id, J::Undefined) {
+                if matches!(
+                    id,
+                    safe_cex_types::retained_json::RetainedJsonInput::Undefined
+                ) {
                     return Err(failure("ApexOmni placement response is missing id".into()));
                 }
-                text(&id)
+                crate::response::text(&id)
             })
             .collect()
     }

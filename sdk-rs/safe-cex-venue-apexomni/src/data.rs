@@ -98,3 +98,20 @@ pub(crate) fn object(fields: impl IntoIterator<Item = (&'static str, J)>) -> J {
             .collect(),
     )
 }
+
+// Conversion between the existing prepared-data carrier and shared JS heap.
+// This retains undefined/BigInt/nonfinite values until their actual wire boundary.
+pub(crate) fn js(value: &J) -> safe_cex_exchange::js_runtime::value::Js {
+    use safe_cex_exchange::js_runtime::value::Js;
+    use std::rc::Rc;
+    match value {
+        J::Undefined => Js::Undefined,
+        J::Null => Js::Null,
+        J::Bool(v) => Js::Bool(*v),
+        J::Number(v) => Js::Number(*v),
+        J::String(v) => Js::str(v),
+        J::BigInt(v) => Js::BigInt(Rc::new(v.clone())),
+        J::Array(v) => Js::array(v.iter().map(js).collect()),
+        J::Object(v) => Js::object(v.iter().map(|(k, v)| (k.as_str(), js(v))).collect()),
+    }
+}

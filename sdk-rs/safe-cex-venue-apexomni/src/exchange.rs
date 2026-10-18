@@ -1,6 +1,6 @@
 //! Venue method bodies over the shared exchange, Store and explicit host capabilities.
 use crate::{
-    data::{self, get, number, property, string, truthy},
+    data::{self, number, string, truthy},
     executions, protocol,
 };
 use safe_cex_exchange::{
@@ -8,6 +8,7 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_num::{JsJsonValue as J, math_round, subtract};
+use safe_cex_types::retained_json::RetainedJsonInput as R;
 use safe_cex_types::{
     Balance, ExchangeOptions, Execution, MarginType, Market, MarketLimits, MarketLimitsAmount,
     MarketLimitsLeverage, MarketPrecision, ModelField, Order, OrderSide, OrderStopTriggerType,
@@ -43,9 +44,9 @@ pub trait ApexHost {
         private: bool,
     ) -> Result<(), ExchangeError>;
     fn dispose_websocket(&self, private: bool) -> Result<(), ExchangeError>;
-    fn request(&self, request: ApexRequest) -> ExchangeFuture<'_, J>;
+    fn request(&self, request: ApexRequest) -> ExchangeFuture<'_, R>;
     fn date_parse(&self, text: &str) -> Result<f64, ExchangeError>;
-    fn console(&self, level: &str, message: &str, detail: Option<&J>) -> Result<(), ExchangeError>;
+    fn console(&self, level: &str, message: &str, detail: Option<&R>) -> Result<(), ExchangeError>;
 }
 
 pub struct ApexOmniExchange {
@@ -62,11 +63,13 @@ pub(crate) fn failure(error: String) -> ExchangeError {
     ExchangeError::new(error)
 }
 pub(crate) fn float(value: &J) -> Result<f64, ExchangeError> {
-    executions::parse(value).map_err(|message| {
-        let mut error = failure(message);
-        error.name = "TypeError".into();
-        error
-    })
+    data::string(value)
+        .map(|s| safe_cex_num::parse_float(&s))
+        .map_err(|message| {
+            let mut error = failure(message);
+            error.name = "TypeError".into();
+            error
+        })
 }
 pub(crate) fn numeric(value: &J) -> Result<f64, ExchangeError> {
     number(value).map_err(|message| {
@@ -187,7 +190,7 @@ impl ApexOmniExchange {
         params: J,
         data: J,
         unlimited: bool,
-    ) -> ExchangeFuture<'_, J> {
+    ) -> ExchangeFuture<'_, R> {
         self.host.request(ApexRequest {
             method,
             path,
@@ -200,19 +203,21 @@ impl ApexOmniExchange {
     }
     // ts: ApexOmniExchange.getAccount
     pub async fn get_account(&self) -> Result<J, ExchangeError> {
+        use crate::response::{field_string, property};
         let response = self
             .request("get", "/v3/account", J::Undefined, J::Undefined, false)
             .await?;
-        Ok(data::object([
+        Ok(crate::data::object([
             (
                 "userId",
-                property(property(&response, "data")?, "id")?.clone(),
+                J::String(field_string(property(property(&response, "data")?, "id")?)?),
             ),
             ("affiliateId", J::Null),
         ]))
     }
     // ts: ApexOmniExchange.fetchRawBalance
     pub async fn fetch_raw_balance(&self) -> Result<Balance, ExchangeError> {
+        use crate::response::{float, get, numeric, truthy};
         let response = self
             .request(
                 "get",
@@ -246,7 +251,7 @@ impl ApexOmniExchange {
             used: float(get(balance, "maintenanceMargin"))?,
             free: numeric(get(balance, "totalEquityValue"))?
                 - numeric(get(balance, "initialMargin"))?,
-            info: Some(retained_info(balance)?),
+            info: Some(balance.clone()),
             currencies: None,
             coins: None,
         })
@@ -261,14 +266,17 @@ impl ApexOmniExchange {
         })
     }
     // ts: ApexOmniExchange.mapPosition
-    pub fn map_position(&self, row: &J) -> Result<Option<Position>, ExchangeError> {
+    pub fn map_position(&self, row: &R) -> Result<Option<Position>, ExchangeError> {
         self.map_position_with_log(row, |message| self.base.log(message, "warning"))
     }
     pub(crate) fn map_position_with_log(
         &self,
-        row: &J,
+        row: &R,
         log: impl FnOnce(&str) -> Result<(), ExchangeError>,
     ) -> Result<Option<Position>, ExchangeError> {
+        use crate::response::{
+            self as data, float, get, nullish_zero, numeric, or_zero, text, truthy,
+        };
         let entry = if truthy(data::v(row, "avgPrice")?) {
             data::v(row, "avgPrice")?.clone()
         } else {
@@ -276,7 +284,7 @@ impl ApexOmniExchange {
         };
         let entry_price = float(&entry)?;
         let contracts = float(&nullish_zero(get(row, "size")))?;
-        let side = if matches!(get(row,"side"),J::String(s) if s == "SHORT") {
+        let side = if get(row, "side").text_equals("SHORT") {
             PositionSide::Short
         } else {
             PositionSide::Long
@@ -337,7 +345,7 @@ impl ApexOmniExchange {
             liquidation_price: float(&or_zero(data::v(row, "liqPrice")?))?,
             position_mode: (Some(PositionMode::Hedged)).into(),
             margin_type: (Some(MarginType::Cross)).into(),
-            info: (Some(retained_info(row)?)).into(),
+            info: (Some(row.clone())).into(),
             last_update: (Some(safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms()))
                 .into(),
             margin_size: (None).into(),
@@ -346,7 +354,10 @@ impl ApexOmniExchange {
         }))
     }
     // ts: ApexOmniExchange.mapOrder
-    pub fn map_order(&self, row: &J) -> Result<Vec<Order>, ExchangeError> {
+    pub fn map_order(&self, row: &R) -> Result<Vec<Order>, ExchangeError> {
+        use crate::response::{
+            self as data, field_string, float, nullish_zero, numeric, property, text, truthy,
+        };
         use safe_cex_num::{TableHit, js_table_lookup};
         // Table keys are evaluated at the source call sites, but shared typed
         // output admission waits until the source's coercions and clocks finish.
@@ -375,8 +386,10 @@ impl ApexOmniExchange {
         let status = js_table_lookup(&protocol::ORDER_STATUS, &status_key);
         let raw_side = property(row, "side")?;
         let side_key = match raw_side {
-            J::String(value) => value.to_uppercase(),
-            J::Undefined | J::Null => "undefined".into(),
+            R::Text(value) => String::from_utf16(value)
+                .map_err(|_| failure("typed side refuses lone surrogate".into()))?
+                .to_uppercase(),
+            R::Undefined | R::Null => "undefined".into(),
             _ => {
                 let mut error = failure("o.side?.toUpperCase is not a function".into());
                 error.name = "TypeError".into();
@@ -399,7 +412,7 @@ impl ApexOmniExchange {
             numeric(&nullish_zero(data::v(row, "cumSuccessFillSize")?))?,
         );
         let last_update = safe_cex_store::virtual_clock::VIRTUAL_CLOCK.get_current_time_ms();
-        let trigger_type = |part: &J| -> Result<Option<OrderStopTriggerType>, ExchangeError> {
+        let trigger_type = |part: &R| -> Result<Option<OrderStopTriggerType>, ExchangeError> {
             let key = text(data::v(part, "triggerPriceType")?)?;
             Ok(match js_table_lookup(&protocol::ORDER_TRIGGER_TYPE, &key) {
                 TableHit::Mapped(value) => Some(*value),
@@ -467,7 +480,7 @@ impl ApexOmniExchange {
             }
         };
         let reduce_only = match raw_reduce_only {
-            J::Bool(value) => *value,
+            R::Bool(value) => *value,
             value if !truthy(value) => false,
             value => {
                 self.host.console(
@@ -490,7 +503,7 @@ impl ApexOmniExchange {
             filled,
             remaining,
             reduce_only: reduce_only.into(),
-            info: (Some(retained_info(row)?)).into(),
+            info: (Some(row.clone())).into(),
             time_in_force: time_in_force.into(),
             last_update,
             tp_trigger_type: tp_trigger_type.into(),
@@ -527,6 +540,7 @@ impl ApexOmniExchange {
     }
     // ts: ApexOmniExchange.fetchOrders
     pub async fn fetch_orders(&self) -> Result<Vec<Order>, ExchangeError> {
+        use crate::response::{self as data, property, truthy};
         let response = self
             .request("get", "/v3/open-orders", J::Undefined, J::Undefined, false)
             .await?;
@@ -541,7 +555,7 @@ impl ApexOmniExchange {
                 let age = now - *timestamp;
                 age.is_nan() || age <= 10_000.0
             });
-        let empty = J::Array(Vec::new());
+        let empty = R::Array(Vec::new());
         let rows = if truthy(rows) { rows } else { &empty };
         let mut filtered_orders = Vec::new();
         for row in data::array(rows).map_err(|_| {
@@ -551,8 +565,9 @@ impl ApexOmniExchange {
         })? {
             let id = property(row, "id")?;
             // Source Map.has compares keys without string coercion.
-            let cancelled = if let J::String(id) = id {
-                self.recently_cancelled_orders.borrow().contains_key(id)
+            let cancelled = if let Some(id) = id.as_text().and_then(|s| String::from_utf16(s).ok())
+            {
+                self.recently_cancelled_orders.borrow().contains_key(&id)
             } else {
                 false
             };
@@ -567,25 +582,25 @@ impl ApexOmniExchange {
         Ok(orders)
     }
     // ts: ApexOmniExchange#normalizeApexSymbolKey
-    pub fn normalize_apex_symbol_key(&self, value: &J) -> Result<String, ExchangeError> {
+    pub fn normalize_apex_symbol_key(&self, value: &R) -> Result<String, ExchangeError> {
         executions::normalize_apex_symbol_key(value).map_err(failure)
     }
     // ts: ApexOmniExchange#normalizeExecutionTimestampToSeconds
     pub fn normalize_execution_timestamp_to_seconds(
         &self,
-        value: &J,
+        value: &R,
     ) -> Result<Option<f64>, ExchangeError> {
         executions::normalize_execution_timestamp_to_seconds(value, |text| {
             self.host.date_parse(text)
         })
     }
     // ts: ApexOmniExchange.recordWsExecution
-    pub fn record_ws_execution(&self, row: &J) -> Result<(), ExchangeError> {
+    pub fn record_ws_execution(&self, row: &R) -> Result<(), ExchangeError> {
         let raw = executions::row_symbol(row);
-        if !truthy(raw) {
+        if !crate::response::truthy(raw) {
             return Ok(());
         }
-        let row_symbol = text(raw)?;
+        let row_symbol = crate::response::text(raw)?;
         let key = self.normalize_apex_symbol_key(raw)?;
         let market = self
             .base
@@ -606,10 +621,14 @@ impl ApexOmniExchange {
                     .markets()
                     .iter()
                     .find(|m| {
-                        self.normalize_apex_symbol_key(&J::String(m.id.clone()))
-                            .is_ok_and(|s| s == key)
+                        self.normalize_apex_symbol_key(&R::Text(
+                            m.id.clone().encode_utf16().collect(),
+                        ))
+                        .is_ok_and(|s| s == key)
                             || self
-                                .normalize_apex_symbol_key(&J::String(m.symbol.clone()))
+                                .normalize_apex_symbol_key(&R::Text(
+                                    m.symbol.clone().encode_utf16().collect(),
+                                ))
                                 .is_ok_and(|s| s == key)
                     })
                     .cloned()
@@ -649,10 +668,14 @@ impl ApexOmniExchange {
         to: Option<f64>,
         limit: f64,
     ) -> Result<Vec<Execution>, ExchangeError> {
-        let key = self.normalize_apex_symbol_key(&J::String(symbol.to_owned()))?;
+        let key =
+            self.normalize_apex_symbol_key(&R::Text(symbol.to_owned().encode_utf16().collect()))?;
         let mut result = Vec::new();
         for e in self.recent_ws_executions.borrow().iter() {
-            if self.normalize_apex_symbol_key(&J::String(e.symbol.clone()))? != key {
+            if self
+                .normalize_apex_symbol_key(&R::Text(e.symbol.clone().encode_utf16().collect()))?
+                != key
+            {
                 continue;
             }
             if let (Some(wanted), Some(actual)) =
@@ -689,6 +712,7 @@ impl ApexOmniExchange {
 impl ApexOmniExchange {
     // ts: ApexOmniExchange.fetchPositions
     pub async fn fetch_positions(&self) -> Result<Vec<Position>, ExchangeError> {
+        use crate::response::{self as data, fields, get, property};
         let response = self
             .request("get", "/v3/account", J::Undefined, J::Undefined, false)
             .await?;
@@ -698,7 +722,7 @@ impl ApexOmniExchange {
         let account = property(&response, "data")?;
         let account_positions = property(account, "positions")?;
         let mut positions = Vec::new();
-        if !matches!(account_positions, J::Undefined | J::Null) {
+        if !matches!(account_positions, R::Undefined | R::Null) {
             for row in data::array(account_positions).map_err(|_| {
                 let mut error = failure("data.data.positions?.map is not a function".into());
                 error.name = "TypeError".into();
@@ -728,7 +752,7 @@ impl ApexOmniExchange {
                 ("contractWallets", "contractWallets"),
             ] {
                 let value = get(account, source);
-                if !matches!(value, J::Undefined) {
+                if !matches!(value, R::Undefined) {
                     config.insert(key.into(), fields(value)?);
                 } else {
                     config.remove(key);
@@ -780,6 +804,7 @@ impl ApexOmniExchange {
     }
     // ts: ApexOmniExchange.fetchMarketsHelper
     pub async fn fetch_markets_helper(&self) -> Result<Vec<Market>, ExchangeError> {
+        use crate::response::{self as data, field_string, fields, float, get, property, truthy};
         let response = self
             .request("get", "/v3/symbols", J::Undefined, J::Undefined, false)
             .await?;
@@ -792,7 +817,7 @@ impl ApexOmniExchange {
             .and_then(serde_json::Value::as_object)
             .cloned()
             .unwrap_or_default();
-        if matches!(config, J::Undefined) {
+        if matches!(config, R::Undefined) {
             // The owned Store snapshot omits this source undefined property.
             old.remove("contractConfig");
         } else {
@@ -846,7 +871,7 @@ impl ApexOmniExchange {
                     field_string(value)
                         .map_err(|cause| failure(format!("{field}={value:?}: {}", cause.message)))
                 };
-                let active = if let J::Bool(value) = get(row, "enableTrade") {
+                let active = if let R::Bool(value) = get(row, "enableTrade") {
                     *value
                 } else {
                     return Err(failure(format!(
@@ -864,10 +889,7 @@ impl ApexOmniExchange {
                     limits,
                     is_expiring: Some(false),
                     is_perpetual: None,
-                    info: Some(
-                        retained_info(row)
-                            .map_err(|cause| failure(format!("info={row:?}: {}", cause.message)))?,
-                    ),
+                    info: Some(row.clone()),
                     pretty_symbol: None,
                     contract_size: None,
                     is_inverse: None,
