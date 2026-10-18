@@ -71,24 +71,24 @@ ts = "ORDER_TYPE"
 kind = "const"
 layer = "adapted"
 rs = "safe-cex-venue-woo/src/constants.rs::ORDER_TYPE"
-status = "divergent"
-note = "CORRECTED ts-bug: ORDER_TYPE inherits Object.prototype lookups (constructor/toString/valueOf/hasOwnProperty functions, __proto__ object). Typed enum pairs only represent declared own codes. Choosing enums excludes those values; an untyped JS-value model could preserve them but would allow functions or prototype objects where downstream order domain enums are required. Live TS prototype oracle pins this defect, so an upstream null-prototype fix forces review. Own-entry declaration order and values retained."
+status = "ported"
+note = "Ordered own-entry template for ORDER_TYPE; binding/globals.rs::enum_table installs the current realm Object.prototype on the live runtime table. Constructed mapper reads retain original inherited function/prototype referents, unknown-key undefined and own-key order. ACCEPT: the former closed-enum lookup lead is absent from the actual binding; see LIVE_ORDER_REVIEW.md and live_order_mapping_tests. The Rust slice represents own entries, not the runtime property-lookup domain."
 
 [[symbol]]
 ts = "ORDER_SIDE"
 kind = "const"
 layer = "adapted"
 rs = "safe-cex-venue-woo/src/constants.rs::ORDER_SIDE"
-status = "divergent"
-note = "CORRECTED ts-bug: ORDER_SIDE inherits Object.prototype lookups (constructor/toString/valueOf/hasOwnProperty functions, __proto__ object). Typed enum pairs only represent declared own codes. Choosing enums excludes those values; an untyped JS-value model could preserve them but would allow functions or prototype objects where downstream order domain enums are required. Live TS prototype oracle pins this defect, so an upstream null-prototype fix forces review. Own-entry declaration order and values retained."
+status = "ported"
+note = "Ordered own-entry template for ORDER_SIDE; binding/globals.rs::enum_table installs the current realm Object.prototype on the live runtime table. Constructed mapper reads retain original inherited function/prototype referents, unknown-key undefined and own-key order. ACCEPT: the former closed-enum lookup lead is absent from the actual binding; see LIVE_ORDER_REVIEW.md and live_order_mapping_tests. The Rust slice represents own entries, not the runtime property-lookup domain."
 
 [[symbol]]
 ts = "ORDER_TRIGGER_TYPE"
 kind = "const"
 layer = "adapted"
 rs = "safe-cex-venue-woo/src/constants.rs::ORDER_TRIGGER_TYPE"
-status = "divergent"
-note = "CORRECTED ts-bug: ORDER_TRIGGER_TYPE inherits Object.prototype lookups (constructor/toString/valueOf/hasOwnProperty functions, __proto__ object). Typed enum pairs only represent declared own codes. Choosing enums excludes those values; an untyped JS-value model could preserve them but would allow functions or prototype objects where downstream order domain enums are required. Live TS prototype oracle pins this defect, so an upstream null-prototype fix forces review. Own-entry declaration order and values retained."
+status = "ported"
+note = "Ordered own-entry template for ORDER_TRIGGER_TYPE; binding/globals.rs::enum_table installs the current realm Object.prototype on the live runtime table. Constructed mapper reads retain original inherited function/prototype referents, unknown-key undefined and own-key order. ACCEPT: the former closed-enum lookup lead is absent from the actual binding; see LIVE_ORDER_REVIEW.md and live_order_mapping_tests. The Rust slice represents own entries, not the runtime property-lookup domain."
 
 [[symbol]]
 ts = "ACCOUNT_RESPONSE"
