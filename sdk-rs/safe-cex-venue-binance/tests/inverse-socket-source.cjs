@@ -13,8 +13,13 @@ const source = rel => path.join(root, 'packages/safe-cex/src', rel);
 const cache = new Map();
 const clock = {now: 1_700_000_000_000};
 let timers = new Map(), nextTimer = 0;
-const setTimer = (fn, delay) => {const id=++nextTimer;timers.set(id,{fn,delay});return id;};
+const setTimer = (fn, delay) => {const id=++nextTimer;timers.set(id,{fn,delay,at:clock.now+delay});return id;};
 const clearTimer = id => timers.delete(id);
+async function advance(ms) {
+ clock.now+=ms;
+ for(const [id,timer] of [...timers])if(timer.at<=clock.now){timers.delete(id);timer.fn();}
+ for(let i=0;i<12;i++)await Promise.resolve();
+}
 const enumsFile = source('types.ts');
 const enumAst = ts.createSourceFile(enumsFile, fs.readFileSync(enumsFile,'utf8'),ts.ScriptTarget.Latest,true);
 const enums = {};
@@ -36,13 +41,14 @@ function evaluate(code, filename, exports={}) {
   return module.exports;
 }
 evaluate(enumCode,enumsFile,enums);
+Object.assign(enums,evaluate(fs.readFileSync(path.join(root,'packages/logging/src/LogSeverity.ts'),'utf8'),path.join(root,'packages/logging/src/LogSeverity.ts')));
 function load(filename) {
   if(cache.has(filename))return cache.get(filename);
   const exports={};cache.set(filename,exports);
   return Object.assign(exports,evaluate(fs.readFileSync(filename,'utf8'),filename,exports));
 }
 class BasePorts {
-  constructor(parent){this.parent=parent;this.sent=[];this.errors=[];this.stats=[];this.cleaned=[];this.received=0;this.pongs=0;this.orderBookInnerState={};this.isConnected=true;this.isForceClosed=false;this.onClose=()=>{};}
+  constructor(parent){this.parent=parent;this.sent=[];this.errors=[];this.stats=[];this.cleaned=[];this.received=0;this.pongs=0;this.orderBookInnerState={};this.isConnected=true;this.isForceClosed=false;this.onClose=()=>{};installBaseReset.call(this);}
   get store(){return this.parent.store;}
   get isDisposed(){return this.parent.isDisposed;}
   send(text){this.sent.push(JSON.parse(text));}
@@ -53,10 +59,15 @@ class BasePorts {
   cleanupMessageHandlerStats(topic){this.cleaned.push(topic);}
   handlePongEvent(){this.pongs++;}
   emitAndLogError(text){this.errors.push(text);}
-  resetOrderbook(){this.resetCalls=(this.resetCalls||0)+1;}
   createWebsocket(url){this.url=url;const listeners=[];return{readyState:1,addEventListener:(event,fn)=>listeners.push([event,fn]),removeEventListener:(event,fn)=>{const i=listeners.findIndex(x=>x[0]===event&&x[1]===fn);if(i>=0)listeners.splice(i,1);},close(){this.readyState=3;},listeners};}
   dispose(){this.baseDisposed=(this.baseDisposed||0)+1;}
 }
+const baseFile=source('exchanges/base.ws.ts');
+const baseAst=ts.createSourceFile(baseFile,fs.readFileSync(baseFile,'utf8'),ts.ScriptTarget.Latest,true);
+const baseClass=baseAst.statements.find(n=>ts.isClassDeclaration(n)&&n.name?.text==='BaseWebSocket');
+const reset=baseClass.members.find(n=>n.name?.getText(baseAst)==='resetOrderbook');
+assert(reset?.initializer,'actual inherited resetOrderbook body');
+const installBaseReset=evaluate(`export function install(){this.resetOrderbook=${reset.initializer.getText(baseAst)};}`,baseFile).install;
 const dispatchFile=source('exchanges/binance/binance.ws-public.ts');
 const dispatchAst=ts.createSourceFile(dispatchFile,fs.readFileSync(dispatchFile,'utf8'),ts.ScriptTarget.Latest,true);
 const declaration=dispatchAst.statements.find(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>d.name.getText(dispatchAst)==='dispatchBinanceMessage'));
@@ -92,15 +103,16 @@ let cases=0;
   assert.deepEqual(seen,[{timestamp:1700000000,open:1,high:2,low:0.5,close:1.5,volume:7}]);a();a();assert.equal(s.sent.filter(x=>x.method==='UNSUBSCRIBE').length,0);b();assert.equal(s.sent.filter(x=>x.method==='UNSUBSCRIBE').length,1);cases++;
  }
  {
-  const p=parent(true),s=new Public(p),seen=[],requests=[];
+  const p=parent(true),s=new Public(p),seen=[],references=[],requests=[];
   const replies=[{lastUpdateId:100,bids:[['100','2']],asks:[['101','3']]},{lastUpdateId:102,bids:[['100','5']],asks:[]}];
   p.publicXhr={async get(url,config){requests.push({url,config});assert(replies.length);return{data:replies.shift()};}};
-  const cleanup=s.listenOrderBook(SYMBOL,b=>seen.push(structuredClone(b)));
+  const cleanup=s.listenOrderBook(SYMBOL,b=>{references.push(b);seen.push(structuredClone(b));});
   const deliver=async body=>{s.onMessage({data:JSON.stringify(body)});for(let i=0;i<6;i++)await Promise.resolve();};
   await deliver({e:'depthUpdate',s:SYMBOL,U:101,u:101,pu:100,b:[['100','4']],a:[]});
   assert.equal(seen.length,1);assert.equal(seen[0].bids[0].amount,4);assert.equal(seen[0].bids[0].total,4);
   await deliver({e:'depthUpdate',s:SYMBOL,U:100,u:100,pu:99,b:[['100','99']],a:[]});assert.equal(seen.length,1);
-  await deliver({e:'depthUpdate',s:SYMBOL,U:103,u:103,pu:999,b:[['100','6']],a:[]});assert.equal(seen.length,2);assert.equal(seen[1].bids[0].amount,6);
+  await deliver({e:'depthUpdate',s:SYMBOL,U:102,u:103,pu:999,b:[['100','6']],a:[]});assert.equal(seen.length,2);assert.equal(seen[1].bids[0].amount,6);
+  assert.equal(references[0],references[1],'source retains one live book');assert.equal(references[0].bids[0].amount,6,'earlier source reference sees later update');
   assert.equal(requests.length,2);for(const r of requests){assert.equal(r.url,'/dapi/v1/depth');assert.deepEqual(r.config,{params:{symbol:SYMBOL,limit:1000}});}cleanup();cases++;
  }
  {
@@ -118,5 +130,31 @@ let cases=0;
   s.onMessage({data:JSON.stringify({e:'ACCOUNT_UPDATE',a:{P:[{s:SYMBOL,pa:'-2',ps:'BOTH',ep:'45000',up:'-0.02'}]}})});
   const position=p.store.positions[0];assert.deepEqual([position.contracts,position.notional,position.side,position.leverage,position.liquidationPrice,position.info.contractsNative,position.info.old],[0.004,200,'short',17,20000,2,true]);assert.equal(p.version,1);cases++;
  }
- assert.equal(cases,6);console.log('Maintained inverse socket classes/imported algorithms: 6 actual source groups PASS (wire/data/candle/depth/fill/inverse-position); Base IO ports only.');
+ {
+  timers=new Map();const p=parent(),s=new Private(p);let requests=0;
+  p.xhr={async post(){requests++;throw new Error('listen key unavailable');}};
+  await s.connectAndSubscribe();assert.equal(requests,1);
+  for(const [index,delay] of [5000,10000,20000,40000,60000,60000].entries()){
+   await advance(delay-1);assert.equal(requests,index+1);await advance(1);assert.equal(requests,index+2);
+  }
+  s.isForceClosed=true;await advance(60000);assert.equal(requests,7);cases++;
+ }
+ {
+  timers=new Map();const p=parent(),s=new Private(p);let requests=0;
+  p.xhr={async post(){requests++;return{data:{listenKey:'key'}};},async put(){requests++;if(requests===2)throw new Error('keepalive unavailable');return{data:{}};}};
+  await s.fetchListenKey();await advance(1799999);assert.equal(requests,1);await advance(1);assert.equal(requests,2);
+  await advance(59999);assert.equal(requests,2);await advance(1);assert.equal(requests,3);await advance(60000);assert.equal(requests,3);
+  s.dispose();await advance(1800000);assert.equal(requests,3);cases++;
+ }
+ {
+  timers=new Map();const p=parent(),s=new Private(p);let release,fullUpdates=0;
+  p.isBackgroundReconciliationPaused=()=>false;
+  p.fetchPositions=()=>new Promise(resolve=>{release=resolve;});
+  p.store.addOrUpdatePositionsFull=rows=>{fullUpdates++;p.store.positions.splice(0,p.store.positions.length,...rows);};
+  const pending=s.executePositionFetch();
+  s.onMessage({data:JSON.stringify({e:'ACCOUNT_UPDATE',a:{P:[{s:SYMBOL,pa:'2',ps:'BOTH',ep:'45000',up:'0.02'}]}})});
+  assert.equal(p.store.positions[0].contracts,0.004);release([]);await pending;
+  assert.equal(fullUpdates,0);assert.equal(p.store.positions[0].contracts,0.004);assert.equal(s.positionFetchInFlight,false);cases++;
+ }
+ assert.equal(cases,9);console.log('Maintained inverse socket classes/imported algorithms: 9 actual source groups PASS (wire/data/candle/depth/fill/inverse-position/retry/keepalive/stale-REST); Base IO ports only.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

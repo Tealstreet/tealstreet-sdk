@@ -200,12 +200,15 @@ fn depth_buffers_snapshot_requires_previous_id_and_resyncs_gap() {
     )));
     let seen = Rc::new(RefCell::new(vec![]));
     let sink = seen.clone();
+    let referents = Rc::new(RefCell::new(vec![]));
+    let saved = referents.clone();
     let cleanup = invoke(
         &h,
         "listenOrderBook",
         vec![
             Js::str(SYMBOL),
             Js::function("capture", move |_, a| {
+                saved.borrow_mut().push(a[0].clone());
                 sink.borrow_mut()
                     .push(safe_cex_exchange::js_runtime::value::to_json(&a[0])?);
                 Ok(Js::Undefined)
@@ -242,11 +245,20 @@ fn depth_buffers_snapshot_requires_previous_id_and_resyncs_gap() {
     )));
     frame(
         &socket,
-        json!({"e":"depthUpdate","s":SYMBOL,"U":103,"u":103,"pu":999,"b":[["100","6"]],"a":[]}),
+        json!({"e":"depthUpdate","s":SYMBOL,"U":102,"u":103,"pu":999,"b":[["100","6"]],"a":[]}),
     );
     h.runtime.pump();
     assert_eq!(seen.borrow().len(), 2);
     assert_eq!(seen.borrow()[1]["bids"][0]["amount"], 6.);
+    assert!(
+        !referents.borrow()[0].strict_equals(&referents.borrow()[1]),
+        "native callback profile is an owned snapshot"
+    );
+    assert_eq!(
+        safe_cex_exchange::js_runtime::value::to_json(&referents.borrow()[0]).unwrap()["bids"][0]["amount"],
+        4.,
+        "earlier native callback stays frozen; maintained source sees6"
+    );
     let requests = h.http.requests.borrow();
     assert_eq!(requests.len(), 2);
     for request in requests.iter() {
@@ -469,5 +481,43 @@ fn maintained_inverse_socket_classes_match_native_case_expectations() {
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn websocket_version_prevents_late_rest_position_snapshot_overwrite() {
+    let h = support::fixture(false, false);
+    seed(&h);
+    key(&h, "key");
+    let socket = connect(&h, SocketSlot::Private);
+    h.http.hold.set(true);
+    h.http.replies.borrow_mut().push_back(Ok(Js::array(vec![])));
+    private_member(&h, "executePositionFetch");
+    assert_eq!(h.http.requests.borrow().len(), 2);
+    assert_eq!(
+        h.http.requests.borrow()[1].get("url").unwrap().to_display(),
+        "/dapi/v1/positionRisk"
+    );
+    frame(
+        &socket,
+        json!({"e":"ACCOUNT_UPDATE","a":{"P":[{"s":SYMBOL,"pa":"2","ps":"BOTH","ep":"45000","up":"0.02"}]}}),
+    );
+    assert_eq!(h.store.positions()[0].contracts, 0.004);
+    h.http.release();
+    h.runtime.pump();
+    assert_eq!(
+        h.store.positions()[0].contracts,
+        0.004,
+        "newer websocket position survives completed old REST snapshot"
+    );
+    assert_eq!(
+        h.http.requests.borrow().len(),
+        2,
+        "follow-up reconciliation stays throttled"
+    );
+    let private = h.exchange.receiver().get("privateWebsocket").unwrap();
+    assert!(
+        !private.get("positionFetchInFlight").unwrap().truthy(),
+        "normal finally releases latch"
     );
 }
