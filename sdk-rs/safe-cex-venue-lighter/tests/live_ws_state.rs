@@ -241,7 +241,8 @@ fn lighter_ws_state_helpers_match_live_typescript() {
             "ordersLength":private::flatten_orders_by_market(Some(&payload)).unwrap().array_values().unwrap().len(),
         });
         assert_eq!(actual, case["expected"], "native flatten values {case}");
-        row.delete(&"cycle".encode_utf16().collect::<Vec<_>>());
+        row.delete(&"cycle".encode_utf16().collect::<Vec<_>>())
+            .unwrap();
     }
     for case in oracle["recent"].as_array().unwrap() {
         assert_eq!(

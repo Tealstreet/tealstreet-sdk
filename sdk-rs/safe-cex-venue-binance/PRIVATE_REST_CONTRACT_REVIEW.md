@@ -55,3 +55,12 @@ the surrounding changes. Measurement exit zero alone is not a passing receipt.
 This is a finite cohort, not whole-venue equivalence. Callable aliases, other
 modules, executable-object profiles and the existing typed UTF8 model boundaries
 retain their separate evidence and ownership.
+
+Error-message selection reads the canonical retained `Thrown` message instead of
+the UTF8 diagnostic field. `ExchangeState::emit` sends the original native value
+to `ExchangeErrorInput::Raw`, the same formatter used by the JS base facade.
+The constructed native emitter and first PM snapshot-failure regressions compare
+D800/DC00 units, exact effect counts, signed HTTP ordering and cached fallback.
+The PM expectation uses the maintained source guard; the regular-order failure
+prevents the later conditional HTTP call. Typed console/log adapters retain their
+separate UTF8 boundary; this selected fix does not widen that shared API.

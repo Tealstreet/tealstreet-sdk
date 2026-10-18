@@ -1,4 +1,1000 @@
 {
+  "safe_cex_venue_binance::class_flags::LiveFlag": {
+    "shape": "typed",
+    "evidence": "src/class_flags.rs carries a callback or bool Cell without Deserialize. The actual native ExchangeOwner installs live Base disposal and snapshot-stale readers. tests/support/live_flag_binding.rs executes signed held Futures/PM HTTP requests, then directly checks live guards, Store order contents/loaded state and actual Base disposal; its second native test checks both Cell values and later writes. scripts/live-flag-controls.py independently compiles a broken live reader and inverted Cell conversion, requires the corresponding named native assertion to fail, restores exact production bytes and requires the same tests to pass. The accepted-set receipt classifies these two typed constructors; it does not execute a decoder or replace the separate native binding witnesses.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "read",
+          "signature": {
+            "inputs": [
+              [
+                "get",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::ops::function::Fn",
+                                      "args": {
+                                        "parenthesized": {
+                                          "inputs": [],
+                                          "output": {
+                                            "primitive": "bool"
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Captures an existing bool callback; execution reads the live owner instead of parsing external data."
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "core::cell::Cell",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "primitive": "bool"
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Moves an already typed bool Cell into local state, without decoding a representation."
+      }
+    ]
+  },
+  "safe_cex_venue_binance::ticker_capture::Capture": {
+    "shape": "typed",
+    "evidence": "ticker_capture::Capture::new receives only an already constructed Rc<dyn Store>, retains it weakly, builds native ticker cells and subscribes to Store changes. It neither parses raw input nor implements Deserialize. The real constructed native_dependencies class test production_native_ticker_capture_aliases_retain_cells_and_replace_generations asserts immediate updates before any dictionary reread, generation replacement, stable row identity and all three venue paths. Its compiled subscription-refresh removal control must fail; this typed classification itself is not a decoder execution receipt.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "store",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_store::contract::Store",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "A concrete Store capability constructs a subscribed state view; no raw field or string enters this constructor."
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_dispatch::Handlers": {
+    "shape": "observed",
+    "evidence": "public_dispatch::Handlers::get performs own-before-prototype lookup and otherwise reads the captured Object prototype. The exact native getter is called with independent own/prototype, shadowed false, stock inherited callable and missing keys; observations inspect Rc identity, length, callable identity class, truthiness and enumerable key order before serialization. Actual constructed NativeImports public frames separately prove dispatch, error and lookup integration against maintained TS.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_venue_binance::public_dispatch::Handler",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual raw-key getter; callback fixtures are not executed during lookup."
+      }
+    ],
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-dispatch-observers.rs\")); } witness::handler($value, <$type>::get) }",
+    "cases": [
+      {
+        "input": {
+          "key": "event.BTC"
+        },
+        "output": {
+          "kind": "list",
+          "length": 2,
+          "sameOwn": true,
+          "samePrototype": false,
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      },
+      {
+        "input": {
+          "key": "event.ETH"
+        },
+        "output": {
+          "kind": "list",
+          "length": 1,
+          "sameOwn": false,
+          "samePrototype": true,
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      },
+      {
+        "input": {
+          "key": "flag"
+        },
+        "output": {
+          "kind": "boolean",
+          "callable": false,
+          "truthy": false,
+          "length": null,
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      },
+      {
+        "input": {
+          "key": "constructor"
+        },
+        "output": {
+          "kind": "function",
+          "callable": true,
+          "truthy": true,
+          "length": "3ff0000000000000",
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      },
+      {
+        "input": {
+          "key": "toString"
+        },
+        "output": {
+          "kind": "function",
+          "callable": true,
+          "truthy": true,
+          "length": "0000000000000000",
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      },
+      {
+        "input": {
+          "key": "__proto__"
+        },
+        "output": {
+          "kind": "object",
+          "callable": false,
+          "truthy": true,
+          "length": null,
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      },
+      {
+        "input": {
+          "key": "missing"
+        },
+        "output": {
+          "kind": "undefined",
+          "callable": false,
+          "truthy": false,
+          "length": null,
+          "keys": [
+            "event.BTC",
+            "flag",
+            "event.ETH"
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::ticker_capture::lookup": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "lookup",
+      "signature": {
+        "inputs": [
+          [
+            "dictionary",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::ticker_capture::Dictionary",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::ticker_capture::Target",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "ticker_capture::lookup accepts a raw symbol key over the actual Capture dictionary. Execute that exact free function using real DefaultStore and Capture; inspect returned row Rc identity, Store membership, every native Ticker number bit, optional presence and keys. The fixture seeds opaque Input info including NaN, infinity, signed zero, lone UTF16 and own undefined; DefaultStore intentionally strips truthy ticker info, matching store.base.ts::stripTickerInfo, and the returned row must reflect that. Stock inherited keys return the actual inherited Target; missing key returns None. The constructed real socket/source prototype witness exercises all three class families.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-dispatch-observers.rs\")); } witness::lookup($value, crate::ticker_capture::lookup) }",
+    "cases": [
+      {
+        "input": {
+          "key": "BTC",
+          "ticker": {
+            "bid": -0.0,
+            "ask": 1.25,
+            "last": -2.5,
+            "mark": 3.75,
+            "index": 4.125,
+            "percentage": 5.5,
+            "openInterest": 6.25,
+            "fundingRate": -7.5,
+            "fundingTime": 8.75,
+            "volume": 9.125,
+            "quoteVolume": 10.5,
+            "id": "left🚀",
+            "symbol": "BTC",
+            "midPrice": -0.0,
+            "timestamp": 2.5
+          }
+        },
+        "output": {
+          "kind": "row",
+          "keys": [
+            "BTC"
+          ],
+          "sameRow": true,
+          "belongsToStore": true,
+          "ticker": {
+            "bid": "8000000000000000",
+            "ask": "3ff4000000000000",
+            "last": "c004000000000000",
+            "mark": "400e000000000000",
+            "index": "4010800000000000",
+            "percentage": "4016000000000000",
+            "openInterest": "4019000000000000",
+            "fundingRate": "c01e000000000000",
+            "fundingTime": "4021800000000000",
+            "volume": "4022400000000000",
+            "quoteVolume": "4025000000000000",
+            "id": "left🚀",
+            "symbol": "BTC",
+            "midPrice": "8000000000000000",
+            "timestamp": "4004000000000000",
+            "infoOwn": false,
+            "info": null
+          }
+        }
+      },
+      {
+        "input": {
+          "key": "ETH",
+          "ticker": {
+            "bid": 0.0,
+            "ask": 11.25,
+            "last": 12.5,
+            "mark": 13.75,
+            "index": 14.125,
+            "percentage": 15.5,
+            "openInterest": 16.25,
+            "fundingRate": 17.5,
+            "fundingTime": 18.75,
+            "volume": 19.125,
+            "quoteVolume": 20.5,
+            "id": "right",
+            "symbol": "ETH"
+          }
+        },
+        "output": {
+          "kind": "row",
+          "keys": [
+            "ETH"
+          ],
+          "sameRow": true,
+          "belongsToStore": true,
+          "ticker": {
+            "bid": "0000000000000000",
+            "ask": "4026800000000000",
+            "last": "4029000000000000",
+            "mark": "402b800000000000",
+            "index": "402c400000000000",
+            "percentage": "402f000000000000",
+            "openInterest": "4030400000000000",
+            "fundingRate": "4031800000000000",
+            "fundingTime": "4032c00000000000",
+            "volume": "4033200000000000",
+            "quoteVolume": "4034800000000000",
+            "id": "right",
+            "symbol": "ETH",
+            "midPrice": null,
+            "timestamp": null,
+            "infoOwn": false,
+            "info": null
+          }
+        }
+      },
+      {
+        "input": {
+          "key": "constructor",
+          "ticker": {
+            "bid": -0.0,
+            "ask": 1.25,
+            "last": -2.5,
+            "mark": 3.75,
+            "index": 4.125,
+            "percentage": 5.5,
+            "openInterest": 6.25,
+            "fundingRate": -7.5,
+            "fundingTime": 8.75,
+            "volume": 9.125,
+            "quoteVolume": 10.5,
+            "id": "left🚀",
+            "symbol": "BTC",
+            "midPrice": -0.0,
+            "timestamp": 2.5
+          }
+        },
+        "output": {
+          "kind": "inherited",
+          "keys": [
+            "BTC"
+          ],
+          "id": "undefined"
+        }
+      },
+      {
+        "input": {
+          "key": "toString",
+          "ticker": {
+            "bid": -0.0,
+            "ask": 1.25,
+            "last": -2.5,
+            "mark": 3.75,
+            "index": 4.125,
+            "percentage": 5.5,
+            "openInterest": 6.25,
+            "fundingRate": -7.5,
+            "fundingTime": 8.75,
+            "volume": 9.125,
+            "quoteVolume": 10.5,
+            "id": "left🚀",
+            "symbol": "BTC",
+            "midPrice": -0.0,
+            "timestamp": 2.5
+          }
+        },
+        "output": {
+          "kind": "inherited",
+          "keys": [
+            "BTC"
+          ],
+          "id": "undefined"
+        }
+      },
+      {
+        "input": {
+          "key": "__proto__",
+          "ticker": {
+            "bid": -0.0,
+            "ask": 1.25,
+            "last": -2.5,
+            "mark": 3.75,
+            "index": 4.125,
+            "percentage": 5.5,
+            "openInterest": 6.25,
+            "fundingRate": -7.5,
+            "fundingTime": 8.75,
+            "volume": 9.125,
+            "quoteVolume": 10.5,
+            "id": "left🚀",
+            "symbol": "BTC",
+            "midPrice": -0.0,
+            "timestamp": 2.5
+          }
+        },
+        "output": {
+          "kind": "inherited",
+          "keys": [
+            "BTC"
+          ],
+          "id": "undefined"
+        }
+      },
+      {
+        "input": {
+          "key": "not-owned",
+          "ticker": {
+            "bid": -0.0,
+            "ask": 1.25,
+            "last": -2.5,
+            "mark": 3.75,
+            "index": 4.125,
+            "percentage": 5.5,
+            "openInterest": 6.25,
+            "fundingRate": -7.5,
+            "fundingTime": 8.75,
+            "volume": 9.125,
+            "quoteVolume": 10.5,
+            "id": "left🚀",
+            "symbol": "BTC",
+            "midPrice": -0.0,
+            "timestamp": 2.5
+          }
+        },
+        "output": {
+          "kind": "missing",
+          "keys": [
+            "BTC"
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_binance::public_dispatch::dispatch_binance_message": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "dispatch_binance_message",
+      "signature": {
+        "inputs": [
+          [
+            "handlers",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_binance::public_dispatch::Handlers",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "record_stats",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut(&str) -> Result<(), Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "The actual public_dispatch::dispatch_binance_message free function selects native Handlers, records statistics before parsing, shares one native packet among callbacks, observes list mutation live, chooses inherited enumerable prefix handlers, and returns original callback failures. Independently authored cases assert callback order, reference identity, signed-zero mutation, reentrant clearing/appending, malformed input and exact failure identity. The actual constructed NativeImports socket tests separately prove the assembled handler path for Futures, PM and Spot; no dispatcher or parser is replaced.",
+    "call": "{ #[allow(dead_code)] mod witness { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/public-dispatch-observers.rs\")); } witness::dispatch($value, |handlers, wire, stats| crate::public_dispatch::dispatch_binance_message(handlers, wire, stats)) }",
+    "cases": [
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"}",
+          "broadcast": true,
+          "exact": true
+        },
+        "output": {
+          "trace": [
+            "stats:event",
+            "broadcast",
+            "exact"
+          ],
+          "packets": [
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": null
+              }
+            },
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": null
+              }
+            }
+          ],
+          "broadcastLength": 1,
+          "error": null
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"}",
+          "broadcast": true,
+          "exact": true,
+          "append": true,
+          "mutate": true
+        },
+        "output": {
+          "trace": [
+            "stats:event",
+            "broadcast",
+            "appended",
+            "exact"
+          ],
+          "packets": [
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": "8000000000000000"
+              }
+            },
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": "8000000000000000"
+              }
+            },
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": "8000000000000000"
+              }
+            }
+          ],
+          "broadcastLength": 2,
+          "error": null
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"}",
+          "prefix": true
+        },
+        "output": {
+          "trace": [
+            "stats:event",
+            "prefix",
+            "inherited-prefix"
+          ],
+          "packets": [
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": null
+              }
+            },
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": null
+              }
+            }
+          ],
+          "broadcastLength": 0,
+          "error": null
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"}",
+          "broadcast": true,
+          "exact": true,
+          "clearOnStats": true
+        },
+        "output": {
+          "trace": [
+            "stats:event",
+            "exact"
+          ],
+          "packets": [
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": null
+              }
+            }
+          ],
+          "broadcastLength": 0,
+          "error": null
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"",
+          "broadcast": true,
+          "exact": true,
+          "statsError": true
+        },
+        "output": {
+          "trace": [
+            "stats:event"
+          ],
+          "packets": [],
+          "broadcastLength": 1,
+          "error": {
+            "name": "Error",
+            "message": "configured failure",
+            "sameError": true
+          }
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"}",
+          "broadcast": true,
+          "exact": true,
+          "handlerError": true
+        },
+        "output": {
+          "trace": [
+            "stats:event",
+            "broadcast"
+          ],
+          "packets": [
+            {
+              "samePacket": true,
+              "fields": {
+                "symbol": "BTC",
+                "mutated": null
+              }
+            }
+          ],
+          "broadcastLength": 1,
+          "error": {
+            "name": "Error",
+            "message": "configured failure",
+            "sameError": true
+          }
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"",
+          "broadcast": true
+        },
+        "output": {
+          "trace": [
+            "stats:event"
+          ],
+          "packets": [],
+          "broadcastLength": 1,
+          "error": null
+        }
+      },
+      {
+        "input": {
+          "wire": "{\"e\":\"event\",\"s\":\"BTC\"}"
+        },
+        "output": {
+          "trace": [],
+          "packets": [],
+          "broadcastLength": 0,
+          "error": null
+        }
+      }
+    ]
+  },
   "safe_cex_venue_binance::binance_types::BinanceIncomeHistoryOptions": {
     "category": "decoder",
     "shape": "map",
@@ -23040,6 +24036,648 @@
     },
     "reason": "Formats one Error from already selected venue/endpoint strings plus UTF16 shape/message slices. It admits no response shape and performs no field decoding or raw parsing. Actual UTF16/error metadata and Display are observed by the direct native constructor test and the native guard contract; classification receipts do not execute this diagnostic builder.",
     "evidence": "Canonical native diagnostic constructor. The former UTF8 malformed helper is retired; all response validators delegate here. Existing private_malformed_constructor_preserves_error_fields assertions retain their three cases, name/message and Display checks."
+  },
+  "safe_cex_venue_binance::signing::encode": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "encode",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::encode in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Percent-encodes an already typed UTF-8 string into request query bytes. It serializes wire text; it does not decode a JSON representation or admit a domain record."
+  },
+  "safe_cex_venue_binance::signing::entries": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "entries",
+      "signature": {
+        "inputs": [
+          [
+            "map",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::map::Map",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::entries in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Borrows existing typed JSON-map entries and orders canonical numeric property names before the remaining keys. It returns a view for request serialization and header normalization, without decoding a record."
+  },
+  "safe_cex_venue_binance::signing::header_value": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "header_value",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::header_value in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Normalizes an existing request header value using Axios header formatting rules (control removal, trimming and recursive arrays). It prepares outbound header text rather than admitting a response or domain schema."
+  },
+  "safe_cex_venue_binance::signing::index": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "index",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "u32"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::index in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Recognizes canonical non-2^32-1 unsigned property-name indices solely as the ordering key for object serialization. Its Option<u32> is a sort key, not a decoded domain owner or wire-shape admission decision."
+  },
+  "safe_cex_venue_binance::signing::numeric": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "numeric",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::numeric in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Formats a native f64 using JavaScript number spelling for outbound timestamp/recvWindow fields; nonfinite spellings remain strings in this typed JSON profile. It encodes an existing numeric argument rather than decoding one."
+  },
+  "safe_cex_venue_binance::signing::query_field": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "query_field",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "output",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::query_field in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Recursively serializes an existing request value into the supplied query-field accumulator, repeating arrays and applying bracket notation to maps. It emits outbound text and does not construct a decoded model."
+  },
+  "safe_cex_venue_binance::signing::serialize_query": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "serialize_query",
+      "signature": {
+        "inputs": [
+          [
+            "params",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::serialize_query in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "The typed outbound request codec corresponding to qs repeat-array serialization. It walks the existing parameter graph and returns query bytes, without parsing a response or constructing a domain model."
+  },
+  "safe_cex_venue_binance::signing::sign_binance_request": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "sign_binance_request",
+      "signature": {
+        "inputs": [
+          [
+            "config",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::map::Map",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "options",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_crypto::SigningOptions",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "lifetime": "'_"
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "exchange",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::ExchangeName",
+                "args": null
+              }
+            }
+          ],
+          [
+            "remote_signer_present",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "recv_window",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "clock",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_store::virtual_clock::VirtualClock",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::map::Map",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              },
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::sign_binance_request in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Asynchronous outbound signing orchestration over an existing structured request config and typed signer/clock capabilities. It computes authoritative params and headers; no deserializer or representation admission is exposed."
+  },
+  "safe_cex_venue_binance::signing::spread": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "spread",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::map::Map",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::spread in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Copies an existing optional JSON value using the source request-object spread profile, including indexed arrays/UTF-16 string units. It is an outbound config transformation, not a decoder or a record-admission boundary."
+  },
+  "safe_cex_venue_binance::signing::text": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "text",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Production signing::text in src/signing.rs; request serialization/signing witnesses in tests/signing.rs and scripts/signing.mjs (actual TypeScript signer, installed Axios/qs/create-hmac). This classification is limited to the decoder role, not a claim of arbitrary-JS parity.",
+    "reason": "Applies the existing query/header stringification profile to a typed JSON value, including array joining and object spelling. It produces outbound text rather than decoding a domain owner."
   },
   "safe_cex_venue_binance::public_rest::endpoint": {
     "category": "non-decoder",
