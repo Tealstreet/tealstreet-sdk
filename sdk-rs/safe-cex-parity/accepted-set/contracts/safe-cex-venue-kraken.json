@@ -7479,5 +7479,134 @@
         }
       }
     }
+  },
+  "safe_cex_venue_kraken::binding::rt::SpotIds": {
+    "category": "non-decoder",
+    "reason": "Module-owned zero-argument FnMut capability that draws CSPRNG bytes and returns a generated 32-character hexadecimal order ID or JsCoercionError. String is its output, not an admitted input; the live closure environment is mutable generator state, not a record or wire decoder.",
+    "evidence": "The fresh compiler/artifact/macro/source-authenticated scripts/client-id-alias-contracts.mjs executes the maintained native identity, Serde and conversion probes on this exact production boxed callable. tests/support/accepted_client_id_alias.rs installs the real spot_client_ids generator into two constructed Spot exchanges, observes shared refill lengths and sequence, three signed AddOrder wire cl_ord_id values and resulting transaction IDs; its separate entropy-failure witness observes native name/message and prevents order HTTP. scripts/client-id-alias-controls.py requires named compiled output-substitution and swallowed-error failures, exact restoration and native passes. TypeScript creates customAlphabet once at module scope in krakenspot.exchange.ts and consumes it in placeOrder; see CLIENT_ID_ALIAS_REVIEW.md.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::boxed::Box",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::FnMut",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::string::String",
+                                              "args": null
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_types::js_coercion::JsCoercionError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::boxed::Box",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::FnMut",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::string::String",
+                                              "args": null
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_types::js_coercion::JsCoercionError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    }
   }
 }

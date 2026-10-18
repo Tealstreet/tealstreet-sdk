@@ -6,6 +6,9 @@ mod accepted_additional_receivers;
 #[path = "../../tests/support/accepted_api_receivers.rs"]
 mod accepted_api_receivers;
 #[cfg(test)]
+#[path = "../../tests/support/accepted_client_id_alias.rs"]
+mod accepted_client_id_alias;
+#[cfg(test)]
 #[path = "../../tests/support/accepted_construction_aliases.rs"]
 mod accepted_construction_aliases;
 #[cfg(test)]

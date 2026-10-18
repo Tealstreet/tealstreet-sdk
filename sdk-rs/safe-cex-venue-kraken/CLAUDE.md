@@ -542,3 +542,11 @@ compiled runtime failures and exact-source restored passes.
 `accepted_member_aliases` witnesses use constructed receivers, real chart HTTP
 and the initialized arrow. `member-alias-controls.py` must fail three named
 compiled runtime assertions and restore exact source bytes before readiness.
+
+`binding::rt::SpotIds` is the module-owned mutable generator capability, not a
+wire decoder. `CLIENT_ID_ALIAS_REVIEW.md` records its source lifetime and exact
+native proof. `--lib accepted_client_id_alias` uses the real generator shared
+by two constructed Spot clients, signed AddOrder requests and entropy refusal;
+`scripts/client-id-alias-controls.py` requires named compiled semantic failures
+and exact restored passes. `scripts/client-id-alias-contracts.mjs` uses fresh
+compiler-authenticated identity/Serde/conversion probes for this one alias.
