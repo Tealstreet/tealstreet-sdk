@@ -124,6 +124,7 @@ fn dropped_typed_and_unit_waiters_keep_signed_http_and_store_continuations_alive
                     Err(error) => panic!("loopback accept: {error}"),
                 }
             };
+            socket.set_nonblocking(false).unwrap();
             socket
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
@@ -134,7 +135,25 @@ fn dropped_typed_and_unit_waiters_keep_signed_http_and_store_continuations_alive
                 assert_ne!(count, 0);
                 bytes.extend_from_slice(&buffer[..count]);
             }
-            let header = String::from_utf8(bytes).unwrap();
+            let header_end = bytes
+                .windows(4)
+                .position(|value| value == b"\r\n\r\n")
+                .unwrap()
+                + 4;
+            let header = String::from_utf8(bytes[..header_end].to_vec()).unwrap();
+            let length = header
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap_or(0);
+            while bytes.len() < header_end + length {
+                let count = socket.read(&mut buffer).unwrap();
+                assert_ne!(count, 0);
+                bytes.extend_from_slice(&buffer[..count]);
+            }
             let mut parts = header.lines().next().unwrap().split_whitespace();
             let method = parts.next().unwrap().to_lowercase();
             let target = parts.next().unwrap();
