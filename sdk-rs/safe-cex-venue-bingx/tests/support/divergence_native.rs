@@ -237,19 +237,33 @@ fn real_final_drop_cancels_host_timers_even_if_store_reset_observer_rejects() {
     open(&h);
     let callbacks = std::rc::Rc::new(std::cell::Cell::new(0));
     let capture = callbacks.clone();
-    let _unsubscribe = safe_cex_store::Store::subscribe(h.store.as_ref(), Box::new(move |_, _| {
-        capture.set(capture.get() + 1);
-        Err(safe_cex_types::StoreSubscriberError::new("reset observer failed"))
-    }));
+    let _unsubscribe = safe_cex_store::Store::subscribe(
+        h.store.as_ref(),
+        Box::new(move |_, _| {
+            capture.set(capture.get() + 1);
+            Err(safe_cex_types::StoreSubscriberError::new(
+                "reset observer failed",
+            ))
+        }),
+    );
     let host = h.exchange.host.clone();
     let runtime = h.runtime.clone();
     let http = h.http.clone();
     let socket = runtime.sockets.borrow()[0].1.clone();
     drop(h);
-    assert!(callbacks.get() > 0, "actual teardown invoked the rejecting Store observer");
+    assert!(
+        callbacks.get() > 0,
+        "actual teardown invoked the rejecting Store observer"
+    );
     assert!(socket.closed.get());
-    assert!(host.tasks.borrow().is_empty(), "Store rejection cannot bypass timer cancellation");
+    assert!(
+        host.tasks.borrow().is_empty(),
+        "Store rejection cannot bypass timer cancellation"
+    );
     runtime.advance(1_800_000.0);
     assert_eq!(http.calls(KEYS).len(), 1);
-    assert!(runtime.reports.borrow().is_empty(), "final teardown is silent");
+    assert!(
+        runtime.reports.borrow().is_empty(),
+        "final teardown is silent"
+    );
 }
