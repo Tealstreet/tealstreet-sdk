@@ -92,17 +92,19 @@ fn native_unhandled_rejections_match_node_without_reporting_handled_promises() {
         let weak_reentrant = Rc::downgrade(&reentrant);
         let handler = catch.clone();
         let reason = Thrown::error("Error", "initial").value;
-        reason.define_accessor(
-            "message",
-            Some(Rc::new(move |_| {
-                if let Some(owner) = weak_reentrant.upgrade() {
-                    let promise = owner.borrow().clone();
-                    promise.call_method("catch", vec![handler.clone()])?;
-                }
-                Ok(Js::str("unhandled-reentrant"))
-            })),
-            None,
-        );
+        reason
+            .define_accessor(
+                "message",
+                Some(Rc::new(move |_| {
+                    if let Some(owner) = weak_reentrant.upgrade() {
+                        let promise = owner.borrow().clone();
+                        promise.call_method("catch", vec![handler.clone()])?;
+                    }
+                    Ok(Js::str("unhandled-reentrant"))
+                })),
+                None,
+            )
+            .expect("test accessor target permits definition");
         *reentrant.borrow_mut() = shared
             .globals
             .get("Promise")
