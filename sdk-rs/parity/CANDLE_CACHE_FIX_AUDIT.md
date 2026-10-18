@@ -66,4 +66,14 @@ execution; compilation alone does not close the IndexedDB row.
 - Production `src/` bytes unchanged from the baseline; no cancellation pin
   changes or classifier exemptions.
 
-Remaining required gates are recorded below when complete.
+- Workspace `cargo fmt --all -- --check`: PASS.
+- Strict native and wasm32 `cargo clippy -p safe-cex-candle-cache --all-targets
+  -- -D warnings`: both PASS (2m47s / 2m20s).
+- Required `safe-cex-exchange --all-features --test cancellable_future_inventory`:
+  **6 PASS**, one intentional discovery-export ignore. No inherited cancellation
+  exception was needed.
+- Final committed-tree full index repeats **7563 / 16669 PASS**.
+
+All Cargo invocations used `CARGO_INCREMENTAL=0`, SDK cwd and jobs1, serially.
+Logs: `/tmp/port-txflow-cache-audit-{native,browser,index,final-index,extract,fmt,clippy,wasm-clippy,cancellation}.log`.
+PR: https://github.com/Tealstreet/tealstreet-sdk/pull/1129.
