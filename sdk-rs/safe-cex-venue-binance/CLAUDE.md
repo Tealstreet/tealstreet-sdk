@@ -874,6 +874,11 @@ public ticker generations, candle delegation/cleanup and depth recovery proofs.
 Registry/N-API construction reaches those concrete classes. The current wasm FFI
 exports only `parity_probe`/`version`, with no legacy message entry.
 
+PM stale-snapshot warnings retain source template units through SnapshotCall into
+the canonical Base log_value path. The native private_rest_native repeated-error
+witness compares signed HTTP rejection/Store fallback, console arguments and log
+event units against both maintained PM fetchOrders and BaseExchange.log bodies.
+
 ### Canonical private socket construction
 
 ExchangeOwner constructs PrivateSocket directly for Futures, PM and Spot. The

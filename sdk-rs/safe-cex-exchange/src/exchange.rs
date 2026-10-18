@@ -702,6 +702,9 @@ impl BaseExchange {
         }
     }
     pub fn log(&self, message: &str, severity: &str) -> Result<(), ExchangeError> {
+        self.log_value(&Js::str(message), severity)
+    }
+    pub fn log_value(&self, message: &Js, severity: &str) -> Result<(), ExchangeError> {
         if self
             .options()
             .tuning
@@ -709,16 +712,19 @@ impl BaseExchange {
             .and_then(|t| t.console_logging)
             != Some(false)
         {
-            self.runtime.console(severity, message);
+            self.runtime
+                .console_values(severity, &[message.clone(), Js::str(severity)]);
         }
         let name = serde_json::to_value(&self.name).unwrap();
-        self.emit_args(
-            "log",
-            &[
-                Js::str(&format!("[{}] {message}", name.as_str().unwrap())),
-                Js::str(severity),
-            ],
-        )
+        let mut units = format!("[{}] ", name.as_str().unwrap())
+            .encode_utf16()
+            .collect::<Vec<_>>();
+        units.extend_from_slice(
+            &message
+                .to_js_string()
+                .map_err(|error| error.to_exchange_error())?,
+        );
+        self.emit_args("log", &[Js::utf16(&units), Js::str(severity)])
     }
     pub fn reject_preflight<T>(&self, message: String) -> Result<T, ExchangeError> {
         self.emit_and_log_error(

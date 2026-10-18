@@ -1,8 +1,9 @@
-//! BaseExchange logging uses the actual runtime default and production native sink.
+//! Typed runtime console and BaseExchange logs reach the production native sink.
 #![cfg(all(feature = "native", not(target_arch = "wasm32")))]
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     native::native_runtime,
+    runtime::ExchangeRuntime,
 };
 use safe_cex_store::store::DefaultStore;
 use safe_cex_types::ExchangeName;
@@ -17,12 +18,13 @@ const MESSAGES: [(&str, &str); 3] = [
 #[test]
 fn base_log_uses_production_native_console_default_without_projection() {
     if std::env::var("SAFE_CEX_CONSOLE_DEFAULT_CHILD").as_deref() == Ok("1") {
+        let runtime = native_runtime();
         let base = BaseExchange::new(
             ExchangeName::Bybit,
             serde_json::from_value(serde_json::json!({"key":"fixture","secret":"fixture"}))
                 .unwrap(),
             Rc::new(DefaultStore::new()),
-            native_runtime(),
+            runtime.clone(),
             ExchangeSettings::default(),
         );
         let events = Rc::new(RefCell::new(Vec::new()));
@@ -35,6 +37,7 @@ fn base_log_uses_production_native_console_default_without_projection() {
             }),
         );
         for (severity, message) in MESSAGES {
+            runtime.console(severity, message);
             base.log(message, severity).unwrap();
         }
         let events = events.borrow();
@@ -72,12 +75,14 @@ fn base_log_uses_production_native_console_default_without_projection() {
     );
     let expected = MESSAGES
         .into_iter()
-        .map(|(severity, message)| format!("[safe-cex {severity}] {message}\n"))
+        .map(|(severity, message)| {
+            format!("[safe-cex {severity}] {message}\n[safe-cex {severity}] {message} {severity}\n")
+        })
         .collect::<String>();
     assert_eq!(
         String::from_utf8(child.stderr).unwrap(),
         expected,
-        "actual NativeRuntime must receive the exact severity and one original string argument"
+        "actual default receives one argument; Base log retains the source message/severity pair"
     );
 }
 
