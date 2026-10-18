@@ -1478,7 +1478,7 @@ fn actual_batch_placement_native_floor() {
     }
     assert_eq!(rows.len(), 58, "independent authored batch floor");
     assert_eq!(
-        corpus["contentHash"], "d4956dbf6f111e1601eddbad178bf1554aa186b9a2237fd80fc763fced1c2322",
+        corpus["contentHash"], "85d7fd145f15aa6a0f4f82c770a0c9a1affd14b8c9c6968cdfcd61232b0c7fd9",
         "source/import pin after native assertions"
     );
     eprintln!(
