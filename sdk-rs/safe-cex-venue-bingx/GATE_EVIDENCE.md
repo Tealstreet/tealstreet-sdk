@@ -1531,3 +1531,14 @@ The source witness requires the exact SAFE_CEX_TYPESCRIPT_PATH module. A missing
 compiler file beneath an installed TypeScript package previously still passed by
 resolving the nearby package; it now fails with MODULE_NOT_FOUND. The explicitly
 selected compiler passes the maintained-source wire body and HMAC comparison.
+
+After the body carrier merged, the actual producer from master8448ce09b93e was
+compiled with the binding regression. It failed with zero adapter requests and
+`typed RestBody refuses NaN leverage`; restoring the retained producer passed the
+same named test and complete source wire/HMAC comparison. The scoped leverage
+checks also pass five binding cases and the pending-position sibling control.
+Strict host and wasm32-unknown-unknown Clippy pass on the refreshed branch.
+The separate registry loopback regression compiles/fails with master's producer
+at e0c4b6dcc816, then passes with the fix: exactly one physical POST, five wire
+fields and the HMAC over leverage=NaN before the JSON-null projection. Required
+all-features cancellation inventory and local parity7464/16630 also pass.

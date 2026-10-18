@@ -164,6 +164,54 @@ fn bingx_native_registry_bootstraps_signs_places_and_cancels() {
     });
 }
 
+#[test]
+fn bingx_native_registry_signs_nan_leverage_before_json_projection() {
+    run_local(async {
+        const ENDPOINT: &str = "/openApi/swap/v2/trade/leverage";
+        let h = venue_harness(
+            ExchangeName::Bingx,
+            Rc::new(|request| {
+                if request.method == "POST" && request.path == ENDPOINT {
+                    Some(json!({"code":0,"data":{}}))
+                } else {
+                    routes(request)
+                }
+            }),
+            json!({"key":"native-key","secret":SECRET,"tealstreetTunnel":false}),
+            None,
+            safe_cex_exchange::native::native_runtime(),
+        )
+        .await;
+        h.exchange.start().await.expect("BingX native start");
+        let result = h
+            .exchange
+            .set_leverage("BTCUSDT".into(), f64::NAN, None)
+            .await;
+        let calls = h
+            .seen
+            .borrow()
+            .iter()
+            .filter(|request| request.method == "POST" && request.path == ENDPOINT)
+            .map(|request| request.body.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            calls.len(),
+            1,
+            "registry NaN leverage reaches HTTP: {result:?}"
+        );
+        result.expect("scripted venue accepts source NaN leverage request");
+        let body: Value = serde_json::from_str(&calls[0]).unwrap();
+        assert_eq!(body.as_object().unwrap().len(), 5);
+        assert_eq!(body["leverage"], Value::Null);
+        assert_eq!(body["side"], "BOTH");
+        assert_eq!(body["symbol"], "BTC-USDT");
+        let timestamp = body["timestamp"].as_f64().unwrap();
+        let preimage = format!("leverage=NaN&side=BOTH&symbol=BTC-USDT&timestamp={timestamp}");
+        assert_eq!(body["signature"], hosted_bingx_mac(&preimage));
+        h.exchange.dispose().unwrap();
+    });
+}
+
 #[derive(Default)]
 struct HostedBingx {
     calls: std::cell::RefCell<Vec<Value>>,
