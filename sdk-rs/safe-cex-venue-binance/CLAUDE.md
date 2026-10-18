@@ -537,6 +537,13 @@ Binance ledger ids arrive as JSON numbers and the class keeps them raw as TS
 does; `income_records` projects them through `String()` only at the typed
 `IncomeRecord` boundary (trait income methods, pager, fold).
 
+The six private-event value owners have individual typed rendering, construction,
+property-selection and iteration roles; their classification receipts do not
+execute decoders. `PRIVATE_EVENT_ROLE_REVIEW.md` records actual native private
+message/Store witnesses, current-realm referent identity and later-mutation
+observations, plus six independent compiled faults with exact restoration. Keep
+the existing EventArray alias and both local-helper/external receiver pins exact.
+
 The family value graph is the canonical `js_runtime::value::Js`: `EventValue`
 is an alias and `EventOps` retains the decoded-data operations without separate
 storage. Closed categorical constructors now create source string primitives.

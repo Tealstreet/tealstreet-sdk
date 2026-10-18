@@ -22640,6 +22640,638 @@
       }
     }
   },
+  "safe_cex_venue_binance::private_event_value::array_for_each": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "array_for_each",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "expression",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "visit",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_venue_binance::request_weight::Failure",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut(EventValue) -> Result<(), Failure>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "resolved_path": {
+                                  "path": "safe_cex_exchange::js_runtime::value::Js",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_binance::request_weight::Failure",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Iterates an already-native optional array and invokes the supplied callback on existing elements. It snapshots initial length through for_each and raises a configured TypeError for nonarrays. It parses no wire record; callback decoding remains outside this iterator role.",
+    "evidence": "Actual native ExchangeOwner/PrivateState message bindings construct Futures/PM/Spot orders and Futures/PM account positions in the real Store; direct EventOps::read independently observes primitive stock members against explicit PrototypeRealm identities and later native property mutation. The six independently compiled production faults must fail those named bindings and pass after exact restoration. Role classifications do not execute decoder probes, claim arbitrary executable JS graphs, or replace the existing shared Js decoder/receiver/alias obligations."
+  },
+  "safe_cex_venue_binance::private_event_value::record": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "record",
+      "signature": {
+        "inputs": [
+          [
+            "fields",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::iter::traits::collect::IntoIterator",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Item",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "tuple": [
+                                      {
+                                        "borrowed_ref": {
+                                          "lifetime": "'static",
+                                          "is_mutable": false,
+                                          "type": {
+                                            "primitive": "str"
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::js_runtime::value::Js",
+                                          "args": null
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl IntoIterator<Item = (&'static str, EventValue)>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::iter::traits::collect::IntoIterator",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [],
+                            "constraints": [
+                              {
+                                "name": "Item",
+                                "args": null,
+                                "binding": {
+                                  "equality": {
+                                    "type": {
+                                      "tuple": [
+                                        {
+                                          "borrowed_ref": {
+                                            "lifetime": "'static",
+                                            "is_mutable": false,
+                                            "type": {
+                                              "primitive": "str"
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                                            "args": null
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Constructs an outgoing native object from static field names and already-native EventValue handles. It preserves existing child referents and the current prototype realm; no text/response/schema is decoded.",
+    "evidence": "Actual native ExchangeOwner/PrivateState message bindings construct Futures/PM/Spot orders and Futures/PM account positions in the real Store; direct EventOps::read independently observes primitive stock members against explicit PrototypeRealm identities and later native property mutation. The six independently compiled production faults must fail those named bindings and pass after exact restoration. Role classifications do not execute decoder probes, claim arbitrary executable JS graphs, or replace the existing shared Js decoder/receiver/alias obligations."
+  },
+  "safe_cex_venue_binance::private_event_value::string": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "string",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::Into",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl Into<String>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::Into",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Wraps an existing Rust string as a literal UTF16 native string primitive. JSON-looking text is never parsed into a value graph or typed owner.",
+    "evidence": "Actual native ExchangeOwner/PrivateState message bindings construct Futures/PM/Spot orders and Futures/PM account positions in the real Store; direct EventOps::read independently observes primitive stock members against explicit PrototypeRealm identities and later native property mutation. The six independently compiled production faults must fail those named bindings and pass after exact restoration. Role classifications do not execute decoder probes, claim arbitrary executable JS graphs, or replace the existing shared Js decoder/receiver/alias obligations."
+  },
+  "safe_cex_venue_binance::private_event_value::stock": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "stock",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Resolves a property name against the current PrototypeRealm and returns its existing scalar/referent. It is existing native property access, with no response parsing or model construction.",
+    "evidence": "Actual native ExchangeOwner/PrivateState message bindings construct Futures/PM/Spot orders and Futures/PM account positions in the real Store; direct EventOps::read independently observes primitive stock members against explicit PrototypeRealm identities and later native property mutation. The six independently compiled production faults must fail those named bindings and pass after exact restoration. Role classifications do not execute decoder probes, claim arbitrary executable JS graphs, or replace the existing shared Js decoder/receiver/alias obligations."
+  },
+  "safe_cex_venue_binance::private_event_value::table": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "table",
+      "signature": {
+        "inputs": [
+          [
+            "entries",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "tuple": [
+                      {
+                        "borrowed_ref": {
+                          "lifetime": null,
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      },
+                      {
+                        "generic": "T"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "wrap",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "generic": "T"
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "safe_cex_venue_binance::private_event_value::PrivateEnum",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_binance::request_weight::Failure",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::marker::Copy",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(T) -> PrivateEnum",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "generic": "T"
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_binance::private_event_value::PrivateEnum",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Coerces an already-native key to text and selects from a typed Copy table or the existing prototype realm. The supplied closed categorical wrapper renders the selected enum; it does not deserialize a response shape or grant arbitrary key admission.",
+    "evidence": "Actual native ExchangeOwner/PrivateState message bindings construct Futures/PM/Spot orders and Futures/PM account positions in the real Store; direct EventOps::read independently observes primitive stock members against explicit PrototypeRealm identities and later native property mutation. The six independently compiled production faults must fail those named bindings and pass after exact restoration. Role classifications do not execute decoder probes, claim arbitrary executable JS graphs, or replace the existing shared Js decoder/receiver/alias obligations."
+  },
+  "safe_cex_venue_binance::private_event_value::PrivateEnum": {
+    "shape": "typed",
+    "evidence": "Actual native ExchangeOwner/PrivateState message bindings construct Futures/PM/Spot orders and Futures/PM account positions in the real Store; direct EventOps::read independently observes primitive stock members against explicit PrototypeRealm identities and later native property mutation. The six independently compiled production faults must fail those named bindings and pass after exact restoration. Role classifications do not execute decoder probes, claim arbitrary executable JS graphs, or replace the existing shared Js decoder/receiver/alias obligations.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "wire",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "serde_json::value::Value",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Renders a closed categorical Rust enum as its outbound wire value. The compiler confirms a self-only API with no raw input; no Deserialize or raw constructor is exempted."
+      }
+    ]
+  },
   "safe_cex_venue_binance::private_event_value::EventArray": {
     "category": "non-decoder",
     "target": {
