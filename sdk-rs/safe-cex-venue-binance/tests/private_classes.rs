@@ -4,13 +4,11 @@ mod canonical_value;
 #[path = "support/lifecycle_aliases.rs"]
 mod lifecycle_aliases;
 #[cfg(feature = "native")]
-<<<<<<< HEAD
-#[path = "support/private_rest_native.rs"]
-mod private_rest_native;
-=======
 #[path = "support/private_order_aliases.rs"]
 mod private_order_aliases;
->>>>>>> origin/master
+#[cfg(feature = "native")]
+#[path = "support/private_rest_native.rs"]
+mod private_rest_native;
 #[cfg(feature = "native")]
 #[path = "support/public_frame_guard.rs"]
 mod public_frame_guard;
