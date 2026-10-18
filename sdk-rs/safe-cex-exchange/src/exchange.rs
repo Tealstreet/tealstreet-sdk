@@ -1044,15 +1044,13 @@ impl BaseExchange {
                 (source, Some(*error))
             }
         };
-        let description = if source.is_object() {
-            format!("[{}]", source.type_of())
-        } else {
-            source.to_display()
-        };
         if self.is_disposed() {
-            self.runtime.console(
+            self.runtime.console_values(
                 "warning",
-                &format!("exchange error (disposed, suppressing) {description}"),
+                &[
+                    Js::str("exchange error (disposed, suppressing)"),
+                    source.clone(),
+                ],
             );
             return Ok(());
         }
@@ -1063,8 +1061,8 @@ impl BaseExchange {
         let suppress = extra.get("suppressConsoleLog") == Some(&Value::Bool(true));
         if !suppress {
             self.runtime
-                .console("error", &format!("exchange error {description}"));
-            self.runtime.console("trace", "");
+                .console_values("error", &[Js::str("exchange error"), source.clone()]);
+            self.runtime.console_values("trace", &[]);
         }
         let sentry_tags = extra
             .get("sentryTags")
@@ -1203,7 +1201,7 @@ impl BaseExchange {
                 self.runtime.report_exception(&error, &to_json(&report)?);
             } else if error_object.truthy() {
                 self.runtime
-                    .report_raw_exception(&to_json(&error_object)?, &to_json(&report)?);
+                    .report_raw_exception(&error_object, &to_json(&report)?);
             }
         }
         let enhanced_context = if source.type_of() == "object" && !source.is_nullish() {

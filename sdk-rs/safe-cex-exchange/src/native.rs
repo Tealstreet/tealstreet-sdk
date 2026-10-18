@@ -265,7 +265,9 @@ impl ExchangeRuntime for NativeRuntime {
             runtime: self.owner.clone(),
         }))))
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[crate::js_runtime::value::Js]) {
+        let rendered = crate::runtime::console_text(message);
+        let message = rendered.as_str();
         eprintln!("[safe-cex {severity}] {message}");
     }
     fn unique_id(&self) -> String {
@@ -283,8 +285,9 @@ impl ExchangeRuntime for NativeRuntime {
             error.name, error.message
         );
     }
-    fn report_raw_exception(&self, error: &Value, context: &Value) {
-        eprintln!("[safe-cex uncaught] {error} {context}");
+    fn report_raw_exception(&self, error: &crate::js_runtime::value::Js, context: &Value) {
+        let description = crate::runtime::console_text(std::slice::from_ref(error));
+        eprintln!("[safe-cex uncaught] {description} {context}");
     }
     fn execute_worker_request(&self, _request: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async {

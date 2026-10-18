@@ -270,7 +270,7 @@ fn noop_runtime() -> Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> {
             }
             Box::new(Never)
         }
-        fn console(&self, _: &str, _: &str) {}
+        fn console_values(&self, _: &str, _: &[safe_cex_exchange::js_runtime::value::Js]) {}
         fn unique_id(&self) -> String {
             String::new()
         }
@@ -286,7 +286,12 @@ fn noop_runtime() -> Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> {
             _: &serde_json::Value,
         ) {
         }
-        fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {}
+        fn report_raw_exception(
+            &self,
+            _: &safe_cex_exchange::js_runtime::value::Js,
+            _: &serde_json::Value,
+        ) {
+        }
         fn execute_worker_request(
             &self,
             _: serde_json::Value,

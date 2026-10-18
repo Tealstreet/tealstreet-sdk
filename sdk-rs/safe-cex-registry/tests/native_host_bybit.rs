@@ -160,6 +160,74 @@ fn bybit_ticker_socket_preserves_subscriber_error_through_native_registry() {
     });
 }
 
+#[test]
+fn bybit_candle_string_tuples_reach_native_registry_readers() {
+    support::run_local(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
+        ] {
+            let h = support::venue_harness(
+                name.clone(),
+                Rc::new(|request| {
+                    (request.path == "/v5/market/kline").then(|| {
+                        json!({
+                        "retCode":0,"retMsg":"OK","result":{"list":["234567","123456suffix"]}
+                        })
+                    })
+                }),
+                json!({"key":"native-bybit-key","secret":support::SECRET}),
+                None,
+                safe_cex_exchange::native::native_runtime(),
+            )
+            .await;
+            let candles = h
+                .exchange
+                .fetch_ohlcv(
+                    serde_json::from_value(json!({
+                        "symbol":"BTCUSDT","interval":"1m","from":1000,"to":2000,"limit":2
+                    }))
+                    .unwrap(),
+                )
+                .await
+                .unwrap_or_else(|e| panic!("{name:?}: iterable KLINE rows must resolve: {e:?}"));
+            assert_eq!(candles.len(), 2);
+            assert_eq!(
+                (
+                    candles[0].timestamp,
+                    candles[0].open,
+                    candles[0].high,
+                    candles[0].low,
+                    candles[0].close,
+                    candles[0].volume
+                ),
+                (0.001, 2., 3., 4., 5., 6.)
+            );
+            assert_eq!(
+                (
+                    candles[1].timestamp,
+                    candles[1].open,
+                    candles[1].high,
+                    candles[1].low,
+                    candles[1].close,
+                    candles[1].volume
+                ),
+                (0.002, 3., 4., 5., 6., 7.)
+            );
+            let seen = h.seen.borrow();
+            assert_eq!(seen.len(), 1);
+            assert_eq!(seen[0].path, "/v5/market/kline");
+            assert!(
+                !seen[0].headers.contains_key("x-bapi-sign"),
+                "KLINE remains unsigned"
+            );
+            h.exchange.dispose().unwrap();
+        }
+    });
+}
+
 fn account(request: &support::Seen) -> Option<Value> {
     (request.path == "/v5/user/query-api").then(|| {
         json!({

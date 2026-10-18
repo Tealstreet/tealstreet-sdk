@@ -23,6 +23,8 @@ struct Runtime {
     clock: std::cell::Cell<f64>,
     wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
+    console_arguments: RefCell<Vec<Vec<Js>>>,
+    raw_exceptions: RefCell<Vec<Js>>,
     exceptions: RefCell<Vec<(String, Value)>>,
     hold_sleep: std::cell::Cell<bool>,
     headers_capable: std::cell::Cell<bool>,
@@ -58,7 +60,10 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push(future);
         Box::new(Task)
     }
-    fn console(&self, severity: &str, message: &str) {
+    fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
+        self.console_arguments.borrow_mut().push(message.to_vec());
+        let rendered = safe_cex_exchange::runtime::console_text(message);
+        let message = rendered.as_str();
         self.consoled
             .borrow_mut()
             .push((severity.into(), message.into()));
@@ -79,7 +84,9 @@ impl ExchangeRuntime for Runtime {
             .borrow_mut()
             .push((error.to_string(), context.clone()));
     }
-    fn report_raw_exception(&self, _: &Value, _: &Value) {}
+    fn report_raw_exception(&self, error: &Js, _: &Value) {
+        self.raw_exceptions.borrow_mut().push(error.clone());
+    }
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
     }
@@ -2125,17 +2132,19 @@ fn array_from_reads_iterables_and_array_likes() {
 }
 
 #[test]
-fn console_error_and_warn_join_string_conversions_with_spaces() {
+fn console_error_and_warn_preserve_original_argument_lists() {
     let (runtime, shared) = scoped_globals();
     let g = &shared.globals;
+    let object = Js::object(vec![("a", Js::Number(1.0))]);
+    let array = Js::array(vec![Js::Number(1.0), Js::Null, Js::Number(2.0)]);
     run(
         g,
         "console.error",
         vec![
             Js::str("reject in updatePositionsInWebworker"),
             Js::Number(1.0),
-            Js::object(vec![("a", Js::Number(1.0))]),
-            Js::array(vec![Js::Number(1.0), Js::Null, Js::Number(2.0)]),
+            object.clone(),
+            array.clone(),
             Js::Undefined,
         ],
     );
@@ -2145,16 +2154,25 @@ fn console_error_and_warn_join_string_conversions_with_spaces() {
         vec![Js::str("No positions found for BTC")],
     );
     run(g, "console.warn", vec![]);
+    let values = runtime.console_arguments.borrow();
+    assert_eq!(values.len(), 3);
+    assert_eq!(values[0].len(), 5);
+    assert!(values[0][0].strict_equals(&Js::str("reject in updatePositionsInWebworker")));
+    assert!(values[0][1].strict_equals(&Js::Number(1.0)));
+    assert!(values[0][2].same_reference(&object));
+    assert!(values[0][3].same_reference(&array));
+    assert!(values[0][4].is_undefined());
+    assert_eq!(values[1].len(), 1);
+    assert!(values[1][0].strict_equals(&Js::str("No positions found for BTC")));
+    assert!(values[2].is_empty());
     assert_eq!(
-        *runtime.consoled.borrow(),
-        [
-            (
-                "error".to_owned(),
-                "reject in updatePositionsInWebworker 1 [object Object] 1,,2 undefined".to_owned()
-            ),
-            ("warn".to_owned(), "No positions found for BTC".to_owned()),
-            ("warn".to_owned(), String::new()),
-        ]
+        runtime
+            .consoled
+            .borrow()
+            .iter()
+            .map(|(severity, _)| severity.as_str())
+            .collect::<Vec<_>>(),
+        ["error", "warn", "warn"]
     );
 }
 
