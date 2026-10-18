@@ -532,3 +532,9 @@ writer at the wire boundary. The actual binding regression and maintained
 full-class source capture inspect order/position info before JSON; the existing
 16-row socket corpus now compares all eight private pong frames exactly, while
 keeping the separate public typed-frame refusal observations.
+
+`zklink_host::ZkLinkHandle` is the opaque native builder/transaction capability,
+not a wire decoder. Its accepted alias row checks the actual compiler type and
+raw trait admission; the production NativeSigner tests separately inspect every
+Contract field, pointer/lifetime retention and foreign-handle refusal. Keep those
+native observations distinct from JSON output or mock-host signing assertions.
