@@ -24,7 +24,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::store::DefaultStore;
 use safe_cex_types::{
-    ExchangeName, OHLCVOptions, Timeframe, retained_json::RetainedJsonInput as Input,
+    AnyTimeframe, ExchangeName, OHLCVOptions, Timeframe, retained_json::RetainedJsonInput as Input,
 };
 use serde_json::{Value, json};
 use std::{
@@ -161,7 +161,7 @@ fn request_private_options_and_account_aliases_come_from_real_class_adapters() {
 fn input_root_aliases_retain_presence_numbers_and_actual_event_array_adapter() {
     let opts: PublicOHLCVOptionsRoot = options_root(OHLCVOptions {
         symbol: "BTCUSD".into(),
-        interval: Timeframe::M1.into(),
+        interval: AnyTimeframe::Variant1(Timeframe::M1),
         from: Some(-0.0),
         to: Some(17.0),
         limit: None,
