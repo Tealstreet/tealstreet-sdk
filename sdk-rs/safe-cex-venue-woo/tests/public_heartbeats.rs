@@ -22,6 +22,7 @@ fn pong_propagates_parent_latency_failure() {
         Err(cause),
         "pong retains latency failure identity"
     );
+    runtime.pump();
     assert_eq!(*parent.latencies.borrow(), vec![8.0]);
     runtime.discard_tasks();
 }
