@@ -671,6 +671,39 @@ impl Js {
         matches!(self, Js::Function(function) if function.construct.is_some())
     }
 
+    /// OrdinaryHasInstance follows bound targets and internal prototypes without reading __proto__.
+    pub fn ordinary_has_instance(&self, value: &Js) -> Result<bool, Thrown> {
+        if !self.is_callable() {
+            return Ok(false);
+        }
+        if let Js::Function(function) = self
+            && let Some(Construct::Bound { target, .. }) = &function.construct
+        {
+            return target.ordinary_has_instance(value);
+        }
+        if !value.is_object() && !value.is_array() && !value.is_callable() {
+            return Ok(false);
+        }
+        let prototype = self.get("prototype")?;
+        if !prototype.is_object() && !prototype.is_array() && !prototype.is_callable() {
+            let mut message = utf16("Function has non-object prototype '").to_vec();
+            message.extend_from_slice(&prototype.to_js_string()?);
+            message.extend_from_slice(&utf16("' in instanceof check"));
+            return Err(Thrown::new(make_error_object(
+                "TypeError",
+                Some(message.into()),
+            )));
+        }
+        let mut candidate = value.prototype();
+        while let Some(current) = candidate {
+            if current.strict_equals(&prototype) {
+                return Ok(true);
+            }
+            candidate = current.prototype();
+        }
+        Ok(false)
+    }
+
     /// GetSuperConstructor reads metadata, without the shadowable `__proto__` property.
     pub fn super_constructor(&self) -> Result<Js, Thrown> {
         if !self.is_callable() {
