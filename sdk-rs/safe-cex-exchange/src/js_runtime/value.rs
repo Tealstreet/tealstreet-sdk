@@ -13,7 +13,7 @@ use std::{
     rc::Rc,
 };
 mod typed;
-mod array;
+pub(super) mod array;
 pub use array::ArrayData;
 use array::{freeze_prop,frozen_prop};
 
@@ -1536,7 +1536,7 @@ impl Js {
         self.grow_array_length(key);
         Ok(())
     }
-    pub(super) fn has_property(&self, key: &[u16]) -> bool {
+    pub fn has_property(&self, key: &[u16]) -> bool {
         if self
             .own_props()
             .is_some_and(|p| p.borrow().contains_key(key))

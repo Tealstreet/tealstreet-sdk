@@ -15,7 +15,7 @@ use crate::{
     sdk_account_api::AccountValue,
     transaction_signing::{SigningResult, TransactionSigningError},
 };
-use safe_cex_exchange::js_runtime::value::{Js, Prop, Str, Thrown, array_index, utf16};
+use safe_cex_exchange::js_runtime::value::{Js, Prop, Str, Thrown, utf16};
 use std::rc::Rc;
 
 impl PlacementIterator for JsIterator {
@@ -56,7 +56,7 @@ fn strict_put(target: &Js, key: &[u16], value: Js) -> Result<(), Thrown> {
                 target.to_display()
             )))
         }
-        Js::Array(_) if array_index(key).is_some() || key == &*utf16("length") => {
+        Js::Array(_) => {
             target.set_key(key, value)
         }
         Js::Object(_) | Js::Function(_) => {
@@ -111,7 +111,7 @@ impl SinglePlacementHost for Bound {
         let key = utf16(key);
         let storable = match &target {
             Js::Object(_) | Js::Function(_) => true,
-            Js::Array(_) => array_index(&key).is_some(),
+            Js::Array(_) => true,
             _ => false,
         };
         if !storable {

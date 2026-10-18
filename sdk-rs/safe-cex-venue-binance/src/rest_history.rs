@@ -82,10 +82,10 @@ fn map(
     let EventValue::Array(a) = v else {
         unreachable!("array validated")
     };
-    let len = a.borrow().len();
+    let len = a.len();
     let mut out = vec![];
     for i in 0..len {
-        let value = { a.borrow().get(i).cloned().flatten() };
+        let value = { crate::private_event_value::array_element(&a,i)? };
         if let Some(v) = value {
             out.push(f(v)?);
         }
@@ -308,7 +308,7 @@ pub async fn historical_fills(
         let mut rows = vec![];
         let mut i = 0;
         loop {
-            let window = windows.borrow().get(i).cloned().flatten();
+            let window = crate::private_event_value::array_element(&windows,i)?;
             let Some(window) = window else { break };
             i += 1;
             let get = b.capture_get(HistoryClient::Private)?;
@@ -317,7 +317,7 @@ pub async fn historical_fills(
             request.write("endTime", window.read("endTime")?);
             let data = get(endpoint("USER_TRADES"), omit(request))?.await?;
             if let EventValue::Array(a) = data {
-                rows.extend(array_values(&a))
+                rows.extend(array_values(&a)?)
             }
         }
         map(EventValue::array(rows), |entry| execution_row(entry, b))
@@ -362,7 +362,7 @@ pub async fn historical_orders(
         let EventValue::Array(a) = rows else {
             unreachable!()
         };
-        let mut out = array_values(&a)
+        let mut out = array_values(&a)?
             .into_iter()
             .filter(|r| !matches!(r, EventValue::Null))
             .collect::<Vec<_>>();

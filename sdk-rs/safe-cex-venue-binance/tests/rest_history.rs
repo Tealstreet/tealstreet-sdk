@@ -49,7 +49,7 @@ fn wire(v: &EventValue) -> Value {
             }
         }
         EventValue::String(v) => json!(String::from_utf16(v).unwrap()),
-        EventValue::Array(v) => array_values(v).iter().map(wire).collect(),
+        EventValue::Array(v) => array_values(v).expect("fixture array reads").iter().map(wire).collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()
@@ -126,7 +126,7 @@ fn rows(v: &EventValue, n: usize, l: &str) -> Vec<EventValue> {
         panic!("{l}: native array")
     };
     assert_eq!(a.borrow().len(), n, "{l}: native row count");
-    array_values(a)
+    array_values(a).expect("fixture array reads")
 }
 fn native_enum(v: &EventValue, want: PrivateEnum, l: &str) {
     let EventValue::String(units) = v else {

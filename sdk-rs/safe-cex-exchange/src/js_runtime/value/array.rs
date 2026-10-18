@@ -30,7 +30,7 @@ impl ArrayData {
     pub fn is_empty(&self) -> bool { self.length.get() == 0 }
 }
 
-pub(super) fn prototype() -> Js {
+pub(in crate::js_runtime) fn prototype() -> Js {
     let realm = safe_cex_num::PrototypeRealm::current();
     if let Some(array) = PROTOTYPES.with(|roots| roots.borrow().iter().find_map(|(r,a)| {
         (r.upgrade().is_some_and(|r| Rc::ptr_eq(&r, &realm))).then(|| a.upgrade()).flatten()
@@ -55,6 +55,20 @@ pub(super) fn prototype() -> Js {
 }
 
 impl Js {
+    /// Native callback entry for the same Array sort body as the installed builtin.
+    pub fn sort_array_with(&self, mut compare: impl FnMut(&Js, &Js) -> Result<std::cmp::Ordering, Thrown>) -> Result<(), Thrown> {
+        let length=self.get("length")?.to_number()?.clamp(0.0,9_007_199_254_740_991.0) as usize;
+        let mut values=Vec::new();
+        for index in 0..length {if self.has_index(index){values.push(self.get(&index.to_string())?);}}
+        super::super::sorting::stable_sort(&mut values, |x,y| {
+            if x.is_undefined() || y.is_undefined() { Ok(x.is_undefined().cmp(&y.is_undefined())) } else { compare(x,y) }
+        })?;
+        let count=values.len();
+        for (index,value) in values.into_iter().enumerate(){self.set(&index.to_string(),value)?;}
+        for index in count..length {self.delete(&utf16(&index.to_string()))?;}
+        Ok(())
+    }
+
     pub fn has_index(&self,index:usize)->bool {self.has_property(&utf16(&index.to_string()))}
     /// Array.splice mutation phase over live indexed properties, without a raw Vec borrow.
     pub fn splice_array(&self,start:usize,delete_count:usize,insert:Vec<Js>)->Result<(),Thrown> {

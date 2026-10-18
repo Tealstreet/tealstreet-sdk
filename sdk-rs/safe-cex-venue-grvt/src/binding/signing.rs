@@ -311,8 +311,7 @@ impl crate::trading_runtime::TradingHost for Host {
         }
     }
     fn minimum(&self, values: Js) -> JsResult<Js, f64> {
-        let values = values
-            .array_values()?
+        let values = value(values.array_values())?
             .ok_or_else(|| Thrown::type_error("value is not iterable").value)?;
         let values = values
             .into_iter()

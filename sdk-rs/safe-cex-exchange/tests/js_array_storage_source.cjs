@@ -89,4 +89,43 @@ for (const mode of ['stable', 'mismatch', 'throws']) {
   catch (thrown) { error = thrown === token ? 'original' : thrown.name; }
   lengthCoercion.push({mode, events, error, length: array.length, own5: Object.hasOwn(array, '5')});
 }
-process.stdout.write(JSON.stringify({named, accessor, length, inherited, symbol, baseline, frozenBuiltins, lengthCoercion}));
+const sparseArray = [];
+Object.defineProperty(sparseArray, '4294967294', {value: 7, writable: true, enumerable: true, configurable: true});
+sparseArray[4294967295] = 'named';
+const highLength = sparseArray.length;
+sparseArray.length = 0;
+const sparse = {highLength, length: sparseArray.length, names: Object.getOwnPropertyNames(sparseArray), named: sparseArray[4294967295]};
+const readonlyArray = [];
+Object.defineProperty(readonlyArray, 'length', {writable: false});
+let pushRefused = false, conversions = 0;
+try { readonlyArray.push(); } catch (e) { if (!(e instanceof TypeError)) throw e; pushRefused = true; }
+Object.defineProperty(readonlyArray, 'length', {value: {valueOf() { conversions++; return 0; }}});
+const readonly = {pushRefused, conversions, length: readonlyArray.length};
+const setterArray = [], setterProto = [];
+const setterCalls = [];
+Object.defineProperty(setterProto, '1', {set(v) { setterCalls.push([this === setterArray, v]); }, configurable: true});
+Object.setPrototypeOf(setterArray, setterProto);
+setterArray[1] = 'direct';
+const beforePush = setterArray.length;
+setterArray.push('zero', 'one');
+const inheritedSetter = {beforePush, length: setterArray.length, keys: Object.keys(setterArray), calls: setterCalls};
+const hiddenArray = [], hiddenProto = [3, 4];
+let hiddenReads = 0;
+Object.defineProperty(hiddenArray, '0', {get() { hiddenReads++; return 99; }, enumerable: false});
+Object.setPrototypeOf(hiddenArray, hiddenProto);
+const enumerated = [];
+for (const key in hiddenArray) enumerated.push(key);
+const hiddenForIn = {keys: enumerated, names: Object.getOwnPropertyNames(hiddenArray), reads: hiddenReads};
+const liveArray = [1, 2, 3];
+const mapped = liveArray.map((v, i) => { if (i === 0) { liveArray[1] = 8; delete liveArray[2]; } return v * 2; });
+const slicedArray = [0, 1, 2];
+const sliced = slicedArray.slice({valueOf() { slicedArray[1] = 9; return 0; }}, 2);
+const sortedArray = [2, 1];
+Object.defineProperty(sortedArray, '0', {get() { sortedArray[1] = 5; return 3; }, set(v) { this.finalFirst = v; }, configurable: true, enumerable: true});
+sortedArray.sort((a,b) => a-b);
+const jsonArray = [0, 1];
+Object.defineProperty(jsonArray, '0', {get() { delete jsonArray[1]; return -0; }});
+const liveReads = {mapped: JSON.stringify(mapped), mappedKeys: Object.keys(mapped), sliced, sorted: [sortedArray.finalFirst, sortedArray[1]], json: JSON.stringify(jsonArray)};
+const prototypeAliases = {samePrototype: Object.getPrototypeOf([]) === Array.prototype, sameMap: [].map === [].map, mapBorrow: Array.prototype.map.call({0: 4, length: 1}, v => v+1)};
+
+process.stdout.write(JSON.stringify({named, accessor, length, inherited, symbol, baseline, frozenBuiltins, lengthCoercion, sparse, readonly, inheritedSetter, hiddenForIn, liveReads, prototypeAliases}));

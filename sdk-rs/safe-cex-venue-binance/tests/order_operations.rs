@@ -67,7 +67,7 @@ fn decoded(v: Value) -> EventValue {
 }
 fn snap(v: &EventValue) -> EventValue {
     match v {
-        EventValue::Array(a) => array(array_values(a).iter().map(snap).collect()),
+        EventValue::Array(a) => array(array_values(a).expect("fixture array reads").iter().map(snap).collect()),
         EventValue::Object(_) => EventValue::record_object(
             v.spread()
                 .iter()
@@ -90,7 +90,7 @@ fn wire(v: &EventValue) -> Value {
         }
         EventValue::Bool(v) => json!(v),
         EventValue::String(s) => json!(String::from_utf16(s).unwrap()),
-        EventValue::Array(a) => array_values(a).iter().map(wire).collect(),
+        EventValue::Array(a) => array_values(a).expect("fixture array reads").iter().map(wire).collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()
@@ -128,7 +128,7 @@ fn values(v: &EventValue, n: usize, l: &str) -> Vec<EventValue> {
         panic!("{l}: native Array")
     };
     assert_eq!(a.borrow().len(), n, "{l}: native array count");
-    array_values(a)
+    array_values(a).expect("fixture array reads")
 }
 fn own(v: &EventValue, k: &str) -> bool {
     let EventValue::Object(o) = v else {
@@ -395,7 +395,7 @@ impl OrderBindings for Bindings {
                     let EventValue::Array(a) = &b.orders else {
                         panic!()
                     };
-                    for (i, o) in array_values(&a).iter().enumerate() {
+                    for (i, o) in array_values(&a).expect("fixture array reads").iter().enumerate() {
                         o.write("id", string(format!("changed-{i}")))
                     }
                     EventValue::Array(a.clone())

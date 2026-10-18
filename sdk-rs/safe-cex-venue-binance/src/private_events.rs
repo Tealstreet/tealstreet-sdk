@@ -660,17 +660,13 @@ pub fn handle_spot_account_events(
             EventValue::record_object(fallback(b.balance()?.read("coins")?, record([])).spread());
         let balances = fallback(
             event.read("B")?,
-            EventValue::Array(Rc::new(std::cell::RefCell::new(vec![]))),
+            EventValue::array(vec![]),
         );
         let balances = match balances {
             EventValue::Array(a) => a,
-            EventValue::String(s) => Rc::new(std::cell::RefCell::new(
-                EventValue::String(s.clone())
-                    .text()?
-                    .chars()
-                    .map(|c| Some(string(c.to_string())))
-                    .collect(),
-            )),
+            EventValue::String(s) => {
+                let EventValue::Array(array)=EventValue::array(EventValue::String(s).text()?.chars().map(|c|string(c.to_string())).collect()) else {unreachable!()};array
+            },
             _ => {
                 return Err(type_error(
                     "object is not iterable (cannot read property Symbol(Symbol.iterator))",
@@ -678,10 +674,8 @@ pub fn handle_spot_account_events(
             }
         };
         let mut i = 0;
-        while i < balances.borrow().len() {
-            let asset_balance = balances.borrow()[i]
-                .clone()
-                .unwrap_or(EventValue::Undefined);
+        while i < balances.len() {
+            let asset_balance=EventValue::Array(balances.clone()).get(&i.to_string())?;
             let asset = asset_balance.read("a")?;
             let free = fallback(asset_balance.read("f")?, string("0")).float()?;
             let used = fallback(asset_balance.read("l")?, string("0")).float()?;

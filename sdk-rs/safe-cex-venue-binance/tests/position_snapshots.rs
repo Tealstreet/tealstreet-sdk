@@ -69,7 +69,7 @@ fn wire(v: &EventValue) -> Value {
                     .collect()
             }
         }
-        EventValue::Array(a) => array_values(a).iter().map(wire).collect(),
+        EventValue::Array(a) => array_values(a).expect("fixture array reads").iter().map(wire).collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()
@@ -502,12 +502,12 @@ fn native(k: Kind, name: &str) -> Value {
         check_balance(&h, &value, name);
     }
     let input = if let EventValue::Array(a) = &h.risk {
-        array_values(a)
+        array_values(a).expect("fixture array reads")
     } else {
         vec![]
     };
     let rows = if let EventValue::Array(a) = &value {
-        array_values(a)
+        array_values(a).expect("fixture array reads")
     } else {
         vec![]
     };
@@ -574,7 +574,7 @@ fn check_positions(h: &Host, v: &EventValue, name: &str) {
         if name == "empty" { 4 } else { 7 },
         "native independent ID count incl discarded duplicates"
     );
-    let rows = array_values(&a);
+    let rows = array_values(&a).expect("fixture array reads");
     let first = &rows[0];
     let real = name != "empty";
     let one = name == "oneway";

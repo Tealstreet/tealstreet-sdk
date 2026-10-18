@@ -842,7 +842,7 @@ fn native_typed_container_aliases_keep_shared_cells() {
 fn native_data_container_aliases_preserve_holes_keys_and_mutation() {
     use safe_cex_types::{OrderBook, OrderBookOrders};
     use safe_cex_venue_backpack::{
-        order_utils, orderbook_state, private_auth, public_control, public_listeners, rest_reads,
+        order_utils, orderbook_state, private_auth, public_control, public_listeners,
         startup_recovery,
     };
     let text: public_control::JsString = vec![0xd800, 0xdc00, 0xdfff];
@@ -871,20 +871,17 @@ fn native_data_container_aliases_preserve_holes_keys_and_mutation() {
     assert!(other.borrow()[0].1.same_reference(&value));
     map.borrow_mut().pop();
     assert_eq!(other.borrow().len(), 1);
-    let array: rest_reads::Array<Native> = Rc::new(RefCell::new(vec![
-        None,
-        Some(Native::Null),
-        Some(Native::Undefined),
-        Some(value.clone()),
-    ]));
+    let array = Native::holey_array(vec![
+        None, Some(Native::Null), Some(Native::Undefined), Some(value.clone()),
+    ]);
     let other = array.clone();
-    assert!(Rc::ptr_eq(&array, &other));
-    assert!(other.borrow()[0].is_none());
-    assert!(matches!(other.borrow()[1], Some(Native::Null)));
-    assert!(other.borrow()[2].as_ref().unwrap().is_undefined());
-    assert!(other.borrow()[3].as_ref().unwrap().same_reference(&value));
-    array.borrow_mut().pop();
-    assert_eq!(other.borrow().len(), 3);
+    assert!(array.same_reference(&other));
+    assert!(!other.has_own("0"));
+    assert!(matches!(other.get("1").unwrap(), Native::Null));
+    assert!(other.get("2").unwrap().is_undefined());
+    assert!(other.get("3").unwrap().same_reference(&value));
+    array.call_method("pop", vec![]).unwrap();
+    assert_eq!(other.get("length").unwrap().to_number().unwrap(), 3.0);
 
     let streams: public_control::Streams = Rc::new(RefCell::new(vec![None, Some(vec![0xd800])]));
     let other = streams.clone();

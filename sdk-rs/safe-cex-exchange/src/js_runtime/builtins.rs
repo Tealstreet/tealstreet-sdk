@@ -353,7 +353,7 @@ pub(crate) fn array_member(this: Js, name: &str) -> Option<Js> {
             Ok(this.clone())
         }),
         "includes" | "indexOf" => {let includes=name=="includes";method(name,move |a|{
-            let len=array_length(&this)?;let needle=arg(&a,0);let start=arg(&a,1).to_number()?;
+            let len=array_length(&this)?;if len==0{return Ok(if includes{Js::Bool(false)}else{Js::Number(-1.)});}let needle=arg(&a,0);let start=arg(&a,1).to_number()?;
             let start=if start.is_nan(){0.}else{start.trunc()};let start=if start<0.{(len as f64+start).max(0.)}else{start} as usize;
             for i in start..len {
                 let value=if includes {Some(this.get(&i.to_string())?)}else{indexed(&this,i)?};
@@ -403,24 +403,23 @@ pub(crate) fn array_member(this: Js, name: &str) -> Option<Js> {
             Ok(acc)
         }),
         "flat"=>method(name,move |a|{
-            let depth=arg(&a,0);let depth=if depth.is_undefined(){1.}else{let n=depth.to_number()?;if n.is_nan(){0.}else{n.trunc()}};
-            let mut out=vec![];flatten_into(&this,depth,&mut out)?;Ok(Js::holey_array(out))
+            let length=array_length(&this)?;let depth=arg(&a,0);let depth=if depth.is_undefined(){1.}else{let n=depth.to_number()?;if n.is_nan(){0.}else{n.trunc()}};
+            let mut out=vec![];flatten_length(&this,length,depth,&mut out)?;Ok(Js::holey_array(out))
         }),
         "sort"=>method(name,move |a|{
             let f=arg(&a,0);if !f.is_undefined()&&!f.is_callable(){return Err(Thrown::type_error("The comparison function must be either a function or undefined"));}
-            let len=array_length(&this)?;let mut values=vec![];for i in 0..len{if let Some(v)=indexed(&this,i)?{values.push(v);}}
-            super::sorting::stable_sort(&mut values,|x,y|{
-                if x.is_undefined()||y.is_undefined(){return Ok(x.is_undefined().cmp(&y.is_undefined()));}
+            this.sort_array_with(|x,y|{
                 if f.is_callable(){let n=f.call(Js::Undefined,vec![x.clone(),y.clone()])?.to_number()?;Ok(n.partial_cmp(&0.).unwrap_or(std::cmp::Ordering::Equal))}else{Ok(x.to_js_string()?.cmp(&y.to_js_string()?))}
             })?;
-            let count=values.len();for (i,value) in values.into_iter().enumerate(){this.set(&i.to_string(),value)?;}
-            for i in count..len{this.delete(&super::value::utf16(&i.to_string()))?;}Ok(this.clone())
+            Ok(this.clone())
         }),
         _=>return None,
     })
 }
 fn flatten_into(source:&Js,depth:f64,out:&mut Vec<Option<Js>>)->Result<(),Thrown>{
-    let len=array_length(source)?;
+    let len=array_length(source)?;flatten_length(source,len,depth,out)
+}
+fn flatten_length(source:&Js,len:usize,depth:f64,out:&mut Vec<Option<Js>>)->Result<(),Thrown>{
     for i in 0..len{if let Some(value)=indexed(source,i)?{if value.is_array()&&depth>0.{flatten_into(&value,depth-1.,out)?;}else{out.push(Some(value));}}}
     Ok(())
 }

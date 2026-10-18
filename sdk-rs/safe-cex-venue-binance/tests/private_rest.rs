@@ -55,7 +55,7 @@ fn wire(v: &EventValue) -> Value {
                 json!({"$prototype":true})
             }
         }
-        EventValue::Array(a) => Value::Array(array_values(a).iter().map(wire).collect()),
+        EventValue::Array(a) => Value::Array(array_values(a).expect("fixture array reads").iter().map(wire).collect()),
         EventValue::Object(o) => {
             let mut out = v
                 .spread()
@@ -116,7 +116,7 @@ fn items(v: &EventValue) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("native Array")
     };
-    array_values(a)
+    array_values(a).expect("fixture array reads")
 }
 fn own(v: &EventValue, k: &str) -> bool {
     if matches!(v, EventValue::Object(_)) {
@@ -351,7 +351,7 @@ impl SnapshotBindings for Bind {
             return Err(s.error.clone());
         }
         Ok(if s.family == "lookup" && s.name() != "store-hit" {
-            EventValue::Array(Default::default())
+            EventValue::array(vec![])
         } else {
             s.orders.clone()
         })
@@ -439,17 +439,17 @@ fn project(s: &State, result: &Result<EventValue, Failure>) -> Value {
         .cloned()
         .unwrap_or(EventValue::Undefined);
     let list = if let EventValue::Array(a) = &v {
-        array_values(a)
+        array_values(a).expect("fixture array reads")
     } else {
         vec![]
     };
     let rows = if let EventValue::Array(a) = &s.payload {
-        array_values(a)
+        array_values(a).expect("fixture array reads")
     } else {
         vec![]
     };
     let algos = if let EventValue::Array(a) = &s.algo {
-        array_values(a)
+        array_values(a).expect("fixture array reads")
     } else {
         vec![]
     };
@@ -1154,7 +1154,7 @@ fn bound_method(
             } else if s.name() == "string-iterables" {
                 string(if which == "first" { "ab" } else { "c" })
             } else if s.name() == "empty" {
-                EventValue::Array(Default::default())
+                EventValue::array(vec![])
             } else {
                 value(s.f[which].clone())
             })

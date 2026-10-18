@@ -48,7 +48,7 @@ pub fn array(values: Vec<EventValue>) -> EventValue {
 }
 fn snapshot(v: &EventValue, expression: &str, method: &str) -> Result<Vec<EventValue>, Failure> {
     if let EventValue::Array(a) = v {
-        return Ok(array_values(&a));
+        return Ok(array_values(&a)?);
     }
     if v.nullish() {
         return Err(type_error(format!(
@@ -70,7 +70,7 @@ fn each_map(
     for i in 0..len {
         let row = {
             if let EventValue::Array(a) = v {
-                a.borrow().get(i).cloned().flatten()
+                crate::private_event_value::array_element(&a,i)?
             } else {
                 None
             }
@@ -172,7 +172,7 @@ fn classify(
     for i in 0..len {
         let row = {
             if let EventValue::Array(a) = orders {
-                a.borrow().get(i).cloned().flatten()
+                crate::private_event_value::array_element(&a,i)?
             } else {
                 None
             }
@@ -389,11 +389,8 @@ fn has(v: &EventValue, key: &str) -> Result<bool, Failure> {
         }
         return Ok(false);
     }
-    if let EventValue::Array(a) = v {
-        return Ok(key == "length"
-            || key
-                .parse::<usize>()
-                .is_ok_and(|i| i.to_string() == key && i < a.borrow().len()));
+    if let EventValue::Array(_) = v {
+        return Ok(v.has_property(&key.encode_utf16().collect::<Vec<_>>()));
     }
     Err(type_error(format!(
         "Cannot use 'in' operator to search for '{key}' in {}",
@@ -477,8 +474,8 @@ fn spread_ids(out: &mut Vec<EventValue>, ids: EventValue) -> Result<(), Failure>
     match ids {
         EventValue::Array(a) => {
             let mut i = 0;
-            while i < a.borrow().len() {
-                out.push(a.borrow()[i].clone().unwrap_or(EventValue::Undefined));
+            while i < a.len() {
+                out.push(EventValue::Array(a.clone()).get(&i.to_string())?);
                 i += 1
             }
             Ok(())

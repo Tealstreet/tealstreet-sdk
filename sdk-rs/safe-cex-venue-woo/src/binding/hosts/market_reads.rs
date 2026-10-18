@@ -187,7 +187,7 @@ impl Host for Frame {
         v.is_array()
     }
     fn length(&mut self, v: &Js, method: &str) -> Result<usize, Thrown> {
-        if let Some(items) = v.array_items()? {
+        if let Js::Array(items) = v {
             return Ok(items.len());
         }
         if method != "length" || v.is_nullish() {
@@ -201,7 +201,7 @@ impl Host for Frame {
         })
     }
     fn has_index(&mut self, v: &Js, index: usize) -> Result<bool, Thrown> {
-        Ok(v.has_own(&index.to_string()))
+        Ok(v.has_index(index))
     }
     fn index(&mut self, v: &Js, index: usize) -> Result<Js, Thrown> {
         v.get(&index.to_string())

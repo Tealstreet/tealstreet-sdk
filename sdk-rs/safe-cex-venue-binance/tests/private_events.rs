@@ -76,7 +76,7 @@ fn norm(v: &EventValue, active: &mut BTreeSet<usize>) -> Value {
             if !active.insert(key) {
                 return json!({"$cycle":true});
             }
-            let out = Value::Array(array_values(a).iter().map(|v| norm(v, active)).collect());
+            let out = Value::Array(array_values(a).expect("fixture array reads").iter().map(|v| norm(v, active)).collect());
             active.remove(&key);
             out
         }
@@ -221,7 +221,7 @@ fn setup(mut f: Value, v: Venue, family: &str) -> Bindings {
     let EventValue::Array(positions) = positions else {
         panic!()
     };
-    for (i, p) in array_values(&positions).iter().enumerate() {
+    for (i, p) in array_values(&positions).expect("fixture array reads").iter().enumerate() {
         p.write(
             "side",
             EventValue::enum_value(PrivateEnum::PositionSide(if i == 1 {
@@ -246,7 +246,7 @@ fn setup(mut f: Value, v: Venue, family: &str) -> Bindings {
         }
     }
     if f["name"] == "metadata-nullish" {
-        let p = &array_values(&positions)[0];
+        let p = &array_values(&positions).expect("fixture array reads")[0];
         p.write("leverage", EventValue::Null);
         p.write("liquidationPrice", number(0.0));
         p.write("marginType", EventValue::Null);
@@ -338,11 +338,11 @@ impl PrivateEventBindings for Bindings {
                 s.data.write("q", string("7"));
             }
             if s.name() == "append-event" && op == PrivateOperation::AddOrder {
-                let first = array_values(&s.events)[0].clone();
+                let first = array_values(&s.events).expect("fixture array reads")[0].clone();
                 s.events.borrow_mut().push(Some(first));
             }
             if s.name() == "throttle-mutates" && op == PrivateOperation::ThrottlePositions {
-                array_values(&s.events)[0]
+                array_values(&s.events).expect("fixture array reads")[0]
                     .read("a")?
                     .write("P", EventValue::array(vec![]));
             }
@@ -405,7 +405,7 @@ impl PrivateEventBindings for Bindings {
             return Err(s.error.clone());
         }
         if s.name() == "append-balance" && n == 1 {
-            let EventValue::Array(a) = array_values(&s.events)[0].read("B")? else {
+            let EventValue::Array(a) = array_values(&s.events).expect("fixture array reads")[0].read("B")? else {
                 panic!()
             };
             EventValue::Array(a.clone())
@@ -491,12 +491,12 @@ fn identity(s: &State, e: &Effect) -> Value {
         }
         AddPosition => {
             let row = &e.args[0];
-            let existing = array_values(&s.positions)
+            let existing = array_values(&s.positions).expect("fixture array reads")
                 .iter()
                 .find(|p| get(p, "id").same(&get(row, "id")))
                 .cloned()
                 .unwrap_or(EventValue::Undefined);
-            let input = if let EventValue::Array(p) = array_values(&s.events)[0]
+            let input = if let EventValue::Array(p) = array_values(&s.events).expect("fixture array reads")[0]
                 .read("a")
                 .unwrap()
                 .read("P")
@@ -509,7 +509,7 @@ fn identity(s: &State, e: &Effect) -> Value {
             json!({"infoFresh":!get(row,"info").same(&get(&existing,"info")),"infoNestedInput":get(&get(row,"info"),"nested").same(&get(&input,"nested")),"rowFresh":!row.same(&existing)})
         }
         UpdatePosition => {
-            json!({"selectorOriginal":array_values(&s.positions).iter().any(|p|p.same(&e.args[0])),"infoOriginal":get(&e.args[1],"info").same(&e.args[0])})
+            json!({"selectorOriginal":array_values(&s.positions).expect("fixture array reads").iter().any(|p|p.same(&e.args[0])),"infoOriginal":get(&e.args[1],"info").same(&e.args[0])})
         }
         UpdateStore => {
             let row = get(&e.args[0], "balance");
@@ -517,7 +517,7 @@ fn identity(s: &State, e: &Effect) -> Value {
             let coins = get(&row, "coins");
             let oldcurr = get(&s.balance, "currencies");
             let oldcoins = get(&s.balance, "coins");
-            let evt = array_values(&s.events)[0].clone();
+            let evt = array_values(&s.events).expect("fixture array reads")[0].clone();
             let asset_info = if let Ok(EventValue::Array(a)) = evt.read("B") {
                 if let Some(entry) = a.borrow().first().and_then(Option::as_ref) {
                     if !get(entry, "a").same(&string("__proto__")) {
@@ -793,7 +793,7 @@ fn order_test(v: Venue, family: &str) {
                 );
                 assert!(
                     field(&extra, "nested").same(&field(
-                        &field(&array_values(&s.orders)[0], "extra"),
+                        &field(&array_values(&s.orders).expect("fixture array reads")[0], "extra"),
                         "nested"
                     )),
                     "{label}: native preserved extra nested identity"
@@ -1212,7 +1212,7 @@ fn account_test(v: Venue) {
             } else {
                 0
             };
-            let original = array_values(&s.positions)[index].clone();
+            let original = array_values(&s.positions).expect("fixture array reads")[index].clone();
             if v == Venue::Futures {
                 native_value(
                     field(&row, "id"),
@@ -1296,7 +1296,7 @@ fn account_test(v: Venue) {
                     17.0 + index as f64,
                     &format!("{label}: native info retained value"),
                 );
-                let EventValue::Array(p) = array_values(&s.events)[0]
+                let EventValue::Array(p) = array_values(&s.events).expect("fixture array reads")[0]
                     .read("a")
                     .unwrap()
                     .read("P")
@@ -1414,7 +1414,7 @@ fn spot_account_test() {
             );
             native_num(field(&row, "upnl"), 0.0, &format!("{label}: native upnl"));
             assert!(
-                field(&row, "info").same(&array_values(&s.events)[0]),
+                field(&row, "info").same(&array_values(&s.events).expect("fixture array reads")[0]),
                 "{label}: native original account event info"
             );
             let curr = field(&row, "currencies");
@@ -1440,7 +1440,7 @@ fn spot_account_test() {
                     "{label}: native appended currency changed"
                 );
             }
-            let assets = match array_values(&s.events)[0].read("B").unwrap() {
+            let assets = match array_values(&s.events).expect("fixture array reads")[0].read("B").unwrap() {
                 EventValue::Array(a) => a,
                 EventValue::Undefined | EventValue::Null => Rc::new(RefCell::new(vec![])),
                 _ => panic!("{label}: native asset collection"),

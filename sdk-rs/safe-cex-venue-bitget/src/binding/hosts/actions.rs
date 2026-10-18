@@ -126,18 +126,6 @@ fn destructure(v: &Js, key: &str) -> Result<Js, Thrown> {
     v.get(key)
 }
 
-fn not_iterable(v: &Js) -> Thrown {
-    let what = match v {
-        Js::Undefined | Js::Null => v.to_display(),
-        Js::Number(_) | Js::Bool(_) => format!("{} {}", v.type_of(), v.to_display()),
-        Js::Function(_) => "function".to_owned(),
-        _ => "object".to_owned(),
-    };
-    Thrown::type_error(&format!(
-        "{what} is not iterable (cannot read property Symbol(Symbol.iterator))"
-    ))
-}
-
 /// Live native iterator over the iterable intrinsics.
 pub(crate) struct JsIter(safe_cex_exchange::js_runtime::iterator::IteratorRecord);
 fn iterate(value:&Js)->Result<JsIter,Thrown>{Ok(JsIter(safe_cex_exchange::js_runtime::iterator::IteratorRecord::get(value)?))}
@@ -545,6 +533,7 @@ impl OrderPlacementHost for Rt {
         let mut it = iterate(&value)?;
         let first = iter_next(&mut it)?.unwrap_or(Js::Undefined);
         let second = iter_next(&mut it)?.unwrap_or(Js::Undefined);
+        it.0.close()?;
         Ok((first, second))
     }
     fn map<F>(&self, member: Js, array: Js, mut callback: F) -> Result<Js, Thrown>

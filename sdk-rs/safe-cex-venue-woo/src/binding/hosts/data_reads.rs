@@ -305,7 +305,7 @@ impl body::Host for Frame {
         length(v)
     }
     fn has_index(&mut self, v: &Js, i: usize) -> Result<bool, Thrown> {
-        Ok(v.has_own(&i.to_string()))
+        Ok(v.has_index(i))
     }
     fn iterator(&mut self, v: Js) -> Result<Iter, Thrown> {
         iterate(v)
@@ -313,8 +313,8 @@ impl body::Host for Frame {
     fn next(&mut self, i: &mut Iter) -> Result<Option<Js>, Thrown> {
         next(i)
     }
-    fn close_iterator(&mut self, _: &mut Iter) -> Result<(), Thrown> {
-        Ok(())
+    fn close_iterator(&mut self, iterator: &mut Iter) -> Result<(), Thrown> {
+        iterator.0.close()
     }
     fn await_element(&mut self, v: Js) -> Task<Js, Thrown> {
         Box::pin(await_js(&self.rt.exchange_runtime(), v))

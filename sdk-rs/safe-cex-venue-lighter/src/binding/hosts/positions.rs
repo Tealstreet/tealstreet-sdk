@@ -11,23 +11,15 @@ use crate::{
     sdk_account_api::AccountValue,
     transaction_signing::SigningResult,
 };
-use safe_cex_exchange::js_runtime::value::{Js, Str, Thrown, array_index, utf16};
+use safe_cex_exchange::js_runtime::value::{Js, Str, Thrown};
 use std::{collections::VecDeque, rc::Rc};
 
 /// Strict-mode PutValue on an already-evaluated base and property key.
 fn put(base: &Js, key: &[u16], value: Js) -> Result<(), Thrown> {
     let name = String::from_utf16_lossy(key);
     match base {
-        Js::Object(_) | Js::Function(_) => base.set_key(key, value),
-        Js::Array(_) if array_index(key).is_some() || key == utf16("length").as_ref() => {
-            base.set_key(key, value)
-        }
-        Js::Array(_) | Js::Map(_) | Js::Set(_) | Js::Promise(_) => {
-            Err(Thrown::type_error(&format!(
-                "Cannot create property '{name}' on {}: the host runtime keeps no named own properties on this value",
-                base.to_display()
-            )))
-        }
+        Js::Object(_) | Js::Function(_) | Js::Array(_) => base.set_key(key, value),
+        Js::Map(_) | Js::Set(_) | Js::Promise(_) => Err(Thrown::type_error(&format!("Cannot create property '{name}' on {}",base.to_display()))),
         primitive => Err(Thrown::type_error(&format!(
             "Cannot create property '{name}' on {} '{}'",
             primitive.type_of(),

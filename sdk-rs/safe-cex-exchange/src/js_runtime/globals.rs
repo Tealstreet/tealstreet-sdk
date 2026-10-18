@@ -522,6 +522,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     def(
         "Array",
         Js::object(vec![
+            ("prototype", super::value::array::prototype()),
             (
                 "isArray",
                 Js::function("isArray", |_, a| Ok(Js::Bool(arg(&a, 0).is_array()))),

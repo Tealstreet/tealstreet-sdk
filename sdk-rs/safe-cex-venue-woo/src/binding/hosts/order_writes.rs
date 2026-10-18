@@ -440,17 +440,16 @@ impl Host for Frame {
     }
     /// `sorted.slice(0, limit)`
     fn slice(&mut self, v: Js, limit: Js) -> Result<Js, Thrown> {
-        let items = v.array_items()?.unwrap_or_default();
-        let len = items.len() as f64;
+        let Js::Array(array) = &v else { return Err(Thrown::type_error("slice requires an array")); };
+        let length = array.len() as f64;
         let end = limit.to_number()?;
-        let end = if end.is_nan() { 0.0 } else { end.trunc() };
-        let end = if end < 0.0 {
-            (len + end).max(0.0)
-        } else {
-            end.min(len)
-        };
-        Ok(Js::holey_array(items[..end as usize].to_vec()))
+        let end = if end.is_nan() {0.0} else {end.trunc()};
+        let end = if end < 0.0 {(length+end).max(0.0)} else {end.min(length)} as usize;
+        let mut items=Vec::new();
+        for index in 0..end {items.push(if v.has_index(index){Some(v.get(&index.to_string())?)}else{None});}
+        Ok(Js::holey_array(items))
     }
+
     fn v(&mut self, v: &Js, k: &str) -> Result<Js, Thrown> {
         self.rt
             .global("v")?

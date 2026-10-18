@@ -5,8 +5,8 @@ use super::value::{to_account, to_js, to_signing};
 use crate::{sdk_account_api::AccountValue, transaction_signing::SigningResult};
 
 use safe_cex_exchange::js_runtime::{
-    builtins, ops as runtime,
-    value::{Js, Str, Thrown, array_index, utf16},
+    ops as runtime,
+    value::{Js, Str, Thrown},
 };
 use std::cell::RefCell;
 
@@ -208,36 +208,9 @@ pub(crate) fn for_of(
     Ok(())
 }
 
-/// An own property of the value's runtime representation, by UTF-16 key.
-pub(crate) fn has_own_key(value: &Js, key: &[u16]) -> bool {
-    match value {
-        Js::Array(_) => value.own_property_names().expect("array names").iter().any(|name| name.as_ref()==key),
-        Js::String(units) => {
-            array_index(key).is_some_and(|i| i < units.len()) || key == utf16("length").as_ref()
-        }
-        Js::Object(o) => o.props.borrow().contains_key(key),
-        Js::Function(f) => f.props.borrow().contains_key(key),
-        _ => false,
-    }
-}
-
 /// HasProperty: own key, prototype chain, or an intrinsic builtin member.
 pub(crate) fn has_property(value: &Js, key: &[u16]) -> bool {
-    if has_own_key(value, key) {
-        return true;
-    }
-    match value {
-        Js::Object(o) => o
-            .proto
-            .borrow()
-            .as_ref()
-            .is_some_and(|proto| has_property(proto, key)),
-        Js::Map(_) | Js::Set(_) if key == utf16("size").as_ref() => true,
-        Js::Array(_) | Js::Map(_) | Js::Set(_) | Js::Promise(_) => {
-            builtins::member(value, key).is_some()
-        }
-        _ => false,
-    }
+    value.has_property(key)
 }
 
 /// A fresh ordinary object with CopyDataProperties from each source in order.

@@ -220,7 +220,7 @@ pub(crate) fn income_records(
 ) -> Result<Vec<safe_cex_types::IncomeRecord>, Failure> {
     let rows = if let EventValue::Array(items) = value {
         let mut rows = Vec::new();
-        for item in array_values(items) {
+        for item in array_values(items)? {
             let item = if matches!(item, EventValue::Object(_)) {
                 let next = item
                     .spread_object()
@@ -744,7 +744,7 @@ impl ExchangeState {
             return Err(failure("weight clients must be an array"));
         };
         let mut objects = vec![];
-        for value in clients.borrow().iter().flatten() {
+        for value in EventValue::Array(clients.clone()).array_items()?.expect("array").into_iter().flatten() {
             if let EventValue::Object(object) = value {
                 objects.push(object.clone())
             }
@@ -1303,15 +1303,7 @@ impl crate::order_operations::OrderBindings for Context {
                 let EventValue::Array(rows) = selector else {
                     return Err(failure("order selectors must be an array"));
                 };
-                rows.borrow()
-                    .iter()
-                    .map(|row| {
-                        row.as_ref()
-                            .unwrap_or(&EventValue::Undefined)
-                            .read("id")?
-                            .text()
-                    })
-                    .collect::<Result<Vec<_>, _>>()?
+                crate::private_event_value::array_values(&rows)?.into_iter().map(|row|row.read("id")?.text()).collect::<Result<Vec<_>,_>>()?
             };
             owner
                 .base

@@ -1389,7 +1389,7 @@ impl ExchangeImports for Imports {
             Poll::Ready(safe_cex_venue_binance::private_rest::SnapshotCompletion {
                 reaction_order: 0,
                 result: Ok(routed.clone().map_or_else(
-                    || EventValue::Array(Default::default()),
+                    || EventValue::array(vec![]),
                     EventValue::from_json,
                 )),
             })

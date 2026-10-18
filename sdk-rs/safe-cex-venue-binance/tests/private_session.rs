@@ -44,7 +44,7 @@ fn wire(v: &EventValue) -> Value {
         }
         EventValue::Bool(x) => json!(x),
         EventValue::String(x) => json!(String::from_utf16(x).unwrap()),
-        EventValue::Array(a) => array_values(a).iter().map(wire).collect(),
+        EventValue::Array(a) => array_values(a).expect("fixture array reads").iter().map(wire).collect(),
         EventValue::Object(_) => v
             .spread()
             .iter()
@@ -267,7 +267,7 @@ impl ConstructorBindings for Ctor {
     fn guards(&self, owner: EventValue, clients: EventValue) -> Result<(), Failure> {
         assert!(owner.same(&self.owner));
         if let EventValue::Array(a) = clients {
-            *self.guards.borrow_mut() = array_values(&a)
+            *self.guards.borrow_mut() = array_values(&a).expect("fixture array reads")
         } else {
             panic!("native constructor guard array")
         };
