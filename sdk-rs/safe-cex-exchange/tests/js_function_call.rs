@@ -137,6 +137,38 @@ fn function_call_retains_receiver_arguments_results_and_throws() {
         "FUNCTION_CALL invalid receiver case floor"
     );
     assert_eq!(json!(refusals), source["refusals"]);
+    let refusal_reads = Rc::new(Cell::new(0));
+    let refusal_calls = Rc::new(Cell::new(0));
+    let invalid = Js::object(vec![]);
+    let calls = refusal_calls.clone();
+    let conversion = Js::function("toString", move |_, _| {
+        calls.set(calls.get() + 1);
+        Err(Thrown::type_error("conversion must not run"))
+    });
+    let reads = refusal_reads.clone();
+    invalid.define_accessor(
+        "toString",
+        Some(Rc::new(move |_| {
+            reads.set(reads.get() + 1);
+            Ok(conversion.clone())
+        })),
+        None,
+    );
+    let error = call.call(invalid, vec![]).unwrap_err();
+    assert_eq!(
+        refusal_reads.get(),
+        0,
+        "FUNCTION_CALL non-callable refusal must not read conversion hooks"
+    );
+    assert_eq!(
+        refusal_calls.get(),
+        0,
+        "FUNCTION_CALL non-callable refusal must not call conversion hooks"
+    );
+    assert_eq!(
+        json!({"reads":refusal_reads.get(),"calls":refusal_calls.get(),"error":error.value.get("name").unwrap().to_display()}),
+        source["refusalHooks"]
+    );
     let reads = Rc::new(Cell::new(0));
     let calls = Rc::new(Cell::new(0));
     let target = Js::function("shadowed", |_, _| {

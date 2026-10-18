@@ -955,6 +955,14 @@ The exchanges-level audit and retained options gap are tracked in
 entrypoints execute their initial source calls before returning their futures;
 caller-drop and reporting choices cite MANIFEST-SPEC.md#exchange-runtime-callback-choice.
 
+The shared function `call` member invokes the original target with the supplied
+strict receiver and remaining arguments. It preserves native values, returned
+references/promises and arbitrary thrown values without awaiting or JSON.
+Non-callable receivers reject before reading conversion hooks. Own function
+`call` properties/getters retain precedence. The native/Node witness
+is `tests/js_function_call.rs`; function construction and prototype metadata
+remain separate capabilities in the Hyperliquid shared-runtime consolidation.
+
 The shared JS runtime supplies `Function.prototype.bind` for venue callbacks,
 retaining the target receiver and prepending bound arguments even when the result
 is rebound or called by an array helper. Own function properties take precedence.

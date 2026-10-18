@@ -33,6 +33,11 @@ for(const invalid of [undefined,null,false,7,'x',{},[]]) {
   assert(thrown instanceof TypeError);
   refusals.push({receiver:describe(invalid),error:thrown.name});
 }
+let refusalReads=0,refusalCalls=0,refusal;
+const invalid={get toString(){refusalReads++;return function(){refusalCalls++;throw new Error('conversion must not run');};}};
+try { Reflect.apply(call,invalid,[]); } catch(error) { refusal=error; }
+assert(refusal instanceof TypeError);assert.equal(refusalReads,0);assert.equal(refusalCalls,0);
+const refusalHooks={reads:refusalReads,calls:refusalCalls,error:refusal.name};
 let reads=0,calls=0;
 const target=function(){throw new Error('original body must not run');};
 const receiver={};
@@ -48,4 +53,4 @@ for(const marker of [{},new TypeError('original')]) {
 const promise=Promise.resolve(7);
 assert.equal((()=>promise).call(receiver),promise);
 assert.equal(rows.length,10);assert.equal(refusals.length,7);
-process.stdout.write(JSON.stringify({rows,empty,refusals,ownCall:{reads,calls},throws:2,promiseSame:true}));
+process.stdout.write(JSON.stringify({rows,empty,refusals,refusalHooks,ownCall:{reads,calls},throws:2,promiseSame:true}));
