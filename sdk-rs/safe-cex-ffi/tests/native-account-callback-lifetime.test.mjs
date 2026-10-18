@@ -11,12 +11,12 @@ for (const pending of [false, true]) test(`closing a native account releases its
       let entered;
       const called = new Promise(resolve => { entered = resolve; });
       const token = () => { entered(); return new Promise(() => {}); };
-      const id = await native.nativeAccountOpen({ exchange: 'bitrue', optionsJson: JSON.stringify({
+      const id = await native.nativeAccountOpen({ exchange: 'bitrue', options: {
         key: 'test-key', secret: 'test-secret', tealstreetProxy: true, overrideProxyUrl: 'http://127.0.0.1:1',
-      }) }, () => {}, () => {}, undefined, token);
+      } }, () => {}, () => {}, undefined, token);
       let outcome;
       if (${pending}) {
-        outcome = native.nativeAccountCallMethod(id, 'validateAccount', '[]').then(
+        outcome = native.nativeAccountCallMethod(id, 'validateAccount', []).then(
           () => { throw Error('unexpected request success'); },
           error => { if (!error.message.includes('native account callback is closed')) throw error; },
         );

@@ -63,6 +63,48 @@ fn construct(scope: &Scope<()>, executor: Js) -> Js {
         .expect("production Promise constructor")
 }
 #[test]
+fn constructor_thenable_jobs_share_fifo_with_promise_reactions() {
+    run(|scope| async move {
+        let trace = Rc::new(RefCell::new(vec![]));
+        let seen = trace.clone();
+        let thenable = Js::object(vec![(
+            "then",
+            Js::function("then", move |_, args| {
+                seen.borrow_mut().push("thenable");
+                arg(&args, 0).call(Js::Undefined, vec![Js::Number(1.)])?;
+                Ok(Js::Undefined)
+            }),
+        )]);
+        let promise = construct(
+            &scope,
+            Js::function("executor", move |_, args| {
+                arg(&args, 0).call(Js::Undefined, vec![thenable.clone()])?;
+                Ok(Js::Undefined)
+            }),
+        );
+        let seen = trace.clone();
+        scope
+            .global("Promise")
+            .unwrap()
+            .call_method("resolve", vec![])
+            .unwrap()
+            .call_method(
+                "then",
+                vec![Js::function("reaction", move |_, _| {
+                    seen.borrow_mut().push("reaction");
+                    Ok(Js::Undefined)
+                })],
+            )
+            .unwrap();
+        assert_eq!(await_js(promise).await.unwrap().as_f64(), Some(1.));
+        assert_eq!(
+            serde_json::to_value(&*trace.borrow()).unwrap(),
+            oracle()["mixedTrace"],
+            "constructor thenables must share FIFO with existing Promise reactions"
+        );
+    });
+}
+#[test]
 fn constructor_runs_executor_synchronously_and_first_settlement_wins() {
     run(|scope| async move {
         let calls = Rc::new(RefCell::new(vec![]));

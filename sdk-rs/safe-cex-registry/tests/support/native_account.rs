@@ -28,9 +28,16 @@ impl Account {
         native_account_call(
             self.account.clone(),
             method.into(),
-            args.as_array().unwrap().clone(),
+            args.as_array()
+                .unwrap()
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect(),
         )
         .await
+        .map(crate::support::boundary_json)
+        .map_err(crate::support::boundary_json)
     }
     pub async fn ok(&self, method: &str, args: Value) -> Value {
         self.call(method, args)
@@ -38,7 +45,7 @@ impl Account {
             .unwrap_or_else(|error| panic!("{method}: {error}"))
     }
 }
-pub async fn started() -> Account {
+pub async fn opened(extra_options: Value) -> Account {
     let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let ws = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", http.local_addr().unwrap());
@@ -92,18 +99,31 @@ pub async fn started() -> Account {
             .unwrap();
         }
     });
+    let mut options = json!({"key":"test-key","secret":"test-secret","publicDataOnly":true,"overrideProxyUrl":origin,
+        "externalPublicData":{"type":"websocket","url":gateway,"exchangeId":"binance"}});
+    options
+        .as_object_mut()
+        .unwrap()
+        .extend(extra_options.as_object().unwrap().clone());
     let account = open_native_account(NativeAccountSpec {
-        hyperliquid_limiter:safe_cex_registry::native_host::hyperliquid_rate_limiter(),exchange:"binance".into(),
-        options:json!({"key":"test-key","secret":"test-secret","publicDataOnly":true,"overrideProxyUrl":origin,
-            "externalPublicData":{"type":"websocket","url":gateway,"exchangeId":"binance"}}),
-        account_name:None,sign:None,proxy_token:None,
-    }).unwrap();
+        hyperliquid_limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
+        exchange: "binance".into(),
+        options: options.into(),
+        account_name: None,
+        sign: None,
+        proxy_token: None,
+    })
+    .unwrap();
     let account = Account {
         account,
         seen,
         peers,
         received,
     };
+    account
+}
+pub async fn started() -> Account {
+    let account = opened(json!({})).await;
     account.ok("start", json!([])).await;
     account
 }

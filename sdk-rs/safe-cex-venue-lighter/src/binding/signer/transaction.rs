@@ -313,9 +313,10 @@ const METHODS: [(&str, Method); 8] = [
         };
         let allocates = nonce.is_none();
         match codec::approve_integrator(&params, nonce) {
-            Ok(p) => host.promise(client.get_approve_integrator_transaction(p), |tx| {
-                Ok(codec::approve_integrator_tx(&tx.borrow()))
-            }),
+            Ok((p, l1_signature)) => host
+                .promise(client.get_approve_integrator_transaction(p), move |tx| {
+                    Ok(codec::approve_integrator_tx(&tx.borrow(), &l1_signature))
+                }),
             Err(error) if allocates => after_nonce(host, client, error),
             Err(error) => host.rejected(error),
         }

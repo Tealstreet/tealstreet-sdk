@@ -24,5 +24,11 @@
   const self = new Promise(r => { resolve = r; });
   resolve(self);
   const selfError = await self.catch(error => error.name);
-  process.stdout.write(JSON.stringify({ firstTrace, firstValue, beforeJob, thenableTrace: trace, adoptedValue, selfError }));
+  const mixedTrace = [];
+  const mixed = new Promise(resolve => resolve({ then(resolve) {
+    mixedTrace.push('thenable'); resolve(1);
+  } }));
+  Promise.resolve().then(() => mixedTrace.push('reaction'));
+  await mixed;
+  process.stdout.write(JSON.stringify({ firstTrace, firstValue, beforeJob, thenableTrace: trace, adoptedValue, selfError, mixedTrace }));
 })().catch(error => { console.error(error); process.exitCode = 1; });

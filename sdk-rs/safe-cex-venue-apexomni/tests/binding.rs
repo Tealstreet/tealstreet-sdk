@@ -2,6 +2,7 @@
 #[allow(dead_code)]
 mod support;
 use safe_cex_exchange::exchange::Exchange;
+use safe_cex_exchange::js_runtime::value::to_typed;
 use safe_cex_store::Store;
 use safe_cex_types::*;
 use serde_json::{Value, json};
@@ -300,15 +301,14 @@ fn market_field_refusal_case(field: &str, wire_field: &str) {
             let refusals = logs
                 .iter()
                 .filter(|args| {
-                    args[0]
-                        .as_str()
+                    to_typed::<String>(&args[0])
                         .unwrap()
                         .contains("Refused ApexOmni market row")
                 })
                 .collect::<Vec<_>>();
             assert_eq!(refusals.len(), 1, "visible per-row refusal");
-            assert_eq!(refusals[0][1], "warning");
-            let message = refusals[0][0].as_str().unwrap();
+            assert_eq!(to_typed::<String>(&refusals[0][1]).unwrap(), "warning");
+            let message = to_typed::<String>(&refusals[0][0]).unwrap();
             assert!(
                 message.contains("row 1") && message.contains(&format!("{field}=")),
                 "{message}"
@@ -348,4 +348,47 @@ fn market_quote_row_refusals_keep_siblings() {
 #[test]
 fn market_active_row_refusals_keep_siblings() {
     market_field_refusal_case("active", "enableTrade");
+}
+
+#[path = "../../parity/test-support/ticker_coercion.rs"]
+mod ticker_coercion;
+
+#[test]
+fn production_ticker_coercion_matches_constructed_typescript() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_store::StoreUpdate;
+    use safe_cex_transport::socket::SocketFrame;
+    let source = ticker_coercion::source("apexomni");
+    assert_eq!(source["cases"].as_array().unwrap().len(), 64);
+    let h = fixture();
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let socket = public_socket(&h);
+    for case in source["cases"].as_array().unwrap() {
+        Store::update(
+            h.store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("apexomni")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(
+                    frame.as_str().unwrap().into(),
+                )));
+            h.runtime.pump();
+        }
+        ticker_coercion::assert_native(&h.store.tickers(), case);
+    }
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+    done(&h);
 }

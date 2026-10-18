@@ -17,13 +17,15 @@ process.on('unhandledRejection', () => {});
 async function main() {
   const rows = [];
   for (const grouped of [false, true]) {
-    for (const rejection of [false, true]) {
+    for (const mode of ['throw', 'reject', 'deferred-reject']) {
+      const rejection = mode !== 'throw', deferred = mode === 'deferred-reject';
       const socket = grouped
         ? new ReconnectingWebSocket('ws://unused', [], { startClosed: true })
         : new EventTarget();
       const trace = [];
       socket.addEventListener('message', () => {
         trace.push('first');
+        if (deferred) return Promise.resolve().then(() => { throw new Error('listener rejection'); });
         if (rejection) return Promise.reject(new Error('listener rejection'));
         throw new Error('listener throw');
       });
@@ -32,7 +34,7 @@ async function main() {
       try { socket.dispatchEvent(new Event('message')); } catch (error) {
         if (!grouped || error.message !== 'listener throw') throw error;
       }
-      rows.push({ grouped, rejection, trace });
+      rows.push({ grouped, rejection, deferred, trace });
     }
   }
   await new Promise(resolve => setImmediate(resolve));

@@ -29,11 +29,11 @@ after(async () => {
 async function open(t) {
   const stores = [];
   const id = await native.nativeAccountOpen(
-    { exchange: 'binance', optionsJson: JSON.stringify({ key: 'test-key', secret: 'test-secret', overrideProxyUrl: origin }) },
-    () => {}, data => stores.push(JSON.parse(data)),
+    { exchange: 'binance', options: { key: 'test-key', secret: 'test-secret', overrideProxyUrl: origin } },
+    () => {}, data => stores.push(data),
   );
   t.after(() => native.nativeAccountClose(id));
-  return { stores, call: async (method, ...args) => JSON.parse(await native.nativeAccountCallMethod(id, method, JSON.stringify(args))) };
+  return { stores, call: async (method, ...args) => await native.nativeAccountCallMethod(id, method, args) };
 }
 async function eventually(predicate) {
   for (let i = 0; i < 200; i++) {

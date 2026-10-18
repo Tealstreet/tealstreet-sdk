@@ -174,6 +174,32 @@ impl crate::order_models::OrderModelHost for OrderFrame {
         let f = self.venue.unlimited().post(endpoint, payload);
         async move { Ok(json!({ "data": f.await? })) }
     }
+    fn post_limited(
+        &mut self,
+        endpoint: &'static str,
+        payload: JsJsonValue,
+    ) -> impl Future<Output = Result<Value, Fault>> {
+        let future = self.venue.xhr().post(endpoint, payload);
+        async move { Ok(json!({ "data": future.await? })) }
+    }
+    fn update_status(&mut self, ids: &[String]) -> Result<(), Fault> {
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        self.venue
+            .base
+            .store
+            .update_orders_status(&refs, OrderStatus::Canceled)
+            .map_err(|error| Fault(error.into()))
+    }
+    fn place_replacement(
+        &mut self,
+        options: Value,
+    ) -> impl Future<Output = Result<Vec<String>, Fault>> {
+        let venue = self.venue.clone();
+        async move {
+            let options: PreparedOrderOpts = from_value(options)?;
+            Ok(venue.place_order(options).await?)
+        }
+    }
     fn cached_tif(&mut self, client_id: Option<&Value>) -> Result<Option<Value>, Fault> {
         let Some(client) = client_id.filter(|c| !c.is_null()) else {
             return Ok(None);
