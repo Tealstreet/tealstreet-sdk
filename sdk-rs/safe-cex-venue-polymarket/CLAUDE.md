@@ -17,6 +17,15 @@ pass after restoration. Existing method-body oracles and controls remain in use.
 Measured concrete transport gates and controls are recorded in
 [BINDING_EVIDENCE.md](BINDING_EVIDENCE.md).
 
+The concrete `Scope<Extra>` receiver registrations cover 28 host methods using
+exact compiler impl hashes. `binding/exchange.rs::receiver_tests` constructs
+the real exchange with NativeRuntime and observes native cells, UTF-16 units,
+throw identity, captured callbacks, class allocation and socket effects.
+Run `cargo test -p safe-cex-venue-polymarket --lib receiver_tests --jobs 1` from
+`sdk-rs`. `scripts/receiver-policy.mjs <fresh-rustdoc-json>` removes all 28 rows
+to prove named guard failures, then restores the unchanged production inventory.
+These receiver classifications do not claim native coverage of every alias.
+
 The binding uses the shared `safeCexAxiosCreate` factory for proxy selection and
 request outcomes. Registry `native_account_factory_routing` and napi
 `native-account-factory-routing.test.mjs` exercise that production path.

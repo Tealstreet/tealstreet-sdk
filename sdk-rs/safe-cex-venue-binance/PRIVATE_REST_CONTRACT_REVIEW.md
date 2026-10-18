@@ -64,3 +64,8 @@ D800/DC00 units, exact effect counts, signed HTTP ordering and cached fallback.
 The PM expectation uses the maintained source guard; the regular-order failure
 prevents the later conditional HTTP call. Typed console/log adapters retain their
 separate UTF8 boundary; this selected fix does not widen that shared API.
+
+The #974 PM warning-template change replaces UTF8 `format!`/`text()` with
+UTF16 prefix concatenation and `to_js_string()`. Review against #970 confirms
+that nested `digits` and `values` bodies are byte-identical and keep their
+individual roles. Both whole-file pins now cover that retained warning path.

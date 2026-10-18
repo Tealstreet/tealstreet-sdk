@@ -127,4 +127,81 @@ test('reviewed generic aliases return only their spec-owned fixed instantiation'
   assert.throws(() => reviewedGenericAliasProbe(alias, undefined, context, { [alias.name]: { ...spec, canonical: 'core::option::Option' } }), /canonical root must be the compiler target root/);
   assert.throws(() => reviewedGenericAliasProbe(alias, undefined, context, { [alias.name]: { ...spec, unsized: true } }), /only rootless dyn targets are unsized/);
   assert.throws(() => reviewedGenericAliasProbe(alias, undefined, context, { [alias.name]: { ...spec, extra: 1 } }), /unsupported spec fields/);
+
+  const canonical = 'indexmap::map::IndexMap';
+  const target = { resolved_path: { path: canonical, args: { angle_bracketed: {
+    args: [{ type: { resolved_path: { path: 'alloc::string::String', args: null } } },
+      { type: { generic: 'T' } }], constraints: [],
+  } } } };
+  const registered = { ...alias, name: 'control::RegisteredMap',
+    generics: { params: [structuredClone(alias.generics.params[1])], where_predicates: [] },
+    rawTarget: target, target };
+  const selected = { ...spec, canonical, generics: registered.generics, suffix: '<::serde_json::Value>', rawTarget: target, target,
+    expectedType: '::indexmap::IndexMap<::std::string::String, ::serde_json::Value>' };
+  const registrySpecs = { [registered.name]: selected };
+  const compilerPath = '/compiled/libindexmap.rmeta';
+  const registryContext = { macroOrigins: ['serde_json'],
+    packageMetadata: { dependencies: [{ name: 'indexmap', rename: null, kind: null, req: '=2.14.2', source: 'registry+https://github.com/rust-lang/crates.io-index' }] },
+    externalTypeAliases: [{ name: registered.name, canonical, kind: 'struct', compilerPath,
+      artifact: { kind: 'registry', compilerPath,
+        packageId: 'registry+https://github.com/rust-lang/crates.io-index#indexmap@2.14.2' } }],
+  };
+  assert.equal(reviewedGenericAliasProbe(registered, undefined, registryContext, registrySpecs).expectedType, selected.expectedType);
+  for (const mutate of [
+    item => { item.packageMetadata.dependencies = []; },
+    item => { item.packageMetadata.dependencies[0].req = '^2.14'; },
+    item => { item.packageMetadata.dependencies[0].source = 'registry+https://foreign.test'; },
+    item => { item.externalTypeAliases[0].artifact.packageId = 'registry+https://example.test#indexmap@2.14.1'; },
+    item => { item.externalTypeAliases[0].artifact.packageId = 'registry+https://example.test#other@2.14.2'; },
+    item => { item.externalTypeAliases[0].artifact.compilerPath = '/other/libindexmap.rmeta'; },
+    item => { item.externalTypeAliases[0].kind = 'trait'; },
+    item => { item.externalTypeAliases[0].artifact.kind = 'unknown'; },
+  ]) {
+    const changed = structuredClone(registryContext); mutate(changed);
+    assert.throws(() => reviewedGenericAliasProbe(registered, undefined, changed, registrySpecs), /canonical root needs actual compiler identity/);
+  }
+  assert.equal(reviewedGenericAliasProbe({ ...registered, name: 'control::UnregisteredMap' }, undefined, registryContext, registrySpecs), undefined);
+});
+
+test('Crypto.com registered prepared tuple preserves its exact compiler pair and refusals', async () => {
+  const name = 'safe_cex_venue_cryptocom::native_bindings::Prepared';
+  const generics = {params:[{name:'V',kind:{type:{bounds:[],default:null,is_synthetic:false}}}],where_predicates:[]};
+  const tuple = {tuple:[{generic:'V'},{generic:'V'}]};
+  const alias = {name,ident:'Prepared',span:{filename:'safe-cex-venue-cryptocom/src/native_bindings.rs'},generics,rawTarget:tuple,target:tuple};
+  const contract = {category:'decoder',evidence:'Exact fixed prepared-pair control.',generics,rawTarget:tuple,target:tuple};
+  const context = {macroOrigins:['serde_json'],externalTypeAliases:[]};
+  const probe = genericAliasProbe(alias, contract, context);
+  assert.equal(probe.probeKind, 'reviewed-cryptocom-prepared');
+  assert.equal(probe.canonical, 'tuple');
+  assert.equal(probe.suffix, '<::safe_cex_types::retained_json::RetainedJsonInput>');
+  assert.equal(probe.expectedType, '(::safe_cex_types::retained_json::RetainedJsonInput,::safe_cex_types::retained_json::RetainedJsonInput)');
+  assert.throws(() => genericAliasProbe({...alias,name:'unreviewed::Prepared'}, contract, context), /source must directly name its type parameter/);
+  for (const mutate of [
+    a => {a.span.filename='different.rs';},
+    a => {a.ident='Different';},
+    a => {a.generics.params[0].kind.type.bounds.push({outlives:"'static"});},
+    a => {a.rawTarget.tuple.push({generic:'V'});},
+    a => {a.target.tuple[1]={primitive:'bool'};},
+  ]) {
+    const item=structuredClone(alias);mutate(item);
+    assert.throws(() => genericAliasProbe(item, contract, context), /reviewed prepared-call tuple/);
+  }
+  for (const key of ['instantiation','aliasProbeExpected','aliasProbeKind','aliasProbeSuffix','nativeCanonical']) {
+    assert.throws(() => genericAliasProbe(alias,{...contract,[key]:'redirect'},context), /caller cannot supply/);
+  }
+  assert.throws(() => genericAliasProbe(alias,contract,{...context,macroOrigins:[]}), /actual compiler context required/);
+  assert.throws(() => genericAliasProbe(alias,contract,{...context,externalTypeAliases:null}), /actual compiler context required/);
+  const {cryptocomPreparedAliasProbe} = await import('./accepted-cryptocom-prepared-alias.mjs');
+  const registered = loadPolicy('generic-aliases')[name];
+  for (const change of [
+    spec => {spec.unsized=true;},
+    spec => {spec.canonical='alloc::rc::Rc';},
+    spec => {spec.suffix='<T,U>';},
+    spec => {spec.expectedType='';},
+    spec => {spec.extra='unreviewed';},
+  ]) {
+    const spec=structuredClone(registered);change(spec);
+    assert.throws(() => cryptocomPreparedAliasProbe(alias,contract,context,{[name]:spec}), /reviewed prepared-call tuple/);
+  }
+  assert.equal(cryptocomPreparedAliasProbe(alias,contract,context,{}),undefined);
 });

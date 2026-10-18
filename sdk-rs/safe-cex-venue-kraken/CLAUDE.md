@@ -446,3 +446,14 @@ leverage wire conversion, fill/income model conversion, and scalar String
 admission still refuse their closed representations. Leverage reports that
 refusal once before any cache mutation. Depth and numeric-query refusals remain
 separate; all twelve utility source boundary cases are retained.
+
+### REST read receiver coverage
+
+`READ_RECEIVER_REVIEW.md` documents the first seven concrete `ReadHost` receiver
+classifications. `tests/support/accepted_read_receivers.rs` reaches only the
+actual Scope of a constructed `KrakenExchange`, reusing terminal transport
+fixtures. The inherited-key regression follows live `utils/get-key.ts` through
+shared `in_operator`; do not restore an own-key-only lookup.
+`scripts/read-receiver-controls.py` requires seven named compiled runtime failures
+and exact-source restoration. Shared Store array identity is separately owned;
+these receiver tests claim only the facade's current slot/value behavior.

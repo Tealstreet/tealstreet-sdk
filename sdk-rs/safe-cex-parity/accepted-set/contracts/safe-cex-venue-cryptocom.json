@@ -70659,5 +70659,171 @@
     },
     "reason": "Builds an outbound zero-position record from the caller-provided market, side and mode using supplied property/import/id/clock/record operations. Constant numeric defaults are constructed, while source referents/order are retained. It does not admit a remote position record.",
     "evidence": "The complete Rust body and corresponding source caller role were individually reviewed. Actual tests/rest_reads.rs invokes this private body through unchanged native public callers and executes complete actual TypeScript methods. Its 68 independently admitted scenarios passed native observations including all native zero-position fields/default number bits, original id/symbol/enum/mode carriers, repeated property/import reads, clock and construction order; this is composition evidence, not a direct private-function test. Individual body corruption compiled and failed its named native assertion with exit 101, followed by exact byte restoration and the same target passing: rest_reads::zero_position<: compiled named runtime failure (exit 101); assertion=CRYPTOCOM-READ-NATIVE-NUMBER; exact restoration PASS. All twenty body controls and five fixture-walk controls passed across the final body-control run and targeted review controls; the latter preserve all original fixture inputs/expectations. The fresh native/default closed20 compiler gate produced 0 native decoder probes, 20 explicit classifications and 0 failures; that metadata is separate from executed evidence. No privacy, generic-host, parent, downstream-decoder, alias, construction or matrix exemption is claimed."
+  },
+
+  "safe_cex_venue_cryptocom::native_bindings::Prepared": {
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      [
+        null,
+        true
+      ],
+      [
+        "method",
+        {
+          "receiver": [
+            false,
+            null
+          ]
+        }
+      ],
+      [
+        [],
+        []
+      ]
+    ],
+    "negative": [
+      null,
+      true,
+      1,
+      "pair",
+      {},
+      [],
+      [
+        1
+      ],
+      [
+        1,
+        2,
+        3
+      ]
+    ],
+    "entrypoints": [],
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "tuple": [
+        {
+          "generic": "V"
+        },
+        {
+          "generic": "V"
+        }
+      ]
+    },
+    "target": {
+      "tuple": [
+        {
+          "generic": "V"
+        },
+        {
+          "generic": "V"
+        }
+      ]
+    },
+    "evidence": "Live method/receiver capability used by BoundHost::prepare/call and the actual constructor binding ops. One registered RetainedJsonInput pair really implements Deserialize; direct member observations cover member order, UTF16 text units, object keys and nested arrays. This fixed decoder classification makes no raw-decoder claim for Prepared<Js> or arbitrary V. Production Prepared<Js> tests preserve original function/receiver identity, getter-once ordering, mutable receiver, Undefined, UTF16 and exact NaN/signed-zero bits, with compiled fail/restore production controls. TS member-call reference: packages/safe-cex/src/exchanges/cryptocom/cryptocom.exchange.ts this.xhr.post calls.",
+    "observation": {
+      "call": "{ use safe_cex_types::retained_json::RetainedJsonInput as Input; fn view(input: &Input) -> serde_json::Value { match input { Input::Null => serde_json::json!([\"null\"]), Input::Undefined => serde_json::json!([\"undefined\"]), Input::Bool(v) => serde_json::json!([\"bool\",v]), Input::Text(v) => serde_json::json!([\"text\",v]), Input::Lexeme(v) => serde_json::json!([\"lexeme\",v]), Input::Float(v) => serde_json::json!([\"bits\",v.to_bits().to_string()]), Input::Array(v) => serde_json::json!([\"array\",v.iter().map(view).collect::<Vec<_>>()]), Input::Object(v) => serde_json::json!([\"object\",v.iter().map(|(k,v)|serde_json::json!([k,view(v)])).collect::<Vec<_>>()]) } } let decoded: $type = serde_json::from_value($value.clone()).expect(\"actual prepared pair decoder\"); serde_json::json!([view(&decoded.0),view(&decoded.1)]) }",
+      "cases": [
+        {
+          "input": [
+            null,
+            true
+          ],
+          "output": [
+            [
+              "null"
+            ],
+            [
+              "bool",
+              true
+            ]
+          ]
+        },
+        {
+          "input": [
+            "method",
+            {
+              "receiver": [
+                false,
+                null
+              ]
+            }
+          ],
+          "output": [
+            [
+              "text",
+              [
+                109,
+                101,
+                116,
+                104,
+                111,
+                100
+              ]
+            ],
+            [
+              "object",
+              [
+                [
+                  [
+                    114,
+                    101,
+                    99,
+                    101,
+                    105,
+                    118,
+                    101,
+                    114
+                  ],
+                  [
+                    "array",
+                    [
+                      [
+                        "bool",
+                        false
+                      ],
+                      [
+                        "null"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        },
+        {
+          "input": [
+            [],
+            []
+          ],
+          "output": [
+            [
+              "array",
+              []
+            ],
+            [
+              "array",
+              []
+            ]
+          ]
+        }
+      ]
+    }
   }
 }

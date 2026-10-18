@@ -47,8 +47,8 @@ pub(super) struct Extra {
 pub(super) type Shared = ScopeShared<Extra>;
 
 #[derive(Clone)]
-pub(super) struct Host {
-    pub shared: Rc<Shared>,
+pub(crate) struct Host {
+    pub(super) shared: Rc<Shared>,
 }
 
 impl Host {

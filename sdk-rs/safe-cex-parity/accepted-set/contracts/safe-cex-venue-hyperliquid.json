@@ -61085,5 +61085,942 @@
       ]
     },
     "evidence": "Reviewed maintained hyperliquid.rateLimiter.ts request parsing, endpoint/batch/base/extra weights and JavaScript Number/array coercion, plus the exact current compiler function API. Actual native observations invoke this production caller through raw_request_weight -> raw_number -> nested text, directly reading returned f64 decimal text and binary64 bits or error name/message. Independently authored raw and typed JSON cases exercise scalar, array, nested array, own-toString errors, signed/overflow inputs, batch boundaries and endpoint choice. Mutating only the nested text comma separator must fail the named comma-join native witness; exact restoration must pass. This is the concrete native/default API with JSON payloads; live getters/prototypes and limiter scheduling are separate obligations."
+  },
+
+  "safe_cex_venue_hyperliquid::spot_types::CancelOrderRequests": {
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      [],
+      [
+        {
+          "a": -0.0,
+          "o": 7
+        }
+      ],
+      [
+        {
+          "a": 2,
+          "o": 3
+        },
+        {
+          "a": 5,
+          "o": 11
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      "list",
+      1,
+      [
+        {}
+      ],
+      [
+        {
+          "a": 1
+        }
+      ],
+      [
+        {
+          "a": 1,
+          "o": null
+        }
+      ],
+      [
+        {
+          "a": "1",
+          "o": 2
+        }
+      ],
+      [
+        [
+          1,
+          2
+        ]
+      ]
+    ],
+    "entrypoints": [],
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "safe_cex_venue_hyperliquid::types::CancelOrderRequests",
+        "args": null
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_hyperliquid::types::CancelOrderRequestsItem",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "Actual public wire alias used by the maintained Hyperliquid module. Exact compiler source/expanded target and authenticated root identity remain guarded. Direct decoded members retain list cardinality/order, distinct fields and binary64 signed-zero bits; arbitrary Cloid strings remain open strings. Source declarations: packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.types.ts and hyperliquidspot.types.ts. Qualified native alias observations supplement existing maintained types/approval-leaves source witnesses; no HTTP or runtime closure claim.",
+    "observation": {
+      "call": "{ let decoded: $type = serde_json::from_value($value.clone()).unwrap(); serde_json::json!(decoded.iter().map(|v|[v.a.to_bits().to_string(),v.o.to_bits().to_string()]).collect::<Vec<_>>()) }",
+      "cases": [
+        {
+          "input": [],
+          "output": []
+        },
+        {
+          "input": [
+            {
+              "a": -0.0,
+              "o": 7
+            }
+          ],
+          "output": [
+            [
+              "9223372036854775808",
+              "4619567317775286272"
+            ]
+          ]
+        },
+        {
+          "input": [
+            {
+              "a": 2,
+              "o": 3
+            },
+            {
+              "a": 5,
+              "o": 11
+            }
+          ],
+          "output": [
+            [
+              "4611686018427387904",
+              "4613937818241073152"
+            ],
+            [
+              "4617315517961601024",
+              "4622382067542392832"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::CancelOrderRequests": {
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      [],
+      [
+        {
+          "a": -0.0,
+          "o": 7
+        }
+      ],
+      [
+        {
+          "a": 2,
+          "o": 3
+        },
+        {
+          "a": 5,
+          "o": 11
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      "list",
+      1,
+      [
+        {}
+      ],
+      [
+        {
+          "a": 1
+        }
+      ],
+      [
+        {
+          "a": 1,
+          "o": null
+        }
+      ],
+      [
+        {
+          "a": "1",
+          "o": 2
+        }
+      ],
+      [
+        [
+          1,
+          2
+        ]
+      ]
+    ],
+    "entrypoints": [],
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_hyperliquid::types::CancelOrderRequestsItem",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_hyperliquid::types::CancelOrderRequestsItem",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "Actual public wire alias used by the maintained Hyperliquid module. Exact compiler source/expanded target and authenticated root identity remain guarded. Direct decoded members retain list cardinality/order, distinct fields and binary64 signed-zero bits; arbitrary Cloid strings remain open strings. Source declarations: packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.types.ts and hyperliquidspot.types.ts. Qualified native alias observations supplement existing maintained types/approval-leaves source witnesses; no HTTP or runtime closure claim.",
+    "observation": {
+      "call": "{ let decoded: $type = serde_json::from_value($value.clone()).unwrap(); serde_json::json!(decoded.iter().map(|v|[v.a.to_bits().to_string(),v.o.to_bits().to_string()]).collect::<Vec<_>>()) }",
+      "cases": [
+        {
+          "input": [],
+          "output": []
+        },
+        {
+          "input": [
+            {
+              "a": -0.0,
+              "o": 7
+            }
+          ],
+          "output": [
+            [
+              "9223372036854775808",
+              "4619567317775286272"
+            ]
+          ]
+        },
+        {
+          "input": [
+            {
+              "a": 2,
+              "o": 3
+            },
+            {
+              "a": 5,
+              "o": 11
+            }
+          ],
+          "output": [
+            [
+              "4611686018427387904",
+              "4613937818241073152"
+            ],
+            [
+              "4617315517961601024",
+              "4622382067542392832"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::Cloid": {
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      "",
+      "0xABC",
+      "arbitrary identifier",
+      "Cloid-\ud83d\ude42"
+    ],
+    "negative": [
+      null,
+      true,
+      1,
+      [],
+      {}
+    ],
+    "entrypoints": [
+      {
+        "trait": "FromStr",
+        "reason": "Actual String trait conversion keeps the complete supplied UTF8 spelling; its string-typed adapter refuses non-string carrier values. Direct native units/bytes cover every declared positive input.",
+        "positive": [
+          "",
+          "Cloid-\ud83d\ude42"
+        ],
+        "negative": [
+          null,
+          1,
+          false,
+          [],
+          {}
+        ],
+        "nativeCases": [
+          {
+            "input": "",
+            "output": {
+              "units": [],
+              "utf8Bytes": 0
+            }
+          },
+          {
+            "input": "Cloid-\ud83d\ude42",
+            "output": {
+              "units": [
+                67,
+                108,
+                111,
+                105,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 10
+            }
+          }
+        ]
+      },
+      {
+        "trait": "From<String>",
+        "reason": "Actual String trait conversion keeps the complete supplied UTF8 spelling; its string-typed adapter refuses non-string carrier values. Direct native units/bytes cover every declared positive input.",
+        "positive": [
+          "",
+          "Cloid-\ud83d\ude42"
+        ],
+        "negative": [
+          null,
+          1,
+          false,
+          [],
+          {}
+        ],
+        "nativeCases": [
+          {
+            "input": "",
+            "output": {
+              "units": [],
+              "utf8Bytes": 0
+            }
+          },
+          {
+            "input": "Cloid-\ud83d\ude42",
+            "output": {
+              "units": [
+                67,
+                108,
+                111,
+                105,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 10
+            }
+          }
+        ]
+      },
+      {
+        "trait": "From<&str>",
+        "reason": "Actual String trait conversion keeps the complete supplied UTF8 spelling; its string-typed adapter refuses non-string carrier values. Direct native units/bytes cover every declared positive input.",
+        "positive": [
+          "",
+          "Cloid-\ud83d\ude42"
+        ],
+        "negative": [
+          null,
+          1,
+          false,
+          [],
+          {}
+        ],
+        "nativeCases": [
+          {
+            "input": "",
+            "output": {
+              "units": [],
+              "utf8Bytes": 0
+            }
+          },
+          {
+            "input": "Cloid-\ud83d\ude42",
+            "output": {
+              "units": [
+                67,
+                108,
+                111,
+                105,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 10
+            }
+          }
+        ]
+      },
+      {
+        "trait": "TryFrom<String>",
+        "reason": "Actual String trait conversion keeps the complete supplied UTF8 spelling; its string-typed adapter refuses non-string carrier values. Direct native units/bytes cover every declared positive input.",
+        "positive": [
+          "",
+          "Cloid-\ud83d\ude42"
+        ],
+        "negative": [
+          null,
+          1,
+          false,
+          [],
+          {}
+        ],
+        "nativeCases": [
+          {
+            "input": "",
+            "output": {
+              "units": [],
+              "utf8Bytes": 0
+            }
+          },
+          {
+            "input": "Cloid-\ud83d\ude42",
+            "output": {
+              "units": [
+                67,
+                108,
+                111,
+                105,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 10
+            }
+          }
+        ]
+      },
+      {
+        "trait": "TryFrom<&str>",
+        "reason": "Actual String trait conversion keeps the complete supplied UTF8 spelling; its string-typed adapter refuses non-string carrier values. Direct native units/bytes cover every declared positive input.",
+        "positive": [
+          "",
+          "Cloid-\ud83d\ude42"
+        ],
+        "negative": [
+          null,
+          1,
+          false,
+          [],
+          {}
+        ],
+        "nativeCases": [
+          {
+            "input": "",
+            "output": {
+              "units": [],
+              "utf8Bytes": 0
+            }
+          },
+          {
+            "input": "Cloid-\ud83d\ude42",
+            "output": {
+              "units": [
+                67,
+                108,
+                111,
+                105,
+                100,
+                45,
+                55357,
+                56898
+              ],
+              "utf8Bytes": 10
+            }
+          }
+        ]
+      }
+    ],
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::string::String",
+        "args": null
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::string::String",
+        "args": null
+      }
+    },
+    "evidence": "Actual public wire alias used by the maintained Hyperliquid module. Exact compiler source/expanded target and authenticated root identity remain guarded. Direct decoded members retain list cardinality/order, distinct fields and binary64 signed-zero bits; arbitrary Cloid strings remain open strings. Source declarations: packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.types.ts and hyperliquidspot.types.ts. Qualified native alias observations supplement existing maintained types/approval-leaves source witnesses; no HTTP or runtime closure claim.",
+    "observation": {
+      "call": "{ let decoded: $type = serde_json::from_value($value.clone()).unwrap(); serde_json::json!({\"units\":decoded.encode_utf16().collect::<Vec<_>>(),\"utf8Bytes\":decoded.len()}) }",
+      "cases": [
+        {
+          "input": "",
+          "output": {
+            "units": [],
+            "utf8Bytes": 0
+          }
+        },
+        {
+          "input": "0xABC",
+          "output": {
+            "units": [
+              48,
+              120,
+              65,
+              66,
+              67
+            ],
+            "utf8Bytes": 5
+          }
+        },
+        {
+          "input": "arbitrary identifier",
+          "output": {
+            "units": [
+              97,
+              114,
+              98,
+              105,
+              116,
+              114,
+              97,
+              114,
+              121,
+              32,
+              105,
+              100,
+              101,
+              110,
+              116,
+              105,
+              102,
+              105,
+              101,
+              114
+            ],
+            "utf8Bytes": 20
+          }
+        },
+        {
+          "input": "Cloid-\ud83d\ude42",
+          "output": {
+            "units": [
+              67,
+              108,
+              111,
+              105,
+              100,
+              45,
+              55357,
+              56898
+            ],
+            "utf8Bytes": 10
+          }
+        }
+      ]
+    },
+    "nativeProjection": "serde_json::json!({\"units\":$decoded.encode_utf16().collect::<Vec<_>>(),\"utf8Bytes\":$decoded.len()})"
+  },
+  "safe_cex_venue_hyperliquid::types::FundingHistory": {
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      [],
+      [
+        {
+          "coin": "BTC",
+          "fundingRate": "-0.01",
+          "premium": "0.02",
+          "time": -0.0
+        }
+      ],
+      [
+        {
+          "coin": "ETH",
+          "fundingRate": "0.03",
+          "premium": "-0.04",
+          "time": 2
+        },
+        {
+          "coin": "SOL",
+          "fundingRate": "0.05",
+          "premium": "0.06",
+          "time": 3
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      "list",
+      1,
+      [
+        {}
+      ],
+      [
+        {
+          "coin": "BTC",
+          "fundingRate": "1",
+          "premium": "2"
+        }
+      ],
+      [
+        {
+          "coin": "BTC",
+          "fundingRate": 1,
+          "premium": "2",
+          "time": 3
+        }
+      ],
+      [
+        [
+          "BTC",
+          "1",
+          "2",
+          3
+        ]
+      ]
+    ],
+    "entrypoints": [],
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_hyperliquid::types::FundingHistoryEntry",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_hyperliquid::types::FundingHistoryEntry",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "Actual public wire alias used by the maintained Hyperliquid module. Exact compiler source/expanded target and authenticated root identity remain guarded. Direct decoded members retain list cardinality/order, distinct fields and binary64 signed-zero bits; arbitrary Cloid strings remain open strings. Source declarations: packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.types.ts and hyperliquidspot.types.ts. Qualified native alias observations supplement existing maintained types/approval-leaves source witnesses; no HTTP or runtime closure claim.",
+    "observation": {
+      "call": "{ let decoded: $type = serde_json::from_value($value.clone()).unwrap(); serde_json::json!(decoded.iter().map(|v|serde_json::json!([v.coin,v.funding_rate,v.premium,v.time.to_bits().to_string()])).collect::<Vec<_>>()) }",
+      "cases": [
+        {
+          "input": [],
+          "output": []
+        },
+        {
+          "input": [
+            {
+              "coin": "BTC",
+              "fundingRate": "-0.01",
+              "premium": "0.02",
+              "time": -0.0
+            }
+          ],
+          "output": [
+            [
+              "BTC",
+              "-0.01",
+              "0.02",
+              "9223372036854775808"
+            ]
+          ]
+        },
+        {
+          "input": [
+            {
+              "coin": "ETH",
+              "fundingRate": "0.03",
+              "premium": "-0.04",
+              "time": 2
+            },
+            {
+              "coin": "SOL",
+              "fundingRate": "0.05",
+              "premium": "0.06",
+              "time": 3
+            }
+          ],
+          "output": [
+            [
+              "ETH",
+              "0.03",
+              "-0.04",
+              "4611686018427387904"
+            ],
+            [
+              "SOL",
+              "0.05",
+              "0.06",
+              "4613937818241073152"
+            ]
+          ]
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::UserOpenOrders": {
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      [],
+      [
+        {
+          "coin": "BTC",
+          "limitPx": "1.2",
+          "oid": -0.0,
+          "side": "A",
+          "sz": "3.4",
+          "timestamp": 7
+        }
+      ],
+      [
+        {
+          "coin": "ETH",
+          "limitPx": "5.6",
+          "oid": 11,
+          "side": "B",
+          "sz": "7.8",
+          "timestamp": -0.0
+        },
+        {
+          "coin": "SOL",
+          "limitPx": "9",
+          "oid": 13,
+          "side": "X",
+          "sz": "10",
+          "timestamp": 17
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      "list",
+      1,
+      [
+        {}
+      ],
+      [
+        {
+          "coin": "BTC",
+          "limitPx": "1",
+          "oid": 2,
+          "side": "A",
+          "sz": "3"
+        }
+      ],
+      [
+        {
+          "coin": "BTC",
+          "limitPx": 1,
+          "oid": 2,
+          "side": "A",
+          "sz": "3",
+          "timestamp": 4
+        }
+      ],
+      [
+        [
+          "BTC",
+          "1",
+          2,
+          "A",
+          "3",
+          4
+        ]
+      ]
+    ],
+    "entrypoints": [],
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_hyperliquid::types::UserOpenOrder",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_hyperliquid::types::UserOpenOrder",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "evidence": "Actual public wire alias used by the maintained Hyperliquid module. Exact compiler source/expanded target and authenticated root identity remain guarded. Direct decoded members retain list cardinality/order, distinct fields and binary64 signed-zero bits; arbitrary Cloid strings remain open strings. Source declarations: packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.types.ts and hyperliquidspot.types.ts. Qualified native alias observations supplement existing maintained types/approval-leaves source witnesses; no HTTP or runtime closure claim.",
+    "observation": {
+      "call": "{ let decoded: $type = serde_json::from_value($value.clone()).unwrap(); serde_json::json!(decoded.iter().map(|v|serde_json::json!([v.coin,v.limit_px,v.oid.to_bits().to_string(),v.side,v.sz,v.timestamp.to_bits().to_string()])).collect::<Vec<_>>()) }",
+      "cases": [
+        {
+          "input": [],
+          "output": []
+        },
+        {
+          "input": [
+            {
+              "coin": "BTC",
+              "limitPx": "1.2",
+              "oid": -0.0,
+              "side": "A",
+              "sz": "3.4",
+              "timestamp": 7
+            }
+          ],
+          "output": [
+            [
+              "BTC",
+              "1.2",
+              "9223372036854775808",
+              "A",
+              "3.4",
+              "4619567317775286272"
+            ]
+          ]
+        },
+        {
+          "input": [
+            {
+              "coin": "ETH",
+              "limitPx": "5.6",
+              "oid": 11,
+              "side": "B",
+              "sz": "7.8",
+              "timestamp": -0.0
+            },
+            {
+              "coin": "SOL",
+              "limitPx": "9",
+              "oid": 13,
+              "side": "X",
+              "sz": "10",
+              "timestamp": 17
+            }
+          ],
+          "output": [
+            [
+              "ETH",
+              "5.6",
+              "4622382067542392832",
+              "B",
+              "7.8",
+              "9223372036854775808"
+            ],
+            [
+              "SOL",
+              "9",
+              "4623507967449235456",
+              "X",
+              "10",
+              "4625478292286210048"
+            ]
+          ]
+        }
+      ]
+    }
   }
 }
