@@ -1,4 +1,4 @@
-#![cfg(feature = "native")]
+#![cfg(all(feature = "native", not(target_arch = "wasm32")))]
 #[path = "support/json_error_runtime.rs"]
 mod capture;
 #[path = "support/inverse_rest_runtime.rs"]

@@ -56,10 +56,10 @@ A key hook appends a row, and the next update exposes the resulting source index
 choice. Native observations compare row IDs, amounts and both hook calls before
 JSON. This preserves the maintained behavior rather than correcting its quirk.
 
-The five-crate Wasm all-target check also exposed a pre-existing native-only
-Binance inherited-refusal fixture whose feature cfg enabled native transport on
-Wasm. Its target cfg now matches the native dependencies it actually uses; every
-native assertion is unchanged.
+The five-crate Wasm all-target check also exposed three pre-existing native-only
+Binance fixtures (inherited refusals, retained errors and class/State bindings)
+whose feature cfg enabled native transport on Wasm. Their target cfg now matches
+the native dependencies they actually use; every native assertion is unchanged.
 
 ## Final merged-head checks
 
