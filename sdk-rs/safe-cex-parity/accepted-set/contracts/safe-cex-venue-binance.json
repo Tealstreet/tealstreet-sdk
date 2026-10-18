@@ -54573,5 +54573,106 @@
         }
       }
     ]
+  },
+  "safe_cex_venue_binance::class_jobs::Settlement": {
+    "shape": "typed",
+    "evidence": "The private-state Settlement<T> is a shared owned Future handle, not a wire constructor or Deserialize owner. The exact Future::poll API receives a pinned handle and native task Context and returns an already-owned Result. The existing production_native_private_clones_share_settlement_and_captured_receiver native test constructs the actual parent and holds its real listen-key request, observes Pending and shared completion through cloned handles, and checks only one request. The eager_prefix_shared_native_settlement_and_all_waiters direct production-job witness separately observes owned success fields, original object identity and both waiter wakeups. The distinct dropped_join_does_not_stop_driver_and_prefix_rejection_is_settlement witness observes original Rc error identity. Canonical named missing-contract RED1 then GREEN1 precise typed Future API classification, zero failed owners, all197 dependency decoder owners retained. Actual native constructor/cloned-handle, eager-job value/wakeup and original rejection identity witnesses pass; the independent successful-poll continuation fault compiles and fails the real binding at its bounded-poll assertion, with exact restoration GREEN; no decoder execution or universal generic data-domain claim.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "core::future::future::Future",
+          "name": "poll",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "resolved_path": {
+                    "path": "core::pin::Pin",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": true,
+                                "type": {
+                                  "generic": "Self"
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "cx",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::task::wake::Context",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'_"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::task::poll::Poll",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Output",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Polls native runtime state and task Context; it neither parses nor admits a wire representation. T is already produced by the scheduled callee."
+      }
+    ]
   }
 }
