@@ -3063,6 +3063,33 @@ const SIXTEEN_METHOD_OUTCOMES: &[(&str, &str, &str, &[&str])] = &[
     ("Spot", "fetch_public_trades", r#"err:Not implemented"#, &[]),
 ];
 
+fn assert_method_outcome_json(actual: &Value, expected: &Value, path: &str) {
+    match (actual, expected) {
+        (Value::Number(actual), Value::Number(expected)) => assert_eq!(
+            actual.as_f64().unwrap().to_bits(),
+            expected.as_f64().unwrap().to_bits(),
+            "{path} numeric bits"
+        ),
+        (Value::Array(actual), Value::Array(expected)) => {
+            assert_eq!(actual.len(), expected.len(), "{path} array length");
+            for (index, expected) in expected.iter().enumerate() {
+                assert_method_outcome_json(&actual[index], expected, &format!("{path}[{index}]"));
+            }
+        }
+        (Value::Object(actual), Value::Object(expected)) => {
+            assert_eq!(
+                actual.keys().collect::<Vec<_>>(),
+                expected.keys().collect::<Vec<_>>(),
+                "{path} object keys"
+            );
+            for (key, expected) in expected {
+                assert_method_outcome_json(&actual[key], expected, &format!("{path}.{key}"));
+            }
+        }
+        _ => assert_eq!(actual, expected, "{path}"),
+    }
+}
+
 #[test]
 fn exchange_classes_bind_all_sixteen_trait_methods_through_scripted_transport() {
     use safe_cex_exchange::exchange::Exchange;
@@ -3166,7 +3193,17 @@ fn exchange_classes_bind_all_sixteen_trait_methods_through_scripted_transport() 
             observed.iter().zip(expected)
         {
             assert_eq!(label, want_label, "method order: {venue:?}");
-            assert_eq!(outcome, want_outcome, "{venue:?} {label} outcome");
+            match (
+                outcome.strip_prefix("ok:"),
+                want_outcome.strip_prefix("ok:"),
+            ) {
+                (Some(actual), Some(expected)) => assert_method_outcome_json(
+                    &serde_json::from_str(actual).unwrap(),
+                    &serde_json::from_str(expected).unwrap(),
+                    &format!("{venue:?} {label} outcome"),
+                ),
+                _ => assert_eq!(outcome, *want_outcome, "{venue:?} {label} outcome"),
+            }
             assert_eq!(
                 requests, want_requests,
                 "{venue:?} {label} transport requests"

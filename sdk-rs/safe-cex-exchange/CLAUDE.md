@@ -1562,6 +1562,12 @@ across six bound arithmetic and six comparison methods, and five min/max argumen
 sets against the actual npm dependency. Positive finite precision stays decimal;
 the public shared model types are unchanged.
 
+The BigNumber import supplies both native call and construct bodies. OKX's
+source placement formatter uses `new BigNumber(amount)`; a callable-only import
+refuses before any order reaches HTTP. The installed-package constructor witness
+compares both forms and constructed clones for all 22 scalar profiles, while the
+real OKX placement binding tests retain batch payload and attached-error checks.
+
 Error prototype thread-local storage stays inside its sole private accessor.
 Module-level item macros are rejected by the parity indexer. The focused
 `safe-cex-parity/tests/runtime_error_prototypes.rs` test indexes the actual SDK
@@ -1790,3 +1796,12 @@ one-argument precision-count helper. The installed native/source tests cover
 123 scalar cases, UTF16 results, original value/throw identity, repeated property
 reads and precision operand coercion. The separate Realm implementation is
 removed only with the atomic Hyperliquid family consolidation.
+
+Operator numeric/default-hint conversion of ordinary objects and functions uses
+`Js::ordinary_to_primitive`, the same live hook traversal as direct value coercion.
+This preserves inherited Object intrinsics without executing unbound data-only
+handles, reads each getter once in valueOf/toString order, and retains original
+thrown values. Native builtin adapters keep their existing separate surfaces.
+`js_builtins_native` compares eight actual NativeRuntime operator hook cases with
+Node; the unchanged Dayjs, Breakout, Kraken candle and Paradex ticker consumers
+cover malformed objects reaching their source Date/arithmetic branches.

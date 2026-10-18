@@ -14,6 +14,9 @@ fn is_primitive(value: &Js) -> bool {
 /// ToPrimitive with the default/number hint (OrdinaryToPrimitive: valueOf, then
 /// toString). Without either member the builtin Object/Array string form applies.
 pub fn to_primitive(value: &Js) -> Result<Js, Thrown> {
+    if matches!(value, Js::Object(_) | Js::Function(_)) {
+        return value.ordinary_to_primitive(["valueOf", "toString"]);
+    }
     if is_primitive(value) {
         return Ok(value.clone());
     }
