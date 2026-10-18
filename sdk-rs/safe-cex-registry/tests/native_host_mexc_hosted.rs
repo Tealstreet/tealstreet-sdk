@@ -355,7 +355,12 @@ fn mexc_private_open_posts_the_worker_reconnect_packet_without_data() {
                 Ok(())
             }),
         );
-        h.exchange.start().await.unwrap();
+        h.exchange
+            .base()
+            .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Private)
+            .expect("the actual MEXC constructor registered its private socket")
+            .connect_and_subscribe(false)
+            .unwrap();
         support::eventually("real MEXC private login and reconnect notification", || {
             !packets.borrow().is_empty()
                 && h.received.borrow().iter().any(|frame| {
