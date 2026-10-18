@@ -15,6 +15,9 @@ use std::{
     rc::Rc,
     task::{Context, Poll, Waker},
 };
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+#[path = "support/retry_observer_native.rs"]
+mod retry_observer_native;
 #[derive(Debug, PartialEq, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 enum Trace {
@@ -302,6 +305,29 @@ fn configured_retry_matches_live_axios_counts_delays_deadlines_and_refusal() {
 }
 #[test]
 fn dropping_retry_observer_keeps_owned_timer_and_replay_alive() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/retry_observer_oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        source,
+        json!({"immediate":0,"beforeReplay":1,"afterReplay":2})
+    );
+    #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+    assert_eq!(
+        retry_observer_native::capture(),
+        source,
+        "production NativeRuntime and HTTP observer-drop trace"
+    );
     let input = json!({"timeout":500,"reset":true,"failures":1,"stop":2,"delay":125,"seed":null,"asyncRefusal":false});
     let (rt, http, xhr, config) = setup(&input);
     rt.hold.set(true);

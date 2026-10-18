@@ -189,6 +189,108 @@ fn result(value: Js) -> Value {
         to_json(&value).unwrap()
     }
 }
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+#[test]
+fn zero_wait_recording_host_matches_native_runtime_and_installed_lodash() {
+    let output = std::process::Command::new("node").args(["-e", r#"
+const throttle=require('lodash/throttle'),trace=[];
+const f=throttle(function(value){trace.push(['invoke',this.id,value]);return value*10},0,{leading:false});
+trace.push(['call',f.call({id:'receiver'},7)===undefined]);
+setTimeout(()=>{trace.push(['result',f.flush()]);console.log(JSON.stringify(trace))},10);
+"#]).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let create =
+        |shared: &ScopeShared<()>, trace: Rc<RefCell<Vec<Value>>>, notify: Rc<dyn Fn()>| {
+            shared
+                .globals
+                .get("throttle")
+                .unwrap()
+                .call(
+                    Js::Undefined,
+                    vec![
+                        Js::function("callback", move |this, args| {
+                            trace.borrow_mut().push(json!([
+                                "invoke",
+                                to_json(&this.get("id")?)?,
+                                to_json(&args[0])?
+                            ]));
+                            notify();
+                            Ok(Js::Number(args[0].to_number()? * 10.0))
+                        }),
+                        Js::Number(0.0),
+                        Js::object(vec![("leading", Js::Bool(false))]),
+                    ],
+                )
+                .unwrap()
+        };
+    let call = |function: &Js, trace: &RefCell<Vec<Value>>| {
+        let returned = function
+            .call(
+                Js::object(vec![("id", Js::str("receiver"))]),
+                vec![Js::Number(7.0)],
+            )
+            .unwrap();
+        trace
+            .borrow_mut()
+            .push(json!(["call", returned.is_undefined()]));
+    };
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&executor, async {
+        let native = safe_cex_exchange::native::native_runtime();
+        let host = safe_cex_exchange::js_runtime::client::rest_http_host(
+            native.clone(),
+            std::sync::Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
+        );
+        let shared = Rc::new(ScopeShared::new(
+            native,
+            host,
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Js::object(vec![]),
+            (),
+        ));
+        globals::install_builtins(&shared.globals, Rc::downgrade(&shared));
+        library::install_library(&shared.globals, Rc::downgrade(&shared));
+        let trace = Rc::new(RefCell::new(vec![]));
+        let fired = Rc::new(tokio::sync::Notify::new());
+        let notify = fired.clone();
+        let function = create(&shared, trace.clone(), Rc::new(move || notify.notify_one()));
+        call(&function, &trace);
+        tokio::time::timeout(std::time::Duration::from_secs(5), fired.notified())
+            .await
+            .unwrap();
+        trace.borrow_mut().push(json!([
+            "result",
+            result(function.call_method("flush", vec![]).unwrap())
+        ]));
+        assert_eq!(
+            json!(*trace.borrow()),
+            expected,
+            "production NativeRuntime must match installed Lodash"
+        );
+    });
+    let (runtime, shared) = fixture();
+    let trace = Rc::new(RefCell::new(vec![]));
+    let function = create(&shared, trace.clone(), Rc::new(|| {}));
+    call(&function, &trace);
+    runtime.advance(2);
+    trace.borrow_mut().push(json!([
+        "result",
+        result(function.call_method("flush", vec![]).unwrap())
+    ]));
+    assert_eq!(
+        json!(*trace.borrow()),
+        expected,
+        "recording host must preserve the production timer boundary"
+    );
+}
 #[test]
 fn lodash_throttle_matches_source_clock_receiver_arguments_and_results() {
     let output = std::process::Command::new("node")
