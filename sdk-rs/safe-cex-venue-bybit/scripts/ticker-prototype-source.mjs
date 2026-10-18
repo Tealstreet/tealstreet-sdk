@@ -25,10 +25,9 @@ module('utils/clone.ts');
 context.clone = context.exports.clone;
 module('store/store.base.ts');
 const Store = context.exports.DefaultStore;
-const initial = (id, symbol, info) => ({
+const initial = (id, symbol) => ({
   id, symbol, bid: 1, ask: 2, last: 3, mark: 4, index: 5, percentage: 6,
   openInterest: 7, fundingRate: 8, fundingTime: 9, volume: 10, quoteVolume: 11,
-  ...(info ? { info } : {}),
 });
 const base = [initial('BTCUSDT', 'BTCUSDT'), initial('undefined', 'UNDEFINED-ID')];
 const rows = [];
@@ -48,7 +47,7 @@ for (const variant of ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot']) {
   for (const [symbol, extra] of [
     ['toString', initial('shadow', 'toString')],
     ['__proto__', initial('prototype', '__proto__')],
-    ['info', initial('prototype', '__proto__', { id: 'BTCUSDT' })],
+    ['last', initial('prototype', '__proto__')],
   ]) {
     for (const lastPrice of ['42', { toString: null }]) {
       cases.push({ tickers: [...base, extra], frame: { topic: `tickers.${symbol}`, data: { symbol, lastPrice } } });
@@ -56,8 +55,8 @@ for (const variant of ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot']) {
   }
   assert.equal(cases.length, 48);
   for (const input of cases) {
-    context.exports.defaultStore.tickers = input.tickers;
     const store = new Store();
+    store.update({ tickers: context.clone(input.tickers) }, false);
     let notifications = 0;
     store.subscribe(() => notifications++);
     let error;

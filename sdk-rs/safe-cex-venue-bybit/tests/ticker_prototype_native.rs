@@ -12,7 +12,11 @@ use safe_cex_transport::socket::SocketFrame;
 use safe_cex_types::ExchangeName;
 use safe_cex_venue_bybit::{BybitDependencies, BybitExchange};
 use serde_json::json;
-use std::{cell::Cell, rc::Rc, sync::Arc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::Arc,
+};
 
 struct RuntimeClock(Rc<dyn WsRuntime>);
 impl RateLimitClock for RuntimeClock {
@@ -90,10 +94,26 @@ async fn observe(name: ExchangeName) {
         .unwrap();
         let count = Rc::new(Cell::new(0));
         let seen = count.clone();
+        let previous = RefCell::new(
+            store
+                .tickers()
+                .iter()
+                .map(|ticker| (ticker.last.to_bits(), ticker.bid.to_bits()))
+                .collect::<Vec<_>>(),
+        );
         let unsubscribe = Store::subscribe(
             store.as_ref(),
-            Box::new(move |_, _| {
-                seen.set(seen.get() + 1);
+            Box::new(move |state, _| {
+                let current: Vec<_> = state
+                    .tickers
+                    .iter()
+                    .map(|ticker| (ticker.last.to_bits(), ticker.bid.to_bits()))
+                    .collect();
+                // The socket also notifies handler statistics; count ticker commits.
+                if current != *previous.borrow() {
+                    seen.set(seen.get() + 1);
+                    *previous.borrow_mut() = current;
+                }
                 Ok(())
             }),
         );
