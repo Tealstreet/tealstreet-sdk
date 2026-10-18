@@ -87,7 +87,7 @@ No production TypeScript or shared type boundary changes.
 - `fix_audit_tests::`: the real runtime-registration and maintained source probes
   pass before and after the recovery module is removed.
 - `binding_streams::listen_order_book_joins_the_snapshot_with_buffered_deltas`:
-  the actual exchange, signed snapshot client, public socket, buffered delta join,
+  the actual exchange, configured snapshot client, public socket, buffered delta join,
   native orderbook and cleanup path remain operational.
 - All-target compiler checking covers the remaining WOO consumers; the full parity
   index checks that no removed Rust target or obsolete exemption is left behind.
