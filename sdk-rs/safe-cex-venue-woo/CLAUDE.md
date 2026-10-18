@@ -524,9 +524,9 @@ Guard/algorithm/position-mode native corpora admit canonical retained UTF-16 inp
 and inspect their units before strict String/DTO projection. Original typed field,
 enum, source-case, numeric-bit and effect assertions remain unchanged.
 
-The five structural aliases have individually reviewed native trait/output records.
+The four remaining structural aliases have individually reviewed native trait/output records.
 `STRUCTURAL_ALIAS_REVIEW.md` separates actual decoders from typed metadata handles,
-records the exact two-slot array registration and documents the constructed class
+records the retired array boundary and documents the constructed class
 cache/signing witness plus independent compiled production controls. Unknown
 array/tuple identities remain refused; no V3 migration route is enabled.
 
@@ -541,6 +541,6 @@ History page parsing uses shared get-key admission before object mapping: null
 and stock arrays without a symbol are skipped; primitives retain the source lookup
 failure. The signed class regression preserves valid sibling fills and error text.
 
-The inactive V3 sequence function/result and their orphan literal codecs are retired.
-Only audit facades called them; constructed-class/import-graph and native receiver
-probes plus real legacy orderbook coverage remain. See WS_STATE_GATES.md and ledger row 46.
+The inactive V3 sequence function/result and orphan codecs were retired first.
+The remaining six-module V3 websocket island is now retired too; its only callers
+were audit facades. See WS_STATE_GATES.md for the complete caller and native proof.

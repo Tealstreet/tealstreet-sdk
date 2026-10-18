@@ -8,14 +8,14 @@ import {loadContracts} from '../../safe-cex-parity/scripts/accepted-contract-fil
 
 assert.deepEqual(process.argv.slice(2),[]);
 const workspace=fileURLToPath(new URL('../..',import.meta.url));
-const names=['legacy_metadata::JsString','legacy_metadata::Rows','legacy_metadata::Fields','v3_contracts::WooV3Decimal','v3_ws_public::WooV3WsBookLevel'].map(n=>'safe_cex_venue_woo::'+n).sort();
+const names=['legacy_metadata::JsString','legacy_metadata::Rows','legacy_metadata::Fields','v3_contracts::WooV3Decimal'].map(n=>'safe_cex_venue_woo::'+n).sort();
 const c=acceptedAliasContext({workspace,packageName:'safe-cex-venue-woo',aliasNames:names,jobs:1});
 const own=c.artifacts.filter(a=>a.package_id===c.pkg.id&&a.target.name===c.target.name);
 assert.equal(own.length,1);
 const results=runProbes(c.root,c.metadata,[{package:c.pkg.name,packageId:c.pkg.id,features:own[0].features,target:c.target,types:[],publicAliases:c.aliases,defaultWitnesses:[],locals:[],delegatedLocals:[],macroOrigins:c.macroOrigins,externalTypeAliases:c.found.externalTypeAliases}],loadContracts(),{target:'native',features:[],jobs:1});
 fs.writeFileSync(path.join(c.metadata.target_directory,'woo-structural-alias-results.json'),JSON.stringify(results,null,2)+'\n');
 assert.deepEqual(results.map(r=>r.name).sort(),names);
-const decoders=new Set(['legacy_metadata::JsString','v3_contracts::WooV3Decimal','v3_ws_public::WooV3WsBookLevel'].map(n=>'safe_cex_venue_woo::'+n));
+const decoders=new Set(['legacy_metadata::JsString','v3_contracts::WooV3Decimal'].map(n=>'safe_cex_venue_woo::'+n));
 for(const result of results){
   assert.deepEqual(result.failures,[],result.name);
   if(decoders.has(result.name)){
@@ -28,4 +28,4 @@ for(const result of results){
     assert.equal(result.deserialize,false,result.name);
   }
 }
-console.log('WOO aliases: 3 runtime decoders; 2 specific classifications; 0 failed');
+console.log('WOO aliases: 2 runtime decoders; 2 specific classifications; 0 failed');
