@@ -92,6 +92,12 @@ Closed-position derivation consumes JSON records and uses shared Number for time
 parseFloat for monetary values. It preserves gross realized PnL and separate
 fees, and returns an error for the whole call on failed coercion.
 
+The [four caller-bound helper review](RESIDUAL_RECEIPT_REVIEW.md) records the
+executed accepted-set contracts for leverage overlay construction, closed-position
+reader orchestration, loaded-flag shallow copies and shared socket detachment.
+Run their exact owner selectors through the maintained scoped measurement driver;
+the control script requires named compiled failures and exact restoration passes.
+
 Trailing-stop formatters use shared adjust and math_round (ties toward positive
 infinity). Preserve each family's ID field/prefix and priceProtect casing;
 only mint the injected UUID after the source's missing-state checks pass.
