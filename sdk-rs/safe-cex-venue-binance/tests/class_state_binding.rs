@@ -55,6 +55,10 @@ fn concrete_class_constructors_retain_native_family_and_children() {
                     &subject.state.private_socket()
                 ));
                 assert!(p.http.sent.lock().unwrap().is_empty());
+                assert!(std::ptr::addr_eq(
+                    subject.base().store.as_ref(),
+                    p.store.as_ref() as &dyn Store
+                ));
                 assert!(Rc::ptr_eq(&subject.0, std::ops::Deref::deref(&subject)));
                 subject.dispose().unwrap();
             }
