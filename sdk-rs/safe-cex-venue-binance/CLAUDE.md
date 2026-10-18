@@ -135,6 +135,12 @@ Public websocket subscription helpers snapshot shared JS own-key order and read
 each count immediately before sending. Native-count callbacks preserve NaN and
 infinities; nonnumeric counts are None. Bind the fallible send callback to the
 core socket when composing classes. Send errors abort the remaining keys.
+All five concrete PublicState kinds use subscribe_binance_public and its private
+encoder. Keep the live-source cases on that actual shared route; do not recreate
+unused family-named forwarding wrappers. The native subscription receipt test
+opens every kind with native_dependencies and checks outgoing bytes, reentry and
+send failure. See PUBLIC_SUBSCRIPTION_REVIEW.md for individual classifications
+and compiled body controls.
 
 Public onOpen bodies use BaseWebSocket send/reset rather than local socket or
 orderbook replicas. Market variants keep their books; public/Spot variants reset
