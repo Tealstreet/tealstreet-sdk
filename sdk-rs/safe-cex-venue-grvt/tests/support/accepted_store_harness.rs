@@ -96,6 +96,20 @@ pub fn view_cache(store: &dyn Store) -> Value {
             .collect(),
     )
 }
+pub fn retained(value: &safe_cex_types::retained_json::RetainedJsonInput) -> Value {
+    use safe_cex_types::retained_json::RetainedJsonInput as I;
+    match value {
+        I::Undefined => json!({"kind":"undefined"}),
+        I::Null => json!({"kind":"null"}),
+        I::Bool(v) => json!({"kind":"boolean","value":v}),
+        I::Text(v) => json!({"kind":"text","units":v}),
+        I::Float(_) | I::Lexeme(_) => json!({"kind":"number","bits":bits(value.as_f64().unwrap())}),
+        I::Array(v) => json!({"kind":"array","items":v.iter().map(retained).collect::<Vec<_>>()}),
+        I::Object(v) => {
+            json!({"kind":"object","fields":v.iter().map(|(key,v)|(key,retained(v))).collect::<Vec<_>>()})
+        }
+    }
+}
 pub fn view_market(value: &Market) -> Value {
     json!({"id":value.id,"symbol":value.symbol,"base":value.base,"quote":value.quote,"active":value.active,
         "pretty":value.pretty_symbol,"precision":[bits(value.precision.amount),bits(value.precision.price)],
@@ -103,7 +117,7 @@ pub fn view_market(value: &Market) -> Value {
         "leverage":[bits(value.limits.leverage.min),bits(value.limits.leverage.max)],"price_limits":value.limits.price.is_some(),
         "flags":[value.is_spot,value.is_perpetual,value.is_inverse,value.is_expiring,value.is_read_only],
         "contract_size":value.contract_size.map(bits),"option":value.option.is_some(),
-        "taker":value.taker_fee.map(bits),"maker":value.maker_fee.map(bits),"info":value.info})
+        "taker":value.taker_fee.map(bits),"maker":value.maker_fee.map(bits),"info":value.info.as_ref().map(retained)})
 }
 pub fn view_markets(store: &dyn Store) -> Value {
     Value::Array(store.markets().iter().map(view_market).collect())
@@ -208,7 +222,7 @@ pub fn place(symbol: &str) -> PlaceOrderOpts {
 pub fn view_ticker(value: &Ticker) -> Value {
     json!({"id":value.id,"symbol":value.symbol,"numbers":[bits(value.bid),bits(value.ask),bits(value.last),bits(value.mark),bits(value.index),
         bits(value.percentage),bits(value.open_interest),bits(value.funding_rate),bits(value.funding_time),bits(value.volume),bits(value.quote_volume)],
-        "mid":value.mid_price.map(bits),"timestamp":value.timestamp.map(bits),"info":value.info})
+        "mid":value.mid_price.map(bits),"timestamp":value.timestamp.map(bits),"info":value.info.as_ref().map(retained)})
 }
 pub fn view_candle(value: &Candle) -> Value {
     json!({"timestamp":bits(value.timestamp),"open":bits(value.open),"high":bits(value.high),"low":bits(value.low),

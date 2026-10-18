@@ -12,6 +12,7 @@ pub(super) fn text(value: &str) -> Frame {
 
 pub(super) fn to_js(value: &Frame) -> Js {
     match value {
+        Frame::Undefined => Js::Undefined,
         Frame::Null => Js::Null,
         Frame::Bool(value) => Js::Bool(*value),
         Frame::Number(value) => Js::Number(*value),
@@ -43,11 +44,7 @@ pub(super) fn from_js(value: &Js) -> Result<Option<Frame>, PortfolioFailure> {
                 let value = value
                     .and_then(|value| from_js(&value).transpose())
                     .transpose()?
-                    .ok_or_else(|| {
-                        failure(ExchangeError::new(
-                            "Sparse or undefined array item at the Coinbase native value boundary",
-                        ))
-                    })?;
+                    .unwrap_or(Frame::Undefined);
                 captured.push(value);
             }
             Frame::Array(Rc::new(RefCell::new(captured)))
@@ -55,11 +52,9 @@ pub(super) fn from_js(value: &Js) -> Result<Option<Frame>, PortfolioFailure> {
         Js::Object(_) => {
             let mut captured = indexmap::IndexMap::new();
             for key in value.own_keys() {
-                if let Some(field) =
-                    from_js(&value.get_key(&key).map_err(super::error::from_thrown)?)?
-                {
-                    captured.insert(key.to_vec(), field);
-                }
+                let field = from_js(&value.get_key(&key).map_err(super::error::from_thrown)?)?
+                    .unwrap_or(Frame::Undefined);
+                captured.insert(key.to_vec(), field);
             }
             Frame::Object(Rc::new(RefCell::new(captured)))
         }
@@ -82,6 +77,7 @@ pub(super) fn same(left: &Frame, right: &Frame) -> bool {
 pub(super) fn query(value: &Frame) -> Result<safe_cex_types::QueryValue, PortfolioFailure> {
     use safe_cex_types::{QueryValue as Q, object_map::JsObjectMap};
     Ok(match value {
+        Frame::Undefined => Q::Undefined,
         Frame::Null => Q::Null,
         Frame::Bool(value) => Q::Bool(*value),
         Frame::Number(value) => Q::Number(*value),

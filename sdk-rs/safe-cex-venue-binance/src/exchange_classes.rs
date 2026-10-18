@@ -1129,7 +1129,8 @@ impl crate::private_rest::SnapshotBindings for Context {
         Ok(self.0.client(Client::Primary)?.truthy())
     }
     fn carries_client_id(&mut self, order: &EventValue, id: &str) -> Result<bool, Failure> {
-        Ok(safe_cex_exchange::client_order_id::order_carries_client_order_id(&typed(order)?, id))
+        safe_cex_exchange::client_order_id::order_carries_client_order_id(&typed(order)?, id)
+            .map_err(|error| Rc::new(ExchangeError::from(error)))
     }
     fn map_history(&mut self, data: EventValue) -> Result<EventValue, Failure> {
         Ok(

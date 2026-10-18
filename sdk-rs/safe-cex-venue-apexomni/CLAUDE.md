@@ -505,3 +505,30 @@ overflow, signed zero and false follow the actual TS exchange and DefaultStore.
 The shared ticker census records the witness. The compiling
 `parity/scripts/ticker-native-controls.py apexomni` fault must fail that test and
 pass after exact source restoration.
+
+
+REST response bodies and ApexHost results use canonical RetainedJsonInput.
+The installed Axios response interceptor keeps native Js response/config objects,
+including retry adapter/serializer capabilities, until the terminal data capture.
+Order/Position/Balance/Market info clones the original retained row; opaque UTF-16
+keys/text, native NaN/infinity/signed zero and own undefined never cross a whole
+response JSON projection. zkLinkConfig uses the same carrier, including source
+own-undefined assignments before later mapping errors. Named public model strings
+and placement inputs retain their strict field boundaries. Signing reads only
+its named scalar config fields; unrelated opaque config members cannot refuse it.
+Warnings use the shared retained writer at their explicit diagnostic text boundary.
+
+The existing binding target includes support/retained_info.rs. It checks actual
+HTTP/interceptor/host/model/Store paths and signs a placement after storing opaque
+contract config. The existing source loader's --retained-info mode executes the
+maintained TS methods for the same data classes; its ordinary driver marker stays
+stable for the existing controlled source corpora.
+
+Incoming private websocket frames remain canonical Input through order/position
+mapping and Store mutation. Partial position updates move info into the native
+ModelPatch slot before strict-field JSON projection, preserving opaque UTF-16,
+nonfinite bits and own undefined. Private pong frames use the shared retained
+writer at the wire boundary. The actual binding regression and maintained
+full-class source capture inspect order/position info before JSON; the existing
+16-row socket corpus now compares all eight private pong frames exactly, while
+keeping the separate public typed-frame refusal observations.

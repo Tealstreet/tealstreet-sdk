@@ -850,7 +850,7 @@ fn fetch_orders_accepts_documented_null_legacy_metadata_through_the_binding() {
     ] {
         assert_eq!(
             info.get(field),
-            Some(&Value::Null),
+            Some(&safe_cex_types::retained_json::RetainedJsonInput::Null),
             "retained own null {field}"
         );
     }

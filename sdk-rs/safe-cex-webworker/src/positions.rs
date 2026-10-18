@@ -197,25 +197,38 @@ fn positions_equal(left: &[safe_cex_types::Position], right: &[safe_cex_types::P
                 && number(a.liquidation_price, b.liquidation_price)
                 && field(&a.margin_size, &b.margin_size, num)
                 && field(&a.last_update, &b.last_update, num)
-                && field(&a.info, &b.info, json_equal)
+                && field(&a.info, &b.info, retained_equal)
                 && field(&a.extra, &b.extra, |a, b| {
                     optional(a.contracts_native, b.contracts_native)
                         && optional(a.unrealized_pnl_native, b.unrealized_pnl_native)
                 })
         })
 }
-fn json_equal(a: &Value, b: &Value) -> bool {
+fn retained_equal(
+    a: &safe_cex_types::retained_json::RetainedJsonInput,
+    b: &safe_cex_types::retained_json::RetainedJsonInput,
+) -> bool {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
     match (a, b) {
-        (Value::Number(a), Value::Number(b)) => {
-            a.to_string().parse::<f64>().ok() == b.to_string().parse::<f64>().ok()
+        (Input::Float(_) | Input::Lexeme(_), Input::Float(_) | Input::Lexeme(_)) => a
+            .as_f64()
+            .zip(b.as_f64())
+            .is_some_and(|(a, b)| a == b || (a.is_nan() && b.is_nan())),
+        (Input::Array(a), Input::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| retained_equal(a, b))
         }
-        (Value::Array(a), Value::Array(b)) => {
-            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| json_equal(a, b))
-        }
-        (Value::Object(a), Value::Object(b)) => {
+        (Input::Object(a), Input::Object(b)) => {
+            let a: std::collections::HashMap<&[u16], _> = a
+                .iter()
+                .map(|(key, value)| (key.as_slice(), value))
+                .collect();
+            let b: std::collections::HashMap<&[u16], _> = b
+                .iter()
+                .map(|(key, value)| (key.as_slice(), value))
+                .collect();
             a.len() == b.len()
                 && a.iter()
-                    .all(|(key, a)| b.get(key).is_some_and(|b| json_equal(a, b)))
+                    .all(|(key, a)| b.get(key).is_some_and(|b| retained_equal(a, b)))
         }
         _ => a == b,
     }

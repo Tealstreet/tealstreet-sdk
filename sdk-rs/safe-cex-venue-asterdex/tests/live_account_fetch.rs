@@ -199,44 +199,53 @@ enum Output {
     Applied(bool),
     Unit,
 }
-fn assert_native_json(actual: &Value, expected: &Value, name: &str) {
-    // JS has one binary64 Number type. Compare decoded scalar values directly;
-    // integer-versus-float serde storage is not a JS semantic difference.
-    match (actual, expected) {
-        (Value::Number(a), Value::Object(b))
-            if b.get("number").and_then(Value::as_str) == Some("-0") =>
-        {
-            assert_eq!(
-                a.as_f64().unwrap().to_bits(),
-                (-0.0_f64).to_bits(),
-                "{name} native signed zero"
-            )
-        }
-        (Value::Number(a), Value::Number(b)) => assert_eq!(
-            a.as_f64().unwrap().to_bits(),
-            b.as_f64().unwrap().to_bits(),
+fn assert_native_json(
+    actual: &safe_cex_types::retained_json::RetainedJsonInput,
+    expected: &safe_cex_types::retained_json::RetainedJsonInput,
+    name: &str,
+) {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    if let Some(number) = actual.as_f64() {
+        let expected = if expected.get("number").is_some_and(|v| v.text_equals("-0")) {
+            -0.0
+        } else {
+            expected.as_f64().expect("expected native number")
+        };
+        assert_eq!(
+            number.to_bits(),
+            expected.to_bits(),
             "{name} native info number"
-        ),
-        (Value::Array(a), Value::Array(b)) => {
+        );
+        return;
+    }
+    match (actual, expected) {
+        (Input::Array(a), Input::Array(b)) => {
             assert_eq!(a.len(), b.len(), "{name} native info array length");
             for (a, b) in a.iter().zip(b) {
                 assert_native_json(a, b, name);
             }
         }
-        (Value::Object(a), Value::Object(b)) => {
+        (Input::Object(a), Input::Object(b)) => {
             assert_eq!(a.len(), b.len(), "{name} native info field count");
             for (key, value) in a {
-                assert_native_json(value, b.get(key).expect("missing source info field"), name);
+                let other = b
+                    .iter()
+                    .find(|(k, _)| k == key)
+                    .expect("missing source info field");
+                assert_native_json(value, &other.1, name);
             }
         }
         _ => assert_eq!(actual, expected, "{name} native info value"),
     }
 }
+
 fn assert_native_models<T>(
     actual: &[T],
     source: &Value,
     name: &str,
-    info: impl Fn(&mut T) -> safe_cex_types::ModelField<Value>,
+    info: impl Fn(
+        &mut T,
+    ) -> safe_cex_types::ModelField<safe_cex_types::retained_json::RetainedJsonInput>,
 ) where
     T: Clone + PartialEq + std::fmt::Debug + serde::de::DeserializeOwned,
 {
@@ -538,8 +547,8 @@ fn account_fetch_matches_source() {
             );
             match &request.body {
                 Some(RestBody::Untransformed(body)) => assert_native_json(
-                    &body.clone().into_value().unwrap(),
-                    &source["body"],
+                    body,
+                    &source["body"].clone().into(),
                     &format!("{name} untransformed body"),
                 ),
                 None => assert!(source.get("body").is_none(), "{name} absent body"),

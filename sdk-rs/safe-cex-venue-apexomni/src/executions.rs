@@ -1,16 +1,14 @@
 //! Execution normalization and the venue's bounded websocket execution cache.
-use crate::{
-    data::{get, string, truthy},
-    exchange::{field_string, float, text},
-};
+use crate::response::{field_string, float, get, text as string, text, truthy};
 use safe_cex_exchange::runtime::ExchangeError;
-use safe_cex_num::{JsJsonValue as J, parse_float, parse_int};
+use safe_cex_num::parse_int;
+use safe_cex_types::retained_json::RetainedJsonInput as J;
 use safe_cex_types::{Execution, OrderSide};
 
 // ts: ApexOmniExchange#normalizeApexSymbolKey
 pub fn normalize_apex_symbol_key(value: &J) -> Result<String, String> {
     let value = if truthy(value) {
-        string(value)?
+        string(value).map_err(|e| e.message)?
     } else {
         String::new()
     };
@@ -35,10 +33,11 @@ pub fn normalize_execution_timestamp_to_seconds(
     if matches!(value, J::Undefined | J::Null) {
         return Ok(None);
     }
-    if let J::String(value) = value
-        && (value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()))
+    if let J::Text(units) = value
+        && (units.is_empty() || !units.iter().all(|b| (48..=57).contains(b)))
     {
-        let date = date_parse(value)?;
+        let value = field_string(value)?;
+        let date = date_parse(&value)?;
         return Ok(date.is_finite().then(|| (date / 1000.0).floor()));
     }
     let parsed = parse_int(&text(value)?, Some(10));
@@ -68,10 +67,6 @@ pub(crate) fn execution_side(value: &J) -> Result<Option<OrderSide>, ExchangeErr
         "SELL" | "S" | "SHORT" => Some(OrderSide::Sell),
         _ => None,
     })
-}
-
-pub(crate) fn parse(value: &J) -> Result<f64, String> {
-    Ok(parse_float(&string(value)?))
 }
 
 pub(crate) fn row_symbol(row: &J) -> &J {

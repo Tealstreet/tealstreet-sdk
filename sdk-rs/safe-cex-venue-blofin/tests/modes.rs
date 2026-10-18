@@ -1,3 +1,5 @@
+#[path = "support/retained_assert.rs"]
+mod retained_assert;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value};
 use safe_cex_store::{Store, StoreMutationError, StoreUpdate, store::DefaultStore};
 use safe_cex_types::{
@@ -209,7 +211,10 @@ fn native_confirmed_mode_cache_first_rekeys_first_id_and_preserves_fields() {
             );
             assert_eq!(p.margin_size, Some(row["marginSize"].as_f64().unwrap()));
             assert_eq!(p.last_update, Some(row["lastUpdate"].as_f64().unwrap()));
-            assert_eq!(p.info.as_ref().unwrap()["tag"], row["info"]["tag"]);
+            retained_assert::assert_value(
+                p.info.as_ref().unwrap().get("tag").unwrap(),
+                &row["info"]["tag"],
+            );
             assert_eq!(
                 p.extra.as_ref().unwrap().contracts_native,
                 Some(row["extra"]["contractsNative"].as_f64().unwrap())

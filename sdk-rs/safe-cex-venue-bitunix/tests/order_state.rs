@@ -1,3 +1,5 @@
+#[path = "../../parity/evidence/retained_model_values.rs"]
+pub mod retained_model_values;
 use safe_cex_num::{JsJsonValue, numeric_ingress::js_from_str};
 use safe_cex_types::{Order, OrderSide, OrderType, Position, PositionSide};
 use safe_cex_venue_bitunix::{order_state as state, tpsl_helpers::TpslLeg};
@@ -54,6 +56,15 @@ fn actual_typescript_order_state() {
     let mut counts = [0; 3];
     for (i, row) in rows.iter().enumerate() {
         let f: Value = serde_json::from_str(row["fixture"].as_str().unwrap()).unwrap();
+        let mut expected = row["result"].clone();
+        if let Some(kind) = expected
+            .get_mut("ok")
+            .and_then(|value| value.get_mut("orderType"))
+        {
+            if let Some(text) = kind.as_str() {
+                *kind = json!({"units":text.encode_utf16().collect::<Vec<_>>()});
+            }
+        }
         let actual = match row["key"].as_str().unwrap() {
             "snapshot" => {
                 counts[0] += 1;
@@ -73,7 +84,7 @@ fn actual_typescript_order_state() {
                     &orders,
                 ) {
                     Ok(s) => {
-                        json!({"ok":s.map_or(json!({"undefined":true}),|s|json!({"price":number(s.price),"qty":number(s.qty),"stopType":s.stop_type,"orderType":s.order_type,"orderPrice":number(s.order_price)}))})
+                        json!({"ok":s.map_or(json!({"undefined":true}),|s|json!({"price":number(s.price),"qty":number(s.qty),"stopType":s.stop_type,"orderType":{"units":s.order_type.as_text().unwrap()},"orderPrice":number(s.order_price)}))})
                     }
                     Err(e) => json!({"error":e.name,"message":e.message}),
                 }
@@ -81,12 +92,13 @@ fn actual_typescript_order_state() {
             "id" => {
                 counts[1] += 1;
                 let positions = positions(&f);
-                let cache: HashMap<String, Value> = serde_json::from_value(
-                    f.get("cache")
-                        .cloned()
-                        .unwrap_or(json!({"BTCUSDT:short":"CACHE-ID"})),
-                )
-                .unwrap();
+                let cache: HashMap<String, safe_cex_types::retained_json::RetainedJsonInput> =
+                    serde_json::from_value(
+                        f.get("cache")
+                            .cloned()
+                            .unwrap_or(json!({"BTCUSDT:short":"CACHE-ID"})),
+                    )
+                    .unwrap();
                 let result =
                     state::get_position_id("BTCUSDT", PositionSide::Short, &positions, &cache);
                 if let Some(v) = result {
@@ -97,7 +109,7 @@ fn actual_typescript_order_state() {
                         .and_then(|p| p.info.as_ref())
                         .and_then(|i| i.get("positionId"));
                     let expected = raw
-                        .filter(|v| safe_cex_num::js_truthy(Some(v)))
+                        .filter(|v| v.is_truthy())
                         .or_else(|| cache.get("BTCUSDT:short"))
                         .unwrap();
                     assert!(
@@ -107,7 +119,7 @@ fn actual_typescript_order_state() {
                 }
                 assert_eq!(row["identity"], true, "ORDER STATE source id identity");
                 result.map_or(json!({"undefined":true}), |v| {
-                    obs(JsJsonValue::from(v.clone()))
+                    obs(retained_model_values::prepared(v))
                 })
             }
             "hydrate" => {
@@ -187,7 +199,7 @@ fn actual_typescript_order_state() {
             _ => panic!(),
         };
         assert_eq!(
-            actual, row["result"],
+            actual, expected,
             "ORDER STATE decoded native {} case {i}",
             row["key"]
         );

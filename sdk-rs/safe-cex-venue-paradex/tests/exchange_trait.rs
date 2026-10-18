@@ -337,7 +337,15 @@ fn private_source_channels_update_native_order_position_and_balance_fields() {
     assert_eq!(order.amount, 0.012);
     assert_eq!(order.remaining, 0.009);
     assert_eq!(order.filled.to_bits(), (0.012_f64 - 0.009).to_bits());
-    assert_eq!(order.info.as_ref().unwrap()["market"], "BTC-USD-PERP");
+    assert!(
+        order
+            .info
+            .as_ref()
+            .unwrap()
+            .get("market")
+            .unwrap()
+            .text_equals("BTC-USD-PERP")
+    );
     drop(orders);
     push(
         "orders.ALL",
@@ -677,7 +685,7 @@ fn amendment_precision_keeps_amount_execution_and_trigger_axes_distinct() {
     stop.reduce_only = true.into();
     stop.price = (99.37).into();
     stop.info = (Some(
-        json!({"id":"native-stop","market":"BTC-USD-PERP","side":"BUY","type":"STOP_MARKET","status":"UNTRIGGERED","price":"0","trigger_price":"99.37","size":"0.006","remaining_size":"0.006","reduce_only":true,"instruction":"GTC"}),
+        json!({"id":"native-stop","market":"BTC-USD-PERP","side":"BUY","type":"STOP_MARKET","status":"UNTRIGGERED","price":"0","trigger_price":"99.37","size":"0.006","remaining_size":"0.006","reduce_only":true,"instruction":"GTC"}).into(),
     )).into();
     drive(
         &runtime,
@@ -842,7 +850,12 @@ fn numeric_created_at_survives_constructed_fetch_orders() {
     );
     assert_eq!(orders[0].filled.to_bits(), (0.006f64 - 0.003f64).to_bits());
     assert_eq!(
-        orders[0].info.as_ref().unwrap()["created_at"]
+        orders[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("created_at")
+            .unwrap()
             .as_f64()
             .unwrap()
             .to_bits(),
@@ -923,9 +936,35 @@ fn raw_order_dates_and_numeric_sizes_survive_constructed_fetch_orders() {
         assert_eq!(orders[index].last_update.to_bits(), expected.to_bits());
     }
     assert!(orders[3].last_update.is_nan());
-    assert!(orders[0].info.as_ref().unwrap()["created_at"].is_null());
-    assert_eq!(orders[1].info.as_ref().unwrap()["created_at"], false);
-    assert_eq!(orders[2].info.as_ref().unwrap()["created_at"], true);
+    assert!(
+        orders[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("created_at")
+            .unwrap()
+            .is_null()
+    );
+    assert_eq!(
+        orders[1]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("created_at")
+            .unwrap()
+            .as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        orders[2]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("created_at")
+            .unwrap()
+            .as_bool(),
+        Some(true)
+    );
     assert!(orders[3].info.as_ref().unwrap().get("created_at").is_none());
 }
 
@@ -1874,4 +1913,89 @@ fn undefined_order_side_matches_maintained_source_presence_and_errors() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "12");
+}
+
+#[test]
+fn retained_info_order_rest_keeps_opaque_native_fields() {
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+    let (venue, runtime, store, wire) = support::fixture_with(private_options(), private_script);
+    drive(&runtime, venue.start()).unwrap();
+    let mut row: Input = json!({"id":"opaque-order","market":"BTC-USD-PERP","side":"BUY","type":"LIMIT","status":"OPEN","price":"101.5","size":"2","remaining_size":"1","created_at":1700000000000f64,"reduce_only":false}).into();
+    let opaque = Input::Object(vec![
+        ("text".encode_utf16().collect(), Input::Text(vec![0xd800])),
+        ("missing".encode_utf16().collect(), Input::Undefined),
+        ("number".encode_utf16().collect(), Input::Float(f64::NAN)),
+        ("negativeZero".encode_utf16().collect(), Input::Float(-0.)),
+        (
+            "positiveInfinity".encode_utf16().collect(),
+            Input::Float(f64::INFINITY),
+        ),
+        (
+            "negativeInfinity".encode_utf16().collect(),
+            Input::Float(f64::NEG_INFINITY),
+        ),
+        (vec![0xdc00], Input::Text(vec![65])),
+    ]);
+    row.as_object_mut()
+        .unwrap()
+        .push(("opaque".encode_utf16().collect(), opaque));
+    wire.retained_responses.borrow_mut().insert(
+        "/orders".into(),
+        Input::Object(vec![(
+            "results".encode_utf16().collect(),
+            Input::Array(vec![row]),
+        )]),
+    );
+    let orders = drive(&runtime, venue.fetch_orders(None)).expect("native opaque order read");
+    assert_eq!(orders.len(), 1, "opaque siblings cannot hide valid order");
+    store.add_or_update_order(orders[0].clone()).unwrap();
+    let orders = store.orders();
+    let opaque = orders[0].info.as_ref().unwrap().get("opaque").unwrap();
+    assert_eq!(
+        opaque.get("text").unwrap().as_text(),
+        Some([0xd800].as_slice())
+    );
+    assert!(matches!(opaque.get("missing"), Some(Input::Undefined)));
+    assert!(opaque.get("number").unwrap().as_f64().unwrap().is_nan());
+    assert_eq!(
+        opaque
+            .get("negativeZero")
+            .unwrap()
+            .as_f64()
+            .unwrap()
+            .to_bits(),
+        (-0f64).to_bits()
+    );
+    assert_eq!(
+        opaque.get("positiveInfinity").unwrap().as_f64(),
+        Some(f64::INFINITY)
+    );
+    assert_eq!(
+        opaque.get("negativeInfinity").unwrap().as_f64(),
+        Some(f64::NEG_INFINITY)
+    );
+    assert!(
+        opaque
+            .as_object()
+            .unwrap()
+            .iter()
+            .any(|(key, value)| key == &[0xdc00] && value.as_text() == Some([65].as_slice()))
+    );
+}
+
+#[test]
+fn actual_source_order_info_preserves_native_metadata() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/order-info-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "3");
 }

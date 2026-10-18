@@ -1,5 +1,7 @@
 #[path = "support/cardinality.rs"]
 mod cardinality;
+#[path = "support/retained_input.rs"]
+mod retained_input;
 use safe_cex_num::numeric_ingress::{js_from_str, js_from_value, js_from_value_ref};
 use safe_cex_venue_weex::utils::*;
 use serde_json::Value;
@@ -77,14 +79,28 @@ fn timestamps_match_actual_typescript() {
     for kind in ["depth", "refusals"] {
         for case in corpus[kind].as_array().unwrap() {
             let raw = case["raw"].as_str().unwrap();
-            assert!(
-                serde_json::from_str::<WeexUtilityInput>(raw).is_err(),
-                "timestamp_{kind}_refusal"
-            );
-            assert!(
-                js_from_str::<WeexUtilityInput>(raw).is_err(),
-                "timestamp_{kind}_refusal"
-            );
+            if kind == "refusals" {
+                let native = retained_input::admit_utf16(raw);
+                let number = if case["fn"] == "normalizeTimestampToMs" {
+                    normalize_timestamp_to_ms(Some(&native), |value| value)
+                } else {
+                    normalize_timestamp_to_seconds(Some(&native), |value| value)
+                }
+                .unwrap();
+                assert_eq!(
+                    format!("{:016x}", number.to_bits()),
+                    case["native"]["bits"].as_str().unwrap()
+                );
+            } else {
+                assert!(
+                    serde_json::from_str::<WeexUtilityInput>(raw).is_err(),
+                    "retained depth direct refusal"
+                );
+                assert!(
+                    js_from_str::<WeexUtilityInput>(raw).is_err(),
+                    "retained depth numeric refusal"
+                );
+            }
         }
     }
     let mut deep = serde_json::json!("1700000000.875");

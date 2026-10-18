@@ -81,11 +81,14 @@ Subscriber errors may retain an opaque Rc error cause. Cloning preserves its
 identity; Error::source exposes it for consumer downcasting without a dependency
 on exchange error types. Equality compares present causes by pointer identity.
 
-retained_json contains the canonical raw-token and numeric-event capture extracted
-from Num ingress. The five shared model info companions delegate to it: absence
-is None and present null is Some(Null). Existing numeric lexemes, including
-overflow and signed zero, survive; native NaN is refused. This is JSON capture,
-not JavaScript wire projection; Num owns typed ingress and output eligibility.
+retained_json contains the canonical UTF-16 native data carrier. All five shared
+model info fields use it, preserving their Option or ModelField outer presence.
+NaN payloads, infinities, signed zero, own undefined, text and keys survive native
+Serde and Store capture. The named native codec is distinct from raw JSON tokens;
+its internal payload never appears in serialized JSON. The single retained JSON
+writer lives here below Num and applies JSON.stringify projection only on output.
+`safe-cex-exchange/tests/js_runtime.rs` runs the maintained TS model/Store corpus
+against actual typed bridges and the production Store facade before wire checks.
 
 Stock Serde F64Deserializer can ignore the raw-token newtype hint and emit its
 float directly. Capture accepts that event using the same Float path as the
@@ -216,3 +219,10 @@ non-booleans. The real native/Store presence target covers 48 actual-source
 upsert/patch combinations. BingX's real amendment witness compares the complete
 signed request against actual source execution and requires undefined reduceOnly
 to be omitted from the wire and HMAC preimage.
+
+Shared model `info` uses canonical `RetainedJsonInput`: Option retains absence on
+Market/Balance/Ticker, and ModelField retains presence on Order/Position. Capture
+native numbers, undefined and UTF16 before serialization; `into_value` is a real
+JSON boundary, never an intermediate model conversion. The native Serde marker
+and InfoRecord codecs preserve own undefined without exposing marker objects in
+wire JSON. The single retained JSON writer lives below Num in this crate.

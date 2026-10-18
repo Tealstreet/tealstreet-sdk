@@ -366,9 +366,9 @@ pub(crate) fn bind(realm: &Realm) {
     b("orderCarriesClientOrderId", 2, |r, a| {
         let order: safe_cex_types::Order = r.to_typed(&arg(a, 0))?;
         let id = r.to_rust_string(&arg(a, 1))?;
-        Ok(Value::Bool(
-            safe_cex_exchange::client_order_id::order_carries_client_order_id(&order, &id),
-        ))
+        safe_cex_exchange::client_order_id::order_carries_client_order_id(&order, &id)
+            .map(Value::Bool)
+            .map_err(|error| r.error_of(error.name, error.message))
     });
     // Object.assign(orderIds, { clientOrderId }): the same array, now carrying the ID.
     b("withReplacementClientOrderId", 2, |r, a| {

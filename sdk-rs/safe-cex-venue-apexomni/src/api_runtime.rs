@@ -5,6 +5,7 @@ use crate::{
     exchange::failure,
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, to_js_json, to_json};
 use safe_cex_exchange::{
     error_reporting::{ExchangeErrorInput, append_http_failure},
     exchange::BaseExchange,
@@ -40,7 +41,7 @@ pub trait ApexApiHost {
     fn legacy_timestamp_ms(&self, now: f64) -> Result<f64, ExchangeError>;
     fn axios_headers(&self, fields: J) -> Result<J, ExchangeError>;
     fn set_content_type(&self, headers: &mut J, value: &str) -> Result<(), ExchangeError>;
-    fn request_retry(&self, config: J) -> ExchangeFuture<'_, J>;
+    fn request_retry(&self, config: Js) -> ExchangeFuture<'_, Js>;
 }
 pub struct ApexApi {
     pub options: ExchangeOptions,
@@ -250,37 +251,65 @@ impl ApexApi {
         set(&mut next, "headers", headers);
         Ok(J::Object(next))
     }
-    pub async fn response_handler(&self, response: &J) -> Result<J, ExchangeError> {
-        let body = property(response, "data")?;
-        let code = property(body, "code")?;
-        if truthy(code) && !matches!(code,J::Number(v) if *v==0.) {
-            let config = get(response, "config");
-            let numeric = data::number(code).map_err(failure)?;
-            let msg = get(body, "msg");
-            let message = if matches!(msg, J::Undefined | J::Null) {
+    pub async fn response_handler(&self, response: &Js) -> Result<Js, ExchangeError> {
+        let read = || -> Result<(Js, Js), Thrown> {
+            let body = response.get("data")?;
+            let code = body.get("code")?;
+            Ok((body, code))
+        };
+        let (body, code) = read().map_err(|e| e.to_exchange_error())?;
+        if code.truthy() && !matches!(&code, Js::Number(v) if *v == 0.) {
+            let config = response.get("config").map_err(|e| e.to_exchange_error())?;
+            let numeric = code.to_number().map_err(|e| e.to_exchange_error())?;
+            let msg = body.get("msg").map_err(|e| e.to_exchange_error())?;
+            let message = if msg.is_nullish() {
                 String::new()
             } else {
-                text(msg)?
+                msg.to_js_string()
+                    .and_then(|s| {
+                        String::from_utf16(&s).map_err(|_| {
+                            Thrown::type_error("Cannot represent JavaScript UTF-16 string as UTF-8")
+                        })
+                    })
+                    .map_err(|e| e.to_exchange_error())?
             };
             let signature_failure = numeric == 20016.
                 || numeric == 401.
                 || message.to_ascii_lowercase().contains("sign");
-            if signature_failure && !truthy(property(config, "__apexLegacyRetried")?) {
-                let mut next = object_fields(config)?;
-                let headers = get(config, "headers");
-                let headers = if truthy(headers) {
-                    headers.clone()
+            if signature_failure
+                && !config
+                    .get("__apexLegacyRetried")
+                    .map_err(|e| e.to_exchange_error())?
+                    .truthy()
+            {
+                let next = config.spread_object().map_err(|e| e.to_exchange_error())?;
+                let headers = config.get("headers").map_err(|e| e.to_exchange_error())?;
+                let headers = if headers.truthy() {
+                    headers
                 } else {
-                    J::Object(Vec::new())
+                    Js::object(vec![])
                 };
-                set(&mut next, "headers", self.host.axios_headers(headers)?);
-                set(&mut next, "__apexLegacyRetried", J::Bool(true));
-                set(&mut next, "__apexUseLegacySigning", J::Bool(true));
-                return self.host.request_retry(J::Object(next)).await;
+                // Request headers remain the strict prepared signing domain.
+                let headers = self
+                    .host
+                    .axios_headers(to_js_json(&headers).map_err(|e| e.to_exchange_error())?)?;
+                next.define("headers", data::js(&headers))
+                    .map_err(|e| e.to_exchange_error())?;
+                next.define("__apexLegacyRetried", Js::Bool(true))
+                    .map_err(|e| e.to_exchange_error())?;
+                next.define("__apexUseLegacySigning", Js::Bool(true))
+                    .map_err(|e| e.to_exchange_error())?;
+                return self.host.request_retry(next).await;
             }
-            let message = format!("[{}] {}", text(code)?, text(msg)?);
-            let status = get(response, "status");
-            let status_view = crate::exchange::fields(&data::object([("status", status.clone())]))?;
+            let render = |v: &Js| -> Result<String, ExchangeError> {
+                String::from_utf16(&v.to_js_string().map_err(|e| e.to_exchange_error())?).map_err(
+                    |_| failure("Cannot represent JavaScript UTF-16 string as UTF-8".into()),
+                )
+            };
+            let message = format!("[{}] {}", render(&code)?, render(&msg)?);
+            let status = response.get("status").map_err(|e| e.to_exchange_error())?;
+            let status_view =
+                serde_json::json!({"status":to_json(&status).map_err(|e|e.to_exchange_error())?});
             let message =
                 append_http_failure(Some(&serde_json::Value::String(message)), &status_view);
             self.exchange.emit_and_log_error(

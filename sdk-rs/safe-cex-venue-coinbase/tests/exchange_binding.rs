@@ -304,14 +304,29 @@ fn edits_only_a_proven_reconciled_native_spot_order() {
         );
     });
     let mut markets = h.drive(h.venue().fetch_markets()).unwrap();
-    markets[0].info.as_mut().unwrap()["product_type"] = json!("SPOT");
+    markets[0]
+        .info
+        .as_mut()
+        .unwrap()
+        .as_object_mut()
+        .unwrap()
+        .push((
+            "product_type".encode_utf16().collect(),
+            json!("SPOT").into(),
+        ));
     let mut canonical = order();
     let info = canonical.info.as_mut().unwrap();
-    info["order_id"] = json!("order-synthetic");
-    info["status"] = json!("OPEN");
-    info["order_type"] = json!("LIMIT");
-    info["order_side"] = json!("BUY");
-    info["filled_size"] = json!("0");
+    info.as_object_mut().unwrap().extend(
+        [
+            ("order_id", "order-synthetic"),
+            ("status", "OPEN"),
+            ("order_type", "LIMIT"),
+            ("order_side", "BUY"),
+            ("filled_size", "0"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.encode_utf16().collect(), json!(value).into())),
+    );
     Store::update(
         h.store.as_ref(),
         StoreUpdate {
@@ -756,7 +771,7 @@ fn cached_balance_fallback_keeps_native_optional_fields_and_nested_currencies() 
     };
     assert_eq!(*available, f64::INFINITY);
     assert_eq!(locked.to_bits(), (-0.0_f64).to_bits());
-    assert_eq!(balance.info, Some(json!({"literal":"retained"})));
+    assert_eq!(balance.info, Some(json!({"literal":"retained"}).into()));
     assert_eq!(balance.coins.as_ref().unwrap()["BTC"].amount, f64::INFINITY);
     assert_eq!(
         balance.coins.as_ref().unwrap()["BTC"].notional.to_bits(),
@@ -767,7 +782,7 @@ fn cached_balance_fallback_keeps_native_optional_fields_and_nested_currencies() 
             .as_balance()
             .unwrap()
             .info,
-        Some(json!({"nested":true}))
+        Some(json!({"nested":true}).into())
     );
 }
 

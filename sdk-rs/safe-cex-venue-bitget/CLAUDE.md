@@ -392,3 +392,19 @@ against the maintained TS exchange and actual Store before JSON. The shared
 fault runner swaps the live bid lookup and requires compiled RED/restored GREEN.
 The native witness identifies shards by their actual subscription frames and
 asserts pairwise socket identity, so three labels cannot exercise one socket.
+
+Position freshness reads canonical retained info directly. Nullish aliases skip own
+undefined, while a present NaN blocks later aliases. The constructed private-receiver
+regression compares nine source timestamp cases across all three variants, including
+parseFloat prefixes before unpaired UTF-16 surrogates and signed-zero bits.
+
+Unknown UTF-16 plan metadata follows the source typed-order fallback after String
+coercion. Only exact table keys select TableHit; an unpaired unit cannot match an
+ASCII key. The constructed exchange control checks eight source cases across
+Classic, USDC and inverse variants without projecting Order.info through JSON.
+
+Both concrete order mappers capture the original row as retained input before
+reading aliases. Unread UTF-16 units, nonfinite numbers, negative zero and own
+undefined survive in the owned info snapshot; the constructed mapper witness
+covers Classic, USDC and inverse. The live order corpus observes those native
+values and property presence before its legacy JSON comparison.

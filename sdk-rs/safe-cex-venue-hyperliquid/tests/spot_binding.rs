@@ -116,7 +116,13 @@ fn bound_start_loads_spot_markets_balance_and_both_sockets() {
     assert_eq!(store.markets().len(), 1);
     assert_eq!(store.markets()[0].symbol, "PURR/USDC");
     assert_eq!(
-        store.markets()[0].info.as_ref().unwrap()["hyperliquidId"].as_f64(),
+        store.markets()[0]
+            .info
+            .as_ref()
+            .unwrap()
+            .get("hyperliquidId")
+            .unwrap()
+            .as_f64(),
         Some(10000.0)
     );
     assert!(store.loaded().markets && store.loaded().tickers);

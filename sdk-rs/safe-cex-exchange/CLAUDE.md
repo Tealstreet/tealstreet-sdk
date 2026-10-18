@@ -1103,8 +1103,8 @@ Binance's `EventValue` is now an alias to this graph, with its existing decoded
 coercion profile expressed as operations rather than another heap.
 `to_typed_preserving_undefined` is the declared-DTO mode of the same native
 visitor: own undefined fields enter as unit values, while callable fields are
-refused. Binance uses this existing DTO policy for nested `info`; the ordinary
-`to_typed` JSON-shaped omission policy is unchanged. The two modes have independent
+refused. Shared model info uses the retained native codec independently of this
+DTO policy. Ordinary typed optional fields keep their existing omission policy. The two modes have independent
 presence/null, native numeric-bit and callable-refusal tests in `typed_js_values`.
 
 The shared lodash import table supplies `times` for source order splitting.
@@ -1200,8 +1200,9 @@ required.
 The JS Store facade constructs scalar model patches with the existing native
 number carrier and typed-value bridge. All declared numeric fields of Position,
 Order, Ticker and Market retain NaN, infinities and signed zero through partial
-updates. Opaque `info` retains its explicit JSON policy; nested option terms keep
-their separate typed decoder. Other field admission, omission and atomic patch
+updates. Opaque `info` crosses the same production facade as retained native data,
+including nested undefined and UTF-16 units; nested option terms retain their
+separate typed decoder. Other field admission, omission and atomic patch
 validation retain [the Store patch choice](../parity/MANIFEST-SPEC.md#store-typed-patch-choice).
 `tests/js_store_patch_numbers.rs` exercises all five model patch methods, with
 compiled projection and signed-zero controls in the adjacent Python runner.
@@ -1742,6 +1743,13 @@ Independent dropped-retention and leaked-retention faults must compile, fail nam
 assertions, restore exact source and pass. This adds no native resource wire codec
 and does not switch a Hyperliquid consumer or change default prototype policy.
 
+The shared `in` operator validates the right-hand receiver, then reuses canonical
+property-presence traversal for ordinary objects, functions and intrinsics.
+Presence includes own undefined values, nonenumerable accessors and function
+names without invoking getters; array length and present indices remain covered.
+`tests/js_in_function_prototypes.rs` compares mixed prototype chains and null
+termination with Node. The original helper compiles but fails this witness;
+the independent function-bypass fault must fail and restore green as well.
 Ordinary objects can retain one native WriteObserver, installed or cleared by
 set_write_observer. Successful assignments notify after the property operation,
 including inherited setters, using the original receiver, UTF-16 key and value.

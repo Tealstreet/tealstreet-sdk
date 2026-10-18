@@ -1,3 +1,9 @@
+Current carrier cutover: model info now retains native Serialize output directly.
+The historical NaN refusal below is superseded for the typed ticker/market/order
+mappers; their native metadata observations now require successful NaN retention.
+The pure position helper still takes Value, so its explicit nonfinite input
+projection refusal remains separate. No output-info refusal is inferred from it.
+
 # Aster native metadata and signer evidence
 
 Parent: `ac0f5fccf24207b26c279e67da2a88f2c72a7aae` (integration; no unreviewed feature ancestor).

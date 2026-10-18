@@ -133,84 +133,11 @@ fn write(value: &JsJsonValue, output: &mut String) -> Result<(), JsCoercionError
 
 /// Boolean conversion of canonical retained data before JSON wire projection.
 pub fn js_retained_truthy(value: &safe_cex_types::retained_json::RetainedJsonInput) -> bool {
-    use safe_cex_types::retained_json::RetainedJsonInput as Input;
-    match value {
-        Input::Undefined | Input::Null => false,
-        Input::Bool(value) => *value,
-        Input::Text(value) => !value.is_empty(),
-        Input::Float(value) => *value != 0.0 && !value.is_nan(),
-        Input::Lexeme(value) => value
-            .parse::<f64>()
-            .is_ok_and(|value| value != 0.0 && !value.is_nan()),
-        Input::Array(_) | Input::Object(_) => true,
-    }
+    value.is_truthy()
 }
 /// Direct canonical retained-data JSON projection; no UTF-8 prepared-data copy.
 pub fn js_retained_json_stringify(
     value: &safe_cex_types::retained_json::RetainedJsonInput,
 ) -> Result<Option<String>, JsCoercionError> {
-    if matches!(
-        value,
-        safe_cex_types::retained_json::RetainedJsonInput::Undefined
-    ) {
-        return Ok(None);
-    }
-    let mut output = String::new();
-    write_retained(value, &mut output)?;
-    Ok(Some(output))
-}
-fn write_retained(
-    value: &safe_cex_types::retained_json::RetainedJsonInput,
-    output: &mut String,
-) -> Result<(), JsCoercionError> {
-    use safe_cex_types::retained_json::RetainedJsonInput as Input;
-    match value {
-        Input::Undefined | Input::Null => output.push_str("null"),
-        Input::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
-        Input::Float(value) => number(*value, output),
-        Input::Lexeme(value) => number(
-            value.parse().map_err(|_| JsCoercionError {
-                name: "TypeError",
-                message: "Invalid retained numeric lexeme",
-            })?,
-            output,
-        ),
-        Input::Text(value) => quoted_utf16(value, output),
-        Input::Array(values) => {
-            output.push('[');
-            for (index, value) in values.iter().enumerate() {
-                if index != 0 {
-                    output.push(',');
-                }
-                write_retained(value, output)?;
-            }
-            output.push(']');
-        }
-        Input::Object(entries) => {
-            let mut keys = Vec::new();
-            let mut values = HashMap::new();
-            for (key, value) in entries {
-                if values.insert(key.as_slice(), value).is_none() {
-                    keys.push(key.as_slice());
-                }
-            }
-            output.push('{');
-            let mut first = true;
-            for key in safe_cex_types::js_coercion::js_own_keys_utf16(keys) {
-                let value = values[key];
-                if matches!(value, Input::Undefined) {
-                    continue;
-                }
-                if !first {
-                    output.push(',');
-                }
-                first = false;
-                quoted_utf16(key, output);
-                output.push(':');
-                write_retained(value, output)?;
-            }
-            output.push('}');
-        }
-    }
-    Ok(())
+    value.json_stringify()
 }

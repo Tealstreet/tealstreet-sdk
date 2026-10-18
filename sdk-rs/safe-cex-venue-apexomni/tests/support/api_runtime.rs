@@ -125,13 +125,17 @@ impl ApexApiHost for ApiHost {
         }
         Ok(())
     }
-    fn request_retry(&self, config: J) -> ExchangeFuture<'_, J> {
+    fn request_retry(
+        &self,
+        config: safe_cex_exchange::js_runtime::value::Js,
+    ) -> ExchangeFuture<'_, safe_cex_exchange::js_runtime::value::Js> {
+        let config = safe_cex_exchange::js_runtime::value::to_js_json(&config).unwrap();
         self.runtime.record("retry", vec![config.clone()]);
         Box::pin(async move {
-            Ok(obj(vec![
+            Ok(native::heap(&obj(vec![
                 ("data", obj(vec![("code", n(0.)), ("msg", s("retried"))])),
                 ("config", config),
-            ]))
+            ])))
         })
     }
 }
@@ -165,7 +169,8 @@ fn run_api(kind: &str) {
             let actual = if kind == "request" {
                 api.request_handler(&input)
             } else {
-                futures::executor::block_on(api.response_handler(&input))
+                futures::executor::block_on(api.response_handler(&native::heap(&input)))
+                    .map(|v| safe_cex_exchange::js_runtime::value::to_js_json(&v).unwrap())
             };
             assert_eq!(
                 actual.is_ok(),

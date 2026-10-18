@@ -72,7 +72,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-mexc/src/exchange.rs::MexcExchange::fetch_markets"
 status = "divergent"
-note = "CHOSEN: raw response detail now reaches the structured reporter; a JSON object message with inner detail emits inner detail, and a reporting listener failure escapes instead of returning the Store fallback. Native-first three-method success/throw roots cover this shared repair. Owned Market.info and Store fallback views cite sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Transport failures select response.data.message || err.message as the original JSON value and pass it to the shared reporter as ExchangeErrorInput::Raw, the same path as fetchPositions; projection cites #mexc-report-input-choice. The zero-request unpolled/drop and one-request polled floor is priced at #mexc-borrowed-method-choice; maintained-source eager prefix has its own discriminating control. Ordinary filter/map field floors remain bounded. See DIVERGENCE_AUDIT.md."
+note = "CHOSEN: raw response detail now reaches the structured reporter; a JSON object message with inner detail emits inner detail, and a reporting listener failure escapes instead of returning the Store fallback. Native-first three-method success/throw roots cover this shared repair. Owned Market.info and Store fallback views cite sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Transport failures select response.data.message || err.message as the original JSON value and pass it to the shared reporter as ExchangeErrorInput::Raw, the same path as fetchPositions; projection cites #mexc-report-input-choice. The zero-request unpolled/drop and one-request polled floor is priced at #mexc-borrowed-method-choice; maintained-source eager prefix has its own discriminating control. Ordinary filter/map field floors remain bounded. See DIVERGENCE_AUDIT.md. Retained-info repair: configured response bodies and raw rows remain canonical Input through the complete filter phase and subsequent map phase. Native market info never passes through JSON. The actual configured REST/Store regression proves old-code failure and restored success for opaque UTF-16/NaN/Infinity/-0/Undefined. Earlier prefix/exception findings remain separate."
 
 [[symbol]]
 ts = "MexcExchange.fetchTickers"
@@ -392,7 +392,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-mexc/src/exchange_helpers.rs::get_replacement_order_amount"
 status = "ported"
-note = "Stateless helper extracted from the maintained TypeScript class into a free function; live source oracle preserves helper dependencies and shared typed inputs. Adapted as safe-cex-venue-mexc/src/exchange_helpers.rs::get_replacement_order_amount."
+note = "Stateless helper extracted from the maintained TypeScript class into a free function; canonical retained info preserves nullish alias precedence, native numeric values and UTF-16 parseFloat prefixes. Six maintained-source cases drive real cancel/replacement HTTP and distinguish undefined/null volume from NaN/Infinity/empty/signed-zero volume. No info JSON projection. Adapted as safe-cex-venue-mexc/src/exchange_helpers.rs::get_replacement_order_amount."
 
 [[symbol]]
 ts = "MexcExchange.cancelOrders"

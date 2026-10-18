@@ -238,12 +238,16 @@ fn actual_typescript_order_reads() {
                         outcome: Some(if c["getError"] == "async" {
                             Err(original.clone())
                         } else {
-                            Ok(body.clone())
+                            Ok(body.clone().map(Into::into))
                         }),
                     })
                 }
             },
             |row| {
+                let row = row
+                    .clone()
+                    .into_value()
+                    .expect("finite source fixture trace");
                 trace.borrow_mut().push(json!(["map", row["id"]]));
                 let fail = mapped == c["mapError"].as_i64().unwrap();
                 mapped += 1;

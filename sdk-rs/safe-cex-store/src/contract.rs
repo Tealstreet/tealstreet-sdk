@@ -118,7 +118,7 @@ pub struct StoreUpdate {
         skip_serializing_if = "Option::is_none"
     )]
     #[serde(rename = "zkLinkConfig")]
-    pub zk_link_config: Option<Value>,
+    pub zk_link_config: Option<safe_cex_types::retained_json::RetainedJsonInput>,
     #[serde(
         default,
         deserialize_with = "deserialize_present",
@@ -285,7 +285,10 @@ pub trait Store {
     ) -> Result<(), StoreMutationError>;
     fn update_market(&self, id: &str, changes: &dyn PatchSource) -> Result<(), StoreMutationError>;
     fn update_stark_config(&self, data: Option<Value>) -> Result<(), StoreMutationError>;
-    fn update_zk_link_config(&self, data: Option<Value>) -> Result<(), StoreMutationError>;
+    fn update_zk_link_config(
+        &self,
+        data: Option<safe_cex_types::retained_json::RetainedJsonInput>,
+    ) -> Result<(), StoreMutationError>;
     fn update_user_data(&self, data: Option<Value>) -> Result<(), StoreMutationError>;
     fn latency(&self) -> f64;
     fn balance(&self) -> Ref<'_, Balance>;
@@ -306,7 +309,7 @@ pub trait Store {
     fn options(&self) -> Ref<'_, StoreOptions>;
     fn message_handler_stats(&self) -> Option<Ref<'_, Value>>;
     fn stark_config(&self) -> Option<Ref<'_, Value>>;
-    fn zk_link_config(&self) -> Option<Ref<'_, Value>>;
+    fn zk_link_config(&self) -> Option<Ref<'_, safe_cex_types::retained_json::RetainedJsonInput>>;
     fn user_data(&self) -> Option<Ref<'_, Value>>;
     fn tickers_by_id(&self) -> Ref<'_, IndexMap<String, Ticker>>;
     fn markets_by_id(&self) -> Ref<'_, IndexMap<String, Market>>;
@@ -417,7 +420,7 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         #[serde(rename = "zkLinkConfig")]
-        zk_link_config: Option<Value>,
+        zk_link_config: Option<safe_cex_types::retained_json::RetainedJsonInput>,
         #[serde(
             default,
             deserialize_with = "deserialize_present",
@@ -532,7 +535,23 @@ mod strict_codecs {
 
     impl<'de> serde::Deserialize<'de> for super::StoreUpdate {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireStoreUpdate::deserialize(safe_cex_types::strict_decode::object(deserializer))
+            struct StoreRecordVisitor;
+            impl<'de> serde::de::Visitor<'de> for StoreRecordVisitor {
+                type Value = super::StoreUpdate;
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    formatter.write_str("a Store update record")
+                }
+                fn visit_newtype_struct<D: serde::Deserializer<'de>>(
+                    self,
+                    deserializer: D,
+                ) -> Result<Self::Value, D::Error> {
+                    WireStoreUpdate::deserialize(safe_cex_types::strict_decode::object(
+                        deserializer,
+                    ))
+                }
+            }
+            deserializer
+                .deserialize_newtype_struct(safe_cex_types::STORE_RECORD, StoreRecordVisitor)
         }
     }
 }

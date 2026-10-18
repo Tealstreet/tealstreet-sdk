@@ -1,6 +1,6 @@
 //! Axios-shaped `xhr` over the typed signed clients: the JS client runs no interceptors
 //! of its own, so signing, re-signing, retries and rate limits stay in the Rust createAPI.
-use super::value::{Js, Thrown, from_json, to_json, to_retained_input};
+use super::value::{Js, Thrown, from_retained_input, to_json, to_retained_input};
 use safe_cex_exchange::{
     js_runtime::{client::JsHttpHost, promise::JsFuture},
     runtime::ExchangeRuntime,
@@ -52,10 +52,7 @@ fn request(config: &Js) -> Result<RestRequest, Thrown> {
 }
 
 fn response(response: RestResponse, config: Js) -> Result<Js, Thrown> {
-    let data = response
-        .body
-        .json_value()
-        .map_err(|e| Thrown::error("SyntaxError", &e.to_string()))?;
+    let data = response.body.into_data();
     let headers = Js::object(
         response
             .headers
@@ -64,7 +61,7 @@ fn response(response: RestResponse, config: Js) -> Result<Js, Thrown> {
             .collect(),
     );
     Ok(Js::object(vec![
-        ("data", from_json(&data)),
+        ("data", from_retained_input(data)),
         ("status", Js::Number(f64::from(response.status))),
         ("headers", headers),
         ("config", config),

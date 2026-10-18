@@ -11,6 +11,7 @@ use safe_cex_num::{
 };
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{RestAdapter, RestRequest};
+use safe_cex_types::retained_json::RetainedJsonInput as Input;
 use safe_cex_types::{
     AnyTimeframe, Balance, Candle, ExchangeName, ExchangeOptions, ExtendedTimeframe, Market,
     MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision, OHLCVOptions, Order,
@@ -171,12 +172,6 @@ pub async fn fetch_markets<E: std::fmt::Display>(
                     .filter(|v| js_truthy(Some(v)))
                     .or_else(|| row.get("minSize")),
             )?;
-            // Typed info JSON cannot carry a newly computed NaN/Infinity.
-            if !contract.is_finite() || !lot.is_finite() {
-                return Err(input(
-                    "Nonfinite market info numbers are outside the native JSON model",
-                ));
-            }
             let id = row.get("instId").and_then(Value::as_str).ok_or_else(|| {
                 input(match row.get("instId") {
                     None => "Cannot read properties of undefined (reading 'replace')",
@@ -192,9 +187,22 @@ pub async fn fetch_markets<E: std::fmt::Display>(
                 .get("quoteCurrency")
                 .and_then(Value::as_str)
                 .ok_or_else(|| input("Market quoteCurrency requires a native String"))?;
-            let mut info = row.as_object().expect("filtered object").clone();
-            info.insert("contractValue".into(), json!(contract));
-            info.insert("lotSize".into(), json!(lot));
+            let mut info: Vec<(Vec<u16>, Input)> = row
+                .as_object()
+                .expect("filtered object")
+                .iter()
+                .map(|(key, value)| (key.encode_utf16().collect(), value.clone().into()))
+                .collect();
+            for (key, value) in [("contractValue", contract), ("lotSize", lot)] {
+                if let Some((_, slot)) = info
+                    .iter_mut()
+                    .find(|(name, _)| name.iter().copied().eq(key.encode_utf16()))
+                {
+                    *slot = Input::Float(value);
+                } else {
+                    info.push((key.encode_utf16().collect(), Input::Float(value)));
+                }
+            }
             markets.push(Market {
                 id: id.into(),
                 symbol: id.strip_suffix("-SWAP").unwrap_or(id).replace('-', ""),
@@ -223,7 +231,7 @@ pub async fn fetch_markets<E: std::fmt::Display>(
                 is_spot: None,
                 is_perpetual: None,
                 is_read_only: None,
-                info: Some(Value::Object(info)),
+                info: Some(Input::Object(info)),
                 taker_fee: None,
                 maker_fee: None,
                 option: None,
@@ -491,10 +499,12 @@ pub trait LifecycleHost {
     fn connect_public(&self) -> Result<(), ServiceError<Self::Error>>;
     fn connect_private(&self) -> Result<(), ServiceError<Self::Error>>;
     fn fetch_markets(&self) -> LifecycleFuture<'_, Vec<Market>, Self::Error>;
-    fn fetch_tickers_raw(&self) -> LifecycleFuture<'_, Option<UtilityInput>, Self::Error>;
+    fn fetch_tickers_raw(
+        &self,
+    ) -> LifecycleFuture<'_, Option<crate::tickers::TickerInput>, Self::Error>;
     fn format_tickers(
         &self,
-        raw: Option<UtilityInput>,
+        raw: Option<crate::tickers::TickerInput>,
     ) -> Result<Vec<Ticker>, ServiceError<Self::Error>>;
     fn refetch_margin_type(&self) -> LifecycleFuture<'_, (), Self::Error>;
     fn refetch_position_mode(&self) -> LifecycleFuture<'_, (), Self::Error>;

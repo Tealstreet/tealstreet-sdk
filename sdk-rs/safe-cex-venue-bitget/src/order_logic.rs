@@ -285,14 +285,17 @@ pub fn get_cancel_plan_type(
     amount_step: Option<f64>,
     emit_and_log_error: impl FnMut(String),
 ) -> Result<safe_cex_num::TableHit<&'static str>, ExchangeError> {
-    use safe_cex_num::{TableHit, js_string, js_table_lookup, js_truthy};
+    use safe_cex_num::{TableHit, js_table_lookup};
     let raw = order.info.as_ref().and_then(|info| info.get("planType"));
-    if js_truthy(raw) {
-        let key = js_string(raw).map_err(|error| ExchangeError {
-            name: error.name.into(),
-            message: error.message.into(),
-            metadata: Box::default(),
-        })?;
+    if raw.is_some_and(|value| value.is_truthy()) {
+        let units = safe_cex_types::js_coercion::js_retained_string_utf16(raw.unwrap()).map_err(
+            |error| ExchangeError {
+                name: error.name.into(),
+                message: error.message.into(),
+                metadata: Box::default(),
+            },
+        )?;
+        let key = String::from_utf16(&units).ok();
         let table = [
             ("psl", "pos_loss"),
             ("ptp", "pos_profit"),
@@ -306,7 +309,10 @@ pub fn get_cancel_plan_type(
         ];
         // ts-bug: BitgetExchange.getCancelPlanType returns inherited members
         // instead of taking the immutable-order fallback. Preserve their identity.
-        match js_table_lookup(&table, &key) {
+        match key
+            .as_deref()
+            .map_or(TableHit::Missing, |key| js_table_lookup(&table, key))
+        {
             TableHit::Mapped(value) => return Ok(TableHit::Mapped(*value)),
             TableHit::Inherited(member) => return Ok(TableHit::Inherited(member)),
             TableHit::Missing => {}

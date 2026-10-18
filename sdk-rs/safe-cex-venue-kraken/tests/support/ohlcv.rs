@@ -65,7 +65,7 @@ fn spot_ohlcv_live_oracle() {
                     TableHit::Inherited(member) => json!({"inherited":member.js_string()}),
                     TableHit::Missing => panic!("OHLCV missing interval not defaulted"),
                 };
-                calls.borrow_mut().push(json!({"endpoint":endpoint,"pair":pair(value),"interval":interval,"since":since.map_or(json!({"undefined":true}),number)}));
+                calls.borrow_mut().push(json!({"endpoint":endpoint,"pair":pair(retained_model_values::prepared(&value)),"interval":interval,"since":since.map_or(json!({"undefined":true}),number)}));
                 let failure =
                     || ExchangeError::new(case["message"].as_str().unwrap_or("read failure"));
                 if case["mode"] == "sync" {

@@ -382,6 +382,17 @@ with `SAFE_CEX_TYPESCRIPT_PATH` set. Its six cases compare actual source readers
 and worker registration to the native browser post and UI structured clone.
 A cloned Error keeps its message but resets a custom name, matching JavaScript.
 
+Margin normalization has one retained-data implementation shared by info consumers
+and the finite wire adapter. Native String lowercase/includes retain UTF-16 and
+the source isolated/isolate alternatives. The constructed leverage regression
+compares ten maintained-source cases while preserving own undefined, NaN and
+signed zero in the original Position.info; no info JSON view is constructed.
+
+Replacement amounts select the first non-nullish raw volume alias. Own undefined
+does not suppress quantity, while NaN, Infinity, empty text and signed zero keep
+their source branches. Six maintained-source cases drive real cancel and submit
+requests, including a numeric prefix followed by an unpaired UTF-16 unit.
+
 The cross-layer MEXC/worker proof lives in parity tooling. The venue has no
 worker dependency, including dev-dependencies; architectural layer checks include
 test-only edges. All six browser-post and UI-clone cases remain mandatory in the
@@ -393,3 +404,7 @@ The MEXC unit target retains the six throwing-listener observations and primitiv
 reporting helpers. `venue-oracle:mexc` runs both targets; worker dependencies never
 belong in this venue. Browser Error/structuredClone proof remains in the tooling
 example and Node runner documented above.
+
+Market fetches retain configured response data through tradability filtering and
+normalization; raw info never takes a JSON projection. The constructed fetch/Store
+regression observes opaque UTF-16, nonfinite bits, signed zero and own Undefined.

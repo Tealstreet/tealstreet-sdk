@@ -117,7 +117,7 @@ fn equals(v: Option<Frame>, text: &str) -> bool {
     matches!(v,Some(Frame::String(v)) if v.iter().copied().eq(text.encode_utf16()))
 }
 fn prop(value: &Frame, key: &str) -> Result<Option<Frame>, PortfolioFailure> {
-    if matches!(value, Frame::Null) {
+    if matches!(value, Frame::Null | Frame::Undefined) {
         Err(failure(
             "TypeError",
             &format!("Cannot read properties of null (reading '{key}')"),
@@ -128,7 +128,7 @@ fn prop(value: &Frame, key: &str) -> Result<Option<Frame>, PortfolioFailure> {
 }
 fn frame_string(value: Option<&Frame>) -> Result<Vec<u16>, PortfolioFailure> {
     Ok(match value {
-        None => "undefined".encode_utf16().collect(),
+        None | Some(Frame::Undefined) => "undefined".encode_utf16().collect(),
         Some(Frame::Null) => "null".encode_utf16().collect(),
         Some(Frame::Bool(v)) => v.to_string().encode_utf16().collect(),
         Some(Frame::Number(v)) => safe_cex_num::js_number_string(*v).encode_utf16().collect(),
@@ -139,7 +139,7 @@ fn frame_string(value: Option<&Frame>) -> Result<Vec<u16>, PortfolioFailure> {
                 if i > 0 {
                     result.push(44)
                 }
-                if !matches!(v, Frame::Null) {
+                if !matches!(v, Frame::Null | Frame::Undefined) {
                     result.extend(frame_string(Some(v))?);
                 }
             }
@@ -332,7 +332,7 @@ pub(crate) fn on_message_with_orders<H: PrivateStreamHost>(
                 let error = prop(&json, "error")?;
                 let nested = error
                     .as_ref()
-                    .filter(|v| !matches!(v, Frame::Null))
+                    .filter(|v| !matches!(v, Frame::Null | Frame::Undefined))
                     .and_then(|v| v.get("message"));
                 if truthy(nested.as_ref()) {
                     nested

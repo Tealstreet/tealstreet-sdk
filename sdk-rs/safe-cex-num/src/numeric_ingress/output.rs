@@ -1,5 +1,5 @@
 //! Capture serialization events without JSON's non-finite-to-null projection.
-use super::{JsNumberInput, Node};
+use super::{JsNumberDeserializer, JsNumberInput, Node};
 use serde::ser::{
     self, Serialize, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant,
     SerializeTuple, SerializeTupleStruct, SerializeTupleVariant,
@@ -11,12 +11,12 @@ pub(super) fn capture<T: Serialize + ?Sized>(value: &T) -> Result<JsNumberInput,
 }
 struct Capture;
 struct Sequence {
-    values: Vec<JsNumberInput>,
+    values: Vec<Node>,
     variant: Option<String>,
 }
 struct Object {
-    values: Vec<(String, JsNumberInput)>,
-    key: Option<String>,
+    values: Vec<(Vec<u16>, Node)>,
+    key: Option<Vec<u16>>,
     name: Option<&'static str>,
     variant: Option<String>,
 }
@@ -31,6 +31,9 @@ impl ser::Serializer for Capture {
     type SerializeMap = Object;
     type SerializeStruct = Object;
     type SerializeStructVariant = Object;
+    fn is_human_readable(&self) -> bool {
+        false
+    }
     fn serialize_i8(self, value: i8) -> Result<Self::Ok, Error> {
         Ok(JsNumberInput(Node::Float(value as f64)))
     }
@@ -74,13 +77,11 @@ impl ser::Serializer for Capture {
         self.serialize_str(&v.to_string())
     }
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Error> {
-        Ok(JsNumberInput(Node::Text(v.to_owned())))
+        Ok(JsNumberInput(Node::Text(v.encode_utf16().collect())))
     }
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Error> {
         Ok(JsNumberInput(Node::Array(
-            v.iter()
-                .map(|v| JsNumberInput(Node::Float(f64::from(*v))))
-                .collect(),
+            v.iter().map(|v| Node::Float(f64::from(*v))).collect(),
         )))
     }
     fn serialize_none(self) -> Result<Self::Ok, Error> {
@@ -109,10 +110,18 @@ impl ser::Serializer for Capture {
     }
     fn serialize_newtype_struct<T: Serialize + ?Sized>(
         self,
-        _: &'static str,
+        name: &'static str,
         v: &T,
     ) -> Result<Self::Ok, Error> {
-        capture(v)
+        let captured = capture(v)?;
+        if name == safe_cex_types::retained_json::RETAINED_NATIVE {
+            safe_cex_types::retained_json::deserialize_native_payload(JsNumberDeserializer(
+                captured.0,
+            ))
+            .map(JsNumberInput)
+        } else {
+            Ok(captured)
+        }
     }
     fn serialize_newtype_variant<T: Serialize + ?Sized>(
         self,
@@ -122,8 +131,8 @@ impl ser::Serializer for Capture {
         v: &T,
     ) -> Result<Self::Ok, Error> {
         Ok(JsNumberInput(Node::Object(vec![(
-            variant.to_owned(),
-            capture(v)?,
+            variant.encode_utf16().collect(),
+            capture(v)?.0,
         )])))
     }
     fn serialize_seq(self, _: Option<usize>) -> Result<Sequence, Error> {
@@ -185,7 +194,9 @@ impl Sequence {
     fn finish(self) -> JsNumberInput {
         let array = JsNumberInput(Node::Array(self.values));
         match self.variant {
-            Some(name) => JsNumberInput(Node::Object(vec![(name, array)])),
+            Some(name) => {
+                JsNumberInput(Node::Object(vec![(name.encode_utf16().collect(), array.0)]))
+            }
             None => array,
         }
     }
@@ -194,7 +205,7 @@ impl SerializeSeq for Sequence {
     type Ok = JsNumberInput;
     type Error = Error;
     fn serialize_element<T: Serialize + ?Sized>(&mut self, v: &T) -> Result<(), Error> {
-        self.values.push(capture(v)?);
+        self.values.push(capture(v)?.0);
         Ok(())
     }
     fn end(self) -> Result<Self::Ok, Error> {
@@ -205,7 +216,7 @@ impl SerializeTuple for Sequence {
     type Ok = JsNumberInput;
     type Error = Error;
     fn serialize_element<T: Serialize + ?Sized>(&mut self, v: &T) -> Result<(), Error> {
-        self.values.push(capture(v)?);
+        self.values.push(capture(v)?.0);
         Ok(())
     }
     fn end(self) -> Result<Self::Ok, Error> {
@@ -216,7 +227,7 @@ impl SerializeTupleStruct for Sequence {
     type Ok = JsNumberInput;
     type Error = Error;
     fn serialize_field<T: Serialize + ?Sized>(&mut self, v: &T) -> Result<(), Error> {
-        self.values.push(capture(v)?);
+        self.values.push(capture(v)?.0);
         Ok(())
     }
     fn end(self) -> Result<Self::Ok, Error> {
@@ -227,7 +238,7 @@ impl SerializeTupleVariant for Sequence {
     type Ok = JsNumberInput;
     type Error = Error;
     fn serialize_field<T: Serialize + ?Sized>(&mut self, v: &T) -> Result<(), Error> {
-        self.values.push(capture(v)?);
+        self.values.push(capture(v)?.0);
         Ok(())
     }
     fn end(self) -> Result<Self::Ok, Error> {
@@ -244,7 +255,7 @@ impl Object {
             Some("$serde_json::private::Number" | "$serde_json::private::RawValue")
         ) {
             let mut fields = self.values.into_iter();
-            let (_, JsNumberInput(Node::Text(text))) = fields
+            let (_, Node::Text(text)) = fields
                 .next()
                 .ok_or_else(|| <Error as ser::Error>::custom("empty private JSON value"))?
             else {
@@ -253,11 +264,16 @@ impl Object {
             if fields.next().is_some() {
                 return Err(ser::Error::custom("extra private JSON value fields"));
             }
-            return serde_json::from_str::<JsNumberInput>(&text);
+            return serde_json::from_str::<JsNumberInput>(
+                &String::from_utf16(&text).map_err(<Error as ser::Error>::custom)?,
+            );
         }
         let object = JsNumberInput(Node::Object(self.values));
         Ok(match self.variant {
-            Some(name) => JsNumberInput(Node::Object(vec![(name, object)])),
+            Some(name) => JsNumberInput(Node::Object(vec![(
+                name.encode_utf16().collect(),
+                object.0,
+            )])),
             None => object,
         })
     }
@@ -271,8 +287,8 @@ impl SerializeMap for Object {
         }
         self.key = Some(match capture(key)?.0 {
             Node::Text(v) => v,
-            Node::Float(v) if v.is_finite() => crate::js_number_string(v),
-            Node::Bool(v) => v.to_string(),
+            Node::Float(v) if v.is_finite() => crate::js_number_string(v).encode_utf16().collect(),
+            Node::Bool(v) => v.to_string().encode_utf16().collect(),
             _ => return Err(ser::Error::custom("invalid JSON object key")),
         });
         Ok(())
@@ -282,7 +298,7 @@ impl SerializeMap for Object {
             .key
             .take()
             .ok_or_else(|| <Error as ser::Error>::custom("serialized value without key"))?;
-        self.values.push((key, capture(value)?));
+        self.values.push((key, capture(value)?.0));
         Ok(())
     }
     fn end(self) -> Result<Self::Ok, Error> {
@@ -297,13 +313,20 @@ impl SerializeStruct for Object {
         key: &'static str,
         value: &T,
     ) -> Result<(), Error> {
-        self.values.push((key.to_owned(), capture(value)?));
+        self.values
+            .push((key.encode_utf16().collect(), capture(value)?.0));
         Ok(())
     }
     fn skip_field(&mut self, key: &'static str) -> Result<(), Error> {
-        if self.name == Some(safe_cex_types::model_field::MODEL_RECORD) {
+        if matches!(
+            self.name,
+            Some(
+                safe_cex_types::model_field::MODEL_RECORD
+                    | safe_cex_types::model_field::INFO_RECORD
+            )
+        ) {
             self.values
-                .push((key.to_owned(), JsNumberInput(Node::Undefined)));
+                .push((key.encode_utf16().collect(), Node::Undefined));
         }
         Ok(())
     }
@@ -319,7 +342,8 @@ impl SerializeStructVariant for Object {
         key: &'static str,
         value: &T,
     ) -> Result<(), Error> {
-        self.values.push((key.to_owned(), capture(value)?));
+        self.values
+            .push((key.encode_utf16().collect(), capture(value)?.0));
         Ok(())
     }
     fn end(self) -> Result<Self::Ok, Error> {
