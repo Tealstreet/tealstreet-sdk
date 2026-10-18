@@ -97,6 +97,10 @@ artifacts before native Serde/conversion probes and compiled identity controls.
 `PROJECTION_CONTRACT_REVIEW.md` records twenty nonce/builder/request/projection
 function contracts, actual-source/native observations and isolated compiled controls.
 
+`BUILDER_BINDING_CONTRACT_REVIEW.md` records the nineteen builder/approval/member
+contracts, their native and source witnesses, and the bounded constructor-phase
+listener profile. Other package owners retain separate acceptance obligations.
+
 Order cancellation forwards `__suppressAsterUnknownOrderError` through the shared
 request config-extension carrier. The real API interceptors suppress only the
 already-gone `-2011` response; cancellation still logs completion.
