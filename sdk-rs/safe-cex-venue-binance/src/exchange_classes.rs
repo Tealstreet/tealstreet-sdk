@@ -1097,11 +1097,27 @@ impl crate::private_rest::SnapshotBindings for Context {
             };
             match m {
                 crate::private_rest::SnapshotMethod::ConsoleError => {
-                    owner.runtime.console("error", &value.text()?);
+                    let values = args
+                        .into_iter()
+                        .map(|arg| match arg {
+                            A::Value(value) => value,
+                            A::Error(error) => {
+                                safe_cex_exchange::js_runtime::value::Thrown::from((*error).clone())
+                                    .value
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    owner.runtime.console_values("error", &values);
                     Ok(())
                 }
                 crate::private_rest::SnapshotMethod::Log => {
-                    owner.base.log(&value.text()?, "info").map_err(Rc::new)
+                    let severity = match args.get(1) {
+                        Some(A::Value(value)) if !matches!(value, EventValue::Undefined) => {
+                            value.text()?
+                        }
+                        _ => "info".into(),
+                    };
+                    owner.base.log(&value.text()?, &severity).map_err(Rc::new)
                 }
                 crate::private_rest::SnapshotMethod::Emit => owner.emit(value),
             }
