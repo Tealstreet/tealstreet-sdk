@@ -733,6 +733,10 @@ rs = "safe-cex-types/src/lib.rs::ExchangeOptionsExtra"
 reason = "C3 inline representation of the anonymous TS field ExchangeOptions.extra; adds no exported TS name or behavior. See safe-cex-types/TYPE_PARITY.md."
 
 [[exempt]]
+rs = "safe-cex-types/src/lib.rs::ExchangeOptionsExtraHyrotraderMode"
+reason = "C3 inline representation of the anonymous TS literal union ExchangeOptions.extra.hyrotraderMode; accepts exactly demo|production and adds no exported TS enum name or policy. Strict wire/source union checks and the full live type-shape comparator cover admission. Mode selection remains mapped on the concrete Hyro class. See safe-cex-types/TYPE_PARITY.md."
+
+[[exempt]]
 rs = "safe-cex-types/src/lib.rs::ExchangeOptionsExtraAsterdexApiVersion"
 reason = "C3 inline representation of the anonymous TS field ExchangeOptions.extra.asterdexApiVersion; adds no exported TS name or behavior. See safe-cex-types/TYPE_PARITY.md."
 

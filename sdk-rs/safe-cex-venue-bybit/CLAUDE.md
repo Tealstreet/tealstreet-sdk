@@ -878,3 +878,13 @@ Store retirement. Its serialized child builds exercise production REST-derived
 WS, explicit WS overrides and simulator-backed production, each with absent,
 explicit demo and explicit production modes. The ordinary unconfigured profile
 checks the exact source refusal. All Cargo subprocesses use jobs1 and a timeout.
+
+The top-level account `hyrotraderDemo` boolean maps to the Hyro mode before
+presence-aware extra overrides, matching accountToExchangeOptions; other venues
+keep their existing extra shape. The 24 source/native account cases cover absent,
+false and true flags with absent, undefined, demo and production overrides.
+The live metadata snapshot keeps Hyro disabled in normal/preview discovery while
+enabledInDev remains true, matching the source rather than account-mode selection.
+The snapshot URL component oracle explicitly selects demo and executes the new
+source configuration methods; actual default production/fallback routing is covered
+separately through the constructed binding matrix.
