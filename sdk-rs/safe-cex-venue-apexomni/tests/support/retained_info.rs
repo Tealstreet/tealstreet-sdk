@@ -1,4 +1,68 @@
 use safe_cex_types::retained_json::RetainedJsonInput as Input;
+
+#[test]
+fn private_frame_info_keeps_opaque_utf16_and_wire_numbers() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let h = fixture();
+    let private = started_private(&h);
+    let mut order = raw_order();
+    order["id"] = json!("private-retained-order");
+    order["opaque"] = json!("OPAQUE_WIRE_VALUE");
+    let raw = json!({"topic":"ws_zk_accounts_v3","contents":{
+        "orders":[order],
+        "positions":[{"symbol":"BTC-USDC","side":"LONG","size":"4","entryPrice":"123","customImr":"0.1","opaque":"OPAQUE_WIRE_VALUE"}]
+    }}).to_string().replace("\"OPAQUE_WIRE_VALUE\"",r#"{"text":"\ud800","\udc00":"opaque-key-value","overflow":1e400,"negativeZero":-0}"#);
+    private
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(raw)));
+    h.runtime.pump();
+    let check = |row: &Input| {
+        let opaque = row.get("opaque").unwrap();
+        assert_eq!(
+            opaque.get("text").unwrap().as_text(),
+            Some([0xd800].as_slice())
+        );
+        assert!(
+            opaque
+                .as_object()
+                .unwrap()
+                .iter()
+                .any(|(key, value)| key == &[0xdc00] && value.text_equals("opaque-key-value"))
+        );
+        assert_eq!(
+            opaque.get("overflow").unwrap().as_f64(),
+            Some(f64::INFINITY)
+        );
+        assert_eq!(
+            opaque
+                .get("negativeZero")
+                .unwrap()
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            (-0.0f64).to_bits()
+        );
+    };
+    {
+        let orders = h.store.orders();
+        let order = orders
+            .iter()
+            .find(|o| o.id == "private-retained-order")
+            .expect("private order with opaque metadata must reach actual Store");
+        check(order.info.value().unwrap());
+    }
+    {
+        let positions = h.store.positions();
+        let position = positions
+            .iter()
+            .find(|p| p.contracts == 4.0)
+            .expect("private position with opaque metadata must reach actual Store");
+        check(position.info.value().unwrap());
+    }
+    done(&h);
+}
 fn opaque_info() -> safe_cex_exchange::js_runtime::value::Js {
     use safe_cex_exchange::js_runtime::value::Js;
     let opaque = Js::object(vec![
