@@ -14,6 +14,7 @@ import { verifiedMacroOrigins } from './accepted-macro-origins.mjs';
 import { verifiedNumberOutputOrigin, verifiedNumberOutputDefinition, numberOutputDefinitionCovers } from './accepted-number-output.mjs';
 import { genericAliasProbe } from './accepted-callable-alias.mjs';
 import { buildScanner } from './accepted-scanner.mjs';
+import { measurementScope, scopedMeasurements } from './accepted-measure-scope.mjs';
 
 const args = process.argv.slice(2);
 const contractPath = args.find(arg => arg.startsWith('--contracts='))?.slice(12) ?? defaultContractDirectory;
@@ -28,7 +29,8 @@ assert.ok(['native', 'wasm32-unknown-unknown'].includes(configuration.target), '
 const targetArgs = configuration.target === 'native' ? [] : ['--target', configuration.target];
 const featureArgs = configuration.features.length ? ['--features', configuration.features.join(',')] : [];
 const selected = args.find(arg => arg.startsWith('--package='))?.slice(10);
-assert.ok(args.every(arg => arg === '--inventory' || arg === '--census' || arg === '--measure' || arg.startsWith('--package=') || arg.startsWith('--workspace=') || arg.startsWith('--contracts=') || arg.startsWith('--target=') || arg.startsWith('--features=') || arg.startsWith('--jobs=')), 'accepted-set: unsupported argument');
+assert.ok(args.every(arg => arg === '--inventory' || arg === '--census' || arg === '--measure' || arg.startsWith('--package=') || arg.startsWith('--workspace=') || arg.startsWith('--contracts=') || arg.startsWith('--target=') || arg.startsWith('--features=') || arg.startsWith('--jobs=') || arg.startsWith('--module=') || arg.startsWith('--owner=')), 'accepted-set: unsupported argument');
+const scope = measurementScope(args, selected);
 function cargo(args, options = {}) {
   const result = spawnSync('cargo', ['--color', 'never', ...args], {
     cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
@@ -201,7 +203,10 @@ fs.writeFileSync(output, `${JSON.stringify(found, null, 2)}\n`);
 console.log(`accepted-set: ${found.reduce((sum, pkg) => sum + pkg.types.filter(type => type.deserialize).length, 0)} Deserialize owners; inventory ${output}`);
 if (!args.includes('--inventory')) {
   const contracts = args.includes('--census') ? undefined : allContracts;
-  const results = runProbes(root, metadata, found, contracts, configuration);
+  const measured = scopedMeasurements(found, scope, root);
+  if (scope) console.log(`accepted-set: scoped --measure ${JSON.stringify(scope)}; full compiler inventory preserved`);
+  const results = runProbes(root, metadata, measured, contracts,
+    scope ? {...configuration, measurementScope: scope} : configuration);
   const failures = results.filter(row => row.failures.length);
   if (!args.includes('--measure')) assert.equal(failures.length, 0, `accepted-set: ${failures.length} failed types\n${failures.map(row => `${row.name}: ${row.failures.join('; ')}`).join('\n')}`);
 }
