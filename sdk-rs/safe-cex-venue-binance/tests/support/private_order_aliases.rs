@@ -245,14 +245,12 @@ fn native_cancel_symbol_handles_wait_for_both_signed_deletes_and_keep_other_symb
         let result = run(&runtime, call);
         assert_eq!(result.is_ok(), algo_status == 200);
         if let Err(error) = &result {
-            let native =
-                safe_cex_exchange::js_runtime::value::Thrown::from((**error).clone()).value;
-            let response = native.get("response").unwrap();
-            assert_eq!(numbers(&response.get("status").unwrap()), 500.0);
-            assert_eq!(
-                text(&response.get("data").unwrap().get("msg").unwrap()),
-                "algo refused"
-            );
+            let response = error
+                .response
+                .as_ref()
+                .expect("retained HTTP rejection response");
+            assert_eq!(response["status"], 500);
+            assert_eq!(response["data"]["msg"], "algo refused");
         }
         let rows = owner.base.store.orders();
         assert_eq!(rows.len(), 3);
