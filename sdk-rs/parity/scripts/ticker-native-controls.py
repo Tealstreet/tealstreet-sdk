@@ -5,6 +5,13 @@ import sys
 
 root = Path(__file__).resolve().parents[3]
 cases = {
+    "asterdex": ("public_stream.rs", "exchange_trait", '("last", update.patch.last),', '("last", update.patch.volume),'),
+    "asterdex-refusal": ("public_stream.rs", "exchange_trait", '                    return Ok(None);\n                }\n                _ =>', '                    0.0\n                }\n                _ =>'),
+    "orderly": ("stream_reports.rs", "exchange_trait", '("last", get(h, &row, "close")?),', '("last", get(h, &row, "amount")?),'),
+    "orderly-refusal": ("binding/primitives.rs", "exchange_trait", 'if !matches!(&**value, Js::Number(_)) {', 'if false && !matches!(&**value, Js::Number(_)) {'),
+    "orderly-report": ("binding/primitives.rs", "exchange_trait", 'Orderly ticker {} typed field {field} requires a number; received {}', 'Orderly ticker WRONG typed field {field} requires a number; received {} {}'),
+    "woo": ("public_socket.rs", "binding_streams", '("last", "close"),', '("last", "amount"),'),
+    "woo-refusal": ("public_socket.rs", "binding_streams", "                    continue 'rows;", "                    if fields.is_empty() { continue 'rows; } 0.0"),
     "bingx": ("public_stream.rs", "binding", '("mark", "fairPrice"),', '("mark", "indexPrice"),'),
     "bitget": ("ticker.rs", "exchange_binding", '("bid", &["bidPr", "bidPrice", "bid"][..]),', '("bid", &["askPr", "askPrice", "ask"][..]),'),
     "grvt-store": ("binding/public.rs", "exchange_binding", 'vec![Js::object(vec![("id", id.clone())]), patch],', 'vec![id.clone(), patch],'),
@@ -41,7 +48,7 @@ selected = sys.argv[1:] or list(cases)
 assert set(selected) <= cases.keys(), "unknown venue control"
 for venue in selected:
     filename, target, before, after = cases[venue]
-    crate = {"hyrotrader": "bybit", "kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid", "polymarket-store": "polymarket", "grvt-store": "grvt", "grvt-candle": "grvt", "grvt-mark": "grvt", "paradex-book": "paradex", "krakenspot": "kraken"}.get(venue, venue)
+    crate = {"hyrotrader": "bybit", "asterdex-refusal": "asterdex", "orderly-refusal": "orderly", "orderly-report": "orderly", "woo-refusal": "woo", "kucoinspot": "kucoin", "hyperliquidspot": "hyperliquid", "polymarket-store": "polymarket", "grvt-store": "grvt", "grvt-candle": "grvt", "grvt-mark": "grvt", "paradex-book": "paradex", "krakenspot": "kraken"}.get(venue, venue)
     test = {
         "kraken": "production_ticker_coercion_futures_matches_constructed_typescript",
         "krakenspot": "production_ticker_coercion_spot_matches_constructed_typescript",
