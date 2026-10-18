@@ -10,6 +10,7 @@ import { aliasContract } from './accepted-aliases.mjs';
 import { defaultWitnessContract, telemetryDefaultWitness } from './accepted-defaults.mjs';
 import { grvtFieldsBody } from './accepted-grvt-fields.mjs';
 import { nodeProbeConfiguration, nodeProbeHarness, executeNodeProbes } from './accepted-node-probes.mjs';
+import { requiredFeatures } from './accepted-feature-contracts.mjs';
 
 const literal = value => JSON.stringify(value);
 const aliasTraitMethods = [
@@ -61,7 +62,11 @@ export function runProbes(root, metadata, packages, contracts, configuration = {
   const wasm = configuration.target === 'wasm32-unknown-unknown';
   const nativePolicy = JSON.parse(fs.readFileSync(new URL('../../rust-wasm.json', import.meta.url), 'utf8'));
   for (const pkg of packages) {
+    assert.ok(Array.isArray(pkg.features), `${pkg.package}: compiler feature inventory is required for native probes`);
     const owners = [...pkg.types, ...(pkg.publicAliases ?? []).map(alias => ({ ...alias, kind: 'alias' })), ...(pkg.defaultWitnesses ?? [])];
+    for (const owner of owners) assert.ok(requiredFeatures(contracts?.[owner.name], owner.name)
+      .every(feature => pkg.features.includes(feature)) && (!contracts?.[owner.name]?.requiredFeatures || configuration.target === 'native'),
+    `${owner.name}: required native feature observations must use the canonical feature-aware driver`);
     if (!owners.length && !pkg.locals?.length) continue;
     const packageMetadata = metadata.packages.find(item => item.name === pkg.package);
     const crateRoot = path.dirname(packageMetadata.manifest_path);
@@ -194,7 +199,7 @@ export function runProbes(root, metadata, packages, contracts, configuration = {
       text += '\n[[bin]]\nname = "accepted-set-production-runner"\npath = "__accepted_set_runner.rs"\n';
     }
     fs.writeFileSync(manifest, text);
-    const features = configuration.features.length ? ['--features', configuration.features.join(',')] : [];
+    const features = pkg.features.length ? ['--features', pkg.features.join(',')] : [];
     const command = node ? ['build', '--color', 'never', '-p', pkg.package, '--jobs', jobs, '--lib', '--message-format=json', ...features] : wasm ? ['build', '--color', 'never', '-p', pkg.package, '--jobs', jobs, ...targetArgs, '--target', configuration.target, ...features] : ['run', '--color', 'never', '-p', pkg.package, '--jobs', jobs, '--bin', nativeBinary ? target.name : 'accepted-set-production-runner', ...features];
     const build = spawnSync('cargo', command, {
       cwd: path.join(sandbox, workspaceRelative), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
@@ -238,7 +243,7 @@ export function runProbes(root, metadata, packages, contracts, configuration = {
       receipts.push({ name: helper.name, classificationOnly: true, category: 'private-decoder-helper', runtimeOwner: helper.runtimeOwner, failures: [] });
     }
     console.log(`${pkg.package}: ${receipts.filter(row => !row.classificationOnly).length} production runtime results; ${receipts.filter(row => row.classificationOnly).length} explicit classifications; ${receipts.filter(row => row.failures.length).length} failed owners`);
-    results.push(...receipts.map(row => ({ ...row, configuration })));
+    results.push(...receipts.map(row => ({ ...row, configuration, compilerFeatures: pkg.features })));
     for (const [file, bytes] of originals) fs.writeFileSync(file, bytes);
   }
   fs.writeFileSync(path.join(metadata.target_directory, 'accepted-set-results.json'), `${JSON.stringify(results, null, 2)}\n`);

@@ -12,6 +12,7 @@ edition = "2024"
 
 [features]
 permissive = []
+native = []
 
 [dependencies]
 serde.workspace = true
