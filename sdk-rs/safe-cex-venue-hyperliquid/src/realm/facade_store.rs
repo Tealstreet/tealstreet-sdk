@@ -382,7 +382,7 @@ mod tests {
                 .call(&update, &facade, &[selector.clone(), changes])
                 .unwrap();
             assert_eq!(
-                store.orders()?[0].price.as_ref().unwrap().to_bits(),
+                store.orders().unwrap()[0].price.as_ref().unwrap().to_bits(),
                 value.to_bits()
             );
         }
@@ -390,11 +390,11 @@ mod tests {
         realm
             .call(&update, &facade, &[selector.clone(), changes])
             .unwrap();
-        assert!(store.orders()?[0].price.is_undefined());
+        assert!(store.orders().unwrap()[0].price.is_undefined());
         let omitted = realm.new_object();
         realm.call(&update, &facade, &[selector, omitted]).unwrap();
         assert!(
-            store.orders()?[0].price.is_undefined(),
+            store.orders().unwrap()[0].price.is_undefined(),
             "an absent patch preserves the field"
         );
     }

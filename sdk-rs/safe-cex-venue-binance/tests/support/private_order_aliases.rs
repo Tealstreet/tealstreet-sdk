@@ -157,7 +157,7 @@ fn native_cancel_capabilities_wait_for_http_before_store_status() {
     assert!(poll(&runtime, &mut call).is_pending());
     assert_eq!(http.count("/fapi/v1/order"), 1);
     assert_eq!(
-        owner.base.store.orders()[0].status,
+        owner.base.store.orders().unwrap()[0].status,
         safe_cex_types::OrderStatus::Open
     );
     let request = http.requests.lock().unwrap()[0].clone();
@@ -170,7 +170,7 @@ fn native_cancel_capabilities_wait_for_http_before_store_status() {
         EventValue::Undefined
     ));
     assert_eq!(
-        owner.base.store.orders()[0].status,
+        owner.base.store.orders().unwrap()[0].status,
         safe_cex_types::OrderStatus::Canceled
     );
     owner.dispose().unwrap();
@@ -384,7 +384,7 @@ fn native_private_handler_and_event_array_keep_numeric_fields_before_transport()
     ])
     .unwrap();
     assert_eq!(
-        owner.base.store.orders()[0].filled.to_bits(),
+        owner.base.store.orders().unwrap()[0].filled.to_bits(),
         (-0.0f64).to_bits()
     );
     let rows: EventArray = owner.private.parent.orders().unwrap();

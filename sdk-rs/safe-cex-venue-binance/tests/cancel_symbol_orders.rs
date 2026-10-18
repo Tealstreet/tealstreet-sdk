@@ -37,7 +37,7 @@ fn fixture() -> Rc<DefaultStore> {
     )
     .unwrap();
     assert_eq!(
-        store.update_ids().orders,
+        store.update_ids().unwrap().orders,
         1.0,
         "independent seeded order version"
     );
@@ -362,7 +362,7 @@ fn compare(variant: &str, count: usize) {
             run(cancel_binance_symbol_orders(
                 || {
                     view_reads.set(view_reads.get() + 1);
-                    handles.clone()
+                    Ok(handles.clone())
                 },
                 symbol,
                 delete,
@@ -407,7 +407,7 @@ fn compare(variant: &str, count: usize) {
             expected(&case, pm_spot);
         // Assert the decoded native Store and errors before any source trace or
         // request wire-option comparison. No serialization/roundtrip is used.
-        let actual = store.orders();
+        let actual = store.orders().unwrap();
         assert_eq!(
             actual.len(),
             expected_rows.len(),
@@ -453,7 +453,7 @@ fn compare(variant: &str, count: usize) {
             "CANCEL {variant} case {index} native later subscriber count"
         );
         assert_eq!(
-            store.update_ids().orders,
+            store.update_ids().unwrap().orders,
             (1 + expected_notifications) as f64,
             "CANCEL {variant} case {index} native authored version delta"
         );
@@ -601,6 +601,7 @@ fn compare(variant: &str, count: usize) {
         }
         for (actual, source) in store
             .orders()
+            .unwrap()
             .iter()
             .zip(case["orders"].as_array().unwrap())
         {
@@ -611,7 +612,7 @@ fn compare(variant: &str, count: usize) {
             );
         }
         assert_eq!(
-            store.update_ids().orders,
+            store.update_ids().unwrap().orders,
             case["updateId"].as_f64().unwrap()
         );
         assert_eq!(
@@ -707,7 +708,7 @@ fn futures_waits_for_both_settlements_without_repolling_ready_future() {
                     }))
                 };
                 let mut future = std::pin::pin!(cancel_binance_symbol_orders(
-                    || handles.clone(),
+                    || Ok(handles.clone()),
                     "BTCUSDT",
                     delete,
                     |group, status| {
@@ -735,6 +736,7 @@ fn futures_waits_for_both_settlements_without_repolling_ready_future() {
                 assert!(
                     store
                         .orders()
+                        .unwrap()
                         .iter()
                         .all(|order| order.status == OrderStatus::Open),
                     "CANCEL native no early mutation after one settlement"

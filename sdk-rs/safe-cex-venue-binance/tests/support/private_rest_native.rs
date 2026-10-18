@@ -78,7 +78,7 @@ fn owner(raw: &'static str, pm: bool) -> (Rc<ExchangeOwner>, Rc<Runtime>, Arc<Ht
             safe_cex_types::ExchangeName::Binance
         },
         serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
-        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
         dependencies,
     )
     .unwrap();
@@ -173,7 +173,7 @@ fn native_client_order_lookup_reconciles_lost_placement_response_through_signed_
         markets: Some(vec![serde_json::from_value(json!({"id":"BTCUSDT","symbol":"BTCUSDT","base":"BTC","quote":"USDT","active":true,"precision":{"price":0.1,"amount":0.1},"limits":{"amount":{"min":0.1,"max":10},"leverage":{"min":1,"max":100}}})).unwrap()]),
         ..Default::default()
     }, false).unwrap();
-    assert!(owner.base.store.orders().is_empty());
+    assert!(owner.base.store.orders().unwrap().is_empty());
     let result = run(
         &runtime,
         owner.invoke(

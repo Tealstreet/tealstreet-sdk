@@ -64,8 +64,11 @@ fn valuation_and_reconciliation_match_live_typescript() {
                         .position(|q| symbol == format!("{asset}{q}"))
                         .unwrap();
                     let text = case["quotes"][at].as_str().unwrap();
-                    (text != "undefined").then(|| number_from_string(text))
-                });
+                    Ok::<_, std::convert::Infallible>(
+                        (text != "undefined").then(|| number_from_string(text)),
+                    )
+                })
+                .unwrap();
                 assert_eq!(
                     spelling(actual),
                     case["expected"].as_str().unwrap(),

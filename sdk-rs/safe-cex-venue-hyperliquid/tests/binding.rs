@@ -166,7 +166,7 @@ fn external_startup_waits_for_both_loaded_flags_and_disposes_its_provider() {
         &f.exchange.base().store,
     ));
     let store = &f.exchange.base().store;
-    let mut loaded = store.loaded().clone();
+    let mut loaded = store.loaded().unwrap().clone();
     loaded.markets = true;
     store
         .update(
@@ -331,7 +331,7 @@ fn historical_positions_fold_real_fills_with_account_bounds_and_settlement() {
     assert_eq!(record.symbol, "BTC-PERP");
     assert_eq!(
         record.settle_currency,
-        f.exchange.base().store.markets_by_symbol()["BTC-PERP"].quote
+        f.exchange.base().store.markets_by_symbol().unwrap()["BTC-PERP"].quote
     );
     assert_eq!(record.realized_pnl, 1000.0);
     assert_eq!(record.fees, 3.0);
@@ -436,7 +436,7 @@ fn start_loads_markets_balance_and_dials_both_sockets() {
     );
     let store = f.exchange.base().store.clone();
     assert_eq!(
-        store.markets().len(),
+        store.markets().unwrap().len(),
         2,
         "core perp markets loaded; requests {:?}; console {:?}; reports {:?}",
         f.routes
@@ -449,9 +449,9 @@ fn start_loads_markets_balance_and_dials_both_sockets() {
         f.host.reports.borrow()
     );
     assert!(
-        store.loaded().markets && store.loaded().tickers,
+        store.loaded().unwrap().markets && store.loaded().unwrap().tickers,
         "loaded flags {:?}",
-        *store.loaded()
+        store.loaded().unwrap()
     );
     assert_eq!(
         f.host.sockets.borrow().len(),
@@ -928,7 +928,7 @@ fn production_import_live_fills_emit_each_fill_update_later_positions_and_refres
         assert_eq!(event["orderId"], (1101 + i).to_string());
         assert_eq!(event["side"], "buy");
     }
-    let positions = f.exchange.base().store.positions();
+    let positions = f.exchange.base().store.positions().unwrap();
     let position = positions
         .iter()
         .find(|p| p.symbol == "BTC-PERP" && p.side == safe_cex_types::PositionSide::Long)
@@ -1015,6 +1015,7 @@ fn production_seam_terminal_cancel_removes_the_local_order_after_the_venue_miss(
             .base()
             .store
             .orders()
+            .unwrap()
             .iter()
             .all(|o| o.id != "777"),
         "successful terminal cancellation clears the actual Store"
@@ -1048,6 +1049,7 @@ fn production_seam_nonterminal_cancel_retains_the_original_error_and_order() {
             .base()
             .store
             .orders()
+            .unwrap()
             .iter()
             .any(|o| o.id == "777")
     );
@@ -1123,7 +1125,7 @@ fn production_seam_lookup_uses_order_status_by_cloid_without_mutating_orders() {
         before,
         "lookup must not refresh/mutate the open-order snapshot"
     );
-    assert!(f.exchange.base().store.orders().is_empty());
+    assert!(f.exchange.base().store.orders().unwrap().is_empty());
 }
 
 #[test]
@@ -1139,14 +1141,14 @@ fn production_seam_reconnect_snapshot_refreshes_core_positions_and_balance() {
         before + 1,
         "the real reconnect override fetches core state alongside orders"
     );
-    let positions = f.exchange.base().store.positions();
+    let positions = f.exchange.base().store.positions().unwrap();
     let btc = positions
         .iter()
         .find(|p| p.symbol == "BTC-PERP" && p.side == safe_cex_types::PositionSide::Long)
         .expect("core position");
     assert_eq!(btc.contracts, 0.25);
-    assert_eq!(f.exchange.base().store.balance().total, 2275.0);
-    assert!(f.exchange.base().store.loaded().orders);
+    assert_eq!(f.exchange.base().store.balance().unwrap().total, 2275.0);
+    assert!(f.exchange.base().store.loaded().unwrap().orders);
 }
 
 #[test]
@@ -1432,7 +1434,7 @@ fn production_seam_private_orders_frame_updates_the_store_without_a_fill() {
         &wire,
         json!({"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":888,"side":"B","limitPx":"60010","sz":"0.4","origSz":"0.5","timestamp":1700000000100u64,"orderType":"Limit","reduceOnly":false,"cloid":cloid},"status":"open","statusTimestamp":1700000000100u64}]}),
     );
-    let orders = f.exchange.base().store.orders();
+    let orders = f.exchange.base().store.orders().unwrap();
     let order = orders
         .iter()
         .find(|order| order.id == "888")
@@ -1461,7 +1463,7 @@ fn production_seam_private_core_positions_frame_updates_the_store_without_a_fill
         &wire,
         json!({"channel":"clearinghouseState","data":{"user":MASTER,"dex":"","clearinghouseState":seam_core_state()}}),
     );
-    let positions = f.exchange.base().store.positions();
+    let positions = f.exchange.base().store.positions().unwrap();
     let position = positions
         .iter()
         .find(|p| p.symbol == "BTC-PERP" && p.side == safe_cex_types::PositionSide::Long)
@@ -1497,7 +1499,7 @@ fn production_seam_private_core_balance_frame_updates_the_store_without_a_fill()
         &wire,
         json!({"channel":"clearinghouseState","data":{"user":MASTER,"dex":"","clearinghouseState":state}}),
     );
-    let balance = f.exchange.base().store.balance();
+    let balance = f.exchange.base().store.balance().unwrap();
     assert_eq!(
         (balance.total, balance.used, balance.free, balance.upnl),
         (1375.0, 25.0, 1350.0, 0.0)
@@ -1537,7 +1539,7 @@ fn production_reconcile_clears_undefined_tif_and_then_stops_rewriting() {
         "source mapper owns an undefined TIF"
     );
     {
-        let orders = f.exchange.base().store.orders();
+        let orders = f.exchange.base().store.orders().unwrap();
         let row = orders.iter().find(|row| row.id == "777").unwrap();
         assert_eq!(
             row.client_order_id.as_deref(),
@@ -1549,11 +1551,11 @@ fn production_reconcile_clears_undefined_tif_and_then_stops_rewriting() {
             "realm updateOrder must retain the mapper's own undefined TIF"
         );
     }
-    let revision = f.exchange.base().store.update_ids().orders;
+    let revision = f.exchange.base().store.update_ids().unwrap().orders;
     f.host.block_on(f.exchange.fetch_orders(None)).unwrap();
     f.host.settle();
     assert_eq!(
-        f.exchange.base().store.update_ids().orders,
+        f.exchange.base().store.update_ids().unwrap().orders,
         revision,
         "an identical REST refresh must not rewrite the reconciled order"
     );
@@ -1622,7 +1624,7 @@ fn production_ticker_coercion_matches_constructed_typescript() {
             )));
             f.host.settle();
         }
-        ticker_coercion::assert_native(&f.exchange.base().store.tickers(), case);
+        ticker_coercion::assert_native(&f.exchange.base().store.tickers().unwrap(), case);
     }
     assert!(
         f.host.reports.borrow().is_empty(),

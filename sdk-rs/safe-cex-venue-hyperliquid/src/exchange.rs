@@ -312,7 +312,9 @@ mod tests {
                 let opts: PlaceOrderOpts=serde_json::from_value(json!({"symbol":"BTC","type":"market","side":"buy","amount":row["amount"],"reduceOnly":row["reduceOnly"]})).unwrap();
                 let size = safe_cex_num::number_from_string(row["size"].as_str().unwrap());
                 assert_eq!(
-                    state.should_use_position_tpsl(&opts, &market, size),
+                    state
+                        .should_use_position_tpsl(&opts, &market, size)
+                        .unwrap(),
                     row["result"].as_bool().unwrap(),
                     "source first position and TPSL guards"
                 );

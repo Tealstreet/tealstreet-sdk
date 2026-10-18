@@ -535,7 +535,7 @@ fn public_classes_native_ticker_bindings_before_actual_source() {
             "bookTicker"
         };
         owner.on_message(&format!(r#"{{"e":"{event}","s":"BTC","c":"4.2","P":"1.2","v":"3.6","q":"9.1","b":"2.5","a":"12.3"}}"#)).unwrap();
-        let ticker = parent.store.tickers()[0].clone();
+        let ticker = parent.store.tickers().unwrap()[0].clone();
         let regular = event == "24hrTicker";
         assert_eq!(
             ticker.last,
@@ -720,7 +720,7 @@ fn public_bound_callback_and_core_protocol_retain_receiver_without_cycle() {
     ))
     .unwrap();
     assert_eq!(
-        parent.store.tickers()[0].last,
+        parent.store.tickers().unwrap()[0].last,
         4.2,
         "native saved arrow works after public handle drop"
     );
@@ -729,7 +729,7 @@ fn public_bound_callback_and_core_protocol_retain_receiver_without_cycle() {
     ))
     .unwrap();
     assert_eq!(
-        parent.store.tickers()[0].ask,
+        parent.store.tickers().unwrap()[0].ask,
         12.3,
         "native retained Base protocol works after public handle drop"
     );
@@ -844,7 +844,7 @@ fn public_captured_ticker_reference_observes_id_rename_before_dictionary_replace
                     let mut patch = safe_cex_store::model_patch::ModelPatch::default();
                     patch.set_json("id", json!("renamed"));
                     Store::update_ticker(store.as_ref(), "btc", &patch).unwrap();
-                    let mut next = store.tickers()[0].clone();
+                    let mut next = store.tickers().unwrap()[0].clone();
                     next.bid = 0.0;
                     next.ask = 0.0;
                     Store::update(
@@ -870,17 +870,17 @@ fn public_captured_ticker_reference_observes_id_rename_before_dictionary_replace
             .unwrap();
         assert!(renamed.get());
         assert_eq!(
-            parent.store.tickers()[0].id,
+            parent.store.tickers().unwrap()[0].id,
             "renamed",
             "native current row retains renamed ID"
         );
         assert_eq!(
-            parent.store.tickers()[0].bid,
+            parent.store.tickers().unwrap()[0].bid,
             3.6,
             "native captured ticker ID observes mutation before replacement"
         );
         assert_eq!(
-            parent.store.tickers()[0].ask,
+            parent.store.tickers().unwrap()[0].ask,
             4.2,
             "native captured ticker reference updates replacement row through renamed ID"
         );
@@ -947,12 +947,12 @@ fn public_same_generation_symbol_alias_receives_second_tick() {
             )
             .unwrap();
         assert_eq!(
-            parent.store.tickers()[0].symbol,
+            parent.store.tickers().unwrap()[0].symbol,
             "ETH",
             "native subscriber renames ticker symbol"
         );
         assert_eq!(
-            parent.store.tickers()[0].last,
+            parent.store.tickers().unwrap()[0].last,
             12.3,
             "native same-generation alias receives second price 12.3 rather than 4.2"
         );
@@ -1064,12 +1064,12 @@ fn public_symbol_collision_uses_latest_store_alias_owner() {
             )
             .unwrap();
         assert_eq!(
-            parent.store.tickers()[0].last,
+            parent.store.tickers().unwrap()[0].last,
             12.3,
             "native symbol collision updates latest alias owner btc to 12.3"
         );
         assert_eq!(
-            parent.store.tickers()[1].last,
+            parent.store.tickers().unwrap()[1].last,
             0.0,
             "native symbol collision leaves displaced eth ticker unchanged"
         );

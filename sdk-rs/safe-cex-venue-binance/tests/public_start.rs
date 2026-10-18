@@ -100,7 +100,7 @@ fn public_start_matches_live_source() {
                 captured.borrow_mut().push(serde_json::json!(v));
                 log_events.borrow_mut().push("log");
                 if action == "loaded" {
-                    let mut loaded = Store::loaded(log_store.as_ref()).clone();
+                    let mut loaded = Store::loaded(log_store.as_ref()).unwrap().clone();
                     loaded.markets = true;
                     loaded.tickers = true;
                     Store::update(
@@ -119,7 +119,7 @@ fn public_start_matches_live_source() {
                 Ok(())
             }),
         );
-        let snapshot = || json!({"orders":Store::orders(store.as_ref()).to_vec(),"positions":Store::positions(store.as_ref()).to_vec(),"balance":Store::balance(store.as_ref()).clone(),"loaded":Store::loaded(store.as_ref()).clone()});
+        let snapshot = || json!({"orders":Store::orders(store.as_ref()).unwrap().to_vec(),"positions":Store::positions(store.as_ref()).unwrap().to_vec(),"balance":Store::balance(store.as_ref()).unwrap().clone(),"loaded":Store::loaded(store.as_ref()).unwrap().clone()});
         let before = snapshot();
         let updates = Rc::new(RefCell::new(0));
         let captured = updates.clone();
@@ -236,7 +236,9 @@ fn startup_preserves_notification_identity_and_log_failure_order() {
             "startup skips later subscriber after throw"
         );
         assert!(
-            store.loaded().orders && store.loaded().positions && store.loaded().balance,
+            store.loaded().unwrap().orders
+                && store.loaded().unwrap().positions
+                && store.loaded().unwrap().balance,
             "startup commits before notification failure"
         );
         first();

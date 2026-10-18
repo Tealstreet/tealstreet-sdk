@@ -486,12 +486,12 @@ fn native_lifecycle_aliases_publish_store_then_resolve_tick_again_at_timer_fire(
     let owner = owner(http.clone(), runtime.clone());
     invoke(&owner, &runtime, Method::Tick, vec![]);
     assert_eq!(
-        owner.base.store.balance().total.to_bits(),
+        owner.base.store.balance().unwrap().total.to_bits(),
         17.25_f64.to_bits(),
         "LifecycleCall Store update"
     );
     assert!(
-        owner.base.store.loaded().balance,
+        owner.base.store.loaded().unwrap().balance,
         "LifecycleAsyncCall settles account"
     );
     assert_eq!(http.count("/fapi/v3/account"), 1);

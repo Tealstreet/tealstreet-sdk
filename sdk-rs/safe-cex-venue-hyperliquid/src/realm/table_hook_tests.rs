@@ -5,6 +5,80 @@ use safe_cex_exchange::{
 };
 use std::{cell::Cell, fmt, rc::Rc};
 
+#[test]
+fn table_view_enumerates_native_keys_and_projects_only_its_reached_row() {
+    use safe_cex_exchange::{js_runtime::value::from_json, native_store::DefaultStore};
+    use safe_cex_types::{StoreReadError, StoreReadPhase};
+
+    let store = Rc::new(DefaultStore::new());
+    let native = store.facade().unwrap();
+    let ticker = |symbol: &str| {
+        from_json(&serde_json::json!({
+            "id":symbol,"symbol":symbol,"bid":1,"ask":2,"last":3,"mark":4,"index":5,
+            "percentage":0,"openInterest":0,"fundingRate":0,"fundingTime":0,"volume":0,"quoteVolume":0
+        }))
+    };
+    let poison = ticker("POISON");
+    native
+        .call_method(
+            "update",
+            vec![Js::object(vec![(
+                "tickers",
+                Js::array(vec![ticker("SELECTED"), poison.clone()]),
+            )])],
+        )
+        .unwrap();
+    let cause = Js::object(vec![("code", Js::utf16(&[0xd800]))]);
+    let thrown = cause.clone();
+    let reads = Rc::new(Cell::new(0));
+    let count = reads.clone();
+    poison
+        .define_accessor(
+            "bid",
+            Some(Rc::new(move |_| {
+                count.set(count.get() + 1);
+                Err(Thrown::new(thrown.clone()))
+            })),
+            None,
+        )
+        .unwrap();
+    let mut realm = Realm::new(Rc::new(TestRuntime::default()));
+    let legacy = super::facade_store::store_object(&realm, store);
+    let view = realm.get_str(&legacy, "tickersBySymbol").unwrap();
+    assert_eq!(realm.own_keys(&view, true).unwrap().len(), 2);
+    assert_eq!(reads.get(), 0, "key enumeration must not read DTO fields");
+    let row = realm.get_str(&view, "SELECTED").unwrap();
+    assert!(
+        realm
+            .get_str(&row, "bid")
+            .unwrap()
+            .strict_equal(&super::value::Value::Number(1.0))
+    );
+    assert_eq!(
+        reads.get(),
+        0,
+        "selected projection must not touch an unrelated row"
+    );
+    let error = realm.get_str(&view, "POISON").unwrap_err();
+    let recovered = realm.exchange_error(&error);
+    let read = recovered
+        .origin
+        .as_ref()
+        .unwrap()
+        .error()
+        .downcast_ref::<StoreReadError>()
+        .unwrap();
+    assert_eq!(read.phase(), StoreReadPhase::Projection);
+    assert!(
+        read.native_cause()
+            .downcast_ref::<Thrown>()
+            .unwrap()
+            .value
+            .same_reference(&cause)
+    );
+    assert_eq!(reads.get(), 1, "the reached getter runs exactly once");
+}
+
 #[derive(Debug)]
 struct OriginalCause {
     value: Js,

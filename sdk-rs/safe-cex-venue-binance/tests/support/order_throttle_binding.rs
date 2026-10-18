@@ -30,7 +30,7 @@ fn actual_private_order_throttle_waits_then_publishes_loaded_snapshot() {
             safe_cex_exchange::native::NativeHttpEvents::default(),
         );
         let store: Rc<dyn Store> = Rc::new(safe_cex_exchange::native_store::DefaultStore::new());
-        let mut loaded = store.loaded().clone();
+        let mut loaded = store.loaded().unwrap().clone();
         loaded.tickers = true;
         store
             .update(
@@ -54,7 +54,7 @@ fn actual_private_order_throttle_waits_then_publishes_loaded_snapshot() {
             deps,
         )
         .unwrap();
-        let before = owner.base.store.update_ids().orders;
+        let before = owner.base.store.update_ids().unwrap().orders;
         owner.private.throttled_orders().unwrap();
         runtime.pump();
         assert_eq!(
@@ -63,8 +63,8 @@ fn actual_private_order_throttle_waits_then_publishes_loaded_snapshot() {
             "source debounce duration"
         );
         assert!(requests.lock().unwrap().is_empty());
-        assert_eq!(owner.base.store.update_ids().orders, before);
-        assert!(!owner.base.store.loaded().orders);
+        assert_eq!(owner.base.store.update_ids().unwrap().orders, before);
+        assert!(!owner.base.store.loaded().unwrap().orders);
         runtime.now.set(10_000.0);
         runtime.sleep_clock.set(10_000.0);
         for _ in 0..32 {
@@ -78,13 +78,13 @@ fn actual_private_order_throttle_waits_then_publishes_loaded_snapshot() {
                 "configured signed HTTP: {url}"
             );
         }
-        assert_eq!(owner.base.store.update_ids().orders, before + 1.0);
+        assert_eq!(owner.base.store.update_ids().unwrap().orders, before + 1.0);
         assert!(
-            owner.base.store.loaded().orders,
+            owner.base.store.loaded().unwrap().orders,
             "real class publishes loaded.orders"
         );
         assert!(
-            owner.base.store.loaded().tickers,
+            owner.base.store.loaded().unwrap().tickers,
             "loaded sibling survives the real Store update"
         );
         assert!(matches!(
