@@ -855,3 +855,100 @@ pub async fn nan_codec_probe(storage: js_sys::Function) -> Result<String, JsValu
         "IndexedDB NaN/null reload hits and malformed misses: {checked} real profiles"
     ))
 }
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub async fn fix_audit_probe() -> Result<String, JsValue> {
+    use safe_cex_candle_cache::{
+        CacheRuntime, CandleCacheChunkAccessOptions, Chunks,
+        indexed_db::{IndexedDBCandleCacheBackend, IndexedDBCandleCacheBackendOptions},
+    };
+    use safe_cex_types::Candle;
+    use std::{
+        rc::Rc,
+        task::{Context, Waker},
+    };
+    let runtime = CacheRuntime {
+        now_ms: Rc::new(|| 1_700_004_200_000.),
+        sleep: Rc::new(|_| Box::pin(std::future::pending())),
+        spawn: Rc::new(drop),
+    };
+    let marker = Rc::new(());
+    let weak = Rc::downgrade(&marker);
+    let captured = marker.clone();
+    drop(marker);
+    let config = IndexedDBCandleCacheBackendOptions {
+        db_name: "port-txflow-fix-audit".into(),
+        report_error: Some(Rc::new(move |_| {
+            let _ = &captured;
+        })),
+        ..Default::default()
+    };
+    let backend = IndexedDBCandleCacheBackend::new(config.clone(), runtime.clone());
+    backend
+        .clear(None)
+        .unwrap()
+        .await
+        .map_err(|e| JsValue::from_str(&e))?;
+    let options = CandleCacheChunkAccessOptions {
+        chunk_size: 100,
+        interval_seconds: 60.,
+    };
+    let mut slots = vec![None; 100];
+    slots[99] = Some(Candle {
+        timestamp: -60_000.,
+        open: 11.,
+        high: 17.,
+        low: 7.,
+        close: 13.,
+        volume: 19.,
+        last_side: None,
+    });
+    // Warm database: the future's first poll starts the actual put transaction.
+    let mut write = backend.persist_chunks("negative".into(), Chunks::from([(-1, slots)]), options);
+    assert!(
+        write
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    drop(write);
+    drop(backend);
+    drop(config);
+    assert!(
+        weak.upgrade().is_none(),
+        "CACHE-AUDIT dropped persistence must release callback owner"
+    );
+    // Dropping the waiter detaches callbacks; an already-issued browser put still commits.
+    let reader = IndexedDBCandleCacheBackend::new(
+        IndexedDBCandleCacheBackendOptions {
+            db_name: "port-txflow-fix-audit".into(),
+            ..Default::default()
+        },
+        runtime,
+    );
+    let chunks = reader
+        .load_chunks("negative".into(), vec![-1], options)
+        .unwrap()
+        .await
+        .map_err(|e| JsValue::from_str(&e))?;
+    let candle = chunks
+        .get(&-1)
+        .and_then(|c| c[99].as_ref())
+        .ok_or_else(|| JsValue::from_str("CACHE-AUDIT cancelled waiter lost issued put"))?;
+    for (actual, expected) in [
+        (candle.timestamp, -60_000_f64),
+        (candle.open, 11.),
+        (candle.high, 17.),
+        (candle.low, 7.),
+        (candle.close, 13.),
+        (candle.volume, 19.),
+    ] {
+        assert_eq!(
+            actual.to_bits(),
+            expected.to_bits(),
+            "CACHE-AUDIT IndexedDB native field"
+        );
+    }
+    Ok("CACHE-AUDIT IndexedDB pre-epoch persistence and cancelled waiter ownership passed".into())
+}

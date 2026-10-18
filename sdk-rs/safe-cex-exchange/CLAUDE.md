@@ -1959,3 +1959,9 @@ materialization follows that source chain and the canonical retained response.
 Aster/WOO native binding witnesses inspect class, diagnostic fields, causes and
 signed requests before JSON. Original JS object identity remains an owned-tree residual.
 
+The mapped loop utility requires its owning runtime on LoopHost and starts via
+start_eager. Its sleep Promise preserves the source await fence even for ready
+leaves, and waiter drop leaves the continuation alive. Positive infinity disables
+all loop host effects; remaining_utils compares invocation, continuation and
+callback scheduling with the maintained TypeScript function in Node.
+
