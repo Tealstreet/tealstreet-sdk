@@ -371,4 +371,4 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
 - Private replays passed before BingX integration; final ten-variant private
   replay results and exact-head CI are tracked on PR #1309. Landing is authorized
   only after those checks are green; then cut a fresh follow-up branch from the
-  merged landing. No push to master, rebase, force-push or stash was used.
+  merged landing.
