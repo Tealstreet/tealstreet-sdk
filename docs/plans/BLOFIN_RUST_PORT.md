@@ -314,3 +314,32 @@ All required brief gates pass after landing integration on `487fd434f5`:
 - Integration replay caught a lost BloFin-specific instruments cache-bust filter;
   restored only that known empty random query on its configured path. Retained
   all meaningful query values and caller IDs. Final four-venue gates are running.
+
+### Final four-venue gates
+
+All brief gates PASS on the four-venue artifact from `f698c02126`, using Node22
+and three-run public medians:
+
+| Public fixture | Frames | TS/Rust CPU ms | TS/Rust steady ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| BloFin | 2,764 | 184.932 /179.409 | 134.210 /103.233 | 1.526896 /1.399720 |
+| Binance | 871 | 180.825 /103.744 | 101.247 /47.654 | 2.188504 /1.859880 |
+| Bybit | 8,742 | 455.663 /415.780 | 300.881 /248.049 | 3.201512 /2.291096 |
+| OKX | 8,902 | 569.781 /524.418 | 439.808 /386.700 | 2.453216 /2.410456 |
+
+- Exact public Store/book outputs match. Private correctness PASS: BloFin29,
+  Binance14, Bybit18, and29 each for OKX/OKX EU/demo/EU-demo. Every recorded
+  write is matched once. BloFin deltas remain0.0001@100,0.0002@130,0.0002@170;
+  duplicates, regressions and terminal replays produce no additional executions.
+- Release wasm1,446,776 bytes, below unchanged1,468,006-byte budget. Shared
+  engine remains O3; host, venue crates and serde_json use measured size profiles.
+- Native222 tests, SDK wasm17 and JS host/wire4 pass; venue/wasm clippy, fmt,
+  bans, root typecheck44 tasks and lint28 tasks pass. Earlier full JS6490 and
+  focused BloFin37 pass; PR CI verifies the integrated repository again.
+- Final three independent integration reviews found no remaining concrete
+  blockers. Shared splitter review verified legacy/nested/envelope modes;
+  harness review verified exact caller IDs, cache-bust filtering, staging and
+  single-use writes; trading/SDK review verified all four dispatches and durable
+  asymmetric leverage settings. Findings are posted on PR1300.
+- PR1300 is mergeable into `feat/rust-rewrite`. Awaiting green CI before merge
+  and creation of a fresh follow-up branch; no pending code changes identified.
