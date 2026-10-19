@@ -49,10 +49,24 @@ export class EngineHost {
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;
+    let actions;
+    try {
+      actions = this.engine.command(JSON.stringify(reply === undefined ? command : { ...command, command: reply }), this.transport.now());
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    if (this.disposed) return Promise.reject(new Error('engine disposed'));
     const promise = reply === undefined
       ? Promise.resolve()
       : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject }));
-    this.run(this.engine.command(JSON.stringify(reply === undefined ? command : { ...command, command: reply }), this.transport.now()));
+    try {
+      this.run(actions);
+    } catch (error) {
+      if (reply === undefined) return Promise.reject(error);
+      const pending = this.commands.get(reply);
+      this.commands.delete(reply);
+      pending?.reject(error);
+    }
     return promise;
   }
 

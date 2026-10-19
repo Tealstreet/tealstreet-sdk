@@ -131,3 +131,17 @@ adapter tests and four isolated wasm32 clippy checks pass. Repository-wide
 
 Family WASM bytes/budgets after integration: Binance 769031/786432,
 Bybit 748585/765952, Crypto.com 617650/638976, OKX 711518/729088.
+
+Follow-up adversarial test found a synchronous invalid WASM command registered an
+unreturned pending Promise; rejecting it on dispose could become an unhandled
+rejection. Validate first, register before executing returned actions, and clean
+up transport/action errors through the returned Promise. The regression fails
+before the fix and passes afterward. All 24 JS host tests and six native tests
+now pass; independent review reproduces resource-disposal safety.
+
+Full native workspace fmt, bans, all-target clippy, tests and wasm32 workspace
+clippy pass after Crypto.com integration. Four-family baseline aggregate build
+is complete. Controlled before/after public runs and seven final private tapes
+are running; the first baseline OKX run passes (1.08x CPU, 1.70x retained memory)
+under stable collection, illustrating why earlier exploratory memory results
+must not be mixed with final measurements.

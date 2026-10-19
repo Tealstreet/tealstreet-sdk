@@ -153,6 +153,26 @@ test('synchronous command validation failure leaves no hidden pending promise', 
   f.host.dispose();
 });
 
+test('outbound action failures reject and remove their pending command', async () => {
+  const f = fixture();
+  f.engine.command = () => JSON.stringify([{ op: 'wsSend', socket: 1, text: 'request' }]);
+  f.host.sockets.get(1).send = () => { throw new Error('send failed'); };
+  await assert.rejects(f.host.command({ op: 'fetchCandles' }), /send failed/);
+  assert.equal(f.host.commands.size, 0);
+  f.host.dispose();
+});
+
+test('a throwing disposal callback returns the command cancellation without a hidden rejection', async () => {
+  const f = fixture();
+  f.engine.command = () => JSON.stringify([{ op: 'log', level: 'error', message: 'stop' }]);
+  f.host.handlers.onLog = () => {
+    f.host.dispose();
+    throw new Error('callback failed');
+  };
+  await assert.rejects(f.host.command({ op: 'fetchCandles' }), /engine disposed/);
+  assert.equal(f.host.commands.size, 0);
+});
+
 test('disposal during an action callback stops the remaining resource actions', () => {
   const f = fixture();
   f.host.handlers.onLog = () => f.host.dispose();
