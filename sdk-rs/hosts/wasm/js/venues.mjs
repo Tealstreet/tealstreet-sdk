@@ -8,6 +8,7 @@ const families = Object.freeze({
   okxeu: 'okx',
   okxdemo: 'okx',
   okxeudemo: 'okx',
+  weex: 'weex',
 });
 
 export function venueFamily(venue) {

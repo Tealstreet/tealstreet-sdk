@@ -12,6 +12,7 @@ const importEngine = (family: VenueFamily) => {
     case 'bybit': return import('@tealstreet/safe-cex-wasm/web/bybit');
     case 'cryptocom': return import('@tealstreet/safe-cex-wasm/web/cryptocom');
     case 'okx': return import('@tealstreet/safe-cex-wasm/web/okx');
+    case 'weex': return import('@tealstreet/safe-cex-wasm/web/weex');
   }
 };
 

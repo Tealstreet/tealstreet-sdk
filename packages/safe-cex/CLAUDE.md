@@ -923,7 +923,7 @@ the error.
 ## Rust engine loading
 
 The registered WASM loader receives the Rust venue name. `loadWebEngine` and
-`loadNodeEngine` select a family package (`binance`, `bybit`, `cryptocom`, `okx`); aliases
+`loadNodeEngine` select a family package (`binance`, `bybit`, `cryptocom`, `okx`, `weex`); aliases
 share a module, while different families instantiate separate binaries. Browser
 imports use literal family subpaths so a browser downloads only its venue. Add
 a family to the WASM Cargo features, package exports, shared `venueFamily`

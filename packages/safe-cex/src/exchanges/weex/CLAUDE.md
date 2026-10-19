@@ -199,3 +199,17 @@ Private channels:
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `newClientOrderId`, rule `^[.A-Z:/a-z0-9_-]{1,36}$`, on the single and regular batch paths.
+
+## Rust engine
+
+`engine: 'rust'` selects `sdk-rs/venues/weex` for Contract V3 futures. Native
+and Workers transports carry signed private upgrade headers; browser transports
+continue the two-second REST loop. Income ranges use the engine's shared span
+pager. Reads stage complete snapshots and preserve newer stream events.
+
+The Rust gate records intentional TS corrections: opening trigger orders retain
+both trigger and execution prices, failed order halves preserve the last complete
+snapshot, stale frames cannot reopen terminal state, duplicate execution IDs emit
+once, malformed placement acknowledgements fail without invented IDs, partial
+cancellation failures retain rejected orders, and margin changes preserve each
+symbol's position mode. See `sdk-rs/harness/gate.mjs` and the venue tests.

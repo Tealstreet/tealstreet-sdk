@@ -18,11 +18,13 @@
     "rust:build-wasm": "bash sdk-rs/harness/build.sh",
     "rust:build-profile": "bash sdk-rs/harness/build-profile.sh",
     "rust:profile": "node --expose-gc sdk-rs/harness/profile.mjs",
+    "rust:replay": "node --expose-gc sdk-rs/harness/replay.mjs",
     "rust:record": "node sdk-rs/harness/record.mjs",
     "rust:private-tape": "node sdk-rs/harness/private-tape.mjs",
     "rust:private-tape-bybit": "node sdk-rs/harness/private-tape-bybit.mjs",
     "rust:private-tape-cryptocom": "node sdk-rs/harness/private-tape-cryptocom.mjs",
     "rust:private-tape-okx": "node sdk-rs/harness/private-tape-okx.mjs",
+    "rust:private-tape:weex": "node sdk-rs/harness/private-tape-weex.mjs",
     "rust:trim-tape": "node sdk-rs/harness/trim-tape.mjs",
     "rust:gate": "node sdk-rs/harness/gate.mjs",
     "rust:test-harness": "node --test sdk-rs/harness/*.test.mjs"

@@ -2,5 +2,6 @@
   "binance": 786432,
   "bybit": 765952,
   "okx": 729088,
-  "cryptocom": 638976
+  "cryptocom": 638976,
+  "weex": 1048576
 }

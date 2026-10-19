@@ -49,12 +49,23 @@
     "./node/cryptocom": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/node/cryptocom/safe_cex_wasm.js"
+    },
+    "./web/weex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/weex/safe_cex_wasm.js"
+    },
+    "./node/weex": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/weex/safe_cex_wasm.js"
     }
   },
   "scripts": {
     "build-wasm": "bash ../../harness/build.sh",
     "test": "node --test js/*.test.mjs",
     "check-sizes": "node ../../harness/check-wasm-sizes.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
   },
   "license": "MIT"
 }

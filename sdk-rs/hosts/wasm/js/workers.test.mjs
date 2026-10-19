@@ -78,7 +78,7 @@ globalThis.Response = class {
 globalThis.fetch = async (url, init = {}) => {
   if (init.headers?.Upgrade === 'websocket') {
     const socket = new FakeSocket();
-    upgrades.push({ url, socket });
+    upgrades.push({ url, socket, headers: init.headers });
     return { webSocket: socket };
   }
   const name = new URL(url).pathname.split('/').pop();
@@ -104,13 +104,15 @@ const until = async (check) => {
 test('the transport opens client sockets with an https upgrade', async () => {
   const events = [];
   workersTransport().connect('wss://fstream.binance.com/public/ws', {
+    headers: { 'ACCESS-SIGN': 'signature' },
     onOpen: () => events.push('open'),
     onMessage: (text) => events.push(text),
     onClose: (code) => events.push(code),
   });
   await until(() => upgrades.length > 0);
-  const { url, socket } = upgrades.at(-1);
+  const { url, socket, headers } = upgrades.at(-1);
   assert.equal(url, 'https://fstream.binance.com/public/ws');
+  assert.equal(headers['ACCESS-SIGN'], 'signature');
   socket.dispatch('message', { data: 'hello' });
   socket.close(1001);
   assert.deepEqual(events, ['open', 'hello', 1001]);
@@ -244,4 +246,20 @@ test('commands await a pending start and report a missing engine explicitly', as
   await Promise.all([start, command]);
   assert.deepEqual(JSON.parse(client.sent.at(-1)), { op: 'done', id: 8, result: 'done' });
   object.leave(client);
+});
+
+test('Workers derives private upgrade capability from its transport', async () => {
+  let options;
+  const EngineObject = createEngineObject({ loadEngine: async () => ({ WasmEngine: class {
+    constructor(_, json) { options = JSON.parse(json); }
+    start() { return ''; }
+  } }) });
+  const object = new EngineObject({ storage: { setAlarm() {} } });
+  const client = { send() {} };
+  object.clients.add(client);
+  try {
+    await object.receive(client, JSON.stringify({ op: 'start', venue: 'weex', options: { key: 'replay-key', privateWsHeaders: false } }));
+    assert.equal(options.privateWsHeaders, true);
+    assert.equal(options.key, 'replay-key');
+  } finally { object.leave(client); }
 });

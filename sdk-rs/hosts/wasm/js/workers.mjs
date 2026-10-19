@@ -12,12 +12,13 @@ import { EngineHost } from './host.mjs';
 
 /** Outbound sockets and requests from a Worker or Durable Object. */
 export const workersTransport = () => ({
+  webSocketHeaders: true,
   now: () => Date.now(),
-  connect(url, { onOpen, onMessage, onClose }) {
+  connect(url, { headers = {}, onOpen, onMessage, onClose }) {
     let socket;
     let closed = false;
     // Workers open client WebSockets with an upgrade request over https.
-    fetch(url.replace(/^ws/, 'http'), { headers: { Upgrade: 'websocket' } }).then(
+    fetch(url.replace(/^ws/, 'http'), { headers: { ...headers, Upgrade: 'websocket' } }).then(
       (response) => {
         socket = response.webSocket;
         if (!socket) return onClose(1006);
@@ -41,7 +42,7 @@ export const workersTransport = () => ({
     };
   },
   async request({ method, url, headers, body }) {
-    const response = await fetch(url, { method, headers, body });
+    const response = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(20_000) });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
     return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };
@@ -116,9 +117,10 @@ export const createEngineObject = ({ loadEngine, flush = { store: 250, books: 60
           // Leaving invalidates this attempt even if another client reconnects
           // before its module finishes loading.
           if (this.starting !== starting || this.clients.size === 0) return;
+          const transport = workersTransport();
           const host = new EngineHost(
-            new WasmEngine(message.venue, JSON.stringify(message.options ?? {})),
-            workersTransport(),
+            new WasmEngine(message.venue, JSON.stringify({ ...message.options, privateWsHeaders: transport.webSocketHeaders })),
+            transport,
             {
               onFrame: (frame) => this.broadcast(frame),
               onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),

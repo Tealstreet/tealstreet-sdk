@@ -9,6 +9,7 @@ const aliases = {
   bybit: ['bybit'],
   cryptocom: ['cryptocom'],
   okx: ['okx', 'okxeu', 'okxdemo', 'okxeudemo'],
+  weex: ['weex'],
 };
 
 for (const [family, names] of Object.entries(aliases)) {

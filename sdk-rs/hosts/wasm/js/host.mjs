@@ -32,6 +32,7 @@ export class EngineHost {
     this.messageBytes = 0;
     this.batchBuffer = new Uint8Array(0);
     this.batchTimer = undefined;
+    this.socketFallbacks = new Set();
     this.disposed = false;
   }
 
@@ -45,7 +46,7 @@ export class EngineHost {
     if (this.disposed) return Promise.reject(new Error('engine disposed'));
     this.drainMessages();
     if (this.disposed) return Promise.reject(new Error('engine disposed'));
-    const reply = command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
+    const reply = command.op === 'setTickerSymbols' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;
@@ -101,6 +102,8 @@ export class EngineHost {
     this.messages.length = 0;
     this.messageBytes = 0;
     this.batchBuffer = new Uint8Array(0);
+    for (const handle of this.socketFallbacks) this.transport.clearTimeout(handle);
+    this.socketFallbacks.clear();
     for (const socket of this.sockets.values()) socket.close();
     for (const handle of this.timers.values()) this.transport.clearTimeout(handle);
     this.sockets.clear();
@@ -206,7 +209,25 @@ export class EngineHost {
     switch (action.op) {
       case 'wsConnect': {
         const id = action.socket;
+        if (action.headers?.length && !transport.webSocketHeaders) {
+          this.handlers.onLog?.('warning', 'WebSocket upgrade headers unavailable; continuing REST reconciliation');
+          if (this.disposed) break;
+          let handle;
+          let fired = false;
+          handle = transport.setTimeout(() => {
+            fired = true;
+            this.socketFallbacks.delete(handle);
+            if (this.disposed) return;
+            this.drainMessages();
+            if (this.disposed) return;
+            this.run(engine.wsClose(id, 1006, transport.now()));
+          }, 0);
+          if (!fired && !this.disposed) this.socketFallbacks.add(handle);
+          else if (this.disposed) transport.clearTimeout(handle);
+          break;
+        }
         const socket = transport.connect(action.url, {
+          headers: action.headers && Object.fromEntries(action.headers),
           onOpen: () => {
             if (this.disposed) return;
             this.drainMessages();
@@ -305,23 +326,39 @@ async function* chunks(stream) {
 }
 
 /** Transport over the runtime's own WebSocket, fetch and timers. */
-export const nativeTransport = () => ({
+export const nativeTransport = () => {
+  let Socket = globalThis.WebSocket;
+  let webSocketHeaders = false;
+  try {
+    const module = globalThis.process?.getBuiltinModule?.('module');
+    if (module?.createRequire) {
+      Socket = module.createRequire(import.meta.url)('ws');
+      webSocketHeaders = true;
+    }
+  } catch { /* Browser and restricted renderer transports keep REST fallback. */ }
+  return {
+  webSocketHeaders,
   now: () => Date.now(),
-  connect(url, { onOpen, onMessage, onClose }) {
-    const ws = new WebSocket(url);
-    ws.addEventListener('open', () => onOpen());
+  connect(url, { headers = {}, onOpen, onMessage, onClose }) {
+    if (Object.keys(headers).length && !webSocketHeaders) throw new Error('WebSocket upgrade headers unavailable');
+    const ws = webSocketHeaders ? new Socket(url, { headers: { 'User-Agent': 'Tealstreet', ...headers } }) : new Socket(url);
+    let closed = false;
+    const reportClose = (code) => { if (!closed) { closed = true; onClose(code); } };
+    ws.addEventListener('error', () => reportClose(1006));
+    ws.addEventListener('open', () => { if (!closed) onOpen(); });
     ws.addEventListener('message', (event) => {
       if (typeof event.data === 'string') onMessage(event.data);
     });
-    ws.addEventListener('close', (event) => onClose(event.code));
+    ws.addEventListener('close', (event) => reportClose(event.code));
     return { send: (text) => ws.send(text), close: () => ws.close() };
   },
   async request({ method, url, headers, body }) {
-    const response = await fetch(url, { method, headers, body });
+    const response = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(20_000) });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
     return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };
   },
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (handle) => clearTimeout(handle),
-});
+};
+};

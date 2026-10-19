@@ -5,12 +5,14 @@ const init = vi.hoisted(() => ({
   bybit: vi.fn(async () => undefined),
   cryptocom: vi.fn(async () => undefined),
   okx: vi.fn(async () => undefined),
+  weex: vi.fn(async () => undefined),
 }));
 
 vi.mock('@tealstreet/safe-cex-wasm/web/binance', () => ({ default: init.binance, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/bybit', () => ({ default: init.bybit, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/cryptocom', () => ({ default: init.cryptocom, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/okx', () => ({ default: init.okx, WasmEngine: class {} }));
+vi.mock('@tealstreet/safe-cex-wasm/web/weex', () => ({ default: init.weex, WasmEngine: class {} }));
 
 beforeEach(() => {
   vi.resetModules();
@@ -25,14 +27,15 @@ describe.runIf(process.env.SAFE_CEX_WASM_TESTS)('browser Rust engine selection',
     expect(init.okx).toHaveBeenCalledTimes(1);
     expect(init.bybit).not.toHaveBeenCalled();
     expect(init.cryptocom).not.toHaveBeenCalled();
+    expect(init.weex).not.toHaveBeenCalled();
     expect(init.binance).not.toHaveBeenCalled();
   });
 
   it('initializes each requested family separately', async () => {
     const { loadWebEngine } = await import('../exchanges/rust/loadWebEngine');
-    const [binance, pm, bybit, cryptocom, okx] = await Promise.all(['binance', 'binancepm', 'bybit', 'cryptocom', 'okx'].map(loadWebEngine));
+    const [binance, pm, bybit, cryptocom, okx, weex] = await Promise.all(['binance', 'binancepm', 'bybit', 'cryptocom', 'okx', 'weex'].map(loadWebEngine));
     expect(binance).toBe(pm);
-    expect(new Set([binance, bybit, cryptocom, okx]).size).toBe(4);
+    expect(new Set([binance, bybit, cryptocom, okx, weex]).size).toBe(5);
     for (const initialize of Object.values(init)) expect(initialize).toHaveBeenCalledTimes(1);
   });
 
