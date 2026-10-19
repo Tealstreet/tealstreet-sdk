@@ -386,16 +386,8 @@ impl MexcFutures {
             _ => {}
         }
     }
-    pub fn apply_order(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        mut order: Order,
-        scope: Scope,
-        revision: u64,
-    ) {
-        if scope == Scope::Regular
-            && let Some(current) = cx.store.order(&order.id)
-        {
+    fn monotonic_order(cx: &Cx<'_, Pending>, mut order: Order) -> Order {
+        if let Some(current) = cx.store.order(&order.id) {
             if order.filled < current.filled {
                 let status = order.status;
                 order = current.clone();
@@ -408,6 +400,31 @@ impl MexcFutures {
             if current.status == OrderStatus::Closed {
                 order.status = OrderStatus::Closed;
             }
+        }
+        order
+    }
+    fn commit_order_snapshot(cx: &mut Cx<'_, Pending>, rows: Vec<Order>) {
+        let rows = rows
+            .into_iter()
+            .map(|o| {
+                if matches!(o.kind, OrderType::Limit | OrderType::Market) {
+                    Self::monotonic_order(cx, o)
+                } else {
+                    o
+                }
+            })
+            .collect();
+        cx.store.set_orders(rows);
+    }
+    pub fn apply_order(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut order: Order,
+        scope: Scope,
+        revision: u64,
+    ) {
+        if scope == Scope::Regular {
+            order = Self::monotonic_order(cx, order);
         }
         if order.status == OrderStatus::Open && self.account.terminal.contains_key(&order.id) {
             // A fill can precede cancellation but arrive after its HTTP ack.
@@ -581,7 +598,7 @@ impl MexcFutures {
             }
             _ => {
                 if raw.trigger_side == 1.0
-                    || (raw.trigger_side == 0.0 && raw.take_profit_price > 0.0)
+                    || (raw.trigger_side == 0.0 && raw.take_profit_price.unwrap_or(0.0) > 0.0)
                 {
                     OrderType::TakeProfit
                 } else {
@@ -593,9 +610,9 @@ impl MexcFutures {
             raw.price
         } else if scope == Scope::Stop {
             if kind == OrderType::TakeProfit {
-                raw.take_profit_price
+                raw.take_profit_price.unwrap_or(0.0)
             } else {
-                raw.stop_loss_price
+                raw.stop_loss_price.unwrap_or(0.0)
             }
         } else {
             raw.trigger_price
@@ -608,6 +625,13 @@ impl MexcFutures {
             OrderStatus::Canceled
         } else {
             OrderStatus::Open
+        };
+        let previous = cx.store.order(id);
+        let trigger = |value| match value {
+            Some(1.0) => Some(StopTriggerType::LastPrice),
+            Some(2.0) => Some(StopTriggerType::MarkPrice),
+            Some(3.0) => Some(StopTriggerType::IndexPrice),
+            _ => None,
         };
         Some(Order {
             id: id.to_string(),
@@ -636,10 +660,35 @@ impl MexcFutures {
             } else {
                 raw.create_time
             }),
-            trigger_type: None,
-            take_profit: None,
-            stop_loss: None,
+            trigger_type: match scope {
+                Scope::Plan => trigger(raw.trend),
+                Scope::Stop => trigger(if kind == OrderType::TakeProfit {
+                    raw.profit_trend
+                } else {
+                    raw.loss_trend
+                }),
+                _ => None,
+            }
+            .or_else(|| previous.and_then(|o| o.trigger_type)),
+            take_profit: match raw.take_profit_price {
+                Some(p) => (p > 0.0).then_some(p),
+                None => previous.and_then(|o| o.take_profit),
+            },
+            stop_loss: match raw.stop_loss_price {
+                Some(p) => (p > 0.0).then_some(p),
+                None => previous.and_then(|o| o.stop_loss),
+            },
             extra: Some(OrderExtra {
+                tp_trigger_type: trigger(raw.profit_trend).or_else(|| {
+                    previous
+                        .and_then(|o| o.extra.as_ref())
+                        .and_then(|e| e.tp_trigger_type)
+                }),
+                sl_trigger_type: trigger(raw.loss_trend).or_else(|| {
+                    previous
+                        .and_then(|o| o.extra.as_ref())
+                        .and_then(|e| e.sl_trigger_type)
+                }),
                 remaining_native: Some((native - filled_native).max(0.0)),
                 filled_in_placement_units: if scope == Scope::Regular {
                     Some(filled_native)
@@ -748,6 +797,16 @@ impl MexcFutures {
                     self.account
                         .settings_revision
                         .insert(symbol.clone(), self.account.revision);
+                    for row in &rows {
+                        let side = if row.position_type == 1.0 {
+                            PositionSide::Long
+                        } else {
+                            PositionSide::Short
+                        };
+                        self.account
+                            .rail_revision
+                            .insert((symbol.clone(), side), self.account.revision);
+                    }
                     self.account.rails.insert(symbol.clone(), rails);
                     cx.store.update_setting(&symbol, |s| {
                         s.leverage = rails.long;
@@ -961,7 +1020,7 @@ impl MexcFutures {
                                     rows.push(o.clone());
                                 }
                             }
-                            cx.store.set_orders(rows);
+                            Self::commit_order_snapshot(cx, rows);
                         } else {
                             let mut rows = s.orders;
                             for o in cx.store.orders() {
@@ -980,7 +1039,7 @@ impl MexcFutures {
                                     rows.push(o.clone());
                                 }
                             }
-                            cx.store.set_orders(rows);
+                            Self::commit_order_snapshot(cx, rows);
                         }
                     }
                 }

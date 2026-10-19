@@ -169,3 +169,22 @@ and cut a follow-up branch. Never touch master or force-push.
 - Post-merge root typecheck 44/44 and lint 28/28 pass. Parallel root tests hit
   one unrelated HyroTrader dynamic-import 5s timeout (6535 other tests passed);
   all 10 isolated HyroTrader tests pass. A serial root rerun is in progress.
+- PR opened: https://github.com/Tealstreet/tealstreet-sdk/pull/1304 (base
+  feat/rust-rewrite). Fresh adversarial reviewers found and posted: malformed
+  live depth accepted while advancing version; lagging REST cumulative fills;
+  attached brackets lost on amend; metadata/write acknowledgement ordering;
+  standalone stop references lost after WS reconciliation.
+- Rust fixes and committed regressions address each finding. Validate complete
+  deltas before any application; share monotonic merging across snapshot/live
+  commits; retain brackets and independent source metadata through optimistic,
+  WS, REST and amend paths; stamp side revisions for accepted metadata reads.
+  Four independent private reproductions now pass; both reviewers pass bounded
+  rereview. 50 MEXC tests and 14 engine tests pass; crate clippy passes.
+- Full root serial rerun passes all 27 tasks, with 6536/6536 safe-cex tests in
+  each test target. Original runtime PR CI passed all Rust jobs and PR TS/secret
+  checks. The first-branch push scan separately flagged a pre-existing Binance
+  documented signing test in older rewrite history (879fdc7461); no MEXC key
+  material was detected. New normal pushes scan only the new commit range.
+- Review-fix build: 1461609 bytes, below retained 1468006-byte target budget.
+  Rebuilt MEXC private/public replays pass; final TS reference fixes and remaining
+  regression gates/CI are checked before merge.

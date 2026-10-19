@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Event};
+use safe_cex_engine::{Action, Command, Event};
 use support::*;
 
 const POSITION: &str = r#"{"positionId":739113577038255616,"symbol":"BTC_USDT","positionType":1,"holdVol":60,"holdAvgPrice":60000,"leverage":10,"openType":1,"positionMode":2,"unrealized":6,"liquidatePrice":50000,"im":36,"updateTime":1700000000000}"#;
@@ -271,4 +271,83 @@ fn startup_mode_and_metadata_reads_respect_the_rate_limit_pause() {
         }),
     );
     assert!(e.drain_actions().all(|a| !matches!(a, Action::Http(_))));
+}
+
+#[test]
+fn metadata_read_cannot_be_overwritten_by_older_mutation_ack() {
+    let (mut e, _, reads, _) = private_started();
+    for r in reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    e.drain_actions().for_each(drop);
+    e.handle(
+        200.0,
+        Event::Command(Command::SetLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            leverage: 30.0,
+        }),
+    );
+    let mutation = requests(&mut e).remove(0);
+    e.handle(
+        210.0,
+        Event::Command(Command::FetchLeverage {
+            command: 2,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let read = requests(&mut e).remove(0);
+    response(
+        &mut e,
+        &read,
+        r#"{"success":true,"code":0,"data":[{"positionType":1,"leverage":40,"openType":2},{"positionType":2,"leverage":45,"openType":2}]}"#,
+    );
+    assert_eq!(
+        e.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(40.0)
+    );
+    response(&mut e, &mutation, r#"{"success":true,"code":0}"#);
+    assert_eq!(
+        e.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(40.0)
+    );
+}
+
+#[test]
+fn later_regular_and_full_rest_snapshots_cannot_regress_cumulative_fills() {
+    for full in [false, true] {
+        let (mut e, socket, reads, timer) = private_started();
+        for r in reads {
+            response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+        }
+        ws(
+            &mut e,
+            socket,
+            &format!(r#"{{"channel":"push.personal.order","data":{ORDER}}}"#),
+        );
+        e.drain_actions().for_each(drop);
+        if full {
+            ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+        } else {
+            e.handle(2100.0, Event::TimerFired { timer });
+        }
+        for r in requests(&mut e) {
+            let body = if r.url.contains("open_orders") {
+                format!(
+                    r#"{{"success":true,"code":0,"data":[{}]}}"#,
+                    ORDER.replace("\"dealVol\":10", "\"dealVol\":0")
+                )
+            } else {
+                r#"{"success":true,"code":0,"data":[]}"#.into()
+            };
+            response(&mut e, &r, &body);
+        }
+        let order = e.store().order("739113577038255617").unwrap();
+        assert_eq!(order.filled, 0.001);
+        assert_eq!(
+            order.extra.as_ref().unwrap().filled_in_placement_units,
+            Some(10.0)
+        );
+        assert_eq!(order.extra.as_ref().unwrap().remaining_native, Some(20.0));
+    }
 }

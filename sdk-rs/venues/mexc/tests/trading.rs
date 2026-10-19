@@ -755,3 +755,152 @@ fn definitive_filled_amend_read_updates_local_state_and_withholds_replacement() 
     let actions: Vec<_> = e.drain_actions().collect();
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
 }
+
+#[test]
+fn amend_retains_attached_bracket_prices_and_independent_sources_across_lifecycles() {
+    use safe_cex_engine::model::StopTriggerType;
+    for lifecycle in 0..3 {
+        let (mut e, socket, reads, _) = private_started();
+        for r in reads {
+            response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+        }
+        e.drain_actions().for_each(drop);
+        let raw = r#"{"channel":"push.personal.order","data":{"orderId":"one","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":0,"price":59000,"state":2}}"#;
+        if lifecycle < 2 {
+            let mut opts = order();
+            opts.stop_loss = Some(55000.0);
+            opts.take_profit = Some(65000.0);
+            opts.tp_trigger_type = Some(StopTriggerType::MarkPrice);
+            opts.sl_trigger_type = Some(StopTriggerType::IndexPrice);
+            e.handle(
+                200.0,
+                Event::Command(Command::PlaceOrders {
+                    command: 1,
+                    orders: vec![opts],
+                }),
+            );
+            let place = requests(&mut e).remove(0);
+            if lifecycle == 1 {
+                ws(&mut e, socket, raw);
+            }
+            reply(
+                &mut e,
+                &place,
+                300.0,
+                r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0}]}"#,
+            );
+            if lifecycle == 0 {
+                ws(&mut e, socket, raw);
+            }
+        } else {
+            ws(&mut e,socket,&raw.replace("\"state\":2","\"state\":2,\"stopLossPrice\":55000,\"takeProfitPrice\":65000,\"lossTrend\":3,\"profitTrend\":2"));
+        }
+        let stored = e.store().order("one").unwrap();
+        assert_eq!(stored.stop_loss, Some(55000.0));
+        assert_eq!(stored.take_profit, Some(65000.0));
+        e.drain_actions().for_each(drop);
+        e.handle(
+            2000.0,
+            Event::Command(Command::AmendOrder {
+                command: 2,
+                id: "one".into(),
+                price: Some(58000.0),
+                amount: None,
+            }),
+        );
+        let cancel = requests(&mut e).remove(0);
+        reply(
+            &mut e,
+            &cancel,
+            2100.0,
+            r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0}]}"#,
+        );
+        let read = requests(&mut e).remove(0);
+        reply(
+            &mut e,
+            &read,
+            2200.0,
+            r#"{"success":true,"code":0,"data":{"orderId":"one","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":0,"price":59000,"state":4,"stopLossPrice":55000,"takeProfitPrice":65000}}"#,
+        );
+        let replacement = requests(&mut e).remove(0);
+        let body = replacement.body.unwrap();
+        for expected in [
+            "\"stopLossPrice\":\"55000\"",
+            "\"takeProfitPrice\":\"65000\"",
+            "\"lossTrend\":3",
+            "\"profitTrend\":2",
+        ] {
+            assert!(body.contains(expected), "{body}");
+        }
+    }
+}
+
+#[test]
+fn plan_stop_amend_keeps_mark_source_after_ws() {
+    use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, StopTriggerType};
+    let (mut e, socket, reads, _) = private_started();
+    for r in reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    e.drain_actions().for_each(drop);
+    let opts = PlaceOrderOpts {
+        symbol: "BTCUSDT".into(),
+        kind: OrderType::StopLoss,
+        side: OrderSide::Sell,
+        amount: 60.0,
+        price: Some(55000.0),
+        trigger_price: None,
+        stop_loss: None,
+        take_profit: None,
+        reduce_only: Some(true),
+        time_in_force: None,
+        trigger_type: None,
+        tp_trigger_type: None,
+        sl_trigger_type: Some(StopTriggerType::MarkPrice),
+        client_order_id: None,
+        close: None,
+    };
+    e.handle(
+        200.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![opts],
+        }),
+    );
+    let place = requests(&mut e).remove(0);
+    assert!(place.body.as_ref().unwrap().contains("\"trend\":2"));
+    response(&mut e, &place, r#"{"success":true,"code":0,"data":"plan"}"#);
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.plan.order","data":{"id":"plan","symbol":"BTC_USDT","side":4,"orderType":5,"vol":60,"triggerPrice":55000,"triggerType":2,"trend":2,"state":1}}"#,
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        2000.0,
+        Event::Command(Command::AmendOrder {
+            command: 2,
+            id: "plan".into(),
+            price: Some(54000.0),
+            amount: None,
+        }),
+    );
+    let cancel = requests(&mut e).remove(0);
+    e.handle(
+        2100.0,
+        Event::HttpResponse {
+            request: cancel.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"success":true,"code":0}"#,
+            },
+        },
+    );
+    let replacement = requests(&mut e).remove(0);
+    assert!(
+        replacement.body.as_ref().unwrap().contains("\"trend\":2"),
+        "{}",
+        replacement.body.unwrap()
+    );
+}

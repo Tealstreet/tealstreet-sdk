@@ -239,8 +239,12 @@ impl MexcFutures {
             take_profit_price: opts
                 .take_profit
                 .map(|v| num::format(num::adjust(v, m.precision.price))),
-            loss_trend: opts.stop_loss.map(|_| trend(opts.sl_trigger_type)),
-            profit_trend: opts.take_profit.map(|_| trend(opts.tp_trigger_type)),
+            loss_trend: opts
+                .stop_loss
+                .map(|_| trend(opts.sl_trigger_type.or(opts.trigger_type))),
+            profit_trend: opts
+                .take_profit
+                .map(|_| trend(opts.tp_trigger_type.or(opts.trigger_type))),
         })
     }
     fn placement(
@@ -336,8 +340,16 @@ impl MexcFutures {
             let body = json(&Stop {
                 position_id,
                 vol: p.contracts / m.contract_size.unwrap_or(1.0),
-                loss_trend: if take { 1 } else { trend(opts.sl_trigger_type) },
-                profit_trend: if take { trend(opts.tp_trigger_type) } else { 1 },
+                loss_trend: if take {
+                    1
+                } else {
+                    trend(opts.sl_trigger_type.or(opts.trigger_type))
+                },
+                profit_trend: if take {
+                    trend(opts.tp_trigger_type.or(opts.trigger_type))
+                } else {
+                    1
+                },
                 stop_loss_price: (!take).then(|| trigger_price.clone()),
                 take_profit_price: take.then_some(trigger_price),
                 profit_loss_vol_type: "SAME",
@@ -396,11 +408,14 @@ impl MexcFutures {
             trigger_type: if gte { 1 } else { 2 },
             execute_cycle: 2,
             order_type: 5,
-            trend: trend(if take {
-                opts.tp_trigger_type
-            } else {
-                opts.sl_trigger_type
-            }),
+            trend: trend(
+                (if take {
+                    opts.tp_trigger_type
+                } else {
+                    opts.sl_trigger_type
+                })
+                .or(opts.trigger_type),
+            ),
             position_mode: if cx.store.hedged() { 1 } else { 2 },
             reduce_only: true,
         })?;
@@ -640,10 +655,10 @@ impl MexcFutures {
                         reduce_only: Some(o.reduce_only),
                         time_in_force: o.time_in_force,
                         trigger_type: o.trigger_type,
-                        tp_trigger_type: None,
-                        sl_trigger_type: None,
-                        stop_loss: None,
-                        take_profit: None,
+                        tp_trigger_type: o.extra.as_ref().and_then(|e| e.tp_trigger_type),
+                        sl_trigger_type: o.extra.as_ref().and_then(|e| e.sl_trigger_type),
+                        stop_loss: o.stop_loss,
+                        take_profit: o.take_profit,
                         client_order_id: None,
                         close: o.close,
                     };
@@ -1023,6 +1038,20 @@ impl MexcFutures {
                     "MEXC original order became invalid during amend; replacement withheld".into(),
                 );
             }
+            opts.take_profit = if raw.take_profit_price.is_some() {
+                order.take_profit
+            } else {
+                order.take_profit.or(opts.take_profit)
+            };
+            opts.stop_loss = if raw.stop_loss_price.is_some() {
+                order.stop_loss
+            } else {
+                order.stop_loss.or(opts.stop_loss)
+            };
+            if let Some(extra) = &order.extra {
+                opts.tp_trigger_type = extra.tp_trigger_type.or(opts.tp_trigger_type);
+                opts.sl_trigger_type = extra.sl_trigger_type.or(opts.sl_trigger_type);
+            }
             opts.amount = intent.amount.unwrap_or_else(|| {
                 order
                     .extra
@@ -1060,6 +1089,19 @@ impl MexcFutures {
             return;
         }
         if cx.store.order(&id).is_some() {
+            if scope == Scope::Regular {
+                cx.store.update_order(&id, |o| {
+                    o.take_profit = o.take_profit.or(opts.take_profit);
+                    o.stop_loss = o.stop_loss.or(opts.stop_loss);
+                    let extra = o.extra.get_or_insert_with(OrderExtra::default);
+                    extra.tp_trigger_type = extra
+                        .tp_trigger_type
+                        .or(opts.tp_trigger_type.or(opts.trigger_type));
+                    extra.sl_trigger_type = extra
+                        .sl_trigger_type
+                        .or(opts.sl_trigger_type.or(opts.trigger_type));
+                });
+            }
             return;
         }
         if opts.kind == OrderType::Market {
@@ -1100,10 +1142,16 @@ impl MexcFutures {
             client_order_id: None,
             time_in_force: Some(opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel)),
             last_update: cx.now,
-            trigger_type: None,
+            trigger_type: match opts.kind {
+                OrderType::StopLoss => opts.sl_trigger_type.or(opts.trigger_type),
+                OrderType::TakeProfit => opts.tp_trigger_type.or(opts.trigger_type),
+                _ => None,
+            },
             take_profit: opts.take_profit,
             stop_loss: opts.stop_loss,
             extra: Some(OrderExtra {
+                tp_trigger_type: opts.tp_trigger_type.or(opts.trigger_type),
+                sl_trigger_type: opts.sl_trigger_type.or(opts.trigger_type),
                 remaining_native: Some(native),
                 ..Default::default()
             }),

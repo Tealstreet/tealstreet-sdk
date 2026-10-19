@@ -101,6 +101,8 @@ const KNOWN_TS_FIXES = {
     // over a late cancellation acknowledgement. Failed reads preserve state.
     // Regular cumulative fills stay monotonic; terminal rows never reopen.
     // Stale amend reads cannot regress those fills or place a replacement.
+    // REST/optimistic rows retain cumulative fills; amendments retain attached
+    // brackets and standalone stop sources through venue reconciliation.
     // Repeated private execution IDs emit one fill within the replay window.
   },
 };

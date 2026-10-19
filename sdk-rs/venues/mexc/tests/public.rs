@@ -314,3 +314,50 @@ fn invalid_rest_depth_never_commits_a_partial_or_empty_anchor() {
         );
     }
 }
+
+#[test]
+fn malformed_live_or_buffered_deltas_invalidate_before_advancing_the_anchor() {
+    for buffered in [false, true] {
+        for levels in [
+            "[[60000,50],[59999,-1]]",
+            "[[60000,50],[0,1]]",
+            "[[60000,null]]",
+        ] {
+            let (mut e, socket) = started();
+            e.drain_actions().for_each(drop);
+            e.handle(
+                150.0,
+                Event::Command(Command::SubscribeOrderBook {
+                    symbol: "BTCUSDT".into(),
+                }),
+            );
+            let r = requests(&mut e).remove(0);
+            let anchor =
+                r#"{"success":true,"code":0,"data":{"version":10,"bids":[[60000,10]],"asks":[]}}"#;
+            if !buffered {
+                response(&mut e, &r, anchor);
+            }
+            ws(
+                &mut e,
+                socket,
+                &format!(
+                    r#"{{"channel":"push.depth","symbol":"BTC_USDT","data":{{"version":11,"bids":{levels},"asks":[]}}}}"#
+                ),
+            );
+            if buffered {
+                response(&mut e, &r, anchor);
+            }
+            assert!(e.book("BTCUSDT").is_none());
+            ws(
+                &mut e,
+                socket,
+                r#"{"channel":"push.depth","symbol":"BTC_USDT","data":{"version":12,"bids":[[59998,20]],"asks":[]}}"#,
+            );
+            assert!(e.book("BTCUSDT").is_none());
+            assert!(
+                e.drain_actions()
+                    .any(|a| matches!(a, Action::SetTimer { .. }))
+            );
+        }
+    }
+}

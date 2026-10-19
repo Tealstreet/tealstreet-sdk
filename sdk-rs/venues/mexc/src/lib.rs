@@ -205,6 +205,15 @@ impl MexcFutures {
         }
     }
     fn depth(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, depth: Depth) {
+        if depth
+            .bids
+            .iter()
+            .chain(&depth.asks)
+            .any(|Level(p, v, _)| *p <= 0.0 || *v < 0.0)
+        {
+            self.resync(cx, symbol);
+            return;
+        }
         let size = cx
             .store
             .market(symbol)
@@ -442,11 +451,10 @@ impl Venue for MexcFutures {
                     cx.store.update_ticker(&symbol, |t| *t = ticker);
                 }
             }
-            "push.depth" => {
-                if let Ok(depth) = serde_json::from_str(data.get()) {
-                    self.depth(cx, &symbol, depth);
-                }
-            }
+            "push.depth" => match serde_json::from_str(data.get()) {
+                Ok(depth) => self.depth(cx, &symbol, depth),
+                Err(_) => self.resync(cx, &symbol),
+            },
             "push.kline" => {
                 if let Ok(raw) = serde_json::from_str::<Kline<'_>>(data.get()) {
                     let interval = self

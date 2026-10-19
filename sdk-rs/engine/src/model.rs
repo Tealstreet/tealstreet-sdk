@@ -168,6 +168,10 @@ pub struct Ticker {
 #[serde(rename_all = "camelCase")]
 pub struct OrderExtra {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tp_trigger_type: Option<StopTriggerType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sl_trigger_type: Option<StopTriggerType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub remaining_native: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filled_in_placement_units: Option<f64>,

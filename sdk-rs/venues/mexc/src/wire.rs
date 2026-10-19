@@ -260,6 +260,13 @@ pub struct PositionRow<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderRow<'a> {
+    #[serde(default, deserialize_with = "optional_number")]
+    pub trend: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub profit_trend: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub loss_trend: Option<f64>,
+
     #[serde(default)]
     pub reduce_only: bool,
     #[serde(borrow, default, deserialize_with = "id")]
@@ -290,10 +297,10 @@ pub struct OrderRow<'a> {
     pub vol_type: f64,
     #[serde(default, deserialize_with = "number")]
     pub trigger_side: f64,
-    #[serde(default, deserialize_with = "number")]
-    pub take_profit_price: f64,
-    #[serde(default, deserialize_with = "number")]
-    pub stop_loss_price: f64,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub take_profit_price: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub stop_loss_price: Option<f64>,
     #[serde(default, deserialize_with = "number")]
     pub update_time: f64,
     #[serde(default, deserialize_with = "number")]
