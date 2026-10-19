@@ -291,6 +291,7 @@ fn private_signing_failure_sends_no_auth_or_subscribe_and_recovers() {
         1,
         "shared recovery reports the original cause once"
     );
+    assert!(!reports[0].is_empty(), "source signing cause is nonempty");
     assert!(
         logs.iter().any(|message| message.contains(&reports[0])),
         "runtime report preserves the cause from the source authentication catch"
