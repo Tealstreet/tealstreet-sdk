@@ -58,7 +58,7 @@ test('real native transport failures preserve AxiosError name and ECONNREFUSED c
     assert.ok(error instanceof Error);
     assert.equal(error.name, 'AxiosError');
     assert.equal(error.code, 'ECONNREFUSED');
-    assert.match(error.message, /^connect ECONNREFUSED http:\/\/127\.0\.0\.1:/);
+    assert.equal(error.message, '[bitrue] Network error (ECONNREFUSED) to /fapi/v2/account');
     return true;
   });
 });

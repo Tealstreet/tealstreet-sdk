@@ -471,5 +471,157 @@
     "category": "non-decoder",
     "reason": "The live Rc<RefCell<Vec<MessageCallback>>> owns mutable native callback registrations; its callable elements consume parsed messages and it has no raw Deserialize input route. It is not an ordinary message decoder.",
     "evidence": "binding::exchange::structural_alias_tests::native_callback_registry_keeps_live_lists_and_original_errors constructs the production BingxExchange, drives its actual public socket, observes captured-list append/replacement and payload identity, and propagates the original callback error/code referent. tests/handler-list-controls.py proves a production snapshot-list fault fails the native dispatch assertion before exact restoration."
+  },
+  "safe_cex_venue_bingx::exchange::ApiFactory": {
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "dyn_trait": {
+        "traits": [
+          {
+            "trait": {
+              "path": "core::ops::function::Fn",
+              "args": {
+                "parenthesized": {
+                  "inputs": [
+                    {
+                      "resolved_path": {
+                        "path": "safe_cex_types::ExchangeOptions",
+                        "args": null
+                      }
+                    }
+                  ],
+                  "output": {
+                    "resolved_path": {
+                      "path": "core::result::Result",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::rc::Rc",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_bingx::api::BingxApi",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "safe_cex_exchange::runtime::ExchangeError",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "generic_params": []
+          }
+        ],
+        "lifetime": "'a"
+      }
+    },
+    "target": {
+      "dyn_trait": {
+        "traits": [
+          {
+            "trait": {
+              "path": "core::ops::function::Fn",
+              "args": {
+                "parenthesized": {
+                  "inputs": [
+                    {
+                      "resolved_path": {
+                        "path": "safe_cex_types::ExchangeOptions",
+                        "args": null
+                      }
+                    }
+                  ],
+                  "output": {
+                    "resolved_path": {
+                      "path": "core::result::Result",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::rc::Rc",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_bingx::api::BingxApi",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "safe_cex_exchange::runtime::ExchangeError",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "generic_params": []
+          }
+        ],
+        "lifetime": "'a"
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The single reviewed ApiFactory<'static> instantiation is a constructor capability: it accepts an already typed ExchangeOptions and returns Rc<BingxApi> or ExchangeError. ExchangeHost::secondary invokes the supplied factory; the alias itself exposes no encoded-input decoder. This classification makes no claim for other lifetimes or the constructor's behavior.",
+    "evidence": "The canonical compiler inventory pins the source declaration, lifetime parameters and full expanded dyn Fn signature. The existing reviewed-unsized production binding compiles invariant pointer-type equality against the independently authored static signature and executes the ordinary alias decoder/conversion-trait probes; signature or lifetime drift must fail. Existing BingX binding factory tests separately exercise configured construction and routing."
   }
 }
