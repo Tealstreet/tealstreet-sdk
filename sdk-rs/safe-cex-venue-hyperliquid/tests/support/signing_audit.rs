@@ -1,7 +1,7 @@
 //! Exercise the installed signer from a constructed production exchange.
 use super::{HyperliquidDependencies, HyperliquidExchange, RuntimeClock};
-use crate::{binding_test_runtime as host, rate_limit::RateLimiter, realm::Value};
-use safe_cex_exchange::native_store::DefaultStore;
+use crate::{binding_test_runtime as host, rate_limit::RateLimiter};
+use safe_cex_exchange::{native_store::DefaultStore, js_runtime::value::Js};
 use serde_json::{Value as Json, json};
 use std::{
     process::Command,
@@ -53,9 +53,9 @@ fn run(success: bool) {
         let exchange = fixture();
         let mut r = exchange.binding.borrow().as_ref().unwrap().realm.clone();
         let make_wallet = r.import("createWalletFromPrivateKey").unwrap();
-        let wallet = r.call(&make_wallet, &Value::Undefined, &[Value::str(&format!("0x{}", "11".repeat(32)))]).unwrap();
+        let wallet = r.call(&make_wallet, &Js::Undefined, &[Js::str(&format!("0x{}", "11".repeat(32)))]).unwrap();
         let signer = r.import("signL1Action").unwrap();
-        let action = r.from_serde(&json!({"type":"cancel","cancels":[{"a":1,"o":1234}]}));
+        let action = r.encode_json(&json!({"type":"cancel","cancels":[{"a":1,"o":1234}]}));
         let mut completed = 0;
         for row in source().iter().filter(|row| row["ok"] == success) {
             let id = row["id"].as_str().unwrap();
@@ -68,10 +68,10 @@ fn run(success: bool) {
             let bytes = f64::to_le_bytes(nonce);
             let spelling = bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
             assert_eq!(spelling, row["nonceBits"], "native nonce bits {id}");
-            let returned = r.call(&signer, &Value::Undefined, &[wallet.clone(), action.clone(), Value::Null, Value::Number(nonce), Value::Bool(row["mainnet"].as_bool().unwrap())]);
+            let returned = r.call(&signer, &Js::Undefined, &[wallet.clone(), action.clone(), Js::Null, Js::Number(nonce), Js::Bool(row["mainnet"].as_bool().unwrap())]);
             assert_eq!(returned.is_err(), row["syncThrow"].as_bool().unwrap(), "HL_SIGNING sync boundary {id}");
             let pending = returned.unwrap();
-            assert_eq!(pending.promise().is_some(), row["promise"], "HL_SIGNING Promise boundary {id}");
+            assert_eq!(matches!(&pending, Js::Promise(_)), row["promise"], "HL_SIGNING Promise boundary {id}");
             let result = r.await_value(pending).await;
             if success {
                 let signature = result.unwrap();
@@ -80,17 +80,17 @@ fn run(success: bool) {
                     assert_eq!(r.to_rust_string(&actual).unwrap(), row["signature"][key], "HL_SIGNING {id}/{key}");
                 }
                 let v = r.get_str(&signature, "v").unwrap();
-                assert_eq!(v.as_number().unwrap().to_bits(), row["signature"]["v"].as_f64().unwrap().to_bits(), "HL_SIGNING {id}/v");
+                assert_eq!(v.as_f64().unwrap().to_bits(), row["signature"]["v"].as_f64().unwrap().to_bits(), "HL_SIGNING {id}/v");
             } else {
                 let error = result.expect_err("fractional nonce rejects the installed signer");
-                let name = r.get_str(&error, "name").unwrap();
-                let message = r.get_str(&error, "message").unwrap();
+                let name = r.get_str(&error.value, "name").unwrap();
+                let message = r.get_str(&error.value, "message").unwrap();
                 let base = r.global_binding("Error").unwrap();
                 let range = r.global_binding("RangeError").unwrap();
                 let profile = json!({
                     "name": r.to_rust_string(&name).unwrap(), "message": r.to_rust_string(&message).unwrap(),
-                    "display": r.to_rust_string(&error).unwrap(),
-                    "isError": r.instance_of(&error, &base).unwrap(), "isRangeError": r.instance_of(&error, &range).unwrap(),
+                    "display": r.to_rust_string(&error.value).unwrap(),
+                    "isError": r.instance_of(&error.value, &base).unwrap(), "isRangeError": r.instance_of(&error.value, &range).unwrap(),
                 });
                 assert_eq!(profile, row["error"], "HL_SIGNING native nonce rejection {id}");
             }

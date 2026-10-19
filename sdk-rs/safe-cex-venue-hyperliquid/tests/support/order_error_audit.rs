@@ -1,11 +1,8 @@
 //! Observe the actual bound placement consumer, not the standalone Result adapter.
 use super::{HyperliquidDependencies, HyperliquidExchange, RuntimeClock};
 use crate::binding_test_runtime as host;
-use crate::{
-    rate_limit::RateLimiter,
-    realm::{PropKey, Realm, Value},
-};
-use safe_cex_exchange::native_store::DefaultStore;
+use crate::{rate_limit::RateLimiter, host::Host};
+use safe_cex_exchange::{native_store::DefaultStore, js_runtime::value::Js};
 use serde_json::{Value as Json, json};
 use std::{
     cell::Cell,
@@ -48,7 +45,7 @@ fn fixture() -> (Rc<HyperliquidExchange>, Rc<host::Host>) {
     (exchange, runtime)
 }
 
-fn profile(r: &mut Realm, error: &Value) -> Json {
+fn profile(r: &mut Host, error: &Js) -> Json {
     let class = r.import("HyperliquidUnreadableOrderResponseError").unwrap();
     let base = r.global_binding("Error").unwrap();
     let prototype = r.get_str(&class, "prototype").unwrap();
@@ -64,13 +61,9 @@ fn profile(r: &mut Realm, error: &Value) -> Json {
         .call_method(&object, "getPrototypeOf", std::slice::from_ref(&class))
         .unwrap();
     let descriptor = |key: &str| {
-        let object = error.object().unwrap().borrow();
-        object
-            .props
-            .iter()
-            .find(|p| p.key.units() == Some(key.encode_utf16().collect::<Vec<_>>().as_slice()))
-            .map(|p| json!([p.enumerable, p.writable, p.configurable]))
-            .unwrap_or(Json::Null)
+        let descriptor = object.call_method("getOwnPropertyDescriptor", vec![error.clone(), Js::str(key)]).unwrap();
+        if matches!(descriptor, Js::Undefined) { return Json::Null; }
+        json!([descriptor.get("enumerable").unwrap().truthy(), descriptor.get("writable").unwrap().truthy(), descriptor.get("configurable").unwrap().truthy()])
     };
     let name = r.get_str(error, "name").unwrap();
     let message = r.get_str(error, "message").unwrap();
@@ -79,14 +72,14 @@ fn profile(r: &mut Realm, error: &Value) -> Json {
         .own_keys(error, true)
         .unwrap()
         .iter()
-        .map(|key| String::from_utf16(key.units().unwrap()).unwrap())
+        .map(|key| String::from_utf16(key.as_str().unwrap()).unwrap())
         .collect();
     json!({
         "name": r.to_string(&name).unwrap().as_ref(), "message": r.to_string(&message).unwrap().as_ref(),
         "display": r.to_string(error).unwrap().as_ref(),
         "isError": r.instance_of(error, &base).unwrap(), "isUnreadable": r.instance_of(error, &class).unwrap(),
-        "directPrototype": direct.strict_equal(&prototype), "constructor": constructor.strict_equal(&class),
-        "prototypeParent": parent.strict_equal(&base_prototype), "constructorParent": class_parent.strict_equal(&base),
+        "directPrototype": direct.strict_equals(&prototype), "constructor": constructor.strict_equals(&class),
+        "prototypeParent": parent.strict_equals(&base_prototype), "constructorParent": class_parent.strict_equals(&base),
         "nameDescriptor": descriptor("name"), "messageDescriptor": descriptor("message"), "enumerableKeys": enumerable_keys,
     })
 }
@@ -100,7 +93,7 @@ fn order_error_audit_bound_constructor_retains_error_inheritance_and_units() {
     for row in source()["constructors"].as_array().unwrap() {
         let units: Vec<u16> = serde_json::from_value(row["message"].clone()).unwrap();
         let error = r
-            .construct(&class, &[Value::String(units.into())], None)
+            .construct(&class, &[Js::utf16(&units)], None)
             .unwrap();
         assert_eq!(
             profile(&mut r, &error),
@@ -119,7 +112,7 @@ fn order_error_audit_real_response_consumer_reconciles_only_unreadable_errors() 
     let seen = refreshes.clone();
     let observer = r.native("observeOrderRefresh", 0, move |_, _, _| {
         seen.set(seen.get() + 1);
-        Ok(Value::Undefined)
+        Ok(Js::Undefined)
     });
     r.set_str(&binding.instance, "scheduleOrderRefresh", observer)
         .unwrap();
@@ -127,9 +120,9 @@ fn order_error_audit_real_response_consumer_reconciles_only_unreadable_errors() 
     for row in source()["cases"].as_array().unwrap() {
         let before = refreshes.get();
         let input = if row["undefined"] == true {
-            Value::Undefined
+            Js::Undefined
         } else {
-            r.from_serde(&row["input"])
+            r.encode_json(&row["input"])
         };
         let result = r.call_method(
             &binding.instance,
@@ -139,7 +132,7 @@ fn order_error_audit_real_response_consumer_reconciles_only_unreadable_errors() 
         if let Some(expected) = row.get("error") {
             let error = result.expect_err("HL_ORDER_ERROR malformed response must reject");
             assert_eq!(
-                profile(&mut r, &error),
+                profile(&mut r, &error.value),
                 *expected,
                 "HL_ORDER_ERROR actual bound parser/catch Error profile {row}"
             );
@@ -158,8 +151,5 @@ fn order_error_audit_real_response_consumer_reconciles_only_unreadable_errors() 
         );
     }
     assert_eq!(refreshes.get(), 9);
-    assert!(
-        r.has_own(&binding.instance, &PropKey::str("scheduleOrderRefresh"))
-            .unwrap()
-    );
+    assert!(binding.instance.has_own("scheduleOrderRefresh"));
 }
