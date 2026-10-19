@@ -170,7 +170,7 @@ fn native_api_signing_retains_original_error_through_transport() {
             });
             let request = client.build_request("/exchange", &body).unwrap();
             let error = client
-                .prepare_request(request.clone(), true)
+                .prepare_request(request.clone(), true, &|_| Ok(()))
                 .await
                 .unwrap_err();
             let TransportError::Rejected(origin) = &error else {
