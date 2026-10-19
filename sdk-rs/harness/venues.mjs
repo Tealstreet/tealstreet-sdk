@@ -183,6 +183,22 @@ export const VENUES = {
       };
     },
   },
+  bitget: {
+    rust: 'bitget',
+    ts: { module: `${root}/bitget/bitget.exchange.ts`, className: 'BitgetExchange', name: 'bitget' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.entries(exchange.publicWebsocket.messageHandlers).filter(([key, handlers]) => key.startsWith('orderBook_') && handlers.length).length >= count,
+    privateSocket: '/ws/private',
+    options: { passphrase: 'replay-passphrase' },
+  },
+  bitgetusdc: {
+    rust: 'bitgetusdc',
+    ts: { module: `${root}/bitget/bitgetusdc.exchange.ts`, className: 'BitgetUSDCExchange', name: 'bitgetusdc' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.entries(exchange.publicWebsocket.messageHandlers).filter(([key, handlers]) => key.startsWith('orderBook_') && handlers.length).length >= count,
+    privateSocket: '/ws/private',
+    options: { passphrase: 'replay-passphrase' },
+  },
   backpack: {
     rust: 'backpack',
     ts: { module: `${root}/backpack/backpack.exchange.ts`, className: 'BackpackExchange', name: 'backpack' },
