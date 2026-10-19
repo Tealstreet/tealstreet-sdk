@@ -351,3 +351,275 @@ fn later_regular_and_full_rest_snapshots_cannot_regress_cumulative_fills() {
         assert_eq!(order.extra.as_ref().unwrap().remaining_native, Some(20.0));
     }
 }
+
+fn scoped_ready() -> (TestEngine, safe_cex_engine::SocketId) {
+    let mut markets: serde_json::Value = serde_json::from_str(MARKETS).unwrap();
+    let mut eth = markets["data"][0].clone();
+    eth["symbol"] = "ETH_USDT".into();
+    eth["baseCoin"] = "ETH".into();
+    markets["data"].as_array_mut().unwrap().push(eth);
+    let (mut e, socket, reads, _) = private_started_with_markets(&markets.to_string());
+    for r in reads {
+        let body = if r.url.contains("open_orders") {
+            format!(
+                r#"{{"success":true,"code":0,"data":[{ORDER},{}]}}"#,
+                ORDER
+                    .replace("BTC_USDT", "ETH_USDT")
+                    .replace("739113577038255617", "739113577038255618")
+            )
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#.into()
+        };
+        response(&mut e, &r, &body);
+    }
+    e.drain_actions().for_each(drop);
+    (e, socket)
+}
+fn place_scoped_plan(e: &mut TestEngine, symbol: &str, now: f64) -> safe_cex_engine::TimerId {
+    let opts = serde_json::from_value(serde_json::json!({
+        "symbol": symbol, "type": "stop_market", "side": "sell", "amount": 10, "price": 55000,
+    }))
+    .unwrap();
+    e.handle(
+        now,
+        Event::Command(Command::PlaceOrders {
+            command: now as u32,
+            orders: vec![opts],
+        }),
+    );
+    let request = requests(e).remove(0);
+    e.handle(
+        now + 10.0,
+        Event::HttpResponse {
+            request: request.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: &format!(r#"{{"success":true,"code":0,"data":"placed-{symbol}-{now}"}}"#),
+            },
+        },
+    );
+    e.drain_actions()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if at_ms == now + 1510.0 => Some(timer),
+            _ => None,
+        })
+        .unwrap()
+}
+
+#[test]
+fn scoped_stop_reconciliation_preserves_other_symbols_and_newer_stream_updates() {
+    let (mut e, socket) = scoped_ready();
+    let timer = place_scoped_plan(&mut e, "BTCUSDT", 300.0);
+    e.handle(1810.0, Event::TimerFired { timer });
+    let reads = requests(&mut e);
+    assert_eq!(reads.len(), 3);
+    assert!(reads.iter().any(|r| {
+        r.url
+            .contains("/open_orders/BTC_USDT?page_num=1&page_size=100")
+    }));
+    for r in reads.iter().filter(|r| !r.url.contains("open_orders")) {
+        assert!(r.url.contains("symbol=BTC_USDT"));
+        assert!(r.url.contains("start_time=-7689598190"));
+    }
+    let text = format!(
+        r#"{{"channel":"push.personal.order","data":{}}}"#,
+        ORDER.replace("\"state\":2", "\"state\":4")
+    );
+    e.handle(
+        1820.0,
+        Event::WsMessage {
+            socket,
+            text: &text,
+        },
+    );
+    for r in reads {
+        let body = if r.url.contains("open_orders") {
+            format!(r#"{{"success":true,"code":0,"data":[{ORDER}]}}"#)
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#.into()
+        };
+        response(&mut e, &r, &body);
+    }
+    assert!(e.store().order("739113577038255618").is_some());
+    assert!(
+        !e.store()
+            .orders()
+            .iter()
+            .any(|o| o.id == "739113577038255617"
+                && o.status == safe_cex_engine::model::OrderStatus::Open)
+    );
+    assert!(e.store().loaded().orders);
+}
+
+#[test]
+fn failed_scoped_stop_snapshot_never_commits_successful_subset() {
+    let (mut e, _) = scoped_ready();
+    let timer = place_scoped_plan(&mut e, "BTCUSDT", 300.0);
+    e.handle(1810.0, Event::TimerFired { timer });
+    let reads = requests(&mut e);
+    assert_eq!(reads.len(), 3);
+    for r in reads {
+        response(
+            &mut e,
+            &r,
+            if r.url.contains("planorder") {
+                r#"{"success":false,"code":510,"data":[]}"#
+            } else {
+                r#"{"success":true,"code":0,"data":[]}"#
+            },
+        );
+    }
+    assert!(e.store().order("739113577038255617").is_some());
+    assert!(e.store().order("739113577038255618").is_some());
+    assert!(
+        e.store()
+            .orders()
+            .iter()
+            .any(|order| order.id.starts_with("placed-"))
+    );
+}
+
+#[test]
+fn scoped_refreshes_debounce_per_symbol_and_wait_for_other_order_batches() {
+    let (mut e, _) = scoped_ready();
+    let btc_timer = place_scoped_plan(&mut e, "BTCUSDT", 300.0);
+    let eth_timer = place_scoped_plan(&mut e, "ETHUSDT", 500.0);
+    e.handle(1810.0, Event::TimerFired { timer: btc_timer });
+    let btc_reads = requests(&mut e);
+    assert_eq!(btc_reads.len(), 3);
+    e.handle(2010.0, Event::TimerFired { timer: eth_timer });
+    assert!(requests(&mut e).is_empty());
+    for r in btc_reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    let eth_reads = requests(&mut e);
+    assert_eq!(eth_reads.len(), 3);
+    assert!(eth_reads.iter().all(|r| r.url.contains("ETH_USDT")));
+    for r in eth_reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    // Scoped reconciliation cannot retire an existing regular row merely
+    // because the venue's immediate post-placement snapshot is lagging.
+    assert!(e.store().order("739113577038255617").is_some());
+    assert!(e.store().order("739113577038255618").is_some());
+    assert!(e.store().loaded().orders);
+}
+
+#[test]
+fn stream_order_before_placement_ack_still_schedules_scoped_reconciliation() {
+    let (mut e, socket) = scoped_ready();
+    let opts = serde_json::from_str(
+        r#"{"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":10,"price":55000}"#,
+    )
+    .unwrap();
+    e.handle(
+        300.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![opts],
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    e.handle(305.0, Event::WsMessage { socket, text: r#"{"channel":"push.personal.plan.order","data":{"id":"stream-first","symbol":"BTC_USDT","side":4,"vol":10,"triggerPrice":55000,"triggerType":2,"state":1}}"# });
+    e.handle(
+        310.0,
+        Event::HttpResponse {
+            request: request.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: r#"{"success":true,"code":0,"data":"stream-first"}"#,
+            },
+        },
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::SetTimer {
+                timer,
+                at_ms: 1810.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1810.0, Event::TimerFired { timer });
+    let reads = requests(&mut e);
+    assert_eq!(reads.len(), 3);
+    assert!(reads.iter().all(|r| r.url.contains("BTC_USDT")));
+}
+
+#[test]
+fn returned_regular_rows_keep_terminal_stream_state_through_regular_and_full_snapshots() {
+    use safe_cex_engine::model::OrderStatus;
+    for full in [false, true] {
+        for (state, status) in [(4, OrderStatus::Canceled), (3, OrderStatus::Closed)] {
+            for returned in [0, 10, 20] {
+                let (mut e, socket, reads, timer) = private_started();
+                for r in reads {
+                    response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+                }
+                e.drain_actions().for_each(drop);
+                // Start the read before the authoritative terminal stream update.
+                if full {
+                    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+                } else {
+                    e.handle(2100.0, Event::TimerFired { timer });
+                }
+                let reads = requests(&mut e);
+                let text = format!(
+                    r#"{{"channel":"push.personal.order","data":{}}}"#,
+                    ORDER.replace("\"state\":2", &format!("\"state\":{state}"))
+                );
+                ws(&mut e, socket, &text);
+                for r in reads {
+                    let body = if r.url.contains("open_orders") {
+                        format!(
+                            r#"{{"success":true,"code":0,"data":[{}]}}"#,
+                            ORDER.replace("\"dealVol\":10", &format!("\"dealVol\":{returned}"))
+                        )
+                    } else {
+                        r#"{"success":true,"code":0,"data":[]}"#.into()
+                    };
+                    response(&mut e, &r, &body);
+                }
+                let order = e.store().order("739113577038255617").unwrap();
+                assert_eq!(order.status, status);
+                assert_eq!(order.filled, f64::from(returned.max(10)) * 0.0001);
+                assert_eq!(
+                    order.extra.as_ref().unwrap().filled_in_placement_units,
+                    Some(f64::from(returned.max(10)))
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn absent_terminal_regular_rows_are_removed_and_tombstones_cannot_be_restored_by_lagging_rest() {
+    let (mut e, socket, reads, timer) = private_started();
+    for r in reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    let text = format!(
+        r#"{{"channel":"push.personal.order","data":{}}}"#,
+        ORDER.replace("\"state\":2", "\"state\":4")
+    );
+    ws(&mut e, socket, &text);
+    e.drain_actions().for_each(drop);
+    e.handle(2100.0, Event::TimerFired { timer });
+    for r in requests(&mut e) {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    assert!(e.store().order("739113577038255617").is_none());
+    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+    for r in requests(&mut e) {
+        let body = if r.url.contains("open_orders") {
+            format!(r#"{{"success":true,"code":0,"data":[{ORDER}]}}"#)
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#.into()
+        };
+        response(&mut e, &r, &body);
+    }
+    assert!(e.store().order("739113577038255617").is_none());
+}

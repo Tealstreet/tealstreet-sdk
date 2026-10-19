@@ -164,6 +164,10 @@ impl BinanceFutures {
             return;
         }
         match read {
+            Read::OrderByClientId { .. } => cx.done(
+                command,
+                Err("Client ID query is not supported by this venue".into()),
+            ),
             Read::Fills {
                 symbol,
                 order_id,
