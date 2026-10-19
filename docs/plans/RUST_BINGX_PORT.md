@@ -109,3 +109,20 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
 - 18 query tests pass; independent repeat audit has no remaining query blocker.
   Crate clippy --all-targets -D warnings passes. Full repository checks and
   post-optimization replay gates running; no public performance claim yet.
+
+### Gate checkpoint (work in progress)
+
+- BingX documented private gate PASS: 37 frames, 2 markets, 2 tickers; TS/Rust
+  main CPU 64.1/46.0ms, retained memory 0.9/0.8MB (correctness-only private gate).
+- Public output matches after declared fixes. Latest completed 3-run gate:
+  CPU112.6/96.6ms, steady53.4/47.9ms; memory1.8/1.9MB. Memory still FAILS;
+  reducing startup table reservations/seed allocations, no ready claim.
+- Harness review fixed Rust-oracle precision normalization, wire-type masking,
+  reusable write responses, future staged snapshots and unsafe numeric WS IDs.
+  Four request-matcher regression tests pass. Added staged account mutation to
+  the private tape; final gate rerun pending latest build.
+- Streamed all fill-history envelope variants; 20 history tests pass. Shared
+  splitter alias tests and table reservations preserve the frame layout.
+- Root typecheck44/44 and lint28/28 pass. Full tests found existing misplaced
+  wasm tests violating exchange runtime boundary; moved them to audit tests.
+  Boundary regression +4 wasm tests pass; full root test rerun underway.

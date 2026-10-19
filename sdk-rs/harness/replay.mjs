@@ -8,6 +8,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
+import { requestKey as keyOf, takeResponse } from './requests.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -35,43 +36,37 @@ const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 
 /** Per-request values: clocks, signatures and generated client ids. */
-const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId']);
-const canonicalUrl = (url) => {
-  const parsed = new URL(url);
-  const query = [...parsed.searchParams]
-    .filter(([name]) => !VOLATILE.has(name))
-    .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"[^"]*",?/g, '')])
-    .sort(([a], [b]) => a.localeCompare(b));
-  return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
-};
+const callerIds = new Set(records.flatMap((r) => r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean));
+const requestKey = (method,url,body) => keyOf(method,url,body,callerIds);
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
   constructor() {
     this.responses = new Map();
     for (const record of records.filter((r) => r.type === 'http')) {
-      const key = `${record.method} ${canonicalUrl(record.url)}`;
+      const key = requestKey(record.method, record.url, record.requestBody);
       if (!this.responses.has(key)) this.responses.set(key, []);
       this.responses.get(key).push(record);
     }
-    this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
+    this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command' || r.type === 'close');
     this.open = new Map();
     this.waiters = [];
     this.unserved = 0;
+    this.time = 0;
   }
 
-  respond(method, url) {
-    const queue = this.responses.get(`${method} ${canonicalUrl(url)}`);
+  respond(method, url, requestBody) {
+    const queue = this.responses.get(requestKey(method, url, requestBody));
     if (!queue?.length) {
       this.unserved++;
       return { status: 599, body: '' };
     }
-    const record = queue.length > 1 ? queue.shift() : queue[0];
+    const record = takeResponse(queue, method, url, this.time);
     return { status: record.status, body: record.body };
   }
 
-  connect(url, onOpen, onMessage) {
-    const socket = { url, onMessage, closed: false };
+  connect(url, onOpen, onMessage, onClose) {
+    const socket = { url, onMessage, onClose, closed: false };
     setImmediate(() => {
       if (socket.closed) return;
       this.open.set(url, socket);
@@ -83,7 +78,14 @@ class Tape {
 
   async socketFor(url) {
     while (!this.open.get(url) || this.open.get(url).closed) {
-      await new Promise((resolve) => this.waiters.push(() => (this.open.get(url) ? (resolve(), true) : false)));
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error(`socket did not connect: ${url}`)), 30_000);
+        this.waiters.push(() => {
+          const socket = this.open.get(url);
+          if (!socket || socket.closed) return false;
+          clearTimeout(timeout); resolve(); return true;
+        });
+      });
     }
     return this.open.get(url);
   }
@@ -95,7 +97,7 @@ class Tape {
    */
   async play(onTick, ready = async () => {}, runCommand = async () => {}) {
     const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
-    for (const url of urls) await this.socketFor(url);
+    if (urls.length) await this.socketFor(urls[0]);
     await ready();
     const start = performance.now();
     let delivered = 0;
@@ -106,11 +108,13 @@ class Tape {
         const wait = frame.t - (performance.now() - start);
         if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
       }
+      this.time = frame.t;
       if (frame.type === 'command') {
         this.results.push(await runCommand(frame).then((ids) => ({ ok: ids }), (error) => ({ error: String(error?.message ?? error) })));
       } else {
         const socket = await this.socketFor(frame.url);
-        socket.onMessage(frame.text);
+        if (frame.type === 'close') { socket.closed = true; socket.onClose?.(frame.code ?? 1006); }
+        else socket.onMessage(frame.text);
       }
       delivered++;
       onTick?.(frame.t);
@@ -189,19 +193,32 @@ async function runRust() {
   const fills = [];
   const transport = {
     now: () => Date.now(),
-    connect: (url, { onOpen, onMessage }) => {
-      const socket = tape.connect(url, onOpen, onMessage);
+    connect: (url, { onOpen, onMessage, onClose }) => {
+      const socket = tape.connect(url, onOpen, onMessage, onClose);
       return { send: () => {}, close: () => (socket.closed = true) };
     },
-    request: async ({ method, url }) => {
-      const { status, body } = tape.respond(method, url);
+    request: async ({ method, url, body: requestBody }) => {
+      const { status, body } = tape.respond(method, url, requestBody);
       return { status, headers: '', body: encoder.encode(body) };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
   const options = isPrivate ? { key: KEY, secret: SECRET } : { publicDataOnly: true };
-  const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
+  const engine = new WasmEngine(venue.rust, JSON.stringify(options));
+  if (process.env.RUST_MEMORY_TRACE) {
+    let last = wasmMemoryBytes();
+    for (const method of ['start', 'httpStart', 'httpChunk', 'httpEnd', 'wsMessage', 'takeFrame']) {
+      const original = engine[method].bind(engine);
+      engine[method] = (...args) => {
+        const result = original(...args);
+        const bytes = wasmMemoryBytes();
+        if (bytes !== last) console.error(`memory ${method} ${args[0]}: ${last} -> ${bytes}`);
+        last = bytes; return result;
+      };
+    }
+  }
+  const host = new EngineHost(engine, transport, {
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
       const received = values['no-egress'] ? buffer : structuredClone(buffer, { transfer: [buffer] });
@@ -335,6 +352,11 @@ async function runTs() {
           for (const fn of this.listeners.message) fn({ data });
           this.onmessage?.({ data });
         },
+        (code) => {
+          this.readyState = 3;
+          for (const fn of this.listeners.close) fn({ code });
+          this.onclose?.({ code });
+        },
       );
     }
     addEventListener(type, fn) {
@@ -358,7 +380,7 @@ async function runTs() {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString());
+    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data);
     // The raw body: the client's own transformResponse parses it, big ids included.
     const response = { data: body, status, statusText: String(status), headers: {}, config, request: {} };
     if (status >= 400) {
@@ -371,7 +393,7 @@ async function runTs() {
   };
   const store = new DefaultStore();
   const options = isPrivate ? { key: KEY, secret: SECRET } : { key: '', secret: '', publicDataOnly: true };
-  const exchange = new Exchange(venue.ts.name, options, store);
+  const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;

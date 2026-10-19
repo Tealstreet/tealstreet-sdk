@@ -111,6 +111,13 @@ impl<'a> FrameWriter<'a> {
         }
     }
 
+    /// Reserve known table sizes once, avoiding geometric growth during startup frames.
+    pub fn reserve_tables(&mut self, bytes: usize, strings: usize) {
+        self.buf.reserve_exact(bytes);
+        self.strings.reserve_exact(strings);
+        self.string_index.reserve(strings);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.sections == 0
     }

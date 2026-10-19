@@ -80,7 +80,7 @@ pub struct Bingx {
     books: HashMap<String, BookState>,
     candles: HashMap<(String, String), u32>,
     seed: Vec<Ticker>,
-    seed_index: HashMap<String, usize>,
+    seed_index: Vec<Option<usize>>,
     seed_reported: Vec<bool>,
     sequence: u64,
     retries: HashMap<TimerId, List>,
@@ -107,7 +107,7 @@ impl Bingx {
             books: HashMap::new(),
             candles: HashMap::new(),
             seed: Vec::new(),
-            seed_index: HashMap::new(),
+            seed_index: Vec::new(),
             seed_reported: Vec::new(),
             sequence: 0,
             retries: HashMap::new(),
@@ -519,7 +519,11 @@ impl Venue for Bingx {
             },
             Pending::Premium { valid } => match serde_json::from_str::<Premium<'_>>(item) {
                 Ok(p) => {
-                    if let Some(&i) = self.seed_index.get(p.symbol.as_ref()) {
+                    let index = cx
+                        .store
+                        .market_by_id(&p.symbol)
+                        .and_then(|m| cx.store.market_index(&m.symbol));
+                    if let Some(i) = index.and_then(|index| self.seed_index[index as usize]) {
                         let t = &mut self.seed[i];
                         t.mark = p.mark_price;
                         t.index = p.index_price;
@@ -590,26 +594,26 @@ impl Venue for Bingx {
                 )
             }
             Pending::Daily { rows, valid: true } => {
-                self.seed_index = rows
-                    .iter()
-                    .enumerate()
-                    .map(|(i, t)| (t.id.clone(), i))
-                    .collect();
+                self.seed_index = vec![None; cx.store.markets().len()];
+                for (i, ticker) in rows.iter().enumerate() {
+                    if let Some(index) = cx.store.market_index(&ticker.symbol) {
+                        self.seed_index[index as usize] = Some(i)
+                    }
+                }
                 self.seed_reported = vec![false; rows.len()];
                 self.seed = rows;
                 self.read(cx, paths::PREMIUM, Pending::Premium { valid: true })
             }
             Pending::Premium { valid: true } => {
-                let mut rows = Vec::with_capacity(self.seed.len());
-                for (t, seen) in std::mem::take(&mut self.seed)
-                    .into_iter()
-                    .zip(self.seed_reported.drain(..))
-                {
-                    if seen {
-                        rows.push(t)
-                    }
-                }
-                self.seed_index = HashMap::new();
+                self.seed_index = Vec::new();
+                let reported = std::mem::take(&mut self.seed_reported);
+                let mut index = 0;
+                self.seed.retain(|_| {
+                    let keep = reported[index];
+                    index += 1;
+                    keep
+                });
+                let rows = std::mem::take(&mut self.seed);
                 cx.store.set_tickers(rows);
                 if let Some(c) = &self.credentials {
                     self.account.start(cx, c);

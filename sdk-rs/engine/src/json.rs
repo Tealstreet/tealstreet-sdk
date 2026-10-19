@@ -108,6 +108,8 @@ pub enum ArrayAt {
     EnvelopeField(&'static str),
     /// Either `field: []` or `field: { nested: [] }`, preserving its envelope.
     EnvelopeFieldOrNested(&'static str, &'static str),
+    /// The same envelope selection with several accepted nested array names.
+    EnvelopeFieldOrNestedAny(&'static str, &'static [&'static str]),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -167,7 +169,9 @@ impl ArraySplitter {
     pub fn envelope(&self) -> Option<&[u8]> {
         matches!(
             self.at,
-            ArrayAt::EnvelopeField(_) | ArrayAt::EnvelopeFieldOrNested(_, _)
+            ArrayAt::EnvelopeField(_)
+                | ArrayAt::EnvelopeFieldOrNested(_, _)
+                | ArrayAt::EnvelopeFieldOrNestedAny(_, _)
         )
         .then_some(&self.envelope)
     }
@@ -176,7 +180,9 @@ impl ArraySplitter {
         for &byte in data {
             if matches!(
                 self.at,
-                ArrayAt::EnvelopeField(_) | ArrayAt::EnvelopeFieldOrNested(_, _)
+                ArrayAt::EnvelopeField(_)
+                    | ArrayAt::EnvelopeFieldOrNested(_, _)
+                    | ArrayAt::EnvelopeFieldOrNestedAny(_, _)
             ) && (self.phase != Phase::InArray
                 || (!self.in_string && self.depth == self.array_depth && byte == b']'))
             {
@@ -235,6 +241,12 @@ impl ArraySplitter {
                                     && self.nested_parent
                                     && nested.as_bytes() == self.key)
                         }
+                        ArrayAt::EnvelopeFieldOrNestedAny(field, nested) => {
+                            (self.depth == 1 && field.as_bytes() == self.key)
+                                || (self.depth == 2
+                                    && self.nested_parent
+                                    && nested.iter().any(|key| key.as_bytes() == self.key))
+                        }
                     };
                     continue;
                 }
@@ -243,7 +255,11 @@ impl ArraySplitter {
                         && self.depth == 1
                         && self.armed
                         && byte == b'{'
-                        && matches!(self.at, ArrayAt::EnvelopeFieldOrNested(_, _))
+                        && matches!(
+                            self.at,
+                            ArrayAt::EnvelopeFieldOrNested(_, _)
+                                | ArrayAt::EnvelopeFieldOrNestedAny(_, _)
+                        )
                     {
                         self.nested_parent = true;
                     }
@@ -255,7 +271,8 @@ impl ArraySplitter {
                                 ArrayAt::Field(_) | ArrayAt::EnvelopeField(_) => {
                                     self.armed && self.depth == 2
                                 }
-                                ArrayAt::EnvelopeFieldOrNested(_, _) => {
+                                ArrayAt::EnvelopeFieldOrNested(_, _)
+                                | ArrayAt::EnvelopeFieldOrNestedAny(_, _) => {
                                     self.armed
                                         && (self.depth == 2
                                             || self.depth == 3 && self.nested_parent)
@@ -337,6 +354,30 @@ mod tests {
         let mut splitter = ArraySplitter::new(ArrayAt::Field("symbols"));
         splitter.feed(br#"{"other":[1],"symbolsX":[2]}"#, |_| panic!("no match"));
         assert!(!splitter.finished());
+    }
+
+    #[test]
+    fn nested_array_aliases_retain_valid_envelopes_across_chunks() {
+        for body in [
+            r#"{"data":[{"id":1}],"code":0}"#,
+            r#"{"data":{"fill_orders":[{"id":1}]},"code":0}"#,
+            r#"{"data":{"fill_history_orders":[{"id":1}]},"code":0}"#,
+        ] {
+            let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeFieldOrNestedAny(
+                "data",
+                &["fill_orders", "fill_history_orders"],
+            ));
+            let mut rows = 0;
+            for b in body.as_bytes().chunks(2) {
+                splitter.feed(b, |_| rows += 1)
+            }
+            assert!(splitter.finished());
+            assert_eq!(rows, 1);
+            assert_eq!(
+                std::str::from_utf8(splitter.envelope().unwrap()).unwrap(),
+                body.replace(r#"{"id":1}"#, "")
+            );
+        }
     }
 
     #[test]

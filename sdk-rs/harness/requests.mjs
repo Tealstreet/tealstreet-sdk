@@ -1,0 +1,26 @@
+// Request matching keeps wire types and caller IDs; only clocks/signatures
+// and generated client IDs vary between otherwise equivalent replays.
+const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature']);
+const CLIENT_IDS = new Set(['clientOrderId', 'newClientOrderId', 'clientAlgoId']);
+const stable = (callerIds) => ([name, value]) =>
+  !VOLATILE.has(name) && !(CLIENT_IDS.has(name) && !callerIds.has(value));
+
+export const requestKey = (method, url, body, callerIds = new Set()) => {
+  const parsed = new URL(url);
+  const query = [...parsed.searchParams].filter(stable(callerIds))
+    .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"([^"]*)",?/g,
+      (match, _field, id) => callerIds.has(id) ? match : '')])
+    .sort(([a], [b]) => a.localeCompare(b));
+  const payload = typeof body === 'string' && body ? JSON.parse(body) : body ?? {};
+  const data = Object.entries(payload).filter(stable(callerIds)).sort(([a], [b]) => a.localeCompare(b));
+  return `${method} ${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)} ${JSON.stringify(data)}`;
+};
+
+export const takeResponse = (queue, method, url, time = 0) => {
+  if (!queue?.length) return undefined;
+  const repeat = method === 'GET' || (['POST', 'PUT'].includes(method) && /\/(listenKey|userDataStream)$/.test(new URL(url).pathname));
+  if (repeat && queue.some((r) => r.availableAfter !== undefined)) {
+    return queue.findLast((r) => (r.availableAfter ?? 0) <= time) ?? queue[0];
+  }
+  return queue.length > 1 || !repeat ? queue.shift() : queue[0];
+};

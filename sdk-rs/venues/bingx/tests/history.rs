@@ -487,3 +487,56 @@ fn historical_orders_accept_documented_working_status_and_string_boolean() {
     assert_eq!(rows[0].status, "open");
     assert!(rows[0].reduce_only);
 }
+
+#[test]
+fn fills_stream_chunked_direct_and_both_nested_aliases_without_losing_rows() {
+    let rows = r#"[{"tradeId":9223372036854775818,"orderId":"o","side":"BUY","filledPrice":"10","volume":"0.1","filledTm":"1000","commission":"-0.01","currency":"USDT"}]"#;
+    for data in [
+        rows.to_owned(),
+        format!(r#"{{"fill_orders":{rows}}}"#),
+        format!(r#"{{"fill_history_orders":{rows}}}"#),
+    ] {
+        for width in [1, 7, 1000] {
+            let mut h = Harness::new(true);
+            h.query(fills(1000.0, 1000.0));
+            let request = h.requests.remove(0).id;
+            h.event(Event::HttpStart {
+                request,
+                status: 200,
+                headers: "",
+            });
+            // Code after the array must still be checked after streamed rows.
+            let body = format!(r#"{{"data":{data},"code":0,"msg":""}}"#);
+            for chunk in body.as_bytes().chunks(width) {
+                h.event(Event::HttpChunk {
+                    request,
+                    data: chunk,
+                });
+            }
+            h.event(Event::HttpEnd { request });
+            let rows: Vec<Execution> = h.result();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].id, "9223372036854775818");
+            assert_eq!(rows[0].timestamp, 1.0);
+            assert_eq!(
+                (rows[0].price, rows[0].qty, rows[0].commission),
+                (10.0, 0.1, 0.01)
+            );
+        }
+    }
+}
+
+#[test]
+fn fills_stream_error_metadata_and_truncation_discard_already_decoded_rows() {
+    let row = r#"{"tradeId":"a","orderId":"o","side":"BUY","price":"1","qty":"1","time":1000}"#;
+    for body in [
+        format!(r#"{{"data":{{"fill_orders":[{row}]}},"code":109400,"msg":"denied"}}"#),
+        format!(r#"{{"code":0,"data":{{"fill_history_orders":[{row}"#),
+    ] {
+        let mut h = Harness::new(true);
+        h.query(fills(1000.0, 1000.0));
+        h.reply(&body);
+        assert_eq!(h.results.len(), 1);
+        assert!(h.results[0].is_err());
+    }
+}

@@ -176,13 +176,13 @@ enum FillData {
 }
 
 impl FillData {
-    fn into_rows(self) -> Vec<FillRow> {
+    fn is_empty(&self) -> bool {
         match self {
             Self::Direct(rows)
             | Self::History {
                 fill_history_orders: rows,
             }
-            | Self::Orders { fill_orders: rows } => rows,
+            | Self::Orders { fill_orders: rows } => rows.is_empty(),
         }
     }
 }
@@ -462,24 +462,19 @@ impl History {
         } else {
             credentials
         };
-        let (url, headers, body) = params.into_request(Method::Get, path, auth, cx.now);
+        let (url, headers, _) = params.into_request(Method::Get, path, auth, cx.now);
         let request = Pending::History(Request {
             command,
             window: (from.unwrap_or(0.0), to.unwrap_or(0.0)),
             rows: Vec::new(),
             error: None,
         });
-        if matches!(read.kind, Kind::Fills) {
-            cx.request(Method::Get, url, headers, body, request);
+        let at = if matches!(read.kind, Kind::Fills) {
+            ArrayAt::EnvelopeFieldOrNestedAny("data", &["fill_orders", "fill_history_orders"])
         } else {
-            cx.request_streamed(
-                Method::Get,
-                url,
-                headers,
-                ArrayAt::EnvelopeField("data"),
-                request,
-            );
-        }
+            ArrayAt::EnvelopeField("data")
+        };
+        cx.request_streamed(Method::Get, url, headers, at, request);
     }
 
     pub fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
@@ -517,7 +512,9 @@ impl History {
                     })
                 })
                 .map_err(|e| e.to_string()),
-            Kind::Fills => return,
+            Kind::Fills => serde_json::from_str::<FillRow>(item)
+                .map_err(|e| e.to_string())
+                .and_then(|row| map_fill(row, read.symbol.as_deref().unwrap_or_default())),
         };
         match row {
             Ok(row) => request.rows.push(row),
@@ -553,14 +550,14 @@ impl History {
                     response.data.ok_or_else(|| "missing fill data".to_owned())
                 })
                 .and_then(|data| {
-                    data.into_rows()
-                        .into_iter()
-                        .map(|row| map_fill(row, read.symbol.as_deref().unwrap_or_default()))
-                        .collect::<Result<Vec<_>, _>>()
+                    if data.is_empty() {
+                        Ok(())
+                    } else {
+                        Err("streamed fill metadata retained unexpected rows".into())
+                    }
                 });
-            match result {
-                Ok(rows) => request.rows = rows,
-                Err(error) => request.error = Some(error),
+            if let Err(error) = result {
+                request.error = Some(error);
             }
         } else {
             let result = serde_json::from_str::<Envelope<de::IgnoredAny>>(response.body)

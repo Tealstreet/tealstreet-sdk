@@ -371,6 +371,29 @@ impl Store {
     /// Write the drained changes as frame sections.
     pub fn write<'a>(&'a self, pending: &Pending, w: &mut FrameWriter<'a>) {
         let changes = &pending.changes;
+        if changes.markets || changes.tickers_replaced {
+            let market_bytes = if changes.markets {
+                self.markets
+                    .iter()
+                    .map(|m| 116 + m.id.len() + m.symbol.len() + m.base.len() + m.quote.len())
+                    .sum()
+            } else {
+                0
+            };
+            let ticker_bytes = if changes.tickers_replaced {
+                92 * self.tickers.len()
+            } else {
+                0
+            };
+            w.reserve_tables(
+                market_bytes + ticker_bytes + 128,
+                if changes.markets {
+                    4 * self.markets.len()
+                } else {
+                    0
+                },
+            );
+        }
         if changes.markets {
             self.write_markets(w);
         }

@@ -19,6 +19,9 @@ const { values } = parseArgs({
 });
 const outDir = 'sdk-rs/harness/out';
 mkdirSync(outDir, { recursive: true });
+const tapeBytes = readFileSync(values.tape);
+const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
+  .toString().split('\n').filter(Boolean).map(JSON.parse);
 
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
@@ -74,14 +77,12 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
     // BingX TS emits a terminal cumulative fill, ignores partial executions,
     // and drops its terminal watermark so TRADE_UPDATE can repeat that fill.
     // Use the taped per-execution oracle; Rust is still compared against it.
-    const bytes = readFileSync(values.tape);
-    const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes).toString().trim().split('\n').map(JSON.parse);
     const watermark = new Map();
     const fills = [];
     for (const record of records) {
       if (record.type !== 'ws' || !record.url?.includes('?listenKey=')) continue;
       let event;
-      try { event = JSON.parse(record.text); } catch { continue; }
+      try { event = JSON.parse(record.text, (_key, value, context) => typeof value === 'number' && !Number.isSafeInteger(value) && context?.source && /^-?\d+$/.test(context.source) ? context.source : value); } catch { continue; }
       if (!['ORDER_TRADE_UPDATE', 'TRADE_UPDATE'].includes(event.e)) continue;
       const o = event.o;
       if (!['PARTIALLY_FILLED', 'FILLED'].includes(o.X)) continue;
@@ -96,7 +97,7 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
     // TS's private mapper reads closePosition but misses the native cp alias.
     for (const record of records) {
       if (record.type !== 'ws') continue;
-      let event; try { event = JSON.parse(record.text); } catch { continue; }
+      let event; try { event = JSON.parse(record.text, (_key, value, context) => typeof value === 'number' && !Number.isSafeInteger(value) && context?.source && /^-?\d+$/.test(context.source) ? context.source : value); } catch { continue; }
       const row = account.orders.find((o) => o.id === String(event.o?.i));
       if (row && event.o.cp !== undefined) row.close = event.o.cp === true || event.o.cp === 'true';
     }
@@ -121,14 +122,21 @@ if (isPrivate) {
 // KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
 // integer step 1. Correct that precision and its synthetic ticker touch only.
 if (values.venue === 'bingx') {
-  const bySymbol = new Map(rust.markets.map((m) => [m.symbol, m]));
-  const prices = new Map();
+  const contracts = new Map();
+  for (const record of records) {
+    if (record.type !== 'http' || new URL(record.url).pathname !== '/openApi/swap/v2/quote/contracts') continue;
+    const response = JSON.parse(record.body);
+    if (response.code !== 0 || !Array.isArray(response.data)) continue;
+    for (const contract of response.data) contracts.set(contract.symbol, contract);
+  }
+  const zeroPrecision = (value) => (typeof value === 'number' || typeof value === 'string' && value.trim() !== '') && Number(value) === 0;
+  const prices = new Set();
   for (const market of ts.markets) {
-    const native = bySymbol.get(market.symbol);
-    for (const field of ['amount', 'price']) {
-      if (market.precision[field] === 0.1 && native?.precision[field] === 1) {
+    const source = contracts.get(market.id);
+    for (const [field, nativeField] of [['amount', 'quantityPrecision'], ['price', 'pricePrecision']]) {
+      if (market.precision[field] === 0.1 && zeroPrecision(source?.[nativeField])) {
         market.precision[field] = 1;
-        if (field === 'price') prices.set(market.symbol, 1);
+        if (field === 'price') prices.add(market.symbol);
       }
     }
   }

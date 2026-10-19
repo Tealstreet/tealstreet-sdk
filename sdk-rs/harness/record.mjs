@@ -58,9 +58,8 @@ const recording = {
 
 const { WasmEngine } = await loadEngine();
 let frames = 0;
-let updates = 0;
 const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: false })), recording, {
-  onStoreUpdate: () => updates++,
+  onFrame: () => frames++,
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });
 host.start();
@@ -73,7 +72,7 @@ setTimeout(() => {
   host.flush();
   host.dispose();
   tape.end(() => {
-    console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames }));
+    console.log(JSON.stringify({ out, seconds: Number(values.seconds), frames }));
     process.exit(0);
   });
 }, Number(values.seconds) * 1000);
