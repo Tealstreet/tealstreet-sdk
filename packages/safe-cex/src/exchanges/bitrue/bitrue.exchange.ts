@@ -979,6 +979,7 @@ export class BitrueExchange extends BaseExchange {
         base: market.symbol.split('-')[1],
         quote: market.symbol.split('-')[2],
         active: market.status === 1,
+        contractSize: multiplier,
         precision: {
           amount: multiplier,
           price: 1 / 10 ** market.pricePrecision,
@@ -1022,7 +1023,7 @@ export class BitrueExchange extends BaseExchange {
         await sleep(100);
       }
       const rawCandles = await this.publicWebsocket.makeRequest(topic);
-      const candles = this.publicWebsocket.mapKline(rawCandles);
+      const candles = this.publicWebsocket.mapKline(rawCandles, opts.symbol);
       this.recentWsRequests[topic] = {
         time: Date.now(),
         data: candles,
@@ -1055,7 +1056,7 @@ export class BitrueExchange extends BaseExchange {
     // consistent with every other flag-based exchange — don't re-clamp here.
     const amount = adjust(opts.amount, pAmount);
     const side = opts.side === OrderSide.Buy ? 'BUY' : 'SELL';
-    const direction = opts.reduceOnly ? 'CLOSE' : 'OPEN';
+    const direction = isStopOrTP || opts.reduceOnly ? 'CLOSE' : 'OPEN';
     const type = inverseObj(ORDER_TYPE)[opts.type];
 
     // We use price only for limit orders
@@ -1101,6 +1102,7 @@ export class BitrueExchange extends BaseExchange {
       open: direction,
       positionType: marginType === MarginType.Cross ? 1 : 2,
       futureModel: 'normal',
+      clientOrderId: uuid(),
       ...(isStopOrTP
         ? {
             conditionOrder: true,
@@ -1108,7 +1110,14 @@ export class BitrueExchange extends BaseExchange {
             // 1 stoploss 2 take profit
             triggerType: opts.type === OrderType.StopLoss ? 1 : 2,
             // 1 last 2 mark
-            triggerPriceType: opts.slTriggerType === OrderStopTriggerType.LastPrice ? 1 : 2,
+            triggerPriceType:
+              opts.type === OrderType.StopLoss
+                ? opts.slTriggerType === OrderStopTriggerType.LastPrice
+                  ? 1
+                  : 2
+                : opts.tpTriggerType === OrderStopTriggerType.MarkPrice
+                  ? 2
+                  : 1,
           }
         : {}),
     });
@@ -1170,7 +1179,7 @@ export class BitrueExchange extends BaseExchange {
           triggerOrderCreateParams.push({
             clientOrderId: uuid(),
             triggerType: 2,
-            triggerPriceType: opts.tpTriggerType === OrderStopTriggerType.LastPrice ? 1 : 2,
+            triggerPriceType: opts.tpTriggerType === OrderStopTriggerType.MarkPrice ? 2 : 1,
             triggerPrice: opts.takeProfit,
             type: 'MARKET',
             price: 0,
@@ -1311,12 +1320,8 @@ export class BitrueExchange extends BaseExchange {
   cancelOrders = async (orders: Order[]) => {
     try {
       const cancelPayloads = orders.map((o) => {
-        const conditionOrder = o.type !== OrderType.Limit;
-        if (o.info?.clientOrderId) {
-          return { clientOrderId: o.info.clientOrderId, contractName: o.symbol, conditionOrder };
-        } else {
-          return { orderId: o.id, contractName: o.symbol, conditionOrder };
-        }
+        const conditionOrder = o.type === OrderType.StopLoss || o.type === OrderType.TakeProfit;
+        return { orderId: o.id, contractName: o.symbol, conditionOrder };
       });
       const lots = chunk(cancelPayloads, 50);
       await mapSeries(lots, async (lot) => {

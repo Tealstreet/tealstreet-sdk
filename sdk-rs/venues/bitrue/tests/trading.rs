@@ -354,6 +354,21 @@ fn unrelated_cancel_identity_cannot_start_replacement() {
     assert_eq!(h.writes(), 0);
 }
 #[test]
+fn incomplete_authoritative_children_cannot_drop_known_protection() {
+    for children in ["", r#", "childOrders":[]"#] {
+        let mut h = Harness::new();
+        h.order(0.0);
+        let mut order = h.e.store().order("2334151155877155281").unwrap().clone();
+        order.stop_loss = Some(1800.0);
+        h.e.store_mut().upsert_order(order);
+        h.amend();
+        let request = h.take(Method::Get, "/fapi/v2/order?");
+        h.reply(request, &detail("INIT", 0.0, children));
+        assert!(h.failed());
+        assert_eq!(h.writes(), 0);
+    }
+}
+#[test]
 fn settings_commit_only_after_success_and_unsupported_modes_never_write() {
     let mut h = Harness::new();
     h.command(Command::SetLeverage {

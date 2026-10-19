@@ -68,6 +68,8 @@ struct EngineOptions {
     passphrase: Option<String>,
     #[serde(default)]
     private_ws_headers: bool,
+    #[serde(default)]
+    recv_window: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -465,7 +467,7 @@ impl WasmEngine {
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
-                ..BitrueOptions::default()
+                recv_window: options.recv_window.unwrap_or(20_000),
             }))),
             "blofin" => Box::new(Engine::new(Blofin::new(BlofinOptions {
                 testnet: options.testnet,

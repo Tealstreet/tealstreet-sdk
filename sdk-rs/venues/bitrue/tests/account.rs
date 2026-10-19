@@ -298,3 +298,13 @@ fn fetch_leverage_reads_account_metadata_without_any_order_or_leverage_probe() {
     assert!(h.actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone{command,result})if *command==88&&result.as_ref().is_ok_and(|s|s.contains("\"buyLeverage\":25.0")))));
     assert!(h.pending.iter().all(|r| r.method == Method::Get));
 }
+
+#[test]
+fn cumulative_average_fallback_recovers_execution_price_without_replaying() {
+    let mut h = Harness::new();
+    h.seed();
+    for (z, average) in [(1, 100), (3, 120), (3, 120)] {
+        h.ws(&format!(r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"{z}","p":"99","ap":"{average}"}}}}"#));
+    }
+    assert_eq!(h.fills(), vec![(100.0, 10.0), (130.0, 20.0)]);
+}

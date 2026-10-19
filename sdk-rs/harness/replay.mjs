@@ -247,7 +247,10 @@ class Tape extends SharedTape {
 
   assertWritesConsumed() {
     const missing = this.responses.unusedWrites();
-    if (missing) throw new Error(`${missing} taped write(s) were not sent`);
+    if (missing) {
+      const routes = [...this.responses.queues.values()].flat().filter((r) => isWriteRequest(r.method, r.url)).map((r) => r.method + ' ' + new URL(r.url).pathname);
+      throw new Error(`${missing} taped write(s) were not sent: ${routes.join(', ')}`);
+    }
   }
 
   async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
@@ -769,6 +772,18 @@ async function runTs() {
       : { key: '', secret: '', publicDataOnly: true }),
   };
   const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
+  // Model the worker shell's local method dispatch, using the real methods.
+  exchange.emitter.on('callMethod', ({ method, args, requestId }) => {
+    setImmediate(async () => {
+      try {
+        if (!['removeOrders', 'fetchAndSetOrders'].includes(method)) throw new Error(`Unsupported taped worker method ${method}`);
+        const result = await exchange[method](...args);
+        exchange.emitter.emit('callMethod:done', { requestId, success: true, result });
+      } catch (error) {
+        exchange.emitter.emit('callMethod:done', { requestId, success: false, result: { message: error.message } });
+      }
+    });
+  });
   venue.configureTs?.(exchange);
   venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];

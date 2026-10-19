@@ -14,6 +14,7 @@ pub struct Request {
     from_ms: Option<f64>,
     to_ms: Option<f64>,
     limit: usize,
+    received: usize,
     rows: Vec<Execution>,
     seen: HashSet<String>,
     failed: bool,
@@ -24,6 +25,7 @@ impl Request {
         self.rows.clear();
         self.seen.clear();
         self.failed = false;
+        self.received = 0;
     }
 }
 
@@ -80,6 +82,12 @@ fn side(value: &str) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+fn valid_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+        && value.bytes().any(|byte| byte != b'0')
 }
 
 fn time_ms(value: f64) -> f64 {
@@ -186,6 +194,7 @@ impl Bitrue {
                 from_ms,
                 to_ms,
                 limit,
+                received: 0,
                 rows: Vec::new(),
                 seen: HashSet::new(),
                 failed: false,
@@ -199,6 +208,11 @@ impl Bitrue {
         request: &mut Request,
         item: &str,
     ) {
+        request.received += 1;
+        if request.failed || request.received > 1000 {
+            request.failed = true;
+            return;
+        }
         let row = match serde_json::from_str::<Fill<'_>>(item) {
             Ok(row) => row,
             Err(_) => {
@@ -217,13 +231,12 @@ impl Bitrue {
             request.failed = true;
             return;
         };
-        let order_id = if side == "buy" {
-            row.bid_id.as_ref().or(row.ask_id.as_ref())
-        } else {
-            row.ask_id.as_ref().or(row.bid_id.as_ref())
-        }
-        .filter(|id| !id.is_empty())
-        .map_or_else(|| row.trade_id.to_string(), ToString::to_string);
+        let Some(order_id) = (if side == "buy" { row.bid_id.as_ref() } else { row.ask_id.as_ref() })
+            .filter(|id| valid_id(id)) else {
+                request.failed = true;
+                return;
+            };
+        let order_id = order_id.to_string();
         let time = time_ms(row.ctime.0);
         let qty = fill_qty(
             row.qty.0,
@@ -231,7 +244,7 @@ impl Bitrue {
             row.price.0,
             market.contract_size.unwrap_or(market.precision.amount),
         );
-        if row.trade_id.is_empty()
+        if !valid_id(&row.trade_id)
             || row.price.0 <= 0.0
             || !qty.is_finite()
             || qty <= 0.0
@@ -282,6 +295,13 @@ impl Bitrue {
                 request.command,
                 Err("Malformed Bitrue execution history".into()),
             );
+            return;
+        }
+        // fromId advances forward from a trade ID; no backward cursor is
+        // documented for the default recent page. A full filtered page cannot
+        // establish absence of older matches, so never present it as complete.
+        if request.received >= request.limit && request.rows.len() < request.limit {
+            cx.done(request.command, Err("INCOMPLETE: Bitrue native fill page is full before local filters reach the requested limit".into()));
             return;
         }
         request.rows.sort_by(|a, b| b.time_ms.total_cmp(&a.time_ms));

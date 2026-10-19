@@ -139,7 +139,7 @@ export class RustEngineExchange extends BaseExchange {
     const transport = engineTransport();
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
-      JSON.stringify({ key, secret, passphrase, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly), privateWsHeaders: Boolean(transport.webSocketHeaders) }),
+      JSON.stringify({ key, secret, passphrase, recvWindow: this.options.extra?.recvWindow, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly), privateWsHeaders: Boolean(transport.webSocketHeaders) }),
     );
     this.host = new EngineHost(engine, transport, {
       onFrame: this.receiveFrame,

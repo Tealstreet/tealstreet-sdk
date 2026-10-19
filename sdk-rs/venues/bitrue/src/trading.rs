@@ -1046,12 +1046,20 @@ impl Bitrue {
                             opts.tp_trigger_type = Some(reference);
                         }
                     }
-                } else if amend.order.stop_loss.is_some()
-                    || amend.order.take_profit.is_some()
+                }
+                let known_protection_missing = (amend.order.stop_loss.is_some()
+                    && !seen.contains(&1))
+                    || (amend.order.take_profit.is_some() && !seen.contains(&2))
                     || cx.store.orders().iter().any(|o| {
-                        o.parent_id.as_ref() == Some(&amend.target.id) && !terminal(o.status)
-                    })
-                {
+                        o.parent_id.as_ref() == Some(&amend.target.id)
+                            && !terminal(o.status)
+                            && !match o.kind {
+                                OrderType::StopLoss => seen.contains(&1),
+                                OrderType::TakeProfit => seen.contains(&2),
+                                _ => false,
+                            }
+                    });
+                if known_protection_missing {
                     return Err("Bitrue replacement cannot verify attached protection".into());
                 }
                 let rows = self.placement(cx, &opts)?;

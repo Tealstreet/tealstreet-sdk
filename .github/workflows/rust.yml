@@ -192,3 +192,9 @@ jobs:
         run: |
           corepack yarn -s rust:private-tape:weex
           corepack yarn -s rust:gate --venue weex --tape sdk-rs/harness/tapes/weex-private.jsonl --runs 1 --books ''
+      - name: Bitrue public data (correctness, CPU and memory)
+        run: corepack yarn -s rust:gate --venue bitrue --tape sdk-rs/harness/fixtures/bitrue-public.jsonl.gz --books E-BTC-USDT,E-ETH-USDT
+      - name: Bitrue account and trading (correctness)
+        run: |
+          corepack yarn -s rust:private-tape-bitrue
+          corepack yarn -s rust:gate --venue bitrue --tape sdk-rs/harness/tapes/bitrue-private.jsonl --runs 1 --books ''
