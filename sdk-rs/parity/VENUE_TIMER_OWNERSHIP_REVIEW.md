@@ -30,6 +30,52 @@ Backpack disposal fixtures track real owned timeout handles. They retain the
 existing assertions for depth cancellation before socket close and the source
 retention of the ticker throttle; no cancellation assertion is dropped.
 
+## Independent WOO release replay
+
+The preserved 260-frame bundle was replayed on immutable ee045514f4 with the
+original physical/parser/clock/raw-task fences. All four runs delivered 260/260;
+terminal unknown/finite/ready/blocking tasks and Promise jobs were zero, with no
+HTTP misses or provisional receipt. Both complete repeat graphs passed, as did
+cross-engine books and candles.
+
+This is a liveness result, not full parity acceptance: TS emitted 188 events and
+native 186 (two additional TS Grafana HTTP events). All 129 ticker Store rows had
+own-key-order differences, and 128 handler-stat rows differed. Other independently
+checked Store fields, including health/request statistics, matched. The shared-load
+CPU/wall ratios were 36.91x/24.17x; no performance acceptance is claimed. The newer
+master handler-stat implementation was not in that frozen replay, so these
+residuals are routed separately without attributing them to the timer change.
+The overseer assigned HTTP telemetry to 0w5ohi, ticker order to 4ri6pb, handler
+statistics to wdtab1 and CPU profiling to dwfl8p.
+
+The independent raw receipt and field evidence are named
+`woo-timers-ee045514f4-release-strict.json` and its `.field-evidence.json`
+companion in the live-diff cache.
+
+## Independent Backpack release replay
+
+The same ee045514f4 RELEASE addon replayed the preserved 38,289-frame tape with
+all original fences and 90-second timeouts: 38,288 application messages plus one
+physical ping. Complete drain/liveness passed with terminal unknown/finite/ready/
+blocking tasks and Promise jobs zero, no errors and no HTTP misses.
+
+Overall semantic parity remains NONDETERMINISTIC: TS emitted 266 outputs and
+native 259. Every individual native channel's complete repeat graph passed, but
+the combined first Store/book order swapped across repeats. The stable book
+difference is TS one empty event versus native a populated 418-bid/295-ask book,
+then empty; native's first bid is price 1/amount 0.38647. TS/native Store counts are
+252/250, first requestStats.ok 4/0, and HTTP telemetry has three request/response
+pairs only in TS. Both candle graphs passed. CPU/wall ratios were 3.385x/1.655x.
+These are retained open findings, not timer-source attribution or acceptance;
+the independent owner notified the FFI ordering, HTTP telemetry and overseer lanes.
+
+The frozen addon SHA256 is
+`7b7557b00a92380e76cc9909268f395f1ca22753802254bd83aff4b7825cfa05`.
+The common receipt index is `venue-timers-release-report.txt` and the complete
+liveness receipt is `venue-timers-liveness-proof.json` in the live-diff cache.
+`backpack-timers-ee045514f4-release-strict.json` has the original identity, field
+and channel-repeat evidence companions. No tape bytes or drain rules changed.
+
 ## Venue census and direct cutover
 
 The census inspects all 27 venue crates' production timer scheduling, including
