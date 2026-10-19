@@ -5,7 +5,8 @@
 // transport = {
 //   now(): number,
 //   connect(url, { onOpen, onMessage, onClose }): { send(text), close() },
-//   request({ method, url, headers, body }): Promise<{ status, body: Uint8Array }>,
+//   request({ method, url, headers, body }): Promise<{ status, headers?: string, body: Uint8Array }>,
+//     (`headers` as `name: value` lines),
 //   setTimeout(fn, ms), clearTimeout(handle),
 // }
 
@@ -92,7 +93,8 @@ export class EngineHost {
             body: action.body,
           })
           .then(
-            ({ status, body }) => this.run(engine.httpResponse(id, status, body, transport.now())),
+            ({ status, headers = '', body }) =>
+              this.run(engine.httpResponse(id, status, headers, body, transport.now())),
             (error) => this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now())),
           );
         break;
@@ -141,7 +143,13 @@ export const nativeTransport = () => ({
   },
   async request({ method, url, headers, body }) {
     const response = await fetch(url, { method, headers, body });
-    return { status: response.status, body: new Uint8Array(await response.arrayBuffer()) };
+    const lines = [];
+    response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
+    return {
+      status: response.status,
+      headers: lines.join('\n'),
+      body: new Uint8Array(await response.arrayBuffer()),
+    };
   },
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (handle) => clearTimeout(handle),

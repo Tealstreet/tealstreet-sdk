@@ -1,7 +1,7 @@
 //! Typed exchange state plus change tracking. Once per flush the engine drains
 //! the changes with [`Store::take_pending`] and writes them into the flush
 //! frame with [`Store::write`].
-use crate::model::{Balance, Loaded, Market, Order, Position, Ticker};
+use crate::model::{Balance, Loaded, MarginType, Market, Order, OrderStatus, Position, Ticker};
 use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
 use std::collections::HashMap;
 
@@ -15,6 +15,9 @@ pub struct Store {
     orders: Vec<Order>,
     positions: Vec<Position>,
     balance: Balance,
+    /// Per-market account settings, keyed by market index.
+    settings: HashMap<u32, MarketSetting>,
+    hedged: bool,
     loaded: Loaded,
     latency: f64,
     changes: Changes,
@@ -55,6 +58,13 @@ fn ticker_values(t: &Ticker) -> [f64; 11] {
     ]
 }
 
+/// The account's leverage and margin type on one market.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MarketSetting {
+    pub leverage: f64,
+    pub margin_type: Option<MarginType>,
+}
+
 #[derive(Default)]
 struct Changes {
     markets: bool,
@@ -62,6 +72,7 @@ struct Changes {
     orders: bool,
     positions: bool,
     balance: bool,
+    settings: bool,
     status: bool,
 }
 
@@ -163,28 +174,43 @@ impl Store {
         &self.orders
     }
 
+    pub fn order(&self, id: &str) -> Option<&Order> {
+        self.orders.iter().find(|order| order.id == id)
+    }
+
+    /// Replace every order with a venue snapshot.
     pub fn set_orders(&mut self, orders: Vec<Order>) {
         self.orders = orders;
         self.changes.orders = true;
         self.set_loaded(|loaded| loaded.orders = true);
     }
 
-    /// Insert or replace by id; an order that is no longer open is removed.
+    /// Insert or replace by id. A closed or canceled row stays, with its
+    /// status, until the next snapshot replaces the list.
     pub fn upsert_order(&mut self, order: Order) {
-        let open = matches!(order.status, crate::model::OrderStatus::Open);
         match self
             .orders
             .iter()
             .position(|existing| existing.id == order.id)
         {
-            Some(index) if open => self.orders[index] = order,
-            Some(index) => {
-                self.orders.remove(index);
-            }
-            None if open => self.orders.push(order),
-            None => return,
+            Some(index) => self.orders[index] = order,
+            None => self.orders.push(order),
         }
         self.changes.orders = true;
+    }
+
+    /// Mutate one order in place; returns whether it exists.
+    pub fn update_order(&mut self, id: &str, update: impl FnOnce(&mut Order)) -> bool {
+        let Some(order) = self.orders.iter_mut().find(|order| order.id == id) else {
+            return false;
+        };
+        update(order);
+        self.changes.orders = true;
+        true
+    }
+
+    pub fn set_order_status(&mut self, id: &str, status: OrderStatus) -> bool {
+        self.update_order(id, |order| order.status = status)
     }
 
     pub fn remove_orders(&mut self, ids: &[&str]) {
@@ -206,6 +232,10 @@ impl Store {
         self.set_loaded(|loaded| loaded.positions = true);
     }
 
+    pub fn position(&self, id: &str) -> Option<&Position> {
+        self.positions.iter().find(|p| p.id == id)
+    }
+
     /// Insert or replace by id; a position with zero contracts is removed.
     pub fn upsert_position(&mut self, position: Position) {
         let index = self.positions.iter().position(|p| p.id == position.id);
@@ -220,6 +250,15 @@ impl Store {
         self.changes.positions = true;
     }
 
+    /// Change positions in place; rows left with zero contracts are removed.
+    pub fn update_positions(&mut self, mut update: impl FnMut(&mut Position)) {
+        for position in &mut self.positions {
+            update(position);
+        }
+        self.positions.retain(|p| p.contracts != 0.0);
+        self.changes.positions = true;
+    }
+
     pub fn balance(&self) -> &Balance {
         &self.balance
     }
@@ -230,6 +269,51 @@ impl Store {
             self.changes.balance = true;
         }
         self.set_loaded(|loaded| loaded.balance = true);
+    }
+
+    pub fn setting(&self, symbol: &str) -> Option<MarketSetting> {
+        let market = self.market_index(symbol)?;
+        self.settings.get(&market).copied()
+    }
+
+    /// Replace every market's settings.
+    pub fn set_settings(&mut self, settings: impl IntoIterator<Item = (u32, MarketSetting)>) {
+        self.settings = settings.into_iter().collect();
+        self.changes.settings = true;
+    }
+
+    pub fn update_setting(&mut self, symbol: &str, update: impl FnOnce(&mut MarketSetting)) {
+        let Some(market) = self.market_index(symbol) else {
+            return;
+        };
+        let setting = self.settings.entry(market).or_insert(MarketSetting {
+            leverage: f64::NAN,
+            margin_type: None,
+        });
+        let before = *setting;
+        update(setting);
+        if *setting != before {
+            self.changes.settings = true;
+        }
+    }
+
+    pub fn hedged(&self) -> bool {
+        self.hedged
+    }
+
+    pub fn set_hedged(&mut self, hedged: bool) {
+        if hedged != self.hedged {
+            self.hedged = hedged;
+            self.changes.status = true;
+        }
+    }
+
+    /// Change market rows in place (indexes and symbols must not change).
+    pub fn update_markets(&mut self, mut update: impl FnMut(&mut Market)) {
+        for market in &mut self.markets {
+            update(market);
+        }
+        self.changes.markets = true;
     }
 
     pub fn loaded(&self) -> Loaded {
@@ -301,6 +385,9 @@ impl Store {
             w.f64s([b.used, b.free, b.total, b.upnl]);
             w.end();
         }
+        if changes.settings {
+            self.write_settings(w);
+        }
         if changes.status {
             let l = self.loaded;
             let loaded = [
@@ -314,7 +401,12 @@ impl Store {
             .filter(|(set, _)| *set)
             .fold(0, |bits, (_, flag)| bits | flag);
             w.begin(section::STATUS);
-            w.u32s([loaded, 0]);
+            let flags = if self.hedged {
+                wire::status_flag::HEDGED
+            } else {
+                0
+            };
+            w.u32s([loaded, flags]);
             w.f64(self.latency);
             w.end();
         }
@@ -403,6 +495,7 @@ impl Store {
                 o.close,
                 o.time_in_force,
                 o.trigger_type,
+                o.extra.as_ref().and_then(|e| e.reject_reason),
             )
         }));
         w.pad();
@@ -418,6 +511,21 @@ impl Store {
         for column in columns {
             w.f64s(orders.iter().map(column));
         }
+        w.end();
+    }
+
+    fn write_settings<'a>(&'a self, w: &mut FrameWriter<'a>) {
+        let mut rows: Vec<(&u32, &MarketSetting)> = self.settings.iter().collect();
+        rows.sort_unstable_by_key(|(market, _)| **market);
+        w.begin(section::SETTINGS);
+        w.u32(rows.len() as u32);
+        w.u32s(rows.iter().map(|(market, _)| **market));
+        w.u32s(
+            rows.iter()
+                .map(|(_, s)| s.margin_type.map_or(0, |m| m as u32 + 1)),
+        );
+        w.pad();
+        w.f64s(rows.iter().map(|(_, s)| s.leverage));
         w.end();
     }
 

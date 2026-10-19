@@ -5,7 +5,8 @@
 //! JSON array string, or an empty string when there are none.
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, LogLevel, Notice, RequestId, SocketId, TimerId, Venue,
+    Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, Response, SocketId,
+    TimerId, Venue,
 };
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use serde::{Deserialize, Serialize};
@@ -43,6 +44,10 @@ struct EngineOptions {
     testnet: bool,
     #[serde(default)]
     public_data_only: bool,
+    #[serde(default)]
+    key: Option<String>,
+    #[serde(default)]
+    secret: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -163,6 +168,14 @@ enum CommandIn {
         command: u32,
         ids: Vec<String>,
     },
+    AmendOrder {
+        command: u32,
+        id: String,
+        #[serde(default)]
+        price: Option<f64>,
+        #[serde(default)]
+        amount: Option<f64>,
+    },
     CancelSymbolOrders {
         command: u32,
         symbol: String,
@@ -172,6 +185,60 @@ enum CommandIn {
         command: u32,
         symbol: String,
         leverage: f64,
+    },
+    SetMarginType {
+        command: u32,
+        symbol: String,
+        isolated: bool,
+    },
+    SetPositionMode {
+        command: u32,
+        hedged: bool,
+    },
+    #[serde(rename_all = "camelCase")]
+    FetchFills {
+        command: u32,
+        #[serde(default)]
+        symbol: Option<String>,
+        #[serde(default)]
+        order_id: Option<String>,
+        #[serde(default)]
+        from: Option<f64>,
+        #[serde(default)]
+        to: Option<f64>,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    FetchOrderHistory {
+        command: u32,
+        #[serde(default)]
+        symbol: Option<String>,
+        #[serde(default)]
+        from: Option<f64>,
+        #[serde(default)]
+        to: Option<f64>,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    #[serde(rename_all = "camelCase")]
+    FetchIncome {
+        command: u32,
+        #[serde(default)]
+        symbol: Option<String>,
+        #[serde(default)]
+        income_type: Option<String>,
+        #[serde(default)]
+        from: Option<f64>,
+        #[serde(default)]
+        to: Option<f64>,
+        #[serde(default)]
+        limit: Option<u32>,
+    },
+    FetchPublicTrades {
+        command: u32,
+        symbol: String,
+        #[serde(default)]
+        limit: Option<u32>,
     },
     #[serde(rename_all = "camelCase")]
     FetchCandles {
@@ -200,6 +267,86 @@ impl From<CommandIn> for Command {
             }
             CommandIn::PlaceOrders { command, orders } => Self::PlaceOrders { command, orders },
             CommandIn::CancelOrders { command, ids } => Self::CancelOrders { command, ids },
+            CommandIn::AmendOrder {
+                command,
+                id,
+                price,
+                amount,
+            } => Self::AmendOrder {
+                command,
+                id,
+                price,
+                amount,
+            },
+            CommandIn::SetMarginType {
+                command,
+                symbol,
+                isolated,
+            } => Self::SetMarginType {
+                command,
+                symbol,
+                isolated,
+            },
+            CommandIn::SetPositionMode { command, hedged } => {
+                Self::SetPositionMode { command, hedged }
+            }
+            CommandIn::FetchFills {
+                command,
+                symbol,
+                order_id,
+                from,
+                to,
+                limit,
+            } => Self::Query {
+                command,
+                query: Query::Fills {
+                    symbol,
+                    order_id,
+                    from_ms: from,
+                    to_ms: to,
+                    limit,
+                },
+            },
+            CommandIn::FetchOrderHistory {
+                command,
+                symbol,
+                from,
+                to,
+                limit,
+            } => Self::Query {
+                command,
+                query: Query::OrderHistory {
+                    symbol,
+                    from_ms: from,
+                    to_ms: to,
+                    limit,
+                },
+            },
+            CommandIn::FetchIncome {
+                command,
+                symbol,
+                income_type,
+                from,
+                to,
+                limit,
+            } => Self::Query {
+                command,
+                query: Query::Income {
+                    symbol,
+                    kind: income_type,
+                    from_ms: from,
+                    to_ms: to,
+                    limit,
+                },
+            },
+            CommandIn::FetchPublicTrades {
+                command,
+                symbol,
+                limit,
+            } => Self::Query {
+                command,
+                query: Query::PublicTrades { symbol, limit },
+            },
             CommandIn::CancelSymbolOrders { command, symbol } => {
                 Self::CancelSymbolOrders { command, symbol }
             }
@@ -258,6 +405,8 @@ impl WasmEngine {
             "binance" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
             }))),
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };
@@ -294,17 +443,28 @@ impl WasmEngine {
         self.flush()
     }
 
-    /// `body` is the raw response bytes; invalid UTF-8 is reported as a failure.
+    /// `headers` is `name: value` lines; `body` is the raw response bytes.
+    /// Invalid UTF-8 is reported as a failure.
     #[wasm_bindgen(js_name = httpResponse)]
-    pub fn http_response(&mut self, request: u32, status: u16, body: &[u8], now: f64) -> String {
+    pub fn http_response(
+        &mut self,
+        request: u32,
+        status: u16,
+        headers: &str,
+        body: &[u8],
+        now: f64,
+    ) -> String {
         let request = RequestId(request);
         match std::str::from_utf8(body) {
             Ok(body) => self.inner.handle(
                 now,
                 Event::HttpResponse {
                     request,
-                    status,
-                    body,
+                    response: Response {
+                        status,
+                        headers,
+                        body,
+                    },
                 },
             ),
             Err(_) => self.inner.handle(

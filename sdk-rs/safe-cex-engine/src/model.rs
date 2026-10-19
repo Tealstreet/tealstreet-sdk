@@ -293,6 +293,10 @@ pub struct PlaceOrderOpts {
     #[serde(default)]
     pub trigger_type: Option<StopTriggerType>,
     #[serde(default)]
+    pub tp_trigger_type: Option<StopTriggerType>,
+    #[serde(default)]
+    pub sl_trigger_type: Option<StopTriggerType>,
+    #[serde(default)]
     pub client_order_id: Option<String>,
     #[serde(default)]
     pub close: Option<bool>,

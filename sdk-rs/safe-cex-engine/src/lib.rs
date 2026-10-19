@@ -4,11 +4,12 @@ pub mod engine;
 pub mod json;
 pub mod model;
 pub mod num;
+pub mod paging;
 pub mod store;
 pub mod wire;
 
 pub use engine::{
     Action, Command, CommandId, Cx, Engine, Event, Fill, HttpRequest, LogLevel, Method, Notice,
-    RequestId, SocketId, TimerId, Venue,
+    Query, RequestId, Response, SocketId, TimerId, Venue,
 };
 pub use store::Store;

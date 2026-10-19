@@ -5,6 +5,20 @@ use std::borrow::Cow;
 
 type Str<'a> = Cow<'a, str>;
 
+/// A number Binance sends either bare or as a decimal string.
+fn number<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f64, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Number<'a> {
+        Bare(f64),
+        Text(#[serde(borrow)] Str<'a>),
+    }
+    Ok(match Number::deserialize(deserializer)? {
+        Number::Bare(value) => value,
+        Number::Text(text) => safe_cex_engine::num::parse(&text),
+    })
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SymbolInfo<'a> {
@@ -192,4 +206,382 @@ pub fn event_type(text: &str) -> Option<&str> {
     let start = text.find("\"e\":\"")? + 5;
     let end = text[start..].find('"')? + start;
     Some(&text[start..end])
+}
+
+/// Binance encodes large ids as JSON numbers; they fit in u64.
+pub type Id = u64;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListenKey<'a> {
+    #[serde(borrow)]
+    pub listen_key: Str<'a>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorBody<'a> {
+    pub code: i64,
+    #[serde(borrow, default)]
+    pub msg: Str<'a>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionModeBody {
+    pub dual_side_position: bool,
+}
+
+#[derive(Deserialize)]
+pub struct LeverageBracket<'a> {
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(default)]
+    pub brackets: Vec<Bracket>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Bracket {
+    #[serde(deserialize_with = "number")]
+    pub initial_leverage: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SymbolConfig<'a> {
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(borrow, default)]
+    pub margin_type: Str<'a>,
+    #[serde(default, deserialize_with = "number")]
+    pub leverage: f64,
+}
+
+/// One `/fapi/v3/positionRisk` row.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionRisk<'a> {
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(borrow)]
+    pub position_side: Str<'a>,
+    #[serde(borrow)]
+    pub position_amt: Str<'a>,
+    #[serde(borrow)]
+    pub entry_price: Str<'a>,
+    #[serde(borrow)]
+    pub un_realized_profit: Str<'a>,
+    #[serde(borrow)]
+    pub liquidation_price: Str<'a>,
+    #[serde(borrow)]
+    pub notional: Str<'a>,
+    #[serde(borrow, default)]
+    pub isolated_margin: Option<Str<'a>>,
+    #[serde(default)]
+    pub update_time: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Account<'a> {
+    #[serde(borrow, default)]
+    pub assets: Vec<AccountAsset<'a>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountAsset<'a> {
+    #[serde(borrow)]
+    pub asset: Str<'a>,
+    #[serde(borrow, default)]
+    pub wallet_balance: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub available_balance: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub initial_margin: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub unrealized_profit: Option<Str<'a>>,
+}
+
+/// One `/fapi/v1/openOrders` row.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenOrder<'a> {
+    pub order_id: Id,
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(borrow, rename = "type")]
+    pub kind: Str<'a>,
+    #[serde(borrow)]
+    pub side: Str<'a>,
+    #[serde(borrow)]
+    pub price: Str<'a>,
+    #[serde(borrow, default)]
+    pub stop_price: Option<Str<'a>>,
+    #[serde(borrow)]
+    pub orig_qty: Str<'a>,
+    #[serde(borrow)]
+    pub executed_qty: Str<'a>,
+    #[serde(default)]
+    pub reduce_only: bool,
+    #[serde(default)]
+    pub close_position: bool,
+    #[serde(borrow, default)]
+    pub working_type: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub time_in_force: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub client_order_id: Option<Str<'a>>,
+}
+
+/// One `/fapi/v1/openAlgoOrders` row.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenAlgoOrder<'a> {
+    pub algo_id: Id,
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(borrow)]
+    pub order_type: Str<'a>,
+    #[serde(borrow)]
+    pub side: Str<'a>,
+    #[serde(borrow, default)]
+    pub trigger_price: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub quantity: Option<Str<'a>>,
+    #[serde(default)]
+    pub reduce_only: bool,
+    #[serde(default)]
+    pub close_position: bool,
+    #[serde(borrow, default)]
+    pub working_type: Option<Str<'a>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlacedOrder {
+    #[serde(default)]
+    pub order_id: Option<Id>,
+    #[serde(default)]
+    pub algo_id: Option<Id>,
+}
+
+/// One element of a `batchOrders` response: an order or an error.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchItem<'a> {
+    #[serde(default)]
+    pub order_id: Option<Id>,
+    #[serde(default)]
+    pub code: Option<i64>,
+    #[serde(borrow, default)]
+    pub msg: Option<Str<'a>>,
+}
+
+#[derive(Deserialize)]
+pub struct OrderUpdateEvent<'a> {
+    #[serde(borrow)]
+    pub o: OrderUpdate<'a>,
+}
+
+/// `ORDER_TRADE_UPDATE.o`.
+#[derive(Deserialize)]
+pub struct OrderUpdate<'a> {
+    pub i: Id,
+    #[serde(borrow)]
+    pub s: Str<'a>,
+    #[serde(rename = "S", borrow)]
+    pub side: Str<'a>,
+    #[serde(borrow)]
+    pub ot: Str<'a>,
+    #[serde(rename = "X", borrow)]
+    pub status: Str<'a>,
+    #[serde(borrow)]
+    pub p: Str<'a>,
+    #[serde(borrow, default)]
+    pub sp: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub ap: Option<Str<'a>>,
+    #[serde(borrow)]
+    pub q: Str<'a>,
+    #[serde(borrow)]
+    pub z: Str<'a>,
+    #[serde(borrow, default)]
+    pub l: Option<Str<'a>>,
+    #[serde(rename = "L", borrow, default)]
+    pub last_price: Option<Str<'a>>,
+    #[serde(rename = "R", default)]
+    pub reduce_only: bool,
+    #[serde(rename = "cp", default)]
+    pub close_position: bool,
+    #[serde(borrow, default)]
+    pub wt: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub f: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub c: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub r: Option<Str<'a>>,
+}
+
+#[derive(Deserialize)]
+pub struct AlgoUpdateEvent<'a> {
+    #[serde(borrow)]
+    pub o: AlgoUpdate<'a>,
+}
+
+/// `ALGO_UPDATE.o`.
+#[derive(Deserialize)]
+pub struct AlgoUpdate<'a> {
+    pub aid: Id,
+    #[serde(borrow)]
+    pub s: Str<'a>,
+    #[serde(rename = "S", borrow)]
+    pub side: Str<'a>,
+    #[serde(borrow)]
+    pub o: Str<'a>,
+    #[serde(rename = "X", borrow)]
+    pub status: Str<'a>,
+    #[serde(borrow, default)]
+    pub tp: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub q: Option<Str<'a>>,
+    #[serde(rename = "R", default)]
+    pub reduce_only: bool,
+    #[serde(default)]
+    pub cp: bool,
+    #[serde(borrow, default)]
+    pub wt: Option<Str<'a>>,
+}
+
+#[derive(Deserialize)]
+pub struct AccountUpdateEvent<'a> {
+    #[serde(borrow)]
+    pub a: AccountUpdate<'a>,
+}
+
+#[derive(Deserialize)]
+pub struct AccountUpdate<'a> {
+    #[serde(rename = "P", borrow, default)]
+    pub positions: Vec<AccountPosition<'a>>,
+}
+
+#[derive(Deserialize)]
+pub struct AccountPosition<'a> {
+    #[serde(borrow)]
+    pub s: Str<'a>,
+    #[serde(borrow)]
+    pub pa: Str<'a>,
+    #[serde(borrow)]
+    pub ep: Str<'a>,
+    #[serde(borrow)]
+    pub up: Str<'a>,
+    #[serde(borrow)]
+    pub ps: Str<'a>,
+}
+
+#[derive(Deserialize)]
+pub struct ConfigUpdateEvent<'a> {
+    #[serde(borrow, default)]
+    pub ac: Option<LeverageConfig<'a>>,
+}
+
+#[derive(Deserialize)]
+pub struct LeverageConfig<'a> {
+    #[serde(borrow)]
+    pub s: Str<'a>,
+    pub l: f64,
+}
+
+/// `/fapi/v1/userTrades` row.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserTrade<'a> {
+    pub id: Id,
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    pub order_id: Id,
+    #[serde(borrow)]
+    pub price: Str<'a>,
+    #[serde(borrow)]
+    pub qty: Str<'a>,
+    #[serde(borrow)]
+    pub side: Str<'a>,
+    #[serde(borrow, default)]
+    pub commission: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub commission_asset: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub position_side: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub realized_pnl: Option<Str<'a>>,
+    #[serde(default)]
+    pub maker: Option<bool>,
+    pub time: f64,
+}
+
+/// `/fapi/v1/allOrders` row.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoricalOrderRow<'a> {
+    pub order_id: Id,
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(borrow)]
+    pub status: Str<'a>,
+    #[serde(borrow)]
+    pub price: Str<'a>,
+    #[serde(borrow, default)]
+    pub avg_price: Option<Str<'a>>,
+    #[serde(borrow)]
+    pub orig_qty: Str<'a>,
+    #[serde(borrow)]
+    pub executed_qty: Str<'a>,
+    #[serde(borrow, rename = "type")]
+    pub kind: Str<'a>,
+    #[serde(borrow, default)]
+    pub orig_type: Option<Str<'a>>,
+    #[serde(borrow)]
+    pub side: Str<'a>,
+    #[serde(borrow, default)]
+    pub position_side: Option<Str<'a>>,
+    #[serde(default)]
+    pub reduce_only: bool,
+    pub time: f64,
+    #[serde(default)]
+    pub update_time: f64,
+}
+
+/// `/fapi/v1/income` row.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomeRow<'a> {
+    #[serde(borrow, default)]
+    pub symbol: Str<'a>,
+    #[serde(borrow)]
+    pub income_type: Str<'a>,
+    #[serde(borrow)]
+    pub income: Str<'a>,
+    #[serde(borrow)]
+    pub asset: Str<'a>,
+    pub time: f64,
+    pub tran_id: Id,
+    #[serde(borrow, default)]
+    pub trade_id: Option<Str<'a>>,
+}
+
+/// `/fapi/v1/trades` row.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicTrade<'a> {
+    pub id: Id,
+    #[serde(borrow)]
+    pub price: Str<'a>,
+    #[serde(borrow)]
+    pub qty: Str<'a>,
+    #[serde(borrow)]
+    pub quote_qty: Str<'a>,
+    pub time: f64,
+    pub is_buyer_maker: bool,
 }

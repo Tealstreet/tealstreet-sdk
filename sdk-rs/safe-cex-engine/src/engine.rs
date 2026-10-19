@@ -107,6 +107,13 @@ pub enum Command {
         command: CommandId,
         ids: Vec<String>,
     },
+    /// Change an open order's price or amount.
+    AmendOrder {
+        command: CommandId,
+        id: String,
+        price: Option<f64>,
+        amount: Option<f64>,
+    },
     CancelSymbolOrders {
         command: CommandId,
         symbol: String,
@@ -116,6 +123,21 @@ pub enum Command {
         symbol: String,
         leverage: f64,
     },
+    SetMarginType {
+        command: CommandId,
+        symbol: String,
+        isolated: bool,
+    },
+    SetPositionMode {
+        command: CommandId,
+        hedged: bool,
+    },
+    /// A rare request/response read (history, income, trades); the result is
+    /// JSON in [`Notice::CommandDone`] and never enters the frame.
+    Query {
+        command: CommandId,
+        query: Query,
+    },
     FetchCandles {
         command: CommandId,
         symbol: String,
@@ -124,6 +146,55 @@ pub enum Command {
         from_ms: Option<f64>,
         to_ms: Option<f64>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Query {
+    /// The account's own executions.
+    Fills {
+        symbol: Option<String>,
+        order_id: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        limit: Option<u32>,
+    },
+    /// Closed and canceled orders.
+    OrderHistory {
+        symbol: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        limit: Option<u32>,
+    },
+    /// Realized PnL, funding and commission ledger rows.
+    Income {
+        symbol: Option<String>,
+        kind: Option<String>,
+        from_ms: Option<f64>,
+        to_ms: Option<f64>,
+        limit: Option<u32>,
+    },
+    PublicTrades {
+        symbol: String,
+        limit: Option<u32>,
+    },
+}
+
+/// An HTTP response as the host received it.
+#[derive(Clone, Copy, Debug)]
+pub struct Response<'a> {
+    pub status: u16,
+    /// Raw `name: value` lines separated by `\n`; names in any case.
+    pub headers: &'a str,
+    pub body: &'a str,
+}
+
+impl<'a> Response<'a> {
+    pub fn header(&self, name: &str) -> Option<&'a str> {
+        self.headers.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.trim().eq_ignore_ascii_case(name).then(|| value.trim())
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -141,8 +212,7 @@ pub enum Event<'a> {
     },
     HttpResponse {
         request: RequestId,
-        status: u16,
-        body: &'a str,
+        response: Response<'a>,
     },
     HttpFailed {
         request: RequestId,
@@ -298,8 +368,7 @@ pub trait Venue {
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
         pending: Self::Pending,
-        status: u16,
-        body: &str,
+        response: Response<'_>,
     );
     fn on_request_failed(
         &mut self,
@@ -363,13 +432,9 @@ impl<V: Venue> Engine<V> {
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
             Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
             Event::WsClosed { socket, code } => self.venue.on_close(&mut cx, socket, code),
-            Event::HttpResponse {
-                request,
-                status,
-                body,
-            } => {
+            Event::HttpResponse { request, response } => {
                 if let Some(pending) = cx.io.pending.remove(&request) {
-                    self.venue.on_response(&mut cx, pending, status, body);
+                    self.venue.on_response(&mut cx, pending, response);
                 }
             }
             Event::HttpFailed { request, error } => {

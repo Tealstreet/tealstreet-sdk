@@ -3,7 +3,7 @@
 //! "Data shapes: the flush frame". The decoder is safe-cex-wasm/js/wire.mjs.
 use crate::model::{
     Candle, MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide,
-    StopTriggerType, TimeInForce,
+    RejectReason, StopTriggerType, TimeInForce,
 };
 use crate::store::TICKER_FIELDS;
 use std::collections::HashMap;
@@ -25,6 +25,11 @@ pub mod section {
     pub const BALANCE: u16 = 9;
     pub const STATUS: u16 = 10;
     pub const FILLS: u16 = 11;
+    pub const SETTINGS: u16 = 12;
+}
+
+pub mod status_flag {
+    pub const HEDGED: u32 = 1;
 }
 
 pub mod market_flag {
@@ -45,8 +50,10 @@ pub mod loaded_flag {
 }
 
 /// Order enums packed into one u32, one field per byte:
-/// status | type << 8 | (side | reduceOnly << 1 | close << 2 | closeKnown << 3) << 16
-/// | (timeInForce | triggerType << 4) << 24. Zero means absent where optional.
+/// status | type << 8 | (side | reduceOnly << 1 | close << 2 | closeKnown << 3
+/// | rejectReason << 4) << 16 | (timeInForce | triggerType << 4) << 24.
+/// Zero means absent where optional.
+#[allow(clippy::too_many_arguments)]
 pub fn order_enums(
     status: OrderStatus,
     kind: OrderType,
@@ -55,13 +62,15 @@ pub fn order_enums(
     close: Option<bool>,
     time_in_force: Option<TimeInForce>,
     trigger: Option<StopTriggerType>,
+    reject: Option<RejectReason>,
 ) -> u32 {
     let status = status as u32;
     let kind = kind as u32;
     let flags = (side as u32)
         | ((reduce_only as u32) << 1)
         | (((close == Some(true)) as u32) << 2)
-        | ((close.is_some() as u32) << 3);
+        | ((close.is_some() as u32) << 3)
+        | (reject.map_or(0, |r| r as u32 + 1) << 4);
     let tif = time_in_force.map_or(0, |t| t as u32 + 1);
     let trigger = trigger.map_or(0, |t| t as u32 + 1);
     status | (kind << 8) | (flags << 16) | ((tif | (trigger << 4)) << 24)

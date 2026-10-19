@@ -98,11 +98,15 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 7 | `ORDERS` (replace) | `u32 n`; `u32 strings[n][3]` (id, clientOrderId, parentId); `u32 market[n]`; `u32 enums[n]`; f64 columns: price, amount, filled, remaining, lastUpdate, takeProfit, stopLoss |
 | 8 | `POSITIONS` (replace) | `u32 n`; `u32 market[n]`; `u32 enums[n]`; f64 columns: entryPrice, notional, leverage, unrealizedPnl, realizedPnl, contracts, liquidationPrice, marginSize, lastUpdate |
 | 9 | `BALANCE` | f64 `[used, free, total, upnl]` |
-| 10 | `STATUS` | `u32 loaded` bits, `u32 0`, f64 latency |
-| 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]` |
+| 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
+| 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution |
+| 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]` |
 
 A market index is a row of the most recent `MARKETS` section; a ticker index is
-a row of the most recent `TICKERS` section. Enum codes and flag bits are
+a row of the most recent `TICKERS` section. `POSITIONS` holds open positions
+only; per-market leverage and margin type live in `SETTINGS`, replacing the
+zero-size placeholder positions TS kept for every market. An order's packed
+enum word carries its reject reason (flags bits 4-5). Enum codes and flag bits are
 defined once in `safe-cex-engine/src/wire.rs` and mirrored by the decoder in
 `safe-cex-wasm/js/wire.mjs`.
 

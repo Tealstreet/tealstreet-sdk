@@ -1,28 +1,43 @@
 //! Binance USD-M futures on the sans-I/O engine.
+mod account;
+mod history;
+mod sign;
+mod trading;
 mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, SocketId, TimerId, Venue, json, num,
+    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, json, num,
 };
+use sign::{Credentials, Query};
 use std::collections::HashMap;
 use wire::*;
 
 const MAX_RECONNECT_DELAY_MS: f64 = 30_000.0;
 const DEPTH_SNAPSHOT_LIMIT: u32 = 1000;
+/// Every socket is checked this often; one silent for `SILENCE_LIMIT_MS` is
+/// treated as dead (a half-open socket never reports a close).
+const WATCHDOG_INTERVAL_MS: f64 = 5_000.0;
+const SILENCE_LIMIT_MS: f64 = 20_000.0;
+/// Background reads pause at 80% of the 2,400 request-weight budget.
+const WEIGHT_PAUSE_THRESHOLD: f64 = 1_920.0;
+const WEIGHT_PAUSE_MS: f64 = 60_000.0;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Options {
     pub testnet: bool,
-    /// Skip `!bookTicker` (high-frequency, only needed to trade).
+    /// Markets, tickers, books and candles only; no account.
     pub public_data_only: bool,
+    pub key: Option<String>,
+    pub secret: Option<String>,
 }
 
 struct Urls {
     rest: &'static str,
     public_ws: &'static str,
     market_ws: &'static str,
+    private_ws: &'static str,
 }
 
 impl Urls {
@@ -32,12 +47,14 @@ impl Urls {
                 rest: "https://demo-fapi.binance.com",
                 public_ws: "wss://demo-fstream.binance.com/public/ws",
                 market_ws: "wss://demo-fstream.binance.com/market/ws",
+                private_ws: "wss://demo-fstream.binance.com/private/ws",
             }
         } else {
             Self {
                 rest: "https://fapi.binance.com",
                 public_ws: "wss://fstream.binance.com/public/ws",
                 market_ws: "wss://fstream.binance.com/market/ws",
+                private_ws: "wss://fstream.binance.com/private/ws",
             }
         }
     }
@@ -50,12 +67,16 @@ pub enum Pending {
     PremiumIndex,
     DepthSnapshot { symbol: String, generation: u32 },
     Klines { command: CommandId },
+    Account(account::Request),
+    Trade(trading::Request),
+    History(history::Request),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Channel {
     Public,
     Market,
+    Private,
 }
 
 struct Connection {
@@ -63,6 +84,8 @@ struct Connection {
     open: bool,
     attempts: u32,
     reconnect: Option<TimerId>,
+    watchdog: Option<TimerId>,
+    last_received: f64,
     next_request_id: u64,
 }
 
@@ -73,6 +96,8 @@ impl Connection {
             open: false,
             attempts: 0,
             reconnect: None,
+            watchdog: None,
+            last_received: 0.0,
             next_request_id: 10,
         }
     }
@@ -126,27 +151,49 @@ struct TickerSeed {
 pub struct BinanceFutures {
     options: Options,
     urls: Urls,
+    credentials: Option<Credentials>,
     public: Connection,
     market: Connection,
+    private: Connection,
     books: HashMap<String, BookState>,
     candles: HashMap<(String, String), u32>,
     ticker_seed: TickerSeed,
     /// Depth snapshots are paused until this time after a 418 or 429.
     rest_paused_until: f64,
+    /// Background account reads pause until this time near the weight limit.
+    background_paused_until: f64,
+    account: account::AccountState,
+    trading: trading::TradingState,
+    history: history::HistoryState,
 }
 
 impl BinanceFutures {
     pub fn new(options: Options) -> Self {
         let urls = Urls::for_options(&options);
+        let credentials = match (&options.key, &options.secret) {
+            (Some(key), Some(secret)) if !options.public_data_only && !key.is_empty() => {
+                Some(Credentials {
+                    key: key.clone(),
+                    secret: secret.clone(),
+                })
+            }
+            _ => None,
+        };
         Self {
             options,
             urls,
+            credentials,
             public: Connection::new(),
             market: Connection::new(),
+            private: Connection::new(),
             books: HashMap::new(),
             candles: HashMap::new(),
             ticker_seed: TickerSeed::default(),
             rest_paused_until: 0.0,
+            background_paused_until: 0.0,
+            account: account::AccountState::default(),
+            trading: trading::TradingState::default(),
+            history: history::HistoryState::default(),
         }
     }
 
@@ -154,16 +201,21 @@ impl BinanceFutures {
         match channel {
             Channel::Public => &mut self.public,
             Channel::Market => &mut self.market,
+            Channel::Private => &mut self.private,
         }
     }
 
     fn channel_of(&self, socket: SocketId) -> Option<Channel> {
-        if self.public.socket == Some(socket) {
-            Some(Channel::Public)
-        } else if self.market.socket == Some(socket) {
-            Some(Channel::Market)
-        } else {
-            None
+        [Channel::Public, Channel::Market, Channel::Private]
+            .into_iter()
+            .find(|&channel| self.connection_ref(channel).socket == Some(socket))
+    }
+
+    fn connection_ref(&self, channel: Channel) -> &Connection {
+        match channel {
+            Channel::Public => &self.public,
+            Channel::Market => &self.market,
+            Channel::Private => &self.private,
         }
     }
 
@@ -177,15 +229,116 @@ impl BinanceFutures {
         );
     }
 
-    fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
-        let url = match channel {
-            Channel::Public => self.urls.public_ws,
-            Channel::Market => self.urls.market_ws,
+    /// A signed request; every parameter travels in the query string.
+    fn signed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        method: Method,
+        path: &str,
+        query: Query,
+        pending: Pending,
+    ) {
+        let Some(credentials) = &self.credentials else {
+            return;
         };
+        let query = query.signed(credentials, cx.now);
+        cx.request(
+            method,
+            format!("{}{path}?{query}", self.urls.rest),
+            vec![("X-MBX-APIKEY", credentials.key.clone())],
+            None,
+            pending,
+        );
+    }
+
+    fn connect_url(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, url: &str) {
         let socket = cx.connect(url);
         let connection = self.connection(channel);
         connection.socket = Some(socket);
         connection.open = false;
+    }
+
+    fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
+        let url = match channel {
+            Channel::Public => self.urls.public_ws,
+            Channel::Market => self.urls.market_ws,
+            Channel::Private => return self.request_listen_key(cx),
+        };
+        self.connect_url(cx, channel, url);
+    }
+
+    /// Note request weight; near the limit, or on a 418/429, pause background reads.
+    fn observe_weight(&mut self, cx: &mut Cx<'_, Pending>, response: &Response<'_>) {
+        let pause = if matches!(response.status, 418 | 429) {
+            Some(
+                response
+                    .header("retry-after")
+                    .map(num::parse)
+                    .filter(|seconds| *seconds > 0.0)
+                    .map_or(WEIGHT_PAUSE_MS, |seconds| seconds * 1_000.0),
+            )
+        } else {
+            response
+                .header("x-mbx-used-weight-1m")
+                .map(num::parse)
+                .filter(|weight| *weight >= WEIGHT_PAUSE_THRESHOLD)
+                .map(|_| WEIGHT_PAUSE_MS)
+        };
+        if let Some(pause) = pause {
+            self.background_paused_until = self.background_paused_until.max(cx.now + pause);
+        }
+    }
+
+    fn background_paused(&self, now: f64) -> bool {
+        now < self.background_paused_until
+    }
+
+    fn watch(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
+        let timer = cx.set_timer(WATCHDOG_INTERVAL_MS);
+        let connection = self.connection(channel);
+        if let Some(previous) = connection.watchdog.replace(timer) {
+            cx.clear_timer(previous);
+        }
+    }
+
+    /// A socket silent too long is closed and reconnected; the private socket
+    /// is pinged first because it can be quiet for good reason.
+    fn on_watchdog(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
+        let now = cx.now;
+        let connection = self.connection(channel);
+        connection.watchdog = None;
+        let (Some(socket), true) = (connection.socket, connection.open) else {
+            return;
+        };
+        if now - connection.last_received > SILENCE_LIMIT_MS {
+            cx.close(socket);
+            self.on_socket_closed(cx, channel, 4000);
+            return;
+        }
+        if channel == Channel::Private {
+            cx.send(socket, "{\"id\":42,\"method\":\"LIST_SUBSCRIPTIONS\"}");
+        }
+        self.watch(cx, channel);
+    }
+
+    fn on_socket_closed(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, code: u16) {
+        let connection = self.connection(channel);
+        connection.socket = None;
+        connection.open = false;
+        connection.attempts += 1;
+        if let Some(watchdog) = connection.watchdog.take() {
+            cx.clear_timer(watchdog);
+        }
+        let delay = (250.0 * 2f64.powi(connection.attempts as i32)).min(MAX_RECONNECT_DELAY_MS);
+        let timer = cx.set_timer(delay);
+        self.connection(channel).reconnect = Some(timer);
+        if channel == Channel::Private {
+            self.account.resync_orders_on_open = true;
+        }
+        cx.log(
+            LogLevel::Warning,
+            format!("Binance socket closed ({code}); reconnecting in {delay} ms"),
+        );
     }
 
     fn send_subscribe(
@@ -243,6 +396,9 @@ impl BinanceFutures {
             return;
         }
         cx.store.set_markets(markets);
+        if self.credentials.is_some() {
+            self.request_leverage_brackets(cx);
+        }
         self.get(cx, "/fapi/v1/ticker/24hr", Pending::Daily);
         self.get(cx, "/fapi/v1/ticker/bookTicker", Pending::BookTickers);
         self.get(cx, "/fapi/v1/premiumIndex", Pending::PremiumIndex);
@@ -287,7 +443,9 @@ impl BinanceFutures {
         );
         self.ticker_seed = TickerSeed::default();
         cx.store.set_tickers(tickers);
-        if self.options.public_data_only {
+        if self.credentials.is_some() {
+            self.start_account(cx);
+        } else {
             cx.store.set_orders(Vec::new());
             cx.store.set_positions(Vec::new());
             cx.store.set_balance(Default::default());
@@ -545,7 +703,8 @@ impl BinanceFutures {
         }
     }
 
-    fn on_klines(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, status: u16, body: &str) {
+    fn on_klines(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, response: Response<'_>) {
+        let Response { status, body, .. } = response;
         if status != 200 {
             cx.done(
                 command,
@@ -647,9 +806,12 @@ impl Venue for BinanceFutures {
         let Some(channel) = self.channel_of(socket) else {
             return;
         };
+        let now = cx.now;
         let connection = self.connection(channel);
         connection.open = true;
         connection.attempts = 0;
+        connection.last_received = now;
+        self.watch(cx, channel);
         match channel {
             Channel::Public => {
                 let mut topics = if self.options.public_data_only {
@@ -669,35 +831,31 @@ impl Venue for BinanceFutures {
                 topics.extend(self.kline_topics());
                 self.send_subscribe(cx, Channel::Market, "SUBSCRIBE", &topics);
             }
+            Channel::Private => self.on_private_open(cx),
         }
     }
 
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
-        match self.channel_of(socket) {
-            Some(Channel::Public) => self.on_public_frame(cx, text),
-            Some(Channel::Market) => self.on_market_frame(cx, text),
-            None => {}
+        let Some(channel) = self.channel_of(socket) else {
+            return;
+        };
+        self.connection(channel).last_received = cx.now;
+        match channel {
+            Channel::Public => self.on_public_frame(cx, text),
+            Channel::Market => self.on_market_frame(cx, text),
+            Channel::Private => self.on_user_event(cx, text),
         }
     }
 
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, code: u16) {
-        let Some(channel) = self.channel_of(socket) else {
-            return;
-        };
-        let connection = self.connection(channel);
-        connection.socket = None;
-        connection.open = false;
-        connection.attempts += 1;
-        let delay = (250.0 * 2f64.powi(connection.attempts as i32)).min(MAX_RECONNECT_DELAY_MS);
-        let timer = cx.set_timer(delay);
-        self.connection(channel).reconnect = Some(timer);
-        cx.log(
-            LogLevel::Warning,
-            format!("Binance socket closed ({code}); reconnecting in {delay} ms"),
-        );
+        if let Some(channel) = self.channel_of(socket) {
+            self.on_socket_closed(cx, channel, code);
+        }
     }
 
-    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, status: u16, body: &str) {
+    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        self.observe_weight(cx, &response);
+        let Response { status, body, .. } = response;
         match pending {
             Pending::ExchangeInfo => self.on_markets(cx, body),
             Pending::Daily => {
@@ -740,7 +898,10 @@ impl Venue for BinanceFutures {
             Pending::DepthSnapshot { symbol, generation } => {
                 self.on_depth_snapshot(cx, symbol, generation, status, body)
             }
-            Pending::Klines { command } => self.on_klines(cx, command, status, body),
+            Pending::Klines { command } => self.on_klines(cx, command, response),
+            Pending::Account(request) => self.on_account_response(cx, request, response),
+            Pending::Trade(request) => self.on_trade_response(cx, request, Ok(response)),
+            Pending::History(request) => self.on_history_response(cx, request, Ok(response)),
         }
     }
 
@@ -754,6 +915,9 @@ impl Venue for BinanceFutures {
                     Self::snapshot_failed(cx, state, 0.0);
                 }
             }
+            Pending::Account(request) => self.on_account_failed(cx, request, error),
+            Pending::Trade(request) => self.on_trade_response(cx, request, Err(error)),
+            Pending::History(request) => self.on_history_response(cx, request, Err(error)),
             _ => cx.log(
                 LogLevel::Error,
                 format!("Binance startup request failed: {error}"),
@@ -767,12 +931,17 @@ impl Venue for BinanceFutures {
                 state.sync = Sync::Idle;
             }
         }
-        for channel in [Channel::Public, Channel::Market] {
+        for channel in [Channel::Public, Channel::Market, Channel::Private] {
             if self.connection(channel).reconnect == Some(timer) {
                 self.connection(channel).reconnect = None;
                 self.connect(cx, channel);
             }
+            if self.connection(channel).watchdog == Some(timer) {
+                self.on_watchdog(cx, channel);
+            }
         }
+        self.on_account_timer(cx, timer);
+        self.on_history_timer(cx, timer);
     }
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
@@ -821,12 +990,8 @@ impl Venue for BinanceFutures {
                 }
                 self.get(cx, &path, Pending::Klines { command });
             }
-            Command::PlaceOrders { command, .. }
-            | Command::CancelOrders { command, .. }
-            | Command::CancelSymbolOrders { command, .. }
-            | Command::SetLeverage { command, .. } => {
-                cx.done(command, Err("Binance trading is not available yet".into()))
-            }
+            Command::Query { command, query } => self.start_query(cx, command, query),
+            trade => self.on_trade_command(cx, trade),
         }
     }
 

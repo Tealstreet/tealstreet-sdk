@@ -15,6 +15,7 @@ export const SECTION = {
   BALANCE: 9,
   STATUS: 10,
   FILLS: 11,
+  SETTINGS: 12,
 };
 
 export const NONE = 0xffffffff;
@@ -30,6 +31,7 @@ export const MARKET_COLUMNS = [
 ];
 export const MARKET_FLAG = { ACTIVE: 1, INVERSE: 2, SPOT: 4, PERPETUAL: 8, EXPIRING: 16, READ_ONLY: 32 };
 export const LOADED_FLAG = { BALANCE: 1, ORDERS: 2, MARKETS: 4, TICKERS: 8, POSITIONS: 16 };
+export const STATUS_FLAG = { HEDGED: 1 };
 
 export const ORDER_COLUMNS = ['price', 'amount', 'filled', 'remaining', 'lastUpdate', 'takeProfit', 'stopLoss'];
 export const ORDER_STATUS = ['open', 'closed', 'canceled', 'creating', 'updating', 'canceling'];
@@ -37,6 +39,7 @@ export const ORDER_TYPE = ['market', 'limit', 'conditional', 'stop_market', 'tak
 export const ORDER_SIDE = ['buy', 'sell'];
 export const TIME_IN_FORCE = [undefined, 'GoodTillCancel', 'ImmediateOrCancel', 'FillOrKill', 'PostOnly'];
 export const TRIGGER_TYPE = [undefined, 'mark_price', 'last_price', 'index_price'];
+export const REJECT_REASON = [undefined, 'PostOnly', 'InsufficientBalance', 'ReduceOnly'];
 
 export const POSITION_COLUMNS = [
   'entryPrice', 'notional', 'leverage', 'unrealizedPnl', 'realizedPnl',
@@ -56,6 +59,7 @@ export const orderEnums = (word) => {
     side: ORDER_SIDE[flags & 1],
     reduceOnly: (flags & 2) !== 0,
     close: flags & 8 ? (flags & 4) !== 0 : undefined,
+    rejectReason: REJECT_REASON[flags >>> 4],
     timeInForce: TIME_IN_FORCE[last & 0xf],
     triggerType: TRIGGER_TYPE[last >>> 4],
   };
@@ -231,9 +235,21 @@ export class Frame {
   status() {
     const section = this.first(SECTION.STATUS);
     if (!section) return undefined;
-    const loaded = new Uint32Array(this.buffer, section.offset, 1)[0];
+    const [loaded, flags] = new Uint32Array(this.buffer, section.offset, 2);
     const latency = new Float64Array(this.buffer, section.offset + 8, 1)[0];
-    return { loaded, latency };
+    return { loaded, hedged: (flags & STATUS_FLAG.HEDGED) !== 0, latency };
+  }
+
+  /** Per-market account settings, replacing any earlier table. */
+  settings() {
+    const section = this.first(SECTION.SETTINGS);
+    if (!section) return undefined;
+    const { buffer } = this;
+    const count = new Uint32Array(buffer, section.offset, 1)[0];
+    const market = new Uint32Array(buffer, section.offset + 4, count);
+    const margin = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
+    const leverage = new Float64Array(buffer, align8(section.offset + 4 + count * 8), count);
+    return { count, market, leverage, marginType: (i) => MARGIN_TYPE[margin[i]] };
   }
 
   fills() {
