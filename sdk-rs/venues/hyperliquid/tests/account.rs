@@ -334,3 +334,15 @@ fn rest_after_cancel_trust_window_reenables_live_order_updates() {
     );
     assert_eq!(e.store().order("9").unwrap().remaining, 0.5);
 }
+#[test]
+fn same_millisecond_partial_executions_both_update_position() {
+    let (mut e, s) = ready("disabled");
+    message(
+        &mut e,
+        s,
+        2000.0,
+        r#"{"channel":"userFills","data":{"fills":[{"coin":"BTC","side":"B","px":"100","sz":"0.5","time":2000,"tid":7,"oid":99,"startPosition":"2"},{"coin":"BTC","side":"B","px":"100","sz":"0.5","time":2000,"tid":8,"oid":99,"startPosition":"2.5"}]}}"#,
+    );
+    assert_eq!(e.store().positions()[0].contracts, 3.0);
+    assert_eq!(fill_count(e.take_frame(2000.0).unwrap()), 2);
+}

@@ -54,13 +54,16 @@ sub-agent implementation review and fixes before every phase commit.
   limit/from semantics, Unicode interval panic. Six documented-payload tests
   pass; bans, formatting and clippy pass. Registration in wasm/harness remains
   in phase 5, so phase 1 does not enable an incomplete venue in user flows.
-- Phase 2: implementation checkpoint. Twelve account tests, one official SDK
+- Phase 2: implementation checkpoint. Thirteen account tests, one official SDK
   signing-vector test (mainnet/testnet/vault), and six public tests pass.
   `review_private` found and drove fixes for position IDs, core trigger fallback,
   suppression recovery, user event shapes, TIF retention, newer REST source
   times, per-symbol fill clocks and HIP-3 in-flight refresh collapse. Final
-  review of these fixes pending. Weighted read queue bounds background reads;
-  orders reconcile at 1s for HIP-3, positions at 120s, with debounced fill heals.
+  review drove two further fixes: snapshot and optimistic fill clocks are
+  separate (two executions in the same millisecond both apply); order reads
+  are demand-driven, debounced at 500ms with a 1s minimum cadence. Weighted
+  reads bound background traffic; HIP-3 positions reconcile at 120s, with
+  debounced fill heals. Bans, fmt, clippy and all twenty native tests pass.
   Deleted unused `crypto/wallet_utils.rs`; private-key address derivation now
   uses a transport-free Ethereum primitive for non-fatal startup warnings.
 - Phase 3: pending.

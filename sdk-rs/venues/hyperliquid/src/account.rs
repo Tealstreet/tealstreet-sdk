@@ -42,7 +42,7 @@ pub struct Account {
     mode_timer: Option<TimerId>,
     role_timer: Option<TimerId>,
     sync_timer: Option<TimerId>,
-    order_timer: Option<TimerId>,
+    last_order_refresh: f64,
     read_timer: Option<TimerId>,
     read_window: f64,
     read_weight: u32,
@@ -59,6 +59,8 @@ pub struct Account {
     state_revision: HashMap<String, u64>,
     state_time: HashMap<String, f64>,
     position_time: HashMap<String, f64>,
+    snapshot_time: HashMap<String, f64>,
+    last_fill: HashMap<String, (f64, u64)>,
     state_dirty: HashSet<String>,
     state_refresh_timer: Option<TimerId>,
     pub orders_revision: HashMap<String, u64>,
@@ -239,9 +241,8 @@ impl Hyperliquid {
         self.check_builder(cx);
         self.account_read(cx, "userFees", None, Request::Fees, false);
         self.refresh_account(cx);
-        self.account.sync_timer = Some(cx.set_timer(120_000.0));
         if !self.dex_names.is_empty() {
-            self.account.order_timer = Some(cx.set_timer(1000.0));
+            self.account.sync_timer = Some(cx.set_timer(120_000.0));
         }
     }
     pub(crate) fn check_builder(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -333,7 +334,9 @@ impl Hyperliquid {
     }
     pub(crate) fn schedule_orders(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.refresh_timer.is_none() && self.user().is_some() {
-            self.account.refresh_timer = Some(cx.set_timer(500.0));
+            self.account.refresh_timer = Some(
+                cx.set_timer(500.0f64.max(1000.0 - (cx.now - self.account.last_order_refresh))),
+            );
         }
     }
     fn refresh_spot(&mut self, cx: &mut Cx<'_, Pending>, force: bool) {
@@ -665,10 +668,6 @@ impl Hyperliquid {
             self.account.read_timer = None;
             self.pump_reads(cx);
         }
-        if self.account.order_timer == Some(timer) {
-            self.refresh_orders(cx);
-            self.account.order_timer = Some(cx.set_timer(1000.0));
-        }
         if self.account.mode_timer == Some(timer) {
             self.account.mode_timer = None;
             self.mode_ready(cx);
@@ -682,10 +681,13 @@ impl Hyperliquid {
         }
         if self.account.refresh_timer == Some(timer) {
             self.account.refresh_timer = None;
+            self.account.last_order_refresh = cx.now;
             self.refresh_orders(cx);
         }
         if self.account.sync_timer == Some(timer) {
-            self.refresh_account(cx);
+            for dex in self.dex_names.clone() {
+                self.refresh_state(cx, &dex);
+            }
             self.account.sync_timer = Some(cx.set_timer(120_000.0));
         }
     }
@@ -731,6 +733,9 @@ impl Hyperliquid {
                     self.account
                         .position_time
                         .insert(market.symbol.clone(), time);
+                    self.account
+                        .snapshot_time
+                        .insert(market.symbol.clone(), time);
                 }
             }
         }
@@ -759,6 +764,7 @@ impl Hyperliquid {
                     continue;
                 }
                 self.account.position_time.insert(symbol.clone(), time);
+                self.account.snapshot_time.insert(symbol.clone(), time);
             }
             let margin = if p.leverage.kind == "cross" {
                 MarginType::Cross
@@ -1216,12 +1222,25 @@ impl Hyperliquid {
         };
         if self
             .account
-            .position_time
+            .snapshot_time
             .get(symbol)
             .is_some_and(|t| *t >= fill.time)
         {
             return;
         }
+        if self
+            .account
+            .last_fill
+            .get(symbol)
+            .is_some_and(|(time, tid)| {
+                *time > fill.time || (*time == fill.time && *tid >= fill.tid)
+            })
+        {
+            return;
+        }
+        self.account
+            .last_fill
+            .insert(symbol.into(), (fill.time, fill.tid));
         let end = start + fill.sz * if fill.side == "B" { 1.0 } else { -1.0 };
         let old = cx
             .store
