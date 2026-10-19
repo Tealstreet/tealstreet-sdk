@@ -394,6 +394,7 @@ fn worker_structured_clone_matches_node_graphs_and_refusals() {
 }
 
 mod clone_observation {
+    use safe_cex_exchange::js_runtime::globals::install_builtins;
     use safe_cex_exchange::js_runtime::value::{Js, Prop, Thrown, error_object, utf16};
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),

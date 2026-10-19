@@ -41409,7 +41409,7 @@
       }
     },
     "evidence": "safe-cex-exchange/STRUCTURED_CLONE_REVIEW.md; actual recorder PerfFixture::record -> structured_clone, direct native graph profiles against Node structuredClone, plus existing real listener record/dump/replay. Exact compiler API from fresh native/default inventory. Stack accessor-versus-data representation alone is approved engine-specific ACCEPT; supplied units/read/write/flags and exact message/cause descriptors remain pinned.",
-    "call": "{ mod observation { use crate::js_runtime::value::{Js,Prop,Thrown,error_object,utf16}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/structured-clone-observers.rs\")); } observation::observe($value, |value| $type(value)) }",
+    "call": "{ mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js,Prop,Thrown,error_object,utf16}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/structured-clone-observers.rs\")); } observation::observe($value, |value| $type(value)) }",
     "cases": [
       {
         "input": "primitives",
@@ -41727,7 +41727,7 @@
       }
     },
     "evidence": "safe-cex-exchange/STRUCTURED_CLONE_REVIEW.md; actual recorder PerfFixture::record -> structured_clone, direct native graph profiles against Node structuredClone, plus existing real listener record/dump/replay. Exact compiler API from fresh native/default inventory. Stack accessor-versus-data representation alone is approved engine-specific ACCEPT; supplied units/read/write/flags and exact message/cause descriptors remain pinned.",
-    "call": "{ mod observation { use crate::js_runtime::value::{Js,Prop,Thrown,error_object,utf16}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/structured-clone-observers.rs\")); } observation::observe($value, |value| $type(value, &mut Vec::new())) }",
+    "call": "{ mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js,Prop,Thrown,error_object,utf16}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/structured-clone-observers.rs\")); } observation::observe($value, |value| $type(value, &mut Vec::new())) }",
     "cases": [
       {
         "input": "primitives",

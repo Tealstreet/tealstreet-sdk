@@ -1,6 +1,18 @@
 use serde_json::{Value, json};
 use std::{cell::RefCell, rc::Rc};
 
+fn own_descriptor(value: &Js, key: &[u16]) -> Js {
+    let globals = Js::object(vec![]);
+    install_builtins::<()>(&globals, std::rc::Weak::new());
+    globals
+        .get("Object")
+        .unwrap()
+        .call_method(
+            "getOwnPropertyDescriptor",
+            vec![value.clone(), Js::utf16(key)],
+        )
+        .unwrap()
+}
 fn bits(value: &Js) -> String {
     let n = value.as_f64().unwrap();
     if n.is_nan() {
@@ -14,9 +26,7 @@ fn keys(value: &Js) -> Vec<String> {
         .own_keys()
         .iter()
         .filter(|key| {
-            value
-                .own_property_descriptor(key)
-                .unwrap()
+            own_descriptor(value, key)
                 .get("enumerable")
                 .unwrap()
                 .truthy()
@@ -25,7 +35,7 @@ fn keys(value: &Js) -> Vec<String> {
         .collect()
 }
 fn descriptor(value: &Js, key: &str) -> Value {
-    let d = value.own_property_descriptor(&utf16(key)).unwrap();
+    let d = own_descriptor(value, &utf16(key));
     json!([
         d.get("writable").unwrap().truthy(),
         d.get("enumerable").unwrap().truthy(),
@@ -142,7 +152,7 @@ pub fn observe(profile: &Value, clone: impl Fn(&Js) -> Result<Js, Thrown>) -> Va
                 .unwrap();
             let c = clone(&e).unwrap();
             let cc = c.get("cause").unwrap();
-            let mut result = json!({"name":c.get("name").unwrap().to_display(),"units":c.get("message").unwrap().as_str().unwrap().as_ref(),"stack":c.get("stack").unwrap().as_str().unwrap().as_ref(),"alias":cc.get("child").unwrap().strict_equals(&cc.get("again").unwrap()),"detached":!cc.strict_equals(&cause),"extra":c.has_own("extra"),"keys":keys(&c),"messageDescriptor":descriptor(&c,"message"),"stackFlags":[c.own_property_descriptor(&utf16("stack")).unwrap().get("enumerable").unwrap().truthy(),c.own_property_descriptor(&utf16("stack")).unwrap().get("configurable").unwrap().truthy()],"causeDescriptor":descriptor(&c,"cause")});
+            let mut result = json!({"name":c.get("name").unwrap().to_display(),"units":c.get("message").unwrap().as_str().unwrap().as_ref(),"stack":c.get("stack").unwrap().as_str().unwrap().as_ref(),"alias":cc.get("child").unwrap().strict_equals(&cc.get("again").unwrap()),"detached":!cc.strict_equals(&cause),"extra":c.has_own("extra"),"keys":keys(&c),"messageDescriptor":descriptor(&c,"message"),"stackFlags":[own_descriptor(&c, &utf16("stack")).get("enumerable").unwrap().truthy(),own_descriptor(&c, &utf16("stack")).get("configurable").unwrap().truthy()],"causeDescriptor":descriptor(&c,"cause")});
             c.set(
                 "stack",
                 Js::utf16(&[0xd800, 114, 101, 112, 108, 97, 99, 101, 109, 101, 110, 116]),
@@ -157,7 +167,7 @@ pub fn observe(profile: &Value, clone: impl Fn(&Js) -> Result<Js, Thrown>) -> Va
             e.set("stack", Js::Number(17.)).unwrap();
             e.set("cause", Js::Undefined).unwrap();
             let c = clone(&e).unwrap();
-            let mut result = json!({"message":c.has_own("message"),"stack":c.has_own("stack")&&c.get("stack").unwrap().is_undefined(),"cause":c.has_own("cause")&&c.get("cause").unwrap().is_undefined(),"keys":keys(&c),"stackFlags":[c.own_property_descriptor(&utf16("stack")).unwrap().get("enumerable").unwrap().truthy(),c.own_property_descriptor(&utf16("stack")).unwrap().get("configurable").unwrap().truthy()],"causeDescriptor":descriptor(&c,"cause")});
+            let mut result = json!({"message":c.has_own("message"),"stack":c.has_own("stack")&&c.get("stack").unwrap().is_undefined(),"cause":c.has_own("cause")&&c.get("cause").unwrap().is_undefined(),"keys":keys(&c),"stackFlags":[own_descriptor(&c, &utf16("stack")).get("enumerable").unwrap().truthy(),own_descriptor(&c, &utf16("stack")).get("configurable").unwrap().truthy()],"causeDescriptor":descriptor(&c,"cause")});
             c.set("stack", Js::Number(23.)).unwrap();
             result["stackWrite"] = json!(c.get("stack").unwrap().as_f64().unwrap() as i32);
             result
