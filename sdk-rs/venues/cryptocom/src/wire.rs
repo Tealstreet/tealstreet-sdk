@@ -17,6 +17,29 @@ pub struct Envelope<'a> {
     pub result: Option<&'a RawValue>,
 }
 
+// The common public path decodes its nested payload once.
+#[derive(Deserialize)]
+pub struct TickerPush<'a> {
+    #[serde(default)]
+    pub code: i64,
+    #[serde(borrow)]
+    pub result: TickerMessage<'a>,
+}
+
+#[derive(Deserialize)]
+pub enum TickerChannel {
+    #[serde(rename = "ticker")]
+    Ticker,
+}
+
+#[derive(Deserialize)]
+pub struct TickerMessage<'a> {
+    pub channel: TickerChannel,
+    pub instrument_name: &'a str,
+    #[serde(borrow)]
+    pub data: Vec<TickerRow<'a>>,
+}
+
 #[derive(Deserialize)]
 pub struct Message<'a> {
     pub channel: &'a str,
@@ -105,26 +128,30 @@ pub struct TickerName<'a> {
 pub struct TickerRow<'a> {
     pub i: &'a str,
     #[serde(default)]
-    pub b: &'a str,
+    pub b: Option<&'a str>,
     #[serde(default)]
-    pub k: &'a str,
-    pub a: &'a str,
-    pub c: &'a str,
-    pub v: &'a str,
-    pub vv: &'a str,
+    pub k: Option<&'a str>,
     #[serde(default)]
-    pub oi: &'a str,
+    pub a: Option<&'a str>,
+    #[serde(default)]
+    pub c: Option<&'a str>,
+    #[serde(default)]
+    pub v: Option<&'a str>,
+    #[serde(default)]
+    pub vv: Option<&'a str>,
+    #[serde(default)]
+    pub oi: Option<&'a str>,
 }
 
 impl TickerRow<'_> {
     pub fn apply(&self, t: &mut Ticker) {
-        t.bid = num::parse(self.b);
-        t.ask = num::parse(self.k);
-        t.last = num::parse(self.a);
-        t.percentage = num::parse(self.c) * 100.0;
-        t.volume = num::parse(self.v);
-        t.quote_volume = num::parse(self.vv);
-        t.open_interest = num::parse(self.oi);
+        t.bid = self.b.map_or(0.0, num::parse);
+        t.ask = self.k.map_or(0.0, num::parse);
+        t.last = self.a.map_or(0.0, num::parse);
+        t.percentage = self.c.map_or(0.0, num::parse) * 100.0;
+        t.volume = self.v.map_or(0.0, num::parse);
+        t.quote_volume = self.vv.map_or(0.0, num::parse);
+        t.open_interest = self.oi.map_or(0.0, num::parse);
     }
 }
 

@@ -39,3 +39,25 @@ test('bad signatures and missing channels cannot pass the socket audit', () => {
   assert(audit.errors().some((e) => e.includes('signature')));
   assert(audit.errors().some((e) => e.includes('user.trade')));
 });
+
+test('HMAC check preserves exact nanosecond integer parameters', () => {
+  const method = 'private/get-trades', id = Date.now(), nonce = id, api_key = 'replay-key';
+  const payload = method + id + api_key + 'end_time1610000000000000001' + nonce;
+  const sig = createHmac('sha256', 'replay-secret').update(payload).digest('hex');
+  const body = JSON.stringify({ method, id, nonce, api_key, sig, params: {} }).replace('"params":{}', '"params":{"end_time":1610000000000000001}');
+  const url = 'https://api.crypto.com/exchange/v1/private/get-trades';
+  assert.equal(venue.checkRequest('POST', url, body), true);
+  assert.equal(venue.checkRequest('POST', url, body.replace('1610000000000000001', '1610000000000000002')), false);
+});
+
+test('public audit requires ticker subscriptions before replay', () => {
+  const audit = venue.createSocketAudit('rust', { isPrivate: false, books: ['BTCUSD-PERP'], tickers: ['BTCUSD-PERP', 'ETHUSD-PERP'] });
+  const send = (channels) => audit.sent(publicUrl, JSON.stringify({ method: 'subscribe', params: { channels } }));
+  send(['book.BTCUSD-PERP.50']);
+  assert.equal(audit.ready(), false);
+  assert(audit.errors().some((e) => e.includes('missing ticker subscription')));
+  const ready = venue.createSocketAudit('rust', { isPrivate: false, books: [], tickers: ['BTCUSD-PERP'] });
+  ready.sent(publicUrl, JSON.stringify({ method: 'subscribe', params: { channels: ['ticker.BTCUSD-PERP'] } }));
+  assert.equal(ready.ready(), true);
+  assert.deepEqual(ready.errors(), []);
+});

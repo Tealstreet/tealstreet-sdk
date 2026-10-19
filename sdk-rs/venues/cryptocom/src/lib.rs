@@ -192,19 +192,21 @@ impl Cryptocom {
     }
 
     fn market_channels(&mut self, cx: &mut Cx<'_, Pending>) {
-        let mut channels: Vec<String> = cx
-            .store
-            .markets()
-            .iter()
-            .map(|m| format!("ticker.{}", m.id))
-            .collect();
-        for m in cx.store.markets() {
-            channels.push(format!("mark.{}", m.id));
-            if let Some(index) = self.indexes.get(&m.id).filter(|i| i.ends_with("-INDEX")) {
-                channels.push(format!("index.{index}"));
-            }
-            channels.push(format!("funding.{}", m.id));
-        }
+        let markets = cx.store.markets();
+        let channels =
+            markets
+                .iter()
+                .map(|m| format!("ticker.{}", m.id))
+                .chain(markets.iter().flat_map(|m| {
+                    let index = self.indexes.get(&m.id).filter(|i| i.ends_with("-INDEX"));
+                    [
+                        Some(format!("mark.{}", m.id)),
+                        index.map(|i| format!("index.{i}")),
+                        Some(format!("funding.{}", m.id)),
+                    ]
+                    .into_iter()
+                    .flatten()
+                }));
         for channel in channels {
             if self.subscriptions.len() >= 350 {
                 break;
@@ -241,9 +243,11 @@ impl Cryptocom {
                     first = false;
                     state.book.clear();
                     for (side, rows) in [(BookSide::Bids, row.bids), (BookSide::Asks, row.asks)] {
-                        for (p, q, _) in rows {
-                            state.book.apply(side, num::parse(p), num::parse(q));
-                        }
+                        state.book.load_sorted(
+                            side,
+                            rows.into_iter()
+                                .map(|(p, q, _)| (num::parse(p), num::parse(q))),
+                        );
                     }
                     state.synced = true;
                     let bid = state.book.best_bid().unwrap_or(0.0);
@@ -335,6 +339,17 @@ impl Venue for Cryptocom {
             return;
         };
         self.sockets[channel].last = cx.now;
+        if channel == 0
+            && let Ok(push) = serde_json::from_str::<TickerPush>(text)
+            && push.code == 0
+        {
+            let TickerChannel::Ticker = push.result.channel;
+            if let Some(row) = push.result.data.first() {
+                cx.store
+                    .update_ticker(push.result.instrument_name, |t| row.apply(t));
+            }
+            return;
+        }
         let result = (|| {
             let envelope: Envelope<'_> = serde_json::from_str(text)?;
             if envelope.method == "public/heartbeat" {

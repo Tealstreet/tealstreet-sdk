@@ -41,7 +41,7 @@ fn ready() -> (Engine<Cryptocom>, SocketId) {
     );
     answer(
         &mut engine,
-        r#"{"id":2,"result":{"data":[{"i":"SHIB_BTC","b":null,"oi":null,"a":null},{"i":"BTCUSD-PERP","b":"100","k":"101","a":"100.5","c":"-0.01","v":"2","vv":"201"}]},"code":0}"#,
+        r#"{"id":2,"result":{"data":[{"i":"SHIB_BTC","b":null,"oi":null,"a":null},{"i":"BTCUSD-PERP","b":null,"k":"101","a":"100.5","c":"-0.01","v":"2","vv":"201"}]},"code":0}"#,
     );
     let socket = engine
         .drain_actions()
@@ -58,6 +58,7 @@ fn nested_chunked_lists_seed_markets_and_tickers() {
     let (engine, _) = ready();
     assert_eq!(engine.store().markets().len(), 1);
     assert_eq!(engine.store().tickers()[0].percentage, -1.0);
+    assert_eq!(engine.store().tickers()[0].bid, 0.0);
     assert_eq!(engine.store().markets()[0].precision.amount, 0.0001);
 }
 #[test]

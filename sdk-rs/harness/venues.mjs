@@ -1,6 +1,7 @@
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac } from 'node:crypto';
+import { parseRequestJson } from './request-json.mjs';
 
 const root = '../../packages/safe-cex/src/exchanges';
 
@@ -11,14 +12,23 @@ export const VENUES = {
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('book.')).length >= count,
     privateSocket: '/exchange/v1/user',
+    publicTickers: (records) => {
+      const seed = records.find((r) => r.type === 'http' && r.url.endsWith('/public/get-instruments'));
+      return seed ? JSON.parse(seed.body).result.data.filter((r) => r.inst_type === 'PERPETUAL_SWAP' && r.tradable).map((r) => r.symbol) : [];
+    },
+    // KNOWN_TS_FIXES: public-only startup returns before market subscriptions.
+    prepareTs: (exchange, { isPrivate }) => {
+      if (!isPrivate) exchange.publicWebsocket.subscribeToMarketData(exchange.store.markets.map((m) => ({ instrumentName: m.id, indexInstrumentName: m.info?.underlyingSymbol })));
+    },
     // KNOWN_TS_FIXES: the global ticker/book throttles drop updates across
-    // symbols. Flush each pending trailing call so the reference sees all data.
+    // symbols. Reset after every frame so each next update gets a leading call,
+    // without retaining trailing timers during accelerated replay.
     afterTsFrame: (exchange) => {
-      exchange.publicWebsocket.handleTickerUpdate.flush();
-      exchange.publicWebsocket.handleBookUpdate.flush();
+      exchange.publicWebsocket.handleTickerUpdate.cancel();
+      exchange.publicWebsocket.handleBookUpdate.cancel();
     },
     isWrite: (method, url) => method === 'POST' && /private\/(advanced\/)?(create|amend|cancel|change|close)-/.test(new URL(url).pathname),
-    createSocketAudit: (impl, { isPrivate, books }) => {
+    createSocketAudit: (impl, { isPrivate, books, tickers = [] }) => {
       const connections = new Map();
       const failures = [];
       const socket = (url) => {
@@ -27,6 +37,8 @@ export const VENUES = {
       };
       return {
         received(url, text) {
+          // Market data has no auth/heartbeat state to audit.
+          if (!text.includes('public/heartbeat') && !text.includes('public/auth')) return;
           const frame = JSON.parse(text);
           if (frame.method === 'public/heartbeat') socket(url).heartbeats.add(frame.id);
           if (frame.method === 'public/auth' && frame.code === 0) {
@@ -53,6 +65,7 @@ export const VENUES = {
         ready() {
           const entries = [...connections.entries()];
           if (isPrivate && !entries.some(([url, state]) => url.endsWith('/user') && state.auth)) return false;
+          if (tickers.length && !entries.some(([url, state]) => url.endsWith('/market') && tickers.slice(0, 350 - books.length).every((symbol) => state.channels.has('ticker.' + symbol)))) return false;
           if (books.length && !entries.some(([url, state]) => url.endsWith('/market') && books.every((symbol) => state.channels.has('book.' + symbol + '.50')))) return false;
           return true;
         },
@@ -63,6 +76,9 @@ export const VENUES = {
               if (!state.auth) failures.push('private WS never authenticated');
               const required = ['user.order', 'user.advance.order', 'user.positions', 'user.balance', ...(impl === 'rust' ? ['user.trade'] : [])];
               for (const channel of required) if (!state.channels.has(channel)) failures.push('missing private subscription ' + channel);
+            }
+            if (url.endsWith('/market')) for (const symbol of tickers.slice(0, 350 - books.length)) {
+              if (!state.channels.has('ticker.' + symbol)) failures.push('missing ticker subscription ' + symbol);
             }
             if (url.endsWith('/market')) for (const symbol of books) {
               if (!state.channels.has('book.' + symbol + '.50')) failures.push('missing book subscription ' + symbol);
@@ -76,7 +92,7 @@ export const VENUES = {
       const path = new URL(url).pathname.replace('/exchange/v1/', '');
       if (!path.startsWith('private/')) return true;
       try {
-        const envelope = JSON.parse(body);
+        const envelope = parseRequestJson(body);
         const params = Object.keys(envelope.params).sort().map((key) => {
           const value = envelope.params[key];
           return key + (Array.isArray(value) ? value.join('') : String(value));

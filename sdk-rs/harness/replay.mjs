@@ -8,6 +8,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
+import { parseRequestJson } from './request-json.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -47,19 +48,19 @@ const canonicalUrl = (url) => {
 
 const canonicalBody = (body) => {
   if (!body) return '';
-  const value = typeof body === 'string' ? JSON.parse(body) : body;
+  const value = typeof body === 'string' ? parseRequestJson(body) : body;
   // Authentication metadata varies, but params and caller ids must match.
   const params = value?.method && value?.params ? value.params : value;
   const sorted = (value) => Array.isArray(value) ? value.map(sorted) :
     value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sorted(value[key])])) : value;
-  return JSON.stringify(sorted(params));
+  return JSON.stringify(sorted(params), (_key, value) => typeof value === 'bigint' ? { integer: String(value) } : value);
 };
 const requestKey = (method, url, body) => method + ' ' + canonicalUrl(url) + ' ' + canonicalBody(body);
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
   constructor(impl) {
-    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols });
+    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records) });
     this.responses = new Map();
     for (const record of records.filter((r) => r.type === 'http')) {
       const key = requestKey(record.method, record.url, record.requestBody);
@@ -387,7 +388,18 @@ async function runTs() {
     }
     return response;
   };
+  const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
   const store = new DefaultStore();
+  const mainStore = new DefaultStore();
+  // Exercise the production browser-worker packer, including its ticker
+  // baseline, and the real receiver. Rust already transfers every store table.
+  const worker = new ExchangeWorker({}, 'replay', venue.ts.name, {}, {}, {}, 'replay');
+  worker._store = store;
+  let state;
+  store.subscribe((data) => { state = data; });
+  const postStore = () => {
+    if (!values['no-egress'] && state) mainStore.update(structuredClone(worker._prepareStorePayload(state)), true);
+  };
   const options = isPrivate ? { key: KEY, secret: SECRET } : { key: '', secret: '', publicDataOnly: true };
   const exchange = new Exchange(venue.ts.name, options, store);
   const executions = [];
@@ -404,17 +416,19 @@ async function runTs() {
   })();
   // Model the worker posting each subscribed book to main every 250 ms.
   let lastFlush = -Infinity;
-  let posted = 0;
+  const mainBooks = {};
   const frames = await tape.play(
     (t) => {
       if (t - lastFlush >= 250) {
+        postStore();
         if (!values['no-egress']) {
-          for (const book of Object.values(finalBooks)) posted += structuredClone(book).bids.length;
+          for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
         }
         lastFlush = t;
       }
     },
     async () => {
+      venue.prepareTs?.(exchange, { isPrivate });
       while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
       const loaded = () => Object.values(store.loaded).every(Boolean);
       while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
@@ -442,13 +456,15 @@ async function runTs() {
   );
   await Promise.all([started, subscribed]);
   await settle();
+  postStore();
+  if (!values['no-egress']) for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
   const metrics = measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark);
   const snapshot = {
-    markets: store.markets.map((m) => ({ ...m })),
-    tickers: store.tickers.map((t) => ({ ...t })),
+    markets: (values['no-egress'] ? store : mainStore).markets.map((m) => ({ ...m })),
+    tickers: (values['no-egress'] ? store : mainStore).tickers.map((t) => ({ ...t })),
   };
   const bookCopies = Object.fromEntries(
-    Object.entries(finalBooks).map(([symbol, book]) => [symbol, JSON.parse(JSON.stringify(book))]),
+    Object.entries(values['no-egress'] ? finalBooks : mainBooks).map(([symbol, book]) => [symbol, JSON.parse(JSON.stringify(book))]),
   );
   const account = isPrivate
     ? {

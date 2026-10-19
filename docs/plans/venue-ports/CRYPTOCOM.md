@@ -147,3 +147,30 @@ new regressions PASS (35 venue tests total); crate clippy PASS. Fresh successful
 recording is pending the release relink. TS full-suite rerun encountered only
 unrelated import/configuration timeouts under concurrent machine load; running
 the complete package suite with 2 workers and 30-second test timeout.
+
+### Gate audit and public performance
+
+Fresh live capture succeeded: 20 seconds, two books; trimmed fixture contains
+2,177 frames, 404 derivative markets/tickers and both full-depth snapshots.
+Live payloads also contain null derivative quotes: Rust maps unavailable numeric
+values to zero; the explicit KNOWN_TS_FIXES normalization corrects TS NaN.
+The independent request oracle now preserves unsafe literal integer parameters
+as BigInt, so nanosecond cursor signatures remain exact (Node 22/24 verified).
+
+Public gate review found missing TS worker-to-main store transport and missing
+ticker-subscription enforcement. The harness now invokes the actual production
+ExchangeWorker payload packer and DefaultStore receiver, retains main-thread
+books, compares received state, and requires ticker subscriptions. TS public-only
+startup incorrectly skips all market subscriptions; an explicit reference hook
+corrects it. Both paths omit app-derived postprocessors. Protocol audit parsing
+now only examines heartbeat/auth candidates, leaving numeric data in the engine.
+
+Rust decodes the common nested ticker envelope once, builds subscriptions lazily
+up to the cap, and loads sorted snapshot sides directly. Venue 35 tests and
+clippy PASS. First corrected public replay PASS: TS/Rust main CPU 169.5/91.6 ms,
+steady 84.9/46.3 ms, retained 1.8/1.4 MB. Final repeated replay plus Binance
+regressions are running; these numbers remain provisional until committed below.
+
+Full package rerun: 450 files / 6,488 tests passed; one unrelated registry-wide
+construction test hit its explicit 60-second timeout. An isolated rerun is being
+checked. Root typecheck and lint had passed; no unrelated test behavior changed.

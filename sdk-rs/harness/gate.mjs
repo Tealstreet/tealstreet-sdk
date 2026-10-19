@@ -17,6 +17,9 @@ const { values } = parseArgs({
     'no-egress': { type: 'boolean', default: false },
   },
 });
+const tapeBytes = readFileSync(values.tape);
+const tapeRecords = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes).toString('utf8').trim().split('\n').map(JSON.parse);
+const replayTimeout = Math.max(60_000, tapeRecords.reduce((last, r) => Math.max(last, r.t ?? 0), 0) + 30_000);
 const outDir = 'sdk-rs/harness/out';
 mkdirSync(outDir, { recursive: true });
 
@@ -25,8 +28,8 @@ const replay = (impl, run) => {
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
   args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
   if (values['no-egress']) args.push('--no-egress');
-  const result = spawnSync(process.execPath, args, { encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(`${impl} replay failed:\n${result.stderr}`);
+  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: replayTimeout });
+  if (result.status !== 0) throw new Error(`${impl} replay failed:\n${result.error?.message ?? result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
 };
 
@@ -73,8 +76,7 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
     account.hedged = true;
     // TS omits user.trade entirely. Derive the execution oracle from documented
     // taped trade rows, independently of Rust's account output.
-    const bytes = readFileSync(values.tape);
-    const tape = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes).toString('utf8').trim().split('\n').map(JSON.parse);
+    const tape = tapeRecords;
     const seen = new Set();
     account.fills = [];
     for (const record of tape) {
@@ -94,7 +96,8 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
     // uses exec_inst; account-wide leverage uses account_id + integer leverage;
     // ignored brackets/opening triggers reject before writes; caller ids use a
     // conservative 36-byte ceiling without JS string emulation.
-    // Public throttle correction is the afterTsFrame hook in venues.mjs.
+    // Public throttle and public-only subscription corrections are the
+    // afterTsFrame and prepareTs hooks in venues.mjs.
     return;
   }
   for (const position of account.positions) {
@@ -112,6 +115,14 @@ if (isPrivate) {
   const left = JSON.stringify(ts.commands);
   const right = JSON.stringify(rust.commands);
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
+}
+// KNOWN_TS_FIXES: Crypto.com legitimately sends null quotes (empty books).
+// TS parseFloat(null) yields NaN; the engine's numeric boundary represents
+// unavailable ticker numbers as zero.
+if (values.venue === 'cryptocom') {
+  for (const ticker of ts.tickers) for (const field of ['bid', 'ask', 'last', 'percentage', 'volume', 'quoteVolume', 'openInterest']) {
+    if (ticker[field] === null) ticker[field] = 0;
+  }
 }
 compare('market', ts.markets, rust.markets);
 compare('ticker', ts.tickers, rust.tickers);
