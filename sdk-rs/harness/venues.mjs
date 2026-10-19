@@ -46,6 +46,7 @@ export const VENUES = {
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('market.depth.')).length >= count,
     privateSocket: '?listenKey=',
+    matchRequestBody: true,
   },
   binance: {
     rust: 'binance',

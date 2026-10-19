@@ -249,3 +249,11 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   across engine25/Binance29/BingX79/Bybit43/OKX64 before new review fixes.
 - Replay helper9 tests pass after unifying command/time staging, typed body
   matching and generated OKX IDs. Rechecking four-venue gates and CI next.
+
+### Shared adversarial findings addressed
+
+- Posted shared review findings on PR1305. Restored merged gate tape loading,
+  serialized outbound subscriptions with presence guards, and delivered taped
+  closes through TS fake sockets. Enabled BingX leftover-write checks (listen
+  lifecycle requests stay repeatable reads). Independent helper/host12 tests
+  pass; full replay rerun follows. Every run retains upstream correctness checks.

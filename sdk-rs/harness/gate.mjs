@@ -6,6 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { gunzipSync } from 'node:zlib';
 
 const { values } = parseArgs({
   options: {
@@ -18,6 +19,9 @@ const { values } = parseArgs({
 });
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
+const tapeBytes = readFileSync(values.tape);
+const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
+  .toString().split('\n').filter(Boolean).map(JSON.parse);
 
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
@@ -220,7 +224,7 @@ for (let run = 0; run < runs; run++) {
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
   normalizeBingxPublic(ts);
   // OKX validates each native argument/wildcard against every delivered frame.
-  if (!values.venue.startsWith('okx') && JSON.stringify(ts.subscriptions) !== JSON.stringify(rust.subscriptions)) {
+  if (!values.venue.startsWith('okx') && (!Array.isArray(ts.subscriptions) || !Array.isArray(rust.subscriptions) || JSON.stringify(ts.subscriptions) !== JSON.stringify(rust.subscriptions))) {
     differences.push(`websocket subscriptions: ts=${JSON.stringify(ts.subscriptions)} rust=${JSON.stringify(rust.subscriptions)}`);
   }
   compare('market', ts.markets, rust.markets);

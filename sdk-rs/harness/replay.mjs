@@ -484,6 +484,11 @@ async function runTs() {
           for (const fn of this.listeners.message) fn({ data });
           this.onmessage?.({ data });
         },
+        (code) => {
+          this.readyState = 3;
+          for (const fn of this.listeners.close) fn({ code });
+          this.onclose?.({ code });
+        },
       );
     }
     addEventListener(type, fn) {
@@ -657,6 +662,7 @@ writeFileSync(
     impl: values.impl,
     frames: result.frames,
     unserved: result.unserved,
+    subscriptions: result.subscriptions,
     metrics: result.metrics,
     markets: result.store.markets.map(marketFields),
     tickers: result.store.tickers.map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, t[f]])])),
