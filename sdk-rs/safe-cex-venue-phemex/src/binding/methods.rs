@@ -376,26 +376,24 @@ fn parse_tickers(h: &mut Host, d: Js) -> Result<Js, Thrown> {
             continue;
         }
         let n = |k| t.get(k)?.parse_float();
-        let mut f = vec![("id", market.get("id")?), ("symbol", s)];
-        for (k, raw) in [
-            ("bid", "bidRp"),
-            ("ask", "askRp"),
-            ("last", "lastRp"),
-            ("mark", "markRp"),
-            ("index", "indexRp"),
-            ("openInterest", "openInterestRv"),
-            ("fundingRate", "fundingRateRr"),
-            ("volume", "volumeRq"),
-        ] {
-            f.push((k, Js::Number(n(raw)?)));
-        }
-        f.push((
-            "percentage",
-            Js::Number(((n("lastRp")? - n("openRp")?) / n("openRp")?) * 100.0),
-        ));
-        f.push(("fundingTime", Js::Number(0.0)));
-        f.push(("quoteVolume", Js::Number(n("volumeRq")? * n("lastRp")?)));
-        out.push(Js::object(f));
+        out.push(Js::object(vec![
+            ("id", market.get("id")?),
+            ("symbol", s),
+            ("bid", Js::Number(n("bidRp")?)),
+            ("ask", Js::Number(n("askRp")?)),
+            ("last", Js::Number(n("lastRp")?)),
+            ("mark", Js::Number(n("markRp")?)),
+            ("index", Js::Number(n("indexRp")?)),
+            (
+                "percentage",
+                Js::Number(((n("lastRp")? - n("openRp")?) / n("openRp")?) * 100.0),
+            ),
+            ("openInterest", Js::Number(n("openInterestRv")?)),
+            ("fundingRate", Js::Number(n("fundingRateRr")?)),
+            ("fundingTime", Js::Number(0.0)),
+            ("volume", Js::Number(n("volumeRq")?)),
+            ("quoteVolume", Js::Number(n("volumeRq")? * n("lastRp")?)),
+        ]));
     }
     Ok(Js::array(out))
 }
