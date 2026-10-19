@@ -287,3 +287,10 @@ Native reqwest builder failures for protocols Axios rejects retain
 `ERR_BAD_REQUEST` and `Unsupported protocol <scheme>:`. They are request setup
 failures, not retryable connection resets. The constructed Aster validation
 regression compares the real native adapter with maintained Axios.
+
+Axios rate windows use an injected RateLimitScheduler with one independent,
+cancelable reset callback. The exchange implementation registers that timer with
+its BaseExchange task owner; dispose cancels it even if JS HTTP clients survive.
+Dropping the limiter also cancels its reset. Retry clocks keep their sleep API.
+The constructed Bybit controlled-clock regression covers idle windows and both
+cancellation paths; Hyperliquid startup also runs with fixed and advancing clocks.

@@ -535,3 +535,67 @@ pub fn exception_text(error: &Js) -> String {
         .map(|value| value.to_string())
         .unwrap_or_else(|_| console_text(std::slice::from_ref(error)))
 }
+
+struct RateScheduler {
+    runtime: Rc<dyn ExchangeRuntime>,
+    owner: std::rc::Weak<crate::owned_tasks::OwnedTasks>,
+}
+struct RateReset(crate::OwnedOperation);
+impl safe_cex_transport::rate_limit::RateLimitTimer for RateReset {
+    fn cancel(&self) {
+        self.0.cancel();
+    }
+}
+impl safe_cex_transport::rate_limit::RateLimitScheduler for RateScheduler {
+    fn schedule_reset(
+        &self,
+        milliseconds: u64,
+        callback: Box<dyn FnOnce(Result<(), safe_cex_transport::TransportError>)>,
+    ) -> Result<
+        Box<dyn safe_cex_transport::rate_limit::RateLimitTimer>,
+        safe_cex_transport::TransportError,
+    > {
+        let owner = self
+            .owner
+            .upgrade()
+            .filter(|owner| !owner.is_closed())
+            .ok_or_else(|| {
+                safe_cex_transport::TransportError::Host("rate limiter owner is disposed".into())
+            })?;
+        let sleeping = self.runtime.sleep(milliseconds);
+        let reporter = self.runtime.clone();
+        let operation = owner.start_classified(
+            self.runtime.as_ref(),
+            RuntimeTaskKind::Timer,
+            move |_| {
+                Box::pin(async move {
+                    match sleeping.await {
+                        Ok(()) => callback(Ok(())),
+                        Err(error) => {
+                            reporter.report_exception(
+                                &error,
+                                &serde_json::json!({"operation":"rate window reset"}).into(),
+                            );
+                            callback(Err(safe_cex_transport::TransportError::Host(error.message)));
+                        }
+                    }
+                })
+            },
+            |_| {},
+        );
+        Ok(Box::new(RateReset(operation)))
+    }
+}
+/// Supplies independent, cancelable Axios window timers from the exchange runtime.
+#[expect(
+    clippy::arc_with_non_send_sync,
+    reason = "rate schedulers run on the caller's local runtime"
+)]
+pub fn rate_limit_scheduler(
+    owner: &crate::exchange::BaseExchange,
+) -> std::sync::Arc<dyn safe_cex_transport::rate_limit::RateLimitScheduler> {
+    std::sync::Arc::new(RateScheduler {
+        runtime: owner.runtime.clone(),
+        owner: Rc::downgrade(&owner.owned_tasks),
+    })
+}

@@ -13,6 +13,7 @@ use safe_cex_transport::{
 struct Clock {
     now: Cell<u64>,
     sleeps: RefCell<Vec<u64>>,
+    reset: RefCell<Option<Box<dyn FnOnce(Result<(), TransportError>)>>>,
 }
 impl RateLimitClock for Clock {
     fn now_ms(&self) -> u64 {
@@ -24,6 +25,37 @@ impl RateLimitClock for Clock {
         Box::pin(async { Ok(()) })
     }
 }
+struct Reset(std::rc::Rc<std::cell::Cell<bool>>);
+impl safe_cex_transport::rate_limit::RateLimitTimer for Reset {
+    fn cancel(&self) {
+        self.0.set(true);
+    }
+}
+impl safe_cex_transport::rate_limit::RateLimitScheduler for Clock {
+    fn schedule_reset(
+        &self,
+        delay: u64,
+        callback: Box<dyn FnOnce(Result<(), TransportError>)>,
+    ) -> Result<Box<dyn safe_cex_transport::rate_limit::RateLimitTimer>, TransportError> {
+        self.sleeps.borrow_mut().push(delay);
+        let canceled = std::rc::Rc::new(std::cell::Cell::new(false));
+        let active = canceled.clone();
+        *self.reset.borrow_mut() = Some(Box::new(move |result| {
+            if !active.get() {
+                callback(result);
+            }
+        }));
+        Ok(Box::new(Reset(canceled)))
+    }
+}
+impl Clock {
+    fn expire(&self) {
+        self.now.set(self.now.get() + 1000);
+        let callback = self.reset.borrow_mut().take().unwrap();
+        callback(Ok(()));
+    }
+}
+
 struct Adapter {
     key: String,
     calls: Rc<RefCell<Vec<String>>>,
@@ -325,12 +357,21 @@ fn constructor_clients_and_sockets_follow_actual_source() {
             venue.xhr()
         ));
         // Actual throttling, not just a constructor argument comparison.
-        for _ in 0..6 {
+        for _ in 0..5 {
             ready(venue.xhr().request(RestRequest::default())).unwrap();
         }
+        let mut sixth = venue.xhr().request(RestRequest::default());
+        assert!(
+            sixth
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        clock.expire();
+        ready(sixth).unwrap();
         assert_eq!(
             *clock.sleeps.borrow(),
-            [1000],
+            [1000, 1000],
             "sixth primary request must wait at five RPS"
         );
         for _ in 0..6 {
@@ -338,7 +379,7 @@ fn constructor_clients_and_sockets_follow_actual_source() {
         }
         assert_eq!(
             *clock.sleeps.borrow(),
-            [1000],
+            [1000, 1000],
             "unlimited client must not share primary throttle"
         );
         if case["options"]["secondary_key"] == "read-key" {
@@ -347,7 +388,7 @@ fn constructor_clients_and_sockets_follow_actual_source() {
             }
             assert_eq!(
                 *clock.sleeps.borrow(),
-                [1000],
+                [1000, 1000],
                 "read-only secondary has no primary rate limiter"
             );
             assert!(calls.borrow()[12..].iter().all(|key| key == "read-key"));

@@ -51,7 +51,6 @@ async fn observe(name: ExchangeName) {
             remote_signer: None,
             wire: Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
             http_host: Rc::new(NativeHttpHost::default()),
-            rate_limit_clock: Arc::new(RuntimeClock(runtime.clone())),
             retry_clock: Rc::new(RuntimeClock(runtime.clone())),
             clock: VIRTUAL_CLOCK.clone(),
             external_public_data: None,
@@ -164,5 +163,182 @@ fn constructed_public_socket_uses_source_ticker_prototype_lookup() {
         ] {
             observe(name).await;
         }
+    });
+}
+
+#[test]
+#[allow(clippy::arc_with_non_send_sync)]
+fn constructed_public_reads_do_not_strand_idle_limiter_replay_deadlines() {
+    use safe_cex_exchange::{native, replay_clock};
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    let source = std::process::Command::new("node")
+        .args([
+            "-e",
+            r#"
+const assert = require('node:assert/strict');
+const axios = require('axios');
+const rateLimit = require('axios-rate-limit');
+let now = 0, next = 0;
+const timers = new Map();
+global.setTimeout = (callback, delay) => {
+  const handle = {id: ++next, ref() {}, unref() {}};
+  timers.set(handle, {at: now + delay, callback});
+  return handle;
+};
+global.clearTimeout = handle => timers.delete(handle);
+Date.now = () => 0;
+async function advance(time) {
+  now = time;
+  for (let i = 0; i < 100; i++) {
+    await Promise.resolve();
+    for (const [handle, timer] of timers) {
+      if (timer.at <= now) { timers.delete(handle); timer.callback(); }
+    }
+  }
+}
+(async () => {
+  let sent = 0;
+  const client = rateLimit(axios.create({adapter: async config => {
+    sent++;
+    return {status:200, statusText:'OK', headers:{}, data:{}, config};
+  }}), {maxRequests:5, perMilliseconds:1000});
+  const first = Promise.all(Array.from({length:3}, () => client.get('/ticker')));
+  await advance(0); await first;
+  assert.equal(sent, 3);
+  await advance(2341.45725);
+  const second = Promise.all(Array.from({length:5}, () => client.get('/ticker')));
+  await advance(2341.45725); await second;
+  assert.equal(sent, 8);
+  assert.equal(Date.now(), 0);
+  console.log('independent rate reset PASS');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"#,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    assert!(String::from_utf8_lossy(&source.stdout).contains("independent rate reset PASS"));
+    struct Wire;
+    impl RestAdapter for Wire {
+        fn execute(&self, _: RestRequest) -> RestFuture<'_, RestResponse> {
+            Box::pin(async {
+                Ok(RestResponse {
+                    status: 200,
+                    headers: Default::default(),
+                    reason: None,
+                    body: RestResponseBody::Encoded(
+                        br#"{"retCode":0,"retMsg":"OK","result":{"list":[]}}"#.to_vec(),
+                    ),
+                })
+            })
+        }
+    }
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&executor, async {
+        let runtime = native::native_replay_runtime(1_700_000_000_000.);
+        let venue = BybitExchange::create(
+            ExchangeName::Bybit,
+            serde_json::from_value(json!({"key":"", "secret":"", "publicDataOnly":true})).unwrap(),
+            Rc::new(DefaultStore::new()),
+            BybitDependencies {
+                runtime: runtime.clone(),
+                remote_signer: None,
+                wire: Arc::new(Wire),
+                http_host: Rc::new(NativeHttpHost::default()),
+                retry_clock: Rc::new(RuntimeClock(runtime.clone())),
+                clock: VIRTUAL_CLOCK.clone(),
+                external_public_data: None,
+                relay_enabled: false,
+            },
+        )
+        .unwrap();
+        assert!(venue.fetch_tickers().await.unwrap().is_empty());
+        let clock = runtime.replay_clock.as_ref().unwrap();
+        replay_clock::activate(clock).unwrap();
+        let advance = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            replay_clock::advance(clock, 2341.45725),
+        )
+        .await;
+        assert!(
+            advance.is_ok(),
+            "BYBIT_IDLE_LIMITER_ADVANCE: completed HTTP leaves no parked reset sleep"
+        );
+        advance.unwrap().unwrap();
+        assert!(venue.fetch_tickers().await.unwrap().is_empty());
+        venue.dispose().unwrap();
+        drop(venue);
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            native::replay_raw_tasks(&runtime)["waitingTimers"],
+            0,
+            "BYBIT_RATE_DISPOSE cancels pending window reset"
+        );
+        tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            replay_clock::advance(clock, 5000.),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        safe_cex_store::virtual_clock::set_thread_host_time(None);
+    });
+}
+
+#[test]
+fn dropping_native_rate_limiter_cancels_its_independent_reset() {
+    use safe_cex_exchange::{
+        exchange::{BaseExchange, ExchangeSettings},
+        native,
+        runtime::rate_limit_scheduler,
+    };
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&executor, async {
+        let runtime = native::native_replay_runtime(1_700_000_000_000.);
+        let base = BaseExchange::new(
+            ExchangeName::Bybit,
+            serde_json::from_value(json!({"key":"", "secret":""})).unwrap(),
+            Rc::new(DefaultStore::new()),
+            runtime.clone(),
+            ExchangeSettings::default(),
+        );
+        let limiter = safe_cex_transport::rate_limit::RateLimiter::new(
+            rate_limit_scheduler(&base),
+            1,
+            60_000,
+        );
+        limiter.acquire().await.unwrap();
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            native::replay_raw_tasks(&runtime)["waitingTimers"],
+            1,
+            "reset is a real owned timer"
+        );
+        drop(limiter);
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            native::replay_raw_tasks(&runtime)["waitingTimers"],
+            0,
+            "BYBIT_RATE_DROP cancels the reset on limiter drop"
+        );
+        safe_cex_store::virtual_clock::set_thread_host_time(None);
     });
 }

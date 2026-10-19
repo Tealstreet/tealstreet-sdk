@@ -2736,7 +2736,7 @@
                                 "traits": [
                                   {
                                     "trait": {
-                                      "path": "safe_cex_transport::rate_limit::RateLimitClock",
+                                      "path": "safe_cex_transport::rate_limit::RateLimitScheduler",
                                       "args": null
                                     },
                                     "generic_params": []
@@ -15391,7 +15391,7 @@
                                 "traits": [
                                   {
                                     "trait": {
-                                      "path": "safe_cex_transport::rate_limit::RateLimitClock",
+                                      "path": "safe_cex_transport::rate_limit::RateLimitScheduler",
                                       "args": null
                                     },
                                     "generic_params": []
@@ -15428,7 +15428,7 @@
           }
         },
         "input": "typed",
-        "reason": "Constructs FIFO window state from an existing RateLimitClock capability and typed usize/u64 budget; accepts no serialized domain model. Native slot cancellation, failure accounting, and queued venue timestamp witnesses execute the resulting state."
+        "reason": "Constructs FIFO window state from an existing independent RateLimitScheduler capability and typed usize/u64 budget; accepts no serialized domain model. Native slot cancellation, failure accounting, and queued venue timestamp witnesses execute the resulting state."
       }
     ]
   },

@@ -7824,3 +7824,23 @@ reason = "Native host capability: synchronously validates physical WebSocket con
 [[exempt]]
 rs = "safe-cex-num/src/sorting.rs::stable_sort"
 reason = "Native JS intrinsic capability: one error-generic V8 TimSort backs Array.sort, lodash orderBy and venue comparator ports without Rust's total-order requirement. This exposes the shared V8 TimSort implementation for cross-crate reuse; no standalone maintained TS declaration. Native js_sort coverage and constructed Paradex socket/getter regressions exercise NaN comparisons, retained levels, stability and first-throw termination."
+
+[[exempt]]
+rs = "safe-cex-transport/src/rate_limit.rs::RateLimitTimer"
+reason = "Native cancellation capability for the one Axios window-reset timer. Drop of the limiter cancels this task; no standalone SDK declaration. Constructed Bybit controlled-clock and disposal witnesses exercise the real runtime owner."
+
+[[exempt]]
+rs = "safe-cex-transport/src/rate_limit.rs::RateLimitTimer::cancel"
+reason = "Native timer cancellation ABI used by RateLimiter Drop, with the same source Axios reset semantics and explicit native disposal ruling. The constructed Bybit replay witness verifies pending reset cancellation."
+
+[[exempt]]
+rs = "safe-cex-transport/src/rate_limit.rs::RateLimitScheduler"
+reason = "Injected native scheduler for axios-rate-limit setTimeout callbacks, independent of request polling or Date/performance reads. Existing retry clocks retain their sleep ABI. Constructed Bybit and HL startup plus FIFO/cancellation fixtures cover this capability."
+
+[[exempt]]
+rs = "safe-cex-transport/src/rate_limit.rs::RateLimitScheduler::schedule_reset"
+reason = "Native host callback scheduling capability for the single window timer, matching maintained axios-rate-limit reset ordering. A parked future is not a timer owner; constructed controlled-clock and real-clock probes cover the runtime-backed implementation."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::rate_limit_scheduler"
+reason = "Native injection adapter from ExchangeRuntime to RateLimitScheduler using the existing OwnedTasks registry and Timer task kind. It introduces no per-request spawn, alternate clock or value carrier. Actual constructed Bybit controlled-clock and limiter drop observations prove timer progress and cancellation."
