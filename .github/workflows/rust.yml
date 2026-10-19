@@ -102,7 +102,7 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Seven venues: measured 2,924,643 bytes; allow 3 MiB.
+      # Eight venues, size-optimized wasm: measured 2,702,020 bytes; allow 3 MiB.
       WASM_BUDGET_BYTES: 3145728
     defaults:
       run:

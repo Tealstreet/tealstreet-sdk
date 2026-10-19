@@ -331,3 +331,7 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   monotonic replay time, and delayed-command/real-timeout regressions. Ordinal
   and clock fixes re-reviewed clear; all 65 harness tests pass. Backpack 49 and
   engine 38 native tests pass, as do workspace native clippy, bans and format.
+- Eight-venue production WASM built successfully: 2,702,020 bytes with the
+  landing branch's size optimization, below the unchanged 3 MiB aggregate CI
+  budget. Workspace WASM clippy, root typecheck44/lint28 also pass. Final SDK
+  tests and nineteen replay gates now run against this exact artifact.
