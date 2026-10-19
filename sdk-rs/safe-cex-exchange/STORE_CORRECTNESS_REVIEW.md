@@ -43,7 +43,7 @@ all other #1110 storage bodies remain unchanged.
 
 ## Compiled controls
 
-All four independent production faults compile, fail the named native regression,
+The original four independent production faults compile, fail the named native regression,
 and pass after exact byte restoration: force Symbol through ToString; remove the
 installed splice member; reread length after coercion/deleted-slot getters; move
 upsert key coercion ahead of the source RHS length read. Logs
@@ -75,3 +75,33 @@ Reproduce the independent compiled controls from sdk-rs with
 `CARGO_INCREMENTAL=0 python3 safe-cex-exchange/scripts/store-correctness-controls.py`.
 The runner rejects compiler errors as RED evidence and restores exact source
 bytes before each GREEN replay. The PR body records the final Wasm lint receipt.
+
+## Terminal-memory controls
+
+Five additional controls target the canonical graph through the actual Store
+facade. Existing terminal witnesses retain status/commit ordering, stale-snapshot
+filtering, subscriber response/cause/origin metadata and unrelated row identity.
+
+| Control | Required compiled failure |
+| --- | --- |
+| `terminal-registration` | Facade no longer exposes callable `markOrdersTerminal` |
+| `terminal-memory` | Suppressed terminal-memory write forgets an ID before its order arrives |
+| `terminal-empty-store` | Empty-Store shortcut loses the remembered ID |
+| `terminal-subscriber-error` | Discarding notification failure returns success |
+| `terminal-id-replacement` | Lossy UTF16 replacement filters the wrong original row |
+
+Each requires its specific native assertion, rejects compiler errors, restores
+the production bytes and passes the unchanged witness again. The UTF16 control
+uses #1180's source-proved raw-ID behavior rather than typed String refusal.
+All five produced named compiled REDs and exact-byte restored GREENs; receipts
+are in `/tmp/okx-terminal-core-controls/`.
+The OKX private-frame terminal/fill ordering witness remains in its CI-wired
+`exchange_binding` target.
+
+From sdk-rs, run only these five controls with:
+
+```sh
+CARGO_INCREMENTAL=0 python3 safe-cex-exchange/scripts/store-correctness-controls.py \
+  terminal-registration terminal-memory terminal-empty-store \
+  terminal-subscriber-error terminal-id-replacement
+```

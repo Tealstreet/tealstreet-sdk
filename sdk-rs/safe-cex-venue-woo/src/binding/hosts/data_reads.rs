@@ -101,74 +101,60 @@ pub(crate) fn next(it: &mut Iter) -> Result<Option<Js>, Thrown> {
     it.0.step_value()
 }
 
-/// setTimeout / setInterval whose handle `clear_timer` cancels; a rejected
-/// callback task is reported like an unhandled rejection.
+/// Source timers use the same owners and queue as the shared runtime timers.
 pub(crate) fn schedule(
     rt: &Rt,
     delay: f64,
     repeat: bool,
     callback: Rc<dyn Fn() -> Result<Task<Js, Thrown>, Thrown>>,
-) -> Js {
+) -> Result<Js, Thrown> {
     let runtime = rt.shared.runtime.clone();
-    let ms = if delay.is_finite() && delay > 0.0 {
-        delay as u64
-    } else {
-        0
-    };
-    let handle = Js::object_with_class("Timeout", vec![]);
-    let weak: Weak<Shared> = Rc::downgrade(&rt.shared);
-    let own = handle.clone();
     let source = if repeat { "setInterval" } else { "setTimeout" };
-    let task = runtime.clone().spawn_local(Box::pin(async move {
-        loop {
-            if let Err(e) = runtime.sleep(ms).await {
-                runtime.report_exception(&e, &serde_json::json!({ "source": source }).into());
-                return;
+    let invoke = Rc::new(move || {
+        let task = match callback() {
+            Ok(task) => task,
+            Err(error) => {
+                runtime.report_exception(
+                    &error.to_exchange_error(),
+                    &serde_json::json!({"source":source}).into(),
+                );
+                return Ok(());
             }
-            match callback() {
-                Ok(task) => {
-                    let reporter = runtime.clone();
-                    let exchange_runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> =
-                        runtime.clone();
-                    Promise::spawn(
-                        &exchange_runtime,
-                        Box::pin(async move {
-                            if let Err(e) = task.await {
-                                reporter.report_exception(
-                                    &e.to_exchange_error(),
-                                    &serde_json::json!({ "source": source }).into(),
-                                );
-                            }
-                            Ok(Js::Undefined)
-                        }),
+        };
+        let reporter = runtime.clone();
+        let exchange_runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = runtime.clone();
+        Promise::spawn(
+            &exchange_runtime,
+            Box::pin(async move {
+                if let Err(e) = task.await {
+                    reporter.report_exception(
+                        &e.to_exchange_error(),
+                        &serde_json::json!({"source":source}).into(),
                     );
                 }
-                Err(e) => runtime.report_exception(
-                    &e.to_exchange_error(),
-                    &serde_json::json!({ "source": source }).into(),
-                ),
-            }
-            if !repeat {
-                if let Some(shared) = weak.upgrade() {
-                    shared
-                        .timers
-                        .borrow_mut()
-                        .retain(|(h, _)| !h.same_reference(&own));
-                }
-                return;
-            }
-        }
-    }));
-    rt.shared.timers.borrow_mut().push((handle.clone(), task));
-    handle
+                Ok(Js::Undefined)
+            }),
+        );
+        Ok(())
+    });
+    if repeat {
+        let timer = rt
+            .base()
+            .start_interval(delay.max(1.0) as u64, move || {
+                invoke().map_err(|e: Thrown| e.to_exchange_error())
+            })
+            .map_err(Thrown::from)?;
+        Ok(Js::host_object(Rc::new(timer)))
+    } else {
+        Ok(rt.set_timeout(invoke, delay))
+    }
 }
 
-/// clearTimeout / clearInterval: cancels the scheduled task, not just its handle.
 pub(crate) fn clear_timer(rt: &Rt, handle: &Js) {
-    let mut timers = rt.shared.timers.borrow_mut();
-    if let Some(at) = timers.iter().position(|(h, _)| h.same_reference(handle)) {
-        let (_, task) = timers.remove(at);
-        task.cancel();
+    if let Some(timer) = handle.resource::<safe_cex_exchange::OwnedOperation>() {
+        timer.cancel();
+    } else {
+        rt.clear_timeout(handle);
     }
 }
 
@@ -429,7 +415,7 @@ impl body::Host for Frame {
         delay: Js,
         callback: Rc<dyn Fn() -> Result<Task<Js, Thrown>, Thrown>>,
     ) -> Result<Js, Thrown> {
-        Ok(schedule(&self.rt, delay.to_number()?, true, callback))
+        schedule(&self.rt, delay.to_number()?, true, callback)
     }
 }
 

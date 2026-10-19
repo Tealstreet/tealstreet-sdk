@@ -20,6 +20,10 @@ fn terminal(
     id: &str,
     status: OrderStatus,
 ) -> Result<Js, safe_cex_exchange::js_runtime::value::Thrown> {
+    assert!(
+        facade.get("markOrdersTerminal")?.is_callable(),
+        "JS terminal bridge exposes callable markOrdersTerminal"
+    );
     facade.call_method(
         "markOrdersTerminal",
         vec![
@@ -194,7 +198,10 @@ fn terminal_raw_ids_preserve_surrogates_without_replacement_aliasing() {
         .unwrap()
         .unwrap();
     assert_eq!(rows.len(), 1, "only the original surrogate ID is filtered");
-    assert!(rows[0].same_reference(&replacement));
+    assert!(
+        rows[0].same_reference(&replacement),
+        "raw terminal memory preserves replacement-character row identity"
+    );
     let ids: Vec<Vec<u16>> = rows
         .iter()
         .map(|row| row.get("id").unwrap().as_str().unwrap().to_vec())

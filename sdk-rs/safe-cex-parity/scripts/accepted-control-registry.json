@@ -106,7 +106,7 @@
       "reviewed no-op defaults pin their complete APIs, source and declaration",
       "reviewed defaults cannot substitute arbitrary or missing native witnesses",
       "default inventory supplies every inherited body and never infers exemptions for unknown traits",
-      "Exchange default classifications cover only sixteen reviewed candidates and preserve source refusal"
+      "Exchange default classifications cover only seventeen reviewed candidates and preserve source refusal"
     ],
     "accepted-exchange-future.test.mjs": [
       "three exact aliases retain actual internally fixed instantiations and complete expected types",
