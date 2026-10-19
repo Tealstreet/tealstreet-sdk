@@ -1,3 +1,157 @@
+// Shared tape transport: matching is strict except documented generated fields.
+import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
+import { LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
+
+export const replayStoreReady = (loaded, isPrivate) => {
+  const publicMask = LOADED_FLAG.MARKETS | LOADED_FLAG.TICKERS;
+  const required = isPrivate ? publicMask | LOADED_FLAG.BALANCE | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS : publicMask;
+  return (loaded & required) === required;
+};
+/** Per-request values: clocks, signatures and generated client ids. */
+const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
+export const canonicalUrl = (url) => {
+  const parsed = new URL(url);
+  // Active trigger lists use a rolling lookback ending at request time.
+  // Keep its width exact while allowing the two implementations' clock skew.
+  if (
+    /\/private\/(planorder|stoporder)\/list\/orders$/.test(parsed.pathname) &&
+    parsed.searchParams.has('start_time') &&
+    parsed.searchParams.has('end_time')
+  ) {
+    const end = Number(parsed.searchParams.get('end_time'));
+    parsed.searchParams.set('start_time', String(Number(parsed.searchParams.get('start_time')) - end));
+    parsed.searchParams.set('end_time', 'now');
+  }
+  const query = [...parsed.searchParams]
+    .filter(([name]) => !VOLATILE.has(name))
+    .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"[^"]*",?/g, '')])
+    .sort(([a], [b]) => a.localeCompare(b));
+  return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
+};
+
+// JSON object order is immaterial; snowflake ids must never pass through f64.
+export const canonicalBody = (body) => {
+  if (body === undefined || body === null || body === '') return '';
+  if (body instanceof Uint8Array) body = new TextDecoder().decode(body);
+  let parsed = body;
+  if (typeof body === 'string') {
+    try {
+      parsed = JSON.parse(body, (_key, value, context) =>
+        typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value) ? context.source : value,
+      );
+    } catch {
+      return body;
+    }
+  }
+  const sorted = (value) =>
+    Array.isArray(value)
+      ? value.map(sorted)
+      : value && typeof value === 'object'
+        ? Object.fromEntries(
+            Object.keys(value)
+              .filter((key) => key !== 'externalOid' && key !== 'requestId')
+              .sort()
+              .map((key) => [key, sorted(value[key])]),
+          )
+        : value;
+  return JSON.stringify(sorted(parsed));
+};
+
+export async function bodyBytes(body) {
+  if (body instanceof Uint8Array) return body;
+  const chunks = [];
+  let length = 0;
+  for await (const chunk of body) {
+    chunks.push(chunk);
+    length += chunk.length;
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
+}
+
+// Public tapes run faster than real time. Timers must follow the recorded
+// clock so a faster implementation does not skip a retry the slower one runs.
+export class ReplayClock {
+  constructor(epoch) {
+    this.epoch = epoch;
+    this.time = epoch;
+    this.active = false;
+    this.timers = new Map();
+    this.original = { now: Date.now, setTimeout, clearTimeout, setInterval, clearInterval };
+  }
+  install() {
+    Date.now = () => (this.active ? this.time : this.original.now());
+    globalThis.setTimeout = (fn, ms = 0, ...args) => this.schedule(fn, ms, args, false);
+    globalThis.setInterval = (fn, ms = 0, ...args) => this.schedule(fn, ms, args, true);
+    globalThis.clearTimeout = globalThis.clearInterval = (timer) => {
+      if (this.timers.has(timer)) {
+        this.original.clearTimeout(timer.handle);
+        this.timers.delete(timer);
+      } else this.original.clearTimeout(timer);
+    };
+  }
+  schedule(fn, ms, args, repeat) {
+    const timer = {
+      fn,
+      args,
+      delay: Math.max(repeat ? 1 : 0, Number(ms) || 0),
+      repeat,
+      ref() {
+        return this;
+      },
+      unref() {
+        return this;
+      },
+    };
+    timer.at = Date.now() + timer.delay;
+    this.timers.set(timer, timer);
+    if (!this.active) timer.handle = this.original.setTimeout(() => this.fire(timer), timer.delay);
+    return timer;
+  }
+  fire(timer) {
+    if (!this.timers.has(timer)) return;
+    if (timer.repeat) {
+      timer.at = Date.now() + timer.delay;
+      if (!this.active) timer.handle = this.original.setTimeout(() => this.fire(timer), timer.delay);
+    } else this.timers.delete(timer);
+    timer.fn(...timer.args);
+  }
+  start() {
+    const wall = this.original.now();
+    for (const timer of this.timers.values()) {
+      this.original.clearTimeout(timer.handle);
+      timer.at = this.epoch + Math.max(0, timer.at - wall);
+    }
+    this.active = true;
+    this.time = this.epoch;
+  }
+  async advance(t) {
+    const target = this.epoch + t;
+    for (;;) {
+      let next;
+      for (const timer of this.timers.values()) if (timer.at <= target && (!next || timer.at < next.at)) next = timer;
+      if (!next) break;
+      this.time = next.at;
+      this.fire(next);
+      await new Promise(setImmediate);
+    }
+    this.time = target;
+  }
+  restore() {
+    for (const timer of this.timers.values()) this.original.clearTimeout(timer.handle);
+    this.timers.clear();
+    Date.now = this.original.now;
+    for (const name of ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'])
+      globalThis[name] = this.original[name];
+  }
+}
+
+
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
 import { Responses } from './responses.mjs';
@@ -9,15 +163,15 @@ export const within = async (promise, ms, label) => {
     return await Promise.race([
       promise,
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new ReplayTimeout(`${label} exceeded ${ms} ms`)), ms);
+        timer = realTimeout(() => reject(new ReplayTimeout(`${label} exceeded ${ms} ms`)), ms);
       }),
     ]);
   } finally {
-    clearTimeout(timer);
+    realClearTimeout(timer);
   }
 };
 
-export const createTape = (records, venue, isPrivate, { impl, books = [] } = {}) => {
+export const createTape = (records, venue, isPrivate, { impl, books = [], socketTimeoutMs = 30_000 } = {}) => {
   const KEY = 'replay-key',
     SECRET = 'replay-secret',
     PASSPHRASE = 'replay-passphrase';
@@ -30,9 +184,18 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
   const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
   const urlKeys = new Map();
   const bitget = venue.rust.startsWith('bitget');
+  const mexc = venue.rust === 'mexc';
   const canonicalUrl = (url) => {
     if (urlKeys.has(url)) return urlKeys.get(url);
     const parsed = new URL(url);
+    if (
+      mexc && /\/private\/(planorder|stoporder)\/list\/orders$/.test(parsed.pathname) &&
+      parsed.searchParams.has('start_time') && parsed.searchParams.has('end_time')
+    ) {
+      const end = Number(parsed.searchParams.get('end_time'));
+      parsed.searchParams.set('start_time', String(Number(parsed.searchParams.get('start_time')) - end));
+      parsed.searchParams.set('end_time', 'now');
+    }
     const query = [...parsed.searchParams]
       .filter(([name, value]) => !VOLATILE.has(name) || callerIds.has(value))
       .map(([name, value]) => [name, /^[\[{]/.test(value) ? canonicalBody(value, url) : value])
@@ -64,12 +227,14 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
     if (venue.requestBody) parsed = venue.requestBody(parsed);
     else if (venue.rust === 'cryptocom' && parsed?.method && parsed?.params) parsed = parsed.params;
     const sorted = (value) => {
+      if (mexc && typeof value === 'bigint') return String(value);
       if (Array.isArray(value)) return value.map(sorted);
       if (value === null || typeof value !== 'object') return value;
       const keys = Object.keys(value)
         .filter(
           (key) =>
             value[key] !== undefined &&
+            !(mexc && ['externalOid', 'requestId'].includes(key) && !callerIds.has(String(value[key]))) &&
             !(venue.volatileBodyFields && VOLATILE.has(key) && !callerIds.has(String(value[key]))),
         )
         .sort();
@@ -113,7 +278,7 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
         venue.isWrite,
         bitget || Boolean(venue.matchRequestBody || venue.isWrite),
       );
-      this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command' || r.type === 'close');
+      this.frames = records.filter((r) => ['ws', 'command', 'open', 'close'].includes(r.type));
       this.open = new Map();
       this.waiters = [];
       this.commandIndex = 0;
@@ -178,7 +343,7 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
             bind(decode(record.requestBody), decode(body));
           }
         },
-        this.time,
+        this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time,
       );
     }
 
@@ -186,7 +351,7 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
       const key = canonicalUrl(url);
       const generation = (this.generations.get(key) ?? 0) + 1;
       this.generations.set(key, generation);
-      const socket = { url, generation, onMessage, onClose, closed: false, loginVerified: false, topics: new Map() };
+      const socket = { url, generation, ordinal: generation - 1, onMessage, onClose, closed: false, loginVerified: false, topics: new Map() };
       setImmediate(() => {
         if (socket.closed) return;
         // Bybit adds a generated requestId to each connection URL.
@@ -290,40 +455,47 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
       if (missing) throw new Error(`${missing} taped write(s) were not sent`);
     }
 
-    sockets(url) {
-      return [...(this.open.get(canonicalUrl(url)) ?? [])].filter((s) => !s.closed);
+    close(socket, code = 1000) {
+      if (socket.closed) return;
+      socket.closed = true;
+      socket.onClose?.(code);
+    }
+
+    sockets(url, ordinal) {
+      return [...(this.open.get(canonicalUrl(url)) ?? [])].filter(
+        (socket) => !socket.closed && (ordinal === undefined || socket.ordinal === ordinal),
+      );
     }
 
     sent(socket, text) {
       this.send(socket, text);
     }
 
-    async socketFor(url) {
-      while (!this.sockets(url).length) {
+    async socketFor(url, ordinal) {
+      while (!this.sockets(url, ordinal).length) {
         let waiter;
         const opened = new Promise((resolve) => {
-          waiter = () => (this.sockets(url).length ? (resolve(), true) : false);
+          waiter = () => (this.sockets(url, ordinal).length ? (resolve(), true) : false);
           this.waiters.push(waiter);
         });
         try {
-          await within(opened, 30_000, `socket did not open: ${canonicalUrl(url)}`);
+          await within(opened, socketTimeoutMs, `socket did not open: ${canonicalUrl(url)} #${ordinal ?? 'latest'}`);
         } finally {
           this.waiters = this.waiters.filter((queued) => queued !== waiter);
         }
       }
-      return this.sockets(url)[0];
+      return this.sockets(url, ordinal).at(-1);
     }
 
     async deliver(frame) {
-      await this.socketFor(frame.url);
-      const sockets = this.sockets(frame.url);
+      const latest = await this.socketFor(frame.url, frame.socket);
+      const sockets = bitget && frame.socket === undefined ? this.sockets(frame.url) : [latest];
       if (frame.type === 'close') {
-        for (const socket of sockets) {
-          socket.closed = true;
-          socket.onClose?.(frame.code ?? 1006);
-        }
+        for (const socket of sockets) this.close(socket, frame.code ?? 1006);
         return;
       }
+      // connect() already fired onOpen. Metadata only waits for its exact socket.
+      if (frame.type === 'open') return;
       let arg;
       try {
         arg = JSON.parse(frame.text)?.arg;
@@ -352,17 +524,18 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
      * Commands are awaited where they fall. A private tape is paced: each record
      * waits until its time after the account is ready.
      */
-    async play(onTick, ready = async () => {}, runCommand = async () => {}) {
-      const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
+    async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
       await within(
         (async () => {
-          if (urls.length) await this.socketFor(urls[0]);
           await ready();
           while (this.pendingStartupSubscriptions) await new Promise((resolve) => setTimeout(resolve, 1));
         })(),
         15_000,
         'Replay startup',
       );
+      begin();
+      clock?.start();
+      this.replayClock = clock;
       const start = performance.now();
       let delivered = 0;
       const warm = Math.floor(this.frames.length / 4);
@@ -373,6 +546,7 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
           if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
         }
         this.time = frame.t;
+        await clock?.advance(frame.t);
         if (frame.type === 'command') {
           this.commandIndex++;
           this.results.push(

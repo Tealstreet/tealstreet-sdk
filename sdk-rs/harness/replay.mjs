@@ -4,7 +4,8 @@
 //   node --expose-gc --import tsx sdk-rs/harness/replay.mjs --impl ts --tape <file>
 //   node --expose-gc sdk-rs/harness/replay.mjs --impl rust --tape <file>
 import { readFileSync } from 'node:fs';
-import { createTape, within } from './tape.mjs';
+import { createTape, within, ReplayClock, replayStoreReady } from './tape.mjs';
+import { setTimeout as realTimeout } from 'node:timers';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
@@ -35,15 +36,18 @@ const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes
     return record;
   });
 const bookSymbols = values.books.split(',').filter(Boolean);
+const metadata = records.find((r) => r.type === 'meta');
+let clockStart = performance.now();
+if (Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
 // A wrong startup URL, missing socket or lost command must fail the gate.
-const replayDeadline = setTimeout(() => {
+const replayDeadline = realTimeout(() => {
   console.error('Replay exceeded its 120-second deadline');
   process.exit(1);
 }, 120_000);
 replayDeadline.unref();
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
-const isPrivate = records.some((r) =>
+const isPrivate = metadata?.private ?? records.some((r) =>
   venue.isPrivateRecord
     ? venue.isPrivateRecord(r)
     : Boolean(venue.privateSocket && r.url?.includes(venue.privateSocket)),
@@ -89,7 +93,7 @@ const baseline = async () => {
   // Imported code cleanup spans timer turns; both heap and buffers must settle.
   for (let i = 0; i < 40; i++) {
     globalThis.gc?.();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => realTimeout(resolve, 50));
     const memory = process.memoryUsage();
     // Private account pollers remain live; their memory is informational only.
     if (isPrivate) return memory;
@@ -142,6 +146,8 @@ async function runRust() {
   const heapBefore = await baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
+  const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());
+  clock?.install();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
   const tickers = new TickerState();
@@ -158,7 +164,7 @@ async function runRust() {
     connect: (url, { headers, onOpen, onMessage, onClose }) => {
       venue.validateSocket?.(url, headers);
       const socket = tape.connect(url, onOpen, onMessage, onClose);
-      return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
+      return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
     },
     request: async ({ method, url, body: requestBody, headers }) => {
       const { status, headers: responseHeaders = '', body } = tape.respond(method, url, requestBody, headers);
@@ -221,7 +227,6 @@ async function runRust() {
   host.start();
   for (const symbol of bookSymbols) host.command({ op: 'subscribeOrderBook', symbol });
   let lastFlush = -Infinity;
-  const allLoaded = 31;
   const flushTimer = isPrivate ? setInterval(() => host.flush(), 250) : undefined;
   const frames = await tape.play(
     (t) => {
@@ -231,13 +236,19 @@ async function runRust() {
       }
     },
     async () => {
-      while ((isPrivate && (status?.loaded ?? 0) !== allLoaded) || (tape.audit && !tape.audit.ready()))
+      while (true) {
+        host.flush();
+        if (replayStoreReady(status?.loaded ?? 0, isPrivate) && (!tape.audit || tape.audit.ready())) break;
         await new Promise((r) => setTimeout(r, 5));
+      }
+      while (!tape.open.size) await new Promise((r) => setTimeout(r, 5));
     },
     (record) => {
       const { op, ...rest } = record;
       return host.command({ op, ...commandArgs(rest) });
     },
+    clock,
+    () => { if (isPrivate) clockStart = performance.now(); },
   );
   await settle();
   tape.assertWritesConsumed();
@@ -245,6 +256,7 @@ async function runRust() {
   host.flush();
   const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark);
   host.dispose();
+  clock?.restore();
 
   // Rebuild comparable records outside the measured window.
   const marketRows = [];
@@ -311,8 +323,10 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   for (let i = 0; i < (settings?.count ?? 0); i++) {
     settingRows.push({
       symbol: symbol(settings.market[i]),
-      leverage: settings.leverage[i],
       marginType: settings.marginType(i),
+      ...(venue.independentLeverage
+        ? { buyLeverage: settings.buyLeverage[i], sellLeverage: settings.sellLeverage[i] }
+        : { leverage: settings.leverage[i] }),
     });
   }
   return {
@@ -373,10 +387,14 @@ async function runTs() {
     }
     close() {
       this.readyState = 3;
-      this.socket.closed = true;
+      tape.close(this.socket);
     }
   }
   globalThis.WebSocket = TapeWebSocket;
+  const { createRequire } = await import('node:module');
+  const require = createRequire(new URL('../../packages/safe-cex/src/exchanges/base.ws.ts', import.meta.url));
+  const wsModule = require.resolve('ws');
+  require.cache[wsModule] = { id: wsModule, filename: wsModule, loaded: true, exports: TapeWebSocket };
   const { [venue.ts.className]: Exchange } = await import(venue.ts.module);
   const { DefaultStore } = await import('../../packages/safe-cex/src/store/store.base.ts');
   const adapter = async (config) => {
@@ -424,6 +442,8 @@ async function runTs() {
   const heapBefore = await baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
+  const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());
+  clock?.install();
   const store = new DefaultStore();
   const mainStore = new DefaultStore();
   // Exercise the production browser-worker packer, including its ticker
@@ -469,12 +489,16 @@ async function runTs() {
       }
     },
     async () => {
+      await Promise.all([started, subscribed]);
       venue.prepareTsReady?.(exchange, { isPrivate });
       while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
       const loaded = () => Object.values(store.loaded).every(Boolean);
       while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
+      while (!tape.open.size) await new Promise((r) => setTimeout(r, 5));
     },
     (record) => runTsCommand(exchange, store, record),
+    clock,
+    () => { if (isPrivate) clockStart = performance.now(); },
   );
   await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
   await settle();
@@ -505,7 +529,7 @@ async function runTs() {
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.
         positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
-        settings: [
+        settings: venue.tsSettings?.(exchange, store) ?? [
           ...new Map(
             store.positions
               .filter((p) => p.leverage > 0)
@@ -522,6 +546,7 @@ async function runTs() {
       }
     : undefined;
   exchange.dispose();
+  clock?.restore();
   return {
     frames,
     metrics,
@@ -553,7 +578,7 @@ async function runTsCommand(exchange, store, record) {
       const update = Object.fromEntries(
         ['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]),
       );
-      return exchange.updateOrder({ order, update });
+      return (await exchange.updateOrder({ order, update })) ?? [];
     }
     case 'setLeverage':
       await exchange.setLeverage(args.symbol, args.leverage);
@@ -564,6 +589,8 @@ async function runTsCommand(exchange, store, record) {
     case 'setPositionMode':
       await exchange.changePositionMode(args.hedged);
       return [];
+    case 'fetchLeverage':
+      return exchange.fetchLeverageForSymbol(args.symbol);
     case 'fetchFills':
       return exchange.fetchHistoricalFills(args);
     case 'fetchOrderHistory':
@@ -596,7 +623,7 @@ function normalizeAccount(account) {
     reduceOnly: Boolean(o.reduceOnly),
     close: Boolean(o.close),
     trigger: o.tpTriggerType ?? o.slTriggerType ?? o.triggerType ?? null,
-    rejectReason: o.extra?.rejectReason ?? o.rejectReason ?? null,
+    rejectReason: o.extra?.rejectReason ?? o.rejectReason ?? venue.tsRejectReason?.(o) ?? null,
   });
   const position = (p) => ({
     symbol: p.symbol,
@@ -617,7 +644,13 @@ function normalizeAccount(account) {
     balance: account.balance,
     orders: account.orders.map(order).sort(bySymbol),
     positions: account.positions.map(position).sort(bySymbol),
-    settings: [...account.settings].sort(bySymbol),
+    settings: account.settings.map((s) => ({
+      symbol: s.symbol,
+      marginType: s.marginType,
+      ...(venue.independentLeverage
+        ? { buyLeverage: s.buyLeverage, sellLeverage: s.sellLeverage }
+        : { leverage: s.leverage }),
+    })).sort(bySymbol),
     fills: account.fills,
   };
 }

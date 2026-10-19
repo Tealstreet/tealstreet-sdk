@@ -404,3 +404,19 @@ all focused tests pass. Final rebuild, replay and repeat audit in progress.
   heap stabilization. Private tapes now report one GC/timer-turn sample rather
   than failing their correctness gate on unscored memory settling. Both engines
   use the same boundary; public stabilization and thresholds remain unchanged.
+
+## MEXC landing integration
+
+- Seven-venue revision 85b3ab2ef8 finished entirely green in GitHub CI:
+  replay gate 6m56s, repository CI 8m52s/9m10s; all local public/private
+  regressions passed. WEEX public TS/Rust CPU 144.7/83.5 ms, steady
+  67.7/34.6 ms, retained 5.2/2.2 MB.
+- MEXC landing 0018bba71a made the PR conflicting before merge. Integrated
+  incoming crate, independent leverage rails, request/response frame additions,
+  public replay clock and exact socket ordinals. Kept the incoming workspace
+  structure and WASM size optimization. Both Bitget product registrations stay.
+- Strict shared Tape factory retains generated-ID/write contracts, Bitget topic
+  routing, timed responses and generation-tagged subscriptions. Incoming tape
+  lifecycle/clock tests are preserved with the shared factory.
+- Independent replay/gate and registration reviews clear. Eight-venue rebuild,
+  native verification, replay reruns and current-head CI are required next.
