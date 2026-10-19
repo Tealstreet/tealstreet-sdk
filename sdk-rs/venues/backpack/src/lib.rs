@@ -1,6 +1,7 @@
 //! Backpack perpetuals on the sans-I/O engine.
 mod account;
 mod sign;
+mod trading;
 mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
@@ -25,6 +26,7 @@ pub struct Options {
 
 pub enum Pending {
     Account(account::Request),
+    Trade(trading::Request),
     Markets {
         rows: Vec<Market>,
         invalid: bool,
@@ -94,6 +96,7 @@ pub struct Backpack {
     candles: HashMap<(String, String), u32>,
     seed: Seed,
     account: account::Account,
+    trading: trading::Trading,
     generation: u64,
 }
 
@@ -106,6 +109,7 @@ impl Backpack {
             candles: HashMap::new(),
             seed: Seed::default(),
             account: account::Account::default(),
+            trading: trading::Trading::default(),
             generation: 0,
         }
     }
@@ -587,6 +591,10 @@ impl Venue for Backpack {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Trade(request) = pending {
+            self.trade_response(cx, request, response);
+            return;
+        }
         if let Pending::Account(request) = pending {
             self.account_response(cx, request, response);
             return;
@@ -711,6 +719,7 @@ impl Venue for Backpack {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Account(request) => self.account_failed(cx, request, error),
+            Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Depth { symbol, generation }
                 if self
                     .books
@@ -834,7 +843,7 @@ impl Venue for Backpack {
                     true,
                 );
             }
-            _ => {}
+            command => self.trade_command(cx, command),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {

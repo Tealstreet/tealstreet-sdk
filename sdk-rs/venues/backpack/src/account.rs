@@ -17,7 +17,9 @@ pub enum Next {
     None,
 }
 pub enum Request {
-    Info,
+    Info {
+        revision: u64,
+    },
     Positions {
         rows: Vec<Position>,
         invalid: bool,
@@ -31,6 +33,7 @@ pub enum Request {
     },
     Orders {
         rows: Vec<Order>,
+        repairs: Vec<crate::trading::Repair>,
         invalid: bool,
         revision: u64,
         next: Next,
@@ -41,6 +44,7 @@ pub struct Account {
     pub credentials: Option<Credentials>,
     pub socket: Connection,
     pub leverage: f64,
+    pub leverage_revision: u64,
     pub orders_revision: u64,
     pub positions_revision: u64,
     pub balance_revision: u64,
@@ -59,6 +63,7 @@ impl Default for Account {
             credentials: None,
             socket: Connection::default(),
             leverage: 1.0,
+            leverage_revision: 0,
             orders_revision: 0,
             positions_revision: 0,
             balance_revision: 0,
@@ -122,7 +127,6 @@ pub fn kind(
 }
 
 pub fn order(row: OrderRow<'_>, store: &safe_cex_engine::Store) -> Order {
-    let _ = row.trigger_by;
     let side = side(&row.side);
     let trigger = row.trigger_price.map(|n| n.0);
     let amount = if trigger.is_some() {
@@ -263,7 +267,9 @@ impl Backpack {
             "/api/v1/account",
             Params::new(),
             None,
-            Pending::Account(Request::Info),
+            Pending::Account(Request::Info {
+                revision: self.account.leverage_revision,
+            }),
             false,
         );
     }
@@ -310,6 +316,7 @@ impl Backpack {
             None,
             Pending::Account(Request::Orders {
                 rows: vec![],
+                repairs: vec![],
                 invalid: false,
                 revision: self.account.orders_revision,
                 next,
@@ -375,9 +382,20 @@ impl Backpack {
                 }
                 result
             }
-            Request::Orders { rows, invalid, .. } => {
+            Request::Orders {
+                rows,
+                repairs,
+                invalid,
+                ..
+            } => {
                 let result = serde_json::from_str::<OrderRow<'_>>(item).map(|r| {
                     if cx.store.market(&r.symbol).is_some() {
+                        if r.trigger_price.is_some()
+                            && r.trigger_by.is_none()
+                            && let Ok(repair) = self.trigger_repair(cx, &r)
+                        {
+                            repairs.push(repair);
+                        }
                         rows.push(order(r, cx.store));
                     }
                 });
@@ -416,22 +434,24 @@ impl Backpack {
             return;
         }
         let failure_next = match &pending {
-            Request::Info => Next::Positions,
+            Request::Info { .. } => Next::Positions,
             Request::Positions { next, .. }
             | Request::Balance { next, .. }
             | Request::Orders { next, .. } => *next,
         };
         let result = (|| {
             match pending {
-                Request::Info => {
+                Request::Info { revision } => {
                     let r: AccountRow =
                         serde_json::from_str(response.body).map_err(|e| e.to_string())?;
-                    self.account.leverage = if r.leverage_limit > 0.0 {
-                        r.leverage_limit
-                    } else {
-                        1.0
-                    };
-                    self.leverage_settings(cx);
+                    if revision == self.account.leverage_revision {
+                        self.account.leverage = if r.leverage_limit > 0.0 {
+                            r.leverage_limit
+                        } else {
+                            1.0
+                        };
+                        self.leverage_settings(cx);
+                    }
                     self.positions_read(cx, Next::Balance);
                 }
                 Request::Positions {
@@ -471,6 +491,7 @@ impl Backpack {
                 }
                 Request::Orders {
                     rows,
+                    repairs,
                     invalid,
                     revision,
                     next,
@@ -480,6 +501,9 @@ impl Backpack {
                     }
                     if revision == self.account.orders_revision {
                         cx.store.set_orders(rows);
+                        for repair in repairs {
+                            self.start_repair(cx, repair);
+                        }
                     }
                     self.next_account(cx, next);
                 }
@@ -502,7 +526,7 @@ impl Backpack {
     ) {
         cx.log(LogLevel::Error, error);
         let next = match pending {
-            Request::Info => Next::Positions,
+            Request::Info { .. } => Next::Positions,
             Request::Positions { next, .. } => next,
             Request::Orders { next, .. } | Request::Balance { next, .. } => next,
         };

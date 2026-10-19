@@ -1,0 +1,389 @@
+mod support;
+use safe_cex_engine::{Action, Command, Event, Method, Notice};
+use support::*;
+fn place(e: &mut Driver, id: u32, orders: &str) {
+    let orders = serde_json::from_str(orders).unwrap();
+    e.handle(
+        2000.0,
+        Event::Command(Command::PlaceOrders {
+            command: id,
+            orders,
+        }),
+    );
+}
+fn done(e: &mut Driver) -> Result<String, String> {
+    e.drain_actions()
+        .find_map(|a| {
+            if let Action::Notice(Notice::CommandDone { result, .. }) = a {
+                Some(result)
+            } else {
+                None
+            }
+        })
+        .expect("command completed")
+}
+#[test]
+fn caller_uint32_is_numeric_on_wire_and_bad_batch_ids_reject_before_any_write() {
+    let (mut e, _) = ready();
+    for id in ["0", "01", "4294967296", "-1", "1.0", "test"] {
+        place(
+            &mut e,
+            1,
+            &format!(
+                r#"[{{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140}},{{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"clientOrderId":"{id}"}}]"#
+            ),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+        )));
+    }
+    place(
+        &mut e,
+        2,
+        r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1.234,"price":140.123,"clientOrderId":"4294967295"}]"#,
+    );
+    let r = requests(&mut e).pop().unwrap();
+    let body = r.body.as_deref().unwrap();
+    assert!(body.contains("\"clientId\":4294967295"));
+    assert!(body.contains("\"quantity\":\"1.23\""));
+    assert!(body.contains("\"price\":\"140.12\""));
+    assert!(r.url.ends_with("/order"));
+    reply(&mut e, &r, 200, r#"{"id":"new"}"#);
+    assert_eq!(done(&mut e).unwrap(), r#"["new"]"#);
+}
+#[test]
+fn duplicate_client_ids_and_bracket_client_id_fail_closed() {
+    let (mut e, _) = ready();
+    for orders in [
+        r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"clientOrderId":"42"},{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"clientOrderId":"42"}]"#,
+        r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"clientOrderId":"42"}]"#,
+    ] {
+        place(&mut e, 1, orders);
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(actions.iter().any(|a| matches!(
+            a,
+            Action::Notice(Notice::CommandDone { result: Err(_), .. })
+        )));
+    }
+}
+#[test]
+fn limit_bracket_waits_for_entry_and_keeps_a_successful_leg_if_other_leg_fails() {
+    let (mut e, _) = ready();
+    place(
+        &mut e,
+        1,
+        r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140,"takeProfit":150,"stopLoss":130}]"#,
+    );
+    let r = requests(&mut e).pop().unwrap();
+    assert!(!r.body.as_deref().unwrap().contains("TriggerPrice"));
+    reply(&mut e, &r, 200, r#"{"id":"entry"}"#);
+    let tp = requests(&mut e).pop().unwrap();
+    let body = tp.body.as_deref().unwrap();
+    assert!(body.contains("\"side\":\"Ask\""));
+    assert!(body.contains("\"triggerPrice\":\"150.00\""));
+    assert!(body.contains("\"triggerBy\":\"MarkPrice\""));
+    reply(&mut e, &tp, 400, r#"{"message":"rejected"}"#);
+    let sl = requests(&mut e).pop().unwrap();
+    assert!(
+        sl.body
+            .as_deref()
+            .unwrap()
+            .contains("\"triggerPrice\":\"130.00\"")
+    );
+    reply(&mut e, &sl, 200, r#"{"id":"stop"}"#);
+    assert_eq!(done(&mut e).unwrap(), r#"["entry","stop"]"#);
+}
+#[test]
+fn market_attached_brackets_and_standalone_trigger_payloads() {
+    let (mut e, _) = ready();
+    place(
+        &mut e,
+        1,
+        r#"[{"symbol":"SOL_USDC_PERP","type":"market","side":"buy","amount":1,"takeProfit":150,"stopLoss":130}]"#,
+    );
+    let r = requests(&mut e).pop().unwrap();
+    let body = r.body.as_deref().unwrap();
+    assert!(body.contains("\"takeProfitTriggerPrice\":\"150.00\""));
+    assert!(body.contains("\"stopLossLimitPrice\":\"130.00\""));
+    assert!(!body.contains("timeInForce"));
+    reply(&mut e, &r, 200, r#"{"id":"market"}"#);
+    e.drain_actions().for_each(drop);
+    place(
+        &mut e,
+        2,
+        r#"[{"symbol":"SOL_USDC_PERP","type":"stop_market","side":"sell","amount":1,"price":130,"slTriggerType":"last_price"}]"#,
+    );
+    let r = requests(&mut e).pop().unwrap();
+    let body = r.body.as_deref().unwrap();
+    assert!(body.contains("\"triggerQuantity\":\"1.00\""));
+    assert!(body.contains("\"triggerBy\":\"LastPrice\""));
+    assert!(body.contains("\"reduceOnly\":true"));
+    assert!(!body.contains("\"quantity\""));
+}
+#[test]
+fn amend_validates_before_cancel_and_never_reuses_the_original_caller_id() {
+    // Seed the caller's order through the real private stream path.
+    let (mut e, socket) = ready();
+    ws(
+        &mut e,
+        socket,
+        "account.orderUpdate",
+        r#"{"e":"orderAccepted","i":"123","c":42,"E":2000000,"X":"New","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"140","q":"5","z":"0","f":"GTC"}"#,
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        2000.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "123".into(),
+            price: Some(0.0),
+            amount: None,
+        }),
+    );
+    assert!(done(&mut e).is_err());
+    e.handle(
+        2000.0,
+        Event::Command(Command::AmendOrder {
+            command: 2,
+            id: "123".into(),
+            price: Some(142.0),
+            amount: Some(3.0),
+        }),
+    );
+    let cancel = requests(&mut e).pop().unwrap();
+    assert_eq!(cancel.method, Method::Delete);
+    reply(&mut e, &cancel, 200, "{}");
+    let replace = requests(&mut e).pop().unwrap();
+    assert!(!replace.body.as_deref().unwrap().contains("clientId"));
+    reply(&mut e, &replace, 200, r#"{"id":"replacement"}"#);
+    assert_eq!(done(&mut e).unwrap(), r#"["replacement"]"#);
+    assert_eq!(
+        e.store().order("123").unwrap().client_order_id.as_deref(),
+        Some("42")
+    );
+}
+#[test]
+fn no_write_retry_after_lost_response_and_leverage_is_global_patch() {
+    let (mut e, _) = ready();
+    place(
+        &mut e,
+        1,
+        r#"[{"symbol":"SOL_USDC_PERP","type":"market","side":"buy","amount":1}]"#,
+    );
+    let r = requests(&mut e).pop().unwrap();
+    e.handle(
+        2000.0,
+        Event::HttpFailed {
+            request: r.id,
+            error: "response lost after acceptance",
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone { result: Err(_), .. })
+    )));
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetLeverage {
+            command: 2,
+            symbol: SYMBOL.into(),
+            leverage: 20.0,
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    assert_eq!(r.method, Method::Patch);
+    reply(&mut e, &r, 200, "{}");
+    assert_eq!(e.store().setting("BTC_USDC_PERP").unwrap().leverage, 20.0);
+    assert_eq!(e.store().setting(SYMBOL).unwrap().leverage, 20.0);
+}
+
+#[test]
+fn delayed_cancel_responses_preserve_new_fills_and_new_orders() {
+    let (mut e, socket) = ready();
+    let event = |id: &str, time: u32, status: &str| {
+        format!(
+            r#"{{"e":"orderAccepted","i":"{id}","E":{time},"X":"{status}","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"140","q":"5","z":"0","f":"GTC"}}"#
+        )
+    };
+    ws(
+        &mut e,
+        socket,
+        "account.orderUpdate",
+        &event("123", 2000000, "New"),
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        2000.0,
+        Event::Command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["123".into()],
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    ws(
+        &mut e,
+        socket,
+        "account.orderUpdate",
+        &event("123", 3000000, "Filled"),
+    );
+    reply(&mut e, &r, 200, "{}");
+    assert_eq!(
+        e.store().order("123").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Closed
+    );
+    e.drain_actions().for_each(drop);
+    ws(
+        &mut e,
+        socket,
+        "account.orderUpdate",
+        &event("456", 4000000, "New"),
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        2000.0,
+        Event::Command(Command::CancelSymbolOrders {
+            command: 2,
+            symbol: SYMBOL.into(),
+        }),
+    );
+    let r = requests(&mut e).pop().unwrap();
+    ws(
+        &mut e,
+        socket,
+        "account.orderUpdate",
+        &event("789", 5000000, "New"),
+    );
+    reply(&mut e, &r, 200, "{}");
+    assert_eq!(
+        e.store().order("789").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
+    assert_eq!(
+        e.store().order("123").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Closed
+    );
+    assert_eq!(
+        e.store().order("456").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Canceled
+    );
+}
+#[test]
+fn native_pair_correlates_reordered_responses_and_rejects_ambiguous_ids() {
+    let (mut e, _) = ready();
+    e.store_mut()
+        .update_markets(|m| m.limits.amount.max = 1000.0);
+    place(
+        &mut e,
+        1,
+        r#"[{"symbol":"SOL_USDC_PERP","type":"limit","side":"buy","amount":1,"price":140},{"symbol":"SOL_USDC_PERP","type":"limit","side":"sell","amount":2,"price":150}]"#,
+    );
+    let r = requests(&mut e).pop().unwrap();
+    assert!(r.url.ends_with("/orders"));
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Row {
+        client_id: u32,
+        side: String,
+    }
+    let rows: Vec<Row> = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
+    assert_ne!(rows[0].client_id, rows[1].client_id);
+    let row = |index: usize, id: &str| {
+        format!(
+            r#"{{"operation":"Ok","id":"{id}","clientId":{},"symbol":"SOL_USDC_PERP","side":"{}","orderType":"Limit"}}"#,
+            rows[index].client_id, rows[index].side
+        )
+    };
+    reply(
+        &mut e,
+        &r,
+        200,
+        &format!("[{},{}]", row(1, "second"), row(0, "first")),
+    );
+    assert_eq!(done(&mut e).unwrap(), r#"["first","second"]"#);
+}
+#[test]
+fn missing_trigger_by_is_repaired_and_does_not_reopen_a_replacement_filled_before_response() {
+    let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    let r = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/orders"))
+        .unwrap();
+    let old = ORDER.replace(
+        "\"orderType\":\"Limit\"",
+        "\"orderType\":\"Market\",\"triggerPrice\":\"130\",\"triggerQuantity\":\"5\"",
+    );
+    reply(&mut e, &r, 200, &format!("[{old}]"));
+    let cancel = requests(&mut e).pop().unwrap();
+    assert_eq!(cancel.method, Method::Delete);
+    reply(&mut e, &cancel, 200, "{}");
+    let new = requests(&mut e).pop().unwrap();
+    assert!(
+        new.body
+            .as_deref()
+            .unwrap()
+            .contains("\"triggerBy\":\"MarkPrice\"")
+    );
+    assert!(!new.body.as_deref().unwrap().contains("clientId"));
+    ws(
+        &mut e,
+        socket,
+        "account.orderUpdate",
+        r#"{"e":"orderFill","i":"replacement","E":4000000,"X":"Filled","s":"SOL_USDC_PERP","o":"Market","S":"Ask","P":"130","Y":"5","q":"0","z":"5","l":"5","L":"129.5","t":999}"#,
+    );
+    let replacement = old
+        .replace("\"id\":\"123\"", "\"id\":\"replacement\"")
+        .replace(
+            "\"triggerPrice\":\"130\"",
+            "\"triggerPrice\":\"130\",\"triggerBy\":\"MarkPrice\"",
+        );
+    reply(&mut e, &new, 200, &replacement);
+    assert!(e.store().order("123").is_none());
+    assert_eq!(
+        e.store().order("replacement").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Closed
+    );
+}
+
+#[test]
+fn delayed_account_info_cannot_restore_the_previous_leverage_after_patch() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use safe_cex_engine::Engine;
+    use safe_cex_venue_backpack::{Backpack, Options};
+    let mut e = Engine::new(Backpack::new(Options {
+        public_data_only: false,
+        key: Some("public-test-key".into()),
+        secret: Some(STANDARD.encode([7u8; 32])),
+    }));
+    e.start(1000.0);
+    let r = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"}]"#,
+    );
+    for r in requests(&mut e) {
+        reply(&mut e, &r, 200, "[]");
+    }
+    let info = requests(&mut e).pop().unwrap();
+    assert!(info.url.ends_with("/account"));
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetLeverage {
+            command: 1,
+            symbol: SYMBOL.into(),
+            leverage: 20.0,
+        }),
+    );
+    let patch = requests(&mut e).pop().unwrap();
+    reply(&mut e, &patch, 200, "{}");
+    reply(&mut e, &info, 200, r#"{"leverageLimit":"10"}"#);
+    assert_eq!(e.store().setting(SYMBOL).unwrap().leverage, 20.0);
+}

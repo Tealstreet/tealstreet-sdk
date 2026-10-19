@@ -76,3 +76,12 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   into TS as an oracle. Still need final tests/clippy result below.
 
 - Private phase final verification: all 21 tests, clippy and bans pass.
+
+- Trading phase verified: 31 total tests, clippy, sub-agent review and fixes.
+  Jobs cover caller uint32 preflight, native pair correlation, brackets,
+  cancel/replace, best-effort cancel lists, cancel-all, global PATCH leverage,
+  fixed mode/margin refusals and automatic triggerBy repairs. Response guards
+  preserve newer fills/new orders and protect global settings from stale GETs.
+  Internal repair jobs have a separate u64 namespace; never retry a write.
+- Repository typecheck passed all 44 tasks. Root lint/tests are running.
+- Next: streaming rare queries, then wasm registration/tapes/performance gates.
