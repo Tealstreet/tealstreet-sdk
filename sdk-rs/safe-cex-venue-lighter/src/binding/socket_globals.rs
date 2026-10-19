@@ -4,19 +4,13 @@ use super::{
     ops::spread,
     realm::{Realm, Shared},
 };
-use safe_cex_exchange::{
-    js_runtime::{
-        sockets::base_websocket_class,
-        value::{Js, Thrown, arg, from_typed, to_typed},
-    },
-    runtime::ExchangeTask,
+use safe_cex_exchange::js_runtime::{
+    sockets::base_websocket_class,
+    value::{Js, Thrown, arg, from_typed, to_typed},
 };
 use safe_cex_transport::RoutingOptions;
 use safe_cex_types::{ExchangeName, ExchangeOptions};
-use std::{
-    cell::{Cell, RefCell},
-    rc::{Rc, Weak},
-};
+use std::rc::{Rc, Weak};
 
 fn shared(weak: &Weak<Shared>) -> Result<Rc<Shared>, Thrown> {
     weak.upgrade()
@@ -120,72 +114,55 @@ fn json_parse(weak: Weak<Shared>) -> Js {
     })
 }
 
-type Intervals = Rc<RefCell<Vec<(Js, Rc<Cell<bool>>, Box<dyn ExchangeTask>)>>>;
-
-/// setInterval / clearInterval: a repeating runtime task per handle; clearing
-/// cancels it. clearInterval of a setTimeout handle clears that timeout, as in JS.
+/// Socket intervals share the BaseExchange owner and its canonical timer scheduler.
 fn install_intervals(globals: &Js, weak: &Weak<Shared>) -> Result<(), Thrown> {
-    let intervals: Intervals = Rc::default();
-    {
-        let (weak, intervals) = (weak.clone(), intervals.clone());
-        define_absent(globals, "setInterval", move || {
-            Js::function("setInterval", move |_, a| {
-                let shared = shared(&weak)?;
-                let callback = arg(&a, 0);
-                let delay = arg(&a, 1).to_number()?;
-                let delay = if delay.is_finite() && delay >= 1.0 {
-                    delay as u64
-                } else {
-                    1
-                };
-                let cancelled: Rc<Cell<bool>> = Rc::default();
-                let runtime = shared.runtime.clone();
-                let stop = cancelled.clone();
-                let task = runtime.clone().spawn_local(Box::pin(async move {
-                    loop {
-                        if runtime.sleep(delay).await.is_err() || stop.get() {
-                            return;
-                        }
-                        if let Err(error) = callback.call(Js::Undefined, vec![]) {
-                            runtime.report_exception(
-                                &error.to_exchange_error(),
-                                &serde_json::json!({"source": "setInterval"}).into(),
-                            );
-                        }
-                        if stop.get() {
-                            return;
-                        }
-                    }
-                }));
-                let handle = Js::object_with_class("Timeout", vec![]);
-                intervals
-                    .borrow_mut()
-                    .push((handle.clone(), cancelled, task));
-                Ok(handle)
-            })
-        })?;
-    }
-    let weak = weak.clone();
-    define_absent(globals, "clearInterval", move || {
-        Js::function("clearInterval", move |_, a| {
-            let handle = arg(&a, 0);
-            let found = {
-                let mut list = intervals.borrow_mut();
-                let index = list.iter().position(|(h, _, _)| h.same_reference(&handle));
-                index.map(|i| list.remove(i))
+    let interval_owner = weak.clone();
+    define_absent(globals, "setInterval", move || {
+        Js::function("setInterval", move |_, args| {
+            let shared = shared(&interval_owner)?;
+            let callback = arg(&args, 0);
+            let delay = arg(&args, 1).to_number()?;
+            let delay = if delay.is_finite() && delay >= 1.0 {
+                delay as u64
+            } else {
+                1
             };
-            match found {
-                Some((_, cancelled, task)) => {
-                    cancelled.set(true);
-                    task.cancel();
-                }
-                None => {
-                    let realm = Realm(shared(&weak)?);
-                    realm.scope().clear_timeout(&handle);
-                }
-            }
-            Ok(Js::Undefined)
+            let base = shared
+                .base
+                .get()
+                .ok_or_else(|| Thrown::error("Error", "BaseExchange is not constructed"))?;
+            let runtime = shared.runtime.clone();
+            let timer = base
+                .start_interval(delay, move || {
+                    if let Err(error) = callback.call(Js::Undefined, vec![]) {
+                        runtime.report_exception(
+                            &error.to_exchange_error(),
+                            &serde_json::json!({"source":"setInterval"}).into(),
+                        );
+                    }
+                    Ok(())
+                })
+                .map_err(Thrown::from)?;
+            Ok(Js::host_object(Rc::new(timer)))
         })
+    })?;
+    let weak = weak.clone();
+    let clear = Rc::new(move |_: Js, args: Vec<Js>| {
+        let handle = arg(&args, 0);
+        if let Some(timer) = handle.resource::<safe_cex_exchange::OwnedOperation>() {
+            timer.cancel();
+        } else {
+            Realm(shared(&weak)?).scope().clear_timeout(&handle);
+        }
+        Ok(Js::Undefined)
+    });
+    let clear_timeout = clear.clone();
+    globals.define(
+        "clearTimeout",
+        Js::function("clearTimeout", move |this, args| clear_timeout(this, args)),
+    )?;
+    define_absent(globals, "clearInterval", move || {
+        Js::function("clearInterval", move |this, args| clear(this, args))
     })
 }
 

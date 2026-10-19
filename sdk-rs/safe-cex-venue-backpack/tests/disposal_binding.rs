@@ -29,6 +29,24 @@ impl ExchangeTask for CountTask {
         self.0.set(true)
     }
 }
+fn tracked_timeout(
+    socket: &Rc<safe_cex_exchange::websocket::BaseWebSocket>,
+    cancelled: Rc<Cell<bool>>,
+) -> safe_cex_exchange::OwnedOperation {
+    struct Cancellation(Rc<Cell<bool>>);
+    impl Drop for Cancellation {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+    let cancellation = Cancellation(cancelled);
+    socket
+        .start_timeout(60_000, move || {
+            let _retained = &cancellation;
+            Ok(())
+        })
+        .unwrap()
+}
 struct Socket {
     name: &'static str,
     close: Rc<dyn Fn(&str)>,
@@ -140,12 +158,12 @@ fn exercise(surface: &str) {
         depth: true,
         last: Cell::new(Some(1.0)),
         pending: RefCell::new(Some(Value::Null)),
-        task: RefCell::new(Some(Box::new(CountTask(depth_cancel.clone())))),
+        task: RefCell::new(Some(tracked_timeout(&p.base, depth_cancel.clone()))),
     });
     p.listeners.throttles.borrow_mut().push((vec![115], depth));
     *p.ticker_handler.pending.borrow_mut() = Some(Value::Null);
     let ticker_cancel = Rc::new(Cell::new(false));
-    *p.ticker_handler.task.borrow_mut() = Some(Box::new(CountTask(ticker_cancel.clone())));
+    *p.ticker_handler.task.borrow_mut() = Some(tracked_timeout(&p.base, ticker_cancel.clone()));
     *q.state.orders_timeout.borrow_mut() = Some(orders_cancel.clone());
     for state in [&q.state.positions, &q.state.balance] {
         state.scheduled.set(true);
