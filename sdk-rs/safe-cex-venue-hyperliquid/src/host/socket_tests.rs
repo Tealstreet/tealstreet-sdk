@@ -46,7 +46,10 @@ fn constructed_socket_bridges_do_not_retain_the_host_owner_after_dispose() {
         assert!(owner.upgrade().is_some(), "held host must remain live");
         exchange.dispose().unwrap();
         drop(exchange);
-        assert!(owner.upgrade().is_none(), "HL_HOST_OWNER_RELEASE: spot={spot}");
+        assert!(
+            owner.upgrade().is_none(),
+            "HL_HOST_OWNER_RELEASE: spot={spot}"
+        );
     }
 }
 

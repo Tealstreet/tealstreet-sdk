@@ -58,13 +58,11 @@ fn production_spot_limiter_debits_refills_and_recursively_waits() {
         .call_method(&limiter, "waitForToken", &[Js::Number(2.)])
         .unwrap();
     assert!(
-        matches!(
-            match &waiting {
-                Js::Promise(p) => p.result(),
-                _ => panic!("expected promise"),
-            },
-            None
-        ),
+        match &waiting {
+            Js::Promise(p) => p.result(),
+            _ => panic!("expected promise"),
+        }
+        .is_none(),
         "production spot limiter waits when depleted"
     );
     runtime.drain();

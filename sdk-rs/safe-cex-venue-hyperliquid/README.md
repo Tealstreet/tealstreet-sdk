@@ -10,8 +10,11 @@ The standalone DTO cleanup removes declarations with no production Rust
 consumer from `types.rs`, `spot_models.rs` and `spot_types.rs`. The current
 554-row census is 390 ported, 87 divergent and 77 not-applicable. The latter
 rows retain their TypeScript identity with empty Rust mappings. Production
-exchange and socket bindings consume realm values; retained event models and
+exchange and socket bindings consume shared Js values; retained event models and
 order aliases keep their existing native contracts.
+
+`SHARED_RUNTIME_REVIEW.md` describes the atomic family cutover, ownership,
+source-visible regression proofs and the strict release-tape readiness gate.
 
 `not-modeled-types.cjs` excludes the removed core roots from model and corpus
 regeneration. Spot model generation retains four user-event roots. Their current
