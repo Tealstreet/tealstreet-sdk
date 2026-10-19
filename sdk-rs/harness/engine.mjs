@@ -3,5 +3,5 @@ import { createRequire } from 'node:module';
 
 export const loadEngine = async () => {
   const require = createRequire(import.meta.url);
-  return require('../safe-cex-wasm/pkg/node/safe_cex_wasm.js');
+  return require('../hosts/wasm/pkg/node/safe_cex_wasm.js');
 };
