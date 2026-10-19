@@ -174,3 +174,6 @@ regressions are running; these numbers remain provisional until committed below.
 Full package rerun: 450 files / 6,488 tests passed; one unrelated registry-wide
 construction test hit its explicit 60-second timeout. An isolated rerun is being
 checked. Root typecheck and lint had passed; no unrelated test behavior changed.
+
+The isolated registry-construction rerun PASS: all 5 tests. Added Crypto.com
+public/private replays and harness protocol regressions to existing Rust CI.
