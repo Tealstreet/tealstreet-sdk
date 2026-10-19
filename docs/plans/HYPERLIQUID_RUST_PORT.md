@@ -246,3 +246,9 @@ wrapper's missing client-ID rule. Added its existing TS rule and common guard
 regressions. Full native workspace tests and native/wasm Clippy pass; Crypto.com-
 only host compilation passes. Isolated unchanged Hyro configuration tests pass
 10/10, confirming the full-suite import timeouts are resource-sensitive.
+
+Settled five-venue repository checks pass: typecheck, lint and all 27 root test
+tasks. Capping Vitest to one worker and serializing package jobs avoids the Hyro
+import timeout without changing assertions or timeout thresholds. The new
+Crypto.com common-rule regressions pass alongside Hyperliquid/OKX checks;
+31 harness regressions pass. Final five-venue replay/host builds are running.
