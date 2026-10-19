@@ -2439,7 +2439,11 @@ impl BaseWebSocket {
         if self.is_disposed() {
             return Ok(());
         }
-        if result.is_err() {
+        if let Err(error) = result {
+            self.runtime.report_exception(
+                &error,
+                &serde_json::json!({"operation":"websocket authentication"}).into(),
+            );
             self.direct_fallback.borrow_mut().disregard_silence();
             self.parent.log(
                 "Private WebSocket signing could not complete; reconnecting",

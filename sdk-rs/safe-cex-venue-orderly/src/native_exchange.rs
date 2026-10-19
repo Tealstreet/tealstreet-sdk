@@ -293,7 +293,7 @@ mod tests {
         );
         assert_eq!(
             runtime.errors.borrow().as_slice(),
-            ["Expected String"],
+            ["Non-base58 character"],
             "shared recovery must report the original signing cause exactly once"
         );
         assert!(

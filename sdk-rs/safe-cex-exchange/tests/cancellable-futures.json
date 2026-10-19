@@ -2857,9 +2857,9 @@
         "future-signature",
         "await"
       ],
-      "producer_sha256": "2e4103e5fbdb8fa75b32cface6b80c5c67cc0570db3c580159373ae8ec0aa3de",
+      "producer_sha256": "9ec85c40a04e2ae22d3c3aee2639bdacf8cc68e7df8e3c52dd9a6d88ce9ed053",
       "classification": "no-owned-latch",
-      "reason": "Owns the authentication future and performs disposal checks before subscription/reconnect; no separate caller registration is created."
+      "reason": "Owns the authentication future and performs disposal checks before subscription/reconnect; no separate caller registration is created. Reviewed synchronous diagnostic correction: reports the original supplied error before existing warning/reconnect; the single await, disposal guards and absence of a registration/latch are unchanged."
     },
     {
       "owner": "src/websocket.rs::BaseWebSocket::create_websocket",
