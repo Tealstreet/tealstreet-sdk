@@ -368,3 +368,9 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   73 harness tests, undefined-name checks and independent re-review pass.
   SDK21/host25 pass on the nine-venue artifact. Twenty-one replays are running;
   Backpack public already passes. No public performance threshold changed.
+- Required brief gates all PASS on the nine-venue artifact: Backpack CPU
+  199.0/119.4 ms (1.67x), steady 116.8/69.4 ms (1.68x), memory 3.3/1.8 MB
+  (1.86x), private21; Binance CPU 247.6/114.0 ms (2.17x), steady 142.4/50.4 ms
+  (2.82x), memory 4.3/2.4 MB (1.77x), private14. Secret scan clean. Pushing the
+  reviewed candidate while auxiliary replays finish; all twenty-one CI gates
+  and repository jobs must pass before merging PR #1299 into feat/rust-rewrite.
