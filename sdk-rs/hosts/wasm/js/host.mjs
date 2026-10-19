@@ -169,42 +169,73 @@ async function* chunks(stream) {
   }
 }
 
+/** Deliver compressed binary messages and closure in receive order on every JS host. */
+export const bindSocketMessages = (socket, { onMessage, onClose }) => {
+  let pending;
+  let disposed = false;
+  let ending = false;
+  let failed = false;
+  socket.addEventListener('message', (event) => {
+    if (ending || disposed || failed) return;
+    if (typeof event.data === 'string' && !pending) {
+      onMessage(event.data);
+      return;
+    }
+    // Chain binary decoding so a later snapshot cannot overtake an earlier one.
+    const task = (pending ?? Promise.resolve()).then(async () => {
+      if (disposed || failed) return;
+      if (typeof event.data === 'string') return onMessage(event.data);
+      const blob = event.data instanceof Blob ? event.data : new Blob([event.data]);
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const stream = bytes[0] === 0x1f && bytes[1] === 0x8b
+        ? blob.stream().pipeThrough(new DecompressionStream('gzip'))
+        : bytes[0] === 0x78 && ((bytes[0] << 8) + bytes[1]) % 31 === 0
+          ? blob.stream().pipeThrough(new DecompressionStream('deflate')) : blob.stream();
+      const reader = stream.getReader();
+      const decoder = new TextDecoder('utf-8', { fatal: true });
+      let size = 0;
+      let text = '';
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done || disposed) break;
+          size += value.byteLength;
+          if (size > 16 * 1024 * 1024) throw new Error('websocket message exceeds 16 MiB');
+          text += decoder.decode(value, { stream: true });
+        }
+        if (!disposed) text += decoder.decode();
+      } finally {
+        await reader.cancel();
+      }
+      if (!disposed) onMessage(text);
+    }).catch(() => {
+      failed = true;
+      if (!disposed) socket.close();
+    });
+    pending = task;
+    task.finally(() => { if (pending === task) pending = undefined; });
+  });
+  const end = (code) => {
+    if (ending) return;
+    ending = true;
+    const deliver = () => { if (!disposed) onClose(code); };
+    if (pending) pending = pending.then(deliver);
+    else deliver();
+  };
+  socket.addEventListener('close', (event) => end(event.code));
+  socket.addEventListener('error', () => end(1006));
+  return () => { disposed = true; };
+};
+
 /** Transport over the runtime's own WebSocket, fetch and timers. */
 export const nativeTransport = () => ({
   now: () => Date.now(),
   connect(url, { onOpen, onMessage, onClose }) {
     const ws = new WebSocket(url);
-    ws.addEventListener('open', () => onOpen());
-    let pending = Promise.resolve();
-    let disposed = false;
-    ws.addEventListener('message', (event) => {
-      // Chain binary decoding so a later snapshot cannot overtake an earlier one.
-      pending = pending.then(async () => {
-        if (disposed) return;
-        if (typeof event.data === 'string') return onMessage(event.data);
-        const blob = event.data instanceof Blob ? event.data : new Blob([event.data]);
-        const bytes = new Uint8Array(await blob.arrayBuffer());
-        const stream = bytes[0] === 0x1f && bytes[1] === 0x8b
-          ? blob.stream().pipeThrough(new DecompressionStream('gzip')) : blob.stream();
-        const reader = stream.getReader();
-        const decoder = new TextDecoder('utf-8', { fatal: true });
-        let size = 0;
-        let text = '';
-        try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            size += value.byteLength;
-            if (size > 16 * 1024 * 1024) throw new Error('websocket message exceeds 16 MiB');
-            text += decoder.decode(value, { stream: true });
-          }
-          text += decoder.decode();
-        } finally { await reader.cancel(); }
-        if (!disposed) onMessage(text);
-      }).catch(() => { ws.close(); });
-    });
-    ws.addEventListener('close', (event) => { pending = pending.then(() => { if (!disposed) onClose(event.code); }); });
-    return { send: (text) => ws.send(text), close: () => { disposed = true; ws.close(); } };
+    let closed = false;
+    ws.addEventListener('open', () => { if (!closed) onOpen(); });
+    const dispose = bindSocketMessages(ws, { onMessage, onClose });
+    return { send: (text) => ws.send(text), close: () => { closed = true; dispose(); ws.close(); } };
   },
   async request({ method, url, headers, body }) {
     const response = await fetch(url, { method, headers, body });

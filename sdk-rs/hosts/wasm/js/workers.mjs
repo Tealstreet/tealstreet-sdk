@@ -8,7 +8,7 @@
 //   <- binary messages: flush frames (a snapshot first), read with wire.mjs
 //   <- { op: 'done', id, result } | { op: 'done', id, error } | { op: 'log', level, message }
 // Credentials arrive with 'start' and live only in the object's memory.
-import { EngineHost } from './host.mjs';
+import { EngineHost, bindSocketMessages } from './host.mjs';
 
 /** Outbound sockets and requests from a Worker or Durable Object. */
 export const workersTransport = () => ({
@@ -16,26 +16,29 @@ export const workersTransport = () => ({
   connect(url, { onOpen, onMessage, onClose }) {
     let socket;
     let closed = false;
+    let disposeMessages;
     // Workers open client WebSockets with an upgrade request over https.
     fetch(url.replace(/^ws/, 'http'), { headers: { Upgrade: 'websocket' } }).then(
       (response) => {
         socket = response.webSocket;
-        if (!socket) return onClose(1006);
+        if (!socket) {
+          if (!closed) onClose(1006);
+          return;
+        }
         socket.accept();
-        socket.addEventListener('message', (event) => {
-          if (typeof event.data === 'string') onMessage(event.data);
-        });
-        socket.addEventListener('close', (event) => onClose(event.code));
-        socket.addEventListener('error', () => onClose(1006));
-        if (closed) socket.close();
-        else onOpen();
+        disposeMessages = bindSocketMessages(socket, { onMessage, onClose });
+        if (closed) {
+          disposeMessages();
+          socket.close();
+        } else onOpen();
       },
-      () => onClose(1006),
+      () => { if (!closed) onClose(1006); },
     );
     return {
       send: (text) => socket?.send(text),
       close: () => {
         closed = true;
+        disposeMessages?.();
         socket?.close();
       },
     };

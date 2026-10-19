@@ -134,3 +134,24 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   all 38 venue tests PASS (including 7 history tests). Remaining work is
   harness integration, live public recording, replay/performance gates,
   repository checks, and the authorized PR/review/merge process.
+
+### Phase 5 host/replay checkpoint (gates in progress)
+
+- Private parity passed with signed requests, caller-ID single/batch placement,
+  native amend, cancellations, account settings, net realized PnL, history and
+  candle commands. Live public tape includes all public shards and two books.
+- Harness audit prompted per-connection routing/subscription validation, every
+  candle update and book-flush digest comparison, every-run validation, no
+  future HTTP snapshot fallback and JS ArrayBuffer memory accounting. Recorder
+  now captures local socket closes and explicit startup cohorts. Reconnect tape
+  verification and final public CPU/memory gates remain in progress.
+- Browser/Worker host audit fixed binary close/error/disposal ordering. JS host
+  tests: 12 PASS. Native gzip/zlib/plain decoding tests: 3 PASS; native loop test
+  PASS. Removed the unused Bitunix chrono dependency; strict bounded ISO parser
+  tests and malformed UTF8 candle interval regression pass.
+- Root typecheck: 44 tasks PASS; lint: 28 tasks PASS. Root tests found a preexisting
+  Rust wasm test under the runtime tree (6,488 other safe-cex tests passed).
+  Moved it into __tests__/rust; boundary regression and 4 wasm tests now PASS.
+- Public replay found tick precision powf rounding noise, corrected by integer
+  decimal scaling. Public CPU and retained/peak memory still require a final
+  passing run before integration. No all-gates-passed claim yet.

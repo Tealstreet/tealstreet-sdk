@@ -6,6 +6,37 @@ use std::io::Read;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
+const MAX_BINARY_BYTES: usize = 16 * 1024 * 1024;
+
+fn binary_text(bytes: &[u8]) -> Result<String, u16> {
+    let mut decoded = Vec::new();
+    let limit = MAX_BINARY_BYTES as u64 + 1;
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        flate2::read::GzDecoder::new(bytes)
+            .take(limit)
+            .read_to_end(&mut decoded)
+            .map_err(|_| 1007u16)?;
+    } else if bytes.first() == Some(&0x78)
+        && bytes
+            .get(1)
+            .is_some_and(|b| (0x7800 + u16::from(*b)).is_multiple_of(31))
+    {
+        flate2::read::ZlibDecoder::new(bytes)
+            .take(limit)
+            .read_to_end(&mut decoded)
+            .map_err(|_| 1007u16)?;
+    } else {
+        if bytes.len() > MAX_BINARY_BYTES {
+            return Err(1009);
+        }
+        decoded.extend_from_slice(bytes);
+    }
+    if decoded.len() > MAX_BINARY_BYTES {
+        return Err(1009);
+    }
+    String::from_utf8(decoded).map_err(|_| 1007)
+}
+
 pub trait Transport {
     /// Open a socket; report it on `events` and return where to send text.
     /// Dropping the returned sender closes the socket.
@@ -67,14 +98,10 @@ impl Transport for NetworkTransport {
                             let _ = events.send(HostEvent::WsMessage(socket, text.to_string()));
                         }
                         Some(Ok(Message::Binary(bytes))) => {
-                            let text = if bytes.starts_with(&[0x1f,0x8b]) {
-                                let mut text = String::new();
-                                match flate2::read::GzDecoder::new(bytes.as_ref()).take(16 * 1024 * 1024 + 1).read_to_string(&mut text) {
-                                    Ok(_) if text.len() <= 16 * 1024 * 1024 => text,
-                                    Ok(_) => break 1009,
-                                    Err(_) => break 1007,
-                                }
-                            } else { match String::from_utf8(bytes.to_vec()) {Ok(text)=>text,Err(_)=>break 1007} };
+                            let text = match binary_text(&bytes) {
+                                Ok(text) => text,
+                                Err(code) => break code,
+                            };
                             let _ = events.send(HostEvent::WsMessage(socket, text));
                         }
                         // Answering pings needs a flush on a quiet socket.
@@ -152,5 +179,58 @@ impl Transport for NetworkTransport {
             }
             let _ = events.send(HostEvent::HttpEnd(id));
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flate2::{
+        Compression,
+        write::{GzEncoder, ZlibEncoder},
+    };
+    use std::io::Write;
+
+    fn gzip(bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn zlib(bytes: &[u8]) -> Vec<u8> {
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(bytes).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[test]
+    fn binary_frames_decode_plain_gzip_and_zlib_utf8() {
+        let text = "{\"book\":\"€\"}";
+        for bytes in [
+            text.as_bytes().to_vec(),
+            gzip(text.as_bytes()),
+            zlib(text.as_bytes()),
+        ] {
+            assert_eq!(binary_text(&bytes).unwrap(), text);
+        }
+    }
+
+    #[test]
+    fn corrupt_compressed_frames_and_invalid_utf8_are_rejected_whole() {
+        let mut corrupted = gzip(b"{\"book\":1}");
+        let crc = corrupted.len() - 8;
+        corrupted[crc] ^= 1;
+        for bytes in [corrupted, vec![0x1f, 0x8b, 0], vec![0xff], zlib(&[0xff])] {
+            assert_eq!(binary_text(&bytes), Err(1007));
+        }
+    }
+
+    #[test]
+    fn decoded_binary_limit_rejects_oversize_without_returning_a_prefix() {
+        let bytes = vec![b'a'; MAX_BINARY_BYTES + 1];
+        for encoded in [gzip(&bytes), zlib(&bytes)] {
+            assert_eq!(binary_text(&encoded), Err(1009));
+        }
+        assert_eq!(binary_text(&bytes), Err(1009));
     }
 }

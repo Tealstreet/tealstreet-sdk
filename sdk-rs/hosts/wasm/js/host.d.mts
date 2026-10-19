@@ -61,3 +61,9 @@ export class EngineHost {
 }
 
 export function nativeTransport(): Transport;
+
+/** Bind binary/text message decoding and ordered closure to a runtime socket. */
+export function bindSocketMessages(socket: {
+  addEventListener(type: string, listener: (event: { data?: unknown; code?: number }) => void): void;
+  close(): void;
+}, handlers: { onMessage(text: string): void; onClose(code?: number): void }): () => void;

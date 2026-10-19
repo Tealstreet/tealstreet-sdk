@@ -4,7 +4,9 @@ import { defineConfig } from 'vitest/config';
 
 // `yarn test-wasm` runs only the tests that drive the built wasm engine.
 const wasmTests = process.env.SAFE_CEX_WASM_TESTS === '1';
-const testFiles = wasmTests ? ['./src/**/*.wasm.test.{js,jsx,ts,tsx}'] : ['./src/**/*.test.{js,jsx,ts,tsx}'];
+const testFiles = wasmTests
+  ? ['./src/__tests__/rust/**/*.wasm.test.{js,jsx,ts,tsx}']
+  : ['./src/**/*.test.{js,jsx,ts,tsx}'];
 
 export default defineConfig({
   plugins: [
