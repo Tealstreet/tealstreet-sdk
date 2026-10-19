@@ -523,3 +523,25 @@ using Node22.23.3 and three-run medians:
   that wasm-only setting and remeasure the aggregate artifact, all public CPU/
   memory gates and private parity under inherited2,621,440-byte budget. Native,
   SDK, root typecheck/lint and final exact-artifact replay verification run next.
+
+### Eight-venue required gate proof
+
+Every required venue-port brief gate PASS on artifact from6d5104926e:
+BloFin/Binance public and private, native tests/clippy/fmt, wasm clippy/build,
+and bans. Public medians use Node22.23.3 and three runs (shared tape now counts
+recorded socket close events too):
+
+| Public fixture | Frames | TS/Rust CPU ms | TS/Rust steady ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| blofin | 2,765 | 214.553 /173.292 | 129.342 /99.369 | 3.285168 /1.889536 |
+| binance | 873 | 214.725 /107.070 | 115.620 /45.532 | 4.171552 /2.185384 |
+
+- Release2,579,044bytes below inherited2,621,440. Native engine/venue508,
+  SDK wasm20, JS host15, frame-unit3, harness45 tests pass; root typecheck44/
+  lint28, native/wasm clippy, fmt/bans pass. Eight canonical leverage command
+  tests pass, with caller IDs, independent side settings and base units intact.
+- BloFin29 and Binance14 private frames match exactly. Remaining shared public/
+  private variants run alongside final CI. Three independent cross-reviews find
+  no concrete blockers in virtual-tape/real-baseline handling, model/SDK units
+  and rails, or account/trading identity/protection/fill guards. All final PR
+  checks must be green before merge; findings and final results go on PR1300.
