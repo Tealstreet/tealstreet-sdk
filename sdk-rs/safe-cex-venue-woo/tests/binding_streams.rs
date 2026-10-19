@@ -243,7 +243,11 @@ fn start_connects_the_public_socket_and_its_frames_update_the_store() {
             .get(topic)
             .unwrap_or_else(|| panic!("missing {topic} stats"));
         assert_eq!(stat.had_handlers, Some(true), "live WOO {topic} table");
-        assert_eq!(stat.last_callbacks_count, safe_cex_num::PrototypeScalar::Number(1.0), "live WOO {topic} count");
+        assert_eq!(
+            stat.last_callbacks_count,
+            safe_cex_num::PrototypeScalar::Number(1.0),
+            "live WOO {topic} count"
+        );
     }
     let t = ticker(&h);
     assert_eq!(
