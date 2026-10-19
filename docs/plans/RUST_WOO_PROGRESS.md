@@ -75,3 +75,45 @@ No WOO implementation started before Part 1 merge.
 - 15 public tests, native clippy and formatting PASS. Includes 1,501 depth
   levels, bounded buffering, pre-seed subscriptions, stale snapshots, control
   precedence and candle output decoding. Registration remains for gate phase.
+
+## Private, trading and query phases
+
+The three state machines were prepared in disjoint files and integrated
+together, so their shared hooks compile without unused placeholder code.
+Each received its own independent phase review before this checkpoint.
+
+- Private: staged account/positions/paged ordinary+algo reads, exact V1/V3
+  signing and WS auth, hedge settings, monotonic lifecycle/fills, per-execution
+  dedup, bounded signature-aware position reconciliation, metadata expiry and
+  bounded tombstones. Review fixed failed-page atomicity, equity/uPNL races,
+  stale config in positions, object algo children, cache expiry and lifetime
+  growth. STOP kind follows closing side/source; buy trailing uses plus distance.
+  Independent bounded rereview PASS.
+- Trading: complete batch preflight, safe numeric caller IDs, exact splitting,
+  protected IOC touch reads, paired/sized/trailing protections, native quantity
+  amendments, parent-aware cancel, both-family cancel-all and merged symbol
+  cancellation. Config intent guards and authoritative mode/leverage readback.
+  Review fixed rounded-zero amendments and deferred trailing replacement sizing.
+  Independent bounded rereview PASS.
+- Queries: streamed V3 fills and V1 legacy fallback with distinct pagers,
+  V1 orders requesting realized_pnl, and paced V1 ledger with aggregate scope.
+  Bounded income ranges walk beyond 500 by default. Native queries never write
+  the store. Review fixed absent/zero updated_time; rereview PASS.
+- WOO-only order-based journal folding is retained in the SDK shell through a
+  shared pure mapper. `woofi` and `kodiakfi` remain with the Orderly lane, as
+  explicitly confirmed by the overseer.
+
+## Harness work in progress
+
+- Public live capture: 20 seconds, two books. Correctness matches after handling
+  a live null index as an absent frame value, rather than rejecting the seed.
+- CPU initially failed on the small recording. Numeric visitors avoid generic
+  untagged decoding, native ticker indexes avoid repeated symbol allocation and
+  lookup, and WOO retains level-3 optimization inside a level-z aggregate.
+  Latest three-run CPU is below TS; a strict TS memory-baseline validity check
+  rejected one run, so acceptance is pending a complete valid rerun.
+- Eight-venue wasm was 2,741,039 bytes at level-s. Level-z aggregate plus WOO
+  level-3 is 2,605,267 bytes, below the unchanged 2,621,440-byte budget.
+- Private fixture is being reconciled against actual command stages. Exact
+  request bodies/signatures, required write consumption, auth and subscriptions
+  remain enforced. TS reliability repairs and final replay gates are pending.

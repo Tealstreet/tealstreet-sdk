@@ -4,40 +4,79 @@ use serde_json::value::RawValue;
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum Number<'a> {
-    Bare(f64),
-    Text(#[serde(borrow)] Str<'a>),
-}
-impl Number<'_> {
-    fn value<E: serde::de::Error>(self) -> Result<f64, E> {
-        let n = match self {
-            Self::Bare(n) => n,
-            Self::Text(s) => s.parse().map_err(E::custom)?,
-        };
+struct NumberVisitor;
+impl<'de> serde::de::Visitor<'de> for NumberVisitor {
+    type Value = f64;
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a finite number or numeric string")
+    }
+    fn visit_f64<E: serde::de::Error>(self, n: f64) -> Result<f64, E> {
         if n.is_finite() {
             Ok(n)
         } else {
             Err(E::custom("non-finite number"))
         }
     }
+    fn visit_i64<E: serde::de::Error>(self, n: i64) -> Result<f64, E> {
+        self.visit_f64(n as f64)
+    }
+    fn visit_u64<E: serde::de::Error>(self, n: u64) -> Result<f64, E> {
+        self.visit_f64(n as f64)
+    }
+    fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<f64, E> {
+        self.visit_f64(s.parse().map_err(E::custom)?)
+    }
 }
 pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    Number::deserialize(d)?.value()
+    d.deserialize_any(NumberVisitor)
 }
 pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    Option::<Number<'_>>::deserialize(d)?
-        .map(Number::value)
-        .transpose()
+    struct Optional;
+    impl<'de> serde::de::Visitor<'de> for Optional {
+        type Value = Option<f64>;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a nullable finite number")
+        }
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_some<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+            number(d).map(Some)
+        }
+    }
+    d.deserialize_option(Optional)
+}
+
+pub fn id<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Id {
+        Text(String),
+        Integer(u64),
+    }
+    Ok(match Option::<Id>::deserialize(d)? {
+        Some(Id::Text(s)) => s,
+        Some(Id::Integer(n)) => n.to_string(),
+        None => String::new(),
+    })
 }
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
     pub success: Option<bool>,
     #[serde(borrow, default, alias = "msg")]
     pub message: Str<'a>,
+    #[serde(borrow)]
+    pub data: Option<&'a RawValue>,
 }
 impl<'a> Envelope<'a> {
+    pub fn payload(&self) -> Result<&'a str, String> {
+        self.data
+            .map(RawValue::get)
+            .ok_or_else(|| "WOO response has no data".into())
+    }
     pub fn checked(body: &'a str) -> Result<Self, String> {
         let e: Self = serde_json::from_str(body).map_err(|e| format!("WOO response: {e}"))?;
         if e.success != Some(true) {
@@ -95,8 +134,8 @@ pub struct Statistics<'a> {
     pub volume: f64,
     #[serde(rename = "24h_amount", deserialize_with = "number")]
     pub amount: f64,
-    #[serde(deserialize_with = "number")]
-    pub index_price: f64,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub index_price: Option<f64>,
     #[serde(deserialize_with = "number")]
     pub mark_price: f64,
     #[serde(deserialize_with = "number")]

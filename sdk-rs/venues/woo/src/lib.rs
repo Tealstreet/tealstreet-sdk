@@ -1,4 +1,8 @@
 //! WOO perpetuals on the active legacy-public/V1/V3 protocol.
+mod account;
+mod history;
+mod sign;
+mod trading;
 mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
@@ -20,6 +24,9 @@ pub struct Options {
 }
 
 pub enum Pending {
+    Trade(trading::Request),
+    History(history::Request),
+    Account(account::Request),
     Markets {
         rows: Vec<Market>,
         ranges: HashMap<String, f64>,
@@ -27,6 +34,7 @@ pub enum Pending {
     },
     Tickers {
         rows: Vec<Ticker>,
+        indexes: HashMap<String, u32>,
         bad: bool,
     },
     Funding {
@@ -73,6 +81,9 @@ struct CandleState {
     last: Option<Candle>,
 }
 pub struct Woo {
+    trading: trading::Trading,
+    history: history::History,
+    account: account::Account,
     options: Options,
     rest: &'static str,
     public: Connection,
@@ -83,6 +94,7 @@ pub struct Woo {
     seed_retry: Option<(TimerId, bool)>,
     seed_attempts: u32,
     price_ranges: HashMap<String, f64>,
+    ticker_indexes: HashMap<String, u32>,
 }
 
 pub(crate) fn compact(native: &str) -> String {
@@ -136,8 +148,49 @@ fn candle(raw: Kline) -> Option<Candle> {
     })
 }
 impl Woo {
+    fn signed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        method: Method,
+        path: &str,
+        params: Vec<(String, String)>,
+        body: Option<String>,
+        pending: Pending,
+    ) -> Result<safe_cex_engine::RequestId, String> {
+        if method == Method::Get && path.contains("/public/") {
+            let query = sign::query(&params, true);
+            let path = if query.is_empty() {
+                path.to_owned()
+            } else {
+                format!("{path}?{query}")
+            };
+            return Ok(cx.request(
+                method,
+                format!("{}{}", self.rest, path),
+                vec![],
+                None,
+                pending,
+            ));
+        }
+        let (Some(key), Some(secret)) = (&self.options.key, &self.options.secret) else {
+            return Err("WOO private requests require credentials".into());
+        };
+        if self.options.public_data_only || key.is_empty() || secret.is_empty() {
+            return Err("WOO private requests require credentials".into());
+        }
+        let request = sign::request(key, secret, cx.now, method, path, &params, body);
+        let url = if request.path.starts_with("https://") {
+            request.path
+        } else {
+            format!("{}{}", self.rest, request.path)
+        };
+        Ok(cx.request(method, url, request.headers, request.body, pending))
+    }
     pub fn new(options: Options) -> Self {
         Self {
+            account: account::Account::default(),
+            trading: trading::Trading::default(),
+            history: history::History::default(),
             rest: if options.testnet {
                 "https://api.staging.woox.io"
             } else {
@@ -152,6 +205,7 @@ impl Woo {
             seed_retry: None,
             seed_attempts: 0,
             price_ranges: HashMap::new(),
+            ticker_indexes: HashMap::new(),
         }
     }
     pub fn price_range(&self, symbol: &str) -> Option<f64> {
@@ -162,6 +216,7 @@ impl Woo {
             (
                 "/v1/public/futures",
                 Pending::Tickers {
+                    indexes: HashMap::new(),
                     rows: Vec::new(),
                     bad: false,
                 },
@@ -465,6 +520,9 @@ impl Venue for Woo {
         self.seed(cx, false);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        if self.account_open(cx, socket) {
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -501,6 +559,9 @@ impl Venue for Woo {
         }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        if self.account_message(cx, socket, text) {
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -533,9 +594,11 @@ impl Venue for Woo {
                     if !row.symbol.starts_with("PERP_") {
                         continue;
                     }
-                    let symbol = compact(&row.symbol);
+                    let Some(&index) = self.ticker_indexes.get(row.symbol.as_ref()) else {
+                        continue;
+                    };
                     cx.store
-                        .update_ticker(&symbol, |t| match msg.topic.as_ref() {
+                        .update_ticker_at(index, |t| match msg.topic.as_ref() {
                             "tickers" => {
                                 if let Some(v) = row.close {
                                     t.last = v;
@@ -581,6 +644,9 @@ impl Venue for Woo {
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
+        if self.account_close(cx, socket) {
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -603,6 +669,9 @@ impl Venue for Woo {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::History(request) => self.history_item(cx, request, item),
+            Pending::Trade(_) => (),
+            Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets { rows, ranges, bad } => {
                 let Ok(header) = serde_json::from_str::<Symbol<'_>>(item) else {
                     *bad = true;
@@ -672,7 +741,7 @@ impl Venue for Woo {
                     maker_fee: None,
                 });
             }
-            Pending::Tickers { rows, bad } => {
+            Pending::Tickers { rows, indexes, bad } => {
                 let Ok(header) = serde_json::from_str::<Symbol<'_>>(item) else {
                     *bad = true;
                     return;
@@ -692,6 +761,7 @@ impl Venue for Woo {
                     *bad = true;
                     return;
                 }
+                indexes.insert(raw.symbol.to_string(), rows.len() as u32);
                 rows.push(Ticker {
                     id: m.id.clone(),
                     symbol,
@@ -699,7 +769,7 @@ impl Venue for Woo {
                     ask: raw.close,
                     last: raw.close,
                     mark: raw.mark_price,
-                    index: raw.index_price,
+                    index: raw.index_price.unwrap_or(f64::NAN),
                     percentage: num::round_half_up((raw.close - raw.open) / raw.open * 10000.0)
                         / 100.0,
                     open_interest: raw.open_interest,
@@ -732,11 +802,28 @@ impl Venue for Woo {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        let pending = match pending {
+            Pending::Trade(request) => {
+                self.trade_response(cx, request, response);
+                return;
+            }
+            Pending::History(request) => {
+                self.history_response(cx, request, response);
+                return;
+            }
+            other => other,
+        };
+        if let Pending::Account(request) = pending {
+            self.account_response(cx, request, response);
+            return;
+        }
         if !(200..300).contains(&response.status) || Envelope::checked(response.body).is_err() {
             self.on_request_failed(cx, pending, "WOO read rejected");
             return;
         }
         match pending {
+            Pending::History(_) | Pending::Trade(_) => unreachable!(),
+            Pending::Account(_) => unreachable!(),
             Pending::Markets { rows, ranges, bad } => {
                 if bad || rows.is_empty() {
                     self.on_request_failed(
@@ -755,11 +842,12 @@ impl Venue for Woo {
                 self.seed_attempts = 0;
                 self.seed(cx, true);
             }
-            Pending::Tickers { rows, bad } => {
+            Pending::Tickers { rows, indexes, bad } => {
                 if bad || rows.is_empty() {
                     self.on_request_failed(
                         cx,
                         Pending::Tickers {
+                            indexes: HashMap::new(),
                             rows: vec![],
                             bad: false,
                         },
@@ -767,6 +855,7 @@ impl Venue for Woo {
                     );
                     return;
                 }
+                self.ticker_indexes = indexes;
                 cx.store.set_tickers(rows);
                 self.seed_attempts = 0;
                 self.connect_public(cx);
@@ -777,6 +866,8 @@ impl Venue for Woo {
                     cx.store.set_balance(Default::default());
                     cx.store.set_positions(Vec::new());
                     cx.store.set_orders(Vec::new());
+                } else {
+                    self.account_start(cx);
                 }
             }
             Pending::Funding { rows } => {
@@ -853,6 +944,9 @@ impl Venue for Woo {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::History(request) => self.history_failed(cx, request, error),
+            Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
                 self.seed_attempts += 1;
                 cx.log(LogLevel::Error, error);
@@ -877,6 +971,12 @@ impl Venue for Woo {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.trade_timer(cx, timer) || self.history_timer(cx, timer) {
+            return;
+        }
+        if self.account_timer(cx, timer) {
+            return;
+        }
         if self.seed_retry.is_some_and(|(t, _)| t == timer) {
             let (_, tickers) = self.seed_retry.take().unwrap();
             self.seed(cx, tickers);
@@ -919,6 +1019,9 @@ impl Venue for Woo {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        if self.account_command(cx, &command) {
+            return;
+        }
         match command {
             Command::SetTickerSymbols { .. } => (),
             Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),
@@ -980,18 +1083,8 @@ impl Venue for Woo {
                 }
             }
             cmd @ Command::FetchCandles { .. } => self.fetch_candles(cx, cmd),
-            Command::PlaceOrders { command, .. }
-            | Command::CancelOrders { command, .. }
-            | Command::AmendOrder { command, .. }
-            | Command::CancelSymbolOrders { command, .. }
-            | Command::SetLeverage { command, .. }
-            | Command::SetMarginType { command, .. }
-            | Command::SetPositionMode { command, .. }
-            | Command::FetchLeverage { command, .. }
-            | Command::Query { command, .. } => cx.done(
-                command,
-                Err("WOO private account is not initialized".into()),
-            ),
+            Command::Query { command, query } => self.history_command(cx, command, query),
+            command => self.trade_command(cx, command),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {

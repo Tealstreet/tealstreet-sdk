@@ -14,6 +14,7 @@ use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
+use safe_cex_venue_woo::{Options as WooOptions, Woo};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -54,6 +55,8 @@ impl<V: Venue> AnyEngine for Engine<V> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[serde(default)]
+    application_id: Option<String>,
     #[serde(default)]
     testnet: bool,
     #[serde(default)]
@@ -447,6 +450,13 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            "woo" => Box::new(Engine::new(Woo::new(WooOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
+            }))),
             "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
                 public_data_only: options.public_data_only,
                 key: options.key,

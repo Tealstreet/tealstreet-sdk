@@ -3690,6 +3690,7 @@ dependencies = [
  "safe-cex-venue-mexc",
  "safe-cex-venue-okx",
  "safe-cex-venue-weex",
+ "safe-cex-venue-woo",
  "serde",
  "serde_json",
  "wasm-bindgen",

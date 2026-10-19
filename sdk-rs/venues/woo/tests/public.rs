@@ -38,6 +38,32 @@ fn seed_uses_native_perpetual_units_and_skips_irrelevant_rows() {
     assert_eq!(t.open_interest, 10000.0);
     assert_eq!(e.venue().price_range("BTCUSDT"), Some(0.01));
 }
+
+#[test]
+fn nullable_index_keeps_missing_value_without_rejecting_the_seed() {
+    let mut e = Engine::new(Woo::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.start(0.0);
+    let r = requests(&mut e).remove(0);
+    response(&mut e, &r, 10.0, MARKETS);
+    let r = requests(&mut e).remove(0);
+    response(
+        &mut e,
+        &r,
+        20.0,
+        &TICKERS.replace("\"index_price\":59999", "\"index_price\":null"),
+    );
+    let ticker = e.store().ticker("BTCUSDT").unwrap();
+    assert!(ticker.index.is_nan());
+    assert!(
+        serde_json::to_string(ticker)
+            .unwrap()
+            .contains("\"index\":null")
+    );
+    assert!(e.store().loaded().tickers);
+}
 #[test]
 fn public_topics_and_control_frames_cannot_dispatch_payloads() {
     let (mut e, s) = started();
