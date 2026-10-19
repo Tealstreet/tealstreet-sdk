@@ -8,6 +8,75 @@ use std::{
 };
 
 #[test]
+fn instance_of_uses_canonical_prototypes_bound_targets_and_original_getters() {
+    let constructor = Js::constructor("Base", None, |target, _| target.allocate_instance());
+    let prototype = Js::object(vec![]);
+    constructor.define("prototype", prototype.clone()).unwrap();
+    let instance = constructor.construct(vec![], None).unwrap();
+    let bound = constructor
+        .call_method("bind", vec![Js::Undefined])
+        .unwrap();
+    let other = Js::object(vec![]);
+    let mut actual = vec![
+        instance.instance_of(&constructor).unwrap(),
+        instance.instance_of(&bound).unwrap(),
+        other.instance_of(&constructor).unwrap(),
+        Js::Number(1.0).instance_of(&constructor).unwrap(),
+    ];
+    let reads = Rc::new(Cell::new(0));
+    let observed = reads.clone();
+    let cause = Js::object(vec![]);
+    let thrown = cause.clone();
+    let inspected = Js::function("inspect", |_, _| Ok(Js::Undefined));
+    inspected
+        .define_accessor(
+            "prototype",
+            Some(Rc::new(move |_| {
+                observed.set(observed.get() + 1);
+                Err(Thrown::new(thrown.clone()))
+            })),
+            None,
+        )
+        .unwrap();
+    actual.push(Js::Null.instance_of(&inspected).unwrap());
+    assert_eq!(
+        reads.get(),
+        0,
+        "primitive lhs does not inspect a function prototype"
+    );
+    assert!(
+        instance
+            .instance_of(&inspected)
+            .unwrap_err()
+            .value
+            .same_reference(&cause)
+    );
+    assert_eq!(reads.get(), 1);
+    for constructor in [Js::Null, Js::Number(1.0), Js::object(vec![])] {
+        assert_eq!(
+            instance
+                .instance_of(&constructor)
+                .unwrap_err()
+                .value
+                .get("name")
+                .unwrap()
+                .to_display(),
+            "TypeError"
+        );
+    }
+    let source = Command::new("node").args(["-e", "function Base(){};const instance=new Base(),bound=Base.bind(undefined);const trace=[];const inspected=new Proxy(function(){},{get(t,k,r){if(k==='prototype'){trace.push(k);throw cause;}return Reflect.get(t,k,r);}}),cause={};const values=[instance instanceof Base,instance instanceof bound,{} instanceof Base,1 instanceof Base,null instanceof inspected];if(trace.length)throw Error('primitive read');try{instance instanceof inspected;}catch(error){if(error!==cause)throw error;}if(trace.length!==1)throw Error('getter count');console.log(JSON.stringify(values));"]).output().unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    assert_eq!(
+        json!(actual),
+        serde_json::from_slice::<Value>(&source.stdout).unwrap()
+    );
+}
+
+#[test]
 fn class_call_refuses_before_running_constructor() {
     let calls = Rc::new(Cell::new(0));
     let effects = calls.clone();

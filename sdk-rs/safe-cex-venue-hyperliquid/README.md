@@ -10,8 +10,11 @@ The standalone DTO cleanup removes declarations with no production Rust
 consumer from `types.rs`, `spot_models.rs` and `spot_types.rs`. The current
 554-row census is 390 ported, 87 divergent and 77 not-applicable. The latter
 rows retain their TypeScript identity with empty Rust mappings. Production
-exchange and socket bindings consume realm values; retained event models and
+exchange and socket bindings consume shared Js values; retained event models and
 order aliases keep their existing native contracts.
+
+`SHARED_RUNTIME_REVIEW.md` describes the atomic family cutover, ownership,
+source-visible regression proofs and the strict release-tape readiness gate.
 
 `not-modeled-types.cjs` excludes the removed core roots from model and corpus
 regeneration. Spot model generation retains four user-event roots. Their current
@@ -67,12 +70,12 @@ workspace build and workspace host clippy; central wasm/wiring gates are separat
 The family socket facade maps source `ws.close()` to the shared transport-only
 `close_current_websocket()` API. It closes the current native/relay connection
 while preserving `forceClosed`, generation and superclass resources. The private
-perpetual socket's source `dispose` has no super call; the production realm
+perpetual socket's source `dispose` has no super call; the production shared-Js host
 regression checks its wire close and unchanged force/parent-disposal flags against
 the actual TypeScript class, including a failing forceClose source mutation.
 
 Hyperliquid Spot uses `spot_binding::HyperliquidSpotExchange::new` over the same
-production family realm and native dependency shape. Its registry name is
+shared family host and native dependency shape. Its registry name is
 `Hyperliquidspot`; host callers now pass the selected name to
 `RustVenueHost::hyperliquid(name, options)`. Keep the caller-owned limiter shared
 with perpetual accounts. Spot preserves its source constructor's perpetual API
@@ -83,7 +86,7 @@ its cleanup behavior (candle cleanup removes the handler without a wire
 unsubscribe).
 
 Spot's `placeOrder`/`updateOrder` return the object produced by actual
-`omitUndefined` (`lodash/omitBy`) inside the realm. The native Exchange ABI returns
+`omitUndefined` (`lodash/omitBy`) inside the shared host. The native Exchange ABI returns
 `Vec<String>`, so the adapter reads values of enumerable numeric own keys in JS
 key order, skips missing indices, preserves string IDs, and spells number IDs
 with `js_number_string`. Batch placement preflights every caller ID before the
@@ -96,5 +99,5 @@ The Store/DTO boundary uses the shared native typed codec rather than a JSON
 roundtrip. Missing Spot `oraclePx`/`funding` fields produce NaN in source and keep
 that value through native Store snapshots and lookup tables. Wire JSON still
 uses JSON.stringify semantics. Candle calendar arithmetic uses the shared
-`js_runtime` dayjs implementation; the realm adapter exposes the `subtract` and
+`js_runtime` dayjs implementation; the host adapter exposes the `subtract` and
 `valueOf` operations consumed by this source method.

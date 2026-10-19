@@ -6,7 +6,7 @@ import tempfile
 
 package = Path(__file__).resolve().parents[1]
 workspace = package.parent
-imports = package / 'src/realm/imports_venue.rs'
+imports = package / 'src/host/imports_venue.rs'
 consumer = package / 'src/order_request_leaves.rs'
 originals = {p: p.read_bytes() for p in [imports, consumer]}
 logs = Path(tempfile.mkdtemp(prefix='hl-order-error-controls-'))
@@ -27,10 +27,10 @@ status, output = run('baseline')
 assert status == 0 and '2 passed; 0 failed' in output, output
 faults = [
     ('constructor-name', imports,
-     'Value::str("HyperliquidUnreadableOrderResponseError"),',
-     'Value::str("Error"),', 'order_error_audit_bound_constructor_retains_error_inheritance_and_units'),
+     'Js::str("HyperliquidUnreadableOrderResponseError"),',
+     'Js::str("Error"),', 'order_error_audit_bound_constructor_retains_error_inheritance_and_units'),
     ('parser-inheritance', imports,
-     'Err(r.construct(&class, &[Value::str(&e.message)], None)?)',
+     'Err(Thrown::new(r.construct(\n                    &class,\n                    &[Js::str(&e.message)],\n                    None,\n                )?))',
      'let _ = class; Err(r.error(&e.message))',
      'order_error_audit_real_response_consumer_reconciles_only_unreadable_errors'),
     ('reconcile-guard', consumer,

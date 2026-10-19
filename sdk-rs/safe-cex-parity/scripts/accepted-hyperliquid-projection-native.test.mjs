@@ -24,11 +24,11 @@ const specs = Object.fromEntries(Object.entries(loadPolicy('generic-aliases')).f
 assert.deepEqual(Object.keys(specs).sort(), [...projectionNames].sort(), 'all six reviewed associated projections remain selected');
 function command(binary, args) {
   const result = spawnSync(binary, args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, RUSTC_BOOTSTRAP: '1', CARGO_BUILD_JOBS: '1' } });
+    env: { ...process.env, RUSTC_BOOTSTRAP: '1', CARGO_BUILD_JOBS: '1', CARGO_INCREMENTAL: '0', CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR || path.join(root, 'target/accepted-inventory') } });
   assert.equal(result.status, 0, result.stderr); return result.stdout;
 }
 async function production(mode, selected) {
-  const original = fs.readFileSync(path.join(root, 'safe-cex-venue-hyperliquid/src/realm/value.rs'));
+  const original = fs.readFileSync(path.join(root, 'safe-cex-exchange/src/js_runtime/value.rs'));
   const metadata = JSON.parse(command('cargo', ['metadata', '--locked', '--format-version=1']));
   const pkg = metadata.packages.find(p => p.name === 'safe-cex-venue-hyperliquid');
   const target = pkg.targets.find(t => t.kind.includes('lib'));
@@ -50,8 +50,8 @@ async function production(mode, selected) {
   const scanner = buildScanner('1');
   const claims = JSON.parse(command(scanner, ['--alias-claims-json', root, ...new Set(aliases.map(alias => alias.span.filename))]));
   const contracts = Object.fromEntries(aliases.map(alias => [alias.name, {
-    category: 'non-decoder', evidence: 'Focused compiler alias control; actual selected Realm Serde and conversion probes must establish this classification.',
-    reason: `${alias.ident}<Realm> is the reviewed native Realm value/error capability. This control claims no callback execution or other host instantiation.`,
+    category: 'non-decoder', evidence: 'Focused compiler alias control; actual selected shared Js/Thrown Serde and conversion probes must establish this classification.',
+    reason: `${alias.ident}<Host> is the reviewed native shared Js/Thrown capability. This control claims no callback execution or other host instantiation.`,
     generics: specs[alias.name].generics, rawTarget: specs[alias.name].rawTarget, target: specs[alias.name].target,
   }]));
   for (const alias of aliases) alias.claim = aliasClaim(alias, { packageName: pkg.name, crateRoot: path.dirname(pkg.manifest_path), workspace: root, claims }, contracts[alias.name]);
@@ -61,10 +61,11 @@ async function production(mode, selected) {
       const loaded = next(urlToLoad, context); if (urlToLoad !== url) return loaded;
       const source = String(loaded.source), anchor = '    const command = node ?';
       assert.equal(source.split(anchor).length, 2, 'one post-validation copied-production mutation');
-      const injected = `    const mutationFile = path.join(sandbox, workspaceRelative, 'safe-cex-venue-hyperliquid/src/realm/value.rs');
+      const injected = `    const mutationFile = path.join(sandbox, workspaceRelative, 'safe-cex-exchange/src/js_runtime/value.rs');
     remember(mutationFile); const before = fs.readFileSync(mutationFile, 'utf8');
-    assert.equal(before.split('pub(crate) enum Value {').length, 2);
-    fs.writeFileSync(mutationFile, before.replace('pub(crate) enum Value {', 'pub(crate) enum NativeValue {') + '\\npub(crate) type Value = NativeValue;\\n');
+    assert.equal(before.split('pub enum Js {').length, 2);
+    assert.equal(before.split('pub struct Thrown {').length, 2);
+    fs.writeFileSync(mutationFile, before.replace('pub enum Js {', 'pub enum NativeJs {').replace('pub struct Thrown {', 'pub struct NativeThrown {') + '\\npub type Js = NativeJs;\\npub type Thrown = NativeThrown;\\n');
 `;
       return { ...loaded, source: source.replace(anchor, injected + anchor) };
     } });
@@ -75,7 +76,7 @@ async function production(mode, selected) {
     console.log('PROJECTION_NATIVE ' + JSON.stringify({ mode, target: selected, rows }));
     assert.equal(rows.length, 6);
     assert.deepEqual(rows.filter(row => row.failures.length), [], 'projection native compiler owner identity');
-  } finally { assert.deepEqual(fs.readFileSync(path.join(root, 'safe-cex-venue-hyperliquid/src/realm/value.rs')), original, 'actual production source remains unchanged'); }
+  } finally { assert.deepEqual(fs.readFileSync(path.join(root, 'safe-cex-exchange/src/js_runtime/value.rs')), original, 'actual production source remains unchanged'); }
 }
 function child(mode, target) {
   const result = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--projection-native', mode, target], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, RUSTC_BOOTSTRAP: '1' } });

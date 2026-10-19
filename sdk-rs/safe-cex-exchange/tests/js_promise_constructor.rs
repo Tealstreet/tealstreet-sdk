@@ -341,3 +341,74 @@ fn dropping_the_constructor_observer_does_not_cancel_its_thenable_job() {
         );
     });
 }
+
+#[test]
+fn race_uses_live_iterator_resolution_and_keeps_losing_operations_alive() {
+    let source = std::process::Command::new("node").args(["-e", r#"
+(async()=>{const assert=require('node:assert/strict');let resolve;const loser=new Promise(r=>resolve=r), winner={identity:-0};assert.equal(await Promise.race([loser,winner]),winner);const late={};resolve(late);assert.equal(await loser,late);const cause={};assert.equal(await Promise.race([Promise.reject(cause)]).catch(e=>e),cause);let settled=false;Promise.race([]).then(()=>settled=true);await Promise.resolve();assert.equal(settled,false);const calls=[];const thenable={then(resolve){calls.push('then');resolve(3)}};assert.equal(await Promise.race([thenable,7]),7);assert.deepEqual(calls,['then']);console.log('race profiles pass')})().catch(e=>{console.error(e);process.exitCode=1})
+"#]).output().unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    run(|scope| async move {
+        let runtime = scope.exchange_runtime();
+        let constructor = scope.global("Promise").unwrap();
+        let race = |values| {
+            constructor
+                .call_method("race", vec![Js::array(values)])
+                .unwrap()
+        };
+        let pending = Promise::pending(&runtime);
+        let winner = Js::object(vec![("identity", Js::Number(-0.0))]);
+        let raced = race(vec![Js::Promise(pending.clone()), winner.clone()]);
+        assert!(
+            await_js(&runtime, raced)
+                .await
+                .unwrap()
+                .same_reference(&winner)
+        );
+        let late = Js::object(vec![]);
+        pending.settle(Ok(late.clone()));
+        assert!(pending.wait().await.unwrap().same_reference(&late));
+        let cause = Js::object(vec![]);
+        let rejected = race(vec![Js::Promise(Promise::settled(
+            &runtime,
+            Err(Thrown::new(cause.clone())),
+        ))]);
+        assert!(
+            await_js(&runtime, rejected)
+                .await
+                .unwrap_err()
+                .value
+                .same_reference(&cause)
+        );
+        let empty = race(vec![]);
+        tokio::task::yield_now().await;
+        let Js::Promise(empty) = empty else {
+            panic!("race returns promise")
+        };
+        assert!(empty.result().is_none());
+        let calls = Rc::new(RefCell::new(vec![]));
+        let seen = calls.clone();
+        let thenable = Js::object(vec![(
+            "then",
+            Js::function("then", move |_, args| {
+                seen.borrow_mut().push("then");
+                arg(&args, 0).call(Js::Undefined, vec![Js::Number(3.)])?;
+                Ok(Js::Undefined)
+            }),
+        )]);
+        let raced = race(vec![thenable, Js::Number(7.)]);
+        assert_eq!(
+            await_js(&runtime, raced)
+                .await
+                .unwrap()
+                .to_number()
+                .unwrap(),
+            7.
+        );
+        assert_eq!(*calls.borrow(), vec!["then"]);
+    });
+}

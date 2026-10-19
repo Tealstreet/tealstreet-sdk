@@ -917,6 +917,57 @@ include!("support/private_binding_topics.rs");
 #[path = "../../parity/test-support/ticker_coercion.rs"]
 mod ticker_coercion;
 
+#[path = "../../parity/test-support/ticker_ingress.rs"]
+#[cfg(not(target_arch = "wasm32"))]
+mod ticker_ingress;
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn ticker_ingress_rest_keeps_maintained_construction_order() {
+    let source = ticker_ingress::source("phemex", "rest");
+    let h = chart_venue();
+    h.drive(h.venue().start()).unwrap();
+    assert_eq!(h.http.calls("/public/products").len(), 1);
+    assert_eq!(h.http.calls("/md/v3/ticker/24hr/all").len(), 1);
+    assert_eq!(
+        ticker_ingress::observe(h.store.clone()),
+        source,
+        "PHEMEX_REST_TICKER_ORDER"
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn ticker_ingress_stream_insert_keeps_maintained_construction_order() {
+    let source = ticker_ingress::source("phemex", "stream-new");
+    let h = chart_venue();
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    h.store
+        .update(
+            StoreUpdate {
+                tickers: Some(vec![]),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+    public_frame(
+        &h,
+        json!({"method": "perp_market24h_pack_p.update", "data": [[
+            "BTCUSDT", "80", "120", "70", "100", "7", "0", "800", "99", "101",
+            "0.001", "0", "99.5", "100.5"
+        ]]}),
+    );
+    assert_eq!(
+        ticker_ingress::observe(h.store.clone()),
+        source,
+        "PHEMEX_STREAM_TICKER_ORDER"
+    );
+    h.venue().dispose().unwrap();
+}
+
 #[test]
 fn production_ticker_coercion_matches_constructed_typescript() {
     use safe_cex_exchange::websocket::WsEvent;
