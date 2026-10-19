@@ -28,6 +28,8 @@ struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
     replacement: Option<String>,
+    amend_source: Option<String>,
+    amend_filled: bool,
     builder_checked: bool,
 }
 enum Step {
@@ -136,6 +138,7 @@ struct Oid {
 impl Hyperliquid {
     pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         let mut replacement = None;
+        let mut amend_source = None;
         let (command, steps) = match command {
             Command::PlaceOrders { command, orders } => {
                 if let Err(error) = self.preflight(cx, &orders) {
@@ -169,10 +172,30 @@ impl Hyperliquid {
                 price,
                 amount,
             } => {
+                if self
+                    .trading
+                    .active
+                    .iter()
+                    .chain(self.trading.queue.iter())
+                    .any(|job| job.amend_source.as_deref() == Some(id.as_str()))
+                {
+                    cx.done(
+                        command,
+                        Err("Hyperliquid order already has an amendment pending".into()),
+                    );
+                    return;
+                }
                 let Some(old) = cx.store.order(&id).cloned() else {
                     cx.done(command, Err("Order not found".into()));
                     return;
                 };
+                if !matches!(old.status, OrderStatus::Open | OrderStatus::Creating) {
+                    cx.done(
+                        command,
+                        Err("Hyperliquid order is not available for amendment".into()),
+                    );
+                    return;
+                }
                 let mut opts = PlaceOrderOpts {
                     symbol: old.symbol.clone(),
                     kind: old.kind,
@@ -224,6 +247,7 @@ impl Hyperliquid {
                     cx.done(command, Err(error));
                     return;
                 }
+                amend_source = Some(id);
                 (
                     command,
                     VecDeque::from([Step::Cancel(vec![old]), Step::Place(opts)]),
@@ -277,6 +301,8 @@ impl Hyperliquid {
             steps,
             ids: Vec::new(),
             replacement,
+            amend_source,
+            amend_filled: false,
             builder_checked: false,
         });
         self.pump_trades(cx);
@@ -451,6 +477,10 @@ impl Hyperliquid {
         let Some(job) = self.trading.active.as_ref() else {
             return;
         };
+        if job.amend_filled {
+            self.finish_trade(cx, Err("Hyperliquid amendment source was filled".into()));
+            return;
+        }
         if job.steps.is_empty() {
             self.finish_trade(cx, Ok(()));
             return;
@@ -458,6 +488,18 @@ impl Hyperliquid {
         if self.trading.write_at.is_some_and(|at| cx.now - at < 334.0) {
             self.trading.pace =
                 Some(cx.set_timer(334.0 - (cx.now - self.trading.write_at.unwrap())));
+            return;
+        }
+        if matches!(job.steps.front(), Some(Step::Cancel(_)))
+            && let Some(source) = &job.amend_source
+            && cx.store.order(source).is_none_or(|order| {
+                !matches!(order.status, OrderStatus::Open | OrderStatus::Creating)
+            })
+        {
+            self.finish_trade(
+                cx,
+                Err("Hyperliquid amendment source is no longer open".into()),
+            );
             return;
         }
         let needs_builder = matches!(job.steps.front(), Some(Step::Place(_)))
@@ -710,17 +752,24 @@ impl Hyperliquid {
             return;
         }
         self.trading.inflight = false;
-        let parsed = result.map_err(str::to_owned).and_then(|r| {
+        let idempotent_cancel = self.trading.active.as_ref().unwrap().amend_source.is_none();
+        let parsed = result.map_err(ReplyError::uncertain).and_then(|r| {
             if (200..300).contains(&r.status) {
                 parse_reply(r.body)
             } else {
-                Err(format!("Hyperliquid HTTP {}: {}", r.status, r.body))
+                Err(ReplyError::uncertain(format!(
+                    "Hyperliquid HTTP {}: {}",
+                    r.status, r.body
+                )))
             }
         });
         let (kind, statuses) = match parsed {
             Ok(s) => s,
             Err(e) => {
-                if matches!(&request.effect, Effect::Cancel(_)) && only_terminal_cancel(&e) {
+                if idempotent_cancel
+                    && matches!(&request.effect, Effect::Cancel(_))
+                    && only_terminal_cancel(&e.message)
+                {
                     let count = if let Effect::Cancel(orders) = &request.effect {
                         orders.len()
                     } else {
@@ -732,9 +781,11 @@ impl Hyperliquid {
                     )
                 } else {
                     self.restore_cancel(cx, &request.effect);
-                    self.mark_settings_uncertain(cx, &request.effect);
+                    if e.uncertain {
+                        self.mark_settings_uncertain(cx, &request.effect);
+                    }
                     self.schedule_orders(cx);
-                    self.finish_trade(cx, Err(e));
+                    self.finish_trade(cx, Err(e.message));
                     return;
                 }
             }
@@ -769,7 +820,8 @@ impl Hyperliquid {
             })
             .collect::<Vec<_>>();
         if !errors.is_empty()
-            && !(matches!(&request.effect, Effect::Cancel(_))
+            && !(idempotent_cancel
+                && matches!(&request.effect, Effect::Cancel(_))
                 && errors.iter().all(|e| only_terminal_cancel(e)))
         {
             self.restore_cancel(cx, &request.effect);
@@ -805,14 +857,20 @@ impl Hyperliquid {
                     self.trading.active.as_mut().unwrap().ids.push(id.clone());
                     if let Some(mut record) = records.get(index).cloned() {
                         record.order.id = id.clone();
-                        if record.order.symbol.contains('|') {
-                            self.account.pending.insert(id.clone(), record.clone());
-                            if resting
-                                && cx.store.order(&id).is_none()
-                                && !self.account.suppressed.contains_key(&id)
-                            {
-                                cx.store.upsert_order(record.order);
+                        if resting {
+                            self.acknowledge_order_write(cx, &record.order.symbol);
+                            if !record.order.symbol.contains('|') {
+                                record.order.status = OrderStatus::Open;
                             }
+                        }
+                        if resting
+                            && cx.store.order(&id).is_none()
+                            && !self.account.suppressed.contains_key(&id)
+                        {
+                            cx.store.upsert_order(record.order.clone());
+                        }
+                        if record.order.symbol.contains('|') {
+                            self.account.pending.insert(id.clone(), record);
                             self.trading.expected.insert(id);
                             if self.trading.retry.is_none() {
                                 self.trading.retry_step = 0;
@@ -824,7 +882,7 @@ impl Hyperliquid {
             }
             Effect::Cancel(orders) => {
                 for o in orders {
-                    self.acknowledge_cancel(cx, &o.symbol);
+                    self.acknowledge_order_write(cx, &o.symbol);
                     self.account.suppressed.insert(o.id.clone(), cx.now);
                     cx.store.remove_orders(&[&o.id]);
                     self.account
@@ -857,6 +915,18 @@ impl Hyperliquid {
             }
         }
         self.pump_trades(cx);
+    }
+    pub(crate) fn amend_source_filled(&mut self, id: &str) {
+        for job in self
+            .trading
+            .active
+            .iter_mut()
+            .chain(self.trading.queue.iter_mut())
+        {
+            if job.amend_source.as_deref() == Some(id) {
+                job.amend_filled = true;
+            }
+        }
     }
     fn mark_settings_uncertain(&mut self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
         if let Effect::Leverage { symbol, .. } = effect {
@@ -938,15 +1008,34 @@ impl Hyperliquid {
         }
     }
 }
-fn parse_reply(raw: &str) -> Result<(String, Vec<Status>), String> {
-    let reply =
-        serde_json::from_str::<Reply>(raw).map_err(|_| "Invalid response from Hyperliquid API")?;
+struct ReplyError {
+    message: String,
+    uncertain: bool,
+}
+impl ReplyError {
+    fn uncertain(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            uncertain: true,
+        }
+    }
+}
+fn parse_reply(raw: &str) -> Result<(String, Vec<Status>), ReplyError> {
+    let reply = serde_json::from_str::<Reply>(raw)
+        .map_err(|_| ReplyError::uncertain("Invalid response from Hyperliquid API"))?;
+    if reply.status == "err" {
+        let message = serde_json::from_str::<String>(reply.response.get())
+            .map_err(|_| ReplyError::uncertain("Invalid Hyperliquid rejection response"))?;
+        return Err(ReplyError {
+            message,
+            uncertain: false,
+        });
+    }
     if reply.status != "ok" {
-        return Err(serde_json::from_str::<String>(reply.response.get())
-            .unwrap_or_else(|_| "Hyperliquid rejected request".into()));
+        return Err(ReplyError::uncertain("Invalid Hyperliquid response status"));
     }
     let data = serde_json::from_str::<ReplyData>(reply.response.get())
-        .map_err(|_| "Invalid Hyperliquid response data")?;
+        .map_err(|_| ReplyError::uncertain("Invalid Hyperliquid response data"))?;
     Ok((
         data.r#type,
         data.data.map_or_else(Vec::new, |data| data.statuses),

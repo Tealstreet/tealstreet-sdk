@@ -811,7 +811,7 @@ impl Hyperliquid {
             .and_then(|m| m.id.split_once(':'))
             .map_or("", |(d, _)| d)
     }
-    pub(crate) fn acknowledge_cancel(&mut self, cx: &Cx<'_, Pending>, symbol: &str) {
+    pub(crate) fn acknowledge_order_write(&mut self, cx: &Cx<'_, Pending>, symbol: &str) {
         let dex = self.dex_of(cx, symbol).to_owned();
         *self.account.orders_revision.entry(dex).or_default() += 1;
     }
@@ -1246,6 +1246,9 @@ impl Hyperliquid {
         let dex = self.dex_of(cx, &symbol).to_owned();
         *self.account.orders_revision.entry(dex).or_default() += 1;
         if terminal(&update.status) {
+            if update.status == "filled" {
+                self.amend_source_filled(&id);
+            }
             self.account.suppressed.insert(id.clone(), cx.now);
             cx.store.remove_orders(&[&id]);
             if let Some(c) = row.cloid {

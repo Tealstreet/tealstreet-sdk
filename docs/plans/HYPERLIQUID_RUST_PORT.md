@@ -193,3 +193,14 @@ updates cannot reverse acknowledged writes. Ambiguous settings writes recover
 through fresh, budgeted per-symbol activeAssetData reads, including flat/HIP-3
 markets; failed reads retain state and retry. Sixteen account tests pass.
 Independent review accepted the final revision/time fences and wrapper startup.
+
+Trading review fixes complete: reserve each amendment source across queued and
+active jobs, revalidate it before canceling, and abort replacement on an observed
+fill or an ambiguous terminal-miss cancel acknowledgement. Ordinary cancels
+remain idempotent. Core resting acknowledgements retain Open order metadata
+before returning IDs and advance the order-read revision. Definite venue settings
+rejections retain certainty; only ambiguous writes require reconciliation. Failed
+signing restores optimistic cancellation status. Regressions also cover flat
+settings recovery and prewrite REST revisions with future source timestamps.
+All 56 Hyperliquid tests (19 trading), Clippy with denied warnings and formatting
+pass on the settled source. The independent final lifecycle review is pending.

@@ -457,8 +457,14 @@ fn stale_account_snapshot_cannot_reverse_acknowledged_margin_change() {
         &mut e,
         socket,
         2003.0,
-        &format!(r#"{{"channel":"clearinghouseState","data":{STATE}}}"#),
+        &format!(
+            r#"{{"channel":"clearinghouseState","data":{}}}"#,
+            STATE
+                .replace("1000}", "1500}")
+                .replace(r#""szi":"2""#, r#""szi":"3""#)
+        ),
     );
+    assert_eq!(e.store().positions()[0].contracts, 3.0);
     assert_eq!(
         e.store().setting("BTC-PERP").unwrap().margin_type,
         Some(safe_cex_engine::model::MarginType::Isolated)
@@ -533,4 +539,433 @@ fn signing_failure_restores_cancel_status_without_sending_a_request() {
         e.store().order("9").unwrap().status,
         safe_cex_engine::model::OrderStatus::Open
     );
+}
+
+fn reply_at(e: &mut Engine<Hyperliquid>, request: &HttpRequest, now: f64, raw: &str) {
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: request.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: raw,
+            },
+        },
+    );
+}
+fn fire_timers(e: &mut Engine<Hyperliquid>) -> Vec<Action> {
+    let mut actions = e.drain_actions().collect::<Vec<_>>();
+    let mut timers = actions
+        .iter()
+        .filter_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+    for (timer, at_ms) in timers {
+        e.handle(at_ms, Event::TimerFired { timer });
+        actions.extend(e.drain_actions());
+    }
+    actions
+}
+fn action_write(actions: &[Action]) -> &HttpRequest {
+    actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if r.url.ends_with("/exchange") => Some(r),
+            _ => None,
+        })
+        .unwrap()
+}
+fn open_order(e: &mut Engine<Hyperliquid>, socket: safe_cex_engine::SocketId, now: f64) {
+    message(
+        e,
+        socket,
+        now,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"#,
+    );
+}
+
+#[test]
+fn queued_amend_reserves_source_and_rechecks_terminal_order_before_cancel() {
+    for terminal_before_cancel in [false, true] {
+        let (mut e, socket) = ready("disabled");
+        open_order(&mut e, socket, 1900.0);
+        e.handle(
+            2000.0,
+            Event::Command(Command::SetLeverage {
+                command: 1,
+                symbol: "ETH-PERP".into(),
+                leverage: 5.0,
+            }),
+        );
+        let earlier = write(&mut e);
+        e.handle(
+            2001.0,
+            Event::Command(Command::AmendOrder {
+                command: 2,
+                id: "9".into(),
+                price: Some(85.0),
+                amount: None,
+            }),
+        );
+        if terminal_before_cancel {
+            message(
+                &mut e,
+                socket,
+                2002.0,
+                r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"0"},"status":"canceled"}]}"#,
+            );
+        }
+        e.handle(
+            2003.0,
+            Event::Command(Command::AmendOrder {
+                command: 3,
+                id: "9".into(),
+                price: Some(80.0),
+                amount: None,
+            }),
+        );
+        let rejected = e.drain_actions().collect::<Vec<_>>();
+        assert!(rejected.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandDone { command: 3, result: Err(error) })
+            if error.contains("amendment pending"))));
+        assert!(!rejected.iter().any(|a| matches!(a, Action::Http(_))));
+        reply_at(
+            &mut e,
+            &earlier,
+            2004.0,
+            r#"{"status":"ok","response":{"type":"default"}}"#,
+        );
+        let actions = fire_timers(&mut e);
+        if terminal_before_cancel {
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+            );
+            assert!(actions.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandDone { command: 2, result: Err(error) })
+                if error.contains("no longer open"))));
+        } else {
+            let cancel = action_write(&actions);
+            assert_eq!(body(cancel)["action"]["cancels"][0]["o"], 9);
+            reply_at(
+                &mut e,
+                cancel,
+                2400.0,
+                r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+            );
+            let actions = fire_timers(&mut e);
+            let replacement = action_write(&actions);
+            assert_eq!(body(replacement)["action"]["orders"][0]["p"], "85");
+            reply_at(
+                &mut e,
+                replacement,
+                2800.0,
+                r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":10}}]}}}"#,
+            );
+            assert!(
+                !e.drain_actions()
+                    .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+            );
+        }
+    }
+}
+
+#[test]
+fn resting_core_ack_can_be_canceled_before_websocket_update() {
+    let (mut e, socket) = ready("disabled");
+    e.handle(1900.0, Event::WsOpened { socket });
+    let older_orders = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(&r) == "frontendOpenOrders" => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(
+        2000.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![opts(
+                r#"{"symbol":"BTC-PERP","type":"limit","side":"buy","price":90,"amount":1}"#,
+            )],
+        }),
+    );
+    let placed = write(&mut e);
+    let cloid = body(&placed)["action"]["orders"][0]["c"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    reply_at(
+        &mut e,
+        &placed,
+        2001.0,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":9}}]}}}"#,
+    );
+    reply_at(&mut e, &older_orders, 2001.5, "[]");
+    let acknowledged = e.store().order("9").unwrap();
+    assert_eq!(
+        acknowledged.status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
+    assert_eq!(acknowledged.symbol, "BTC-PERP");
+    assert_eq!(
+        acknowledged.client_order_id.as_deref(),
+        Some(cloid.as_str())
+    );
+    assert_eq!(acknowledged.price, 90.0);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        2002.0,
+        Event::Command(Command::CancelOrders {
+            command: 2,
+            ids: vec!["9".into()],
+        }),
+    );
+    let actions = fire_timers(&mut e);
+    let cancel = action_write(&actions);
+    assert_eq!(body(cancel)["action"]["type"], "cancel");
+    assert_eq!(
+        body(cancel)["action"]["cancels"][0],
+        serde_json::json!({"a":0,"o":9})
+    );
+}
+
+#[test]
+fn definite_settings_rejection_keeps_next_queued_command_usable() {
+    let (mut e, _) = ready("disabled");
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetMarginType {
+            command: 1,
+            symbol: "BTC-PERP".into(),
+            isolated: true,
+        }),
+    );
+    let first = write(&mut e);
+    e.handle(
+        2001.0,
+        Event::Command(Command::SetLeverage {
+            command: 2,
+            symbol: "BTC-PERP".into(),
+            leverage: 5.0,
+        }),
+    );
+    reply_at(
+        &mut e,
+        &first,
+        2002.0,
+        r#"{"status":"err","response":"Cannot switch margin mode with open orders"}"#,
+    );
+    let actions = fire_timers(&mut e);
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
+        command: 1, result: Err(error),
+    }) if error == "Cannot switch margin mode with open orders"))
+    );
+    let second = action_write(&actions);
+    assert_eq!(body(second)["action"]["isCross"], true);
+    assert_eq!(body(second)["action"]["leverage"], 5);
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if kind(r) == "activeAssetData"))
+    );
+}
+
+#[test]
+fn uncertain_flat_settings_ignore_untimed_stream_until_targeted_rest_recovers() {
+    let (mut e, socket) = ready("disabled");
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetMarginType {
+            command: 1,
+            symbol: "ETH-PERP".into(),
+            isolated: true,
+        }),
+    );
+    let first = write(&mut e);
+    e.handle(
+        2001.0,
+        Event::HttpFailed {
+            request: first.id,
+            error: "lost after execution",
+        },
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let asset = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(r) == "activeAssetData" => Some(r.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(body(&asset)["coin"], "ETH");
+    message(
+        &mut e,
+        socket,
+        2400.0,
+        r#"{"channel":"activeAssetData","data":{"coin":"ETH","leverage":{"type":"cross","value":20}}}"#,
+    );
+    e.handle(
+        2401.0,
+        Event::Command(Command::SetLeverage {
+            command: 2,
+            symbol: "ETH-PERP".into(),
+            leverage: 5.0,
+        }),
+    );
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
+        command: 2, result: Err(ref error),
+    }) if error.contains("settings are uncertain")))
+    );
+    reply_at(
+        &mut e,
+        &asset,
+        2500.0,
+        r#"{"coin":"ETH","leverage":{"type":"isolated","value":20}}"#,
+    );
+    e.handle(
+        2501.0,
+        Event::Command(Command::SetLeverage {
+            command: 3,
+            symbol: "ETH-PERP".into(),
+            leverage: 5.0,
+        }),
+    );
+    let recovered = write(&mut e);
+    assert_eq!(body(&recovered)["action"]["isCross"], false);
+    assert_eq!(body(&recovered)["action"]["leverage"], 5);
+}
+
+#[test]
+fn prewrite_rest_revision_blocks_future_clock_settings_but_updates_position_size() {
+    let (mut e, socket) = ready("disabled");
+    e.handle(1900.0, Event::WsOpened { socket });
+    let snapshot = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) if kind(&r) == "clearinghouseState" => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetMarginType {
+            command: 1,
+            symbol: "BTC-PERP".into(),
+            isolated: true,
+        }),
+    );
+    let first = write(&mut e);
+    reply_at(
+        &mut e,
+        &first,
+        2002.0,
+        r#"{"status":"ok","response":{"type":"default"}}"#,
+    );
+    let future = STATE
+        .replace("1000}", "4000}")
+        .replace(r#""szi":"2""#, r#""szi":"3""#);
+    reply_at(&mut e, &snapshot, 2003.0, &future);
+    assert_eq!(e.store().positions()[0].contracts, 3.0);
+    assert_eq!(
+        e.store().setting("BTC-PERP").unwrap().margin_type,
+        Some(safe_cex_engine::model::MarginType::Isolated)
+    );
+    assert_eq!(
+        e.store().positions()[0].margin_type,
+        Some(safe_cex_engine::model::MarginType::Isolated)
+    );
+}
+
+#[test]
+fn terminal_cancel_miss_aborts_amend_but_regular_cancel_remains_idempotent() {
+    for amend in [false, true] {
+        for raw in [
+            r#"{"status":"err","response":"Order was never placed, already canceled, or filled. asset=0"}"#,
+            r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":[{"error":"Order was never placed, already canceled, or filled. asset=0"}]}}}"#,
+        ] {
+            let (mut e, socket) = ready("disabled");
+            open_order(&mut e, socket, 1900.0);
+            let command = if amend {
+                Command::AmendOrder {
+                    command: 1,
+                    id: "9".into(),
+                    price: Some(85.0),
+                    amount: None,
+                }
+            } else {
+                Command::CancelOrders {
+                    command: 1,
+                    ids: vec!["9".into()],
+                }
+            };
+            e.handle(2000.0, Event::Command(command));
+            let cancel = write(&mut e);
+            reply_at(&mut e, &cancel, 2001.0, raw);
+            let actions = fire_timers(&mut e);
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+            );
+            assert!(actions.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandDone { command: 1, result }) if result.is_err() == amend)));
+        }
+    }
+}
+
+#[test]
+fn filled_source_aborts_inflight_amend_but_own_cancel_frame_allows_replacement() {
+    for terminal in ["filled", "canceled"] {
+        let (mut e, socket) = ready("disabled");
+        open_order(&mut e, socket, 1900.0);
+        e.handle(
+            2000.0,
+            Event::Command(Command::AmendOrder {
+                command: 1,
+                id: "9".into(),
+                price: Some(85.0),
+                amount: None,
+            }),
+        );
+        let cancel = write(&mut e);
+        message(
+            &mut e,
+            socket,
+            2001.0,
+            &format!(
+                r#"{{"channel":"orderUpdates","data":[{{"order":{{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"0"}},"status":"{terminal}"}}]}}"#
+            ),
+        );
+        reply_at(
+            &mut e,
+            &cancel,
+            2002.0,
+            r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+        );
+        let actions = fire_timers(&mut e);
+        if terminal == "filled" {
+            assert!(
+                !actions
+                    .iter()
+                    .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+            );
+            assert!(actions.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandDone { command: 1, result: Err(error) })
+                if error.contains("source was filled"))));
+        } else {
+            let replacement = action_write(&actions);
+            assert_eq!(body(replacement)["action"]["orders"][0]["p"], "85");
+        }
+    }
 }
