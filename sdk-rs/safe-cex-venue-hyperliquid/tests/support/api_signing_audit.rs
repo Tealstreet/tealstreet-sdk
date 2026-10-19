@@ -1,6 +1,6 @@
 //! Original constructor-installed API client with a real BaseExchange listener.
 use super::{HyperliquidDependencies, HyperliquidExchange, RuntimeClock};
-use crate::{binding_test_runtime as host, rate_limit::RateLimiter, realm::Value};
+use crate::{binding_test_runtime as host, rate_limit::RateLimiter};
 use safe_cex_exchange::{
     js_runtime::value::{Js, Thrown},
     native_store::DefaultStore,
@@ -56,13 +56,13 @@ fn api_signing_audit_listener_failure_rejects_before_transport() {
             exchange.base.on("error", Rc::new(move |_, value| {message_observer.borrow_mut().push(value.clone()); observer.set(observer.get() + 1); if throws {Err(failure.clone())} else {Ok(())}}));
             let mut r = exchange.binding.borrow().as_ref().unwrap().realm.clone();
             let factory = r.import("createExchangeAPI").unwrap();
-            let js_options = r.from_serde(&options);
-            let client = r.call(&factory, &Value::Undefined, &[js_options]).unwrap();
-            let body = r.from_serde(&json!({"action":{"type":row["kind"]},"nonce":1}));
-            let pending = r.call_method(&client, "post", &[Value::str("/exchange"), body.clone()]).unwrap();
-            assert!(pending.promise().is_some());
-            let concurrent = r.call_method(&client, "post", &[Value::str("/exchange"), body]).unwrap();
-            assert!(concurrent.promise().is_some());
+            let js_options = r.encode_json(&options);
+            let client = r.call(&factory, &Js::Undefined, &[js_options]).unwrap();
+            let body = r.encode_json(&json!({"action":{"type":row["kind"]},"nonce":1}));
+            let pending = r.call_method(&client, "post", &[Js::str("/exchange"), body.clone()]).unwrap();
+            assert!(matches!(&pending, Js::Promise(_)));
+            let concurrent = r.call_method(&client, "post", &[Js::str("/exchange"), body]).unwrap();
+            assert!(matches!(&concurrent, Js::Promise(_)));
             let first = r.await_value(pending).await;
             let second = r.await_value(concurrent).await;
             for result in [first, second] {

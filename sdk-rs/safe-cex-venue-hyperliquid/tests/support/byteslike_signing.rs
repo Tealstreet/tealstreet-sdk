@@ -1,4 +1,5 @@
 use super::*;
+use safe_cex_exchange::js_runtime::value::Js;
 use serde_json::{Value as Json, json};
 use std::{process::Command, sync::OnceLock};
 
@@ -29,31 +30,35 @@ fn run(success: bool) {
         .build()
         .unwrap();
     tokio::task::LocalSet::new().block_on(&executor, async {
-        let mut realm = Realm::new(safe_cex_exchange::native::native_runtime());
+        let mut realm = Host::new(
+            safe_cex_exchange::native::native_runtime(),
+            std::sync::Arc::new(crate::host::test_runtime::NoHttp),
+            std::rc::Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
+        );
         super::super::imports::bind(&realm);
         let make_wallet = realm.import("createWalletFromPrivateKey").unwrap();
         let wallet = realm
             .call(
                 &make_wallet,
-                &Value::Undefined,
-                &[Value::str(&format!("0x{}", "11".repeat(32)))],
+                &Js::Undefined,
+                &[Js::str(&format!("0x{}", "11".repeat(32)))],
             )
             .unwrap();
         let signer = realm.import("signL1Action").unwrap();
-        let action = realm.from_serde(&json!({"type":"cancel","cancels":[{"a":1,"o":1234}]}));
+        let action = realm.encode_json(&json!({"type":"cancel","cancels":[{"a":1,"o":1234}]}));
         let mut completed = 0;
         for row in source().iter().filter(|row| row["ok"] == success) {
             let vault = row["vault"].as_str().unwrap();
             let pending = realm
                 .call(
                     &signer,
-                    &Value::Undefined,
+                    &Js::Undefined,
                     &[
                         wallet.clone(),
                         action.clone(),
-                        Value::str(vault),
-                        Value::Number(1700000000123.0),
-                        Value::Bool(true),
+                        Js::str(vault),
+                        Js::Number(1700000000123.0),
+                        Js::Bool(true),
                     ],
                 )
                 .unwrap();
@@ -62,7 +67,7 @@ fn run(success: bool) {
                 let signature = actual.unwrap_or_else(|error| {
                     panic!(
                         "native signature must accept {vault}: {:?}",
-                        realm.to_serde(&error)
+                        realm.to_serde(&error.value)
                     )
                 });
                 for name in ["r", "s"] {
@@ -75,7 +80,7 @@ fn run(success: bool) {
                 }
                 let v = realm.get_str(&signature, "v").unwrap();
                 assert_eq!(
-                    v.as_number().unwrap().to_bits(),
+                    v.as_f64().unwrap().to_bits(),
                     row["signature"]["v"].as_f64().unwrap().to_bits(),
                     "native {vault}/v"
                 );
@@ -103,8 +108,8 @@ fn run(success: bool) {
                     "value",
                     "shortMessage",
                 ] {
-                    let field = realm.get_str(&error, name).unwrap();
-                    if !matches!(field, Value::Undefined) {
+                    let field = realm.get_str(&error.value, name).unwrap();
+                    if !matches!(field, Js::Undefined) {
                         observed.insert(name.into(), realm.to_serde(&field).unwrap());
                     }
                 }
@@ -179,7 +184,11 @@ fn native_api_signing_retains_original_error_through_transport() {
                 shared::to_json(&cause.value().to_js()).unwrap(),
                 row["error"]
             );
-            let mut realm = Realm::new(runtime.clone());
+            let mut realm = Host::new(
+                runtime.clone(),
+                Arc::new(crate::host::test_runtime::NoHttp),
+                Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),
+            );
             let projected = super::super::facade_rest::thrown_from(
                 &mut realm,
                 ExchangeError::from(RestFailure::from_transport(error, request)),
@@ -193,13 +202,13 @@ fn native_api_signing_retains_original_error_through_transport() {
                 "value",
                 "shortMessage",
             ] {
-                let field = realm.get_str(&projected, name).unwrap();
+                let field = realm.get_str(&projected.value, name).unwrap();
                 actual.insert(name.into(), realm.to_serde(&field).unwrap());
             }
             assert_eq!(
                 Json::Object(actual),
                 row["error"],
-                "production Realm REST error projection retains original fields"
+                "production Host REST error projection retains original fields"
             );
             completed += 1;
         }

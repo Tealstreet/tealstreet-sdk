@@ -485,8 +485,9 @@ fn bound_public_book_listener_dispatches_source_levels_and_cleanup() {
     assert_eq!(
         values.borrow().len(),
         1,
-        "reports {:?}",
-        f.host.reports.borrow()
+        "reports {:?}; console {:?}",
+        f.host.reports.borrow(),
+        f.host.console.borrow()
     );
     assert_eq!(values.borrow()[0].bids[0].price, 1.1);
     assert_eq!(values.borrow()[0].asks[0].amount, 3.0);

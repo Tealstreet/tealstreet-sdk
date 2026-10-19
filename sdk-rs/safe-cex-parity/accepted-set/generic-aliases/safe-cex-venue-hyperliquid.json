@@ -1,8 +1,8 @@
 {
   "safe_cex_venue_hyperliquid::private_class::PrivateValue": {
-    "canonical": "safe_cex_venue_hyperliquid::realm::value::Value",
-    "expectedType": "crate::realm::value::Value",
-    "suffix": "<crate::realm::Realm>",
+    "canonical": "safe_cex_exchange::js_runtime::value::Js",
+    "expectedType": "safe_cex_exchange::js_runtime::value::Js",
+    "suffix": "<crate::host::Host>",
     "file": "safe-cex-venue-hyperliquid/src/private_class.rs",
     "generics": {
       "params": [
@@ -48,9 +48,9 @@
     "unsized": false
   },
   "safe_cex_venue_hyperliquid::private_class::PrivateError": {
-    "canonical": "safe_cex_venue_hyperliquid::realm::value::Value",
-    "expectedType": "crate::realm::value::Value",
-    "suffix": "<crate::realm::Realm>",
+    "canonical": "safe_cex_exchange::js_runtime::value::Thrown",
+    "expectedType": "safe_cex_exchange::js_runtime::value::Thrown",
+    "suffix": "<crate::host::Host>",
     "file": "safe-cex-venue-hyperliquid/src/private_class.rs",
     "generics": {
       "params": [
@@ -96,9 +96,9 @@
     "unsized": false
   },
   "safe_cex_venue_hyperliquid::public_class::PublicValue": {
-    "canonical": "safe_cex_venue_hyperliquid::realm::value::Value",
-    "expectedType": "crate::realm::value::Value",
-    "suffix": "<crate::realm::Realm>",
+    "canonical": "safe_cex_exchange::js_runtime::value::Js",
+    "expectedType": "safe_cex_exchange::js_runtime::value::Js",
+    "suffix": "<crate::host::Host>",
     "file": "safe-cex-venue-hyperliquid/src/public_class.rs",
     "generics": {
       "params": [
@@ -144,9 +144,9 @@
     "unsized": false
   },
   "safe_cex_venue_hyperliquid::public_class::PublicError": {
-    "canonical": "safe_cex_venue_hyperliquid::realm::value::Value",
-    "expectedType": "crate::realm::value::Value",
-    "suffix": "<crate::realm::Realm>",
+    "canonical": "safe_cex_exchange::js_runtime::value::Thrown",
+    "expectedType": "safe_cex_exchange::js_runtime::value::Thrown",
+    "suffix": "<crate::host::Host>",
     "file": "safe-cex-venue-hyperliquid/src/public_class.rs",
     "generics": {
       "params": [
@@ -192,9 +192,9 @@
     "unsized": false
   },
   "safe_cex_venue_hyperliquid::core_exchange_class::ExchangeValue": {
-    "canonical": "safe_cex_venue_hyperliquid::realm::value::Value",
-    "expectedType": "crate::realm::value::Value",
-    "suffix": "<crate::realm::Realm>",
+    "canonical": "safe_cex_exchange::js_runtime::value::Js",
+    "expectedType": "safe_cex_exchange::js_runtime::value::Js",
+    "suffix": "<crate::host::Host>",
     "file": "safe-cex-venue-hyperliquid/src/core_exchange_class.rs",
     "generics": {
       "params": [
@@ -240,9 +240,9 @@
     "unsized": false
   },
   "safe_cex_venue_hyperliquid::core_exchange_class::ExchangeError": {
-    "canonical": "safe_cex_venue_hyperliquid::realm::value::Value",
-    "expectedType": "crate::realm::value::Value",
-    "suffix": "<crate::realm::Realm>",
+    "canonical": "safe_cex_exchange::js_runtime::value::Thrown",
+    "expectedType": "safe_cex_exchange::js_runtime::value::Thrown",
+    "suffix": "<crate::host::Host>",
     "file": "safe-cex-venue-hyperliquid/src/core_exchange_class.rs",
     "generics": {
       "params": [
@@ -289,7 +289,7 @@
   },
   "safe_cex_venue_hyperliquid::spot_account_reads::AccountFuture": {
     "canonical": "core::pin::Pin",
-    "expectedType": "::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output=::core::result::Result<crate::realm::value::Value,crate::realm::value::Value>>+'static>>",
+    "expectedType": "::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output=::core::result::Result<safe_cex_exchange::js_runtime::value::Js,safe_cex_exchange::js_runtime::value::Thrown>>+'static>>",
     "file": "safe-cex-venue-hyperliquid/src/spot_account_reads.rs",
     "generics": {
       "params": [
@@ -394,7 +394,7 @@
         }
       }
     },
-    "suffix": "<crate::realm::value::Value,crate::realm::value::Value>",
+    "suffix": "<safe_cex_exchange::js_runtime::value::Js,safe_cex_exchange::js_runtime::value::Thrown>",
     "target": {
       "resolved_path": {
         "path": "core::pin::Pin",
@@ -477,7 +477,7 @@
   },
   "safe_cex_venue_hyperliquid::startup_timeout::TimeoutCallback": {
     "canonical": "alloc::rc::Rc",
-    "expectedType": "::std::rc::Rc<dyn ::std::ops::Fn(::std::vec::Vec<crate::realm::value::Value>)->::core::result::Result<crate::realm::value::Value,crate::realm::value::Value>>",
+    "expectedType": "::std::rc::Rc<dyn ::std::ops::Fn(::std::vec::Vec<safe_cex_exchange::js_runtime::value::Js>)->::core::result::Result<safe_cex_exchange::js_runtime::value::Js,safe_cex_exchange::js_runtime::value::Thrown>>",
     "file": "safe-cex-venue-hyperliquid/src/startup_timeout.rs",
     "generics": {
       "params": [
@@ -576,7 +576,7 @@
         }
       }
     },
-    "suffix": "<crate::realm::value::Value,crate::realm::value::Value>",
+    "suffix": "<safe_cex_exchange::js_runtime::value::Js,safe_cex_exchange::js_runtime::value::Thrown>",
     "target": {
       "resolved_path": {
         "path": "alloc::rc::Rc",
@@ -653,7 +653,7 @@
   },
   "safe_cex_venue_hyperliquid::income::IncomeFuture": {
     "canonical": "core::pin::Pin",
-    "expectedType": "::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output=::core::result::Result<crate::realm::value::Value,crate::realm::value::Value>>+'static>>",
+    "expectedType": "::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output=::core::result::Result<safe_cex_exchange::js_runtime::value::Js,safe_cex_exchange::js_runtime::value::Thrown>>+'static>>",
     "file": "safe-cex-venue-hyperliquid/src/income.rs",
     "generics": {
       "params": [
@@ -766,7 +766,7 @@
         }
       }
     },
-    "suffix": "<'static,crate::realm::value::Value,crate::realm::value::Value>",
+    "suffix": "<'static,safe_cex_exchange::js_runtime::value::Js,safe_cex_exchange::js_runtime::value::Thrown>",
     "target": {
       "resolved_path": {
         "path": "core::pin::Pin",
