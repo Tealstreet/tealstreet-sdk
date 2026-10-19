@@ -496,3 +496,10 @@ portable typed Result adapter is distinct from the production exception object.
 The signing interceptor supplies a fallible request-emission hook through
 `prepare_request`/`execute`; the native factory returns its execution-local
 original listener error before transport. See `FIX_AUDIT_API_SIGNING.md`.
+
+
+The custom socket bridge installs the shared weak-receiver JS handler statistics
+reader after binding its canonical instance. Perpetual and Spot tables therefore
+feed the same core record/pong/cleanup/reconcile algorithm. Constructed witnesses
+cover original recorded BBO/candle bytes, unsubscribe counts, live table replacement,
+selected-key reads, getter cause identity and host release after disposal.

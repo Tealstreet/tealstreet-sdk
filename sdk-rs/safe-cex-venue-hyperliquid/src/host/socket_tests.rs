@@ -32,18 +32,95 @@ fn constructed_socket_bridges_do_not_retain_the_host_owner_after_dispose() {
         };
         let options = serde_json::from_value(json!({"key":"", "secret":""})).unwrap();
         let store = Rc::new(DefaultStore::new());
-        let (exchange, owner): (Rc<dyn Exchange>, _) = if spot {
+        let (exchange, owner, receiver): (Rc<dyn Exchange>, _, _) = if spot {
             let exchange =
                 crate::spot_binding::HyperliquidSpotExchange::new(options, store, dependencies)
                     .unwrap();
             let owner = Rc::downgrade(&exchange.binding.borrow().as_ref().unwrap().realm.shared);
-            (exchange, owner)
+            let receiver = exchange
+                .binding
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .instance
+                .get("publicWebsocket")
+                .unwrap();
+            (exchange, owner, receiver)
         } else {
             let exchange = HyperliquidExchange::new(options, store, dependencies).unwrap();
             let owner = Rc::downgrade(&exchange.binding.borrow().as_ref().unwrap().realm.shared);
-            (exchange, owner)
+            let receiver = exchange
+                .binding
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .instance
+                .get("publicWebsocket")
+                .unwrap();
+            (exchange, owner, receiver)
         };
         assert!(owner.upgrade().is_some(), "held host must remain live");
+        let table = receiver.get("messageHandlers").unwrap();
+        table.define("selected", Js::array(vec![Js::Null])).unwrap();
+        table
+            .define_accessor(
+                "unrelated",
+                Some(Rc::new(|_| {
+                    panic!("statistics must read only the selected handler key")
+                })),
+                None,
+            )
+            .unwrap();
+        receiver
+            .call_method("recordMessageHandlerStats", vec![Js::str("selected")])
+            .unwrap();
+        let native = exchange.base().get_socket(SocketSlot::Public).unwrap();
+        assert_eq!(
+            native.message_handlers_stats.borrow()["selected"].had_handlers,
+            Some(true)
+        );
+        table.set("selected", Js::array(vec![])).unwrap();
+        receiver
+            .call_method("recordMessageHandlerStats", vec![Js::str("selected")])
+            .unwrap();
+        assert_eq!(
+            native.message_handlers_stats.borrow()["selected"].last_callbacks_count,
+            safe_cex_num::PrototypeScalar::Number(0.0)
+        );
+        let replacement = Js::object(vec![("selected", Js::array(vec![Js::Null, Js::Null]))]);
+        receiver
+            .set("messageHandlers", replacement.clone())
+            .unwrap();
+        receiver
+            .call_method("recordMessageHandlerStats", vec![Js::str("selected")])
+            .unwrap();
+        assert_eq!(
+            native.message_handlers_stats.borrow()["selected"].last_callbacks_count,
+            safe_cex_num::PrototypeScalar::Number(2.0)
+        );
+        let original = Js::object(vec![("marker", Js::str("handler getter cause"))]);
+        let captured = original.clone();
+        replacement
+            .define_accessor(
+                "selected",
+                Some(Rc::new(move |_| {
+                    Err(safe_cex_exchange::js_runtime::value::Thrown::new(
+                        captured.clone(),
+                    ))
+                })),
+                None,
+            )
+            .unwrap();
+        let error = receiver
+            .call_method("recordMessageHandlerStats", vec![Js::str("selected")])
+            .unwrap_err();
+        assert!(
+            error.value.same_reference(&original),
+            "HL keeps the original handler getter cause"
+        );
+        receiver.set("messageHandlers", Js::object(vec![])).unwrap();
+        drop(receiver);
+
         exchange.dispose().unwrap();
         drop(exchange);
         assert!(
