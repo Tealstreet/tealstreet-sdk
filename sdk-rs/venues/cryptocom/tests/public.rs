@@ -70,8 +70,8 @@ fn snapshots_replace_both_sides_and_heartbeats_keep_the_id() {
         }),
     );
     for text in [
-        r#"{"code":0,"result":{"channel":"book","instrument_name":"BTCUSD-PERP","data":[{"bids":[["100","1","1"],["99","2","1"]],"asks":[["101","3","1"]]}]}}"#,
-        r#"{"code":0,"result":{"channel":"book","instrument_name":"BTCUSD-PERP","data":[{"bids":[["99","4","1"]],"asks":[]}]}}"#,
+        r#"{"id":-1,"code":0,"result":{"channel":"book","instrument_name":"BTCUSD-PERP","data":[{"bids":[["100","1","1"],["99","2","1"]],"asks":[["101","3","1"]]}]}}"#,
+        r#"{"id":-1,"code":0,"result":{"channel":"book","instrument_name":"BTCUSD-PERP","data":[{"bids":[["99","4","1"]],"asks":[]}]}}"#,
     ] {
         engine.handle(10.0, Event::WsMessage { socket, text });
     }

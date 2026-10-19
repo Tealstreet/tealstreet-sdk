@@ -379,6 +379,14 @@ impl Cryptocom {
             Rows::Positions(rows) => {
                 let mut rows = rows;
                 rows.retain(|p| {
+                    if self
+                        .account
+                        .symbol_closures
+                        .get(&p.symbol)
+                        .is_some_and(|(_, time)| p.last_update.unwrap_or(0.0) <= *time)
+                    {
+                        return false;
+                    }
                     self.account
                         .position_versions
                         .get(&p.id)
@@ -404,6 +412,9 @@ impl Cryptocom {
                 for row in &mut rows {
                     // Recovery rows omit live leverage/liquidation fields.
                     if let Some(live) = cx.store.position(&row.id) {
+                        if live.last_update > row.last_update {
+                            *row = live.clone();
+                        }
                         if row.leverage == 1.0 {
                             row.leverage = live.leverage;
                         }
@@ -411,6 +422,11 @@ impl Cryptocom {
                             row.liquidation_price = live.liquidation_price;
                         }
                     }
+                    self.account
+                        .position_times
+                        .entry(row.id.clone())
+                        .and_modify(|t| *t = t.max(row.last_update.unwrap_or(0.0)))
+                        .or_insert(row.last_update.unwrap_or(0.0));
                     cx.store.update_setting(&row.symbol, |s| {
                         s.leverage = row.leverage;
                         s.margin_type = row.margin_type;
@@ -571,7 +587,7 @@ impl Cryptocom {
                             .unwrap_or(f64::NEG_INFINITY)
                             .max(closed_at)
                     };
-                    if time < last {
+                    if time < last || (position.contracts > 0.0 && time <= closed_at) {
                         return;
                     }
                     self.account.revision += 1;

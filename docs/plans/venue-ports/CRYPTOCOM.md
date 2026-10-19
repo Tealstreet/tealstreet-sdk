@@ -137,3 +137,13 @@ Remaining: finish public tape/gate, final fmt/bans/clippy/checks, review gate ph
 commit fixture + results, merge latest origin/feat/rust-rewrite, push PR targeting
 that branch, adversarial sub-agent PR reviews/comments/fixes, merge PR and create
 fresh follow-up branch. No push/PR/merge landing action has occurred yet.
+
+Live public capture found the venue's signed `id: -1` on unsolicited pushes;
+response ids now decode as i64 and snapshot regressions cover it. Additional
+stale-state audit found cached REST positions and same-timestamp frames could
+reopen a closed position after the closure preceded the request. Closure times
+now fence REST too, and REST timestamps fence later stale stream frames. Two
+new regressions PASS (35 venue tests total); crate clippy PASS. Fresh successful
+recording is pending the release relink. TS full-suite rerun encountered only
+unrelated import/configuration timeouts under concurrent machine load; running
+the complete package suite with 2 workers and 30-second test timeout.

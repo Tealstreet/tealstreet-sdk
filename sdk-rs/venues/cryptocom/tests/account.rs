@@ -180,3 +180,46 @@ fn signature_rejections_retry_once_even_with_http_error_status() {
     }
     assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
 }
+
+#[test]
+fn closed_exposure_stays_closed_against_cached_rest_and_equal_time_frames() {
+    let mut h = Harness::new();
+    h.load();
+    let short = r#"{"instrument_name":"BTCUSD-PERP","quantity":"-2","cost":"200","update_timestamp_ms":10}"#;
+    h.ws("user.positions", short);
+    h.ws(
+        "user.positions",
+        r#"{"instrument_name":"BTCUSD-PERP","quantity":"0","cost":"0","update_timestamp_ms":20}"#,
+    );
+    h.ws("user.positions", &short.replace(":10", ":20"));
+    assert!(h.engine.store().positions().is_empty());
+    let timer = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 10000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    h.now += 10000.0;
+    h.event(Event::TimerFired { timer });
+    h.reply(
+        "get-positions",
+        &format!(r#"{{"code":0,"result":{{"data":[{short}]}}}}"#),
+    );
+    assert!(h.engine.store().positions().is_empty());
+}
+#[test]
+fn rest_position_timestamps_fence_older_stream_frames() {
+    let mut h = Harness::new();
+    let short = r#"{"instrument_name":"BTCUSD-PERP","quantity":"-2","cost":"200","update_timestamp_ms":30}"#;
+    h.reply(
+        "get-positions",
+        &format!(r#"{{"code":0,"result":{{"data":[{short}]}}}}"#),
+    );
+    h.ws(
+        "user.positions",
+        &short.replace(":30", ":10").replace(r#""-2""#, r#""-1""#),
+    );
+    assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
+}

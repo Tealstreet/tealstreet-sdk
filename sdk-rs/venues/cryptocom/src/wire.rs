@@ -6,7 +6,7 @@ use serde_json::value::RawValue;
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
     #[serde(default)]
-    pub id: u64,
+    pub id: i64,
     #[serde(default)]
     pub method: &'a str,
     #[serde(default)]
