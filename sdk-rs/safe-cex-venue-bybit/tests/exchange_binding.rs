@@ -1262,6 +1262,9 @@ fn demo_fill_reconciliation_pages_to_exhaustion_and_fails_closed() {
         )
         .unwrap();
         h.advance(1100.);
+        if expected_calls == 20 {
+            h.advance(3000.);
+        }
         let calls = h.wire.calls("/v5/execution/list");
         // The scripted limiter advances virtual time, so a long first read may
         // also fire the next reconciliation timer. Count the first read only.

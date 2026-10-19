@@ -454,14 +454,16 @@ impl HttpHost for Host {
     }
 }
 
-struct Clock(Rc<Cell<f64>>);
+struct Clock(Rc<Runtime>);
 impl RateLimitClock for Clock {
     fn now_ms(&self) -> u64 {
-        self.0.get() as u64
+        self.0.now.get() as u64
     }
     fn sleep_ms(&self, milliseconds: u64) -> TransportFuture<'_, ()> {
-        self.0.set(self.0.get() + milliseconds as f64);
-        Box::pin(async { Ok(()) })
+        let sleep = self.0.sleep(milliseconds);
+        Box::pin(async move {
+            sleep.await.map_err(|error| safe_cex_transport::TransportError::Host(error.message))
+        })
     }
 }
 
@@ -554,7 +556,7 @@ fn configured_harness(
             remote_signer,
             wire: wire.clone(),
             http_host: Rc::new(Host),
-            retry_clock: Rc::new(Clock(runtime.now.clone())),
+            retry_clock: Rc::new(Clock(runtime.clone())),
             clock,
             external_public_data,
             relay_enabled: false,
