@@ -26,7 +26,10 @@ impl Clock {
         }
         let reset = {
             let mut reset = self.reset.borrow_mut();
-            if reset.as_ref().is_some_and(|timer| timer.deadline <= milliseconds) {
+            if reset
+                .as_ref()
+                .is_some_and(|timer| timer.deadline <= milliseconds)
+            {
                 reset.take()
             } else {
                 None
