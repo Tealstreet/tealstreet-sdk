@@ -548,145 +548,149 @@ fn constructor_clients_and_sockets_follow_actual_source() {
     reason = "browser-local fixture adapters"
 )]
 fn concrete_private_protocol_composes_source_open_sequence_and_real_auth() {
-    composed_private_open(safe_cex_types::ExchangeName::Bybit);
+    private_open_fixture::composed_private_open(safe_cex_types::ExchangeName::Bybit);
 }
 
 #[test]
 #[ignore = "requires frozen workspace Node dependencies; mandatory venue-oracle:bybit CI step"]
 fn delegated_inverse_and_spot_reconnect_start_eagerly_through_real_protocol() {
-    composed_private_open(safe_cex_types::ExchangeName::Bybitinverse);
-    composed_private_open(safe_cex_types::ExchangeName::Bybitspot);
+    private_open_fixture::composed_private_open(safe_cex_types::ExchangeName::Bybitinverse);
+    private_open_fixture::composed_private_open(safe_cex_types::ExchangeName::Bybitspot);
 }
 
-#[allow(
-    clippy::arc_with_non_send_sync,
-    reason = "browser-local fixture adapters"
-)]
-fn composed_private_open(family: safe_cex_types::ExchangeName) {
-    let output = std::process::Command::new("node")
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/scripts/private-open-fixtures.mjs"
-        ))
-        .arg(serde_json::to_value(&family).unwrap().as_str().unwrap())
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(cases.len(), 8);
-    for inline in [false, true] {
-        for case in &cases {
-            let runtime = Rc::new(Runtime::default());
-            runtime.inline.set(inline);
-            let signer = Rc::new(AuthSigner {
-                native_extra_data: RefCell::default(),
-                requests: RefCell::default(),
-                response: case["response"].to_string(),
-                pending: false,
-                wrong_variant: false,
-            });
-            let mut base = BaseExchange::new(
-                family.clone(),
-                serde_json::from_value(json!({"key":"fixture-key","secret":"secret"})).unwrap(),
-                Rc::new(DefaultStore::new()),
-                runtime.clone(),
-                crate::binding::exchange::settings(),
-            );
-            if case["mode"] != "local" {
-                base.signers.remote_signer = Some(signer.clone());
-            }
-            let sync_calls = Rc::new(Cell::new(0));
-            let calls = sync_calls.clone();
-            let gate = Rc::new(Cell::new(false));
-            let sync_gate = gate.clone();
-            let venue = BybitExchange::with_private_protocol(
-                Rc::new(base),
-                runtime.clone(),
-                Arc::new(Clock::default()),
-                |options, _, _| {
-                    Ok(Arc::new(Adapter {
-                        key: options.key.clone(),
-                        calls: Rc::default(),
-                    }))
-                },
-                |_, _| Rc::new(Protocol),
-                crate::ws_private::protocol::PrivateProtocolConfig {
-                    sync_clock: Rc::new(move || {
-                        calls.set(calls.get() + 1);
-                        let gate = sync_gate.clone();
-                        Box::pin(std::future::poll_fn(move |_| {
-                            if gate.get() {
-                                Poll::Ready(Ok(()))
-                            } else {
-                                Poll::Pending
-                            }
-                        }))
-                    }),
-                    now_ms: Rc::new(|| 1000.),
-                    account_name: Some("account".into()),
-                    relay_enabled: false,
-                },
-            )
-            .unwrap();
-            let private = venue.base().get_socket(SocketSlot::Private).unwrap();
-            ready(private.create_websocket(
-                "wss://stream.bybit.com/v5/private".into(),
-                vec![],
-                Default::default(),
+#[cfg(test)]
+mod private_open_fixture {
+    use super::*;
+    #[allow(
+        clippy::arc_with_non_send_sync,
+        reason = "browser-local fixture adapters"
+    )]
+    pub(super) fn composed_private_open(family: safe_cex_types::ExchangeName) {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/private-open-fixtures.mjs"
             ))
+            .arg(serde_json::to_value(&family).unwrap().as_str().unwrap())
+            .output()
             .unwrap();
-            if case["disposed"] == true {
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(cases.len(), 8);
+        for inline in [false, true] {
+            for case in &cases {
+                let runtime = Rc::new(Runtime::default());
+                runtime.inline.set(inline);
+                let signer = Rc::new(AuthSigner {
+                    native_extra_data: RefCell::default(),
+                    requests: RefCell::default(),
+                    response: case["response"].to_string(),
+                    pending: false,
+                    wrong_variant: false,
+                });
+                let mut base = BaseExchange::new(
+                    family.clone(),
+                    serde_json::from_value(json!({"key":"fixture-key","secret":"secret"})).unwrap(),
+                    Rc::new(DefaultStore::new()),
+                    runtime.clone(),
+                    crate::binding::exchange::settings(),
+                );
+                if case["mode"] != "local" {
+                    base.signers.remote_signer = Some(signer.clone());
+                }
+                let sync_calls = Rc::new(Cell::new(0));
+                let calls = sync_calls.clone();
+                let gate = Rc::new(Cell::new(false));
+                let sync_gate = gate.clone();
+                let venue = BybitExchange::with_private_protocol(
+                    Rc::new(base),
+                    runtime.clone(),
+                    Arc::new(Clock::default()),
+                    |options, _, _| {
+                        Ok(Arc::new(Adapter {
+                            key: options.key.clone(),
+                            calls: Rc::default(),
+                        }))
+                    },
+                    |_, _| Rc::new(Protocol),
+                    crate::ws_private::protocol::PrivateProtocolConfig {
+                        sync_clock: Rc::new(move || {
+                            calls.set(calls.get() + 1);
+                            let gate = sync_gate.clone();
+                            Box::pin(std::future::poll_fn(move |_| {
+                                if gate.get() {
+                                    Poll::Ready(Ok(()))
+                                } else {
+                                    Poll::Pending
+                                }
+                            }))
+                        }),
+                        now_ms: Rc::new(|| 1000.),
+                        account_name: Some("account".into()),
+                        relay_enabled: false,
+                    },
+                )
+                .unwrap();
+                let private = venue.base().get_socket(SocketSlot::Private).unwrap();
+                ready(private.create_websocket(
+                    "wss://stream.bybit.com/v5/private".into(),
+                    vec![],
+                    Default::default(),
+                ))
+                .unwrap();
+                if case["disposed"] == true {
+                    venue.dispose().unwrap();
+                }
+                ready(private.on_open()).unwrap();
+                assert_eq!(
+                    json!(sync_calls.get()),
+                    case["before"]["syncCalls"],
+                    "eager clock {case} inline={inline}"
+                );
+                assert_eq!(json!(*runtime.wire.0.borrow()), case["before"]["messages"]);
+                assert_eq!(json!(*signer.requests.borrow()), case["before"]["requests"]);
+                gate.set(true);
+                super::reconnect_sequence::pump(&runtime);
+                assert_eq!(
+                    json!(*runtime.wire.0.borrow()),
+                    case["messages"],
+                    "composed auth frames {case}"
+                );
+                assert_eq!(
+                    json!(*signer.requests.borrow()),
+                    case["requests"],
+                    "composed signer envelope {case}"
+                );
+                assert_eq!(json!(*runtime.sleeps.borrow()), case["sleeps"]);
+                let errors: Vec<_> = runtime
+                    .console
+                    .borrow()
+                    .iter()
+                    .filter(|(level, _)| level == "error")
+                    .map(|(_, message)| {
+                        message
+                            .strip_prefix("exchange error ")
+                            .unwrap_or(message)
+                            .to_owned()
+                    })
+                    .collect();
+                assert_eq!(json!(errors), case["errors"], "composed diagnostic {case}");
+                if case["disposed"] != true {
+                    assert_eq!(json!(runtime.wire.1.get()), case["reconnects"]);
+                }
+                let weak = Rc::downgrade(&venue);
                 venue.dispose().unwrap();
+                drop(venue);
+                super::reconnect_sequence::pump(&runtime);
+                assert!(
+                    weak.upgrade().is_none(),
+                    "concrete protocol must not keep venue alive"
+                );
             }
-            ready(private.on_open()).unwrap();
-            assert_eq!(
-                json!(sync_calls.get()),
-                case["before"]["syncCalls"],
-                "eager clock {case} inline={inline}"
-            );
-            assert_eq!(json!(*runtime.wire.0.borrow()), case["before"]["messages"]);
-            assert_eq!(json!(*signer.requests.borrow()), case["before"]["requests"]);
-            gate.set(true);
-            super::reconnect_sequence::pump(&runtime);
-            assert_eq!(
-                json!(*runtime.wire.0.borrow()),
-                case["messages"],
-                "composed auth frames {case}"
-            );
-            assert_eq!(
-                json!(*signer.requests.borrow()),
-                case["requests"],
-                "composed signer envelope {case}"
-            );
-            assert_eq!(json!(*runtime.sleeps.borrow()), case["sleeps"]);
-            let errors: Vec<_> = runtime
-                .console
-                .borrow()
-                .iter()
-                .filter(|(level, _)| level == "error")
-                .map(|(_, message)| {
-                    message
-                        .strip_prefix("exchange error ")
-                        .unwrap_or(message)
-                        .to_owned()
-                })
-                .collect();
-            assert_eq!(json!(errors), case["errors"], "composed diagnostic {case}");
-            if case["disposed"] != true {
-                assert_eq!(json!(runtime.wire.1.get()), case["reconnects"]);
-            }
-            let weak = Rc::downgrade(&venue);
-            venue.dispose().unwrap();
-            drop(venue);
-            super::reconnect_sequence::pump(&runtime);
-            assert!(
-                weak.upgrade().is_none(),
-                "concrete protocol must not keep venue alive"
-            );
         }
     }
 }

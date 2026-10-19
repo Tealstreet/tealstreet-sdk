@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybitspot.ws-private.ts"
-rust_files = [ "safe-cex-venue-bybit/src/private_ws_lifecycle.rs", "safe-cex-venue-bybit/src/ws_private/protocol.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/ws_private.rs", "safe-cex-venue-bybit/src/private_ws_lifecycle.rs", "safe-cex-venue-bybit/src/ws_private/protocol.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs" ]
 
 [[symbol]]
 ts = "BybitPrivateWebsocket"
@@ -40,7 +40,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-bybit/src/private_ws_lifecycle.rs::send_reconnect_sequence", "safe-cex-venue-bybit/src/ws_private.rs::send_reconnect_sequence" ]
 status = "divergent"
-note = "ACCEPT async FIX-audit row 23: actual bybitspot PrivateProtocol starts ws_private::send_reconnect_sequence eagerly, invoking clock sync before onOpen returns. Eight maintained variant profiles, each on queued and inline runtimes, pin held-clock ordering, 25ms sleep, local/remote authentication, exact variant topics, ping and failure reconnect diagnostics. The legacy public generic helper retains its explicit caller-polled Future and typed error boundary; it does not define this production schedule. Native disposal cancels pending owned work under safe-cex-exchange/PRIVATE_OPEN_REVIEW.md, whereas the source detached Promise survives disposal. This bounded cancellation divergence stays explicit; no identity/alias or auth guard changes. Renamed Rust target: safe-cex-venue-bybit/src/ws_private.rs::send_reconnect_sequence."
+note = "ACCEPT async FIX-audit row 23: actual bybitspot PrivateProtocol starts ws_private::send_reconnect_sequence eagerly, invoking clock sync before onOpen returns. Eight maintained variant profiles, each on queued and inline runtimes, pin held-clock ordering, 25ms sleep, local/remote authentication, exact variant topics, ping and failure reconnect diagnostics. The legacy public generic helper retains its explicit caller-polled Future and typed error boundary; it does not define this production schedule. Native disposal cancels pending owned work under safe-cex-exchange/PRIVATE_OPEN_REVIEW.md, whereas the source detached Promise survives disposal. This bounded cancellation divergence stays explicit; no identity/alias or auth guard changes. Renamed Rust target: safe-cex-venue-bybit/src/ws_private.rs::send_reconnect_sequence. Renamed Rust target: safe-cex-venue-bybit/src/private_ws_lifecycle.rs::send_reconnect_sequence."
 
 [[symbol]]
 ts = "BybitPrivateWebsocket.onMessage"
