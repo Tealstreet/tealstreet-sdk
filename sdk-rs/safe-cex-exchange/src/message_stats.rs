@@ -2,7 +2,6 @@ use crate::{
     exchange::Exchange, runtime::ExchangeError, socket_lifecycle::SocketSlot,
     websocket::BaseWebSocket,
 };
-use safe_cex_types::StoreData;
 use serde_json::{Map, Value, json};
 
 pub fn websocket_has_stats(socket: Option<&BaseWebSocket>) -> bool {
@@ -38,8 +37,8 @@ fn snapshot(socket: &BaseWebSocket) -> Map<String, Value> {
         })
         .collect()
 }
-fn assign(store: &mut StoreData, group: &str, value: Value) -> Result<(), ExchangeError> {
-    let Some(Value::Object(stats)) = &mut store.message_handler_stats else {
+fn assign(store: &mut Option<Value>, group: &str, value: Value) -> Result<(), ExchangeError> {
+    let Some(Value::Object(stats)) = store else {
         return Err(ExchangeError::new(
             "Message-handler statistics require a JSON object",
         ));
@@ -52,11 +51,11 @@ pub struct MessageHandlerStatsPostprocessor;
 impl MessageHandlerStatsPostprocessor {
     pub fn process(
         &self,
-        store: &mut StoreData,
+        store: &mut Option<Value>,
         exchange: &dyn Exchange,
     ) -> Result<(), ExchangeError> {
-        if !safe_cex_num::js_truthy(store.message_handler_stats.as_ref()) {
-            store.message_handler_stats = Some(Value::Object(Map::new()));
+        if !safe_cex_num::js_truthy(store.as_ref()) {
+            *store = Some(Value::Object(Map::new()));
         }
         for (slot, group) in [
             (SocketSlot::Public, "public"),
@@ -74,10 +73,7 @@ impl MessageHandlerStatsPostprocessor {
             assign(store, "public", Value::Object(snapshot(&socket)))?;
         }
         if let Some(socket) = exchange.base().get_socket(SocketSlot::PublicSecondary) {
-            let primary = store
-                .message_handler_stats
-                .as_ref()
-                .and_then(|value| value.get("public"));
+            let primary = store.as_ref().and_then(|value| value.get("public"));
             if safe_cex_num::js_truthy(primary) {
                 let Some(Value::Object(primary)) = primary else {
                     return Err(ExchangeError::new(

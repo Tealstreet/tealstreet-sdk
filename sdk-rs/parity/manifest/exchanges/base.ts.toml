@@ -542,9 +542,9 @@ note = "Overridable venue hook retains the source default. safe-cex-exchange/src
 ts = "BaseExchange.fetchOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-exchange/src/exchange.rs::Exchange::fetch_ohlcv"
+rs = [ "safe-cex-exchange/src/exchange.rs::Exchange::fetch_ohlcv", "safe-cex-exchange/src/exchange.rs::Exchange::fetch_ohlcv_native" ]
 status = "ported"
-note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::fetch_ohlcv is the typed Rust composition of this source symbol."
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::fetch_ohlcv is the explicit typed SDK projection; safe-cex-exchange/src/exchange.rs::Exchange::fetch_ohlcv_native retains the receiver Js for native commands. KuCoin and Bitrue override that view; all remaining default families have exact construction-order proofs in safe-cex-registry/REST_RETURN_ORDER_REVIEW.md and native_host_kucoin_mexc."
 
 [[symbol]]
 ts = "BaseExchange.fetchHistoricalFills"
@@ -638,9 +638,9 @@ note = "Overridable venue hook retains the source default. safe-cex-exchange/src
 ts = "BaseExchange.listenOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::listen_ohlcv", "safe-cex-exchange/src/exchange.rs::Exchange::listen_ohlcv" ]
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::listen_ohlcv", "safe-cex-exchange/src/exchange.rs::Exchange::listen_ohlcv", "safe-cex-exchange/src/exchange.rs::Exchange::listen_ohlcv_retained" ]
 status = "ported"
-note = "Shared base implementation plus object-safe venue override dispatch. safe-cex-exchange/src/exchange.rs::BaseExchange::listen_ohlcv safe-cex-exchange/src/exchange.rs::Exchange::listen_ohlcv"
+note = "Shared base implementation plus object-safe venue override dispatch. The native callback entry retains venue-delivered Js values; typed-only implementations adapt their declared Candle through the same typed listener. safe-cex-exchange/src/exchange.rs::BaseExchange::listen_ohlcv safe-cex-exchange/src/exchange.rs::Exchange::listen_ohlcv safe-cex-exchange/src/exchange.rs::Exchange::listen_ohlcv_retained"
 
 [[symbol]]
 ts = "BaseExchange.listenOHLCVs"

@@ -977,10 +977,11 @@ test('accepted-set control registry pins files and executed mutations', async ()
   // provenance controls; no existing test or mutation is retired.
   // Glob-export coverage adds three tests and two mutations; literal-expression
   // macro coverage adds two mutations. Retain all earlier registrations.
-  assert.equal(Object.values(registry.tests).flat().length, 182, 'registered accepted-set test count');
+  // Defaults-disabled binding coverage adds one test and one admission control.
+  assert.equal(Object.values(registry.tests).flat().length, 183, 'registered accepted-set test count');
   // Retain the added native String-key observer and its mutation while dropping
   // only the retired WOO book-array mutation; other controls stay registered.
-  assert.equal(registry.mutations.length, 199, 'registered accepted-set mutation count');
+  assert.equal(registry.mutations.length, 200, 'registered accepted-set mutation count');
   const output = [...Object.values(registry.tests).flat().map((name, i) => `ok ${i + 1} - ${name}`), ...registry.mutations.map(name => `# ${name}: named assertion; process exit 1`), '# fail 0', '# skipped 0', '# todo 0'].join('\n');
   verifyControls(output, registry);
   for (const name of registry.mutations) assert.throws(() => verifyControls(output.replace(`# ${name}: named assertion; process exit 1`, ''), registry), /mutation inventory/);

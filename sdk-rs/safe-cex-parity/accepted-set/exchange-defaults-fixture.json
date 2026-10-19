@@ -7,7 +7,7 @@
       1
     ],
     "end": [
-      521,
+      547,
       2
     ]
   },
@@ -1406,6 +1406,62 @@
       }
     },
     {
+      "name": "fetch_ohlcv_native",
+      "signature": {
+        "inputs": [
+          [
+            "self",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "Self"
+                }
+              }
+            }
+          ],
+          [
+            "options",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::OHLCVOptions",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::runtime::ExchangeFuture",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "lifetime": "'_"
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    {
       "name": "fetch_option_chain",
       "signature": {
         "inputs": [
@@ -2132,6 +2188,140 @@
                                         }
                                       ],
                                       "output": null
+                                    }
+                                  }
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ListenerCleanup",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    {
+      "name": "listen_ohlcv_retained",
+      "signature": {
+        "inputs": [
+          [
+            "self",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "Self"
+                }
+              }
+            }
+          ],
+          [
+            "options",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::OHLCVOptions",
+                "args": null
+              }
+            }
+          ],
+          [
+            "callback",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "core::ops::function::Fn",
+                                  "args": {
+                                    "parenthesized": {
+                                      "inputs": [
+                                        {
+                                          "borrowed_ref": {
+                                            "lifetime": null,
+                                            "is_mutable": false,
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "output": {
+                                        "resolved_path": {
+                                          "path": "core::result::Result",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "tuple": []
+                                                  }
+                                                },
+                                                {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "safe_cex_exchange::runtime::ExchangeError",
+                                                      "args": null
+                                                    }
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
                                     }
                                   }
                                 },

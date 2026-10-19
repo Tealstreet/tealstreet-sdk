@@ -564,9 +564,12 @@ fn listen(
     let venue = account.exchange.as_ref();
     let cleanup = match method {
         "listenOHLCV" => venue
-            .listen_ohlcv(
+            .listen_ohlcv_retained(
                 arg(args, 0)?,
-                Rc::new(move |candle| notify(NativeValue::encode(&candle))),
+                Rc::new(move |candle| {
+                    notify(NativeValue::from_js(candle));
+                    Ok(())
+                }),
             )
             .map(Some),
         "listenOHLCVs" => {
@@ -779,7 +782,11 @@ pub fn native_account_call(
             "scheduleCancel" => {
                 done(venue.schedule_cancel(arg(&args, 0)?).await).map(|_| NativeValue::Undefined)
             }
-            "fetchOHLCV" => done(venue.fetch_ohlcv(arg(&args, 0)?).await).and_then(encode),
+            "fetchOHLCV" => {
+                done(venue.fetch_ohlcv_native(arg(&args, 0)?).await).and_then(|value| {
+                    NativeValue::from_js(&value).map_err(|error| exchange_error(&error))
+                })
+            }
             "fetchPublicTrades" => done(
                 venue
                     .fetch_public_trades(arg(&args, 0)?, arg(&args, 1)?)
@@ -995,3 +1002,8 @@ mod model_codec_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../tests/support/phemex_public_feed.rs"]
+mod phemex_public_feed_tests;

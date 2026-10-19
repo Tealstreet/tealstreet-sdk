@@ -416,10 +416,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let number = Js::function("Number", |_, a| {
         Ok(Js::Number(match a.first() {
             None => 0.0,
-            Some(value) => match super::ops::to_numeric(value)? {
-                Js::BigInt(n) => n.to_string().parse().unwrap_or(f64::NAN),
-                numeric => numeric.to_number()?,
-            },
+            Some(value) => super::ops::number(value)?,
         }))
     });
     for (key, value) in [
@@ -519,17 +516,27 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         }),
     );
     def("TypeError", error_constructor("TypeError"));
-    def(
-        "Array",
-        Js::object(vec![
-            ("prototype", super::value::array::prototype()),
-            (
-                "isArray",
-                Js::function("isArray", |_, a| Ok(Js::Bool(arg(&a, 0).is_array()))),
-            ),
-            ("from", Js::function("from", |_, a| array_from(&a))),
-        ]),
-    );
+    let array_prototype = super::value::array::prototype();
+    let array = Js::object(vec![
+        ("prototype", array_prototype.clone()),
+        (
+            "isArray",
+            Js::function("isArray", |_, a| Ok(Js::Bool(arg(&a, 0).is_array()))),
+        ),
+        ("from", Js::function("from", |_, a| array_from(&a))),
+    ]);
+    array_prototype
+        .define_property(
+            &super::value::utf16("constructor"),
+            &Js::object(vec![
+                ("value", array.clone()),
+                ("writable", Js::Bool(true)),
+                ("enumerable", Js::Bool(false)),
+                ("configurable", Js::Bool(true)),
+            ]),
+        )
+        .expect("Array intrinsic constructor descriptor");
+    def("Array", array);
     let object = Js::object(vec![
         (
             "setPrototypeOf",
