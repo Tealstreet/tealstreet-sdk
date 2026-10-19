@@ -377,108 +377,115 @@ fn constructed_startup_race_releases_canceled_timeout_reactions() {
     });
 }
 
+#[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
-#[expect(
-    clippy::arc_with_non_send_sync,
-    reason = "limiter clocks are local runtime capabilities"
-)]
-async fn observe_constructed_ping_timer(clear: bool) {
-    use safe_cex_exchange::{exchange::Exchange, native};
-    let source = std::process::Command::new("node")
-        .arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/ping-loop-source.cjs"
-        ))
-        .output()
-        .unwrap();
-    assert!(
-        source.status.success(),
-        "{}",
-        String::from_utf8_lossy(&source.stderr)
-    );
-    let source: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
-    assert_eq!(source.as_array().unwrap().len(), 2);
-    for replay in [false, true] {
-        for (index, member) in ["publicWebsocket", "privateWebsocket"]
-            .into_iter()
-            .enumerate()
-        {
-            assert_eq!(source[index]["timers"], 2);
-            assert_eq!(source[index]["canceled"], true);
-            assert_eq!(source[index]["fired"], 0);
-            let runtime = native::native_replay_runtime(1_700_000_000_000.);
-            if replay {
-                safe_cex_exchange::replay_clock::activate(runtime.replay_clock.as_ref().unwrap())
-                    .unwrap();
-            }
-            let exchange = HyperliquidExchange::new(
-                serde_json::from_value(json!({"key":"", "secret":"", "publicDataOnly":true}))
-                    .unwrap(),
-                Rc::new(DefaultStore::new()),
-                HyperliquidDependencies {
-                    runtime: runtime.clone(),
-                    http: host::Routes::new(vec![]),
-                    limiter: Rc::new(RateLimiter::new(
-                        Arc::new(RuntimeClock::new(runtime.clone())),
-                        1200.,
-                        60_000.,
-                    )),
-                    signers: ExchangeSigners::default(),
-                    external_public_data: None,
-                },
-            )
+mod ping_timer_observation {
+    use super::*;
+
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "limiter clocks are local runtime capabilities"
+    )]
+    pub(super) async fn observe_constructed_ping_timer(clear: bool) {
+        use safe_cex_exchange::{exchange::Exchange, native};
+        let source = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/ping-loop-source.cjs"
+            ))
+            .output()
             .unwrap();
-            let binding = exchange.binding.borrow().as_ref().unwrap().clone();
-            let mut realm = binding.realm.clone();
-            let socket = realm.get_str(&binding.instance, member).unwrap();
-            realm.call_method(&socket, "startPingLoop", &[]).unwrap();
-            for _ in 0..8 {
-                native::replay_checkpoint(&runtime);
-                tokio::task::yield_now().await;
-            }
-            let before = native::replay_raw_tasks(&runtime);
-            assert!(
-                before["unknown"].as_u64().unwrap()
-                    + before["promiseDrivers"].as_u64().unwrap()
-                    + before["waitingTimers"].as_u64().unwrap()
-                    > 0,
-                "actual ping timer must own runtime work: {before}"
-            );
-            if clear {
-                realm.call_method(&socket, "stopPingLoop", &[]).unwrap();
-                assert!(matches!(
-                    realm.get_str(&socket, "hlPingTimeoutId").unwrap(),
-                    Js::Undefined
-                ));
-            }
-            for _ in 0..8 {
-                native::replay_checkpoint(&runtime);
-                tokio::task::yield_now().await;
-            }
-            let after = native::replay_raw_tasks(&runtime);
-            assert_eq!(
-                after["blocking"], 0,
-                "HL_PING_TIMER_OWNERSHIP clear={clear} replay={replay} member={member}: {after}"
-            );
-            assert_eq!(
-                native::replay_pending_jobs(&runtime),
-                0,
-                "scheduled pings are not finite Promise work"
-            );
-            if clear {
+        assert!(
+            source.status.success(),
+            "{}",
+            String::from_utf8_lossy(&source.stderr)
+        );
+        let source: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+        assert_eq!(source.as_array().unwrap().len(), 2);
+        for replay in [false, true] {
+            for (index, member) in ["publicWebsocket", "privateWebsocket"]
+                .into_iter()
+                .enumerate()
+            {
+                assert_eq!(source[index]["timers"], 2);
+                assert_eq!(source[index]["canceled"], true);
+                assert_eq!(source[index]["fired"], 0);
+                let runtime = native::native_replay_runtime(1_700_000_000_000.);
+                if replay {
+                    safe_cex_exchange::replay_clock::activate(
+                        runtime.replay_clock.as_ref().unwrap(),
+                    )
+                    .unwrap();
+                }
+                let exchange = HyperliquidExchange::new(
+                    serde_json::from_value(json!({"key":"", "secret":"", "publicDataOnly":true}))
+                        .unwrap(),
+                    Rc::new(DefaultStore::new()),
+                    HyperliquidDependencies {
+                        runtime: runtime.clone(),
+                        http: host::Routes::new(vec![]),
+                        limiter: Rc::new(RateLimiter::new(
+                            Arc::new(RuntimeClock::new(runtime.clone())),
+                            1200.,
+                            60_000.,
+                        )),
+                        signers: ExchangeSigners::default(),
+                        external_public_data: None,
+                    },
+                )
+                .unwrap();
+                let binding = exchange.binding.borrow().as_ref().unwrap().clone();
+                let mut realm = binding.realm.clone();
+                let socket = realm.get_str(&binding.instance, member).unwrap();
+                realm.call_method(&socket, "startPingLoop", &[]).unwrap();
+                for _ in 0..8 {
+                    native::replay_checkpoint(&runtime);
+                    tokio::task::yield_now().await;
+                }
+                let before = native::replay_raw_tasks(&runtime);
+                assert!(
+                    before["unknown"].as_u64().unwrap()
+                        + before["promiseDrivers"].as_u64().unwrap()
+                        + before["waitingTimers"].as_u64().unwrap()
+                        > 0,
+                    "actual ping timer must own runtime work: {before}"
+                );
+                if clear {
+                    realm.call_method(&socket, "stopPingLoop", &[]).unwrap();
+                    assert!(matches!(
+                        realm.get_str(&socket, "hlPingTimeoutId").unwrap(),
+                        Js::Undefined
+                    ));
+                }
+                for _ in 0..8 {
+                    native::replay_checkpoint(&runtime);
+                    tokio::task::yield_now().await;
+                }
+                let after = native::replay_raw_tasks(&runtime);
                 assert_eq!(
-                    after["waitingTimers"], 0,
-                    "HL_PING_CLEAR_TIMEOUT actual sleep canceled"
+                    after["blocking"], 0,
+                    "HL_PING_TIMER_OWNERSHIP clear={clear} replay={replay} member={member}: {after}"
                 );
                 assert_eq!(
-                    after["promiseDrivers"], 0,
-                    "HL_PING_CLEAR_TIMEOUT timer owner released"
+                    native::replay_pending_jobs(&runtime),
+                    0,
+                    "scheduled pings are not finite Promise work"
                 );
-            } else {
-                realm.call_method(&socket, "stopPingLoop", &[]).unwrap();
+                if clear {
+                    assert_eq!(
+                        after["waitingTimers"], 0,
+                        "HL_PING_CLEAR_TIMEOUT actual sleep canceled"
+                    );
+                    assert_eq!(
+                        after["promiseDrivers"], 0,
+                        "HL_PING_CLEAR_TIMEOUT timer owner released"
+                    );
+                } else {
+                    realm.call_method(&socket, "stopPingLoop", &[]).unwrap();
+                }
+                exchange.dispose().unwrap();
+                safe_cex_store::virtual_clock::set_thread_host_time(None);
             }
-            exchange.dispose().unwrap();
-            safe_cex_store::virtual_clock::set_thread_host_time(None);
         }
     }
 }
@@ -490,7 +497,10 @@ fn constructed_ping_loop_is_owned_and_classified() {
         .enable_all()
         .build()
         .unwrap();
-    tokio::task::LocalSet::new().block_on(&runtime, observe_constructed_ping_timer(false));
+    tokio::task::LocalSet::new().block_on(
+        &runtime,
+        ping_timer_observation::observe_constructed_ping_timer(false),
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -500,5 +510,8 @@ fn constructed_ping_loop_clear_timeout_releases_timer_work() {
         .enable_all()
         .build()
         .unwrap();
-    tokio::task::LocalSet::new().block_on(&runtime, observe_constructed_ping_timer(true));
+    tokio::task::LocalSet::new().block_on(
+        &runtime,
+        ping_timer_observation::observe_constructed_ping_timer(true),
+    );
 }

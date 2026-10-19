@@ -7942,6 +7942,54 @@
     ]
   },
   {
+    "file": "safe-cex-venue-hyperliquid/src/host/facade_exchange.rs",
+    "function": "base_exchange_class",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "can_sign",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "dispose",
+        "count": 1
+      },
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "name",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-hyperliquid/src/host/facade_socket.rs",
+    "function": "base_websocket_class",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "dispose",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-venue-hyperliquid/src/host/host_core.rs",
+    "function": "start_task",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "start",
+        "count": 1
+      }
+    ]
+  },
+  {
     "file": "safe-cex-venue-hyperliquid/src/income.rs",
     "function": "paginate_hyperliquid_by_time",
     "edges": [
@@ -8106,54 +8154,6 @@
         "kind": "reference",
         "hook": "start",
         "callee": "crate :: helper_tasks :: start",
-        "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-venue-hyperliquid/src/host/facade_exchange.rs",
-    "function": "base_exchange_class",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "can_sign",
-        "count": 1
-      },
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "dispose",
-        "count": 1
-      },
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "name",
-        "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-venue-hyperliquid/src/host/facade_socket.rs",
-    "function": "base_websocket_class",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "dispose",
-        "count": 1
-      }
-    ]
-  },
-  {
-    "file": "safe-cex-venue-hyperliquid/src/host/host_core.rs",
-    "function": "start_task",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "start",
         "count": 1
       }
     ]
