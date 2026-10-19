@@ -395,6 +395,10 @@ fn secondary_is_default_off_and_only_get_uses_secondary_credentials() {
 #[test]
 fn limiter_counts_failed_requests_and_secondary_limits_are_independent() {
     let venue = Arc::new(Venue::default());
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "scheduler callbacks are local-thread; the limiter API takes Arc"
+    )]
     let clock = Arc::new(HeldClock::default());
     let limited = RateLimitedAdapter::new(venue.clone(), clock.clone(), 2, 1000);
     venue.replies.lock().unwrap().push_back(Err(reset()));
@@ -501,6 +505,10 @@ impl RateLimitClock for HeldClock {
 #[test]
 fn limiter_fifo_and_cancelled_waiters_do_not_consume_capacity() {
     let venue = Arc::new(Venue::default());
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "scheduler callbacks are local-thread; the limiter API takes Arc"
+    )]
     let clock = Arc::new(HeldClock::default());
     let limited = RateLimitedAdapter::new(venue.clone(), clock.clone(), 1, 1000);
     run(limited.execute(req("GET", "/first"))).unwrap();
@@ -1553,6 +1561,10 @@ fn limiter_preserves_inner_effective_receipt_and_admission() {
         requests: Mutex::new(Vec::new()),
         fail_first: false,
     });
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "scheduler callbacks are local-thread; the limiter API takes Arc"
+    )]
     let clock = Arc::new(HeldClock::default());
     let limiter = RateLimitedAdapter::new(venue.clone(), clock.clone(), 1, 1000);
     for expected_time in [0, 1000] {
@@ -1877,6 +1889,10 @@ fn zero_delay_retry_invokes_scheduler_for_each_retried_attempt() {
 
 #[test]
 fn signing_rate_slots_release_cancelled_waiters_without_spending_capacity() {
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "scheduler callbacks are local-thread; the limiter API takes Arc"
+    )]
     let clock = Arc::new(HeldClock::default());
     let limiter = RateLimiter::new(clock.clone(), 1, 1000);
     drop(limiter.acquire()); // An unpolled reservation has no queue side effects.
@@ -1926,6 +1942,10 @@ fn limiter_resets_from_timer_completion_with_frozen_now_and_idle_windows() {
             self.0.schedule_reset(delay, callback)
         }
     }
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "scheduler callbacks are local-thread; the limiter API takes Arc"
+    )]
     let clock = Arc::new(Clock(HeldClock::default()));
     let limiter = RateLimiter::new(clock.clone(), 3, 1000);
     for _ in 0..3 {
@@ -1957,6 +1977,10 @@ fn limiter_resets_from_timer_completion_with_frozen_now_and_idle_windows() {
 
 #[test]
 fn limiter_reset_failure_rejects_the_queued_request_visibly() {
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "scheduler callbacks are local-thread; the limiter API takes Arc"
+    )]
     let clock = Arc::new(HeldClock::default());
     let limiter = RateLimiter::new(clock.clone(), 1, 1000);
     run(limiter.acquire()).unwrap();
