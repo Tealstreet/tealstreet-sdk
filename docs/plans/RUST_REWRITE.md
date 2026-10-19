@@ -298,7 +298,8 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | BingX | done (#1305) |
 | MEXC | done (#1304); conditional/trailing parity check pending |
 | BloFin | done (#1300) |
-| Bitget, Hyperliquid, Bitunix, Backpack | wave 1, PRs in review |
+| Backpack | done (#1299) |
+| Bitget, Hyperliquid, Bitunix | wave 1, PRs in review |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | lane starting |
 | KuCoin, Phemex | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
