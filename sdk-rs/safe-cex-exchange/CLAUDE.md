@@ -2053,6 +2053,11 @@ See ARRAY_STORAGE_REVIEW.md for the length/descriptor/iterator algorithms, atomi
 consumer boundaries and independent native/Node/compiled controls. The browser
 DATA bridge caches identity before walking enumerable indexed and named fields.
 
+Array.prototype.constructor is its own nonenumerable writable/configurable data
+property and retains the installed Array facade. ARRAY_STORAGE_REVIEW.md records
+the Node identity/mutation proof and the approved single-pair-per-realm Rc cycle
+limit; repeated operations and installations do not grow that retained graph.
+
 Internal update listeners subscribe to the canonical Store's native state referent.
 They do not project StoreData or visit unrelated getters before emitter fanout.
 Typed subscribers remain explicit projection boundaries at their reached slots;
@@ -2138,6 +2143,16 @@ engine-dependent. Array sort compacts defined values before TimSort, then writes
 undefined values and deletes remaining holes; four native/Node profiles pin the
 comparator schedule as well as sparse output.
 
+Store payload preparation consumes the canonical `Js` graph. Its shallow root
+spread preserves construction order, including dynamically appended fields, and
+keeps model rows intact instead of round-tripping them through shared DTOs.
+Only updateIds, loaded and socketHealth are cloned before returning; truthy info
+is stripped with object rest in source order. The scalar ticker baseline reads
+only the packed protocol's eleven fields; that protocol order is independent of
+a ticker object's own-key order. Native post capture owns the resulting graph
+without JSON projection. Typed worker processors convert their existing frame
+once at the preparer's input; there is no second payload algorithm.
+
 Direct calls of the canonical Object.prototype.toString referent use the same
 intrinsic object-tag implementation as ordinary coercion. The actual Aster
 private fill witness compares an object ID against its maintained TS constructor;
@@ -2153,3 +2168,13 @@ NaN payloads canonicalize as Node structuredClone does.
 Uncloneable values and unmodeled object kinds produce visible DataCloneError.
 The worker recorder intentionally drops clone failures as perfFixture.ts does;
 other callers receive the error. Node's real structuredClone supplies the oracle.
+
+Exchange::listen_ohlcv_retained is the native callback entry for listener payloads
+whose runtime shape differs from the explicit typed Candle API. Typed-only venues
+adapt their existing declared listener; Phemex overrides it with the original Js
+payload. Native account delivery captures that retained value without coercion.
+The 906-frame Phemex binding probe compares all 19 maintained-source callbacks.
+
+Private authentication recovery reports the supplied ExchangeError through the
+runtime exception sink before warning/reconnect, preserving its retained cause.
+See `PRIVATE_OPEN_REVIEW.md` for the bounded disposal/recovery differences.

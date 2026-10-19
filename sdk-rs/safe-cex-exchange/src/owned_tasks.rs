@@ -78,6 +78,9 @@ pub(crate) struct OwnedTasks {
     slots: RefCell<HashMap<u64, Rc<Slot>>>,
 }
 impl OwnedTasks {
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed.get()
+    }
     pub(crate) fn detached() -> Rc<Self> {
         Rc::new(Self {
             retain_owner: true,

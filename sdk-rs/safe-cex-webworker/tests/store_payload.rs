@@ -128,11 +128,16 @@ fn snapshot_bookkeeping_matches_live_versions_and_ticker_transitions() {
                 .map(ticker)
                 .collect();
             let actual = if action["op"] == "copy" {
-                baseline.copy_from(&tickers);
+                baseline
+                    .copy_from(&safe_cex_exchange::js_runtime::value::from_typed(&tickers).unwrap())
+                    .unwrap();
                 Value::Null
             } else {
                 baseline
-                    .pack_deltas(&tickers)
+                    .pack_deltas(
+                        &safe_cex_exchange::js_runtime::value::from_typed(&tickers).unwrap(),
+                    )
+                    .unwrap()
                     .map(|deltas| {
                         Value::Array(
                             deltas

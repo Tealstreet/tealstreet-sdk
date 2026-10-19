@@ -47,7 +47,7 @@ struct Host {
     next: Cell<u64>,
     timers: RefCell<BTreeMap<u64, (f64, Rc<dyn Fn()>)>>,
     events: RefCell<Vec<String>>,
-    posts: RefCell<Vec<WorkerStoreMessage>>,
+    posts: RefCell<Vec<RecordedStoreMessage>>,
     fail: Cell<bool>,
     assert_timer_before_post: Cell<bool>,
     manager: Rc<ChaserOrderManager>,
@@ -94,6 +94,11 @@ impl safe_cex_exchange::store_delivery::StoreUpdateThrottleHost for Host {
         self.events.borrow_mut().push(e.message.clone());
     }
 }
+struct RecordedStoreMessage {
+    #[allow(dead_code)]
+    op: safe_cex_webworker::payload::StoreWorkerOp,
+    data: safe_cex_store::StoreUpdate,
+}
 impl ExchangeWorkerHost for Host {
     fn post_store(&self, m: WorkerStoreMessage) -> Result<(), ExchangeError> {
         if self.assert_timer_before_post.replace(false) {
@@ -103,7 +108,11 @@ impl ExchangeWorkerHost for Host {
             );
         }
         self.events.borrow_mut().push("post".into());
-        self.posts.borrow_mut().push(m);
+        self.posts.borrow_mut().push(RecordedStoreMessage {
+            op: m.op,
+            data: safe_cex_exchange::js_runtime::value::to_typed_preserving_undefined(&m.data)
+                .unwrap(),
+        });
         if self.fail.get() {
             Err(ExchangeError::new("post failed"))
         } else {
@@ -274,7 +283,14 @@ fn construction_retains_handles_and_binary64_throttle_configuration() {
             .borrow()
             .is_empty()
     );
-    assert!(w.sentry_report_cooldowns.borrow().is_empty());
+    assert_eq!(
+        w.sentry_report_cooldowns
+            .get("size")
+            .unwrap()
+            .to_number()
+            .unwrap(),
+        0.0
+    );
     assert_eq!(
         w.handler_kinds,
         [

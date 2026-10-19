@@ -110,7 +110,7 @@ pub fn seed_tickers(
     .unwrap();
 }
 pub fn balance(store: &safe_cex_exchange::native_store::DefaultStore) -> Value {
-    let value = store.balance();
+    let value = store.balance().unwrap();
     json!({"total":format!("{:016x}",value.total.to_bits()),"free":format!("{:016x}",value.free.to_bits()),"used":format!("{:016x}",value.used.to_bits())})
 }
 pub fn parameter(wire: &support::Wire, key: &str) -> String {
