@@ -76,7 +76,8 @@ export function hyperliquidProjectionCompilerIdentity(doc, item, paths) {
     const expected = outputs[declaration.member];
     assert.ok(actual && actual.crate_id !== 0 && dependency?.name === expected.crate
       && actual.path.join('::') === expected.canonical && actual.kind === expected.kind
-      && paths.get(String(id))?.join('::') === expected.canonical,
+      && typeof dependency.path === 'string' && dependency.path.length > 0
+      && !paths.has(String(id)),
       `${label}: exact shared compiler output root required`);
     return { canonical: actual.path.join('::'), kind: actual.kind, crate: dependency.name };
   }

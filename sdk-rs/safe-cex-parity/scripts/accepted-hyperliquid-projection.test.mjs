@@ -26,7 +26,7 @@ export function projectionFixture(name = Object.keys(specs)[0]) {
   const spec = specs[name], member = spec.rawTarget.qualified_path.name;
   const root = (id, canonical, kind, file, inner) => ({ id, crate_id: 0, name: canonical.split('::').at(-1), span: { filename: file }, inner: { [kind]: { generics: { params: [], where_predicates: [] }, ...inner } } });
   const prefix = 'safe_cex_venue_hyperliquid';
-  const doc = { paths: {}, external_crates: { 1: { name: 'safe_cex_exchange' } }, index: {
+  const doc = { paths: {}, external_crates: { 1: { name: 'safe_cex_exchange', path: '/compiler/libsafe_cex_exchange.rmeta' } }, index: {
     1: root(1, `${prefix}::ws_ping_lifecycle::WsPingHost`, 'trait', 'safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs', { items: [13, 14], implementations: [4] }),
     2: root(2, `${prefix}::host::Host`, 'struct', 'safe-cex-venue-hyperliquid/src/host/mod.rs', { impls: [4] }),
     4: { id: 4, crate_id: 0, span: { filename: 'safe-cex-venue-hyperliquid/src/host/host_core.rs' }, inner: { impl: {
@@ -42,7 +42,7 @@ export function projectionFixture(name = Object.keys(specs)[0]) {
     inner: { assoc_type: { generics: { params: [], where_predicates: [] }, bounds: [], type: { resolved_path: { id: label === 'Value' ? 3 : 8, args: null } } } },
   };
   const item = { id: 7, inner: { type_alias: { type: { qualified_path: { trait: { id: 1 } } } } } };
-  const paths = new Map(Object.entries(doc.paths).map(([id, value]) => [id, value.path])); paths.set('7', name.split('::'));
+  const paths = new Map(Object.entries(doc.paths).filter(([, value]) => value.crate_id === 0).map(([id, value]) => [id, value.path])); paths.set('7', name.split('::'));
   const identity = hyperliquidProjectionCompilerIdentity(doc, item, paths);
   assert.equal(identity.binding.name, member);
   const alias = { name, ident: name.split('::').at(-1), span: { filename: spec.file }, generics: spec.generics, rawTarget: spec.rawTarget, target: spec.target, projectionIdentity: identity };
@@ -65,6 +65,8 @@ test('six associated projections retain exact compiler roots implementation and 
       x => { x.doc.index[1].inner.trait.generics.params = [{ name: 'T' }]; },
       x => { x.doc.index[2].inner.struct.generics.params = [{ name: 'T' }]; },
       x => { x.doc.external_crates[1].name = 'unreviewed'; },
+      x => { delete x.doc.external_crates[1].path; },
+      x => { x.paths.set('3', x.doc.paths[3].path); x.paths.set('8', x.doc.paths[8].path); },
       x => { x.doc.paths[3].path = ['other','Js']; x.doc.paths[8].path = ['other','Thrown']; },
       x => { x.doc.paths[3].crate_id = 0; x.doc.paths[8].crate_id = 0; },
       x => { x.doc.index[2].inner.struct.impls = []; },
