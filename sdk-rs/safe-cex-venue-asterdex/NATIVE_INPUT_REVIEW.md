@@ -33,3 +33,10 @@ The original production-body regression is recorded in
 `/tmp/kxakrb-aster-native-input-fill-green.log`. Expanded native and scope-control
 receipts use the same prefix. A failed control compilation is not behavioral
 proof; only the subsequent compiled named assertion failure is counted.
+
+Post-master validation: native emitter 11, live private stream 13, constructed
+candle and V3 signing regressions pass. Fresh canonical replay has five runtime
+receipts, one classification and zero failed owners. Full index passes at
+7,563 rows / 16,273 public Rust items; cancellation 6 and override 7 pass (each
+retains its explicit discovery/live-source ignore). Fmt, native all-targets/
+all-features Clippy, WASM library Clippy, wiring 376 and extractor zero-drift pass.
