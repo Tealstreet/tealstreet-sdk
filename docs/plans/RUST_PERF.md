@@ -200,3 +200,9 @@ Reviewed follow-ups (25 engine tests/clippy pass):
 All five family artifacts and the updated memory profiles are rebuilding. The
 next control must pin the five-family landing source and retain an isolated
 Cargo target; use the exact final harness on both sides.
+
+Five-family isolated build/checkpoint passes: 34 host tests, 21 SDK WASM tests,
+five isolated wasm32 clippy checks, SDK typecheck and loader lint. Package bytes:
+Binance 776253, Bybit 755810, Crypto.com 624732, OKX 718732, WEEX 858358;
+WEEX budget tightened to 884736. The next landing fetch includes BingX, so final
+comparison and registration expand to six families before reporting gates.
