@@ -847,7 +847,7 @@ mod tests {
 
         let examples: Vec<Example<'static>> =
             serde_json::from_str(include_str!("../tests/fixtures/routing-plans.json")).unwrap();
-        assert_eq!(examples.len(), 31);
+        assert_eq!(examples.len(), 48);
         for example in examples {
             let state = state(example.plan);
             for http in example.http {

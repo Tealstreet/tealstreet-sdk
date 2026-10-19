@@ -164,6 +164,74 @@ const cases: Case[] = [
     bitget: 'direct',
     direct: true,
   },
+  ...([undefined, false, true] as const).flatMap((publicDataOnly) =>
+    ([undefined, false, true] as const).map((tealstreetTunnel) => ({
+      name: `hyperliquid-public-${publicDataOnly}-tunnel-${tealstreetTunnel}`,
+      exchange: 'hyperliquid' as const,
+      baseURL: 'https://api.hyperliquid.xyz',
+      options: { publicDataOnly, tealstreetTunnel },
+      how: !publicDataOnly,
+    })),
+  ),
+  {
+    name: 'hyperliquid-vault-only-raw-undefined',
+    exchange: 'hyperliquid',
+    baseURL: 'https://api.hyperliquid.xyz',
+    options: { key: '', secret: '', vault: '0x1111111111111111111111111111111111111111', tealstreetTunnel: false },
+    how: true,
+  },
+  {
+    name: 'hyperliquid-address-only-raw-undefined',
+    exchange: 'hyperliquid',
+    baseURL: 'https://api.hyperliquid.xyz',
+    options: {
+      key: '',
+      secret: '',
+      applicationId: '0x2222222222222222222222222222222222222222',
+      tealstreetTunnel: false,
+    },
+    how: true,
+  },
+  {
+    name: 'hyperliquid-keyless-raw-undefined',
+    exchange: 'hyperliquid',
+    baseURL: 'https://api.hyperliquid.xyz',
+    options: { key: '', secret: '', tealstreetTunnel: false },
+    how: true,
+  },
+  {
+    name: 'hyperliquidspot-private-false-tunnel',
+    exchange: 'hyperliquidspot',
+    baseURL: 'https://api.hyperliquid.xyz',
+    options: { tealstreetTunnel: false },
+    how: true,
+  },
+  {
+    name: 'hyperliquidspot-public-true-tunnel',
+    exchange: 'hyperliquidspot',
+    baseURL: 'https://api.hyperliquid.xyz',
+    options: { publicDataOnly: true, tealstreetTunnel: true },
+  },
+  {
+    name: 'hyperliquid-how-wraps-cors-proxy',
+    exchange: 'hyperliquid',
+    baseURL: 'https://api.hyperliquid.xyz',
+    options: { tealstreetProxy: true, tealstreetTunnel: false },
+    how: true,
+  },
+  {
+    name: 'hyperliquid-public-cors-proxy',
+    exchange: 'hyperliquid',
+    baseURL: 'https://api.hyperliquid.xyz',
+    options: { publicDataOnly: true, tealstreetProxy: true, tealstreetTunnel: false },
+  },
+  {
+    name: 'hyperliquid-how-override',
+    exchange: 'hyperliquid',
+    baseURL: 'https://api.hyperliquid.xyz',
+    options: { tealstreetTunnel: false, overrideProxyUrl: 'https://override.invalid/route' },
+    how: true,
+  },
 ];
 
 const fixturePath = resolve(__dirname, '../../../../sdk-rs/hosts/native/tests/fixtures/routing-plans.json');

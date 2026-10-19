@@ -140,9 +140,11 @@ const publicBinanceRequest = (exchange: ExchangeName, request: Request): boolean
 
 // Factory adapter gates are distinct from saved-account metadata defaults.
 const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
-  exchange === 'bingx'
-    ? !options.publicDataOnly && options.tealstreetTunnel !== false
-    : !['weex', 'grvt', 'blofin', 'mexc'].includes(exchange) && Boolean(options.tealstreetTunnel);
+  exchange === 'hyperliquid' || exchange === 'hyperliquidspot'
+    ? !options.publicDataOnly
+    : exchange === 'bingx'
+      ? !options.publicDataOnly && options.tealstreetTunnel !== false
+      : !['weex', 'grvt', 'blofin', 'mexc'].includes(exchange) && Boolean(options.tealstreetTunnel);
 
 const restRoute = (
   provider: TransportProvider,

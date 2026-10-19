@@ -1,5 +1,6 @@
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { InternalAxiosRequestConfig } from 'axios';
+import type { BaseExchange } from '../exchanges/base';
 import type { ExchangeName, ExchangeOptions } from '../types';
 
 import { Blob as NodeBlob } from 'node:buffer';
@@ -9,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { accountToExchangeOptions } from '../createExchangeFromAccount';
 import { exchangeMetadata } from '../exchangeMetadata';
+import { createExchangeAPI, createInfoAPI } from '../exchanges/hyperliquid/hyperliquid.api';
+import { createAPI as createSpotAPI } from '../exchanges/hyperliquid/hyperliquidspot.api';
 import { directTransport } from './direct';
 import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
 import { setDefaultTransport } from './registry';
@@ -414,9 +417,11 @@ describe('engine HTTP routing at the raw transport boundary', () => {
             mocks.createAdapter.mockClear();
             await createEngineTransport(exchange, resolved, raw).request(input);
             const how =
-              exchange === 'bingx'
-                ? resolved.tealstreetTunnel !== false
-                : !['grvt', 'blofin', 'weex', 'mexc'].includes(exchange) && Boolean(resolved.tealstreetTunnel);
+              exchange === 'hyperliquid' || exchange === 'hyperliquidspot'
+                ? !resolved.publicDataOnly
+                : exchange === 'bingx'
+                  ? resolved.tealstreetTunnel !== false
+                  : !['grvt', 'blofin', 'weex', 'mexc'].includes(exchange) && Boolean(resolved.tealstreetTunnel);
             const label = `${exchange} proxy=${tealstreetProxy} tunnel=${tealstreetTunnel} region=${proxyRegion}`;
             expect(mocks.adapter.mock.calls.length, label).toBe(how ? 1 : 0);
             if (how) {
@@ -858,4 +863,57 @@ it('a recovery hint preserves direct routing when the only candidate is a relay'
   });
   expect(raw.connect.mock.lastCall![0]).toBe('wss://stream.bybit.com/v5/private');
   expect(mocks.relay).not.toHaveBeenCalled();
+});
+
+describe('Hyperliquid uses the factories original publicDataOnly option', () => {
+  const permutations = ([undefined, false, true] as const).flatMap((publicDataOnly) =>
+    ([undefined, false, true] as const).flatMap((tealstreetTunnel) =>
+      (['hyperliquid', 'hyperliquidspot'] as const).map((exchange) => ({ exchange, publicDataOnly, tealstreetTunnel })),
+    ),
+  );
+
+  it.each(permutations)(
+    '$exchange publicOnly=$publicDataOnly tunnel=$tealstreetTunnel matches actual TS factories',
+    async ({ exchange, publicDataOnly, tealstreetTunnel }) => {
+      const opts = options({ publicDataOnly, tealstreetTunnel });
+      const parent = { name: exchange } as BaseExchange;
+      // These are the production factories, not a copied decision expression:
+      // both perps clients and the spot client install HOW from the raw flag.
+      const clients =
+        exchange === 'hyperliquid'
+          ? [createExchangeAPI(opts, parent), createInfoAPI(opts, parent)]
+          : [createSpotAPI(opts, parent)];
+      const factoryUsesHow = clients[0].defaults.adapter === mocks.adapter;
+      expect(clients.every((client) => (client.defaults.adapter === mocks.adapter) === factoryUsesHow)).toBe(true);
+      const raw = makeRaw();
+      const host = createEngineTransport(exchange, opts, raw);
+      await host.request({ ...request('https://api.hyperliquid.xyz/info'), body: '{"type":"meta"}' });
+      await host.request({ ...request('https://api.hyperliquid.xyz/exchange'), body: '{"action":{"type":"cancel"}}' });
+      expect(mocks.adapter).toHaveBeenCalledTimes(factoryUsesHow ? 2 : 0);
+      expect(raw.request).toHaveBeenCalledTimes(factoryUsesHow ? 0 : 2);
+      expect(resolveEngineRoutingPlan(exchange, opts, 'https://api.hyperliquid.xyz').http.mode).toBe(
+        factoryUsesHow ? 'how' : 'direct',
+      );
+    },
+  );
+
+  it.each([
+    { vault: '0x1111111111111111111111111111111111111111' },
+    { applicationId: '0x2222222222222222222222222222222222222222' },
+    {},
+  ])('address-only or keyless options retain the raw undefined public flag: %j', async (identity) => {
+    const opts = options({ key: '', secret: '', tealstreetTunnel: false, ...identity });
+    expect(opts.publicDataOnly).toBeUndefined();
+    const parent = { name: 'hyperliquid' } as BaseExchange;
+    expect(createInfoAPI(opts, parent).defaults.adapter).toBe(mocks.adapter);
+    expect(createExchangeAPI(opts, parent).defaults.adapter).toBe(mocks.adapter);
+    const raw = makeRaw();
+    await createEngineTransport('hyperliquid', opts, raw).request({
+      ...request('https://api.hyperliquid.xyz/info'),
+      body: '{"type":"meta"}',
+    });
+    expect(mocks.adapter).toHaveBeenCalledTimes(1);
+    expect(raw.request).not.toHaveBeenCalled();
+    expect(resolveEngineRoutingPlan('hyperliquid', opts, 'https://api.hyperliquid.xyz').http.mode).toBe('how');
+  });
 });

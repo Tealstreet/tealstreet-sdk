@@ -206,3 +206,22 @@ thresholds, normalizations or size budgets changed for this transport work.
   goldens retain their hosts and gain only Bitget's declared policy fields.
 - Ten-venue wasm: **3,499,657 bytes**, below the inherited **3,670,016-byte**
   budget. Public/private Bitget and Binance replays and final CI are running.
+
+### Hyperliquid integration phase
+
+- Merged Hyperliquid through `5c47683969` as `ee81ce021a`, preserving its
+  address-only accounts, builder/vault/testnet options and perps-only guard.
+  Its shared socket carries an explicit public/private role; venue URLs remain
+  real endpoints and the host owns routing.
+- Independent review found its factory installs HOW whenever the original
+  `publicDataOnly` option is false or absent, even with `tealstreetTunnel: false`.
+  Preserve that exact factory behavior for perps and spot. Tests invoke the
+  production TS factories across all flag permutations and address-only/keyless
+  accounts instead of deriving the oracle from the engine gate.
+- Verification: **108 focused TS tests**, package typecheck/lint and the native
+  **48-case** shared routing matrix pass. Hyperliquid's **57 venue tests** and
+  scoped native/wasm Clippy pass. Rebuild the combined engine, run SDK/host tests,
+  then replay Bitget, Hyperliquid and Binance on one settled source revision.
+- Landing now builds per-venue bundles with an inherited **1,258,291-byte**
+  budget. Final CI covers **25 replay comparisons** (11 public, 14 private),
+  including all four OKX account variants. No transport gate thresholds changed.
