@@ -124,7 +124,7 @@ fn message_stats_match_live_socket_precedence_and_pin_shared_representation_gaps
             exchange.base().set_socket(slot, socket);
         }
         MessageHandlerStatsPostprocessor
-            .process(&mut store, exchange.as_ref())
+            .process(&mut store.message_handler_stats, exchange.as_ref())
             .unwrap();
         assert_eq!(
             normalize(store.message_handler_stats.unwrap()),
@@ -142,7 +142,7 @@ fn message_stats_match_live_socket_precedence_and_pin_shared_representation_gaps
         exchange.base().set_socket(SocketSlot::Public, Some(socket));
         let mut store = DEFAULT_STORE.clone();
         MessageHandlerStatsPostprocessor
-            .process(&mut store, exchange.as_ref())
+            .process(&mut store.message_handler_stats, exchange.as_ref())
             .unwrap();
         assert_eq!(
             normalize(store.message_handler_stats.unwrap()),
@@ -161,7 +161,7 @@ fn message_stats_match_live_socket_precedence_and_pin_shared_representation_gaps
         .set_socket(SocketSlot::Public, Some(socket.clone()));
     let mut store = DEFAULT_STORE.clone();
     MessageHandlerStatsPostprocessor
-        .process(&mut store, exchange.as_ref())
+        .process(&mut store.message_handler_stats, exchange.as_ref())
         .unwrap();
     assert_eq!(
         data["witness"]["partial"]["public"]["topic"],
@@ -191,7 +191,7 @@ fn message_stats_match_live_socket_precedence_and_pin_shared_representation_gaps
         .unwrap()
         .last_message_timestamp = f64::INFINITY;
     MessageHandlerStatsPostprocessor
-        .process(&mut store, exchange.as_ref())
+        .process(&mut store.message_handler_stats, exchange.as_ref())
         .unwrap();
     assert_eq!(data["witness"]["infinite"], true);
     assert!(
@@ -213,7 +213,7 @@ fn message_stats_match_live_socket_precedence_and_pin_shared_representation_gaps
     assert_eq!(data["witness"]["arrayNamedGroup"], true);
     assert!(
         MessageHandlerStatsPostprocessor
-            .process(&mut store, exchange.as_ref())
+            .process(&mut store.message_handler_stats, exchange.as_ref())
             .is_err(),
         "CHOSEN JSON arrays cannot hold named stats properties"
     );
@@ -233,7 +233,8 @@ fn message_stats_match_live_socket_precedence_and_pin_shared_representation_gaps
         .set_socket(SocketSlot::PublicSecondary, Some(socket));
     for row in data["primaryShapes"].as_array().unwrap() {
         store.message_handler_stats = Some(json!({"public":row["primary"]}));
-        let result = MessageHandlerStatsPostprocessor.process(&mut store, exchange.as_ref());
+        let result = MessageHandlerStatsPostprocessor
+            .process(&mut store.message_handler_stats, exchange.as_ref());
         if safe_cex_num::js_truthy(Some(&row["primary"])) {
             assert!(
                 result.is_err(),

@@ -1,6 +1,6 @@
-//! Snapshot bookkeeping used by ExchangeWorker's store payload preparation.
+//! Worker payload preparation projects the canonical Store graph without a DTO roundtrip.
+use crate::js_runtime::value::{Js, Thrown, from_typed, utf16};
 use safe_cex_store::PackedTickerDelta;
-use safe_cex_types::Ticker;
 
 pub fn should_send_update_id_backed_snapshot(
     update_id: Option<f64>,
@@ -9,76 +9,88 @@ pub fn should_send_update_id_backed_snapshot(
 ) -> bool {
     force_full_store == Some(true) || update_id.is_none() || last_sent_update_id != update_id
 }
-
 pub fn record_sent_update_id_backed_snapshot(update_id: Option<f64>) -> Option<f64> {
     update_id
 }
 
 struct Snapshot {
-    id: String,
-    symbol: String,
-    values: [Option<f64>; 11],
+    id: Js,
+    symbol: Js,
+    values: [Js; 11],
 }
-fn values(ticker: &Ticker) -> [Option<f64>; 11] {
-    [
-        Some(ticker.bid),
-        Some(ticker.ask),
-        Some(ticker.last),
-        Some(ticker.mark),
-        ticker.index,
-        Some(ticker.percentage),
-        Some(ticker.open_interest),
-        Some(ticker.funding_rate),
-        Some(ticker.funding_time),
-        Some(ticker.volume),
-        Some(ticker.quote_volume),
-    ]
-}
-
-/// The worker's private last-sent ticker state, independent of the live store.
+/// Private scalar baseline; payload rows retain their own construction order.
 #[derive(Default)]
 pub struct TickerBaseline {
-    tickers: Option<Vec<Snapshot>>,
+    tickers: Option<Vec<Option<Snapshot>>>,
 }
 impl TickerBaseline {
-    pub fn copy_from(&mut self, tickers: &[Ticker]) {
-        let baseline = self.tickers.get_or_insert_with(Vec::new);
-        if baseline.len() != tickers.len() {
-            *baseline = tickers
-                .iter()
-                .map(|ticker| Snapshot {
-                    id: ticker.id.clone(),
-                    symbol: ticker.symbol.clone(),
-                    values: values(ticker),
-                })
-                .collect();
-            return;
+    pub fn copy_from(&mut self, tickers: &Js) -> Result<(), Thrown> {
+        let length = tickers.get("length")?.to_number()? as usize;
+        if self
+            .tickers
+            .as_ref()
+            .is_none_or(|rows| rows.len() != length)
+        {
+            self.tickers = Some((0..length).map(|_| None).collect());
         }
-        for (snapshot, ticker) in baseline.iter_mut().zip(tickers) {
-            snapshot.id.clone_from(&ticker.id);
-            snapshot.symbol.clone_from(&ticker.symbol);
-            snapshot.values = values(ticker);
+        let baseline = self.tickers.as_mut().expect("initialized baseline");
+        let mut index = 0;
+        while (index as f64) < tickers.get("length")?.to_number()? {
+            let ticker = tickers.get(&index.to_string())?;
+            if index >= baseline.len() {
+                baseline.resize_with(index + 1, || None);
+            }
+            if baseline[index].is_none() {
+                baseline[index] = Some(Snapshot {
+                    id: ticker.get("id")?,
+                    symbol: ticker.get("symbol")?,
+                    values: std::array::from_fn(|_| Js::Undefined),
+                });
+            }
+            let snapshot = baseline[index].as_mut().expect("initialized row");
+            snapshot.id = ticker.get("id")?;
+            snapshot.symbol = ticker.get("symbol")?;
+            for (value, field) in snapshot
+                .values
+                .iter_mut()
+                .zip(safe_cex_store::store::PACKED_TICKER_FIELDS)
+            {
+                *value = ticker.get(field)?;
+            }
+            index += 1;
         }
+        Ok(())
     }
-
-    pub fn pack_deltas(&mut self, tickers: &[Ticker]) -> Option<Vec<PackedTickerDelta>> {
-        let baseline = self.tickers.as_mut()?;
-        if baseline.len() != tickers.len() {
-            return None;
+    pub fn pack_deltas(&mut self, tickers: &Js) -> Result<Option<Vec<PackedTickerDelta>>, Thrown> {
+        let Some(baseline) = self.tickers.as_mut() else {
+            return Ok(None);
+        };
+        let length = tickers.get("length")?.to_number()? as usize;
+        if baseline.len() != length {
+            return Ok(None);
         }
         let mut packed = Vec::new();
-        for (index, (previous, ticker)) in baseline.iter_mut().zip(tickers).enumerate() {
-            if ticker.id != previous.id || ticker.symbol != previous.symbol {
-                // ts-bug: earlier baseline rows remain mutated on this fallback.
-                return None;
+        let mut index = 0;
+        while (index as f64) < tickers.get("length")?.to_number()? {
+            let ticker = tickers.get(&index.to_string())?;
+            let Some(Some(previous)) = baseline.get_mut(index) else {
+                return Ok(None);
+            };
+            if !ticker.get("id")?.strict_equals(&previous.id)
+                || !ticker.get("symbol")?.strict_equals(&previous.symbol)
+            {
+                return Ok(None);
             }
             let mut mask = 0_u32;
             let mut changed = Vec::new();
-            for (field, value) in values(ticker).into_iter().enumerate() {
-                // JS !==, including NaN !== NaN and +0 === -0.
-                if value != previous.values[field] {
-                    previous.values[field] = value;
-                    if let Some(value) = value {
+            for (field, name) in safe_cex_store::store::PACKED_TICKER_FIELDS
+                .iter()
+                .enumerate()
+            {
+                let value = ticker.get(name)?;
+                if !value.strict_equals(&previous.values[field]) {
+                    previous.values[field] = value.clone();
+                    if let Js::Number(value) = value {
                         mask |= 1 << field;
                         changed.push(value);
                     }
@@ -91,102 +103,71 @@ impl TickerBaseline {
                     values: changed,
                 });
             }
+            index += 1;
         }
-        Some(packed)
+        Ok(Some(packed))
     }
 }
 
 pub fn sanitize_for_post_message(
-    data: &safe_cex_types::StoreData,
+    data: &Js,
     omit_orders: bool,
     omit_positions: bool,
-) -> safe_cex_store::StoreUpdate {
-    // Explicit destructuring makes additions to the shared store a compile error
-    // until the worker's full-snapshot projection carries them too.
-    let safe_cex_types::StoreData {
-        latency,
-        balance,
-        markets,
-        tickers,
-        orders,
-        stark_config,
-        zk_link_config,
-        user_data,
-        positions,
-        displayed_positions,
-        displayed_margin,
-        orders_risk,
-        active_chasers,
-        active_twaps,
-        loaded,
-        options,
-        update_ids,
-        message_handler_stats,
-        request_stats,
-        fetched_leverage,
-        socket_health,
-    } = data;
-    let orders = (!omit_orders).then(|| {
-        let mut orders = orders.clone();
-        for order in &mut orders {
-            if order
-                .info
-                .as_ref()
-                .is_some_and(safe_cex_types::retained_json::RetainedJsonInput::is_truthy)
-            {
-                order.info = safe_cex_types::ModelField::Absent;
-            }
-        }
-        orders
-    });
-    let positions = (!omit_positions).then(|| {
-        let mut positions = positions.clone();
-        for position in &mut positions {
-            if position
-                .info
-                .as_ref()
-                .is_some_and(safe_cex_types::retained_json::RetainedJsonInput::is_truthy)
-            {
-                position.info = safe_cex_types::ModelField::Absent;
-            }
-        }
-        positions
-    });
-    let mut displayed_positions = displayed_positions.clone();
-    for position in &mut displayed_positions {
-        if position
-            .position
-            .info
-            .as_ref()
-            .is_some_and(safe_cex_types::retained_json::RetainedJsonInput::is_truthy)
-        {
-            position.position.info = safe_cex_types::ModelField::Absent;
+) -> Result<Js, Thrown> {
+    let result = data.spread_object()?;
+    for field in ["updateIds", "loaded", "socketHealth"] {
+        let value = result.get(field)?;
+        if value.truthy() {
+            result.set(field, value.spread_object()?)?;
         }
     }
-    safe_cex_store::StoreUpdate {
-        latency: Some(*latency),
-        balance: Some(balance.clone()),
-        markets: Some(markets.clone()),
-        tickers: Some(tickers.clone()),
-        orders,
-        stark_config: stark_config.clone(),
-        zk_link_config: zk_link_config.clone(),
-        user_data: user_data.clone(),
-        positions,
-        displayed_positions: Some(displayed_positions),
-        displayed_margin: displayed_margin.clone(),
-        orders_risk: Some(orders_risk.clone()),
-        active_chasers: Some(active_chasers.clone()),
-        active_twaps: Some(active_twaps.clone()),
-        loaded: Some(loaded.clone()),
-        options: Some(options.clone()),
-        update_ids: Some(update_ids.clone().into()),
-        message_handler_stats: message_handler_stats.clone(),
-        request_stats: request_stats.clone(),
-        fetched_leverage: Some(fetched_leverage.clone()),
-        socket_health: socket_health.clone(),
-        ticker_deltas: None,
+    for (field, omit) in [
+        ("orders", omit_orders),
+        ("positions", omit_positions),
+        ("displayedPositions", false),
+    ] {
+        if omit {
+            result.delete(&utf16(field))?;
+            continue;
+        }
+        let rows = result.get(field)?;
+        if !rows.is_array() {
+            continue;
+        }
+        let mut needs = false;
+        let mut index = 0;
+        while (index as f64) < rows.get("length")?.to_number()? {
+            if rows.get(&index.to_string())?.get("info")?.truthy() {
+                needs = true;
+                break;
+            }
+            index += 1;
+        }
+        if needs {
+            let stripped = rows.call_method(
+                "map",
+                vec![Js::function("stripStoreInfo", |_, args| {
+                    let item = args.first().cloned().unwrap_or(Js::Undefined);
+                    if !item.get("info")?.truthy() {
+                        return Ok(item);
+                    }
+                    // Source destructuring binds info before the rest copy excludes it.
+                    item.get("info")?;
+                    let row = Js::object(vec![]);
+                    for key in item.own_keys() {
+                        if key.as_ref() != utf16("info").as_ref()
+                            && item.own_enumerability(&key)? == Some(true)
+                        {
+                            row.define_key(&key, item.get_key(&key)?)?;
+                        }
+                    }
+                    Ok(row)
+                })],
+            )?;
+            result.set(field, stripped)?;
+        }
     }
+    Ok(result)
 }
 
 #[derive(Default)]
@@ -201,66 +182,79 @@ pub struct StorePayloadPreparer {
 impl StorePayloadPreparer {
     pub fn prepare(
         &mut self,
-        data: &safe_cex_types::StoreData,
+        data: &Js,
         markets_version: f64,
         tickers_version: f64,
         hosted_mode: bool,
         force_full_store: Option<bool>,
-    ) -> safe_cex_store::StoreUpdate {
-        let has_active_chasers = !data.active_chasers.is_empty();
+    ) -> Result<Js, Thrown> {
+        let ids = data.get("updateIds")?;
+        let id = |field| -> Result<Option<f64>, Thrown> {
+            Ok(if ids.is_nullish() {
+                None
+            } else {
+                match ids.get(field)? {
+                    Js::Number(value) => Some(value),
+                    _ => None,
+                }
+            })
+        };
+        let orders_id = id("orders")?;
+        let positions_id = id("positions")?;
+        let chasers = data.get("activeChasers")?;
+        let has_active_chasers = !chasers.is_nullish() && chasers.get("length")?.to_number()? > 0.0;
         let can_omit_orders = !has_active_chasers && !self.last_payload_had_active_chasers;
         let should_send_orders = !can_omit_orders
             || should_send_update_id_backed_snapshot(
-                Some(data.update_ids.orders),
+                orders_id,
                 self.last_sent_orders_update_id,
                 force_full_store,
             );
         let should_send_positions = should_send_update_id_backed_snapshot(
-            Some(data.update_ids.positions),
+            positions_id,
             self.last_sent_positions_update_id,
             force_full_store,
         );
-        let mut payload =
-            sanitize_for_post_message(data, !should_send_orders, !should_send_positions);
+        let payload = sanitize_for_post_message(data, !should_send_orders, !should_send_positions)?;
         let pack_ticker_deltas = !hosted_mode;
         let should_send_full_tickers = !pack_ticker_deltas
             || force_full_store == Some(true)
             || self.last_sent_tickers_version != Some(tickers_version)
             || self.baseline.tickers.is_none();
         if should_send_orders {
-            self.last_sent_orders_update_id =
-                record_sent_update_id_backed_snapshot(Some(data.update_ids.orders));
+            self.last_sent_orders_update_id = record_sent_update_id_backed_snapshot(orders_id);
         }
         if should_send_positions {
             self.last_sent_positions_update_id =
-                record_sent_update_id_backed_snapshot(Some(data.update_ids.positions));
+                record_sent_update_id_backed_snapshot(positions_id);
         }
         self.last_payload_had_active_chasers = has_active_chasers;
+        let tickers = payload.get("tickers")?;
         if should_send_full_tickers {
             self.last_sent_tickers_version = Some(tickers_version);
             if pack_ticker_deltas {
-                self.baseline.copy_from(&data.tickers);
+                self.baseline.copy_from(&tickers)?;
             }
         } else {
-            match self.baseline.pack_deltas(&data.tickers) {
+            match self.baseline.pack_deltas(&tickers)? {
                 None => {
                     self.last_sent_tickers_version = Some(tickers_version);
-                    self.baseline.copy_from(&data.tickers);
+                    self.baseline.copy_from(&tickers)?;
                 }
                 Some(deltas) => {
-                    payload.tickers = None;
+                    payload.delete(&utf16("tickers"))?;
                     if !deltas.is_empty() {
-                        payload.ticker_deltas = Some(deltas);
+                        payload.set("tickerDeltas", from_typed(&deltas)?)?;
                     }
                 }
             }
         }
         if force_full_store != Some(true) && self.last_sent_markets_version == Some(markets_version)
         {
-            payload.markets = None;
-            return payload;
+            payload.delete(&utf16("markets"))?;
+            return Ok(payload);
         }
         self.last_sent_markets_version = Some(markets_version);
-        payload
+        Ok(payload)
     }
 }

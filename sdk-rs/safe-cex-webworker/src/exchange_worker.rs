@@ -3,9 +3,9 @@
 use crate::chaser_manager::ChaserOrderManager;
 use crate::chaser_manager::ChaserSupervisor;
 use crate::payload::StoreWorkerOp;
-use crate::payload::StoreWorkerStorePayload;
 use crate::settings::AppSettingsWorkerType;
 use crate::settings::ExchangeMetadataWorkerType;
+use safe_cex_exchange::js_runtime::value::{Js, from_typed};
 use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::store_delivery::StoreFrame;
 use safe_cex_exchange::store_delivery::StoreUpdateThrottle;
@@ -28,10 +28,10 @@ pub trait WorkerHandler {
 }
 pub type ProcessorList = Rc<RefCell<Vec<Rc<dyn WorkerPostprocessor>>>>;
 pub type HandlerList = Rc<RefCell<Vec<Rc<dyn WorkerHandler>>>>;
-/// Typed store envelope avoids serializing native nonfinite values into JSON.
+/// Native store envelope retains construction order and nonfinite values.
 pub struct WorkerStoreMessage {
     pub op: StoreWorkerOp,
-    pub data: StoreWorkerStorePayload,
+    pub data: Js,
 }
 pub trait ExchangeWorkerHost: StoreUpdateThrottleHost + 'static {
     fn post_store(&self, message: WorkerStoreMessage) -> Result<(), ExchangeError>;
@@ -74,7 +74,7 @@ pub struct ExchangeWorker<H: ExchangeWorkerHost> {
     pub postprocessors: RefCell<ProcessorList>,
     pub exchange_dependent_postprocessors: RefCell<ProcessorList>,
     preparer: RefCell<StorePayloadPreparer>,
-    pub sentry_report_cooldowns: RefCell<std::collections::HashMap<String, (f64, f64)>>,
+    pub sentry_report_cooldowns: Js,
 }
 impl<H: ExchangeWorkerHost> ExchangeWorker<H> {
     // ts: constructor. Retain input identity, construct fresh real store and throttle.
@@ -125,7 +125,7 @@ impl<H: ExchangeWorkerHost> ExchangeWorker<H> {
                 postprocessors: RefCell::new(Rc::default()),
                 exchange_dependent_postprocessors: RefCell::new(Rc::default()),
                 preparer: RefCell::default(),
-                sentry_report_cooldowns: RefCell::default(),
+                sentry_report_cooldowns: Js::new_map(),
             }
         })
     }
@@ -167,12 +167,12 @@ impl<H: ExchangeWorkerHost> ExchangeWorker<H> {
         let tickers_version = self.store.get_tickers_version();
         let hosted = self.construction.options.borrow().hosted_mode == Some(true);
         let prepared = self.preparer.borrow_mut().prepare(
-            &data.borrow(),
+            &from_typed(&*data.borrow())?,
             markets_version,
             tickers_version,
             hosted,
             force_full_store,
-        );
+        )?;
         self.construction.ctx.post_store(WorkerStoreMessage {
             op: StoreWorkerOp::Store,
             data: prepared,

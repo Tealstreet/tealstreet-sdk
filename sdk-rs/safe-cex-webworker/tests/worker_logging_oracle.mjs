@@ -27,4 +27,11 @@ const hidden={};Object.defineProperty(hidden,'safeCexSentryReportKey',{value:'hi
 const omissions=[inherited,hidden].map(input=>({input,control:h.getWorkerSentryControl(input),split:h.splitWorkerLogExtra(input)}));
 const nonfiniteSuppression=[Infinity,-Infinity].map(n=>({input:{suppressConsoleLog:n},split:h.splitWorkerLogExtra({suppressConsoleLog:n})}));
 const overflowJson=['1e400','-1e400','1e-400','-1e-400','0','-0'].map(number=>{const inputJson=`{"suppressConsoleLog":${number}}`;return {inputJson,split:h.splitWorkerLogExtra(JSON.parse(inputJson))};});
-process.stdout.write(JSON.stringify({records,omissions,nonfiniteSuppression,overflowJson}));
+const reads=[];
+const controlled={};
+for(const [key,value] of Object.entries({safeCexSentryReportKey:'key',safeCexSentryReportCooldownMs:5,safeCexSentryTags:{t:true},safeCexSentryExtra:{e:true}}))Object.defineProperty(controlled,key,{enumerable:true,get(){reads.push(key);return value;}});
+h.getWorkerSentryControl(controlled);const controlReads=reads.splice(0);
+const splitInput={};
+for(const [key,value] of Object.entries({sentryTags:{t:true},sentryExtra:{e:true},suppressConsoleLog:Infinity,plain:3}))Object.defineProperty(splitInput,key,{enumerable:true,get(){reads.push(key);return value;}});
+h.splitWorkerLogExtra(splitInput);const splitReads=reads.splice(0);
+process.stdout.write(JSON.stringify({records,omissions,nonfiniteSuppression,overflowJson,controlReads,splitReads}));

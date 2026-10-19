@@ -12,15 +12,56 @@ fn startup_forces_the_complete_worker_snapshot_and_order_updates_strip_info() {
         let h = account::opened(json!({"hostedMode":true})).await;
         let posts = Rc::new(RefCell::new(Vec::<Value>::new()));
         let captured = posts.clone();
+        let key_orders = Rc::new(RefCell::new(Vec::new()));
+        let capture_keys = key_orders.clone();
         let unwatch = native_account_watch(
             &h.account,
             Rc::new(|_, _| {}),
-            Rc::new(move |data| captured.borrow_mut().push(support::boundary_json(data))),
+            Rc::new(move |data| {
+                if let safe_cex_registry::native_value::NativeValue::Object(fields) = &data {
+                    capture_keys.borrow_mut().push(
+                        fields
+                            .iter()
+                            .map(|(key, _)| String::from_utf16(key).unwrap())
+                            .collect::<Vec<_>>(),
+                    );
+                }
+                captured.borrow_mut().push(support::boundary_json(data));
+            }),
         );
         h.ok("start", json!([])).await;
         {
             let posts = posts.borrow();
             let snapshot = posts.last().expect("post-start Store snapshot");
+            let source = std::process::Command::new("node")
+                .arg(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/tests/native_store_order_source.mjs"
+                ))
+                .output()
+                .unwrap();
+            assert!(
+                source.status.success(),
+                "{}",
+                String::from_utf8_lossy(&source.stderr)
+            );
+            let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+            assert_eq!(
+                key_orders
+                    .borrow()
+                    .last()
+                    .unwrap()
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                source["snapshot"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_str().unwrap())
+                    .collect::<Vec<_>>(),
+                "STORE-CONSTRUCTION-ORDER actual account full snapshot"
+            );
             assert_eq!(snapshot["markets"][0]["symbol"], "BTCUSDT");
             assert_eq!(snapshot["tickers"][0]["last"], 10.0);
             for key in [

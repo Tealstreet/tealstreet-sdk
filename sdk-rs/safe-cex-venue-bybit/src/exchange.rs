@@ -9,8 +9,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_transport::{
     RestAdapter, RestBody, RestFailure, RestRequest, RestResponse, TransportError,
-    rate_limit::{RateLimitClock, RateLimitedAdapter},
-    secondary::SecondaryKeyClients,
+    rate_limit::RateLimitedAdapter, secondary::SecondaryKeyClients,
 };
 use safe_cex_types::ExchangeOptions;
 use std::{
@@ -450,7 +449,7 @@ impl BybitExchange {
     pub(crate) fn new(
         base: Rc<BaseExchange>,
         runtime: Rc<dyn WsRuntime>,
-        clock: Arc<dyn RateLimitClock>,
+        clock: Arc<dyn safe_cex_transport::rate_limit::RateLimitScheduler>,
         create_api: impl Fn(
             &ExchangeOptions,
             &BaseExchange,
@@ -549,7 +548,7 @@ impl BybitExchange {
     pub(crate) fn with_private_protocol(
         base: Rc<BaseExchange>,
         runtime: Rc<dyn WsRuntime>,
-        clock: Arc<dyn RateLimitClock>,
+        clock: Arc<dyn safe_cex_transport::rate_limit::RateLimitScheduler>,
         create_api: impl Fn(
             &ExchangeOptions,
             &BaseExchange,
