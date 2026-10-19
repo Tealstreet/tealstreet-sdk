@@ -147,7 +147,7 @@
         }
       },
       {
-        "input": " ﻿ ",
+        "input": " \ufeff ",
         "output": {
           "kind": "finite",
           "bits": "0000000000000000"
@@ -4109,7 +4109,7 @@
     "call": "serde_json::json!($type($value.as_str().expect(\"frame\")))",
     "cases": [
       {
-        "input": " PING ",
+        "input": " PING\u00a0",
         "output": true
       },
       {
@@ -23369,7 +23369,7 @@
         }
       },
       {
-        "input": "﻿2 ",
+        "input": "\ufeff2\u00a0",
         "output": {
           "bits": "4000000000000000",
           "nan": false
@@ -23623,7 +23623,7 @@
         }
       },
       {
-        "input": "🚀",
+        "input": "\ud83d\ude80",
         "output": {
           "tag": "string",
           "units": [
@@ -24776,7 +24776,7 @@
           {
             "input": {
               "kind": "string",
-              "text": "雪😀"
+              "text": "\u96ea\ud83d\ude00"
             },
             "output": {
               "tag": "string",
@@ -24858,7 +24858,7 @@
             }
           },
           {
-            "input": "🚀",
+            "input": "\ud83d\ude80",
             "output": {
               "units": [
                 55357,
@@ -26177,7 +26177,7 @@
         },
         "input": "observed",
         "reason": "GetIterator calls the actual retained protocol method and verifies its native object result. Array and astral-string fixtures step that returned iterator and observe iterable-self identity, values and exhaustion.",
-        "call": "{ let owner = if $value.as_str() == Some(\"array\") { $type::array(vec![super::Js::str(\"a\"),super::Js::str(\"b\")]) } else { $type::str(\"A😀\") }; let observed = (|| -> Result<serde_json::Value,super::Thrown> { let iterator = owner.iterator()?; let is_self = iterator.iterator()?.same_reference(&iterator); let mut values = vec![]; for _ in 0..2 { values.push(iterator.call_method(\"next\",vec![])?.get(\"value\")?.to_display()); } Ok(serde_json::json!({\"self\":is_self,\"values\":values,\"done\":iterator.call_method(\"next\",vec![])?.get(\"done\")?.truthy()})) })(); observed.unwrap_or_else(|error|serde_json::json!({\"error\":error.value.get(\"name\").unwrap().to_display()})) }",
+        "call": "{ let owner = if $value.as_str() == Some(\"array\") { $type::array(vec![super::Js::str(\"a\"),super::Js::str(\"b\")]) } else { $type::str(\"A\ud83d\ude00\") }; let observed = (|| -> Result<serde_json::Value,super::Thrown> { let iterator = owner.iterator()?; let is_self = iterator.iterator()?.same_reference(&iterator); let mut values = vec![]; for _ in 0..2 { values.push(iterator.call_method(\"next\",vec![])?.get(\"value\")?.to_display()); } Ok(serde_json::json!({\"self\":is_self,\"values\":values,\"done\":iterator.call_method(\"next\",vec![])?.get(\"done\")?.truthy()})) })(); observed.unwrap_or_else(|error|serde_json::json!({\"error\":error.value.get(\"name\").unwrap().to_display()})) }",
         "cases": [
           {
             "input": "array",
@@ -26196,7 +26196,7 @@
               "self": true,
               "values": [
                 "A",
-                "😀"
+                "\ud83d\ude00"
               ],
               "done": true
             }
@@ -32833,7 +32833,7 @@
           {
             "input": [
               7,
-              "😀",
+              "\ud83d\ude00",
               null
             ],
             "output": {
@@ -32856,7 +32856,7 @@
             }
           },
           {
-            "input": "A😀",
+            "input": "A\ud83d\ude00",
             "output": {
               "values": [
                 {
@@ -32948,7 +32948,7 @@
           {
             "input": [
               7,
-              "😀",
+              "\ud83d\ude00",
               null
             ],
             "output": {
@@ -32971,7 +32971,7 @@
             }
           },
           {
-            "input": "A😀",
+            "input": "A\ud83d\ude00",
             "output": {
               "values": [
                 {
@@ -39837,7 +39837,7 @@
         "where_predicates": []
       }
     },
-    "evidence": "Installed Axios lib/core/AxiosHeaders.js normalizeHeader declaration executes directly in tests/js_headers_oracle.cjs for nine scalar/UTF-16 cases. The native adapter calls the actual private helper and observes returned units. tests/js_runtime.rs::client_header_name_coercion_matches_installed_axios independently compares twelve real public-facade get/has cases, hook order and original thrown identity; the existing four-case/seventeen-operation header corpus stays unchanged.",
+    "evidence": "safe-cex-exchange/CLIENT_NATIVE_INPUT_REVIEW.md. Installed Axios lib/core/AxiosHeaders.js normalizeHeader declaration executes directly in tests/js_headers_oracle.cjs for nine scalar/UTF-16 cases. The native adapter calls the actual private helper and observes returned units. tests/js_runtime.rs::client_header_name_coercion_matches_installed_axios independently compares twelve real public-facade get/has cases, hook order and original thrown identity; the existing four-case/seventeen-operation header corpus stays unchanged.",
     "call": "{ use crate::js_runtime::value::Js;\nlet input = match $value[\"kind\"].as_str().unwrap() {\n    \"text\" => Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|unit| unit.as_u64().unwrap() as u16).collect::<Vec<_>>()),\n    \"number\" => Js::Number(f64::from_bits(u64::from_str_radix($value[\"bits\"].as_str().unwrap(), 16).unwrap())),\n    \"boolean\" => Js::Bool($value[\"value\"].as_bool().unwrap()),\n    \"null\" => Js::Null,\n    \"undefined\" => Js::Undefined,\n    _ => unreachable!(),\n};\nlet units = super::normalized_header(&input).expect(\"source header normalization succeeds\");\nserde_json::json!(units) }",
     "cases": [
       {
