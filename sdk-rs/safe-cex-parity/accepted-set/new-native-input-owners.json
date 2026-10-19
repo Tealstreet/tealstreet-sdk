@@ -423,7 +423,7 @@
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::globals::not_iterable",
       "state": "classified",
-      "ruling": "FIX: canonical operand diagnostic is UTF16-preserving and does not read object coercion. Real installed constructor/refusal paths agree with Node."
+      "ruling": "ACCEPT: internal noniterable diagnostic builder delegates the shared formatter. Its reached number/null refusal paths already agree with Node through installed Set and Array.from; no separate public behavior FIX is claimed for this helper. The shared raw formatter fix is proved by the callback and executor binding REDs."
     },
     {
       "package": "safe-cex-exchange",

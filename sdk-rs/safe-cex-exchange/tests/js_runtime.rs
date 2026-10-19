@@ -5491,29 +5491,55 @@ mod builtin_global_input_contracts {
         for row in source["executorObjects"].as_array().unwrap() {
             let reads = Rc::new(std::cell::Cell::new(0));
             let tag = row["tag"].as_str().unwrap();
+            let value = match tag {
+                "map" => Js::new_map(),
+                "set" => Js::new_set(),
+                "promise" => shared
+                    .globals
+                    .get("Promise")
+                    .unwrap()
+                    .call_method("resolve", vec![Js::Undefined])
+                    .unwrap(),
+                "regexp" => safe_cex_exchange::js_runtime::regexp::regexp(&[120], &[]).unwrap(),
+                "nullproto" => shared
+                    .globals
+                    .get("Object")
+                    .unwrap()
+                    .call_method("setPrototypeOf", vec![Js::object(vec![]), Js::Null])
+                    .unwrap(),
+                _ => input(tag, &reads),
+            };
             let actual = error(
                 shared
                     .globals
                     .get("Promise")
                     .unwrap()
-                    .construct(vec![input(tag, &reads)], None),
+                    .construct(vec![value], None),
             );
-            let message = if tag == "array" {
-                "Promise resolver [object Array] is not a function"
-            } else {
-                "Promise resolver #<Object> is not a function"
+            let operand = match tag {
+                "array" => "[object Array]",
+                "map" => "#<Map>",
+                "set" => "#<Set>",
+                "promise" => "#<Promise>",
+                _ => "#<Object>",
             };
+            let message = format!("Promise resolver {operand} is not a function");
             assert_eq!(actual["name"], "TypeError");
             assert_eq!(
                 actual["units"],
                 json!(message.encode_utf16().collect::<Vec<_>>())
             );
             assert_eq!(reads.get(), 0);
-            if tag == "poison" {
+            let residual_operand = match tag {
+                "poison" | "nullproto" => Some("[object Object]"),
+                "regexp" => Some("[object RegExp]"),
+                _ => None,
+            };
+            if let Some(operand) = residual_operand {
                 assert_eq!(
                     row["units"],
                     json!(
-                        "Promise resolver [object Object] is not a function"
+                        format!("Promise resolver {operand} is not a function")
                             .encode_utf16()
                             .collect::<Vec<_>>()
                     )

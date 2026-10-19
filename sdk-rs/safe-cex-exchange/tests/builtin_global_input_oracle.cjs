@@ -4,7 +4,8 @@ let reads = 0;
 const input = tag => ({
   undefined, null: null, number: 7, boolean: true, text: 'x',
   surrogate: String.fromCharCode(0xd800), object: {}, array: [], bigint: 3n,
-  symbol: Symbol.iterator,
+  symbol: Symbol.iterator, map: new Map(), set: new Set(), promise: Promise.resolve(),
+  regexp: /x/, nullproto: Object.create(null),
   poison: Object.defineProperty({}, 'toString', {get() { reads++; throw new Error('unreached'); }}),
 })[tag];
 const error = operation => {
@@ -30,7 +31,7 @@ const entries = ['text', 'surrogate', 'number', 'null', 'symbol'].map(tag => ({
 const executors = tags.filter(tag => !['object', 'poison', 'array'].includes(tag)).map(tag => ({
   tag, ...error(() => new Promise(input(tag))),
 }));
-const executorObjects = ['object', 'poison', 'array'].map(tag => ({
+const executorObjects = ['object', 'poison', 'array', 'map', 'set', 'promise', 'regexp', 'nullproto'].map(tag => ({
   tag, ...error(() => new Promise(input(tag))),
 }));
 

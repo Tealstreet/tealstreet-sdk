@@ -23,7 +23,10 @@ V8's internal object short-print is the only accepted diagnostic difference:
 for an ordinary object with a poisoned own `toString` getter, Node prints
 `Promise resolver [object Object] is not a function`; native prints
 `Promise resolver #<Object> is not a function`. Both report TypeError without
-reading the getter. Plain objects and arrays match the observed Node strings.
+reading the getter. Plain objects, arrays, Maps, Sets and Promises match the observed Node strings.
+Null-prototype objects likewise print `[object Object]` in Node; RegExp instances
+print `[object RegExp]`. Native uses `#<Object>` for those two object variants;
+the same residual test pins each exact difference.
 This internal display distinction does not authorize coercion, a lost rejection,
 or a different primitive message. The installed residual test pins both strings
 and zero getter reads. The shared known-residuals ledger records the same ruling.
@@ -36,7 +39,8 @@ and zero getter reads. The shared known-residuals ledger records the same ruling
 | flatten_into, flatten_length | Installed flat at depths zero/one, sparse nested rows, -0, UTF16 and object identity. No arbitrary array-like length claim. |
 | map_entries | Actual Map.set/get and identity of its storage handle. The non-Map branch is unreachable through the intrinsic selector. |
 | member, is_regexp | Installed receiver/member and real RegExp dispatch; unknown UTF16 names do not alias ASCII members. The regexp helper identifies the physical native brand. |
-| require_callback, array_from, map_from_entries, not_iterable, v8_operand | Exact source diagnostic FIXes plus successful native traversal and referent preservation. |
+| require_callback, array_from, map_from_entries, v8_operand | Exact source diagnostic FIXes plus successful native traversal and referent preservation. |
+| not_iterable | ACCEPT: existing number/null refusal behavior matches installed Node Set/Array.from. It now delegates the shared formatter; no separate public behavior FIX is claimed. |
 | iterate, consume_iterator | Optional iterator acquisition, raw values, original thrown identity; existing installed Array.from tests pin inherited methods/getters and abrupt close order. |
 | chain_value | Actual NativeRuntime finally continuation preserves fulfillment/rejection reference after cleanup. |
 | construct_promise | Exact invalid primitive executor diagnostic FIX plus existing native constructor suite for synchronous invocation, first settlement and thenable getter identity. |
