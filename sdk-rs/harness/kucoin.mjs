@@ -26,12 +26,16 @@ export const kucoin = {
       if (data.code !== '200000') throw new Error(data.msg || data.code);
     };
   },
-  async settleTs(exchange, { isPrivate }) {
+  async settleTs(exchange, { isPrivate, clock }) {
     if (isPrivate) return;
     const pending = pendingReads.get(exchange);
     let stable = 0;
     while (stable < 3) {
-      await new Promise((resolve) => setTimeout(resolve, 1));
+      if (clock?.active) {
+        await clock.advance(clock.time - clock.epoch + 1);
+        await new Promise(setImmediate);
+      }
+      else await new Promise((resolve) => setTimeout(resolve, 1));
       stable = pending.size ? 0 : stable + 1;
     }
   },

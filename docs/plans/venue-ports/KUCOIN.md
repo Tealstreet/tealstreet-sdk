@@ -151,3 +151,22 @@ CPU TS/Rust 1115.8/791.8 ms, steady 782.3/561.3 ms, retained 6.5/2.8 MB, full
 books identical. Private gate PASS: 32 frames, 17 commands, all five history
 command paths including funding independently validated, zero unserved/unused
 mutations or protocol failures. Run the full seven-venue gate set next.
+
+
+### MEXC landing integration checkpoint
+
+Landing advanced through MEXC (#1304, 63d521a860) before PR publication.
+Integrated its socket ordinals, deterministic public replay clock, settings/frame
+extensions and size-optimized wasm build. Kept typed request/response matching
+outside MEXC, signature header validation, staged/time visibility and query-only
+KuCoin read oracles. Shared socket routing accepts the venue URL key so generated
+connectId varies while bullet token identity remains exact. Trimming keeps all
+in-window HTTP anchors by default (optional explicit cap remains available).
+
+Review found a virtual-clock drain could starve real deadlines on a stalled
+read. Fixed with a real event-loop yield per virtual advance; independent review
+passes and all 49 harness regressions pass, including stalled reads, queued timer
+recovery and token URL routing. Workspace fmt/bans/native+wasm clippy/tests pass.
+Eight-venue wasm is 2,662,854 bytes against the existing 3 MiB budget. Node 22
+full eight-venue replay and SDK integration verification are running; results
+below supersede the earlier seven-venue performance measurements.

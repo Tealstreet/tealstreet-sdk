@@ -67,3 +67,42 @@ test('KuCoin public replay waits for reads queued before the rate limiter', asyn
   await Promise.all([read, settling]);
   assert.equal(settled, true);
 });
+
+
+test('KuCoin queued recovery drains under the deterministic replay clock', async () => {
+  const { ReplayClock } = await import('./tape.mjs');
+  const clock = new ReplayClock(1700000000000);
+  clock.install();
+  try {
+    const exchange = { xhr: { get: () => new Promise((resolve) => setTimeout(resolve, 20)) }, cancelSymbolOrders: async () => {} };
+    kucoin.configureTs(exchange);
+    const read = exchange.xhr.get('/api/v1/level2/snapshot');
+    clock.start();
+    await kucoin.settleTs(exchange, { isPrivate: false, clock });
+    await read;
+    assert(clock.time >= clock.epoch + 20);
+  } finally { clock.restore(); }
+});
+
+
+test('stalled queued reads leave the real replay deadline runnable', async () => {
+  const { ReplayClock } = await import('./tape.mjs');
+  const { setTimeout: realTimeout } = await import('node:timers');
+  const clock = new ReplayClock(1700000000000);
+  clock.install();
+  let release;
+  let settling;
+  try {
+    const exchange = { xhr: { get: () => new Promise((resolve) => { release = resolve; }) }, cancelSymbolOrders: async () => {} };
+    kucoin.configureTs(exchange);
+    exchange.xhr.get('/api/v1/level2/snapshot');
+    clock.start();
+    settling = kucoin.settleTs(exchange, { isPrivate: false, clock });
+    const result = await Promise.race([settling.then(() => 'settled'), new Promise((resolve) => realTimeout(() => resolve('deadline'), 15))]);
+    assert.equal(result, 'deadline');
+  } finally {
+    release?.();
+    await settling;
+    clock.restore();
+  }
+});
