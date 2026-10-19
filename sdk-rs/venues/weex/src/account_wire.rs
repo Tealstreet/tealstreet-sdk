@@ -155,7 +155,7 @@ impl OrderRow<'_> {
             "CONDITIONAL" => OrderType::Conditional,
             "STOP" | "STOP_MARKET" | "STOP_LOSS" => OrderType::StopLoss,
             "TAKE_PROFIT" | "TAKE_PROFIT_MARKET" => OrderType::TakeProfit,
-            "TRAILING_STOP_MARKET" => OrderType::TrailingStopLoss,
+            "TRAILING_STOP_MARKET" | "TRAILING_MARKET" => OrderType::TrailingStopLoss,
             _ => OrderType::Limit,
         };
         let kind = if !self.protective()
@@ -272,7 +272,11 @@ impl OrderRow<'_> {
                 child.reduce_only = true;
                 child.filled = 0.0;
                 child.remaining = child.amount;
-                child.trigger_type = Some(trigger(working));
+                child.trigger_type = matches!(
+                    working,
+                    "CONTRACT_PRICE" | "LAST_PRICE" | "MARK_PRICE" | "INDEX_PRICE"
+                )
+                .then(|| trigger(working));
                 child.extra = Some(OrderExtra {
                     remaining_notional: execution.filter(|n| *n != 0.0),
                     ..OrderExtra::default()

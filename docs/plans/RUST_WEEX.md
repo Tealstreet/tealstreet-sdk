@@ -105,3 +105,12 @@ and positive income continuation. Final verification and landing follow those
 fixes. Initial GitHub Rust gates and PR CI passed. The first-push scan identified
 one old Binance unit-test vector from published official documentation; an exact
 historical fingerprint exception is verified locally, without broad rule changes.
+
+Review fixes are independently re-reviewed clean: bounded reconciliation with
+late-generation guards and paced-page deadline renewal, imported trailing-order
+routing, current REST snapshots revoking stale rollback ownership, preserved
+remaining quantity and per-leg bracket triggers, fill-only uncertainty refusing
+replacement until fresh reconciliation, serialized settings mutations and explicit
+income INCOMPLETE notices for advertised cursors. Focused tests pass: 26 trading,
+17 history, 18 account; WEEX clippy passes. Final shared integration now merges
+the newly landed Bybit nested-array metadata support, followed by all gates.

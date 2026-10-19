@@ -13,6 +13,7 @@ use serde_json::value::RawValue;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 const TERMINAL_LIMIT: usize = 20_000;
+const RECONCILIATION_DEADLINE_MS: f64 = 20_000.0;
 const PRIVATE_WS: &str = "wss://ws-contract.weex.com/v3/ws/private";
 #[derive(Clone, Copy)]
 pub enum Kind {
@@ -24,6 +25,7 @@ pub enum Kind {
     Metadata,
 }
 pub struct Request {
+    cycle: u64,
     kind: Kind,
     revision: u64,
     page: u32,
@@ -108,6 +110,8 @@ impl StagedPosition {
 #[derive(Default)]
 pub struct State {
     started: bool,
+    cycle: u64,
+    deadline: Option<TimerId>,
     pending: u32,
     failed: bool,
     failures: u32,
@@ -131,10 +135,14 @@ pub struct State {
     last_received: f64,
     attempts: u32,
     next_id: u32,
+    unreconciled_fills: bool,
     fills: HashSet<String>,
     fill_order: VecDeque<String>,
 }
 impl State {
+    pub(crate) fn has_unreconciled_fills(&self) -> bool {
+        self.unreconciled_fills
+    }
     pub fn order_revision(&self) -> u64 {
         self.orders_revision
     }
@@ -220,6 +228,9 @@ impl WeexFutures {
         if self.account.pending != 0 {
             return;
         }
+        self.account.cycle += 1;
+        self.account.deadline =
+            Some(cx.set_timer((self.paused_until - cx.now).max(0.0) + RECONCILIATION_DEADLINE_MS));
         self.account.pending = 6;
         self.account.failed = false;
         self.account.order_parts = 0;
@@ -240,6 +251,7 @@ impl WeexFutures {
                 _ => self.account.revision,
             };
             let request = Request {
+                cycle: self.account.cycle,
                 kind,
                 revision,
                 page: if matches!(kind, Kind::Algo) { 1 } else { 0 },
@@ -253,10 +265,34 @@ impl WeexFutures {
         }
     }
     fn send_account(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+        if request.cycle != self.account.cycle {
+            return;
+        }
         if cx.now < self.paused_until {
+            // A rate limit discovered after this cycle began can defer a
+            // later page past its original deadline. Its read budget begins
+            // when that page may actually leave the queue.
+            if let Some(deadline) = self.account.deadline.take() {
+                cx.clear_timer(deadline);
+            }
+            self.account.deadline =
+                Some(cx.set_timer(self.paused_until - cx.now + RECONCILIATION_DEADLINE_MS));
             let timer = cx.set_timer(self.paused_until - cx.now);
             self.account.deferred.push((timer, request));
             return;
+        }
+        let first_page = if matches!(request.kind, Kind::Algo) {
+            1
+        } else {
+            0
+        };
+        if matches!(request.kind, Kind::Normal | Kind::Algo) && request.page > first_page {
+            // Continuation pages each receive the same bounded HTTP budget.
+            // A healthy multi-page snapshot may take more than one budget.
+            if let Some(deadline) = self.account.deadline.take() {
+                cx.clear_timer(deadline);
+            }
+            self.account.deadline = Some(cx.set_timer(RECONCILIATION_DEADLINE_MS));
         }
         let path = match request.kind {
             Kind::Balance => "/capi/v3/account/balance",
@@ -288,6 +324,9 @@ impl WeexFutures {
         request: &mut Request,
         item: &str,
     ) -> bool {
+        if request.cycle != self.account.cycle {
+            return true;
+        }
         request.page_rows += 1;
         match request.kind {
             Kind::Normal | Kind::Algo => serde_json::from_str::<OrderRow<'_>>(item)
@@ -341,6 +380,9 @@ impl WeexFutures {
         mut request: Request,
         response: Response<'_>,
     ) {
+        if request.cycle != self.account.cycle {
+            return;
+        }
         if response.status >= 400 {
             self.account_failed(cx, request, &format!("HTTP {}", response.status));
             return;
@@ -408,6 +450,10 @@ impl WeexFutures {
                         .filter_map(|order| self.account.snapshot_order(order))
                         .collect();
                     cx.store.set_orders(orders);
+                    self.account.unreconciled_fills = false;
+                    // A fresh authoritative read also replaces optimistic
+                    // ownership; an older failed write must not roll it back.
+                    self.account.invalidate_orders();
                 }
             }
             _ => {}
@@ -420,6 +466,9 @@ impl WeexFutures {
         request: Request,
         error: &str,
     ) {
+        if request.cycle != self.account.cycle {
+            return;
+        }
         cx.log(
             LogLevel::Warning,
             format!("WEEX private read: {error}; retaining last-known-good state"),
@@ -434,6 +483,9 @@ impl WeexFutures {
         self.account.failed |= failed;
         self.account.pending = self.account.pending.saturating_sub(1);
         if self.account.pending == 0 {
+            if let Some(deadline) = self.account.deadline.take() {
+                cx.clear_timer(deadline);
+            }
             if let Some((revision, rows)) = self.account.position_stage.take()
                 && revision == self.account.revision
             {
@@ -601,6 +653,9 @@ impl WeexFutures {
                         {
                             continue;
                         }
+                        // The execution can precede its cumulative order
+                        // update. Replacements wait for an authoritative read.
+                        self.account.unreconciled_fills = true;
                         self.account.fill_order.push_back(row.id.to_string());
                         if self.account.fill_order.len() > 20_000
                             && let Some(old) = self.account.fill_order.pop_front()
@@ -644,6 +699,22 @@ impl WeexFutures {
         true
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        if self.account.deadline == Some(timer) {
+            self.account.deadline = None;
+            // Expired HTTP streams may still finish later. Their generation
+            // cannot publish rows, send another page, or finish a newer cycle.
+            self.account.cycle += 1;
+            self.account.order_stage.clear();
+            self.account.position_stage = None;
+            self.account.orders_failed = true;
+            for (timer, _) in self.account.deferred.drain(..) {
+                cx.clear_timer(timer);
+            }
+            cx.log(LogLevel::Warning, "WEEX private reconciliation timed out; retaining last-known-good snapshots and retrying reads");
+            self.account.pending = 1;
+            self.account_finished(cx, true);
+            return true;
+        }
         if let Some(index) = self
             .account
             .deferred

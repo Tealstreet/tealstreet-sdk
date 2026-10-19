@@ -235,6 +235,12 @@ struct IncomeRow<'a> {
     #[serde(borrow, default, deserialize_with = "optional_id")]
     trade_id: Option<Str<'a>>,
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IncomeMetadata {
+    has_next_page: Option<bool>,
+    next_key: Option<serde::de::IgnoredAny>,
+}
 fn optional_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Str<'de>>, D::Error> {
     #[derive(Deserialize)]
     struct Id<'a>(#[serde(borrow, deserialize_with = "id")] Str<'a>);
@@ -793,6 +799,17 @@ impl WeexFutures {
             self.history_failed(cx, request, &error);
             return;
         }
+        let has_more = if matches!(request.kind, Kind::Income) {
+            match serde_json::from_str::<IncomeMetadata>(response.body) {
+                Ok(metadata) => metadata.has_next_page == Some(true) || metadata.next_key.is_some(),
+                Err(_) => {
+                    self.history_failed(cx, request, "malformed WEEX income pagination metadata");
+                    return;
+                }
+            }
+        } else {
+            false
+        };
         let command = request.command;
         let Some(read) = self.history.reads.get_mut(&command) else {
             return;
@@ -808,6 +825,14 @@ impl WeexFutures {
                 let Rows::Income(page) = request.rows else {
                     unreachable!("income page");
                 };
+                if has_more {
+                    // Span continuation cannot prove it consumed an advertised
+                    // opaque cursor, even when a repeated page is short.
+                    cx.log(LogLevel::Warning,"WEEX income history is INCOMPLETE: venue advertises additional cursor rows");
+                    if let Some(walk) = walk.as_mut() {
+                        walk.failed();
+                    }
+                }
                 if let Some(walk) = walk {
                     let identities: Vec<_> = page
                         .iter()

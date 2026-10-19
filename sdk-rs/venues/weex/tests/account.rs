@@ -320,7 +320,7 @@ fn paginated_account_read_waits_for_global_ban_and_is_resigned_afterward() {
             request: request(&actions, "/balance"),
             response: Response {
                 status: 429,
-                headers: "Retry-After: 10",
+                headers: "Retry-After: 60",
                 body: "limited",
             },
         },
@@ -330,14 +330,32 @@ fn paginated_account_read_waits_for_global_ban_and_is_resigned_afterward() {
     response(&mut e, request(&actions, "/openOrders"), 200, &page);
     let deferred: Vec<_> = e.drain_actions().collect();
     assert!(requests(&deferred).is_empty());
-    let timer = deferred
+    assert!(
+        deferred
+            .iter()
+            .any(|a| matches!(a, Action::SetTimer {at_ms,..} if *at_ms == NOW + 80_000.0)),
+        "deadline extends past a newly discovered ban"
+    );
+    let old_deadline = actions
         .iter()
-        .find_map(|action| match action {
-            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 10_000.0 => Some(*timer),
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000.0 => Some(*timer),
             _ => None,
         })
         .unwrap();
-    e.handle(NOW + 10_000.0, Event::TimerFired { timer });
+    assert!(
+        deferred
+            .iter()
+            .any(|a| matches!(a,Action::ClearTimer {timer} if *timer == old_deadline))
+    );
+    let timer = deferred
+        .iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 60_000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(NOW + 60_000.0, Event::TimerFired { timer });
     let actions: Vec<_> = e.drain_actions().collect();
     let requests = requests(&actions);
     assert_eq!(requests.len(), 1);
@@ -346,7 +364,7 @@ fn paginated_account_read_waits_for_global_ban_and_is_resigned_afterward() {
         requests[0]
             .headers
             .iter()
-            .any(|(key, value)| *key == "ACCESS-TIMESTAMP" && value == "1773295710000")
+            .any(|(key, value)| *key == "ACCESS-TIMESTAMP" && value == "1773295760000")
     );
 }
 
@@ -456,4 +474,303 @@ fn bounded_terminal_floor_rejects_inflight_replay_but_fresh_snapshot_admits_old_
     );
     e.handle(NOW,Event::WsMessage {socket,text:r#"{"e":"orders","d":[{"id":"1","symbol":"BTCUSDT","orderSide":"BUY","type":"LIMIT","status":"NEW","size":"1","updatedTime":"1773295700001"}]}"#});
     assert!(e.store().order("1").is_none());
+}
+
+#[test]
+fn stalled_cycle_times_out_and_late_responses_cannot_finish_newer_cycle() {
+    let (mut e, actions) = started(false);
+    complete(&mut e, &actions, NORMAL, ALGO);
+    let expected = e.store().orders().to_vec();
+    let stale = next_cycle(&mut e);
+    let deadline = stale
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 22_000.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("20-second reconciliation deadline");
+    // One complete half cannot replace the existing complete order snapshot.
+    response(&mut e, request(&stale, "/openOrders"), 200, "[]");
+    e.drain_actions().for_each(drop);
+    e.handle(NOW + 22_000.0, Event::TimerFired { timer: deadline });
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert_eq!(e.store().orders(), expected);
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log {message,..}) if message.contains("timed out"))));
+    let retry = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 26_000.0 => Some(*timer),
+            _ => None,
+        })
+        .expect("read-only retry after deadline");
+    e.handle(NOW + 26_000.0, Event::TimerFired { timer: retry });
+    let fresh: Vec<_> = e.drain_actions().collect();
+    assert_eq!(requests(&fresh).len(), 6);
+    // Old settings and empty order responses arrive while the new cycle owns
+    // pending. Neither may mutate state nor consume the new pending counter.
+    response(
+        &mut e,
+        request(&stale, "symbolConfig"),
+        200,
+        r#"[{"symbol":"BTCUSDT","marginType":"ISOLATED","separatedType":"SEPARATED","crossLeverage":"1","isolatedLongLeverage":"1","isolatedShortLeverage":"1"}]"#,
+    );
+    response(&mut e, request(&stale, "/openAlgoOrders"), 200, "[]");
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
+    assert_eq!(e.store().orders(), expected);
+    response(
+        &mut e,
+        request(&fresh, "accountConfig"),
+        200,
+        r#"{"dualSidePosition":false,"canTrade":true}"#,
+    );
+    response(
+        &mut e,
+        request(&fresh, "symbolConfig"),
+        200,
+        r#"[{"symbol":"BTCUSDT","marginType":"CROSSED","separatedType":"COMBINED","crossLeverage":"20","isolatedLongLeverage":"10","isolatedShortLeverage":"15"}]"#,
+    );
+    response(
+        &mut e,
+        request(&fresh, "/balance"),
+        200,
+        r#"[{"asset":"USDT","balance":"5696.49","availableBalance":"5413.06"}]"#,
+    );
+    response(&mut e, request(&fresh, "allPosition"), 200, POSITIONS);
+    response(&mut e, request(&fresh, "/openOrders"), 200, NORMAL);
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a,Action::SetTimer {at_ms,..} if *at_ms == NOW + 2_000.0)),
+        "only all six current responses may complete the cycle"
+    );
+    response(&mut e, request(&fresh, "/openAlgoOrders"), 200, ALGO);
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a,Action::SetTimer {at_ms,..} if at_ms == NOW + 2_000.0))
+    );
+}
+
+#[test]
+fn reconciliation_deadline_starts_after_scheduled_rate_limit_pause() {
+    let (mut e, actions) = started(false);
+    let req = request(&actions, "/balance");
+    e.handle(
+        NOW,
+        Event::HttpResponse {
+            request: req,
+            response: Response {
+                status: 429,
+                headers: "Retry-After: 60",
+                body: "rate limited",
+            },
+        },
+    );
+    for path in [
+        "accountConfig",
+        "symbolConfig",
+        "allPosition",
+        "/openOrders",
+        "/openAlgoOrders",
+    ] {
+        let body = if path == "accountConfig" {
+            r#"{"dualSidePosition":false,"canTrade":true}"#
+        } else {
+            "[]"
+        };
+        response(&mut e, request(&actions, path), 200, body);
+    }
+    let actions: Vec<_> = e.drain_actions().collect();
+    let refresh = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == NOW + 60_000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    // A refresh firing early after its timer was delayed is still queued
+    // behind the ban; the cycle deadline includes that legitimate wait.
+    e.handle(NOW + 30_000.0, Event::TimerFired { timer: refresh });
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(requests(&actions).is_empty());
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a,Action::SetTimer {at_ms,..} if *at_ms == NOW + 80_000.0))
+    );
+}
+
+#[test]
+fn documented_trailing_market_algo_order_is_read_and_canceled_as_algo() {
+    let (mut e, actions) = started(false);
+    complete(
+        &mut e,
+        &actions,
+        "[]",
+        r#"[{"algoId":812345678901234700,"symbol":"BTCUSDT","side":"SELL","orderType":"TRAILING_MARKET","algoStatus":"UNTRIGGERED","quantity":"0.01","triggerPrice":"0","price":"0","createTime":1773295700000,"activatePrice":"70000","callbackRate":"0.05"}]"#,
+    );
+    let order = e.store().order("812345678901234700").unwrap();
+    assert_eq!(
+        order.kind,
+        safe_cex_engine::model::OrderType::TrailingStopLoss
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        NOW,
+        Event::Command(safe_cex_engine::Command::CancelOrders {
+            command: 9,
+            ids: vec!["812345678901234700".into()],
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let requests = requests(&actions);
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, safe_cex_engine::Method::Delete);
+    assert!(
+        requests[0]
+            .url
+            .ends_with("/algoOrder?orderId=812345678901234700")
+    );
+}
+
+#[test]
+fn failed_cancel_cannot_restore_status_over_newer_authoritative_snapshot() {
+    let (mut e, actions) = started(false);
+    complete(&mut e, &actions, NORMAL, "[]");
+    let periodic = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if at_ms == NOW + 2000.0 => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(
+        NOW,
+        Event::Command(safe_cex_engine::Command::CancelOrders {
+            command: 9,
+            ids: vec!["702345678901234600".into()],
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let cancel = request(&actions, "/batchOrders");
+    e.handle(NOW + 2000.0, Event::TimerFired { timer: periodic });
+    let fresh: Vec<_> = e.drain_actions().collect();
+    let canceling = NORMAL
+        .replace("\"NEW\"", "\"CANCELING\"")
+        .replace("1773295700000", "1773295705000");
+    complete(&mut e, &fresh, &canceling, "[]");
+    assert_eq!(
+        e.store().order("702345678901234600").unwrap().status,
+        OrderStatus::Canceling
+    );
+    e.handle(
+        NOW + 6000.0,
+        Event::HttpFailed {
+            request: cancel,
+            error: "ambiguous cancel timeout",
+        },
+    );
+    let current = e.store().order("702345678901234600").unwrap();
+    assert_eq!(
+        current.status,
+        OrderStatus::Canceling,
+        "the old command no longer owns a row replaced by fresh REST"
+    );
+    assert_eq!(current.last_update, NOW + 5000.0);
+}
+
+#[test]
+fn healthy_continuation_pages_get_a_full_budget_and_stalled_peer_still_expires() {
+    for hold_balance in [false, true] {
+        let (mut e, actions) = started(false);
+        let original_deadline = actions
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 20_000.0 => Some(*timer),
+                _ => None,
+            })
+            .unwrap();
+        response(
+            &mut e,
+            request(&actions, "accountConfig"),
+            200,
+            r#"{"dualSidePosition":false,"canTrade":true}"#,
+        );
+        response(&mut e, request(&actions, "symbolConfig"), 200, "[]");
+        if !hold_balance {
+            response(
+                &mut e,
+                request(&actions, "/balance"),
+                200,
+                r#"[{"asset":"USDT","balance":"1","availableBalance":"1"}]"#,
+            );
+        }
+        response(&mut e, request(&actions, "allPosition"), 200, "[]");
+        response(&mut e, request(&actions, "/openAlgoOrders"), 200, "[]");
+        e.drain_actions().for_each(drop);
+        let row = &NORMAL[1..NORMAL.len() - 1];
+        let full = format!("[{}]", vec![row; 100].join(","));
+        e.handle(
+            NOW + 12_000.0,
+            Event::HttpResponse {
+                request: request(&actions, "/openOrders"),
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: &full,
+                },
+            },
+        );
+        let continuation: Vec<_> = e.drain_actions().collect();
+        assert!(
+            continuation
+                .iter()
+                .any(|a| matches!(a,Action::ClearTimer {timer} if *timer == original_deadline))
+        );
+        let extended = continuation
+            .iter()
+            .find_map(|a| match a {
+                Action::SetTimer { timer, at_ms } if *at_ms == NOW + 32_000.0 => Some(*timer),
+                _ => None,
+            })
+            .unwrap();
+        let second = request(&continuation, "/openOrders");
+        e.handle(
+            NOW + 20_000.0,
+            Event::TimerFired {
+                timer: original_deadline,
+            },
+        );
+        assert!(e.drain_actions().next().is_none());
+        assert!(!e.store().loaded().orders);
+        e.handle(
+            NOW + 24_000.0,
+            Event::HttpResponse {
+                request: second,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body: "[]",
+                },
+            },
+        );
+        let complete: Vec<_> = e.drain_actions().collect();
+        assert!(e.store().loaded().orders);
+        if hold_balance {
+            assert!(
+                !complete
+                    .iter()
+                    .any(|a| matches!(a,Action::ClearTimer {timer} if *timer == extended))
+            );
+            e.handle(NOW + 32_000.0, Event::TimerFired { timer: extended });
+            assert!(e.drain_actions().any(|a| matches!(a,Action::Notice(safe_cex_engine::Notice::Log {message,..}) if message.contains("timed out"))));
+        } else {
+            assert!(e.store().loaded().positions);
+            assert!(
+                complete
+                    .iter()
+                    .any(|a| matches!(a,Action::ClearTimer {timer} if *timer == extended))
+            );
+        }
+    }
 }

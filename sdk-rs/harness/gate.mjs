@@ -84,6 +84,8 @@ const KNOWN_TS_FIXES = {
     // frames cannot undo newer state; repeated fill IDs emit once; missing
     // placement IDs fail rather than fabricating an ID; rejected cancellations
     // retain their order; per-symbol margin changes preserve that symbol's mode.
+    // Price-only replacement preserves remaining quantity and refuses uncertain
+    // fill/bracket state; positive income cursors always report INCOMPLETE.
   },
 };
 if (isPrivate) {

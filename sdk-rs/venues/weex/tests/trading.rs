@@ -1,15 +1,21 @@
 //! Contract V3 documented trading examples and adversarial lifecycle contracts.
 use safe_cex_engine::model::*;
 use safe_cex_engine::store::MarketSetting;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Method, Notice, Response};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, HttpRequest, Method, Notice, Response, SocketId,
+};
 use safe_cex_venue_weex::{Options, WeexFutures};
 use serde_json::{Value, json};
 
 fn engine() -> Engine<WeexFutures> {
+    engine_with_private_ws(false)
+}
+fn engine_with_private_ws(private_ws_headers: bool) -> Engine<WeexFutures> {
     let mut e = Engine::new(WeexFutures::new(Options {
         key: Some("key".into()),
         secret: Some("secret".into()),
         passphrase: Some("passphrase".into()),
+        private_ws_headers,
         ..Options::default()
     }));
     e.store_mut().set_markets(vec![Market {
@@ -588,10 +594,30 @@ fn protective_amend_refuses_synthetic_id_and_size_and_preserves_execution_price(
 #[test]
 fn cancel_replace_preflights_then_preserves_brackets_and_generates_new_client_id() {
     let mut e = engine();
-    let mut old = order("1", OrderType::Limit);
-    old.take_profit = Some(70000.0);
-    old.stop_loss = Some(58000.0);
-    e.store_mut().upsert_order(old);
+    let mut original = opts("");
+    original.side = OrderSide::Sell;
+    original.amount = 0.2;
+    original.price = Some(59000.0);
+    original.take_profit = Some(70000.0);
+    original.stop_loss = Some(58000.0);
+    original.time_in_force = Some(TimeInForce::PostOnly);
+    let placed = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 99,
+            orders: vec![original],
+        },
+    );
+    let placement = writes(&placed).pop().unwrap();
+    let ack = single_ack(&placement, 1);
+    response(&mut e, &placement, ack);
+    let old_client = e
+        .store()
+        .order("1")
+        .unwrap()
+        .client_order_id
+        .clone()
+        .unwrap();
     let actions = command(
         &mut e,
         Command::AmendOrder {
@@ -612,7 +638,7 @@ fn cancel_replace_preflights_then_preserves_brackets_and_generates_new_client_id
     assert_eq!(payload["quantity"], "0.123");
     assert_eq!(payload["price"], "60000");
     assert_eq!(payload["timeInForce"], "POST_ONLY");
-    assert_ne!(payload["newClientOrderId"], "old-client");
+    assert_ne!(payload["newClientOrderId"], old_client);
     let ack = single_ack(&r, 2);
     let actions = response(&mut e, &r, ack);
     assert_eq!(done(&actions).unwrap(), r#"["2"]"#);
@@ -916,4 +942,383 @@ fn cancel_symbol_acknowledges_order_arriving_after_dispatch() {
         e.store().order("123").unwrap().status,
         OrderStatus::Canceled
     );
+}
+
+fn import_orders(e: &mut Engine<WeexFutures>, normal: Value, algo: Value) {
+    let _ = import_orders_with_socket(e, normal, algo);
+}
+fn import_orders_with_socket(
+    e: &mut Engine<WeexFutures>,
+    normal: Value,
+    algo: Value,
+) -> Option<SocketId> {
+    let actions = command(
+        e,
+        Command::SetLeverage {
+            command: 900,
+            symbol: "BTCUSDT".into(),
+            leverage: 20.0,
+        },
+    );
+    let req = writes(&actions).pop().unwrap();
+    let actions = response(e, &req, json!({"code":"200"}));
+    let socket = actions.iter().find_map(|action| match action {
+        Action::WsConnectWithHeaders { socket, .. } => Some(*socket),
+        _ => None,
+    });
+    let requests: Vec<_> = actions
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    let _ = respond_account_reads(e, requests, normal, algo);
+    socket
+}
+fn respond_account_reads(
+    e: &mut Engine<WeexFutures>,
+    requests: Vec<HttpRequest>,
+    normal: Value,
+    algo: Value,
+) -> Vec<Action> {
+    let mut actions = Vec::new();
+    for request in requests {
+        let value = if request.url.contains("openAlgoOrders") {
+            algo.clone()
+        } else if request.url.contains("openOrders") {
+            normal.clone()
+        } else if request.url.contains("accountConfig") {
+            json!({"canTrade":true,"dualSidePosition":false})
+        } else if request.url.contains("symbolConfig") {
+            json!([{"symbol":"BTCUSDT","marginType":"CROSSED","separatedType":"COMBINED","crossLeverage":"20","isolatedLongLeverage":"20","isolatedShortLeverage":"20"}])
+        } else {
+            json!([])
+        };
+        actions.extend(response(e, &request, value));
+    }
+    actions
+}
+#[test]
+fn imported_algo_bracket_children_preserve_both_working_types_on_amend() {
+    let mut e = engine();
+    import_orders(
+        &mut e,
+        json!([]),
+        json!([{"algoId":"55","symbol":"BTCUSDT","side":"BUY","orderType":"STOP","algoStatus":"UNTRIGGERED","quantity":"0.02","price":"68800","triggerPrice":"68900","tpTriggerPrice":"70500","slTriggerPrice":"68000","tpOrderType":"MARK_PRICE","workingType":"CONTRACT_PRICE","updateTime":1773295700000u64}]),
+    );
+    let actions = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "55".into(),
+            price: Some(69000.0),
+            amount: None,
+        },
+    );
+    let cancel = writes(&actions).pop().unwrap();
+    let actions = response(&mut e, &cancel, json!({"orderId":"55","success":true}));
+    let replacement = writes(&actions).pop().unwrap();
+    assert_eq!(body(&replacement)["TpWorkingType"], "MARK_PRICE");
+    assert_eq!(body(&replacement)["SlWorkingType"], "CONTRACT_PRICE");
+}
+#[test]
+fn unknown_imported_bracket_source_fails_before_cancel() {
+    let mut e = engine();
+    let mut old = order("1", OrderType::Limit);
+    old.take_profit = Some(70000.0);
+    old.stop_loss = Some(58000.0);
+    e.store_mut().upsert_order(old);
+    let actions = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "1".into(),
+            price: Some(60000.0),
+            amount: None,
+        },
+    );
+    assert!(writes(&actions).is_empty());
+    assert!(
+        done(&actions)
+            .unwrap_err()
+            .contains("cannot preserve imported")
+    );
+    assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Open);
+}
+#[test]
+fn price_only_amend_replaces_only_the_unfilled_quantity() {
+    let mut e = engine();
+    let mut partial = order("1", OrderType::Limit);
+    partial.amount = 0.2;
+    partial.filled = 0.1;
+    partial.remaining = 0.1;
+    e.store_mut().upsert_order(partial);
+    let actions = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "1".into(),
+            price: Some(60000.0),
+            amount: None,
+        },
+    );
+    let cancel = writes(&actions).pop().unwrap();
+    let actions = response(&mut e, &cancel, json!([{"orderId":"1","success":true}]));
+    let replacement = writes(&actions).pop().unwrap();
+    assert_eq!(body(&replacement)["batchOrders"][0]["quantity"], "0.1");
+    assert_eq!(
+        body(&replacement)["batchOrders"][0]["timeInForce"],
+        "POST_ONLY"
+    );
+    let ack = batch_ack(&replacement, 2);
+    response(&mut e, &replacement, ack);
+    assert_eq!(
+        e.store().order("1").unwrap().filled + e.store().order("2").unwrap().amount,
+        0.2
+    );
+}
+#[test]
+fn a_fill_while_canceling_blocks_stale_replacement_quantity() {
+    for filled in [0.15, 0.2] {
+        let mut e = engine();
+        let mut partial = order("1", OrderType::Limit);
+        partial.amount = 0.2;
+        partial.filled = 0.1;
+        partial.remaining = 0.1;
+        e.store_mut().upsert_order(partial);
+        let actions = command(
+            &mut e,
+            Command::AmendOrder {
+                command: 1,
+                id: "1".into(),
+                price: Some(60000.0),
+                amount: None,
+            },
+        );
+        let cancel = writes(&actions).pop().unwrap();
+        e.store_mut().update_order("1", |order| {
+            order.filled = filled;
+            order.remaining = 0.2 - filled;
+            if filled == 0.2 {
+                order.status = OrderStatus::Closed;
+            }
+        });
+        let actions = response(&mut e, &cancel, json!([{"orderId":"1","success":true}]));
+        assert!(writes(&actions).is_empty());
+        assert!(
+            done(&actions)
+                .unwrap_err()
+                .contains("changed while canceling")
+        );
+        assert_eq!(e.store().order("1").unwrap().filled, filled);
+    }
+}
+#[test]
+fn overlapping_settings_commands_fail_before_a_second_write_then_allow_retry() {
+    let mut e = engine();
+    let actions = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            leverage: 20.0,
+        },
+    );
+    let first = writes(&actions).pop().unwrap();
+    let actions = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 2,
+            symbol: "BTCUSDT".into(),
+            leverage: 30.0,
+        },
+    );
+    assert!(writes(&actions).is_empty());
+    assert!(
+        done(&actions)
+            .unwrap_err()
+            .contains("settings update is already in flight")
+    );
+    response(&mut e, &first, json!({"code":"200"}));
+    let actions = command(
+        &mut e,
+        Command::SetLeverage {
+            command: 3,
+            symbol: "BTCUSDT".into(),
+            leverage: 30.0,
+        },
+    );
+    let second = writes(&actions).pop().unwrap();
+    response(&mut e, &second, json!({"code":"200"}));
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 30.0);
+}
+#[test]
+fn imported_trailing_market_order_cancels_through_the_algo_endpoint() {
+    let mut e = engine();
+    import_orders(
+        &mut e,
+        json!([]),
+        json!([{"algoId":"66","symbol":"BTCUSDT","side":"BUY","orderType":"TRAILING_MARKET","algoStatus":"UNTRIGGERED","quantity":"0.02","updateTime":1773295700000u64}]),
+    );
+    let actions = command(
+        &mut e,
+        Command::CancelOrders {
+            command: 1,
+            ids: vec!["66".into()],
+        },
+    );
+    let cancel = writes(&actions).pop().unwrap();
+    assert!(cancel.url.ends_with("/algoOrder?orderId=66"));
+}
+
+#[test]
+fn fill_only_socket_event_during_cancel_blocks_replacement_before_order_update() {
+    let mut e = engine_with_private_ws(true);
+    let socket=import_orders_with_socket(&mut e,json!([{"orderId":"1","symbol":"BTCUSDT","side":"SELL","type":"LIMIT","status":"PARTIALLY_FILLED","origQty":"0.2","executedQty":"0.1","price":"59000","updateTime":1773295700000u64}]),json!([])).unwrap();
+    e.handle(1002.0, Event::WsOpened { socket });
+    e.drain_actions().for_each(drop);
+    let actions = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "1".into(),
+            price: Some(60000.0),
+            amount: None,
+        },
+    );
+    let cancel = writes(&actions).pop().unwrap();
+    e.handle(1003.0,Event::WsMessage {socket,text:r#"{"e":"fill","d":[{"id":"fill-2","orderId":"1","symbol":"BTCUSDT","orderSide":"SELL","fillSize":"0.05","fillValue":"3000"}]}"#});
+    assert_eq!(
+        e.store().order("1").unwrap().filled,
+        0.1,
+        "the cumulative orders frame has not arrived"
+    );
+    e.drain_actions().for_each(drop);
+    let actions = response(&mut e, &cancel, json!([{"orderId":"1","success":true}]));
+    assert!(writes(&actions).is_empty());
+    assert!(
+        done(&actions)
+            .unwrap_err()
+            .contains("changed while canceling")
+    );
+}
+#[test]
+fn imported_algo_children_with_unknown_trigger_source_cannot_authorize_amend() {
+    for missing in ["tpOrderType", "workingType"] {
+        let mut e = engine();
+        let mut row = json!({"algoId":"55","symbol":"BTCUSDT","side":"BUY","orderType":"STOP","algoStatus":"UNTRIGGERED","quantity":"0.02","price":"68800","triggerPrice":"68900","tpTriggerPrice":"70500","slTriggerPrice":"68000","tpOrderType":"MARK_PRICE","workingType":"CONTRACT_PRICE","updateTime":1773295700000u64});
+        row.as_object_mut().unwrap().remove(missing);
+        import_orders(&mut e, json!([]), Value::Array(vec![row]));
+        let actions = command(
+            &mut e,
+            Command::AmendOrder {
+                command: 1,
+                id: "55".into(),
+                price: Some(69000.0),
+                amount: None,
+            },
+        );
+        assert!(writes(&actions).is_empty());
+        assert!(
+            done(&actions)
+                .unwrap_err()
+                .contains("cannot preserve imported")
+        );
+        assert_eq!(e.store().order("55").unwrap().status, OrderStatus::Open);
+    }
+}
+
+#[test]
+fn fill_only_socket_event_before_amend_waits_for_authoritative_order_reconciliation() {
+    let mut e = engine_with_private_ws(true);
+    let socket=import_orders_with_socket(&mut e,json!([{"orderId":"1","symbol":"BTCUSDT","side":"SELL","type":"LIMIT","status":"PARTIALLY_FILLED","origQty":"0.2","executedQty":"0.1","price":"59000","updateTime":1773295700000u64}]),json!([])).unwrap();
+    e.handle(1002.0, Event::WsOpened { socket });
+    let before_fill: Vec<_> = e
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    e.handle(1003.0,Event::WsMessage {socket,text:r#"{"e":"fill","d":[{"id":"fill-2","orderId":"1","symbol":"BTCUSDT","orderSide":"SELL","fillSize":"0.05","fillValue":"3000"}]}"#});
+    assert_eq!(
+        e.store().order("1").unwrap().filled,
+        0.1,
+        "the cumulative orders frame has not arrived"
+    );
+    e.drain_actions().for_each(drop);
+    let actions = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "1".into(),
+            price: Some(60000.0),
+            amount: None,
+        },
+    );
+    assert!(
+        writes(&actions).is_empty(),
+        "uncertain remaining size cannot authorize the destructive cancel"
+    );
+    assert!(
+        done(&actions)
+            .unwrap_err()
+            .contains("awaiting order reconciliation")
+    );
+    assert_eq!(e.store().order("1").unwrap().status, OrderStatus::Open);
+    let current = json!([{"orderId":"1","symbol":"BTCUSDT","side":"SELL","type":"LIMIT","status":"PARTIALLY_FILLED","origQty":"0.2","executedQty":"0.15","price":"59000","updateTime":1773295701000u64}]);
+    let actions = respond_account_reads(&mut e, before_fill, current.clone(), json!([]));
+    let blocked = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 3,
+            id: "1".into(),
+            price: Some(60000.0),
+            amount: None,
+        },
+    );
+    assert!(
+        writes(&blocked).is_empty(),
+        "the older snapshot cannot clear fill uncertainty"
+    );
+    assert!(
+        done(&blocked)
+            .unwrap_err()
+            .contains("awaiting order reconciliation")
+    );
+    let refresh = actions
+        .into_iter()
+        .find_map(|action| match action {
+            Action::SetTimer {
+                timer,
+                at_ms: 3001.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(3001.0, Event::TimerFired { timer: refresh });
+    let fresh = e
+        .drain_actions()
+        .filter_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+    respond_account_reads(&mut e, fresh, current, json!([]));
+    let actions = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 2,
+            id: "1".into(),
+            price: Some(60000.0),
+            amount: None,
+        },
+    );
+    assert_eq!(
+        writes(&actions).len(),
+        1,
+        "a fresh complete snapshot permits an explicit caller retry"
+    );
+    assert_eq!(writes(&actions)[0].method, Method::Delete);
 }

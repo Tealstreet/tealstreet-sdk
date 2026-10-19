@@ -380,7 +380,8 @@ impl<P> Cx<'_, P> {
 
     /// Issue a request whose successful body holds a large array: each element
     /// goes to [`Venue::on_item`] as it arrives, then [`Venue::on_response`]
-    /// runs with an empty body. Error bodies arrive whole.
+    /// receives metadata with streamed rows replaced by null. Error bodies
+    /// arrive whole.
     pub fn request_streamed(
         &mut self,
         method: Method,

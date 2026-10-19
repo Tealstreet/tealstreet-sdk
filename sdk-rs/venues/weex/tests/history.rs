@@ -535,3 +535,57 @@ fn pathological_income_ranges_are_rejected_before_network_io() {
     assert!(result(&actions).unwrap_err().contains("budget"));
     assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
 }
+
+#[test]
+fn positive_income_cursor_never_reports_a_short_repeated_span_as_complete() {
+    let mut e = engine();
+    let mut now = NOW;
+    let mut actions = command(&mut e, income(Some(NOW), Some(NOW + 1000.0)));
+    let mut warned = false;
+    let mut completed = false;
+    for _ in 0..10 {
+        warned|=actions.iter().any(|action|matches!(action,Action::Notice(Notice::Log {message,..}) if message.contains("INCOMPLETE")));
+        if actions
+            .iter()
+            .any(|action| matches!(action, Action::Notice(Notice::CommandDone { .. })))
+        {
+            let rows: Vec<IncomeResult> = serde_json::from_str(&result(&actions).unwrap()).unwrap();
+            assert_eq!(rows.len(), 1);
+            completed = true;
+            break;
+        }
+        if actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+        {
+            let req = request(&actions, "/account/income");
+            let row = bill(42, NOW + 500.0);
+            actions = response(
+                &mut e,
+                now,
+                req.id,
+                &format!(
+                    r#"{{"hasNextPage":true,"nextKey":{{"nextKeyId":42,"nextKeyTime":{}}},"items":[{row}]}}"#,
+                    NOW + 500.0
+                ),
+            );
+        } else {
+            actions = advance(&mut e, &mut now, actions);
+        }
+    }
+    assert!(completed && warned);
+}
+#[test]
+fn non_null_income_cursor_warns_even_when_has_next_page_is_false() {
+    let mut e = engine();
+    let actions = command(&mut e, income(None, None));
+    let req = request(&actions, "/account/income");
+    let actions = response(
+        &mut e,
+        NOW,
+        req.id,
+        r#"{"hasNextPage":false,"nextKey":{"nextKeyId":42},"items":[]}"#,
+    );
+    assert_eq!(result(&actions).unwrap(), "[]");
+    assert!(actions.iter().any(|action|matches!(action,Action::Notice(Notice::Log {message,..}) if message.contains("INCOMPLETE"))));
+}

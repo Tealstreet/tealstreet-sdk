@@ -33,7 +33,13 @@ pub(crate) struct Request {
     call: Call,
     revision: u64,
 }
+struct ReplacementGuard {
+    id: String,
+    amount: f64,
+    filled: f64,
+}
 struct Step {
+    replacement: Option<ReplacementGuard>,
     method: Method,
     path: &'static str,
     query: String,
@@ -324,6 +330,7 @@ fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: String) {
 }
 fn post(path: &'static str, body: String, call: Call) -> Step {
     Step {
+        replacement: None,
         method: Method::Post,
         path,
         query: String::new(),
@@ -333,6 +340,39 @@ fn post(path: &'static str, body: String, call: Call) -> Step {
 }
 
 impl WeexFutures {
+    fn replacement_brackets(
+        &self,
+        cx: &Cx<'_, Pending>,
+        order: &Order,
+    ) -> Result<Brackets, String> {
+        if let Some(types) = self.trading.brackets.get(&order.id) {
+            return Ok(*types);
+        }
+        let source = |kind| {
+            cx.store
+                .orders()
+                .iter()
+                .find(|child| {
+                    child.parent_id.as_deref() == Some(order.id.as_str()) && child.kind == kind
+                })
+                .and_then(|child| child.trigger_type)
+        };
+        let tp = order
+            .take_profit
+            .map(|_| {
+                source(OrderType::TakeProfit)
+                    .ok_or("WEEX cannot preserve imported take-profit trigger type")
+            })
+            .transpose()?;
+        let sl = order
+            .stop_loss
+            .map(|_| {
+                source(OrderType::StopLoss)
+                    .ok_or("WEEX cannot preserve imported stop-loss trigger type")
+            })
+            .transpose()?;
+        Ok(Brackets { tp, sl })
+    }
     fn plan_orders(
         &self,
         cx: &Cx<'_, Pending>,
@@ -600,6 +640,7 @@ impl WeexFutures {
                 order_id_list: native.clone(),
             };
             steps.push_back(Step {
+                replacement: None,
                 method: Method::Delete,
                 path: "/capi/v3/batchOrders",
                 query: String::new(),
@@ -618,6 +659,7 @@ impl WeexFutures {
                 continue;
             }
             steps.push_back(Step {
+                replacement: None,
                 method: Method::Delete,
                 path: "/capi/v3/algoOrder",
                 query: format!("orderId={base}"),
@@ -643,6 +685,24 @@ impl WeexFutures {
         cx: &mut Cx<'_, Pending>,
         command: Command,
     ) -> Option<Command> {
+        // Serialize settings admission: a later command must be planned from
+        // acknowledged settings, never an older in-flight mode/margin cache.
+        if let Command::SetLeverage { command: id, .. }
+        | Command::SetMarginType { command: id, .. }
+        | Command::SetPositionMode { command: id, .. } = &command
+            && self.trading.jobs.values().any(|job| job.refresh)
+        {
+            if self.trading.jobs.contains_key(id) {
+                cx.log(LogLevel::Error, "WEEX command ID is already in flight");
+            } else {
+                reject(
+                    cx,
+                    *id,
+                    "WEEX account settings update is already in flight; wait for its result".into(),
+                );
+            }
+            return None;
+        }
         self.trading.brackets.retain(|id, _| {
             cx.store
                 .order(id)
@@ -707,12 +767,16 @@ impl WeexFutures {
                         if new_price.is_none() && amount.is_none() {
                             return Err("WEEX amendment requires price or amount".into());
                         }
+                        if self.account.has_unreconciled_fills() {
+                            return Err("WEEX fills are awaiting order reconciliation; wait before amending".into());
+                        }
                         let conditional = o.kind == OrderType::Conditional;
+                        let brackets = self.replacement_brackets(cx, &o)?;
                         let opts = PlaceOrderOpts {
                             symbol: o.symbol.clone(),
                             kind: o.kind,
                             side: o.side,
-                            amount: amount.unwrap_or(o.amount),
+                            amount: amount.unwrap_or(o.remaining),
                             price: if conditional {
                                 o.extra
                                     .as_ref()
@@ -727,13 +791,20 @@ impl WeexFutures {
                             reduce_only: Some(o.reduce_only),
                             time_in_force: o.time_in_force,
                             trigger_type: o.trigger_type,
-                            tp_trigger_type: self.trading.brackets.get(&o.id).and_then(|b| b.tp),
-                            sl_trigger_type: self.trading.brackets.get(&o.id).and_then(|b| b.sl),
+                            tp_trigger_type: brackets.tp,
+                            sl_trigger_type: brackets.sl,
                             client_order_id: None,
                             close: o.close,
                         };
                         // Replacement preflight runs before the destructive cancel.
-                        let replacement = self.plan_orders(cx, vec![opts])?;
+                        let mut replacement = self.plan_orders(cx, vec![opts])?;
+                        if let Some(step) = replacement.front_mut() {
+                            step.replacement = Some(ReplacementGuard {
+                                id: o.id.clone(),
+                                amount: o.amount,
+                                filled: o.filled,
+                            });
+                        }
                         let mut cancel = self.plan_cancel(cx, vec![o.id])?;
                         cancel.extend(replacement);
                         Ok(cancel)
@@ -749,6 +820,7 @@ impl WeexFutures {
                     Ok([false, true]
                         .into_iter()
                         .map(|is_algo| Step {
+                            replacement: None,
                             method: Method::Delete,
                             path: if is_algo {
                                 "/capi/v3/algoOpenOrders"
@@ -932,6 +1004,18 @@ impl WeexFutures {
             job.steps.clear();
         }
         if let Some(step) = job.steps.pop_front() {
+            if let Some(guard) = &step.replacement
+                && !cx.store.order(&guard.id).is_some_and(|order| {
+                    order.status == OrderStatus::Canceled
+                        && order.amount == guard.amount
+                        && order.filled == guard.filled
+                })
+            {
+                job.error=Some("WEEX order changed while canceling; replacement not submitted; reconcile before retrying".into());
+                self.refresh_account(cx);
+                self.trade_next(cx, command);
+                return;
+            }
             if matches!(
                 &step.call,
                 Call::Place { .. } | Call::Cancel { .. } | Call::Amend { .. }
@@ -1019,9 +1103,18 @@ impl WeexFutures {
             return;
         }
         let owned = request.revision == self.account.order_revision();
+        // A fill frame can revoke ownership before the cumulative order frame
+        // changes cached quantities. Never replace from that stale amount.
+        let replacement_lost = !owned
+            && matches!(&request.call, Call::Cancel { .. })
+            && self.trading.jobs.get(&request.command).is_some_and(|job| {
+                job.steps
+                    .front()
+                    .is_some_and(|step| step.replacement.is_some())
+            });
         let result = self.apply_trade_response(cx, &request.call, response.body, owned);
         self.account.invalidate_orders();
-        if result.is_err() {
+        if result.is_err() || replacement_lost {
             self.refresh_account(cx);
         }
         if matches!(
@@ -1043,6 +1136,9 @@ impl WeexFutures {
             }
         }
         if let Some(job) = self.trading.jobs.get_mut(&request.command) {
+            if replacement_lost {
+                job.error.get_or_insert_with(||"WEEX order changed while canceling; replacement not submitted; reconcile before retrying".into());
+            }
             match result {
                 Ok(ids) => job.ids.extend(ids),
                 Err(error) => {
