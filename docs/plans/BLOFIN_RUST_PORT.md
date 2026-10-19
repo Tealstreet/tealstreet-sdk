@@ -497,3 +497,9 @@ using Node22.23.3 and three-run medians:
   IDs/default refs/staging/unused writes; per-side leverage/wire fallback and SDK
   hooks; retained order/fill identities across store/index/interner changes.
   Plan/proof committed; final CI and remaining private results go on PR1300.
+
+- All17 seven-venue replays completed PASS on854c600708: seven public fixtures
+  and ten private variants, zero mismatched or unused writes. Private frames:
+  BloFin29/Binance14/BingX38/Bybit18/Crypto.com21/WEEX20/OKX variants29 each.
+  MEXC landed at63d521a860 during validation, making PR1300 conflict again.
+  Integrate its shared quantity-unit/parser/transport changes before final CI.
