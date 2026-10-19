@@ -3,6 +3,11 @@
 //! instance's ported method and converts its result at the typed boundary.
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "../tests/support/weight_limiter_audit.rs"]
+mod weight_limiter_audit;
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "../tests/support/api_signing_audit.rs"]
 mod api_signing_audit;
 
