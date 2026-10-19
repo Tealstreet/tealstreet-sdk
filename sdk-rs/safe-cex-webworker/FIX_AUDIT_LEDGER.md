@@ -26,9 +26,9 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 | 26 | CallMethodHandler.handleCallMethod | OPEN | Continuation timing repaired below; typed arguments/primitive rejection admission remains. |
 | 30 | readStringProperty | ACCEPT | Merged #1158: native Get, getter cause and approved typed String replacement. |
 | 71 | ExchangeWorker.start | FIX | Canonical eager startup, source await checkpoints and dropped-waiter continuation below. |
-| 72 | PerfFixtureFrame | OPEN | Dead codec removed; real native record/clone/cap/metronome/replay service is still a FIX. |
-| 73 | PerfFixture | OPEN | Dead codec removed; actual recording/dump/replay round trip remains a FIX. |
-| 74 | PerfFixtureConfig | OPEN | Native argument retained; actual perf-service modes/timers remain a FIX. |
+| 72 | PerfFixtureFrame | FIX | Native record/clone/cap/metronome service and actual TS/listener round trip below. |
+| 73 | PerfFixture | FIX | Module-owned fixture, dump identity and actual record/replay round trip below. |
+| 74 | PerfFixtureConfig | FIX | Native config/modes, interval/loop and full timer teardown below. |
 | 75 | ChaserOrderOptions | OPEN | Shared task model and live reads. |
 | 76 | TwapOptions | OPEN | Shared task model and live reads. |
 | 77 | TwapState | OPEN | Native state/serialization. |
@@ -308,6 +308,43 @@ record-to-replay round trips. This batch closes one row: 8 FIX / 4 ACCEPT /
 15 OPEN. All other worker ownership remains with codex-0xekzz; codex-l89ogr has
 no active worker edits or source snapshot.
 
+## Native perf service: rows 72–74
+
+The source service has real host record/replay callers. Required perf host stubs
+are replaced by one module-owned `PerfFixture` using canonical native `Js`.
+`worker_context` receives that service and records at the outbound post choke
+point before dedicated forwarding or shared-port broadcast. Config and dump
+messages use the installed listener; replay init never loads a venue.
+
+The maintained `perfFixture.ts` oracle records three actual outbound log, Store
+and fill frames, dumps them, and replays them from a fresh module at 7ms cadence.
+The native listener baseline at a11c258daa compiled and failed with zero frames
+versus the source's three. The native implementation preserves captured snapshots
+across later mutation, shared/cyclic references, own undefined, nonfinite/signed
+zero bits and lone-surrogate UTF16. Replay posts each original captured message
+reference, ignores atMs, and ends after the final non-looping frame.
+
+Shared `js_runtime::structured_clone` is one platform operation, with no JSON
+adapter. Native primitives, ordinary objects, sparse arrays, Map, Set and intrinsic
+Errors are checked against Node's real structuredClone, including graph identity,
+cycles, getters/deletion, Error cause/hidden fields and original getter throws.
+NaN payload bits canonicalize exactly as Node structuredClone does; other numeric
+bits remain intact. Functions, symbols, Promises and unsupported native object kinds refuse visibly
+with DataCloneError; the recorder drops clone failures exactly as the source does.
+The operation does not claim unmodeled browser resource clone/transfer support.
+
+Additional source/native probes cover the cap before getters/clone, dropped
+uncloneable records, frames-array identity and replacement on record reset,
+interval clamping, fixed-cadence looping and module disposal with retained service
+and session handles. The module cancels all pending metronome callbacks and closes
+the service, following the approved full-teardown native lifetime policy.
+
+The transferred cohort now has 11 FIX, 4 ACCEPT and 12 OPEN rows.
+
+A compiled missing-NaN-normalization control fails the actual Node clone-bit
+comparison; exact restoration passes. The real listener additionally records a
+negative NaN with a non-default payload and checks Node's canonical output bits.
+
 ## Mutable default template: row 22
 
 The source exports a shallow-frozen default, so edits to its nested ID array
@@ -330,6 +367,5 @@ and owned-instance-array mutation witnesses remain intact.
 This closes the mutable default finding only. Rows 21/24/25/75-79 concern distinct
 model/dispatcher consumers, so sharing task_types.rs does not make their raw
 admission, output or depth questions evidence for acceptance. They remain OPEN.
-The transferred cohort has 9 FIX, 4 ACCEPT and 14 OPEN on this master base;
-independent READY perf rows 72-74 in #1238 move the combined total to 12 FIX,
-4 ACCEPT and 11 OPEN when that PR lands.
+With merged perf rows 72-74 in #1238, the transferred cohort now has 12 FIX,
+4 ACCEPT and 11 OPEN rows.
