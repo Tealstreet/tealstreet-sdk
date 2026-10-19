@@ -145,4 +145,22 @@ let sameCoercionError = false;
 try { String(coercionArray); } catch (e) { sameCoercionError = e === coercionToken; }
 const coercionHooks = {units:coercionUnits,bits:coercionBuffer.toString('hex'),plus:coercionPlus,events:coercionEvents,sameError:sameCoercionError};
 
-process.stdout.write(JSON.stringify({named, accessor, length, inherited, symbol, baseline, frozenBuiltins, lengthCoercion, sparse, readonly, inheritedSetter, hiddenForIn, liveReads, prototypeAliases, coercionHooks}));
+const constructorDescriptor = Object.getOwnPropertyDescriptor(Array.prototype, 'constructor');
+const constructorArray = [];
+const constructorIdentity = {
+  prototype: Array.prototype.constructor === Array,
+  instance: constructorArray.constructor === Array,
+  descriptor: constructorDescriptor && [constructorDescriptor.value === Array, constructorDescriptor.writable, constructorDescriptor.enumerable, constructorDescriptor.configurable],
+  enumerated: Object.keys(Array.prototype).includes('constructor'),
+};
+const replacementConstructor = {};
+Array.prototype.constructor = replacementConstructor;
+constructorIdentity.replaced = constructorArray.constructor === replacementConstructor;
+constructorArray.constructor = Array;
+constructorIdentity.shadowed = constructorArray.constructor === Array && Array.prototype.constructor === replacementConstructor;
+delete constructorArray.constructor;
+constructorIdentity.unshadowed = constructorArray.constructor === replacementConstructor;
+Object.defineProperty(Array.prototype, 'constructor', constructorDescriptor);
+constructorIdentity.restored = constructorArray.constructor === Array;
+
+process.stdout.write(JSON.stringify({named, accessor, length, inherited, symbol, baseline, frozenBuiltins, lengthCoercion, sparse, readonly, inheritedSetter, hiddenForIn, liveReads, prototypeAliases, coercionHooks, constructorIdentity}));
