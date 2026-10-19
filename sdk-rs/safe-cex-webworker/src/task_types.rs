@@ -122,11 +122,9 @@ impl<'de> Deserialize<'de> for ChaserOrderOptions {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChaserCompleteEvent {
     pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
     pub symbol: String,
     pub side: OrderSide,
@@ -135,28 +133,22 @@ pub struct ChaserCompleteEvent {
     pub filled: f64,
     pub stop_reason: String,
 }
-
-#[derive(Deserialize)]
-#[serde(remote = "ChaserCompleteEvent")]
-#[serde(rename_all = "camelCase")]
-struct ChaserCompleteEventWire {
-    id: String,
-    #[serde(default, deserialize_with = "present")]
-    client_id: Option<String>,
-    symbol: String,
-    side: OrderSide,
-    reduce_only: bool,
-    size: f64,
-    filled: f64,
-    stop_reason: String,
-}
-impl<'de> Deserialize<'de> for ChaserCompleteEvent {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        safe_cex_num::numeric_ingress::JsNumberInput::deserialize(deserializer)?
-            .decode_with(|decoder| {
-                ChaserCompleteEventWire::deserialize(safe_cex_types::strict_decode::object(decoder))
-            })
-            .map_err(serde::de::Error::custom)
+impl Serialize for ChaserCompleteEvent {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut record =
+            serializer.serialize_struct(safe_cex_types::model_field::MODEL_RECORD, 8)?;
+        record.serialize_field("id", &self.id)?;
+        safe_cex_types::ModelField::from(self.client_id.as_ref())
+            .into_property()
+            .serialize_field(&mut record, "clientId")?;
+        record.serialize_field("symbol", &self.symbol)?;
+        record.serialize_field("side", &self.side)?;
+        record.serialize_field("reduceOnly", &self.reduce_only)?;
+        record.serialize_field("size", &self.size)?;
+        record.serialize_field("filled", &self.filled)?;
+        record.serialize_field("stopReason", &self.stop_reason)?;
+        record.end()
     }
 }
 
@@ -465,12 +457,6 @@ mod inventory {
             ChaserOrderOptionsWire,
             "records",
             "ChaserOrderOptions",
-            "fields"
-        );
-        check!(
-            ChaserCompleteEventWire,
-            "records",
-            "ChaserCompleteEvent",
             "fields"
         );
         check!(

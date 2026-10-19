@@ -97,7 +97,6 @@ fn task_records_follow_source_fields_and_reject_positional_and_optional_null_inp
     }
     qualified_record!(ChaserTerminate);
     qualified_record!(ChaserOrderOptions);
-    qualified_record!(ChaserCompleteEvent);
     qualified_record!(ChaserOrderState);
     qualified_record!(TwapOptions);
     qualified_record!(TwapState);
@@ -189,10 +188,6 @@ fn task_records_follow_source_fields_and_reject_positional_and_optional_null_inp
     );
     probe_ingress!(ChaserOrderOptions, "delay", |v: &ChaserOrderOptions| v
         .delay);
-    probe_ingress!(ChaserCompleteEvent, "size", |v: &ChaserCompleteEvent| v
-        .size);
-    probe_ingress!(ChaserCompleteEvent, "filled", |v: &ChaserCompleteEvent| v
-        .filled);
     probe_ingress!(ChaserOrderState, "attempts", |v: &ChaserOrderState| v
         .attempts);
     probe_ingress!(TwapOptions, "size", |v: &TwapOptions| v.size);
@@ -216,22 +211,23 @@ fn task_records_follow_source_fields_and_reject_positional_and_optional_null_inp
         .started_at
         .unwrap());
     assert_eq!(
-        lexical_zero_checks, 20,
+        lexical_zero_checks, 18,
         "INGRESS-CARDINALITY lexical negative-zero inputs"
     );
     assert_eq!(
-        numeric_comparisons, 420,
+        numeric_comparisons, 378,
         "INGRESS-CARDINALITY native bit comparisons"
     );
     assert_eq!(
         numeric_fields.len(),
-        20,
+        18,
         "INGRESS-CARDINALITY native field total"
     );
     let source_numeric_fields: std::collections::BTreeSet<_> = schema["records"]
         .as_object()
         .unwrap()
         .iter()
+        .filter(|(name, _)| name.as_str() != "ChaserCompleteEvent")
         .flat_map(|(name, record)| {
             record["numericFields"]
                 .as_array()
@@ -272,20 +268,6 @@ fn task_records_follow_source_fields_and_reject_positional_and_optional_null_inp
                 "terminate",
                 "clientId",
             ],
-        ),
-        record::<ChaserCompleteEvent>(
-            &schema["records"]["ChaserCompleteEvent"],
-            &[
-                "id",
-                "clientId",
-                "symbol",
-                "side",
-                "reduceOnly",
-                "size",
-                "filled",
-                "stopReason",
-            ],
-            &["clientId"],
         ),
         record::<ChaserOrderState>(
             &schema["records"]["ChaserOrderState"],
@@ -391,9 +373,6 @@ fn task_records_follow_source_fields_and_reject_positional_and_optional_null_inp
     let mut chaser = schema["records"]["ChaserOrderOptions"]["sample"].clone();
     chaser["side"] = json!({"buy":null});
     assert!(ChaserOrderOptions::deserialize(chaser).is_err());
-    let mut event = schema["records"]["ChaserCompleteEvent"]["sample"].clone();
-    event["side"] = json!({"sell":null});
-    assert!(ChaserCompleteEvent::deserialize(event).is_err());
     let mut twap = schema["records"]["TwapOptions"]["sample"].clone();
     twap["activeMarket"]["precision"] = json!([0.01, 0.01]);
     assert!(TwapOptions::deserialize(twap).is_err());
