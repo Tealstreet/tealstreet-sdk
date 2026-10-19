@@ -755,6 +755,13 @@ Object.freeze builtin protects its outer fields while its nested ID array stays
 mutable. Constructors snapshot through the shared typed state decoder; remaining
 raw state admission and instance-array alias findings stay separate.
 
+Completion events are output records; their unreachable inbound codec is retired.
+Serialize through canonical MODEL_RECORD/ModelField property semantics so the
+actual chaser:complete listener owns clientId even when its value is undefined.
+The engine/source listener witness pins eight ordered keys, all values and native
+number bits; the original ten identity cases remain output checks. Other live
+task decoders retain their numeric/presence floors and independent audit rows.
+
 ## Module Drop override review
 
 `WorkerModule::drop` is a production teardown boundary under the approved native

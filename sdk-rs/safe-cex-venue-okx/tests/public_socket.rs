@@ -146,7 +146,7 @@ fn maintained_typescript_public_dispatch_and_sequence_recovery() {
                         assert_eq!(stat.last_message_timestamp, 123.);
                         (stat.last_callbacks_count.clone(), stat.had_handlers)
                     };
-                    calls.borrow_mut().push(json!({"key":key,"index":callback_index,"data":js_json_stringify(&JsJsonValue::from(data.clone())).unwrap().unwrap(),"stats":{"count":count,"had":had}}));
+                    calls.borrow_mut().push(json!({"key":key,"index":callback_index,"data":js_json_stringify(&JsJsonValue::from(safe_cex_exchange::js_runtime::value::to_json(data).unwrap())).unwrap().unwrap(),"stats":{"count":count,"had":had}}));
                     if remove && callback_index == 0 {
                         socket.message_handlers.borrow_mut().shift_remove(&key);
                     }
@@ -304,7 +304,7 @@ fn own_empty_handler_shadows_positive_arity_prototype() {
     safe_cex_venue_okx::public_socket::dispatch_message_handler(
         &socket,
         "constructor",
-        &json!({}),
+        &safe_cex_exchange::js_runtime::value::from_json(&json!({})),
         &RefCell::new(HashMap::new()),
         &RefCell::new(HashSet::new()),
         &|_| Ok(()),
@@ -330,7 +330,7 @@ fn inherited_error_records_core_stats_before_returning() {
     let error = safe_cex_venue_okx::public_socket::dispatch_message_handler(
         &socket,
         "constructor",
-        &json!({}),
+        &safe_cex_exchange::js_runtime::value::from_json(&json!({})),
         &RefCell::new(HashMap::new()),
         &RefCell::new(HashSet::new()),
         &|_| Ok(()),
@@ -385,4 +385,89 @@ fn incoming_health_publication_errors_stop_frame_processing() {
             "incoming health error identity {pong}"
         );
     }
+}
+
+#[test]
+fn retained_handler_frames_cross_the_production_core_registry() {
+    let runtime = Rc::new(Runtime::default());
+    let parent = Parent::new();
+    let socket = BaseWebSocket::new(1, parent, runtime, Rc::new(Protocol));
+    let calls = Rc::new(RefCell::new(0));
+    let seen = calls.clone();
+    let callback: MessageHandler = Rc::new(move |_| {
+        *seen.borrow_mut() += 1;
+        Ok(())
+    });
+    socket
+        .message_handlers
+        .borrow_mut()
+        .insert("tickers".into(), Rc::new(RefCell::new(vec![callback])));
+    let sequences = RefCell::new(HashMap::new());
+    let recovering = RefCell::new(HashSet::new());
+    let topics = RefCell::new(HashMap::new());
+    for marker in [r"\ud800", r"\udfff", r"\ud83e\udd80"] {
+        let frame = format!(
+            r#"{{"arg":{{"channel":"tickers"}},"unused":{{"{marker}":["{marker}"]}},"overflow":1e400,"zero":-0}}"#
+        );
+        on_message(
+            &socket,
+            &SocketFrame::Text(frame),
+            &sequences,
+            &recovering,
+            &topics,
+        )
+        .expect("source-valid native graph reaches OKX dispatch");
+    }
+    on_message(
+        &socket,
+        &SocketFrame::Text(r#"{"arg":{"channel":"tickers"},"neighbor":true}"#.into()),
+        &sequences,
+        &recovering,
+        &topics,
+    )
+    .unwrap();
+    assert_eq!(
+        *calls.borrow(),
+        4,
+        "all valid frames reach the shared registry"
+    );
+    socket.dispose();
+}
+
+#[cfg(test)]
+mod retained_handler_support {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../safe-cex-exchange/tests/support/retained_handlers.rs"
+    ));
+}
+#[test]
+fn shared_core_handlers_retain_the_source_graph_and_native_fields() {
+    let socket = BaseWebSocket::new(
+        1,
+        Parent::new(),
+        Rc::new(Runtime::default()),
+        Rc::new(Protocol),
+    );
+    let cases = retained_handler_support::source_frames("okx", "publicWebsocket");
+    let (handlers, calls) = retained_handler_support::pair(&cases, false);
+    socket
+        .message_handlers
+        .borrow_mut()
+        .insert("retainedProbe".into(), handlers);
+    let sequences = RefCell::new(HashMap::new());
+    let recovering = RefCell::new(HashSet::new());
+    let topics = RefCell::new(HashMap::new());
+    for case in cases {
+        on_message(
+            &socket,
+            &SocketFrame::Text(case["frame"].as_str().unwrap().into()),
+            &sequences,
+            &recovering,
+            &topics,
+        )
+        .unwrap();
+    }
+    assert_eq!(calls.get(), 8);
+    socket.dispose();
 }

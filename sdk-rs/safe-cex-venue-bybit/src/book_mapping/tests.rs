@@ -1,4 +1,6 @@
 use super::*;
+use safe_cex_exchange::js_runtime::value::{from_json, to_json};
+use serde_json::{Value, json};
 fn encode(value: f64) -> Value {
     if value.is_nan() {
         "NaN".into()
@@ -66,7 +68,7 @@ fn book_state_matches_live_source() {
                 state.resyncing = false;
                 Ok(Outcome::Suppress)
             } else {
-                state.apply(frame)
+                state.apply(&from_json(frame))
             };
             let mut actual = serde_json::Map::new();
             actual.insert(
@@ -82,7 +84,7 @@ fn book_state_matches_live_source() {
                     actual.insert("error".into(), error.into());
                 }
             }
-            actual.insert("state".into(),json!({"book":book(&state.book),"lastUpdate":state.last_update,"resyncing":state.resyncing}));
+            actual.insert("state".into(),json!({"book":book(&state.book),"lastUpdate":to_json(&state.last_update).unwrap(),"resyncing":state.resyncing}));
             let actual = normalize(&Value::Object(actual));
             native.push(actual);
         }

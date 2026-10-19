@@ -36,9 +36,6 @@ pub mod historical_fills;
 
 pub mod order_pages;
 
-pub mod v3_ticker;
-pub mod v3_ws_quotes;
-
 pub mod legacy_metadata;
 
 pub mod legacy_socket_control;
