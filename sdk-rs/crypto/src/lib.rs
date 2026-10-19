@@ -76,7 +76,6 @@ pub mod ethereum;
 pub mod lighter;
 pub mod starknet;
 pub mod uuid;
-pub mod wallet_utils;
 pub mod zklink;
 
 #[cfg(test)]
