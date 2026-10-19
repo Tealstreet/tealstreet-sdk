@@ -6,14 +6,14 @@ const venue = venueOf('cryptocom');
 const privateUrl = 'wss://stream.crypto.com/exchange/v1/user';
 const publicUrl = 'wss://stream.crypto.com/exchange/v1/market';
 const auth = () => {
-  const method = 'public/auth', id = 1610000000000, nonce = id, api_key = 'replay-key';
+  const method = 'public/auth', id = Date.now(), nonce = id, api_key = 'replay-key';
   const sig = createHmac('sha256', 'replay-secret').update(method + id + api_key + nonce).digest('hex');
   return { method, id, nonce, api_key, sig };
 };
 const subscriptions = ['user.order', 'user.advance.order', 'user.positions', 'user.balance', 'user.trade'];
 test('HMAC check binds the signed method to the REST route', () => {
   const body = (method) => {
-    const id = 1, nonce = 1, api_key = 'replay-key', params = { client_oid: 'caller' };
+    const id = Date.now(), nonce = id, api_key = 'replay-key', params = { client_oid: 'caller' };
     const sig = createHmac('sha256', 'replay-secret').update(method + id + api_key + 'client_oidcaller' + nonce).digest('hex');
     return JSON.stringify({ method, id, nonce, api_key, params, sig });
   };
@@ -25,6 +25,7 @@ test('HMAC check binds the signed method to the REST route', () => {
 test('socket audit checks auth, subscriptions and heartbeat identity', () => {
   const audit = venue.createSocketAudit('rust', { isPrivate: true, books: ['BTCUSD-PERP'] });
   audit.sent(privateUrl, JSON.stringify(auth()));
+  audit.received(privateUrl, JSON.stringify({ method: 'public/auth', code: 0 }));
   audit.sent(privateUrl, JSON.stringify({ method: 'subscribe', params: { channels: subscriptions } }));
   audit.sent(publicUrl, JSON.stringify({ method: 'subscribe', params: { channels: ['book.BTCUSD-PERP.50'] } }));
   audit.received(privateUrl, JSON.stringify({ method: 'public/heartbeat', id: 123 }));

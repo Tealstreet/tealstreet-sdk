@@ -22,23 +22,27 @@ export const VENUES = {
       const connections = new Map();
       const failures = [];
       const socket = (url) => {
-        if (!connections.has(url)) connections.set(url, { auth: false, channels: new Set(), heartbeats: new Set() });
+        if (!connections.has(url)) connections.set(url, { auth: false, authAck: false, channels: new Set(), heartbeats: new Set() });
         return connections.get(url);
       };
       return {
         received(url, text) {
           const frame = JSON.parse(text);
           if (frame.method === 'public/heartbeat') socket(url).heartbeats.add(frame.id);
+          if (frame.method === 'public/auth' && frame.code === 0) {
+            if (!socket(url).auth) failures.push('auth acknowledgement preceded valid auth request');
+            socket(url).authAck = socket(url).auth;
+          }
         },
         sent(url, text) {
           const frame = JSON.parse(text);
           const state = socket(url);
           if (frame.method === 'public/auth') {
             const payload = frame.method + frame.id + frame.api_key + frame.nonce;
-            state.auth = frame.api_key === 'replay-key' && frame.sig === createHmac('sha256', 'replay-secret').update(payload).digest('hex');
+            state.auth = Number.isSafeInteger(frame.id) && Number.isSafeInteger(frame.nonce) && Math.abs(Date.now() - frame.nonce) < 60_000 && frame.api_key === 'replay-key' && frame.sig === createHmac('sha256', 'replay-secret').update(payload).digest('hex');
             if (!state.auth) failures.push('invalid private WS auth signature');
           } else if (frame.method === 'subscribe') {
-            if (url.endsWith('/user') && !state.auth) failures.push('private subscriptions sent before authentication');
+            if (url.endsWith('/user') && !state.authAck) failures.push('private subscriptions sent before authentication');
             for (const channel of frame.params.channels) state.channels.add(channel);
           } else if (frame.method === 'unsubscribe') {
             for (const channel of frame.params.channels) state.channels.delete(channel);
@@ -78,7 +82,7 @@ export const VENUES = {
           return key + (Array.isArray(value) ? value.join('') : String(value));
         }).join('');
         const payload = envelope.method + envelope.id + envelope.api_key + params + envelope.nonce;
-        return method === 'POST' && envelope.method === path && envelope.api_key === 'replay-key' &&
+        return method === 'POST' && envelope.method === path && Number.isSafeInteger(envelope.id) && Number.isSafeInteger(envelope.nonce) && Math.abs(Date.now() - envelope.nonce) < 60_000 && envelope.api_key === 'replay-key' &&
           createHmac('sha256', 'replay-secret').update(payload).digest('hex') === envelope.sig;
       } catch { return false; }
     },
