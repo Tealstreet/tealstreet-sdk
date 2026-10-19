@@ -38,6 +38,8 @@ The shared boundary eagerly polls the typed body to its first real suspension. I
   SDK waiter drops. The obsolete typed timestamp helper was deleted; its original
   20/512 source cases now exercise the live API, with eager and identity checks.
 
+- Hyperliquid perp and Spot: the atomic Realm removal uses canonical shared Js throughout both constructed bindings. The common launch boundary starts its owned binding immediately through start_eager and awaits the original member Promise. The constructed-family regression asserts the original receiver, synchronous prefix before waiter polling, and continuation after dropping the waiter; it also observes original nested object, array, callback, thrown value and iterator references at the actual BaseExchange emitter handoff. The frozen emitter test retains its exact source stringify and native-bit assertions.
+
 ## All production implementations at the frozen baseline
 
 Counts are implementation counts: seven typed-async implementations, sixteen deferred-JS implementations, two deferred-Realm implementations, three eager-JS implementations, three distinct mixed implementations, and one synchronous refusal. BloFin and WEEX are included in their original baseline categories, with fixes described above. “Eager JS invocation” describes only the common call boundary and is not a blanket ACCEPT for every method.
