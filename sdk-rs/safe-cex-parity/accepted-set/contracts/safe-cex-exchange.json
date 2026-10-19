@@ -42688,5 +42688,1300 @@
     },
     "reason": "Iterates the existing native iterable and resolves each item through the canonical Promise algorithm. It schedules first-settlement observations, retains original values or thrown causes, and drops losing observations without cancelling the source operation. It neither parses serialized input nor constructs a decoded model.",
     "evidence": "safe-cex-venue-hyperliquid/src/host/socket_tests.rs::constructed_startup_race_releases_canceled_timeout_reactions executes the installed Promise.race through the real constructed withStartupTimeout binding on both NativeRuntime and controlled replay runtime; it asserts original result reference identity, zero pending jobs and zero blocking tasks after timeout cancellation. See safe-cex-venue-hyperliquid/SHARED_RUNTIME_REVIEW.md."
+  },
+  "safe_cex_exchange::js_runtime::client::axios_headers_from": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "axios_headers_from",
+      "signature": {
+        "inputs": [
+          [
+            "input",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/CLIENT_INPUT_BOUNDARIES_REVIEW.md; scripts/client-input-observers.rs invokes this exact production helper. tests/client_input_oracle.cjs executes installed AxiosHeaders/findKey/buildURL for the source-backed cases; typed-provider status/equality cases are explicit bridge-model observations, not source decoder exemptions. ACCEPT: constructor adapter used by the no-proxy factory on newly assembled plain headers. It normalizes native values and installs inherited methods without serializing them. The name is not a claim of the AxiosHeaders.from identity overload; this internal producer path corresponds to new AxiosHeaders.",
+    "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/client-input-observers.rs\")); } observation::from($value, $type) }",
+    "cases": [
+      {
+        "input": "scalar",
+        "output": {
+          "entries": [
+            [
+              [
+                88
+              ],
+              [
+                "string",
+                [
+                  48
+                ]
+              ]
+            ],
+            [
+              [
+                78,
+                117,
+                108,
+                108
+              ],
+              [
+                "null",
+                null
+              ]
+            ],
+            [
+              [
+                79,
+                102,
+                102
+              ],
+              [
+                "boolean",
+                false
+              ]
+            ],
+            [
+              [
+                85,
+                116,
+                102
+              ],
+              [
+                "string",
+                [
+                  55296
+                ]
+              ]
+            ]
+          ],
+          "get": true,
+          "has": true,
+          "same": false
+        }
+      },
+      {
+        "input": "array",
+        "output": {
+          "entries": [
+            [
+              [
+                88
+              ],
+              [
+                "array",
+                3,
+                [
+                  "0",
+                  "1",
+                  "2"
+                ],
+                [
+                  [
+                    "string",
+                    [
+                      49,
+                      50,
+                      51
+                    ]
+                  ],
+                  [
+                    "null",
+                    null
+                  ],
+                  [
+                    "boolean",
+                    false
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "get": true,
+          "has": true,
+          "same": false
+        }
+      },
+      {
+        "input": "empty",
+        "output": {
+          "entries": [],
+          "get": true,
+          "has": true,
+          "same": false
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::client::header_key": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "header_key",
+      "signature": {
+        "inputs": [
+          [
+            "headers",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::value::Str",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/CLIENT_INPUT_BOUNDARIES_REVIEW.md; scripts/client-input-observers.rs invokes this exact production helper. tests/client_input_oracle.cjs executes installed AxiosHeaders/findKey/buildURL for the source-backed cases; typed-provider status/equality cases are explicit bridge-model observations, not source decoder exemptions. ACCEPT: case-insensitive reverse own-key selection over native headers. It does not read unrelated header values; hit, missing and falsy names match the installed Axios findKey/normalization path.",
+    "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/client-input-observers.rs\")); } observation::key($value, $type) }",
+    "cases": [
+      {
+        "input": "hit",
+        "output": {
+          "key": [
+            120
+          ],
+          "readValue": false
+        }
+      },
+      {
+        "input": "miss",
+        "output": {
+          "key": null,
+          "readValue": false
+        }
+      },
+      {
+        "input": "falsy",
+        "output": {
+          "key": null,
+          "readValue": false
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::client::normalized_header_value": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "normalized_header_value",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/CLIENT_INPUT_BOUNDARIES_REVIEW.md; scripts/client-input-observers.rs invokes this exact production helper. tests/client_input_oracle.cjs executes installed AxiosHeaders/findKey/buildURL for the source-backed cases; typed-provider status/equality cases are explicit bridge-model observations, not source decoder exemptions. FIX: replace dense snapshot recursion with the original array map call, preserving sparse slots, custom method receiver, lookup errors and original thrown identity. Real AxiosHeaders construction has a compiled production RED/GREEN.",
+    "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/client-input-observers.rs\")); } observation::normalize($value, $type) }",
+    "cases": [
+      {
+        "input": "sparse",
+        "output": {
+          "ok": true,
+          "value": [
+            "array",
+            4,
+            [
+              "1",
+              "3"
+            ],
+            [
+              [
+                "hole"
+              ],
+              [
+                "string",
+                [
+                  97
+                ]
+              ],
+              [
+                "hole"
+              ],
+              [
+                "undefined",
+                null
+              ]
+            ]
+          ],
+          "trace": []
+        }
+      },
+      {
+        "input": "custom-map",
+        "output": {
+          "ok": true,
+          "value": [
+            "array",
+            2,
+            [
+              "0",
+              "1"
+            ],
+            [
+              [
+                "string",
+                [
+                  88
+                ]
+              ],
+              [
+                "boolean",
+                false
+              ]
+            ]
+          ],
+          "trace": [
+            "receiver"
+          ]
+        }
+      },
+      {
+        "input": "map-throws",
+        "output": {
+          "ok": false,
+          "name": "original",
+          "trace": [
+            "get-map"
+          ]
+        }
+      },
+      {
+        "input": "map-noncallable",
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "trace": []
+        }
+      },
+      {
+        "input": "nested",
+        "output": {
+          "ok": true,
+          "value": [
+            "array",
+            4,
+            [
+              "0",
+              "1",
+              "2",
+              "3"
+            ],
+            [
+              [
+                "boolean",
+                false
+              ],
+              [
+                "null",
+                null
+              ],
+              [
+                "undefined",
+                null
+              ],
+              [
+                "array",
+                3,
+                [
+                  "0",
+                  "1",
+                  "2"
+                ],
+                [
+                  [
+                    "string",
+                    [
+                      120
+                    ]
+                  ],
+                  [
+                    "string",
+                    [
+                      49,
+                      50,
+                      51
+                    ]
+                  ],
+                  [
+                    "string",
+                    [
+                      55296
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "trace": []
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::client::set_header": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "set_header",
+      "signature": {
+        "inputs": [
+          [
+            "headers",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "rewrite",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/CLIENT_INPUT_BOUNDARIES_REVIEW.md; scripts/client-input-observers.rs invokes this exact production helper. tests/client_input_oracle.cjs executes installed AxiosHeaders/findKey/buildURL for the source-backed cases; typed-provider status/equality cases are explicit bridge-model observations, not source decoder exemptions. ACCEPT: reached plain-header key/value assignments preserve false disabling, rewrite tri-state, case-insensitive original key, null and sanitized string values. Direct production probes match installed AxiosHeaders.set. Public overload completeness is not inherited by this private assignment helper.",
+    "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/client-input-observers.rs\")); } observation::set($value, $type) }",
+    "cases": [
+      {
+        "input": "default",
+        "output": {
+          "entries": [
+            [
+              [
+                88
+              ],
+              [
+                "boolean",
+                false
+              ]
+            ],
+            [
+              [
+                69,
+                109,
+                112,
+                116,
+                121
+              ],
+              [
+                "null",
+                null
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "input": "true",
+        "output": {
+          "entries": [
+            [
+              [
+                88
+              ],
+              [
+                "string",
+                [
+                  110,
+                  101,
+                  119
+                ]
+              ]
+            ],
+            [
+              [
+                69,
+                109,
+                112,
+                116,
+                121
+              ],
+              [
+                "null",
+                null
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "input": "false",
+        "output": {
+          "entries": [
+            [
+              [
+                88
+              ],
+              [
+                "boolean",
+                false
+              ]
+            ],
+            [
+              [
+                69,
+                109,
+                112,
+                116,
+                121
+              ],
+              [
+                "null",
+                null
+              ]
+            ]
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::client::js_params_serializer": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "js_params_serializer",
+      "signature": {
+        "inputs": [
+          [
+            "config",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/CLIENT_INPUT_BOUNDARIES_REVIEW.md; scripts/client-input-observers.rs invokes this exact production helper. tests/client_input_oracle.cjs executes installed AxiosHeaders/findKey/buildURL for the source-backed cases; typed-provider status/equality cases are explicit bridge-model observations, not source decoder exemptions. FIX: Axios buildURL invokes an unbound serializer with params and options. Preserve original object options or the function wrapper as argument two; remove receiver binding. Direct private helper and actual client/REST-host terminal-query probes compile RED/GREEN.",
+    "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/client-input-observers.rs\")); } observation::params($value, $type) }",
+    "cases": [
+      {
+        "input": "function",
+        "output": {
+          "callable": true,
+          "result": {
+            "ok": true,
+            "value": [
+              "string",
+              [
+                55296,
+                38,
+                120
+              ]
+            ]
+          },
+          "trace": [
+            "undefined",
+            "wrapped-options"
+          ]
+        }
+      },
+      {
+        "input": "object",
+        "output": {
+          "callable": true,
+          "result": {
+            "ok": true,
+            "value": [
+              "string",
+              [
+                55296,
+                38,
+                120
+              ]
+            ]
+          },
+          "trace": [
+            "undefined",
+            "same-options"
+          ]
+        }
+      },
+      {
+        "input": "throws",
+        "output": {
+          "callable": true,
+          "result": {
+            "ok": false,
+            "original": true
+          },
+          "trace": [
+            "undefined",
+            "same-options"
+          ]
+        }
+      },
+      {
+        "input": "missing",
+        "output": {
+          "callable": false,
+          "result": {
+            "value": [
+              "undefined",
+              null
+            ]
+          },
+          "trace": []
+        }
+      },
+      {
+        "input": "noncallable",
+        "output": {
+          "callable": false,
+          "result": {
+            "value": [
+              "boolean",
+              false
+            ]
+          },
+          "trace": []
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::client::factory::status_of": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "status_of",
+      "signature": {
+        "inputs": [
+          [
+            "response",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "f64"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/CLIENT_INPUT_BOUNDARIES_REVIEW.md; scripts/client-input-observers.rs invokes this exact production helper. tests/client_input_oracle.cjs executes installed AxiosHeaders/findKey/buildURL for the source-backed cases; typed-provider status/equality cases are explicit bridge-model observations, not source decoder exemptions. ACCEPT: status selection for the typed transport response model, whose HTTP status is numeric. Direct native observations pin nonzero numeric values and rejected nullish/non-number/NaN cells; this classification does not admit malformed wire statuses or grant a general coercion policy.",
+    "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/client-input-observers.rs\")); } observation::status($value, $type) }",
+    "cases": [
+      {
+        "input": "undefined",
+        "output": null
+      },
+      {
+        "input": "null",
+        "output": null
+      },
+      {
+        "input": "false",
+        "output": null
+      },
+      {
+        "input": "negative-zero",
+        "output": null
+      },
+      {
+        "input": "nan",
+        "output": null
+      },
+      {
+        "input": "infinity",
+        "output": "7ff0000000000000"
+      },
+      {
+        "input": "text",
+        "output": null
+      },
+      {
+        "input": "number",
+        "output": "407ad00000000000"
+      },
+      {
+        "input": "string-status",
+        "output": null
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::client::factory::same": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "same",
+      "signature": {
+        "inputs": [
+          [
+            "left",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "right",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/CLIENT_INPUT_BOUNDARIES_REVIEW.md; scripts/client-input-observers.rs invokes this exact production helper. tests/client_input_oracle.cjs executes installed AxiosHeaders/findKey/buildURL for the source-backed cases; typed-provider status/equality cases are explicit bridge-model observations, not source decoder exemptions. ACCEPT: internal equality of two already materialized typed-provider JSON model projections. Own undefined remains distinct from null, signed-zero model cells remain distinct, and nonfinite JSON projections coincide with null. The comparison is adapter reconciliation glue, not TS Object.is, reference equality, or a wire JSON-string comparison; existing actual host config probes verify that unchanged live cells retain their original identity/bits.",
+    "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/client-input-observers.rs\")); } observation::same($value, $type) }",
+    "cases": [
+      {
+        "input": "equal",
+        "output": true
+      },
+      {
+        "input": "different",
+        "output": false
+      },
+      {
+        "input": "zero",
+        "output": false
+      },
+      {
+        "input": "undefined-null",
+        "output": false
+      },
+      {
+        "input": "nonfinite",
+        "output": true
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::client::create": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "create",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Rc",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "dyn_trait": {
+                            "traits": [
+                              {
+                                "trait": {
+                                  "path": "safe_cex_exchange::js_runtime::client::JsHttpHost",
+                                  "args": null
+                                },
+                                "generic_params": []
+                              }
+                            ],
+                            "lifetime": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "defaults",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/CLIENT_INPUT_BOUNDARIES_REVIEW.md; tests/js_runtime.rs::client_constructor_and_promise_links_match_installed_axios plus existing client request/rejection chain, query-host and retry tests execute actual production client capabilities. tests/client_input_oracle.cjs supplies independent installed-Axios completed-pipeline observations.",
+    "reason": "ACCEPT: constructs one native Axios-shaped object and captures already-native runtime/default/state capabilities. No input language is admitted at construction; delegated request parsing and dispatch remain independently classified. Actual client creation and installed-Axios completed pipeline profiles cover fulfillment, original rejection passthrough, and recovery."
+  },
+  "safe_cex_exchange::js_runtime::client::spawn": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "spawn",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_exchange::js_runtime::client::JsHttpHost",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "body",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::promise::JsFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'static"
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/CLIENT_INPUT_BOUNDARIES_REVIEW.md; tests/js_runtime.rs::client_constructor_and_promise_links_match_installed_axios plus existing client request/rejection chain, query-host and retry tests execute actual production client capabilities. tests/client_input_oracle.cjs supplies independent installed-Axios completed-pipeline observations.",
+    "reason": "ACCEPT: scheduling adapter from an existing typed JsFuture and runtime handle to the canonical Promise carrier. It does not inspect or project the eventual native value. Actual client calls return that carrier; completion/rejection/recovery retain the original object referent."
+  },
+  "safe_cex_exchange::js_runtime::client::chain_step": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "chain_step",
+      "signature": {
+        "inputs": [
+          [
+            "runtime",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_exchange::runtime::ExchangeRuntime",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "interceptor",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "tuple": [
+                    {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    },
+                    {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          [
+            "current",
+            {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/CLIENT_INPUT_BOUNDARIES_REVIEW.md; tests/js_runtime.rs::client_constructor_and_promise_links_match_installed_axios plus existing client request/rejection chain, query-host and retry tests execute actual production client capabilities. tests/client_input_oracle.cjs supplies independent installed-Axios completed-pipeline observations.",
+    "reason": "ACCEPT: an internal Promise settlement link selects the callable fulfillment/rejection continuation and passes the original Js value. It neither decodes nor captures the input graph. Three actual native/installed-Axios completed pipelines and existing rejection-chain tests pin callable selection, LIFO/FIFO order, original thrown identity and recovery; arbitrary callback bodies remain their own owners."
   }
 }

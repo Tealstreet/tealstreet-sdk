@@ -57,4 +57,19 @@ const normalizations=normalizationInputs.map(input=>{
  return {input,output:normalized?Array.from({length:normalized.length},(_,i)=>normalized.charCodeAt(i)):[]};
 });
 assert.equal(normalizations.length,9);
-process.stdout.write(JSON.stringify({architecture:process.arch,nodeMajor:Number(process.versions.node.split('.')[0]),cases,coercions,normalizations}));
+const valueProfiles=['sparse','custom-map','map-throws','map-noncallable','nested'];
+const valueRows=valueProfiles.map(kind=>{
+ const trace=[], token={marker:'array-map'};
+ let input;
+ if(kind==='sparse'){input=new Array(4);input[1]=' a ';input[3]=undefined;}
+ if(kind==='nested')input=[false,null,undefined,['\t x\r\n ',123,'\ud800']];
+ if(kind==='custom-map') {input=[1];input.map=function(fn){trace.push(this===input?'receiver':'wrong');return [fn(' X '),fn(false)];};}
+ if(kind==='map-throws'){input=[1];Object.defineProperty(input,'map',{get(){trace.push('get-map');throw token;}});}
+ if(kind==='map-noncallable'){input=[1];input.map=0;}
+ const view=value=>Array.isArray(value)?['array',value.length,Object.keys(value),Array.from({length:value.length},(_,i)=>Object.hasOwn(value,i)?view(value[i]):['hole'])]:
+  typeof value==='string'?['string',Array.from({length:value.length},(_,i)=>value.charCodeAt(i))]:[value===null?'null':typeof value,value===null||value===undefined?null:value];
+ let output;try{const h=new AxiosHeaders({X:input});output={ok:true,value:view(h.get('x')),trace};}
+ catch(error){output={ok:false,name:error===token?'original':error.name,trace};}
+ return {input:kind,output};
+});
+process.stdout.write(JSON.stringify({architecture:process.arch,nodeMajor:Number(process.versions.node.split('.')[0]),cases,coercions,normalizations,valueRows}));

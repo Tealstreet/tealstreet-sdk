@@ -195,17 +195,20 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::client::axios_headers_from",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: constructor adapter used by the no-proxy factory on newly assembled plain headers. It normalizes native values and installs inherited methods without serializing them. The name is not a claim of the AxiosHeaders.from identity overload; this internal producer path corresponds to new AxiosHeaders."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::client::chain_step",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: an internal Promise settlement link selects the callable fulfillment/rejection continuation and passes the original Js value. It neither decodes nor captures the input graph. Three actual native/installed-Axios completed pipelines and existing rejection-chain tests pin callable selection, LIFO/FIFO order, original thrown identity and recovery; arbitrary callback bodies remain their own owners."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::client::create",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: constructs one native Axios-shaped object and captures already-native runtime/default/state capabilities. No input language is admitted at construction; delegated request parsing and dispatch remain independently classified. Actual client creation and installed-Axios completed pipeline profiles cover fulfillment, original rejection passthrough, and recovery."
     },
     {
       "package": "safe-cex-exchange",
@@ -265,22 +268,26 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::client::factory::same",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: internal equality of two already materialized typed-provider JSON model projections. Own undefined remains distinct from null, signed-zero model cells remain distinct, and nonfinite JSON projections coincide with null. The comparison is adapter reconciliation glue, not TS Object.is, reference equality, or a wire JSON-string comparison; existing actual host config probes verify that unchanged live cells retain their original identity/bits."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::client::factory::status_of",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: status selection for the typed transport response model, whose HTTP status is numeric. Direct native observations pin nonzero numeric values and rejected nullish/non-number/NaN cells; this classification does not admit malformed wire statuses or grant a general coercion policy."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::client::header_key",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: case-insensitive reverse own-key selection over native headers. It does not read unrelated header values; hit, missing and falsy names match the installed Axios findKey/normalization path."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::client::js_params_serializer",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: Axios buildURL invokes an unbound serializer with params and options. Preserve original object options or the function wrapper as argument two; remove receiver binding. Direct private helper and actual client/REST-host terminal-query probes compile RED/GREEN."
     },
     {
       "package": "safe-cex-exchange",
@@ -301,7 +308,8 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::client::normalized_header_value",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: replace dense snapshot recursion with the original array map call, preserving sparse slots, custom method receiver, lookup errors and original thrown identity. Real AxiosHeaders construction has a compiled production RED/GREEN."
     },
     {
       "package": "safe-cex-exchange",
@@ -331,12 +339,14 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::client::set_header",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: reached plain-header key/value assignments preserve false disabling, rewrite tri-state, case-insensitive original key, null and sanitized string values. Direct production probes match installed AxiosHeaders.set. Public overload completeness is not inherited by this private assignment helper."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::client::spawn",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: scheduling adapter from an existing typed JsFuture and runtime handle to the canonical Promise carrier. It does not inspect or project the eventual native value. Actual client calls return that carrier; completion/rejection/recovery retain the original object referent."
     },
     {
       "package": "safe-cex-exchange",
