@@ -345,17 +345,20 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::collections::collection_iterator",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: the directly observed native behavior matches the independent Node protocol profiles; no production change is needed. Native raw-input classification with direct observations: Reads the original native Map/Set storage at each iterator step. Direct native and independent Node cases cover keys/values/entries, live clear/delete/reinsert, sticky exhaustion, signed zero, lone UTF-16 units and original object identity; it does not project through JSON. Fixtures: safe-cex-exchange/scripts/collection-input-observers.rs and tests/iterator_contract_oracle.cjs; src/js_runtime/collection_contract_tests.rs executes the same direct helpers. Bounded native default-feature profile only."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::collections::iterator_method",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: the directly observed native behavior matches the independent Node protocol profiles; no production change is needed. Native raw-input classification with direct observations: Acquires Symbol.iterator from the original native input. Direct native and independent Node cases distinguish data and absent accessors, preserve inherited getter receiver identity and propagate the exact thrown referent; this is executed raw-input behavior, not a non-decoder exemption. Fixtures: safe-cex-exchange/scripts/collection-input-observers.rs and tests/iterator_contract_oracle.cjs; src/js_runtime/collection_contract_tests.rs executes the same direct helpers. Bounded native default-feature profile only."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::collections::iterator_method_receiver",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: the directly observed native behavior matches the independent Node protocol profiles; no production change is needed. Native raw-input classification with direct observations: Resolves the iterator capability through the native prototype chain while preserving the original receiver. Direct probes execute own and inherited data/getter/absent/throw cases and inspect the original thrown referent and getter effects. Fixtures: safe-cex-exchange/scripts/collection-input-observers.rs and tests/iterator_contract_oracle.cjs; src/js_runtime/collection_contract_tests.rs executes the same direct helpers. Bounded native default-feature profile only."
     },
     {
       "package": "safe-cex-exchange",
