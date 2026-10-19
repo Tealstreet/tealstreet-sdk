@@ -67,6 +67,9 @@ owned by codex-l89ogr. These entries grant no decoder classification or exemptio
 The immediate follow-up adds a bounded feature forwarding the existing native
 runtime capability and executes those adapters on this same real Host; it does
 not introduce a fake runtime or an alternate value path.
+The same follow-up owns the inherited `types::OrderType` OnlyMap visitor
+observation gap exposed by the full inventory. Its decoder guard remains active;
+no waiver or non-decoder classification is added by this cutover.
 
 ## Validation boundary
 
