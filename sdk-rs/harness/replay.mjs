@@ -55,9 +55,8 @@ class Tape {
   respond(method, url, body) {
     const key = keyFor(method, url, body);
     this.requests.add(key);
-    // Startup reads see time zero; availability advances only once playback starts.
-    const elapsed = this.playStartedAt === undefined ? 0 : performance.now() - this.playStartedAt;
-    const record = selectResponse(this.responses.get(key), elapsed);
+    // Startup reads see time zero; later state waits for its recorded event.
+    const record = selectResponse(this.responses.get(key), this.playbackTime ?? 0);
     if (!record) {
       this.unserved++;
       console.error(`unserved: ${key}`);
@@ -99,8 +98,7 @@ class Tape {
     const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
     for (const url of urls) await this.socketFor(url);
     await ready();
-    this.playStartedAt = performance.now();
-    const start = this.playStartedAt;
+    const start = performance.now();
     let delivered = 0;
     const warm = Math.floor(this.frames.length / 4);
     for (const frame of this.frames) {
@@ -109,6 +107,8 @@ class Tape {
         const wait = frame.t - (performance.now() - start);
         if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
       }
+      // Timed HTTP state cannot precede the event that made it available.
+      this.playbackTime = frame.t;
       if (frame.type === 'command') {
         this.results.push(await runCommand(frame).then((ids) => ({ ok: ids }), (error) => ({ error: String(error?.message ?? error) })));
       } else {

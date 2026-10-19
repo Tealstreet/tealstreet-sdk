@@ -117,3 +117,22 @@ After all gates: merge origin/feat/rust-rewrite into lane, push, open PR into
 feat/rust-rewrite, adversarial local sub-agent review with findings posted to
 PR, fix and repeat; merge PR and create a fresh follow-up branch. No master
 changes or release automation.
+
+Phase 5 size checkpoint: default builds retain all compiled venues; optional
+`rust:build-wasm --venue <venue>` applies the browser size budget per venue.
+This avoids raising the 1,258,291-byte budget when a new venue is registered.
+Hyperliquid is 1,147,832 bytes; Binance is 907,075 bytes. Both single-venue
+public/private gates pass (public medians across three runs):
+
+| Venue | TS CPU ms | Rust CPU ms | TS steady ms | Rust steady ms | TS retained MB | Rust retained MB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Hyperliquid | 317.4 | 62.2 | 23.6 | 21.4 | 4.1 | 1.7 |
+| Binance | 213.0 | 88.2 | 120.6 | 35.7 | 2.3 | 2.0 |
+
+Private gates compare correctness only: Hyperliquid 26 events/seven commands;
+Binance 14 events. Both host integration suites pass. Native/wasm Clippy passes
+for default and each single-venue feature combination. The final harness review
+fixed availability to advance with delivered events and limits Binance fixture
+integration tests to the Binance CI matrix entry. Default combined-build replay
+revalidation is running. Origin has since landed Bybit; merge it next and repeat
+affected checks before opening the PR.

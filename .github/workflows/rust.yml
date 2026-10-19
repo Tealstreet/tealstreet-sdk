@@ -97,9 +97,18 @@ jobs:
   # Replays recorded traffic through TS and Rust: output must be identical, and
   # on public data Rust must use less CPU and less memory (see the plan's gates).
   gate:
-    name: Rust / replay gate
+    name: Rust / replay gate (${{ matrix.venue }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - venue: binance
+            books: BTCUSDT,ETHUSDT,SOLUSDT
+            private_script: rust:private-tape
+          - venue: hyperliquid
+            books: BTC-PERP,ETH-PERP
+            private_script: rust:private-tape-hyperliquid
     env:
       WASM_BINDGEN_VERSION: 0.2.129
       # The browser engine's size budget for one venue.
@@ -129,20 +138,24 @@ jobs:
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
       - run: yarn install --frozen-lockfile --network-timeout 600000
-      - name: Build the wasm engine
-        run: yarn rust:build-wasm
+      - name: Build the venue wasm engine
+        run: yarn rust:build-wasm --venue ${{ matrix.venue }}
       - name: The TS exchange on the wasm engine
+        if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex test-wasm
       - name: The Cloudflare Workers host
+        if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex-wasm test
       - name: Check the wasm size budget
         run: |
           size=$(stat -c%s sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm)
           echo "wasm: $size bytes (budget $WASM_BUDGET_BYTES)"
           test "$size" -le "$WASM_BUDGET_BYTES"
-      - name: Binance public data (correctness, CPU and memory)
-        run: yarn rust:gate --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz
-      - name: Binance account and trading (correctness)
+      - name: Replay request normalization
+        run: yarn rust:test-harness
+      - name: Public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}'
+      - name: Account and trading (correctness)
         run: |
-          yarn rust:private-tape
-          yarn rust:gate --tape sdk-rs/harness/tapes/binance-private.jsonl --runs 1 --books ''
+          yarn ${{ matrix.private_script }}
+          yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs 1 --books ''

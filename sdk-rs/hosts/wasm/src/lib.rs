@@ -3,11 +3,16 @@
 //! JavaScript owns sockets, fetch and timers; it forwards each event here and
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none.
+#[cfg(not(any(feature = "binance", feature = "hyperliquid")))]
+compile_error!("safe-cex-wasm requires at least one venue feature: binance or hyperliquid");
+
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
+#[cfg(feature = "binance")]
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+#[cfg(feature = "hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -46,6 +51,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
 }
 
+#[cfg(any(feature = "binance", feature = "hyperliquid"))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
@@ -57,15 +63,20 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
+    #[cfg(feature = "hyperliquid")]
     #[serde(default)]
     application_id: Option<String>,
+    #[cfg(feature = "hyperliquid")]
     #[serde(default)]
     vault: Option<String>,
+    #[cfg(feature = "hyperliquid")]
     #[serde(default)]
     hyperliquid_builder: Option<HyperliquidBuilder>,
+    #[cfg(feature = "hyperliquid")]
     #[serde(default)]
     enable_spot_markets: bool,
 }
+#[cfg(feature = "hyperliquid")]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HyperliquidBuilder {
@@ -438,10 +449,12 @@ pub struct WasmEngine {
 
 #[wasm_bindgen]
 impl WasmEngine {
+    #[cfg(any(feature = "binance", feature = "hyperliquid"))]
     #[wasm_bindgen(constructor)]
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: EngineOptions = serde_json::from_str(options_json)?;
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "binance")]
             "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
@@ -449,6 +462,7 @@ impl WasmEngine {
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
             }))),
+            #[cfg(feature = "hyperliquid")]
             "hyperliquid" => {
                 if options.enable_spot_markets {
                     return Err(JsError::new(
