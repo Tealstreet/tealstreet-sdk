@@ -24,7 +24,7 @@ crates=$(ls -d safe-cex-*/)
 
 # JavaScript value, number, string and runtime emulation.
 ban 'JS-shaped value types' '\bJs[A-Z][A-Za-z]*\b|\bjs_runtime\b|\bJsValue\b' $crates
-ban 'UTF-16 string emulation' 'Vec<u16>|encode_utf16|from_utf16' $crates
+ban 'UTF-16 string emulation' 'encode_utf16|from_utf16|[Uu]tf16' $crates
 ban 'JS number formatting emulation' 'ryu[-_]js|js_number_string|to_precision|ECMAScript' $crates
 ban 'emulated promises, microtasks or timers' '\bmicrotask|\bMicrotask|\bPromise[A-Z]?\b|setTimeout|setInterval' $crates
 ban 'Axios or BaseExchange facades' '\bAxios|\bBaseExchange\b|\bbase_exchange\b' $crates
