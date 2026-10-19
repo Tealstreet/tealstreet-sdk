@@ -30,7 +30,7 @@ const context = vm.createContext({ performance: { now: () => now }, setTimeout: 
 const source = `${parseSource.replace(/export /g, '')}
 class Timeframes { ${timeframes} }
 class Subject { ${body}\n${pong} }
-globalThis.api = new Subject(); globalThis.timeframes = new Timeframes().timeframes;`;
+globalThis.timeframes = new Timeframes().timeframes;`;
 vm.runInContext(ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
 }).outputText.replace(/export /g, ''), context);
