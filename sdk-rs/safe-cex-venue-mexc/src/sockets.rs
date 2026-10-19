@@ -127,10 +127,17 @@ impl PrivateProtocol {
                 return Ok(());
             };
             let owner = parent.clone();
+            let request_owner = parent.clone();
+            // The async timeout callback invokes fetchBalance before returning
+            // its Promise. Only its Store update belongs after the reaction.
+            let balance =
+                safe_cex_exchange::eager::start_eager(&parent.base().runtime, async move {
+                    Ok(request_owner.fetch_balance().await)
+                });
             let weak_socket = weak_socket.clone();
             parent.base().start_owned_operation(async move {
                 let _ = async {
-                    let balance = reaction(owner.fetch_balance()).await?;
+                    let balance = reaction(balance).await??;
                     if weak_socket
                         .upgrade()
                         .is_some_and(|socket| !socket.is_disposed())

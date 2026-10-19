@@ -421,3 +421,12 @@ The login signer also uses the shared eager boundary instead of manual first-pol
 code. Other direct typed readers retain their separate timing audit obligations.
 The constructed `exchange_trait` eager tests hold/release real terminal REST
 responses and observe production Store commits, throws and cancel/replace order.
+
+The nine non-UTF-8 FIX-audit rows are reviewed in `NON_UTF8_BOUNDARIES.md`:
+seven ACCEPT observations and two repaired request-prefix defects. Book listeners
+and private balance timeout callbacks must start actual HTTP synchronously via
+canonical eager startup; reactions and Store updates remain deferred. The socket
+fixture queues spawn bodies without first-polling them. NativeRuntime prefix
+witnesses and independent compiled controls prevent that fixture from hiding a
+regression; the maintained public-class oracle also pins live re-subscription
+iteration and captured handler arrays through the registered binding.
