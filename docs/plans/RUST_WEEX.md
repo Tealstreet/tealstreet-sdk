@@ -51,16 +51,18 @@ by a sub-agent at each phase boundary. Never touch master or rebase.
   startup recovery and full streamed-document validation. Newest whitespace and
   cap regressions are included in the next full verification.
 - Private/trading: bounded implementations in progress in separate modules;
-  integration and phase reviews remain. Before further work, merging the nested
-  workspace layout requested by the overseer.
+  integration and phase reviews remain. Nested workspace merged; crate now at
+  `sdk-rs/venues/weex`. Standing authorization covers landing-branch conflicts;
+  keep its structure, never stash. Crypto audit found no helper made unused by
+  this port (signing/UUID helpers remain live).
 - Observed TS defect to cover: `fetchOrders` turns a failed normal/algo read
   into an empty half-snapshot. Rust must retain last-known-good state and
   document the deliberate difference in gate and commit message.
 
 ## Delivery
 
-After every gate passes, merge `origin/feat/rust-rewrite` into the lane (stop
-on conflicts per AGENTS.md), rerun affected gates, push, open PR into
+After every gate passes, merge `origin/feat/rust-rewrite` into the lane (resolve conflicts under the overseer
+standing authorization, keeping the landing structure), rerun affected gates, push, open PR into
 `feat/rust-rewrite`, post adversarial local sub-agent findings as PR comments,
 fix/review until clean or diminishing returns, merge PR and branch from the
 updated rewrite branch. Report real gate numbers and any unfinished work.
