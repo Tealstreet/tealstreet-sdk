@@ -254,11 +254,11 @@ struct Incoming {
     splitter: Option<ArraySplitter>,
     envelope: bool,
     /// Everything not streamed: error bodies and unstreamed requests. A
-    /// streamed body keeps only its start, to explain a missing array.
+    /// streamed body's envelope is kept by its splitter.
     body: Vec<u8>,
 }
 
-/// How much of a streamed body is kept to report a response without its array.
+/// How much of a streamed envelope is quoted to report a response without its array.
 const STREAM_PREVIEW_BYTES: usize = 512;
 
 struct Io<P> {
@@ -345,7 +345,8 @@ impl<P> Cx<'_, P> {
 
     /// Issue a request whose successful body holds a large array: each element
     /// goes to [`Venue::on_item`] as it arrives, then [`Venue::on_response`]
-    /// runs with an empty body. Error bodies arrive whole.
+    /// runs with the envelope for metadata modes (array emptied),
+    /// or an empty body for legacy `Root`/`Field`. Error bodies arrive whole.
     pub fn request_streamed(
         &mut self,
         method: Method,
@@ -546,10 +547,7 @@ impl<V: Venue> Engine<V> {
                 status,
                 headers: headers.to_owned(),
                 splitter,
-                envelope: matches!(
-                    at,
-                    Some(ArrayAt::FieldEnvelope(_) | ArrayAt::AnyFieldEnvelope(_))
-                ),
+                envelope: at.is_some_and(ArrayAt::retains_envelope),
                 body: Vec::new(),
             },
         );
@@ -563,10 +561,6 @@ impl<V: Venue> Engine<V> {
             incoming.body.extend_from_slice(data);
             return;
         };
-        let room = STREAM_PREVIEW_BYTES.saturating_sub(incoming.body.len());
-        incoming
-            .body
-            .extend_from_slice(&data[..room.min(data.len())]);
         // The continuation leaves the map while the venue holds it.
         let Some(mut pending) = self.io.pending.remove(&request) else {
             return;
@@ -600,14 +594,19 @@ impl<V: Venue> Engine<V> {
         // A 2xx without the expected array (an error envelope, a truncated
         // body) must never read as an authoritative empty list.
         if let Some(splitter) = &incoming.splitter {
+            let outside = splitter.outside();
             if !splitter.finished() {
-                let preview = String::from_utf8_lossy(&incoming.body);
+                let preview = &outside[..outside.len().min(STREAM_PREVIEW_BYTES)];
+                let preview = String::from_utf8_lossy(preview);
                 let message = format!("response did not contain the expected list: {preview}");
                 self.venue.on_request_failed(&mut cx, pending, &message);
                 return;
             }
             let body = if incoming.envelope {
-                let Some(body) = splitter.envelope() else {
+                let Some(body) = splitter
+                    .envelope()
+                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                else {
                     self.venue.on_request_failed(
                         &mut cx,
                         pending,
@@ -735,5 +734,95 @@ impl<V: Venue> Engine<V> {
         self.io.candles.clear();
         self.io.frame = frame;
         (!empty).then_some(self.io.frame.as_slice())
+    }
+}
+
+#[cfg(test)]
+mod streamed_metadata_tests {
+    use super::*;
+
+    struct Capture {
+        at: ArrayAt,
+        body: Option<String>,
+        failed: bool,
+    }
+
+    impl Venue for Capture {
+        type Pending = ();
+        fn start(&mut self, cx: &mut Cx<'_, ()>) {
+            cx.request_streamed(
+                Method::Get,
+                "https://example.test".into(),
+                vec![],
+                self.at,
+                (),
+            );
+        }
+        fn on_open(&mut self, _: &mut Cx<'_, ()>, _: SocketId) {}
+        fn on_message(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: &str) {}
+        fn on_close(&mut self, _: &mut Cx<'_, ()>, _: SocketId, _: u16) {}
+        fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), response: Response<'_>) {
+            self.body = Some(response.body.into());
+        }
+        fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {
+            self.failed = true;
+        }
+        fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
+        fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+        fn book(&self, _: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    #[test]
+    fn every_metadata_mode_rejects_truncated_envelopes_and_delivers_complete_status() {
+        for (at, body, expected) in [
+            (
+                ArrayAt::EnvelopeField("data"),
+                r#"{"data":[1],"code":10001}"#,
+                r#"{"data":[],"code":10001}"#,
+            ),
+            (
+                ArrayAt::Path(&["result", "list"]),
+                r#"{"result":{"list":[1],"cursor":"next"},"retCode":10001}"#,
+                r#"{"result":{"list":[],"cursor":"next"},"retCode":10001}"#,
+            ),
+            (
+                ArrayAt::AnyFieldEnvelope(&["list"]),
+                r#"{"data":{"list":[1]},"code":10001}"#,
+                r#"{"data":{"list":[]},"code":10001}"#,
+            ),
+        ] {
+            for complete in [false, true] {
+                let mut engine = Engine::new(Capture {
+                    at,
+                    body: None,
+                    failed: false,
+                });
+                engine.start(0.0);
+                let request = engine
+                    .drain_actions()
+                    .find_map(|action| match action {
+                        Action::Http(request) => Some(request.id),
+                        _ => None,
+                    })
+                    .unwrap();
+                engine.http_start(0.0, request, 200, "");
+                let body = if complete {
+                    body
+                } else {
+                    &body[..body.len() - 1]
+                };
+                for byte in body.as_bytes().chunks(1) {
+                    engine.http_chunk(0.0, request, byte);
+                }
+                engine.http_end(0.0, request);
+                assert_eq!(engine.venue().failed, !complete, "{at:?}");
+                assert_eq!(engine.venue().body.as_deref(), complete.then_some(expected));
+            }
+        }
     }
 }

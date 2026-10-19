@@ -4,9 +4,9 @@
 //   node --expose-gc --import tsx sdk-rs/harness/replay.mjs --impl ts --tape <file>
 //   node --expose-gc sdk-rs/harness/replay.mjs --impl rust --tape <file>
 import { readFileSync } from 'node:fs';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
-import { createHash } from 'node:crypto';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
 
@@ -29,35 +29,67 @@ const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes
   .filter(Boolean)
   .map((line) => JSON.parse(line));
 const bookSymbols = values.books.split(',').filter(Boolean);
+// A wrong startup URL, missing socket or lost command must fail the gate.
+const replayDeadline = setTimeout(() => {
+  console.error('Replay exceeded its 120-second deadline');
+  process.exit(1);
+}, 120_000);
+replayDeadline.unref();
+class ReplayTimeout extends Error {}
+const within = async (promise, ms, label) => {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new ReplayTimeout(`${label} exceeded ${ms} ms`)), ms);
+    })]);
+  } finally { clearTimeout(timer); }
+};
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
-const isPrivate = records.some((r) => r.url?.includes(venue.privateSocket));
+const isPrivate = records.some((r) =>
+  venue.isPrivateRecord ? venue.isPrivateRecord(r) : Boolean(venue.privateSocket && r.url?.includes(venue.privateSocket)),
+);
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
+const PASSPHRASE = 'replay-passphrase';
+const callerIds = new Set(records.flatMap((r) => r.type === 'command' ? (r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean) : []));
 
-/** Per-request values: clocks, signatures and generated client ids. */
+/** Per-request clocks, signatures, connection IDs and generated client IDs. */
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'requestId']);
 const clientFields = new Set(['newClientOrderId', 'clientAlgoId', 'clientId']);
-const callerIds = new Set(records.flatMap((r) => (r.orders ?? []).map((o) => o.clientOrderId)).filter(Boolean));
 const canonicalObject = (value) => {
   if (Array.isArray(value)) return value.map(canonicalObject);
   if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value).filter(([key, v]) => !clientFields.has(key) || callerIds.has(v))
+  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)
     .sort(([a], [b]) => a.localeCompare(b)).map(([key, v]) => [key, canonicalObject(v)]));
 };
 const canonicalBody = (body) => {
   if (body == null || body === '') return '';
-  return JSON.stringify(canonicalObject(typeof body === 'string' ? JSON.parse(body) : body));
+  let parsed = body;
+  try {
+    if (typeof body === 'string') parsed = JSON.parse(body);
+    else if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) parsed = JSON.parse(new TextDecoder().decode(body));
+  } catch { return String(body); }
+  const sorted = (value) => {
+    if (Array.isArray(value)) return value.map(sorted);
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.entries(value).filter(([key, v]) => v !== undefined &&
+      (!clientFields.has(key) || callerIds.has(v)) && !(venue.volatileBodyFields && VOLATILE.has(key)))
+      .sort(([a], [b]) => a.localeCompare(b)).map(([key, v]) => [key,
+        !callerIds.has(v) && venue.generatedBodyId?.(key, v) ? '<generated>' : sorted(v),
+      ]));
+  };
+  return JSON.stringify(sorted(parsed));
 };
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams]
-     .filter(([name, value]) => !VOLATILE.has(name) && (!clientFields.has(name) || callerIds.has(value)))
+    .filter(([name, value]) => !VOLATILE.has(name) && (!clientFields.has(name) || callerIds.has(value)))
     .map(([name, value]) => [name, value.startsWith('[') || value.startsWith('{') ? canonicalBody(value) : value])
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
-
+const requestKey = (method, url, body) => `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
 const apiSupported = (value) => value == null || value === '' ? true
   : typeof value === 'number' ? value !== 0
   : typeof value === 'boolean' ? value
@@ -68,14 +100,14 @@ class Tape {
   constructor() {
     this.responses = new Map();
     for (const record of records.filter((r) => r.type === 'http')) {
-      const key = `${record.method} ${canonicalUrl(record.url)} ${canonicalBody(record.requestBody)}`;
+      const key = requestKey(record.method, record.url, record.requestBody);
       if (!this.responses.has(key)) this.responses.set(key, []);
       this.responses.get(key).push(record);
     }
     this.frames = records.filter((r) => ['ws', 'command', 'open', 'close'].includes(r.type)).map((r) => {
       if (r.url) r = { ...r, url: canonicalUrl(r.url) };
       if (r.type !== 'ws') return r;
-      const m = JSON.parse(r.text);
+      const m = r.text.trimStart().startsWith('{') ? JSON.parse(r.text) : {};
       const topic = m.channel ? { channel: m.channel } : m.ch ? (m.symbol ? { ch: m.ch, symbol: m.symbol } : { ch: m.ch }) : undefined;
       return { ...r, topic: topic && JSON.stringify(canonicalObject(topic)), channel: m.ch };
     });
@@ -83,6 +115,7 @@ class Tape {
     this.connectionCounts = new Map();
     this.byConnection = new Map();
     this.unserved = 0;
+    this.commandIndex = 0;
   }
 
   time = 0;
@@ -93,19 +126,27 @@ class Tape {
 
   send(socket, text) {
     const { url, connection } = socket;
+    if (venue.respondToPing && text === 'ping') {
+      setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
+      return;
+    }
     const message = JSON.parse(text);
     if (message.op === 'login' && values.venue === 'bitunix') {
       socket.authenticated = true;
       for (const arg of message.args) this.verifySignature(arg, '', '', true);
     }
     if (message.op === 'subscribe' || message.op === 'unsubscribe') {
+      const validate = venue.validateSubscriptions ?? venue.validateLogin;
+      if (validate && !Array.isArray(message.args)) throw new Error(`Invalid subscription on ${socket.url}`);
       for (const arg of message.args) {
+        if (validate && (!arg || typeof arg.channel !== 'string' || !arg.channel)) throw new Error(`Invalid subscription topic on ${socket.url}`);
         const topic = JSON.stringify(canonicalObject(arg));
         const was = socket.topics.has(topic);
         if (message.op === 'subscribe') {
           socket.topics.add(topic);
+          socket.subscriptionArgs.set(topic, arg);
           if (!was && ['ticker', 'price'].includes(arg.ch)) socket.publicTopics.add(topic);
-        } else { socket.topics.delete(topic); socket.publicTopics.delete(topic); }
+        } else { socket.topics.delete(topic); socket.publicTopics.delete(topic); socket.subscriptionArgs.delete(topic); }
         this.subscriptions.push(JSON.stringify([url, connection, message.op, canonicalObject(arg)]));
       }
     } else if (message.event === 'sub' || message.event === 'unsub') {
@@ -113,6 +154,21 @@ class Tape {
       if (message.event === 'sub') socket.topics.add(topic); else socket.topics.delete(topic);
       this.subscriptions.push(JSON.stringify([url, connection, message.event, canonicalObject(message.params)]));
     }
+    if (!venue.validateLogin || !/\/(private|business)$/.test(new URL(socket.url).pathname)) return;
+    if (message.op !== 'login') return;
+    const arg = message.args?.length === 1 ? message.args[0] : undefined;
+    const timestamp = String(arg?.timestamp ?? '');
+    if (arg?.apiKey !== KEY || arg?.passphrase !== PASSPHRASE || !/^\d+$/.test(timestamp)
+      || !Number.isSafeInteger(Number(timestamp)) || Math.abs(Number(timestamp) - Date.now() / 1000) > 30) {
+      throw new Error(`Invalid OKX login credentials/timestamp on ${socket.url}`);
+    }
+    const expected = createHmac('sha256', SECRET).update(`${timestamp}GET/users/self/verify`).digest('base64');
+    const supplied = Buffer.from(String(arg.sign ?? ''));
+    const expectedBytes = Buffer.from(expected);
+    if (supplied.length !== expectedBytes.length || !timingSafeEqual(supplied, expectedBytes)) {
+      throw new Error(`Invalid OKX login signature on ${socket.url}`);
+    }
+    socket.loginVerified = true;
   }
 
   verifySignature(headers, query, body, ws = false) {
@@ -132,27 +188,39 @@ class Tape {
         .map(([key, value]) => `${key}${value}`).join('').replace(/[=&]/g, '');
       this.verifySignature(headers, query, body);
     }
-    const canonical = `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
-    if (method !== 'GET') this.outbound.push(canonical);
-    const queue = this.responses.get(canonical)
-      ?? this.responses.get(`${method} ${canonicalUrl(url)} `);
+    const key = requestKey(method, url, body);
+    if (method !== 'GET') this.outbound.push(key);
+    const queue = this.responses.get(key)
+      ?? (!venue.matchRequestBody ? this.responses.get(requestKey(method, url)) : undefined);
     if (!queue?.length) {
       this.unserved++;
-      console.error(`unserved ${canonical}`);
+      console.error(`unserved ${key}`);
       return { status: 599, body: '' };
     }
-    const versioned = queue.filter((r) => r.after !== undefined && r.after <= this.time);
-    const record = queue.some((r) => r.after !== undefined) ? versioned.at(-1)
-      : queue.length > 1 ? queue.shift() : queue[0];
-    if (!record) { this.unserved++; return { status: 599, body: '' }; }
-    return { status: record.status, body: record.body };
+    // Venues stage reconciliation by elapsed tape time or command number.
+    const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= this.commandIndex && (r.after ?? 0) <= this.time);
+    if (!eligible.length) {
+      this.unserved++;
+      console.error(`Request preceded its taped stage: ${key}`);
+      return { status: 599, body: '' };
+    }
+    const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
+    let current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
+    const timed = queue.some((r) => r.after !== undefined);
+    if (timed) {
+      const after = Math.max(...current.map((r) => r.after ?? 0));
+      current = current.filter((r) => (r.after ?? 0) === after);
+    }
+    const record = timed ? current.at(-1) : current[0];
+    if ((!timed && current.length > 1) || (venue.matchRequestBody && method !== 'GET')) queue.splice(queue.indexOf(record), 1);
+    return { status: record.status, headers: record.headers ?? '', body: record.body };
   }
 
   connect(url, onOpen, onMessage, onClose) {
     url = canonicalUrl(url);
     const connection = this.connectionCounts.get(url) ?? 0;
     this.connectionCounts.set(url, connection + 1);
-    const socket = { url, connection, onOpen, onMessage, onClose, closed: false, opened: false, topics: new Set(), publicTopics: new Set() };
+    const socket = { url, connection, onOpen, onMessage, onClose, closed: false, opened: false, topics: new Set(), publicTopics: new Set(), subscriptionArgs: new Map(), loginVerified: false };
     this.sockets.push(socket);
     this.byConnection.set(`${url}:${connection}`, socket);
     // Old synthetic fixtures have no lifecycle records; live tapes drive every
@@ -168,6 +236,36 @@ class Tape {
     if (socket.closed || socket.opened) return;
     socket.opened = true;
     socket.onOpen();
+  }
+
+  assertSubscribed(socket, message) {
+    if (!(venue.validateSubscriptions ?? venue.validateLogin) || !message.arg?.channel || !Array.isArray(message.data)) return;
+    const topics = [...socket.subscriptionArgs.values()].filter((topic) => topic.channel === message.arg.channel);
+    // Some documented messages put instId only on each data row, not arg.
+    const rows = message.data.length ? message.data : [null];
+    for (const row of rows) {
+      const object = row && !Array.isArray(row) && typeof row === 'object' ? row : {};
+      const covered = topics.some((topic) => Object.entries(topic).every(([key, value]) => {
+        if (key === 'channel') return true;
+        if (key === 'instType' && value === 'ANY') return true;
+        const values = [message.arg[key], object[key]].filter((v) => v !== undefined && v !== '');
+        if (!values.length && key === 'instType') {
+          const id = object.instId ?? message.arg.instId;
+          if (id?.endsWith('-SWAP')) values.push('SWAP');
+        }
+        return values.length > 0 && values.every((v) => v === value);
+      }));
+      if (!covered) {
+        throw new Error(`Unsubscribed ${message.arg.channel} frame on ${socket.url}: ${JSON.stringify(message.arg)}${object.instId ? ` instId=${object.instId}` : ''}`);
+      }
+    }
+  }
+
+  assertWritesConsumed() {
+    if (!venue.matchRequestBody) return;
+    const missing = [...this.responses].flatMap(([key, rows]) =>
+      key.startsWith('GET ') ? [] : rows.map(() => key));
+    if (missing.length) throw new Error(`${missing.length} taped write(s) were not sent:\n${missing.join('\n')}`);
   }
 
   async socketFor(frame) {
@@ -218,7 +316,7 @@ class Tape {
    */
   async play(onTick, ready = async () => {}, runCommand = async () => {}) {
     let initialized;
-    const ensureReady = () => initialized ??= (async () => {
+    const ensureReady = () => initialized ??= within((async () => {
       await ready();
       if (values.venue !== 'bitunix') return;
       const symbols = JSON.parse(records.find((r) => r.type === 'http' && r.url.includes('/market/trading_pairs')).body).data
@@ -229,8 +327,9 @@ class Tape {
         if (performance.now() > deadline) throw new Error(`active startup topics missing: expected ${symbols * 2}, got ${active()}`);
         await new Promise((r) => setTimeout(r, 5));
       }
-    })();
-    if (values.venue !== 'bitunix') await ensureReady();
+    })(), 15_000, 'Replay startup');
+    const recordedLifecycle = records.some((r) => r.type === 'connect');
+    if (values.venue !== 'bitunix' && !recordedLifecycle) await ensureReady();
     this.peakBytes = Math.max(this.peakBytes ?? 0, this.sampleMemory?.() ?? 0);
     const start = performance.now();
     let delivered = 0;
@@ -244,7 +343,11 @@ class Tape {
       this.time = frame.t;
       if (frame.type === 'command') {
         await ensureReady();
-        this.results.push(await runCommand(frame).then((ids) => ({ ok: ids }), (error) => ({ error: String(error?.message ?? error) })));
+        this.commandIndex++;
+        this.results.push(await within(runCommand(frame), 15_000, `Command ${frame.op}`).then((ids) => ({ ok: ids }), (error) => {
+          if (error instanceof ReplayTimeout) throw error;
+          return { error: String(error?.message ?? error) };
+        }));
       } else {
         const socket = await this.socketFor(frame);
         if (frame.type === 'open' || frame.type === 'close') await this.lifecycle(frame);
@@ -254,6 +357,12 @@ class Tape {
             const deadline = performance.now() + 10_000;
             while (!socket.topics.has(frame.topic) && !socket.closed && performance.now() < deadline)
               await new Promise((r) => setTimeout(r, 5));
+          }
+          if ((venue.validateLogin || venue.validateSubscriptions) && frame.text.trimStart().startsWith('{')) {
+            const message = JSON.parse(frame.text);
+            if (venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified)
+              throw new Error(`Taped login success preceded a valid login on ${frame.url}`);
+            this.assertSubscribed(socket, message);
           }
           this.validateTopic(socket, frame);
           socket.onMessage(frame.text);
@@ -326,13 +435,14 @@ const sortBook = (book) => ({
   asks: book.asks.map(({ price, amount }) => [price, amount]),
 });
 
-const tickerFields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume'];
+const tickerFields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume', 'openInterest'];
 const marketFields = (m) => ({
   id: m.id,
   symbol: m.symbol,
   base: m.base,
   quote: m.quote,
   active: m.active,
+  contractSize: m.contractSize ?? null,
   precision: m.precision,
   limits: { amount: { min: Number(m.limits.amount.min), max: Number(m.limits.amount.max) } },
 });
@@ -363,13 +473,17 @@ async function runRust() {
       return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
     request: async ({ method, url, body: requestBody, headers }) => {
-      const { status, body } = tape.respond(method, url, requestBody, headers);
-      return { status, headers: '', body: encoder.encode(body) };
+      const { status, headers: responseHeaders = '', body } = tape.respond(method, url, requestBody, headers);
+      const chunks = async function* () {
+        const bytes = encoder.encode(body);
+        for (let offset = 0; offset < bytes.length; offset += 16 * 1024) yield bytes.subarray(offset, offset + 16 * 1024);
+      };
+      return { status, headers: responseHeaders, body: chunks() };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
-  const options = isPrivate ? { key: KEY, secret: SECRET } : { publicDataOnly: true };
+  const options = { ...venue.options, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }) };
   await settle();
   const heapBefore = await baseline();
   tape.sampleMemory = () => jsMemoryBytes() - heapBefore + wasmMemoryBytes();
@@ -422,6 +536,8 @@ async function runRust() {
     },
   );
   await settle();
+  tape.assertWritesConsumed();
+  tape.assertWritesConsumed();
   clearInterval(flushTimer);
   host.flush();
   clearInterval(sampling);
@@ -437,6 +553,7 @@ async function runRust() {
       base: markets.base(i),
       quote: markets.quote(i),
       active: (markets.flags[i] & 1) !== 0,
+      contractSize: markets.contractSize[i] || undefined,
       precision: { amount: markets[MARKET_COLUMNS[0]][i], price: markets[MARKET_COLUMNS[1]][i] },
       limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
     });
@@ -488,7 +605,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
     orders: orderRows,
     positions: positionRows,
     settings: settingRows,
-    fills: fills.map((f) => ({ id: f.id, symbol: symbol(f.market), side: f.side === 0 ? 'buy' : 'sell', amount: f.amount, ...(values.venue === 'bitunix' ? { price: f.price } : {}) })),
+    fills: fills.map((f) => ({ id: f.id, symbol: symbol(f.market), side: f.side === 0 ? 'buy' : 'sell', amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
   };
 }
 
@@ -560,8 +677,9 @@ async function runTs() {
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   const store = new DefaultStore();
-  const options = isPrivate ? { key: KEY, secret: SECRET } : { key: '', secret: '', publicDataOnly: true };
+  const options = { ...venue.options, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { key: '', secret: '', publicDataOnly: true }) };
   const exchange = new Exchange(venue.ts.name, options, store);
+  venue.configureTs?.(exchange);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
@@ -592,40 +710,11 @@ async function runTs() {
       const loaded = () => Object.values(store.loaded).every(Boolean);
       while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
     },
-    async (record) => {
-      if (record.op === 'placeOrders') return exchange.placeOrders(record.orders);
-      if (record.op === 'cancelOrders') {
-        await exchange.cancelOrders(store.orders.filter((order) => record.ids.includes(order.id)));
-        return [];
-      }
-      if (record.op === 'cancelSymbolOrders') {
-        await exchange.cancelSymbolOrders(record.symbol);
-        return [];
-      }
-      if (record.op === 'amendOrder') {
-        const order = store.orders.find((o) => o.id === record.id);
-        if (!order) throw new Error(`order ${record.id} not found`);
-        return exchange.updateOrder({ order, update: Object.fromEntries(['price', 'amount'].filter((key) => record[key] !== undefined).map((key) => [key, record[key]])) });
-      }
-      if (record.op === 'setLeverage') { await exchange.setLeverage(record.symbol, record.leverage); return []; }
-      if (record.op === 'setMarginType') { await exchange.changeMarginType(record.isolated, record.symbol); return []; }
-      if (record.op === 'setPositionMode') { await exchange.changePositionMode(record.hedged); return []; }
-      if (record.op === 'fetchFills') return exchange.fetchHistoricalFills(record);
-      if (record.op === 'fetchOrderHistory') return exchange.fetchHistoricalOrders(record);
-      if (record.op === 'fetchIncome') return exchange.fetchIncomeHistory({ ...record, startTime: record.from, endTime: record.to });
-      if (record.op === 'fetchPublicTrades') return exchange.fetchPublicTrades(record.symbol, record.limit);
-      if (record.op === 'fetchCandles') return exchange.fetchOHLCV(record);
-      if (record.op === 'subscribeCandles') {
-        const key = `${record.symbol}:${record.interval}`;
-        candleListeners.set(key, exchange.listenOHLCV(record, (c) => candleUpdates.push({ symbol: record.symbol, interval: record.interval, candle: [c.timestamp, c.open, c.high, c.low, c.close, c.volume] })));
-        return;
-      }
-      if (record.op === 'unsubscribeCandles') { candleListeners.get(`${record.symbol}:${record.interval}`)?.(); return; }
-      throw new Error(`unknown command ${record.op}`);
-    },
+    (record) => runTsCommand(exchange, store, record, { candleListeners, candleUpdates }),
   );
-  await Promise.all([started, subscribed]);
+  await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
   await settle();
+  tape.assertWritesConsumed();
   clearInterval(sampling);
   const metrics = await measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark, tape.peakBytes);
   const snapshot = {
@@ -643,12 +732,47 @@ async function runTs() {
         // Zero-size placeholders carry each market's leverage and margin type.
         positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
         settings: [...new Map(store.positions.filter((p) => p.leverage > 0).sort((a, b) => a.contracts - b.contracts).map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }])).values()],
-        fills: executions.map((f) => ({ id: f.id, symbol: f.symbol, side: f.side, amount: f.amount, ...(values.venue === 'bitunix' ? { price: f.price } : {}) })),
+        fills: executions.map((f) => ({ id: f.id, symbol: f.symbol, side: f.side, amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
       }
     : undefined;
   exchange.dispose();
   if (posted && !Object.keys(consumerBooks).length) throw new Error('lost consumer books');
   return { frames, metrics, bookEvents, unserved: tape.unserved, signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
+}
+
+async function runTsCommand(exchange, store, record, { candleListeners, candleUpdates }) {
+  const { op, ...args } = commandArgs(record);
+  switch (op) {
+    case 'placeOrders': return exchange.placeOrders(args.orders);
+    case 'cancelOrders':
+      await exchange.cancelOrders(store.orders.filter((order) => args.ids.includes(order.id)));
+      return [];
+    case 'cancelSymbolOrders': await exchange.cancelSymbolOrders(args.symbol); return [];
+    case 'amendOrder': {
+      const order = store.orders.find((o) => o.id === args.id);
+      if (!order) throw new Error(`unknown order ${args.id}`);
+      const update = Object.fromEntries(['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]));
+      return exchange.updateOrder({ order, update });
+    }
+    case 'setLeverage': await exchange.setLeverage(args.symbol, args.leverage); return [];
+    case 'setMarginType': await exchange.changeMarginType(args.isolated, args.symbol); return [];
+    case 'setPositionMode': await exchange.changePositionMode(args.hedged); return [];
+    case 'fetchFills': return exchange.fetchHistoricalFills(args);
+    case 'fetchOrderHistory': return exchange.fetchHistoricalOrders(args);
+    case 'fetchIncome': {
+      const { from, to, ...options } = args;
+      return exchange.fetchIncomeHistory({ ...options, startTime: from, endTime: to });
+    }
+    case 'fetchPublicTrades': return exchange.fetchPublicTrades(args.symbol, args.limit);
+    case 'fetchCandles': return exchange.fetchOHLCV(args);
+    case 'subscribeCandles': {
+      const key = `${args.symbol}:${args.interval}`;
+      candleListeners.set(key, exchange.listenOHLCV(args, (c) => candleUpdates.push({ symbol: args.symbol, interval: args.interval, candle: [c.timestamp, c.open, c.high, c.low, c.close, c.volume] })));
+      return;
+    }
+    case 'unsubscribeCandles': candleListeners.get(`${args.symbol}:${args.interval}`)?.(); return;
+    default: throw new Error(`unknown command ${op}`);
+  }
 }
 
 /** The fields both implementations carry, in one shape. */
@@ -657,9 +781,13 @@ function normalizeAccount(account) {
     id: String(o.id),
     symbol: o.symbol,
     status: o.status,
-    timeInForce: o.timeInForce ?? 'GTC',
-    clientOrderId: o.clientOrderId || null,
-    parentId: o.parentId || null,
+    ...(values.venue === 'bitunix' ? {
+      timeInForce: ({ GTC: 'GoodTillCancel', POST_ONLY: 'PostOnly', GTX: 'PostOnly', IOC: 'ImmediateOrCancel', FOK: 'FillOrKill' })[o.timeInForce] ?? o.timeInForce ?? 'GoodTillCancel',
+      // TS keeps native identity in info; virtual protection rows share that
+      // info with their parent, so only the native row owns its client ID.
+      clientOrderId: o.clientOrderId || (String(o.info?.orderId) === String(o.id) ? o.info?.clientId : null) || null,
+      parentId: o.parentId || (o.info?.orderId && ['tp', 'sl'].some((leg) => o.id === `${o.info.orderId}__${leg}`) ? String(o.info.orderId) : null),
+    } : {}),
     type: o.type,
     side: o.side,
     price: o.price,
@@ -718,4 +846,5 @@ writeFileSync(
     bookEvents: result.bookEvents.sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1])),
   }),
 );
+clearTimeout(replayDeadline);
 process.exit(0);

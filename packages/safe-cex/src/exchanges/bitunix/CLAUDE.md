@@ -699,7 +699,10 @@ positive rebates. Do not subtract fee/funding again or synthesize funding rows.
 
 Intentional Rust corrections are listed in the replay gate: failed reads preserve
 state, cumulative order executions emit once, historical fills dedupe by trade ID,
-regular orders retain client IDs, split generated IDs are unique, and a
+split generated IDs are unique, and a
 cancel/recreate amendment requires acknowledged cancellation and final remaining
 quantity. Public `ft`/`nft` may be ISO strings: the next funding time uses `nft`
 (or `ft` if absent), converted to epoch milliseconds rather than the ISO year.
+
+The replay compares client IDs from TS order `info` with typed Rust fields; this
+is a metadata projection, not a claimed TS client-ID loss.

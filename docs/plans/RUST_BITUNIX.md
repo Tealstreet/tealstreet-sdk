@@ -205,3 +205,19 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
 - Next: merge latest landing branch (currently Bybit + OKX), preserve its generic
   harness capabilities, rerun integrated gates, push and open/review PR. Merge
   only after PR CI is green; then cut the requested fresh follow-up branch.
+
+### Landing integration checkpoint
+
+- Merged landing at 693ad4f139 (Bybit + OKX), resolving shared files with separate
+  engine/harness/host reviews. Kept canonical EnvelopeField/Path plus Bitunix
+  AnyFieldEnvelope validation; kept every venue factory/alias and one canonical
+  wasm test location. Added Bitunix public/private gates to Rust CI.
+- Preserved upstream OKX login/topic/ping validation, venue options and TS oracle
+  configuration, response headers/chunking, command-stage snapshots and required
+  write consumption alongside Bitunix connection identities and timed snapshots.
+- Clarified client-ID comparisons: TS stores native IDs in order.info. The
+  Bitunix gate projects those into the same typed fields; this is not a claimed
+  TS client-ID bug. Other ports keep their prior account comparison contract.
+- Integrated root typecheck 44 tasks and lint 28 tasks PASS. First root tests hit
+  an unrelated WEEX reconnect timeout; its 11 targeted tests and full 27-task
+  retry PASS. Workspace Rust checks/build and integrated replays in progress.

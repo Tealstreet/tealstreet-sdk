@@ -100,7 +100,7 @@ impl BitunixFutures {
             Method::Get,
             format!("{REST}{MARKETS}"),
             self.headers(),
-            json::ArrayAt::FieldEnvelope("data"),
+            json::ArrayAt::EnvelopeField("data"),
             Pending::Markets {
                 rows: Vec::new(),
                 invalid: false,
@@ -512,7 +512,7 @@ impl Venue for BitunixFutures {
                     Method::Get,
                     format!("{REST}{TICKERS}"),
                     self.headers(),
-                    json::ArrayAt::FieldEnvelope("data"),
+                    json::ArrayAt::EnvelopeField("data"),
                     Pending::Tickers {
                         rows: Vec::new(),
                         invalid: false,
@@ -583,7 +583,7 @@ impl Venue for BitunixFutures {
                     Method::Get,
                     format!("{REST}{TICKERS}"),
                     self.headers(),
-                    json::ArrayAt::FieldEnvelope("data"),
+                    json::ArrayAt::EnvelopeField("data"),
                     Pending::Tickers {
                         rows: Vec::new(),
                         invalid: false,

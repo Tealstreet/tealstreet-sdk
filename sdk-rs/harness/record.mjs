@@ -46,6 +46,7 @@ const recording = {
         handlers.onOpen();
       },
       onMessage: (text) => {
+        frames++;
         write({ type: 'ws', url, connection, text });
         handlers.onMessage(text);
       },
@@ -58,15 +59,24 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const chunks = [];
-    if (response.body instanceof Uint8Array) chunks.push(response.body);
-    else for await (const chunk of response.body) chunks.push(chunk);
-    const bytes = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.length, 0));
-    let at = 0;
-    for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.length; }
-    const body = new TextDecoder().decode(bytes);
-    write({ type: 'http', method: request.method, url: request.url, requestBody: request.body, status: response.status, body });
-    return { ...response, body: bytes };
+    const recorded = (body) => write({
+      type: 'http', method: request.method, url: request.url,
+      ...(request.body === undefined ? {} : { requestBody: request.body }),
+      status: response.status, headers: response.headers ?? '', body,
+    });
+    if (response.body instanceof Uint8Array) {
+      recorded(new TextDecoder().decode(response.body));
+      return response;
+    }
+    return { ...response, body: (async function* () {
+      const decoder = new TextDecoder();
+      let body = '';
+      for await (const chunk of response.body) {
+        body += decoder.decode(chunk, { stream: true });
+        yield chunk;
+      }
+      recorded(body + decoder.decode());
+    })() };
   },
 };
 
@@ -74,7 +84,7 @@ const { WasmEngine } = await loadEngine();
 let frames = 0;
 let updates = 0;
 const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: true })), recording, {
-  onFrame: () => { updates++; frames++; },
+  onFrame: () => { updates++; },
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });
 host.start();
