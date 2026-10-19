@@ -248,7 +248,7 @@ impl TunnelHost for TokenTunnel {
     }
 }
 /// The Tealstreet transport's host: HOW adapters over the token tunnel. The source's
-/// `markRestProxyHeader` stamps a diagnostic config property, which RestRequest has no field for.
+/// Native proxy authorization retains its diagnostic marker outside HTTP headers.
 struct NativeTealstreetHost {
     tunnel: Rc<dyn TunnelHost>,
 }
@@ -270,7 +270,12 @@ impl TealstreetTransportHost for NativeTealstreetHost {
     fn is_node_or_bun_runtime(&self) -> bool {
         true
     }
-    fn mark_rest_proxy_header(&self, _request: &mut RestRequest, _shape: &'static str) {}
+    fn mark_rest_proxy_header(&self, request: &mut RestRequest, shape: &'static str) {
+        request.config_extensions.insert(
+            "safeCexRestDiagProxyHeader".into(),
+            safe_cex_types::retained_json::RetainedJsonInput::Text(shape.encode_utf16().collect()),
+        );
+    }
     fn default_adapter(&self) -> Arc<dyn RestAdapter> {
         how(
             &self.tunnel,

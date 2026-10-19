@@ -1,99 +1,99 @@
 [file]
 ts = "packages/lighter-sdk/src/signer/key-manager.ts"
-rust_files = [ "safe-cex-venue-lighter/src/sdk_key_management.rs", "safe-cex-lighter-sdk/src/key_runtime.rs" ]
+rust_files = []
 
 [[symbol]]
 ts = "KeyPair"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_key_management.rs::KeyPair"
-status = "ported"
-note = "Native pair of distinct UTF16 private/public string fields; source interface mapping, direct independent field assertions."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Retired after shipped-caller census: Lighter constructs TransactionClient and uses its canonical signer binding; no tracked application or venue calls the standalone TransactionSigner or its key-manager/hash helpers. The unused Rust implementation and exclusive fixtures were deleted. TS declarations/barrel exports remain inventoried; this is not a claim of SDK-wide API equivalence. See safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "KeyManagerError"
 kind = "class"
-layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_key_management.rs::KeyManagerError"
-status = "divergent"
-note = "FORCED: native Rust error value preserves name, UTF16 message and unknown cause; JS Error prototype inheritance, instanceof and engine stack have no native runtime counterpart. Concrete class struct and constructor exist; native fields/cause identity tested."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Retired after shipped-caller census: Lighter constructs TransactionClient and uses its canonical signer binding; no tracked application or venue calls the standalone TransactionSigner or its key-manager/hash helpers. The unused Rust implementation and exclusive fixtures were deleted. TS declarations/barrel exports remain inventoried; this is not a claim of SDK-wide API equivalence. See safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "KeyManagerError.constructor"
 kind = "constructor"
-layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_key_management.rs::KeyManagerError::new"
-status = "divergent"
-note = "FORCED: native constructor sets source name, preserves UTF16 message and omitted/undefined or object cause identity, but cannot perform JS Error super construction/prototype/engine-stack behavior without a JS runtime. Native field/cause oracle; no runtime bridge claimed."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Retired after shipped-caller census: Lighter constructs TransactionClient and uses its canonical signer binding; no tracked application or venue calls the standalone TransactionSigner or its key-manager/hash helpers. The unused Rust implementation and exclusive fixtures were deleted. TS declarations/barrel exports remain inventoried; this is not a claim of SDK-wide API equivalence. See safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "ensureWasmInitialized"
 kind = "function"
-layer = "adapted"
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::ensure_wasm_initialized"
-status = "ported"
-note = "Eager readiness/init imports, owned continuation through post-init readiness/error wrapping, retained original cause; four actual-source cases plus synchronous init failure and eager/drop witnesses. Imported scheduling and KeyManagerError construction are explicit capabilities."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Retired after shipped-caller census: Lighter constructs TransactionClient and uses its canonical signer binding; no tracked application or venue calls the standalone TransactionSigner or its key-manager/hash helpers. The unused Rust implementation and exclusive fixtures were deleted. TS declarations/barrel exports remain inventoried; this is not a claim of SDK-wide API equivalence. See safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "isWasmError"
 kind = "function"
-layer = "adapted"
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::key_is_wasm_error"
-status = "ported"
-note = "safe-cex-lighter-sdk/src/key_runtime.rs::key_is_wasm_error implements object then non-null then inherited-property membership, without reading the error value; exact JS typeof/null/in primitives supplied by the host. Four actual-source predicate cases."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Retired after shipped-caller census: Lighter constructs TransactionClient and uses its canonical signer binding; no tracked application or venue calls the standalone TransactionSigner or its key-manager/hash helpers. The unused Rust implementation and exclusive fixtures were deleted. TS declarations/barrel exports remain inventoried; this is not a claim of SDK-wide API equivalence. See safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "generateKeyPair"
 kind = "function"
-layer = "adapted"
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::generate_key_pair"
-status = "ported"
-note = "SDK body owns initialization, bound crypto export dispatch, error membership/string coercion and privateKey then publicKey reads; raw field values are retained without invented validation. Imported JS primitives/error constructor are capabilities; UTF16 errors and original thrown object identity tested, including dropped awaiter."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Retired after shipped-caller census: Lighter constructs TransactionClient and uses its canonical signer binding; no tracked application or venue calls the standalone TransactionSigner or its key-manager/hash helpers. The unused Rust implementation and exclusive fixtures were deleted. TS declarations/barrel exports remain inventoried; this is not a claim of SDK-wide API equivalence. See safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "derivePublicKey"
 kind = "function"
-layer = "adapted"
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::derive_public_key"
-status = "ported"
-note = "Initialization precedes exact UTF16 length/ASCII hex validation; SDK body dispatches unchanged key to the bound ported crypto export, wraps error records and assimilates a returned thenable through imported PromiseResolve. Native object identity and original error cause preserved; source normal/invalid/surrogate/error and extra thenable cases."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Retired after shipped-caller census: Lighter constructs TransactionClient and uses its canonical signer binding; no tracked application or venue calls the standalone TransactionSigner or its key-manager/hash helpers. The unused Rust implementation and exclusive fixtures were deleted. TS declarations/barrel exports remain inventoried; this is not a claim of SDK-wide API equivalence. See safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "isValidPrivateKey"
 kind = "function"
-layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_key_management.rs::is_valid_private_key"
-status = "ported"
-note = "Source typed string domain under ordinary intrinsics: exact UTF16 length80 then ASCII hex regex decision; native boolean oracle."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Retired after shipped-caller census: Lighter constructs TransactionClient and uses its canonical signer binding; no tracked application or venue calls the standalone TransactionSigner or its key-manager/hash helpers. The unused Rust implementation and exclusive fixtures were deleted. TS declarations/barrel exports remain inventoried; this is not a claim of SDK-wide API equivalence. See safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "isValidPublicKey"
 kind = "function"
-layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_key_management.rs::is_valid_public_key"
-status = "ported"
-note = "Source typed string domain under ordinary intrinsics: exact UTF16 length80 then ASCII hex regex decision; native boolean oracle."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Retired after shipped-caller census: Lighter constructs TransactionClient and uses its canonical signer binding; no tracked application or venue calls the standalone TransactionSigner or its key-manager/hash helpers. The unused Rust implementation and exclusive fixtures were deleted. TS declarations/barrel exports remain inventoried; this is not a claim of SDK-wide API equivalence. See safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "normalizePrivateKey"
 kind = "function"
-layer = "adapted"
-rs = [ "safe-cex-venue-lighter/src/sdk_key_management.rs::normalize_private_key", "safe-cex-venue-lighter/src/sdk_key_management.rs::KeyInput" ]
-status = "ported"
-note = "Ordinary UTF16 strings and owned unmodified Buffer/Uint8Array bytes: lowercase-only 0x removal, case preservation, lowercase byte hex and source validation/error text. Exotic prototype/global overrides and iterators outside adapter. Native result/error oracle. Split member `safe-cex-venue-lighter/src/sdk_key_management.rs::KeyInput`. Inline string | Buffer | Uint8Array parameter shape accepted by the normalizePrivateKey body (and shared with normalizePublicKey)."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Retired after shipped-caller census: Lighter constructs TransactionClient and uses its canonical signer binding; no tracked application or venue calls the standalone TransactionSigner or its key-manager/hash helpers. The unused Rust implementation and exclusive fixtures were deleted. TS declarations/barrel exports remain inventoried; this is not a claim of SDK-wide API equivalence. See safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "normalizePublicKey"
 kind = "function"
-layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_key_management.rs::normalize_public_key"
-status = "ported"
-note = "Ordinary UTF16 strings and owned unmodified Buffer/Uint8Array bytes: lowercase-only 0x removal, case preservation, lowercase byte hex and source validation/error text. Exotic prototype/global overrides and iterators outside adapter. Native result/error oracle."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Retired after shipped-caller census: Lighter constructs TransactionClient and uses its canonical signer binding; no tracked application or venue calls the standalone TransactionSigner or its key-manager/hash helpers. The unused Rust implementation and exclusive fixtures were deleted. TS declarations/barrel exports remain inventoried; this is not a claim of SDK-wide API equivalence. See safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "secureCompareKeys"
 kind = "function"
-layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_key_management.rs::secure_compare_keys"
-status = "ported"
-note = "Typed UTF16 strings: source unequal-length early return, full XOR/OR loop over equal-length code units and final zero comparison. Native boolean oracle; no machine-code constant-time proof claimed."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Retired after shipped-caller census: Lighter constructs TransactionClient and uses its canonical signer binding; no tracked application or venue calls the standalone TransactionSigner or its key-manager/hash helpers. The unused Rust implementation and exclusive fixtures were deleted. TS declarations/barrel exports remain inventoried; this is not a claim of SDK-wide API equivalence. See safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md."

@@ -166,7 +166,7 @@ fn effective_receipt_url_and_action_classification() {
         );
         let original_body = json!({"action":{"type":original_action},"receiptMarker":"original"});
         let request = client.build_request(original_url, &original_body).unwrap();
-        let result = ready(client.execute(request, false));
+        let result = ready(client.execute(request, false, &|_| Ok(())));
         assert_eq!(
             result.is_err(),
             rejected,

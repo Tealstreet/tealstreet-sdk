@@ -2,8 +2,8 @@
 
 Authority: the 37 exact rows in `assignments/codex-0w5ohi.json`, linked from
 `non-utf8-assignment-index.json`, and the async ruling in
-`divergence-cluster-rulings.md`. Twenty-five rows are reconciled below; the other
-12 remain with the delegated production-binding audit owner.
+`divergence-cluster-rulings.md`. Twenty-seven rows are reconciled below; the
+remaining ten belong to the delegated production-binding audit owner.
 
 | Assignment rows | Source owner | Verdict | Production observation |
 | --- | --- | --- | --- |
@@ -71,14 +71,14 @@ compiles early-copy and nonzero-Spot-return faults, requires named runtime
 failures, restores exact bytes and requires GREEN. No WebSocket bodies change.
 
 The position batch reconciles five rows. With the seven rows in PR #1182,
-row 37 ACCEPT-safety in PR #1188 and the five Hyro rows below, 18 of 37
-are reconciled and 19 remain.
+row 37 ACCEPT-safety in PR #1188, the five Hyro rows below and delegated
+history rows 6/16 in PR #1198, plus the seven retained rows in PR #1212,
+27 of 37 are reconciled and ten remain.
 
-The former 19-row remainder was split by module: codex-0efu4x owns rows
-1/2/3/6/7/8/12/13/16/23/25/35 (public/private socket lifecycle, history mapping
-and position controls); codex-0w5ohi retained rows
-18/24/26/27/32/33/36 (reconciled in the retained batch below) (Spot, placement options, account,
-market and startup/facade work). Existing WS carrier owners retain their separate
+The remaining ten rows belong to codex-0efu4x:
+1/2/3/7/8/12/13/23/25/35 (public/private socket lifecycle and position controls).
+The seven rows retained by codex-0w5ohi, 18/24/26/27/32/33/36, are reconciled
+in the retained batch below. Existing WS carrier owners retain their separate
 body changes; the socket audit owner coordinates those boundaries first.
 
 ## Original-method retry guard: row 37 ACCEPT-safety
@@ -138,6 +138,15 @@ and prove that shadowed `__proto__` accessors are not read.
 Error classification separately, requires compiled named native failures, then
 restores exact source bytes and replays the receiver.
 
+## Delegated history: rows 6 and 16
+
+Both primary and inverse history mapper rows are FIX in PR #1198. The live
+historical-fills reader visibly refuses malformed strict output fields after
+source paging and recovery, preserving valid neighbors and source error priority.
+The synchronous raw mapper and its original identity/alias guards are unchanged.
+See `DELEGATED_HISTORY_FIX_AUDIT.md` for the real-binding RED/GREEN, six compiled
+production controls and the ten remaining delegated rows.
+
 ## Retained startup, markets, tickers and placement: rows 18/24/26/27/32/33/36
 
 | Row | Verdict | Production binding evidence |
@@ -161,5 +170,6 @@ restores exact production bytes and requires the named native witnesses GREEN. T
 primary placement targets retain their original cases and effects. The exported
 JSON mappers remain supplemental tests, with no production fallback through them.
 
-This batch reconciles all seven rows retained by codex-0w5ohi. The twelve rows
-delegated to codex-0efu4x retain that owner's separate milestones and verdicts.
+This batch reconciles all seven rows retained by codex-0w5ohi. Of the twelve
+rows delegated to codex-0efu4x, history rows 6/16 are reconciled above and the
+other ten retain that owner's separate milestones and verdicts.

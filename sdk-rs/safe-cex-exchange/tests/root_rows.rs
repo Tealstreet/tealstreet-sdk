@@ -74,6 +74,40 @@ fn root_fill_table_native_values_keys_and_prototype_kind() {
     assert_eq!(source["native"], 15);
     assert_eq!(source["base"], 7);
     assert_eq!(source["prototypeArity"], 0);
+    let venues = source["venues"].as_array().unwrap();
+    assert_eq!(venues.len(), 49);
+    let prototype = source["prototype"].as_array().unwrap();
+    assert_eq!(prototype.len(), 12);
+    for row in prototype {
+        let name = row["name"].as_str().unwrap();
+        let TableHit::Inherited(member) = fill_event_units(name) else {
+            panic!("ROOT source builtin missing {name}");
+        };
+        assert_eq!(json!(member.length()), row["length"], "ROOT arity {name}");
+        assert_eq!(member.js_string(), row["text"], "ROOT builtin text {name}");
+    }
+    for name in source["absent"].as_array().unwrap() {
+        let name = name.as_str().unwrap();
+        assert_eq!(
+            fill_event_units(name),
+            TableHit::Missing,
+            "ROOT miss {name}"
+        );
+    }
+    for venue in venues {
+        let name = venue["name"].as_str().unwrap();
+        let expected = match venue["unit"].as_str() {
+            Some("native") => TableHit::Mapped(FillEventUnit::Native),
+            Some("base") => TableHit::Mapped(FillEventUnit::Base),
+            None => TableHit::Missing,
+            other => panic!("unexpected source fill unit {other:?}"),
+        };
+        assert_eq!(
+            fill_event_units(name),
+            expected,
+            "ROOT full venue fill unit {name}"
+        );
+    }
 }
 #[test]
 fn root_handler_aliases_native_presence_bits_and_callback_identity() {

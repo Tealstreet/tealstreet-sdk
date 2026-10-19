@@ -624,3 +624,13 @@ separate static text, qualified, borrowed Value and owned Value routes. Keep the
 general borrowed/owned guards intact. The constructed native socket witnesses
 and `numeric-changes-controls.py` observe both real ticker publication families;
 registered parity controls require named native identity/order/route failures.
+
+`NON_UTF8_FIX_AUDIT.md` reconciles the twelve assigned non-UTF-8 audit rows
+through the actual constructed Scope. Keep the assembled account-log path on
+native Js until source-selected coercions/finite guards: whole-response JSON
+projection can discard a good page before those guards run. The six
+`non_utf8_fix_audit` tests compare exact startup, shared journal delegation and
+live fill/income fields to maintained source. The three compiled production
+faults in `scripts/non-utf8-audit-controls.py` require named failures and exact
+restored passes. The standalone borrowed wire utilities keep their separately
+documented input domain; they are not the live account-log mapper.
