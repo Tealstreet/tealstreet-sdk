@@ -83,6 +83,45 @@ const isPrivate = Boolean(ts.account);
 // last-trade filter permanently deleted valid levels when the trade lagged.
 const KNOWN_TS_FIXES = {
   cryptocom: fixCryptocomAccount,
+  phemex(account) {
+    // TS deduplicates executions by order within each message, then repeats
+    // executions echoed by later messages. Build the oracle only from the tape.
+    const seen = new Set();
+    account.fills = [];
+    for (const record of tapeRecords) {
+      if (record.type !== 'ws') continue;
+      const message = JSON.parse(record.text);
+      if (message.type === 'snapshot') continue;
+      for (const row of message.orders_p ?? []) {
+        if (!['MakerFill', 'TakerFill'].includes(row.execStatus) || !row.execID || seen.has(row.execID)) continue;
+        seen.add(row.execID);
+        account.fills.push({ id: row.orderID, symbol: row.symbol.toUpperCase(), side: row.side.toLowerCase(), amount: Number(row.execQty), price: Number(row.execPriceRp) });
+      }
+    }
+    const cumulative = new Map();
+    for (const record of tapeRecords) {
+      if (record.type !== 'ws') continue;
+      for (const row of JSON.parse(record.text).orders_p ?? []) {
+        const filled = Number(row.cumQty ?? row.cumQtyRq);
+        const amount = Number(row.orderQty ?? row.orderQtyRq);
+        if (Number.isFinite(filled) && Number.isFinite(amount)) cumulative.set(row.orderID, { filled, remaining: Math.max(0, amount - filled) });
+      }
+    }
+    for (const order of account.orders) {
+      const fixed = cumulative.get(order.id);
+      if (fixed) Object.assign(order, fixed);
+    }
+    // TS uses last execution size, then zeroes canceled fills; cumulative venue
+    // quantities above retain exposure independently of Rust's mapped rows.
+    // Other native safety regressions: failed slices retain prior currency;
+    // final events fence stale snapshots, Triggered remains non-terminal;
+    // ambiguous writes never retry; split units preserve exact requested size;
+    // partial-fill cancel/replace refuses uncertain remaining quantity;
+    // zero-open tickers report zero percentage, and a full WS snapshot replaces
+    // old depth. TS public dispatch now preserves outer sequence for buffering,
+    // explicitly requests depth0 (default30 leaves deep levels stale), and
+    // replaces periodic full snapshots.
+  },
   // Applied to the TS oracle itself (okx.ws-public.ts / okx.exchange.ts).
   okx: [
     'full books retain levels past a stale last trade',
@@ -192,6 +231,7 @@ for (let run = 0; run < runs; run++) {
   const right = JSON.stringify(stable(rust.commands));
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
   // KNOWN_TS_FIXES: unavailable Crypto.com quotes produce NaN in TS.
+  if (values.venue === 'phemex') for (const ticker of ts.tickers) { if (ticker.percentage === null) ticker.percentage = 0; }
   if (values.venue === 'cryptocom') for (const ticker of ts.tickers) {
     for (const field of ['bid', 'ask', 'last', 'percentage', 'volume', 'quoteVolume', 'openInterest']) {
       if (ticker[field] === null) ticker[field] = 0;

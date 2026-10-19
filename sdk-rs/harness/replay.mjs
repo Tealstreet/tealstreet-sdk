@@ -62,7 +62,7 @@ const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrde
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams]
-    .filter(([name, value]) => !VOLATILE.has(name) || callerIds.has(value))
+    .filter(([name, value]) => (!VOLATILE.has(name) || callerIds.has(value)) && (callerIds.has(value) || !venue.generatedQueryId?.(name, value)))
     .map(([name, value]) => [name, /^[\[{]/.test(value) ? canonicalBody(value) : value])
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
@@ -106,6 +106,7 @@ class Tape {
     this.responses = new Responses(records, requestKey, venue.checkRequest, isWriteRequest);
     this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
     this.open = new Map();
+    this.connections = [];
     this.waiters = [];
     this.commandIndex = 0;
   }
@@ -147,6 +148,7 @@ class Tape {
       if (socket.closed) return;
       // Bybit adds a generated requestId to each connection URL.
       this.open.set(canonicalUrl(url), socket);
+      this.connections.push(socket);
       onOpen();
       this.waiters = this.waiters.filter((waiter) => !waiter());
     });
@@ -154,7 +156,12 @@ class Tape {
   }
 
   send(socket, text) {
+    venue.onSocketSend?.(socket, text);
     this.audit?.sent(socket.url, text);
+    if (venue.pingReply) {
+      const reply = venue.pingReply(text);
+      if (reply) setImmediate(() => { if (!socket.closed) socket.onMessage(reply); });
+    }
     if (venue.respondToPing && text === 'ping') {
       setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
       return;
@@ -218,8 +225,17 @@ class Tape {
     if (missing) throw new Error(`${missing} taped write(s) were not sent`);
   }
 
-  async socketFor(rawUrl) {
+  async socketFor(rawUrl, text) {
     const url = canonicalUrl(rawUrl);
+    if (venue.socketMatches && text !== undefined) {
+      const find = () => this.connections.find((s) => !s.closed && canonicalUrl(s.url) === url && venue.socketMatches(s, text));
+      const started = performance.now();
+      while (!find()) {
+        if (performance.now() - started > 15_000) throw new Error(`matching socket did not open: ${url}`);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      return find();
+    }
     while (!this.open.get(url) || this.open.get(url).closed) {
       let timer;
       try {
@@ -241,12 +257,18 @@ class Tape {
     const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
     await within((async () => {
       for (const url of urls) await this.socketFor(url);
+      for (const frame of this.frames.filter((f) => venue.bootstrapFrame?.(f))) {
+        const socket = await this.socketFor(frame.url, frame.text);
+        socket.onMessage(frame.text);
+        await new Promise(setImmediate);
+      }
       await ready();
     })(), 15_000, 'Replay startup');
     const start = performance.now();
     let delivered = 0;
     const warm = Math.floor(this.frames.length / 4);
     for (const frame of this.frames) {
+      if (venue.bootstrapFrame?.(frame)) continue;
       if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
       if (isPrivate) {
         const wait = frame.t - (performance.now() - start);
@@ -260,7 +282,7 @@ class Tape {
           return { error: String(error?.message ?? error) };
         }));
       } else {
-        const socket = await this.socketFor(frame.url);
+        const socket = await this.socketFor(frame.url, frame.text);
         if ((venue.validateLogin || venue.validateSubscriptions) && frame.text.trimStart().startsWith('{')) {
           const message = JSON.parse(frame.text);
           if (venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified) {
@@ -388,6 +410,7 @@ async function runRust() {
   };
   const options = { ...venue.options, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }) };
   const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
+    onLog: (level, message) => console.error(`[${level}] ${message}`),
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
       const received = values['no-egress'] ? buffer : structuredClone(buffer, { transfer: [buffer] });
@@ -422,7 +445,11 @@ async function runRust() {
       }
     },
     async () => {
-      while ((isPrivate && (status?.loaded ?? 0) !== allLoaded) || (tape.audit && !tape.audit.ready())) await new Promise((r) => setTimeout(r, 5));
+      const waiting = performance.now();
+      while ((isPrivate && (status?.loaded ?? 0) !== allLoaded) || (tape.audit && !tape.audit.ready())) {
+        if (performance.now() - waiting > 10_000) throw new Error(`Rust readiness incomplete: loaded=${status?.loaded}, protocol=${JSON.stringify(tape.audit?.errors())}`);
+        await new Promise((r) => setTimeout(r, 5));
+      }
     },
     (record) => {
       const { op, ...rest } = record;
@@ -610,6 +637,9 @@ async function runTs() {
     (record) => runTsCommand(exchange, store, record),
   );
   await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
+  if (venue.tsReplaySettled) await within((async () => {
+    while (!venue.tsReplaySettled(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
+  })(), 15_000, 'TS pending book snapshots');
   await settle();
   tape.assertWritesConsumed();
   postStore();
