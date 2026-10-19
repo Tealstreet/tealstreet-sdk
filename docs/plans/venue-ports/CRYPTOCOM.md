@@ -44,3 +44,12 @@ Full auto; commit each phase after verification and a sub-agent review.
 ## Progress
 
 - Initial inspection and plan audit complete. No implementation yet.
+
+### Public phase
+
+Implemented typed market/ticker seed, valuations, default snapshot books,
+candles, subscriptions and 90-second watchdog. Shared streaming supports nested
+arrays and signed-body reads without changing existing callers. Review found
+malformed list/UTF-8 acceptance; fixed with streamed syntax validation and
+regressions. Checks: bans PASS; crate clippy PASS; engine 10 tests and venue 6
+tests PASS. Public phase ready; private phase next.

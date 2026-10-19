@@ -358,6 +358,11 @@ impl<P> Cx<'_, P> {
         id
     }
 
+    /// Stream the response of an already-issued request, including signed POST reads.
+    pub fn stream_response(&mut self, request: RequestId, at: ArrayAt) {
+        self.io.streams.insert(request, at);
+    }
+
     pub fn set_timer(&mut self, delay_ms: f64) -> TimerId {
         let timer = TimerId(self.io.next());
         self.io.timers.insert(timer, ());
@@ -604,7 +609,7 @@ impl<V: Venue> Engine<V> {
             let response = Response {
                 status: incoming.status,
                 headers: &incoming.headers,
-                body: "",
+                body: splitter.envelope(),
             };
             self.venue.on_response(&mut cx, pending, response);
             return;
