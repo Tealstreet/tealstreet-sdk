@@ -317,3 +317,41 @@ fn malformed_candle_dates_reject_empty_and_mixed_history_before_window_filtering
         );
     }
 }
+
+#[test]
+fn candle_stream_requires_close_and_ticker_null_never_overwrites_last_good_price() {
+    let (mut e, socket) = boot();
+    e.handle(
+        2.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: SYMBOL.into(),
+            interval: "1m".into(),
+        }),
+    );
+    e.drain_actions().for_each(drop);
+    for candle in [
+        CANDLE.replace(",\"close\":60000", ""),
+        CANDLE.replace("\"close\":60000", "\"close\":null"),
+    ] {
+        message(
+            &mut e,
+            socket,
+            3.0,
+            &format!(r#"{{"channel":"market_e_btcusdt_kline_1min","tick":{candle}}}"#),
+        );
+        assert!(e.take_market_frame(3.0).is_none());
+    }
+    message(
+        &mut e,
+        socket,
+        4.0,
+        r#"{"channel":"market_e_btcusdt_ticker","tick":{"close":60000}}"#,
+    );
+    message(
+        &mut e,
+        socket,
+        5.0,
+        r#"{"channel":"market_e_btcusdt_ticker","tick":{"close":null}}"#,
+    );
+    assert_eq!(e.store().ticker(SYMBOL).unwrap().last, 60000.0);
+}

@@ -110,16 +110,50 @@ pub struct Contract<'a> {
     pub min_order_money: Number,
     pub status: Number,
 }
-#[derive(Deserialize, Default)]
-pub struct Tick {
-    #[serde(default, alias = "last")]
-    pub close: Number,
+fn present_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Number>, D::Error> {
+    Number::deserialize(d).map(Some)
+}
+// Decode the public tick once; only candles need their extra numeric fields.
+#[derive(Deserialize)]
+pub struct Payload<'a> {
+    #[serde(default, alias = "last", deserialize_with = "present_number")]
+    pub close: Option<Number>,
     #[serde(default)]
     pub rose: Number,
     #[serde(default)]
     pub vol: Number,
     #[serde(default)]
     pub amount: Number,
+    #[serde(default, alias = "bids")]
+    pub buys: Option<Vec<[Number; 2]>>,
+    #[serde(default)]
+    pub asks: Option<Vec<[Number; 2]>>,
+    #[serde(borrow, default)]
+    pub ds: Str<'a>,
+    #[serde(default)]
+    pub id: Number,
+    #[serde(borrow, default)]
+    pub open: Option<&'a serde_json::value::RawValue>,
+    #[serde(borrow, default)]
+    pub high: Option<&'a serde_json::value::RawValue>,
+    #[serde(borrow, default)]
+    pub low: Option<&'a serde_json::value::RawValue>,
+}
+impl<'a> Payload<'a> {
+    pub fn into_candle(self) -> Option<CandleWire<'a>> {
+        let number = |raw: Option<&serde_json::value::RawValue>| {
+            serde_json::from_str::<Number>(raw?.get()).ok()
+        };
+        Some(CandleWire {
+            ds: self.ds,
+            id: self.id,
+            open: number(self.open)?,
+            high: number(self.high)?,
+            low: number(self.low)?,
+            close: self.close?,
+            vol: self.vol,
+        })
+    }
 }
 #[derive(Deserialize)]
 pub struct Message<'a> {
@@ -136,15 +170,9 @@ pub struct Message<'a> {
     #[serde(borrow, default)]
     pub ping: Option<&'a serde_json::value::RawValue>,
     #[serde(borrow, default)]
-    pub tick: Option<&'a serde_json::value::RawValue>,
+    pub tick: Option<Payload<'a>>,
     #[serde(borrow, default)]
     pub data: Option<&'a serde_json::value::RawValue>,
-}
-#[derive(Deserialize)]
-pub struct Depth {
-    #[serde(alias = "bids")]
-    pub buys: Vec<[Number; 2]>,
-    pub asks: Vec<[Number; 2]>,
 }
 #[derive(Deserialize)]
 pub struct CandleWire<'a> {

@@ -12,7 +12,7 @@ use safe_cex_engine::{
 };
 use serde::Serialize;
 use std::collections::HashMap;
-use wire::{CandleWire, Contract, Depth, Message, Tick};
+use wire::{CandleWire, Contract, Message, Payload};
 const REST: &str = "https://fapi.bitrue.com";
 const PUBLIC: &str = "wss://fmarket-ws.bitrue.com/kline-api/ws";
 #[derive(Clone, Debug)]
@@ -586,64 +586,71 @@ impl Venue for Bitrue {
             self.reply(cx, &message, text);
             return;
         }
-        let Some(data) = message.tick.or(message.data) else {
-            return;
+        let data = match message.tick {
+            Some(tick) => tick,
+            None => {
+                let Some(data) = message.data else {
+                    return;
+                };
+                let Ok(tick) = serde_json::from_str::<Payload<'_>>(data.get()) else {
+                    return;
+                };
+                tick
+            }
         };
         match self.channels.get(message.channel.as_ref()) {
             Some(Channel::Ticker(index)) => {
-                if let Ok(tick) = serde_json::from_str::<Tick>(data.get()) {
-                    let multiplier = cx
-                        .store
-                        .markets()
-                        .get(*index as usize)
-                        .map_or(1.0, |m| m.precision.amount);
-                    cx.store.update_ticker_at(*index, |t| {
-                        t.last = tick.close.0;
-                        t.mark = tick.close.0;
-                        t.percentage = tick.rose.0 * 100.0;
-                        t.volume = tick.vol.0 * multiplier;
-                        t.quote_volume = tick.amount.0 * multiplier;
-                    });
-                }
+                let multiplier = cx
+                    .store
+                    .markets()
+                    .get(*index as usize)
+                    .map_or(1.0, |m| m.precision.amount);
+                cx.store.update_ticker_at(*index, |t| {
+                    t.last = data.close.unwrap_or_default().0;
+                    t.mark = data.close.unwrap_or_default().0;
+                    t.percentage = data.rose.0 * 100.0;
+                    t.volume = data.vol.0 * multiplier;
+                    t.quote_volume = data.amount.0 * multiplier;
+                });
             }
             Some(Channel::Book(symbol)) => {
-                if let Ok(depth) = serde_json::from_str::<Depth>(data.get()) {
-                    if depth
-                        .buys
-                        .iter()
-                        .chain(&depth.asks)
-                        .any(|r| r[0].0 <= 0.0 || r[1].0 < 0.0)
-                    {
-                        return;
+                let (Some(buys), Some(asks)) = (data.buys, data.asks) else {
+                    return;
+                };
+                if buys
+                    .iter()
+                    .chain(&asks)
+                    .any(|r| r[0].0 <= 0.0 || r[1].0 < 0.0)
+                {
+                    return;
+                }
+                let multiplier = cx.store.market(symbol).map_or(1.0, |m| m.precision.amount);
+                if let Some(state) = self.books.get_mut(symbol) {
+                    state.book.load_sorted(
+                        BookSide::Bids,
+                        buys.iter().map(|r| (r[0].0, r[1].0 * multiplier)),
+                    );
+                    state.book.load_sorted(
+                        BookSide::Asks,
+                        asks.iter().map(|r| (r[0].0, r[1].0 * multiplier)),
+                    );
+                    state.received = true;
+                    if let Some(timer) = state.fallback.take() {
+                        cx.clear_timer(timer);
                     }
-                    let multiplier = cx.store.market(symbol).map_or(1.0, |m| m.precision.amount);
-                    if let Some(state) = self.books.get_mut(symbol) {
-                        state.book.load_sorted(
-                            BookSide::Bids,
-                            depth.buys.iter().map(|r| (r[0].0, r[1].0 * multiplier)),
-                        );
-                        state.book.load_sorted(
-                            BookSide::Asks,
-                            depth.asks.iter().map(|r| (r[0].0, r[1].0 * multiplier)),
-                        );
-                        state.received = true;
-                        if let Some(timer) = state.fallback.take() {
-                            cx.clear_timer(timer);
-                        }
-                        let (bid, ask) = (
-                            state.book.best_bid().unwrap_or(0.0),
-                            state.book.best_ask().unwrap_or(0.0),
-                        );
-                        cx.store.update_ticker(symbol, |t| {
-                            t.bid = bid;
-                            t.ask = ask;
-                        });
-                        cx.book_changed(symbol);
-                    }
+                    let (bid, ask) = (
+                        state.book.best_bid().unwrap_or(0.0),
+                        state.book.best_ask().unwrap_or(0.0),
+                    );
+                    cx.store.update_ticker(symbol, |t| {
+                        t.bid = bid;
+                        t.ask = ask;
+                    });
+                    cx.book_changed(symbol);
                 }
             }
             Some(Channel::Candle(symbol, i)) => {
-                if let Ok(row) = serde_json::from_str::<CandleWire<'_>>(data.get()) {
+                if let Some(row) = data.into_candle() {
                     let multiplier = cx.store.market(symbol).map_or(1.0, |m| m.precision.amount);
                     if let Some(c) = candle(&row, multiplier) {
                         cx.candle(symbol, i, c);
