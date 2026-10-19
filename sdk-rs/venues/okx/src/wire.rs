@@ -96,7 +96,11 @@ pub struct Depth<'a> {
 
 pub fn candle(row: &[&str]) -> Option<safe_cex_engine::model::Candle> {
     use safe_cex_engine::{model::Candle, num::parse};
-    (row.len() >= 8).then(|| Candle {
+    (row.len() >= 8
+        && [0, 1, 2, 3, 4, 7]
+            .iter()
+            .all(|&i| row[i].parse::<f64>().is_ok_and(|v| v.is_finite())))
+    .then(|| Candle {
         timestamp: parse(row[0]) / 1000.0,
         open: parse(row[1]),
         high: parse(row[2]),
@@ -149,8 +153,10 @@ pub struct OrderRow<'a> {
     pub trigger_px: &'a str,
     pub trigger_px_type: &'a str,
     pub sl_trigger_px: &'a str,
+    pub sl_ord_px: &'a str,
     pub sl_trigger_px_type: &'a str,
     pub tp_trigger_px: &'a str,
+    pub tp_ord_px: &'a str,
     pub tp_trigger_px_type: &'a str,
     pub order_px: &'a str,
     pub ord_px: &'a str,

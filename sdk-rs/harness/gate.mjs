@@ -65,14 +65,28 @@ const isPrivate = Boolean(ts.account);
 //    the execution's own price (`L`). Fill prices are not compared.
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
-const KNOWN_TS_FIXES = (account, rustAccount) => {
+const KNOWN_TS_FIXES = {
+  // Applied to the TS oracle itself (okx.ws-public.ts / okx.exchange.ts).
+  okx: [
+    'full books retain levels past a stale last trade',
+    'public trades implement the inherited Not implemented method',
+    'candle calendar bounds use UTC independently of host timezone',
+    // Rust safety fixes: covered independently by documented-payload tests.
+    'split bracket entries acquire SL/TP before the next entry is placed',
+    'native OCO amend preserves its sibling protective leg',
+    'negative protective sizes and market or terminal amends fail before writes',
+    'standalone cancellation continues remaining batches after per-row failures',
+    'new account equity survives delayed snapshots and local balance ticks',
+  ],
+  account: (account, rustAccount) => {
   for (const position of account.positions) {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
     if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
   }
+  },
 };
 if (isPrivate) {
-  KNOWN_TS_FIXES(ts.account, rust.account);
+  KNOWN_TS_FIXES.account(ts.account, rust.account);
   for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
     const left = JSON.stringify(ts.account[field]);
     const right = JSON.stringify(rust.account[field]);
@@ -108,6 +122,7 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (ts.account) console.log('(private tape: paced in real time, so it gates correctness only)');
+if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
 
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.

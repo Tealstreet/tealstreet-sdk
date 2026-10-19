@@ -75,3 +75,26 @@ Never touch master, rebase, or force-push.
   search found no callers. Retained uuid (Binance uses it).
 - Trading and queries remain to implement. Harness integration is being
   prepared in a disjoint file scope by the public-phase reviewer.
+
+### Trading and query phases
+
+- Trading reviewed independently and fixed: native OCO amend preserves sibling
+  protection and selected execution price; each bracket lot acquires SL/TP
+  before the next entry; decimal-safe splitting honors a caller ID exactly once;
+  all preflight finishes before writes; no write retry; failed cancellation
+  prevents replacement; partial standalone cancellations continue other batches.
+  Settings ACKs invalidate pre-write account joins. 17 trading tests passed.
+- Queries implemented in a disjoint scope and independently reviewed: streamed
+  fills/history/bills/public trades, contract conversion, dedupe, exact decimal
+  cursors and bounded paced pagination. Review caught second-based fill bounds
+  and missing optional execution fields; fixed. 15 history tests and all-target
+  clippy passed.
+- Candle bounds match TS limits (300 recent/100 historical), preserve explicit
+  from semantics, fall back to history and subtract calendar months in UTC.
+  TS oracle corrected for public trades, UTC month bounds and full depth.
+- Harness matches OKX write bodies, preserves caller IDs, permits repeated reads
+  but not duplicate writes, supports all variants, and includes documented
+  private/business events, two deduped executions, regular/algo commands and
+  public trades. TS-only OKX and EEA-demo replay: zero unmatched requests.
+- Full release WASM build, public recording/performance gates and Binance
+  regression gates are in progress. No gate numbers claimed yet.

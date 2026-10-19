@@ -1114,3 +1114,20 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 Books retain every venue level. Never filter bids/asks by the last trade price:
 trades can lag book updates, so that filter permanently deletes valid liquidity.
 The Rust replay oracle includes this correction explicitly in `KNOWN_TS_FIXES`.
+
+## Rust engine scope and verified corrections
+
+`engine: 'rust'` supports USDT/USDC linear SWAPs under all four OKX names.
+Sizes sent to OKX remain contracts; fills and remaining quantities use ctVal,
+while the existing book contract uses lotSz. EEA X-Perps and inverse products
+remain outside this engine lane.
+
+The replay oracle also implements public trades (previously inherited an
+unimplemented method), and OHLCV request bounds use UTC calendar arithmetic
+so a local timezone cannot move the monthly boundary. Rust additionally
+isolates bracket entries with their protective legs, amends OCO legs natively,
+refuses negative protective sizes and unsafe market/terminal amends, and
+continues standalone cancel batches after item failures. These corrections are
+listed in the harness KNOWN_TS_FIXES; they are independently tested instead
+of normalizing away output differences. Newer account equity survives REST
+snapshots and subsequent local balance ticks.

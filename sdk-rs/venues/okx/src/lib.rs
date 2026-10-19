@@ -1,6 +1,8 @@
 //! OKX USDT/USDC linear swaps on the sans-I/O engine.
 mod account;
+mod history;
 mod sign;
+mod trading;
 mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
@@ -48,6 +50,8 @@ struct BookState {
 
 pub enum Pending {
     Account(account::Request),
+    History(history::Request),
+    Trade(trading::Request),
     Markets {
         rows: Vec<Market>,
         invalid: bool,
@@ -60,13 +64,26 @@ pub enum Pending {
         command: CommandId,
         rows: Vec<Candle>,
         invalid: bool,
+        read: CandleRead,
     },
+}
+
+pub struct CandleRead {
+    instrument: String,
+    interval: String,
+    limit: u32,
+    before: f64,
+    after: f64,
+    historical: bool,
+    force_history: bool,
 }
 
 pub struct Okx {
     options: Options,
     credentials: Option<Credentials>,
     account: account::AccountState,
+    trading: trading::TradingState,
+    history: history::HistoryState,
     connections: [Connection; 3],
     books: HashMap<String, BookState>,
     marks: HashSet<String>,
@@ -95,6 +112,8 @@ impl Okx {
             options,
             credentials,
             account: account::AccountState::default(),
+            trading: trading::TradingState::default(),
+            history: history::HistoryState::default(),
             connections: std::array::from_fn(|_| Connection::default()),
             books: HashMap::new(),
             marks: HashSet::new(),
@@ -477,6 +496,8 @@ impl Venue for Okx {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Account(request) => self.account_item(cx, request, item),
+            Pending::Trade(_) => {}
+            Pending::History(request) => self.history_item(cx, request, item),
             Pending::Markets { rows, invalid } => {
                 match serde_json::from_str::<wire::Instrument<'_>>(item) {
                     Ok(m) => {
@@ -596,6 +617,10 @@ impl Venue for Okx {
     }
 
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Trade(request) = pending {
+            self.trade_response(cx, request, response);
+            return;
+        }
         let result = if (200..300).contains(&response.status) {
             wire::envelope(response.body).map(|_| ())
         } else {
@@ -607,6 +632,8 @@ impl Venue for Okx {
         }
         match pending {
             Pending::Account(request) => self.account_response(cx, request, response),
+            Pending::Trade(request) => self.trade_response(cx, request, response),
+            Pending::History(request) => self.history_response(cx, request, response),
             Pending::Markets {
                 rows,
                 invalid: false,
@@ -635,7 +662,24 @@ impl Venue for Okx {
                 command,
                 mut rows,
                 invalid: false,
+                mut read,
             } => {
+                if !read.historical && (rows.is_empty() || read.force_history) {
+                    read.historical = true;
+                    let path = read.path();
+                    self.list(
+                        cx,
+                        &path,
+                        false,
+                        Pending::Candles {
+                            command,
+                            rows: Vec::new(),
+                            invalid: false,
+                            read,
+                        },
+                    );
+                    return;
+                }
                 rows.sort_by(|a, b| a.timestamp.total_cmp(&b.timestamp));
                 cx.done(
                     command,
@@ -649,14 +693,22 @@ impl Venue for Okx {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         if let Pending::Account(request) = pending {
             self.account_failed(cx, request, error);
+        } else if let Pending::Trade(request) = pending {
+            self.trade_failed(cx, request, error);
+        } else if let Pending::History(request) = pending {
+            self.history_failed(cx, request, error);
         } else if let Pending::Candles { command, .. } = pending {
-            cx.done(command, Err(error.into()));
+            cx.log(LogLevel::Error, error);
+            cx.done(command, Ok("[]".into()));
         } else {
             cx.log(LogLevel::Error, error);
         }
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.history_timer(cx, timer) {
+            return;
+        }
         if self.account_timer(cx, timer) {
             return;
         }
@@ -759,21 +811,48 @@ impl Venue for Okx {
                 to_ms,
             } => {
                 let Some(m) = cx.store.market(&symbol) else {
-                    cx.done(command, Err(format!("unknown market {symbol}")));
+                    cx.done(command, Ok("[]".into()));
                     return;
                 };
-                let mut path = format!(
-                    "/api/v5/market/candles?instId={}&bar={}&limit={}",
-                    m.id,
-                    bar(&interval),
-                    limit.unwrap_or(500).clamp(1, 1000)
-                );
-                if let Some(from) = from_ms {
-                    path.push_str(&format!("&before={}", num::format(from)));
+                if [from_ms, to_ms]
+                    .into_iter()
+                    .flatten()
+                    .any(|v| !v.is_finite())
+                {
+                    cx.done(command, Err("invalid candle time bounds".into()));
+                    return;
                 }
-                if let Some(to) = to_ms {
-                    path.push_str(&format!("&after={}", num::format(to)));
+                let explicit_limit = limit.filter(|n| *n > 0);
+                let limit = explicit_limit.unwrap_or(300).min(300);
+                let end = to_ms.unwrap_or(cx.now);
+                let Some(default_start) = subtract_bars(end, &interval, limit) else {
+                    cx.done(
+                        command,
+                        Err(format!("unsupported candle interval {interval}")),
+                    );
+                    return;
+                };
+                let before = if explicit_limit.is_none() {
+                    from_ms.unwrap_or(default_start)
+                } else {
+                    default_start
+                };
+                if before > end {
+                    cx.done(command, Err("invalid candle time bounds".into()));
+                    return;
                 }
+                let read = CandleRead {
+                    instrument: m.id.clone(),
+                    interval: interval.clone(),
+                    limit,
+                    before,
+                    after: end,
+                    historical: false,
+                    force_history: to_ms.is_some_and(|to| {
+                        subtract_bars(cx.now, &interval, 1440).is_some_and(|oldest| to < oldest)
+                    }),
+                };
+                let path = read.path();
                 self.list(
                     cx,
                     &path,
@@ -782,19 +861,12 @@ impl Venue for Okx {
                         command,
                         rows: Vec::new(),
                         invalid: false,
+                        read,
                     },
                 );
             }
-            Command::PlaceOrders { command, .. }
-            | Command::CancelOrders { command, .. }
-            | Command::AmendOrder { command, .. }
-            | Command::CancelSymbolOrders { command, .. }
-            | Command::SetLeverage { command, .. }
-            | Command::SetMarginType { command, .. }
-            | Command::SetPositionMode { command, .. }
-            | Command::Query { command, .. } => {
-                cx.done(command, Err("OKX account is not ready".into()))
-            }
+            Command::Query { command, query } => self.start_query(cx, command, query),
+            other => self.trade_command(cx, other),
         }
     }
 
@@ -872,4 +944,70 @@ fn scaled(value: f64, factor: f64) -> f64 {
     let digits = num::decimals(value) + num::decimals(factor);
     let scale = 10f64.powi(digits.min(15) as i32);
     (value * factor * scale).round() / scale
+}
+
+impl CandleRead {
+    fn path(&self) -> String {
+        let endpoint = if self.historical {
+            "history-candles"
+        } else {
+            "candles"
+        };
+        format!(
+            "/api/v5/market/{endpoint}?instId={}&bar={}&limit={}&before={}&after={}",
+            self.instrument,
+            bar(&self.interval),
+            if self.historical {
+                self.limit.min(100)
+            } else {
+                self.limit
+            },
+            num::format(self.before),
+            num::format(self.after)
+        )
+    }
+}
+
+fn subtract_bars(end: f64, interval: &str, count: u32) -> Option<f64> {
+    let duration = match interval {
+        "1m" => 60_000.0,
+        "3m" => 180_000.0,
+        "5m" => 300_000.0,
+        "15m" => 900_000.0,
+        "30m" => 1_800_000.0,
+        "1h" => 3_600_000.0,
+        "2h" => 7_200_000.0,
+        "4h" => 14_400_000.0,
+        "6h" => 21_600_000.0,
+        "12h" => 43_200_000.0,
+        "1d" => 86_400_000.0,
+        "1w" => 604_800_000.0,
+        "1M" => {
+            let ms = end.floor() as i64;
+            let (year, month, day) = sign::civil_date(ms.div_euclid(86_400_000));
+            let months = year * 12 + month - 1 - i64::from(count);
+            let year = months.div_euclid(12);
+            let month = months.rem_euclid(12) + 1;
+            let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+            let days = match month {
+                2 => {
+                    if leap {
+                        29
+                    } else {
+                        28
+                    }
+                }
+                4 | 6 | 9 | 11 => 30,
+                _ => 31,
+            };
+            let year = year - i64::from(month <= 2);
+            let era = year.div_euclid(400);
+            let yoe = year - era * 400;
+            let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day.min(days) - 1;
+            let day = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
+            return Some((day * 86_400_000 + ms.rem_euclid(86_400_000)) as f64);
+        }
+        _ => return None,
+    };
+    Some(end - duration * f64::from(count))
 }

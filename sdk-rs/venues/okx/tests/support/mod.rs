@@ -72,3 +72,46 @@ pub fn ws(engine: &mut Engine<Okx>, socket: SocketId, text: &str) {
 pub fn is_get(action: &Action, suffix: &str) -> bool {
     matches!(action, Action::Http(r) if r.method == Method::Get && r.url.ends_with(suffix))
 }
+
+pub fn trading_engine() -> Engine<Okx> {
+    let mut e = Engine::new(Okx::new(Options {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(MARKET), 1.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(TICKER), 2.0);
+    let out = actions(&mut e);
+    let a = out
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(
+        &mut e,
+        a,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.0,
+    );
+    let mut pending: Vec<_> = actions(&mut e)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    while let Some(a) = pending.pop() {
+        let body = if matches!(&a, Action::Http(r) if r.url.contains("account-position-risk")) {
+            envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+        } else {
+            envelope("")
+        };
+        reply(&mut e, &a, &body, 4.0);
+        pending.extend(
+            actions(&mut e)
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(_))),
+        );
+    }
+    e
+}

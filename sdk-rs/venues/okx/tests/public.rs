@@ -279,3 +279,69 @@ fn incomplete_known_ticker_never_becomes_authoritative_zero() {
     );
     assert!(!e.store().loaded().tickers);
 }
+
+#[test]
+fn candle_reads_use_ts_bounds_limit_and_historical_fallback() {
+    let (mut e, _, _) = public(Options::default());
+    e.handle(
+        1_800_000_000_000.0,
+        Event::Command(Command::FetchCandles {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            interval: "1m".into(),
+            limit: None,
+            from_ms: None,
+            to_ms: None,
+        }),
+    );
+    let request = actions(&mut e).remove(0);
+    assert!(
+        matches!(&request, Action::Http(r) if r.url.ends_with("bar=1m&limit=300&before=1799982000000&after=1800000000000"))
+    );
+    reply(&mut e, &request, &envelope(""), 1_800_000_000_001.0);
+    let fallback = actions(&mut e).remove(0);
+    assert!(
+        matches!(&fallback, Action::Http(r) if r.url.contains("/history-candles?") && r.url.contains("&limit=100&"))
+    );
+    reply(&mut e, &fallback, &envelope(""), 1_800_000_000_002.0);
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: Ok(s), .. }) if s == "[]")));
+}
+
+#[test]
+fn month_candle_bounds_clamp_day_in_leap_february() {
+    let (mut e, _, _) = public(Options::default());
+    e.handle(
+        1_711_886_400_000.0,
+        Event::Command(Command::FetchCandles {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            interval: "1M".into(),
+            limit: Some(1),
+            from_ms: None,
+            to_ms: Some(1_711_886_400_000.0),
+        }),
+    );
+    let out = actions(&mut e);
+    assert!(out.iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("bar=1Mutc&limit=1&before=1709208000000&after=1711886400000"))));
+}
+
+#[test]
+fn business_candle_stream_emits_a_candle_frame() {
+    let (mut e, _, socket) = public(Options::default());
+    e.take_frame(4.0);
+    e.handle(
+        5.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: "1m".into(),
+        }),
+    );
+    ws(
+        &mut e,
+        socket,
+        r#"{"arg":{"channel":"candle1m","instId":"BTC-USDT-SWAP"},"data":[["1700000000000","1","3","0.5","2","9","10","20","1"]]}"#,
+    );
+    let frame = e.take_market_frame(6.0).unwrap();
+    assert_eq!(u16::from_le_bytes(frame[16..18].try_into().unwrap()), 6);
+    assert_eq!(u32::from_le_bytes(frame[24..28].try_into().unwrap()), 1);
+}

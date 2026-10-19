@@ -68,6 +68,13 @@ pub struct AccountState {
 }
 
 impl Okx {
+    pub(crate) fn account_after_settings(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.join = None;
+        self.account.generation += 1;
+        self.account.revision += 1;
+        self.account_refresh(cx);
+    }
+
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.credentials.is_none() {
             return;
@@ -1014,6 +1021,13 @@ impl Okx {
                                 o.ord_px
                             });
                             (p > 0.0).then_some(p)
+                        } else if matches!(o.ord_type, "oco" | "conditional") {
+                            let p = num::parse(if kind == OrderType::StopLoss {
+                                o.sl_ord_px
+                            } else {
+                                o.tp_ord_px
+                            });
+                            (p != 0.0).then_some(p)
                         } else {
                             None
                         },
