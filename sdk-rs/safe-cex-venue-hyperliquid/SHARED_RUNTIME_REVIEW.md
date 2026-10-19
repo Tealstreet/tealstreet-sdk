@@ -50,6 +50,10 @@ value carrier, conversion fallback or runtime-selection flag.
 - The native Store facade returns its existing graph, maps and rows. Key
   enumeration does not project unrelated fields; selected getter failures keep
   their original cause. No legacy TableView remains to classify or execute.
+- The two private Clone owners have exact construction reviews. The actual
+  perpetual/Spot Host clone shares its graph and import referents, retaining
+  UTF16 and binary64 bits without retaining a disposed owner. Signature Parts
+  clones own distinct r/s strings and copy v bits without signing authority.
 - A constructed lifecycle probe holds a weak scope reference, disposes each
   family and drops its exchange. The old strong socket bridge fails the release
   assertion; the weak bridge releases the scope while preserving live callbacks.
@@ -63,6 +67,9 @@ owned by codex-l89ogr. These entries grant no decoder classification or exemptio
 The immediate follow-up adds a bounded feature forwarding the existing native
 runtime capability and executes those adapters on this same real Host; it does
 not introduce a fake runtime or an alternate value path.
+The same follow-up owns the inherited `types::OrderType` OnlyMap visitor
+observation gap exposed by the full inventory. Its decoder guard remains active;
+no waiver or non-decoder classification is added by this cutover.
 
 ## Validation boundary
 

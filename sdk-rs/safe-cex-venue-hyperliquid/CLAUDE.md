@@ -503,3 +503,10 @@ reader after binding its canonical instance. Perpetual and Spot tables therefore
 feed the same core record/pong/cleanup/reconcile algorithm. Constructed witnesses
 cover original recorded BBO/candle bytes, unsubscribe counts, live table replacement,
 selected-key reads, getter cause identity and host release after disposal.
+
+The startup construction-order regression compares the actual maintained
+`fetchMarketsHelper` and DefaultStore with the constructed native exchange.
+It reads canonical facade own keys directly: Store diagnostics precede loaded
+state, and each ticker retains `openInterest` after `quoteVolume`. The shared
+Host facade preserves mapper construction order without a typed re-encoding;
+do not replace that ingress with a Ticker struct roundtrip or an order table.

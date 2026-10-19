@@ -397,3 +397,29 @@ pub(super) fn from(host: &mut Host, signature: &Js) -> Result<Js, Thrown> {
     };
     Ok(materialize(host, parts))
 }
+
+#[cfg(test)]
+mod clone_tests {
+    use super::Parts;
+
+    #[test]
+    fn signature_parts_clone_preserves_bits_and_owns_distinct_strings() {
+        for v in [27.0_f64, 28.0, -0.0, f64::from_bits(0x7ff8_0000_0000_0042)] {
+            let original = Parts {
+                r: format!("0x{:064x}", 1),
+                s: format!("0x{:064x}", 2),
+                v,
+            };
+            let mut clone = original.clone();
+            assert_eq!(original.r, clone.r);
+            assert_eq!(original.s, clone.s);
+            assert_ne!(original.r.as_ptr(), clone.r.as_ptr());
+            assert_ne!(original.s.as_ptr(), clone.s.as_ptr());
+            assert_eq!(original.v.to_bits(), clone.v.to_bits());
+            clone.r.push('3');
+            clone.s.push('4');
+            assert_eq!(original.r, format!("0x{:064x}", 1));
+            assert_eq!(original.s, format!("0x{:064x}", 2));
+        }
+    }
+}
