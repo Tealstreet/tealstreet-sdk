@@ -2048,6 +2048,11 @@ See ARRAY_STORAGE_REVIEW.md for the length/descriptor/iterator algorithms, atomi
 consumer boundaries and independent native/Node/compiled controls. The browser
 DATA bridge caches identity before walking enumerable indexed and named fields.
 
+Array.prototype.constructor is its own nonenumerable writable/configurable data
+property and retains the installed Array facade. ARRAY_STORAGE_REVIEW.md records
+the Node identity/mutation proof and the approved single-pair-per-realm Rc cycle
+limit; repeated operations and installations do not grow that retained graph.
+
 Internal update listeners subscribe to the canonical Store's native state referent.
 They do not project StoreData or visit unrelated getters before emitter fanout.
 Typed subscribers remain explicit projection boundaries at their reached slots;
@@ -2148,12 +2153,6 @@ NaN payloads canonicalize as Node structuredClone does.
 Uncloneable values and unmodeled object kinds produce visible DataCloneError.
 The worker recorder intentionally drops clone failures as perfFixture.ts does;
 other callers receive the error. Node's real structuredClone supplies the oracle.
-
-
-Array.prototype.constructor is its own nonenumerable writable/configurable data
-property and retains the installed Array facade. ARRAY_STORAGE_REVIEW.md records
-the Node identity/mutation proof and the approved single-pair-per-realm Rc cycle
-limit; repeated operations and installations do not grow that retained graph.
 
 Private authentication recovery reports the supplied ExchangeError through the
 runtime exception sink before warning/reconnect, preserving its retained cause.
