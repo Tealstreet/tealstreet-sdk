@@ -64,3 +64,9 @@ After all gates: merge `origin/feat/rust-rewrite` into lane (stop on conflicts),
 re-run affected checks, push, PR to `feat/rust-rewrite`, adversarial local
 sub-agent reviews posted to PR, fix/review until clean or diminishing returns,
 merge PR, create fresh follow-up branch. Never touch master or force/rebase.
+
+- Workspace relocation: adopted landing members glob and moved Bitget to
+  `sdk-rs/venues/bitget`; host uses its direct path dependency. Overseer gave
+  standing authorization for landing-branch layout conflict resolution.
+- No further stashes: use branch WIP commits. Private-phase stash is restored
+  after the relocation merge. Runtime-tree wasm test failure is overseer-owned.
