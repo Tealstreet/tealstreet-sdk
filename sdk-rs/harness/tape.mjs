@@ -296,7 +296,12 @@ export class Tape {
     return [...this.responses.values()].flat().filter((record) => this.isWrite(record.method, record.url)).length;
   }
   respond(method, url, body, headers) {
-    this.venue.validateRequest?.({ method, url, body, headers });
+    try {
+      this.venue.validateRequest?.({ method, url, body, headers });
+    } catch (error) {
+      this.invalidSignatures++;
+      throw error;
+    }
     if (this.isPrivate && this.venue.verifyRequest && !this.venue.verifyRequest({ method, url, body, headers })) {
       this.invalidSignatures++;
       throw new Error(`invalid replay signature: ${method} ${url}`);

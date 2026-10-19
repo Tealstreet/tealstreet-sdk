@@ -71,13 +71,18 @@ describe('Bitrue futures private execution contract', () => {
     expect(store.orders[0].status).toBe(OrderStatus.Closed);
   });
   it('derives an execution price from cumulative traded value when L is absent', () => {
-    const { socket, fills } = make();
-    socket.handleOrderTradeUpdate(row(2, 'PART_FILLED', { ap: '100', L: undefined }) as any);
-    socket.handleOrderTradeUpdate(row(4, 'PART_FILLED', { ap: '105', L: undefined }) as any);
-    expect(fills.mock.calls.map(([fill]) => [fill.price, fill.amount])).toEqual([
-      [100, 20],
-      [110, 20],
-    ]);
+    for (const first of [
+      { ap: '100', L: undefined },
+      { ap: '0', L: '100' },
+    ]) {
+      const { socket, fills } = make();
+      socket.handleOrderTradeUpdate(row(2, 'PART_FILLED', first) as any);
+      socket.handleOrderTradeUpdate(row(4, 'PART_FILLED', { ap: '105', L: undefined }) as any);
+      expect(fills.mock.calls.map(([fill]) => [fill.price, fill.amount])).toEqual([
+        [100, 20],
+        [110, 20],
+      ]);
+    }
   });
   it('does not re-emit executions already included in an authoritative order snapshot', () => {
     const { socket, store, fills } = make();
@@ -109,5 +114,15 @@ describe('Bitrue futures private execution contract', () => {
     socket.handlePingEvent({ event: 'ping', ts: '1635221621062' });
     expect(send).toHaveBeenCalledWith('{"event":"pong","ts":"1635221621062"}');
     expect(socket.getWatchdogStaleThresholdMs()).toBe(20000);
+  });
+  it('reseeds cumulative value when REST advances beyond the last stream execution', () => {
+    const { socket, store, fills } = make();
+    socket.handleOrderTradeUpdate(row(1, 'PART_FILLED', { ap: '100', L: undefined }) as any);
+    store.update({ orders: [{ ...store.orders[0], filled: 30, remaining: 70, info: { avgPrice: 110 } }] });
+    socket.handleOrderTradeUpdate(row(4, 'PART_FILLED', { ap: '115', L: undefined }) as any);
+    expect(fills.mock.calls.map(([fill]) => [fill.price, fill.amount])).toEqual([
+      [100, 10],
+      [130, 10],
+    ]);
   });
 });

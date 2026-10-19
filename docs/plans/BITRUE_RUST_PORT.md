@@ -82,3 +82,24 @@ create a clean follow-up branch. Never stash, rebase, force-push or touch master
   require exact cancellation identity and signed private requests. 77 harness
   tests pass. Crypto exports remain used by this and existing venue crates;
   no further first-port leftover became unused.
+
+### Harness review and final verification
+
+- Independent harness review PASS after retaining validation failures in the
+  signature counter even if a later signed GET retry succeeds; regression added.
+  78 harness tests pass. The private tape requires all writes to be consumed,
+  exact caller/native IDs and request bodies, signed private reads/writes,
+  subscriptions and server ping replies, and all individual execution prices.
+- Four required replay gates PASS after landing integration: Bitrue public
+  (three runs), Bitrue private (20 frames), Binance public and Binance private.
+  Bitrue three-run medians: TS/Rust CPU 293.0/224.0 ms; steady 187.2/141.2 ms;
+  retained 3.7/2.4 MB. Binance CPU 284.6/149.5 ms, memory 4.2/2.3 MB.
+- Final private price recovery also ties cumulative value to its exact filled
+  quantity across REST advancement, including an earlier L-only fill. A new
+  native and paired TS regression cover the interleaving.
+- Typecheck (44 tasks) and lint (28 tasks) pass. Workspace native clippy passes;
+  full workspace tests and final WASM rebuild are running. The default root
+  test command runs both test-ci and test-unit concurrently; local unrelated
+  5-second import timeouts are being rechecked after compilation settles.
+- No budget increase: inherited landing budget is 3,145,728 bytes. Final head
+  must pass every CI check before merge; no outstanding review waiver.

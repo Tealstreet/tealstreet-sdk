@@ -35,6 +35,7 @@ pub enum Request {
         symbol: String,
         revision: u64,
         rows: Vec<Order>,
+        quotes: HashMap<String, f64>,
         invalid: bool,
     },
 }
@@ -42,8 +43,14 @@ impl Request {
     pub(crate) fn reset(&mut self) {
         match self {
             Self::Snapshot { data, .. } => *data = Snapshot::default(),
-            Self::Orders { rows, invalid, .. } => {
+            Self::Orders {
+                rows,
+                quotes,
+                invalid,
+                ..
+            } => {
                 rows.clear();
+                quotes.clear();
                 *invalid = false;
             }
             _ => {}
@@ -80,7 +87,7 @@ pub struct Account {
     order_timer: Option<TimerId>,
     initial_orders: HashSet<String>,
     progress: HashMap<String, f64>,
-    quotes: HashMap<String, f64>,
+    quotes: HashMap<String, (f64, f64)>,
     leverage_queries: Vec<(CommandId, String)>,
     progress_queue: VecDeque<String>,
     terminal: HashSet<String>,
@@ -178,6 +185,8 @@ struct OrderRow<'a> {
     #[serde(default)]
     orig_qty: Option<Number>,
     executed_qty: Number,
+    #[serde(default)]
+    avg_price: Number,
     #[serde(default)]
     trigger_price: Number,
     #[serde(default)]
@@ -438,6 +447,7 @@ impl Bitrue {
                 symbol,
                 revision: self.account.orders_revision,
                 rows: vec![],
+                quotes: HashMap::new(),
                 invalid: false,
             }),
         );
@@ -639,12 +649,36 @@ impl Bitrue {
         let previous = self
             .filled_native(&id)
             .max(existing.as_ref().map_or(0.0, |o| o.filled));
-        let quote = (row.ap.0 > 0.0).then_some(filled * row.ap.0);
+        let prior_quote = self
+            .account
+            .quotes
+            .get(&id)
+            .filter(|(qty, _)| *qty == previous)
+            .map(|(_, value)| *value);
+        let quote = (row.ap.0 > 0.0).then_some(filled * row.ap.0).or_else(|| {
+            (row.execution_price.0 > 0.0
+                && filled > previous
+                && (previous == 0.0 || prior_quote.is_some()))
+            .then_some(prior_quote.unwrap_or(0.0) + (filled - previous) * row.execution_price.0)
+        });
         let execution_price = if row.execution_price.0 > 0.0 {
             row.execution_price.0
-        } else if filled > previous && (previous == 0.0 || self.account.quotes.contains_key(&id)) {
+        } else if filled > previous
+            && (previous == 0.0
+                || self
+                    .account
+                    .quotes
+                    .get(&id)
+                    .is_some_and(|(qty, _)| *qty == previous))
+        {
             quote.map_or(0.0, |value| {
-                (value - self.account.quotes.get(&id).copied().unwrap_or(0.0)) / (filled - previous)
+                (value
+                    - self
+                        .account
+                        .quotes
+                        .get(&id)
+                        .map_or(0.0, |(_, value)| *value))
+                    / (filled - previous)
             })
         } else {
             0.0
@@ -665,7 +699,7 @@ impl Bitrue {
         if filled >= previous
             && let Some(quote) = quote.filter(|v| v.is_finite())
         {
-            self.account.quotes.insert(id.clone(), quote);
+            self.account.quotes.insert(id.clone(), (filled, quote));
         }
         self.account.progress(&id, filled);
         if terminal(status) {
@@ -1038,12 +1072,24 @@ impl Bitrue {
             Request::Orders {
                 symbol,
                 rows,
+                quotes,
                 invalid,
                 ..
             } => {
                 let mapped = serde_json::from_str::<OrderRow<'_>>(item)
                     .map_err(|_| ())
-                    .and_then(|row| self.map_order_tree(cx, symbol, &row, None));
+                    .and_then(|row| {
+                        if row.avg_price.0 > 0.0
+                            && !row.condition_order
+                            && !matches!(&*row.kind, "STOP_MARKET" | "TAKE_PROFIT_MARKET")
+                        {
+                            let value = row.executed_qty.0 * row.avg_price.0;
+                            if value.is_finite() {
+                                quotes.insert(row.order_id.to_string(), value);
+                            }
+                        }
+                        self.map_order_tree(cx, symbol, &row, None)
+                    });
                 match mapped {
                     Ok(mapped)
                         if mapped
@@ -1181,6 +1227,7 @@ impl Bitrue {
                 symbol,
                 revision,
                 rows,
+                quotes,
                 invalid,
             } => {
                 #[derive(Deserialize)]
@@ -1209,6 +1256,11 @@ impl Bitrue {
                             continue;
                         }
                         self.account.progress(&row.id, row.filled);
+                        if let Some(value) = quotes.get(&row.id) {
+                            self.account
+                                .quotes
+                                .insert(row.id.clone(), (row.filled, *value));
+                        }
                         if terminal(row.status) {
                             self.account.remember_terminal(&row.id);
                         }

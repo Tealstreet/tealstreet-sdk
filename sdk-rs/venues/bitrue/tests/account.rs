@@ -301,12 +301,19 @@ fn fetch_leverage_reads_account_metadata_without_any_order_or_leverage_probe() {
 
 #[test]
 fn cumulative_average_fallback_recovers_execution_price_without_replaying() {
-    let mut h = Harness::new();
-    h.seed();
-    for (z, average) in [(1, 100), (3, 120), (3, 120)] {
-        h.ws(&format!(r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"{z}","p":"99","ap":"{average}"}}}}"#));
+    for first in [r#""ap":"100""#, r#""ap":"0","L":"100""#] {
+        let mut h = Harness::new();
+        h.seed();
+        for (z, average) in [(1, 100), (3, 120), (3, 120)] {
+            let fields = if z == 1 {
+                first.to_owned()
+            } else {
+                format!("\"ap\":\"{average}\"")
+            };
+            h.ws(&format!(r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"{z}","p":"99",{fields}}}}}"#));
+        }
+        assert_eq!(h.fills(), vec![(100.0, 10.0), (130.0, 20.0)]);
     }
-    assert_eq!(h.fills(), vec![(100.0, 10.0), (130.0, 20.0)]);
 }
 
 #[test]
@@ -330,4 +337,14 @@ fn private_deltas_preserve_authoritative_child_parent_direction_and_reference() 
         child.trigger_type,
         Some(safe_cex_engine::model::StopTriggerType::LastPrice)
     );
+}
+
+#[test]
+fn rest_progress_reseeds_the_quote_basis_before_an_average_only_execution() {
+    let mut h = Harness::new();
+    h.seed();
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"1","ap":"100"}}"#);
+    h.reply("/openOrders", r#"{"code":"0","data":[{"orderId":2334151155877155281,"type":"LIMIT","side":"BUY","status":"PART_FILLED","action":"OPEN","price":100,"origQty":100,"executedQty":30,"avgPrice":110}]}"#);
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"100","z":"4","ap":"115"}}"#);
+    assert_eq!(h.fills(), vec![(100.0, 10.0), (130.0, 10.0)]);
 }

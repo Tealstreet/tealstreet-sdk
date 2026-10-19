@@ -799,7 +799,8 @@ export class BitrueExchange extends BaseExchange {
       // }
 
       type NativeOrder = FETCH_ORDERS_RESPONSE['data'][number] & {
-        conditionOrder?: boolean; childOrders?: NativeOrder[];
+        conditionOrder?: boolean;
+        childOrders?: NativeOrder[];
       };
       if (!Array.isArray(data?.data)) throw new Error('Malformed Bitrue order snapshot');
       const orders: Order[] = [];
@@ -810,35 +811,61 @@ export class BitrueExchange extends BaseExchange {
         if (!id || seen.has(id)) throw new Error('Duplicate Bitrue order identity');
         seen.add(id);
         const protective = order.conditionOrder || parent || !order.type;
-        const triggerKind = Number(order.triggerType) === 1 ? OrderType.StopLoss
-          : Number(order.triggerType) === 2 ? OrderType.TakeProfit : undefined;
-        const executionKind = ['IOC', 'FOK', 'POST_ONLY'].includes(String(order.type)) ? OrderType.Limit : ORDER_TYPE[order.type!];
-        const type = (protective ? triggerKind || executionKind : executionKind);
+        const triggerKind =
+          Number(order.triggerType) === 1
+            ? OrderType.StopLoss
+            : Number(order.triggerType) === 2
+              ? OrderType.TakeProfit
+              : undefined;
+        const executionKind = ['IOC', 'FOK', 'POST_ONLY'].includes(String(order.type))
+          ? OrderType.Limit
+          : ORDER_TYPE[order.type!];
+        const type = protective ? triggerKind || executionKind : executionKind;
         const status = ORDER_STATUS[String(order.status).toUpperCase()];
-        const side = parent && order.action !== 'CLOSE'
-          ? parent.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy
-          : ORDER_SIDE[order.side];
+        const side =
+          parent && order.action !== 'CLOSE'
+            ? parent.side === OrderSide.Buy
+              ? OrderSide.Sell
+              : OrderSide.Buy
+            : ORDER_SIDE[order.side];
         if (!type || !status || !side) throw new Error('Malformed Bitrue order schema');
         const conditional = type === OrderType.StopLoss || type === OrderType.TakeProfit;
         if (parent && !conditional) throw new Error('Malformed Bitrue protective child');
-        const amount = conditional && !parent && Number(order.executedQty) > 0
-          ? Number(order.executedQty) : Number(order.origQty);
+        const amount =
+          conditional && !parent && Number(order.executedQty) > 0 ? Number(order.executedQty) : Number(order.origQty);
         const filled = conditional ? 0 : Number(order.executedQty);
         const price = Number(conditional ? order.triggerPrice : order.price);
         if (![amount, filled, price].every(Number.isFinite) || amount < 0 || filled < 0 || filled > amount || price < 0)
           throw new Error('Malformed Bitrue order quantities');
         const previous = this.store.orders.find((row) => row.id === id);
-        const reference = Number(order.triggerPriceType) === 1 ? OrderStopTriggerType.LastPrice
-          : Number(order.triggerPriceType) === 2 ? OrderStopTriggerType.MarkPrice : undefined;
+        const reference =
+          Number(order.triggerPriceType) === 1
+            ? OrderStopTriggerType.LastPrice
+            : Number(order.triggerPriceType) === 2
+              ? OrderStopTriggerType.MarkPrice
+              : undefined;
         let mapped: Order = {
-          id, status, symbol, type, side, price, amount, filled, remaining: amount - filled,
+          id,
+          status,
+          symbol,
+          type,
+          side,
+          price,
+          amount,
+          filled,
+          remaining: amount - filled,
           reduceOnly: Boolean(parent) || order.action === 'CLOSE',
           ...(parent && { parentId: parent.id }),
           ...(order.clientOrderId !== undefined && { clientOrderId: String(order.clientOrderId) }),
-          ...(type === OrderType.StopLoss && (reference || previous?.slTriggerType) && { slTriggerType: reference || previous?.slTriggerType }),
-          ...(type === OrderType.TakeProfit && (reference || previous?.tpTriggerType) && { tpTriggerType: reference || previous?.tpTriggerType }),
-          takeProfit: previous?.takeProfit, stopLoss: previous?.stopLoss,
-          info: order, timeInForce: OrderTimeInForce.GoodTillCancel, lastUpdate: Number(order.transactTime || 0),
+          ...(type === OrderType.StopLoss &&
+            (reference || previous?.slTriggerType) && { slTriggerType: reference || previous?.slTriggerType }),
+          ...(type === OrderType.TakeProfit &&
+            (reference || previous?.tpTriggerType) && { tpTriggerType: reference || previous?.tpTriggerType }),
+          takeProfit: previous?.takeProfit,
+          stopLoss: previous?.stopLoss,
+          info: order,
+          timeInForce: OrderTimeInForce.GoodTillCancel,
+          lastUpdate: Number(order.transactTime || 0),
         };
         const slot = orders.length;
         orders.push(mapped);
@@ -1132,11 +1159,9 @@ export class BitrueExchange extends BaseExchange {
       open: direction,
       positionType: marginType === MarginType.Cross ? 1 : 2,
       futureModel: 'normal',
-      clientOrderId: uuid(),
       ...(isStopOrTP
         ? {
             conditionOrder: true,
-            clientOrderId: uuid(),
             // 1 stoploss 2 take profit
             triggerType: opts.type === OrderType.StopLoss ? 1 : 2,
             // 1 last 2 mark
@@ -1159,11 +1184,12 @@ export class BitrueExchange extends BaseExchange {
 
     let payloads: Array<Record<string, any>> = times(lots, () => ({
       ...req,
+      clientOrderId: uuid(),
       volume: `${lotSize}`,
     }));
 
     if (rest) {
-      payloads.push({ ...req, volume: `${rest}` });
+      payloads.push({ ...req, clientOrderId: uuid(), volume: `${rest}` });
     }
 
     const callerClientOrderId = this.resolveCallerClientOrderId(opts);

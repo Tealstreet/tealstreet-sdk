@@ -57,6 +57,20 @@ const setup = () => {
 };
 
 describe('audit regression: Bitrue trading safety defaults', () => {
+  it('mints an independent client ID for every native split', async () => {
+    const { exchange, post } = setup();
+    await exchange.placeOrder({
+      symbol: market.symbol,
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 2000,
+      price: 60000,
+    });
+    const ids = post.mock.calls.map((call) => call[1].clientOrderId);
+    expect(ids).toHaveLength(2);
+    expect(ids.every((id) => typeof id === 'string' && id.length > 0)).toBe(true);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
   it('defaults attached SL to mark and TP to last price', async () => {
     const { exchange, post } = setup();
     await exchange.placeOrder({

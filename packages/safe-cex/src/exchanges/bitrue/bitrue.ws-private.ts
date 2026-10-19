@@ -170,13 +170,23 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
     }
     const watermark = this.orderWatermarks.get(id);
     const previous = Math.max(watermark?.filled || 0, existing?.filled || 0);
+    if (existing && existing.filled > (watermark?.filled || 0)) {
+      if (Number(existing.info?.avgPrice) > 0)
+        this.cumulativeValues.set(id, (existing.filled / multiplier) * Number(existing.info.avgPrice));
+      else this.cumulativeValues.delete(id);
+    }
     const previousTerminal =
       watermark?.terminal ||
       (existing && [OrderStatus.Closed, OrderStatus.Canceled].includes(existing.status) ? existing.status : undefined);
     const terminal = [OrderStatus.Closed, OrderStatus.Canceled].includes(status);
     const time = Number((json as any).E ?? update.E ?? Date.now());
     const total = Math.max(amount, existing?.amount || 0, watermark?.amount || 0, filled);
-    const cumulativeValue = Number(update.ap) > 0 ? rawFilled * Number(update.ap) : undefined;
+    const cumulativeValue =
+      Number(update.ap) > 0
+        ? rawFilled * Number(update.ap)
+        : Number(update.L) > 0 && filled > previous && (previous === 0 || this.cumulativeValues.has(id))
+          ? (this.cumulativeValues.get(id) || 0) + (rawFilled - previous / multiplier) * Number(update.L)
+          : undefined;
     if (`${update.x || ''}`.toUpperCase() === 'TRADE') {
       // A REST snapshot may already include fills that a delayed stream repeats.
       this.incrementalFills(id, previous / multiplier, this.cumulativeValues.get(id));

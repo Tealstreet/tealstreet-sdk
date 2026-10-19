@@ -97,3 +97,27 @@ test('the extracted Tape selects Bitrue typed matching with route-scoped generat
   assert.equal(tape.missingWrites, 0);
   assert.equal(tape.respond(method, base + path, body, headers).status, 599);
 });
+
+test('an invalid signed read remains a gate failure after a valid retry', () => {
+  const method = 'GET',
+    path = '/fapi/v2/account',
+    timestamp = String(Date.now());
+  const tape = new Tape(
+    [{ type: 'http', method, url: base + path, status: 200, body: '{"code":"0","data":{"account":[]}}' }],
+    venue,
+    true,
+    30000,
+    'rust',
+  );
+  assert.throws(() => tape.respond(method, base + path, undefined, {}), /signature/);
+  const headers = {
+    'X-CH-APIKEY': 'replay-key',
+    'X-CH-TS': timestamp,
+    'X-CH-SIGN': createHmac('sha256', 'replay-secret')
+      .update(timestamp + method + path)
+      .digest('hex'),
+  };
+  assert.equal(tape.respond(method, base + path, undefined, headers).status, 200);
+  assert.equal(tape.invalidSignatures, 1);
+  assert.equal(tape.unserved, 0);
+});
