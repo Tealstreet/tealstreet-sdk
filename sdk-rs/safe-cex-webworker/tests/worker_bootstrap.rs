@@ -45,7 +45,7 @@ struct State {
     config_error: RefCell<Option<ExchangeError>>,
     console_args: RefCell<Vec<Js>>,
     fixture_dump: RefCell<Option<Js>>,
-    stores: RefCell<Vec<WorkerStoreMessage>>,
+    stores: RefCell<Vec<RecordedStoreMessage>>,
     tasks: RefCell<Vec<ExchangeFuture<'static, ()>>>,
     runtime: Rc<runtime::Runtime>,
     manager: Rc<ChaserOrderManager>,
@@ -326,9 +326,18 @@ impl safe_cex_exchange::store_delivery::StoreUpdateThrottleHost for Host {
         self.event(e.message.clone());
     }
 }
+struct RecordedStoreMessage {
+    #[allow(dead_code)]
+    op: safe_cex_webworker::payload::StoreWorkerOp,
+    data: safe_cex_store::StoreUpdate,
+}
 impl ExchangeWorkerHost for Host {
     fn post_store(&self, m: WorkerStoreMessage) -> Result<(), ExchangeError> {
-        self.state.stores.borrow_mut().push(m);
+        self.state.stores.borrow_mut().push(RecordedStoreMessage {
+            op: m.op,
+            data: safe_cex_exchange::js_runtime::value::to_typed_preserving_undefined(&m.data)
+                .unwrap(),
+        });
         self.event("store");
         Ok(())
     }

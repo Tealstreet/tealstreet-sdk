@@ -309,6 +309,12 @@ not replace the slot, and successful responses clear it. `native_host_tunnel`
 exercises real WOO/Bybit HOW 404 reports and cyclic/nonfinite metadata profiles.
 
 Native account Store delivery subscribes to the canonical native state and retains
-that referent through the shared throttle. StoreData projection, postprocessing
-and payload encoding occur only on an actual leading/trailing invocation or an
-explicit snapshot, preserving latest-state delivery without a per-update copy.
+that referent through the shared throttle. Leading/trailing delivery prepares
+and captures the canonical graph directly, retaining root and every nested model's
+own-key order. Explicit snapshots call the real facade serialize method before
+the same preparer. Only the message-handler diagnostic field is projected for its
+typed processor; model rows are never decoded and re-encoded on the way out.
+Dynamic live-state fields remain in their original appended positions. The actual
+native constructor/Store/delivery witness compares six complete source graphs,
+including alternate orders for every model family, and the account startup test
+checks full-snapshot own keys before JSON can omit undefined properties.

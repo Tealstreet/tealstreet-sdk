@@ -1,5 +1,8 @@
 use crate::native_value::NativeValue;
-use safe_cex_exchange::js_runtime::value::{Js, to_typed_preserving_undefined};
+use safe_cex_exchange::js_runtime::{
+    store,
+    value::{Js, from_typed, to_typed},
+};
 use safe_cex_exchange::{
     delivery_timers::WorkerPortTimers,
     message_stats::MessageHandlerStatsPostprocessor,
@@ -11,7 +14,6 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_store::Store;
-use safe_cex_types::StoreData;
 use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
@@ -101,14 +103,7 @@ impl NativeStoreDelivery {
                     250.0 * multiplier,
                     Rc::new(move |data| {
                         if let Some(delivery) = delivery.upgrade() {
-                            let snapshot: StoreData = to_typed_preserving_undefined(&data)
-                                .map_err(|cause| {
-                                    safe_cex_types::StoreReadError::new(
-                                        safe_cex_types::StoreReadPhase::Projection,
-                                        Rc::new(cause),
-                                    )
-                                })?;
-                            delivery.deliver(snapshot, false)?;
+                            delivery.deliver(data, false)?;
                         }
                         Ok(())
                     }),
@@ -116,22 +111,27 @@ impl NativeStoreDelivery {
             }
         })
     }
-    fn deliver(&self, mut data: StoreData, full: bool) -> Result<(), ExchangeError> {
+    fn deliver(&self, data: Js, full: bool) -> Result<(), ExchangeError> {
         if !self.active.get() {
             return Ok(());
         }
         let (Some(store), Some(exchange)) = (self.store.upgrade(), self.exchange.upgrade()) else {
             return Ok(());
         };
-        MessageHandlerStatsPostprocessor.process(&mut data, exchange.as_ref())?;
+        let data = data.spread_object()?;
+        // Only the diagnostic processor needs a typed field. Model rows remain
+        // their original objects all the way through preparation and post capture.
+        let mut statistics = to_typed(&data.get("messageHandlerStats")?)?;
+        MessageHandlerStatsPostprocessor.process(&mut statistics, exchange.as_ref())?;
+        data.set("messageHandlerStats", from_typed(&statistics)?)?;
         let payload = self.preparer.borrow_mut().prepare(
             &data,
             store.get_markets_version(),
             store.get_tickers_version(),
             exchange.base().options().hosted_mode == Some(true),
             Some(full),
-        );
-        let value = NativeValue::encode(&payload)?;
+        )?;
+        let value = NativeValue::from_js(&payload)?;
         (self.post)(value);
         Ok(())
     }
@@ -150,7 +150,10 @@ impl NativeStoreDelivery {
             && !exchange.base().is_disposed()
             && let Some(store) = self.store.upgrade()
         {
-            self.deliver(store.serialize()?, true)?;
+            self.deliver(
+                store::facade(store)?.call_method("serialize", vec![])?,
+                true,
+            )?;
         }
         Ok(())
     }
@@ -166,7 +169,10 @@ impl NativeStoreDelivery {
 #[cfg(test)]
 mod construction_order_tests {
     use super::*;
-    use crate::{native_host::{native_venue_host,hyperliquid_rate_limiter},rust_venues::rust_constructor};
+    use crate::{
+        native_host::{hyperliquid_rate_limiter, native_venue_host},
+        rust_venues::rust_constructor,
+    };
     use safe_cex_exchange::{js_runtime::store, native_store::DefaultStore};
     use safe_cex_types::ExchangeName;
 

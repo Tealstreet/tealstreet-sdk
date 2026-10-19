@@ -1,8 +1,11 @@
 #[path = "support/model_identity.rs"]
 mod model_identity;
-use safe_cex_exchange::store_payload::*;
+#[path = "support/typed_payload_observation.rs"]
+mod typed_payload_observation;
 use safe_cex_types::StoreData;
+use safe_cex_exchange::js_runtime::value::{Js, from_typed, to_json};
 use serde_json::{Value, json};
+use typed_payload_observation::*;
 fn normalized(v: Value) -> Value {
     match v {
         Value::Number(n) => json!(n.as_f64().unwrap()),
@@ -103,6 +106,90 @@ fn store_payload_preparation_matches_live_full_snapshots_and_incremental_transit
         json!({"updateId":0,"loaded":false,"socketHealthy":false,"balance":99,"orderAmount":99})
     );
     let mut input: StoreData = serde_json::from_value(cases[0]["input"].clone()).unwrap();
+    // Observe the production graph before the explicit typed assertions below.
+    // Source clones its three status records but keeps balance/untouched-row aliases.
+    let native = from_typed(&input).unwrap();
+    let native_held =
+        safe_cex_exchange::store_payload::sanitize_for_post_message(&native, false, false).unwrap();
+    native
+        .get("updateIds")
+        .unwrap()
+        .set(
+            "orders",
+            Js::Number(99.0),
+        )
+        .unwrap();
+    native
+        .get("loaded")
+        .unwrap()
+        .set(
+            "orders",
+            Js::Bool(true),
+        )
+        .unwrap();
+    native
+        .get("socketHealth")
+        .unwrap()
+        .set(
+            "publicHealthy",
+            Js::Bool(true),
+        )
+        .unwrap();
+    native
+        .get("balance")
+        .unwrap()
+        .set(
+            "total",
+            Js::Number(99.0),
+        )
+        .unwrap();
+    native
+        .get("orders")
+        .unwrap()
+        .get("1")
+        .unwrap()
+        .set(
+            "amount",
+            Js::Number(99.0),
+        )
+        .unwrap();
+    let observed = Js::object(vec![
+        (
+            "updateId",
+            native_held.get("updateIds").unwrap().get("orders").unwrap(),
+        ),
+        (
+            "loaded",
+            native_held.get("loaded").unwrap().get("orders").unwrap(),
+        ),
+        (
+            "socketHealthy",
+            native_held
+                .get("socketHealth")
+                .unwrap()
+                .get("publicHealthy")
+                .unwrap(),
+        ),
+        (
+            "balance",
+            native_held.get("balance").unwrap().get("total").unwrap(),
+        ),
+        (
+            "orderAmount",
+            native_held
+                .get("orders")
+                .unwrap()
+                .get("1")
+                .unwrap()
+                .get("amount")
+                .unwrap(),
+        ),
+    ]);
+    assert_eq!(
+        normalized(to_json(&observed).unwrap()),
+        normalized(data["aliasWitness"].clone()),
+        "SOURCE native graph clone/alias profile"
+    );
     let held = sanitize_for_post_message(&input, false, false);
     input.update_ids.orders = 99.0;
     input.loaded.orders = true;
@@ -127,12 +214,12 @@ fn store_payload_preparation_matches_live_full_snapshots_and_incremental_transit
     assert_eq!(
         held.balance.unwrap().total,
         0.0,
-        "CHOSEN owned snapshot omits balance alias"
+        "explicit typed observation owns its balance"
     );
     assert_eq!(
         held.orders.unwrap()[1].amount,
         2.0,
-        "CHOSEN owned snapshot omits untouched order alias"
+        "explicit typed observation owns its order"
     );
     // These must remain typed copies, not a JSON round-trip that converts to null.
     input.balance.total = f64::INFINITY;
