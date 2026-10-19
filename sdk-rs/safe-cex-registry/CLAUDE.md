@@ -312,3 +312,10 @@ Native account Store delivery subscribes to the canonical native state and retai
 that referent through the shared throttle. StoreData projection, postprocessing
 and payload encoding occur only on an actual leading/trailing invocation or an
 explicit snapshot, preserving latest-state delivery without a per-update copy.
+
+Native listenOHLCV delivery calls Exchange::listen_ohlcv_retained and captures
+the original Js callback value in OwnedJsValue. It does not deserialize Candle
+before worker delivery. The Phemex recorded-feed child module constructs the
+real venue and uses native_account_call/watch for all 19 callbacks, checking
+string units and numeric bits before serialization and real unlisten cleanup.
+Typed-only venue implementations keep their declared Candle adaptation.
