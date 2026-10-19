@@ -99,3 +99,24 @@ passes every33-owner receipt plus the conversion test
 passes11 and the all-features inventory passes6 with1explicit discovery export
 ignored (`/tmp/aster-alternate-exchange-refreshed.log` and
 `/tmp/aster-alternate-cancellation-refreshed.log`).
+
+## Parent retained diagnostic contract
+
+Parent's WsParent `emit_and_log_error` already accepts and directly forwards
+`Option<&RetainedJsonInput>`. The row-2 contract still named the former Value
+carrier. Its compiler API expectation now records the actual retained type;
+production method bodies, the two distinct listener failures and their expected
+name/message are unchanged. The included fixture's balance observer unwraps the
+Store Result before inspecting fields, matching the current typed read API.
+The canonical scoped replay selects Parent plus the real constructor owner,
+which supplies its existing sandbox-only scope accessor. Parent stream-carrier
+entries remain separately owned; no production accessor is introduced. The actual
+carrier migration is commit 8c148df7ac (retained native reporting contexts), whose
+Parent body only changed the parameter type and still forwards the same value.
+
+Fresh master rustdoc plus maintained inventory/contract validation reproduces
+`unclassified or changed decoder/conversion entrypoint` with the former row-2
+API, then accepts all eight unchanged Parent entrypoints with the retained type.
+Logs: `/tmp/kxakrb-aster-parent-api-{red,green}.log`. This is a fixture refusal,
+not a production behavioral RED. The canonical native replay remains the runtime
+receipt for the actual constructed Parent and listener-error observations.

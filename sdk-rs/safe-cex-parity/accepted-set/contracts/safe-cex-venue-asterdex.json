@@ -89151,7 +89151,7 @@
                                 "is_mutable": false,
                                 "type": {
                                   "resolved_path": {
-                                    "path": "serde_json::value::Value",
+                                    "path": "safe_cex_types::retained_json::RetainedJsonInput",
                                     "args": null
                                   }
                                 }
@@ -89199,7 +89199,7 @@
           }
         },
         "input": "observed",
-        "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
+        "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs. Reviewed retained diagnostics migration: production WsParent/Parent already takes Option<&RetainedJsonInput> and forwards it unchanged. The stale serde_json::Value signature was fixture metadata; both original listener-failure observations remain exact.",
         "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsParent as _;#[allow(unused_imports)] use crate::public_stream::PublicStreamParent as _;#[allow(unused_imports)] use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let message=$value.as_str().unwrap().to_owned();venue.base().on(\"error\",std::rc::Rc::new(move|_,_|Err(safe_cex_exchange::runtime::ExchangeError::new(message.clone()))));f::result(parent.emit_and_log_error(\"native error\",None,None))}",
         "cases": [
           {
