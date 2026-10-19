@@ -39790,6 +39790,1588 @@
       }
     ]
   },
+  "safe_cex_exchange::js_runtime::collections::collection_iterator": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "collection_iterator",
+      "signature": {
+        "inputs": [
+          [
+            "collection",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "kind",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::collections::Kind",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reads the original native Map/Set storage at each iterator step. Direct native and independent Node cases cover keys/values/entries, live clear/delete/reinsert, sticky exhaustion, signed zero, lone UTF-16 units and original object identity; it does not project through JSON. Fixtures: safe-cex-exchange/scripts/collection-input-observers.rs and tests/iterator_contract_oracle.cjs; src/js_runtime/collection_contract_tests.rs executes the same direct helpers. Bounded native default-feature profile only.",
+    "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/collection-input-observers.rs\")); } observation::collection($value, $type) }",
+    "cases": [
+      {
+        "input": "map-values",
+        "output": {
+          "ok": true,
+          "self": true,
+          "steps": [
+            {
+              "done": false,
+              "value": [
+                "number",
+                "8000000000000000"
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                "reference",
+                true
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                "string",
+                [
+                  55296
+                ]
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": "map-keys",
+        "output": {
+          "ok": true,
+          "self": true,
+          "steps": [
+            {
+              "done": false,
+              "value": [
+                "string",
+                [
+                  97
+                ]
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                "string",
+                [
+                  98
+                ]
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                "string",
+                [
+                  99
+                ]
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": "map-entries",
+        "output": {
+          "ok": true,
+          "self": true,
+          "steps": [
+            {
+              "done": false,
+              "value": [
+                [
+                  "string",
+                  [
+                    97
+                  ]
+                ],
+                [
+                  "number",
+                  "8000000000000000"
+                ]
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                [
+                  "string",
+                  [
+                    98
+                  ]
+                ],
+                [
+                  "reference",
+                  true
+                ]
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                [
+                  "string",
+                  [
+                    99
+                  ]
+                ],
+                [
+                  "string",
+                  [
+                    55296
+                  ]
+                ]
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": "set-values",
+        "output": {
+          "ok": true,
+          "self": true,
+          "steps": [
+            {
+              "done": false,
+              "value": [
+                "number",
+                "0000000000000000"
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                "reference",
+                true
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                "string",
+                [
+                  55296
+                ]
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": "set-entries",
+        "output": {
+          "ok": true,
+          "self": true,
+          "steps": [
+            {
+              "done": false,
+              "value": [
+                [
+                  "number",
+                  "0000000000000000"
+                ],
+                [
+                  "number",
+                  "0000000000000000"
+                ]
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                [
+                  "reference",
+                  true
+                ],
+                [
+                  "reference",
+                  true
+                ]
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                [
+                  "string",
+                  [
+                    55296
+                  ]
+                ],
+                [
+                  "string",
+                  [
+                    55296
+                  ]
+                ]
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": "map-clear",
+        "output": {
+          "ok": true,
+          "self": true,
+          "steps": [
+            {
+              "done": false,
+              "value": [
+                "number",
+                "8000000000000000"
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                "string",
+                [
+                  55296
+                ]
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": "set-clear",
+        "output": {
+          "ok": true,
+          "self": true,
+          "steps": [
+            {
+              "done": false,
+              "value": [
+                "number",
+                "0000000000000000"
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                "string",
+                [
+                  55296
+                ]
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": "map-reinsert",
+        "output": {
+          "ok": true,
+          "self": true,
+          "steps": [
+            {
+              "done": false,
+              "value": [
+                "number",
+                "8000000000000000"
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                "string",
+                [
+                  55296
+                ]
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                "reference",
+                true
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": "set-reinsert",
+        "output": {
+          "ok": true,
+          "self": true,
+          "steps": [
+            {
+              "done": false,
+              "value": [
+                "number",
+                "0000000000000000"
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                "string",
+                [
+                  55296
+                ]
+              ]
+            },
+            {
+              "done": false,
+              "value": [
+                "reference",
+                true
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            },
+            {
+              "done": true,
+              "value": [
+                "undefined"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/collection-input-observers.rs\")); } observation::collection($value, $type) }",
+      "nativeFields": [
+        "self",
+        "steps"
+      ],
+      "cases": [
+        {
+          "input": "map-values",
+          "output": {
+            "ok": true,
+            "self": true,
+            "steps": [
+              {
+                "done": false,
+                "value": [
+                  "number",
+                  "8000000000000000"
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  "reference",
+                  true
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  "string",
+                  [
+                    55296
+                  ]
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "input": "map-keys",
+          "output": {
+            "ok": true,
+            "self": true,
+            "steps": [
+              {
+                "done": false,
+                "value": [
+                  "string",
+                  [
+                    97
+                  ]
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  "string",
+                  [
+                    98
+                  ]
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  "string",
+                  [
+                    99
+                  ]
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "input": "map-entries",
+          "output": {
+            "ok": true,
+            "self": true,
+            "steps": [
+              {
+                "done": false,
+                "value": [
+                  [
+                    "string",
+                    [
+                      97
+                    ]
+                  ],
+                  [
+                    "number",
+                    "8000000000000000"
+                  ]
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  [
+                    "string",
+                    [
+                      98
+                    ]
+                  ],
+                  [
+                    "reference",
+                    true
+                  ]
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  [
+                    "string",
+                    [
+                      99
+                    ]
+                  ],
+                  [
+                    "string",
+                    [
+                      55296
+                    ]
+                  ]
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "input": "set-values",
+          "output": {
+            "ok": true,
+            "self": true,
+            "steps": [
+              {
+                "done": false,
+                "value": [
+                  "number",
+                  "0000000000000000"
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  "reference",
+                  true
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  "string",
+                  [
+                    55296
+                  ]
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "input": "set-entries",
+          "output": {
+            "ok": true,
+            "self": true,
+            "steps": [
+              {
+                "done": false,
+                "value": [
+                  [
+                    "number",
+                    "0000000000000000"
+                  ],
+                  [
+                    "number",
+                    "0000000000000000"
+                  ]
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  [
+                    "reference",
+                    true
+                  ],
+                  [
+                    "reference",
+                    true
+                  ]
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  [
+                    "string",
+                    [
+                      55296
+                    ]
+                  ],
+                  [
+                    "string",
+                    [
+                      55296
+                    ]
+                  ]
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "input": "map-clear",
+          "output": {
+            "ok": true,
+            "self": true,
+            "steps": [
+              {
+                "done": false,
+                "value": [
+                  "number",
+                  "8000000000000000"
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  "string",
+                  [
+                    55296
+                  ]
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "input": "set-clear",
+          "output": {
+            "ok": true,
+            "self": true,
+            "steps": [
+              {
+                "done": false,
+                "value": [
+                  "number",
+                  "0000000000000000"
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  "string",
+                  [
+                    55296
+                  ]
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "input": "map-reinsert",
+          "output": {
+            "ok": true,
+            "self": true,
+            "steps": [
+              {
+                "done": false,
+                "value": [
+                  "number",
+                  "8000000000000000"
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  "string",
+                  [
+                    55296
+                  ]
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  "reference",
+                  true
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "input": "set-reinsert",
+          "output": {
+            "ok": true,
+            "self": true,
+            "steps": [
+              {
+                "done": false,
+                "value": [
+                  "number",
+                  "0000000000000000"
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  "string",
+                  [
+                    55296
+                  ]
+                ]
+              },
+              {
+                "done": false,
+                "value": [
+                  "reference",
+                  true
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "done": true,
+                "value": [
+                  "undefined"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::collections::iterator_method": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "iterator_method",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Acquires Symbol.iterator from the original native input. Direct native and independent Node cases distinguish data and absent accessors, preserve inherited getter receiver identity and propagate the exact thrown referent; this is executed raw-input behavior, not a non-decoder exemption. Fixtures: safe-cex-exchange/scripts/collection-input-observers.rs and tests/iterator_contract_oracle.cjs; src/js_runtime/collection_contract_tests.rs executes the same direct helpers. Bounded native default-feature profile only.",
+    "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/collection-input-observers.rs\")); } observation::method($value, $type) }",
+    "cases": [
+      {
+        "input": "own-getter",
+        "output": {
+          "ok": true,
+          "value": [
+            "method"
+          ],
+          "original": false,
+          "receivers": [
+            true
+          ]
+        }
+      },
+      {
+        "input": "inherited-getter",
+        "output": {
+          "ok": true,
+          "value": [
+            "method"
+          ],
+          "original": false,
+          "receivers": [
+            true
+          ]
+        }
+      },
+      {
+        "input": "own-throw",
+        "output": {
+          "ok": false,
+          "value": null,
+          "original": true,
+          "receivers": [
+            true
+          ]
+        }
+      },
+      {
+        "input": "inherited-throw",
+        "output": {
+          "ok": false,
+          "value": null,
+          "original": true,
+          "receivers": [
+            true
+          ]
+        }
+      },
+      {
+        "input": "own-data",
+        "output": {
+          "ok": true,
+          "value": [
+            "number",
+            "8000000000000000"
+          ],
+          "original": false,
+          "receivers": []
+        }
+      },
+      {
+        "input": "inherited-data",
+        "output": {
+          "ok": true,
+          "value": [
+            "number",
+            "8000000000000000"
+          ],
+          "original": false,
+          "receivers": []
+        }
+      },
+      {
+        "input": "own-absent",
+        "output": {
+          "ok": true,
+          "value": [
+            "undefined"
+          ],
+          "original": false,
+          "receivers": []
+        }
+      },
+      {
+        "input": "inherited-absent",
+        "output": {
+          "ok": true,
+          "value": [
+            "undefined"
+          ],
+          "original": false,
+          "receivers": []
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/collection-input-observers.rs\")); } observation::method($value, $type) }",
+      "nativeFields": [
+        "value",
+        "receivers",
+        "original"
+      ],
+      "cases": [
+        {
+          "input": "own-getter",
+          "output": {
+            "ok": true,
+            "value": [
+              "method"
+            ],
+            "original": false,
+            "receivers": [
+              true
+            ]
+          }
+        },
+        {
+          "input": "inherited-getter",
+          "output": {
+            "ok": true,
+            "value": [
+              "method"
+            ],
+            "original": false,
+            "receivers": [
+              true
+            ]
+          }
+        },
+        {
+          "input": "own-throw",
+          "output": {
+            "ok": false,
+            "value": null,
+            "original": true,
+            "receivers": [
+              true
+            ]
+          }
+        },
+        {
+          "input": "inherited-throw",
+          "output": {
+            "ok": false,
+            "value": null,
+            "original": true,
+            "receivers": [
+              true
+            ]
+          }
+        },
+        {
+          "input": "own-data",
+          "output": {
+            "ok": true,
+            "value": [
+              "number",
+              "8000000000000000"
+            ],
+            "original": false,
+            "receivers": []
+          }
+        },
+        {
+          "input": "inherited-data",
+          "output": {
+            "ok": true,
+            "value": [
+              "number",
+              "8000000000000000"
+            ],
+            "original": false,
+            "receivers": []
+          }
+        },
+        {
+          "input": "own-absent",
+          "output": {
+            "ok": true,
+            "value": [
+              "undefined"
+            ],
+            "original": false,
+            "receivers": []
+          }
+        },
+        {
+          "input": "inherited-absent",
+          "output": {
+            "ok": true,
+            "value": [
+              "undefined"
+            ],
+            "original": false,
+            "receivers": []
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::collections::iterator_method_receiver": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "iterator_method_receiver",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "receiver",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Resolves the iterator capability through the native prototype chain while preserving the original receiver. Direct probes execute own and inherited data/getter/absent/throw cases and inspect the original thrown referent and getter effects. Fixtures: safe-cex-exchange/scripts/collection-input-observers.rs and tests/iterator_contract_oracle.cjs; src/js_runtime/collection_contract_tests.rs executes the same direct helpers. Bounded native default-feature profile only.",
+    "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/collection-input-observers.rs\")); } observation::lookup($value, $type) }",
+    "cases": [
+      {
+        "input": "own-getter",
+        "output": {
+          "ok": true,
+          "value": [
+            "method"
+          ],
+          "original": false,
+          "receivers": [
+            true
+          ]
+        }
+      },
+      {
+        "input": "inherited-getter",
+        "output": {
+          "ok": true,
+          "value": [
+            "method"
+          ],
+          "original": false,
+          "receivers": [
+            true
+          ]
+        }
+      },
+      {
+        "input": "own-throw",
+        "output": {
+          "ok": false,
+          "value": null,
+          "original": true,
+          "receivers": [
+            true
+          ]
+        }
+      },
+      {
+        "input": "inherited-throw",
+        "output": {
+          "ok": false,
+          "value": null,
+          "original": true,
+          "receivers": [
+            true
+          ]
+        }
+      },
+      {
+        "input": "own-data",
+        "output": {
+          "ok": true,
+          "value": [
+            "number",
+            "8000000000000000"
+          ],
+          "original": false,
+          "receivers": []
+        }
+      },
+      {
+        "input": "inherited-data",
+        "output": {
+          "ok": true,
+          "value": [
+            "number",
+            "8000000000000000"
+          ],
+          "original": false,
+          "receivers": []
+        }
+      },
+      {
+        "input": "own-absent",
+        "output": {
+          "ok": true,
+          "value": [
+            "undefined"
+          ],
+          "original": false,
+          "receivers": []
+        }
+      },
+      {
+        "input": "inherited-absent",
+        "output": {
+          "ok": true,
+          "value": [
+            "undefined"
+          ],
+          "original": false,
+          "receivers": []
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/collection-input-observers.rs\")); } observation::lookup($value, $type) }",
+      "nativeFields": [
+        "value",
+        "receivers",
+        "original"
+      ],
+      "cases": [
+        {
+          "input": "own-getter",
+          "output": {
+            "ok": true,
+            "value": [
+              "method"
+            ],
+            "original": false,
+            "receivers": [
+              true
+            ]
+          }
+        },
+        {
+          "input": "inherited-getter",
+          "output": {
+            "ok": true,
+            "value": [
+              "method"
+            ],
+            "original": false,
+            "receivers": [
+              true
+            ]
+          }
+        },
+        {
+          "input": "own-throw",
+          "output": {
+            "ok": false,
+            "value": null,
+            "original": true,
+            "receivers": [
+              true
+            ]
+          }
+        },
+        {
+          "input": "inherited-throw",
+          "output": {
+            "ok": false,
+            "value": null,
+            "original": true,
+            "receivers": [
+              true
+            ]
+          }
+        },
+        {
+          "input": "own-data",
+          "output": {
+            "ok": true,
+            "value": [
+              "number",
+              "8000000000000000"
+            ],
+            "original": false,
+            "receivers": []
+          }
+        },
+        {
+          "input": "inherited-data",
+          "output": {
+            "ok": true,
+            "value": [
+              "number",
+              "8000000000000000"
+            ],
+            "original": false,
+            "receivers": []
+          }
+        },
+        {
+          "input": "own-absent",
+          "output": {
+            "ok": true,
+            "value": [
+              "undefined"
+            ],
+            "original": false,
+            "receivers": []
+          }
+        },
+        {
+          "input": "inherited-absent",
+          "output": {
+            "ok": true,
+            "value": [
+              "undefined"
+            ],
+            "original": false,
+            "receivers": []
+          }
+        }
+      ]
+    }
+  },
   "safe_cex_exchange::js_runtime::base_exchange::text": {
     "api": {
       "kind": "function",
