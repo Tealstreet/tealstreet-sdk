@@ -43,4 +43,15 @@ repairs. Current source alone would not establish the original capabilities.
   general-income no-HTTP tests, plus two mixed-batch private replay cases.
   Independent phase review PASS; 22 trading + 8 history tests pass.
 - Native MEXC total: 53 tests pass; bans, formatting, native and wasm clippy
-  pass. Replay and repository checks in progress.
+  pass.
+- Fixed a fixture timing defect exposed by the extra rejected commands:
+  post-cancel REST reads now reflect empty open-order lists, and private pongs
+  through six seconds allow both polling loops to reconcile terminal rows.
+  Three private runs PASS (25 frames), exact comparisons unchanged.
+- MEXC public PASS: 14,701 frames / 1,135 markets / two books;
+  CPU 2085.2 -> 900.0 ms; steady CPU 1432.0 -> 559.8 ms;
+  retained memory 10.1 -> 3.5 MB. Binance public and private PASS.
+- Typecheck 44 tasks, lint 28 tasks, focused TS MEXC 131 tests, harness 40
+  tests and wasm shell 19 tests PASS. Wasm 2,416,535 bytes under the unchanged
+  2,621,440-byte budget. Production Rust is unchanged in this follow-up.
+- PR/adversarial review and green CI pending; WOO starts after merge.

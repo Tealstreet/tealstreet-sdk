@@ -22,7 +22,7 @@ const ids = {
 const records = [{ t: 0, type: 'meta', private: true, epoch: EPOCH }];
 const payload = (value) => JSON.stringify(value).replace(/"@(\d+)"/g, '$1');
 const envelope = (data) => ({ success: true, code: 0, data });
-const http = (method, path, query, response, requestBody) =>
+const http = (method, path, query, response, requestBody, stage = {}) =>
   records.push({
     t: 0,
     type: 'http',
@@ -31,6 +31,7 @@ const http = (method, path, query, response, requestBody) =>
     status: 200,
     body: payload(response),
     ...(requestBody === undefined ? {} : { requestBody: JSON.stringify(requestBody) }),
+    ...stage,
   });
 const ws = (t, socket, channel, data) =>
   records.push({ t, type: 'ws', url: SOCKET, socket, text: payload({ channel, symbol: data?.symbol, data }) });
@@ -283,6 +284,28 @@ for (const [index, type] of ['conditional', 'trailing_stop_market'].entries()) {
     { symbol: 'BTCUSDT', type, side: 'buy', amount: 20, price: 59000, triggerPrice: 61000 },
   ] });
 }
+
+// Open-order reads reflect the accepted cancel-all instead of replaying startup
+// rows forever. Gate the snapshots on command order, including the early rejects.
+const afterCommand = records.filter((r) => r.type === 'command' && r.t <= 2900).length;
+for (const path of ['/api/v1/private/order/list/open_orders', '/api/v1/private/order/list/open_orders/BTC_USDT']) {
+  http('GET', path, { page_num: 1, page_size: 100 }, envelope([]), undefined, { afterCommand });
+}
+for (const symbol of [undefined, 'BTC_USDT']) {
+  const window = {
+    start_time: EPOCH - 89 * 86400000,
+    end_time: EPOCH,
+    page_num: 1,
+    page_size: 100,
+    ...(symbol ? { symbol } : {}),
+  };
+  http('GET', '/api/v1/private/planorder/list/orders', { ...window, states: '1' }, envelope([]), undefined, { afterCommand });
+  http('GET', '/api/v1/private/stoporder/list/orders', { ...window, is_finished: 0 }, envelope([]), undefined, { afterCommand });
+}
+// Both polling loops observe a post-cancel snapshot after the terminal WS frames
+// before the gate compares their reconciled account state.
+ws(4000, 1, 'pong', {});
+ws(6000, 1, 'pong', {});
 
 records.sort((a, b) => a.t - b.t);
 mkdirSync(dirname(values.out), { recursive: true });
