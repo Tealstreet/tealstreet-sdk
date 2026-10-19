@@ -198,7 +198,7 @@ fn chaser_instance_matches_live_source_transitions_prototype_keys_and_disposal()
 }
 
 #[test]
-fn owned_id_arrays_and_immutable_default_have_explicit_live_source_witnesses() {
+fn owned_instance_id_arrays_have_explicit_live_source_witnesses() {
     let output = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -385,4 +385,101 @@ fn active_chaser_postprocessor_matches_live_identity_filter_and_current_state() 
             "empty manager clears store"
         );
     }
+}
+
+#[test]
+fn constructors_snapshot_the_live_shallow_frozen_default() {
+    use safe_cex_exchange::js_runtime::{globals::install_builtins, value::Js};
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/chaser_instance_oracle.mjs"
+        ))
+        .arg("--default-snapshot")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let runtime = Rc::new(Runtime::default());
+    let venue: Rc<dyn Exchange> = Rc::new(Venue {
+        base: BaseExchange::new(
+            ExchangeName::Bybit,
+            serde_json::from_value(json!({"key":"","secret":""})).unwrap(),
+            Rc::new(DefaultStore::new()),
+            runtime,
+            Default::default(),
+        ),
+        capabilities: Default::default(),
+    });
+    let options = Rc::new(RefCell::new(
+        serde_json::from_value(
+            json!({"symbol":"BTC","size":1,"side":"buy","maxAttempts":1,"delay":100}),
+        )
+        .unwrap(),
+    ));
+    let template = default_chaser_state().unwrap();
+    assert!(
+        template.same_reference(&default_chaser_state().unwrap()),
+        "DEFAULT shared module identity"
+    );
+    let ids = template.get("currentOrdersIds").unwrap();
+    let before = ChaserOrderInstance::new(venue.clone(), options.clone()).unwrap();
+    ids.call_method("push", vec![Js::str("seed")]).unwrap();
+    let first = ChaserOrderInstance::new(venue.clone(), options.clone()).unwrap();
+    ids.call_method("push", vec![Js::str("later")]).unwrap();
+    let second = ChaserOrderInstance::new(venue, options).unwrap();
+    first
+        .state()
+        .borrow_mut()
+        .current_orders_ids
+        .push("local".into());
+    let globals = Js::object(vec![]);
+    install_builtins::<()>(&globals, std::rc::Weak::new());
+    let object = globals.get("Object").unwrap();
+    let frozen = object
+        .call_method("isFrozen", vec![template.clone()])
+        .unwrap()
+        .truthy();
+    let nested_frozen = object
+        .call_method("isFrozen", vec![ids.clone()])
+        .unwrap()
+        .truthy();
+    let replace = template.set("currentOrdersIds", Js::array(vec![])).is_ok();
+    let extend = template.set("extra", Js::Bool(true)).is_ok();
+    let actual = json!({"before":before.current_order_ids(),"first":first.current_order_ids(),"second":second.current_order_ids(),
+        "template": ids.array_items().unwrap().unwrap().into_iter().map(|value| {
+            let Js::String(value) = value.unwrap() else { panic!("DEFAULT string IDs") };
+            String::from_utf16(&value).unwrap()
+        }).collect::<Vec<_>>(),"frozen":frozen,"nestedFrozen":nested_frozen,"replace":replace,"extend":extend});
+    assert_eq!(
+        ids.get("length").unwrap().to_number().unwrap().to_bits(),
+        2.0_f64.to_bits()
+    );
+    let independent = std::thread::spawn(|| {
+        default_chaser_state()
+            .unwrap()
+            .get("currentOrdersIds")
+            .unwrap()
+            .get("length")
+            .unwrap()
+            .to_number()
+            .unwrap()
+            .to_bits()
+    })
+    .join()
+    .unwrap();
+    assert_eq!(
+        independent,
+        0.0_f64.to_bits(),
+        "DEFAULT independent native module realm"
+    );
+    ids.set("length", Js::Number(0.0)).unwrap();
+    assert_eq!(
+        actual, expected,
+        "DEFAULT actual constructor must clone the live template"
+    );
 }
