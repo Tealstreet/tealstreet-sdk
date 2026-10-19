@@ -35915,7 +35915,7 @@
     },
     "category": "decoder",
     "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
-    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v).map(Js::Number); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v).map(Js::Number); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
     "cases": [
       {
         "input": {
@@ -35968,7 +35968,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v).map(Js::Number); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v).map(Js::Number); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
       "nativeFields": [
         "type",
         "units",
@@ -36086,12 +36086,12 @@
     },
     "category": "decoder",
     "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
-    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
     "cases": [
       {
         "input": {
           "tag": "number",
-          "value": 1e-08
+          "bits": "4487126258331716666"
         },
         "output": {
           "ok": true,
@@ -36114,7 +36114,7 @@
       {
         "input": {
           "tag": "number",
-          "value": 1.234e+23
+          "bits": "4952307604018087811"
         },
         "output": {
           "ok": true,
@@ -36239,7 +36239,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
       "nativeFields": [
         "type",
         "units",
@@ -36249,7 +36249,7 @@
         {
           "input": {
             "tag": "number",
-            "value": 1e-08
+            "bits": "4487126258331716666"
           },
           "output": {
             "ok": true,
@@ -36272,7 +36272,7 @@
         {
           "input": {
             "tag": "number",
-            "value": 1.234e+23
+            "bits": "4952307604018087811"
           },
           "output": {
             "ok": true,
@@ -36457,7 +36457,7 @@
     },
     "category": "decoder",
     "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
-    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
     "cases": [
       {
         "input": {
@@ -36480,7 +36480,7 @@
       {
         "input": {
           "tag": "number",
-          "value": 0
+          "bits": "0"
         },
         "output": {
           "ok": true,
@@ -36522,7 +36522,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
       "nativeFields": [
         "type",
         "units",
@@ -36550,7 +36550,7 @@
         {
           "input": {
             "tag": "number",
-            "value": 0
+            "bits": "0"
           },
           "output": {
             "ok": true,
@@ -36676,7 +36676,7 @@
     },
     "category": "decoder",
     "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
-    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&Js::object(vec![(\"x\",v)]), &Js::str(\"x\"), Js::str(\"default\")); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&Js::object(vec![(\"x\",v)]), &Js::str(\"x\"), Js::str(\"default\")); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
     "cases": [
       {
         "input": {
@@ -36697,7 +36697,7 @@
       {
         "input": {
           "tag": "number",
-          "value": 42
+          "bits": "4631107791820423168"
         },
         "output": {
           "ok": true,
@@ -36749,7 +36749,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&Js::object(vec![(\"x\",v)]), &Js::str(\"x\"), Js::str(\"default\")); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&Js::object(vec![(\"x\",v)]), &Js::str(\"x\"), Js::str(\"default\")); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
       "nativeFields": [
         "type",
         "units",
@@ -36775,7 +36775,7 @@
         {
           "input": {
             "tag": "number",
-            "value": 42
+            "bits": "4631107791820423168"
           },
           "output": {
             "ok": true,
@@ -36884,7 +36884,7 @@
     },
     "category": "decoder",
     "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
-    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v).map(Js::Number); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v).map(Js::Number); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
     "cases": [
       {
         "input": {
@@ -36938,7 +36938,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v).map(Js::Number); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v).map(Js::Number); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
       "nativeFields": [
         "type",
         "units",
@@ -37057,12 +37057,12 @@
     },
     "category": "decoder",
     "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
-    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
     "cases": [
       {
         "input": {
           "tag": "number",
-          "value": 120
+          "bits": "4638144666238189568"
         },
         "output": {
           "ok": true,
@@ -37078,7 +37078,7 @@
       {
         "input": {
           "tag": "number",
-          "value": 0.01
+          "bits": "4576918229304087675"
         },
         "output": {
           "ok": true,
@@ -37172,7 +37172,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
       "nativeFields": [
         "type",
         "units",
@@ -37182,7 +37182,7 @@
         {
           "input": {
             "tag": "number",
-            "value": 120
+            "bits": "4638144666238189568"
           },
           "output": {
             "ok": true,
@@ -37198,7 +37198,7 @@
         {
           "input": {
             "tag": "number",
-            "value": 0.01
+            "bits": "4576918229304087675"
           },
           "output": {
             "ok": true,
@@ -37382,7 +37382,7 @@
     },
     "category": "decoder",
     "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
-    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(v, Js::Number(1.), Js::Number(2.), Js::Number(2.), Js::Number(5.)); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(v, Js::Number(1.), Js::Number(2.), Js::Number(2.), Js::Number(5.)); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
     "cases": [
       {
         "input": {
@@ -37556,7 +37556,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number($value[\"value\"].as_f64().unwrap()), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(v, Js::Number(1.), Js::Number(2.), Js::Number(2.), Js::Number(5.)); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(v, Js::Number(1.), Js::Number(2.), Js::Number(2.), Js::Number(5.)); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
       "nativeFields": [
         "type",
         "units",

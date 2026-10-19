@@ -14,10 +14,11 @@ const cases={
  safe_string:[{tag:'utf16',units:[55296]},{tag:'number',value:42},{tag:'undefined'},{tag:'null'}],
  decimal_to_precision:[{tag:'string',value:'1.2345'},{tag:'string',value:'-1.235'},{tag:'utf16',units:[55296]},{tag:'string',value:'1e-8'}]
 };
-function v(x){return x.tag==='string'||x.tag==='number'?x.value:x.tag==='utf16'?String.fromCharCode(...x.units):x.tag==='null'?null:undefined;}
+function v(x){if(x.tag==='number'){const b=Buffer.alloc(8);b.writeBigUInt64BE(BigInt(x.bits));return b.readDoubleBE();}return x.tag==='string'?x.value:x.tag==='utf16'?String.fromCharCode(...x.units):x.tag==='null'?null:undefined;}
 const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i));
 function out(f){try{let x=f();return {ok:true,type:typeof x,units:typeof x==='string'?units(x):null,bits:typeof x==='number'?(()=>{let b=Buffer.alloc(8);b.writeDoubleBE(x);return b.readBigUInt64BE().toString()})():null}}catch(e){return{ok:false,name:e.name,units:units(e.message)}}}
 const funcs={integer:x=>parseInt(x),number_to_string:api.numberToString,numeric_string:x=>x.toString(),parse_precision:api.parsePrecision,precision_from_string:api.precisionFromString,safe_string:x=>api.safeString({x},'x','default'),decimal_to_precision:x=>api.decimalToPrecision(x,1,2,2,5)};
+for(const rows of Object.values(cases))for(const input of rows)if(input.tag==='number'){const b=Buffer.alloc(8);b.writeDoubleBE(input.value);input.bits=b.readBigUInt64BE().toString();delete input.value;}
 const result=Object.fromEntries(Object.entries(cases).map(([k,rows])=>[k,rows.map(input=>({input,output:out(()=>funcs[k](v(input)))}))]));console.log(JSON.stringify(result));process.exit(0);
 }
 if(process.argv[2]==='owner-routes'){

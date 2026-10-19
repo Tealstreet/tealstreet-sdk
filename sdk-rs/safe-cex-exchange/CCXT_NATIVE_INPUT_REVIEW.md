@@ -20,7 +20,8 @@ changed by this classification.
 
 Each conversion has an exact compiler API, executed input/output receipts and
 native observations constructed directly as `Js` values, before JSON output.
-Expected observations read string code units, number bits, type and error units;
+Numeric fixture inputs use exact IEEE-754 bit strings. Expected observations
+read string code units, number bits, type and error units;
 they never serialize the decoded input. `js_ccxt_imports_source.cjs` executes the
 unchanged maintained `ccxt_exchange.ts`, `number.ts` and `type.ts`. The private
 `integer` and `numeric_string` helper expectations use their source operations,
