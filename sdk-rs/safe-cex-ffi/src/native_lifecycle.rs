@@ -11,6 +11,7 @@ use safe_cex_webworker::{
     worker_logging::{self, WorkerLogLevel},
 };
 use std::{
+    cell::RefCell,
     future::{Future, poll_fn},
     pin::pin,
     rc::Rc,
