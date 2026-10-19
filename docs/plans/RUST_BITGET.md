@@ -45,7 +45,18 @@ inverse only where its sizing and collateral behavior can be verified.
 - Read the spec, existing engine/Binance pattern, Bitget plan-type and client-id
   guidance, TS Classic/UTA startup, public and trading behavior.
 - Fetched origin and read the updated Process section. Existing lane is clean.
-- No implementation changes yet. Next: public phase.
+- Public implementation: crate + workspace/wasm/SDK/harness registration,
+  USDT/USDC product selection, streamed contracts/tickers/candles, three public
+  sockets, refcounts, sequence/checksum recovery, 5s ping / 20s watchdog.
+- Public sub-agent audit found string sequence decoding, missing snapshot sides,
+  pre-open ping, malformed WS candles, and REST mark-price parity issues. Fixed
+  all; exact sequence, malformed-data and watchdog regressions are covered.
+- Native public checks: bans PASS; fmt PASS; clippy all targets PASS; 11 tests
+  PASS. Repository typecheck/lint/tests and wasm clippy are running.
+- TS defect corrected: books previously applied gaps without validating modern
+  seq/pseq (and legacy checksum). Register this in KNOWN_TS_FIXES at harness
+  phase; normal tapes must still compare identically.
+- Next: private state/signing and reconciliation.
 
 ## Final integration
 
