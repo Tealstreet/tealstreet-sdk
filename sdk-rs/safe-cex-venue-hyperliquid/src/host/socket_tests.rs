@@ -32,17 +32,64 @@ fn constructed_socket_bridges_do_not_retain_the_host_owner_after_dispose() {
         };
         let options = serde_json::from_value(json!({"key":"", "secret":""})).unwrap();
         let store = Rc::new(DefaultStore::new());
-        let (exchange, owner): (Rc<dyn Exchange>, _) = if spot {
+        let (exchange, owner, context): (Rc<dyn Exchange>, _, _) = if spot {
             let exchange =
                 crate::spot_binding::HyperliquidSpotExchange::new(options, store, dependencies)
                     .unwrap();
             let owner = Rc::downgrade(&exchange.binding.borrow().as_ref().unwrap().realm.shared);
-            (exchange, owner)
+            (
+                exchange.clone(),
+                owner,
+                exchange.binding.borrow().as_ref().unwrap().realm.clone(),
+            )
         } else {
             let exchange = HyperliquidExchange::new(options, store, dependencies).unwrap();
             let owner = Rc::downgrade(&exchange.binding.borrow().as_ref().unwrap().realm.shared);
-            (exchange, owner)
+            (
+                exchange.clone(),
+                owner,
+                exchange.binding.borrow().as_ref().unwrap().realm.clone(),
+            )
         };
+        let mut clone = context.clone();
+        assert!(Rc::ptr_eq(&context.shared, &clone.shared));
+        let referent = Js::object(vec![("value", Js::Number(-0.0))]);
+        context.bind_import("cloneWitness", referent.clone());
+        let observed = clone.import("cloneWitness").unwrap();
+        assert!(observed.same_reference(&referent));
+        assert_eq!(
+            observed
+                .get("value")
+                .unwrap()
+                .to_number()
+                .unwrap()
+                .to_bits(),
+            (-0.0_f64).to_bits()
+        );
+        let nan = f64::from_bits(0x7ff8_0000_0000_0042);
+        referent.set("value", Js::Number(nan)).unwrap();
+        referent
+            .set("units", Js::utf16(&[0xd800, 0, 0xdc00]))
+            .unwrap();
+        assert_eq!(
+            observed
+                .get("value")
+                .unwrap()
+                .to_number()
+                .unwrap()
+                .to_bits(),
+            nan.to_bits()
+        );
+        assert!(
+            observed
+                .get("units")
+                .unwrap()
+                .strict_equals(&Js::utf16(&[0xd800, 0, 0xdc00]))
+        );
+        drop(observed);
+        drop(referent);
+        drop(clone);
+        drop(context);
         assert!(owner.upgrade().is_some(), "held host must remain live");
         exchange.dispose().unwrap();
         drop(exchange);
