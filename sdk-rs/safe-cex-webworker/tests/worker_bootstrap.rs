@@ -46,7 +46,7 @@ struct State {
     knob_inputs: RefCell<Vec<(&'static str, Js)>>,
     config_error: RefCell<Option<ExchangeError>>,
     console_args: RefCell<Vec<Js>>,
-    stores: RefCell<Vec<WorkerStoreMessage>>,
+    stores: RefCell<Vec<RecordedStoreMessage>>,
     tasks: RefCell<Vec<ExchangeFuture<'static, ()>>>,
     runtime: Rc<runtime::Runtime>,
     manager: Rc<ChaserOrderManager>,
@@ -336,13 +336,22 @@ impl safe_cex_exchange::store_delivery::StoreUpdateThrottleHost for Host {
         self.event(e.message.clone());
     }
 }
+struct RecordedStoreMessage {
+    #[allow(dead_code)]
+    op: safe_cex_webworker::payload::StoreWorkerOp,
+    data: safe_cex_store::StoreUpdate,
+}
 impl ExchangeWorkerHost for Host {
     fn post_store(&self, m: WorkerStoreMessage) -> Result<(), ExchangeError> {
         self.forward_native(Js::object(vec![
             ("op", from_typed(&m.op)?),
-            ("data", from_typed(&m.data)?),
+            ("data", m.data.clone()),
         ]))?;
-        self.state.stores.borrow_mut().push(m);
+        self.state.stores.borrow_mut().push(RecordedStoreMessage {
+            op: m.op,
+            data: safe_cex_exchange::js_runtime::value::to_typed_preserving_undefined(&m.data)
+                .unwrap(),
+        });
         self.event("store");
         Ok(())
     }
@@ -488,11 +497,15 @@ impl WorkerBootstrapHost for Host {
             }
         }))
     }
-    fn error_properties(&self, e: &ExchangeError) -> Value {
-        json!({"name":e.name,"message":e.message})
+    fn error_properties(&self, e: &ExchangeError) -> Js {
+        safe_cex_exchange::js_runtime::value::Thrown::from(e.clone()).value
     }
-    fn materialize_error(&self, e: &ExchangeError) -> Result<Value, ExchangeError> {
-        Ok(json!({"name":e.name,"message":e.message}))
+    fn materialize_error(&self, e: &ExchangeError) -> Result<Js, ExchangeError> {
+        let raw = self.error_properties(e);
+        Ok(Js::object(vec![
+            ("name", raw.get("name")?),
+            ("message", raw.get("message")?),
+        ]))
     }
     fn console_error_fallback(
         &self,
@@ -755,13 +768,14 @@ fn startup_success_timeout_cancellation_and_retained_loser() {
     assert!(w.cancel_startup.borrow().is_none());
     let error = h
         .state
-        .posts
+        .native_posts
         .borrow()
         .iter()
-        .find(|p| p.op == StoreWorkerOp::Error)
-        .unwrap()
-        .data
-        .clone()
+        .find(|p| {
+            p.get("op").unwrap().to_js_string().unwrap().as_ref()
+                == "error".encode_utf16().collect::<Vec<_>>().as_slice()
+        })
+        .map(|p| safe_cex_exchange::js_runtime::value::to_json(&p.get("data").unwrap()).unwrap())
         .unwrap();
     assert_eq!(
         error[1]["sentryData"]["tags"]["worker_error_phase"], "startup",
@@ -775,13 +789,14 @@ fn startup_success_timeout_cancellation_and_retained_loser() {
     assert!(w.cancel_startup.borrow().is_none());
     let unknown = h
         .state
-        .posts
+        .native_posts
         .borrow()
         .iter()
-        .find(|p| p.op == StoreWorkerOp::Error)
-        .unwrap()
-        .data
-        .clone()
+        .find(|p| {
+            p.get("op").unwrap().to_js_string().unwrap().as_ref()
+                == "error".encode_utf16().collect::<Vec<_>>().as_slice()
+        })
+        .map(|p| safe_cex_exchange::js_runtime::value::to_json(&p.get("data").unwrap()).unwrap())
         .unwrap();
     assert_eq!(
         unknown[0],
@@ -811,12 +826,15 @@ fn payload_routing_live_handler_arrays_and_buffer_floor() {
         .unwrap();
     assert_eq!(w.message_buffer.borrow().len(), 1000);
     assert_eq!(
-        h.state.posts.borrow().len(),
+        h.state.native_posts.borrow().len(),
         1,
         "BOOT native overflow warning delivered"
     );
     assert_eq!(
-        h.state.posts.borrow()[0].data.as_ref().unwrap()[1]["sendToSentry"],
+        safe_cex_exchange::js_runtime::value::to_json(
+            &h.state.native_posts.borrow()[0].get("data").unwrap()
+        )
+        .unwrap()[1]["sendToSentry"],
         false
     );
     w.message_buffer.borrow_mut().clear();
@@ -1259,7 +1277,7 @@ fn startup_dropped_waiter_keeps_clock_loader_and_snapshot_running() {
         }
         h.drain();
         profiles.push(json!({"mode":mode, "completed":h.state.completed_starts.get(),
-            "stores":h.state.stores.borrow().len(), "errors":h.state.posts.borrow().iter().filter(|p|p.op==StoreWorkerOp::Error).count(),
+            "stores":h.state.stores.borrow().len(), "errors":h.state.native_posts.borrow().iter().filter(|p|p.get("op").unwrap().to_js_string().unwrap().as_ref()=="error".encode_utf16().collect::<Vec<_>>().as_slice()).count(),
             "exchange":w.exchange().is_some(), "cancelPending":w.cancel_startup.borrow().is_some()}));
     }
     assert_eq!(
@@ -2341,4 +2359,163 @@ fn native_perf_cap_loop_and_module_disposal_match_source() {
     assert!(!service.is_replaying());
     assert!(service.configure(Js::Null).is_err());
     assert!(session.get_worker().is_none());
+}
+
+#[test]
+fn worker_logging_retains_native_extra_graphs_at_actual_post() {
+    let (h, w) = fixture(false);
+    let shared = Js::object(vec![("value", Js::Number(f64::INFINITY))]);
+    shared.define("self", shared.clone()).unwrap();
+    let extra = Js::object(vec![
+        ("first", shared.clone()),
+        ("second", shared.clone()),
+        ("missing", Js::Undefined),
+        ("zero", Js::Number(-0.0)),
+    ]);
+    extra.define_key(&[0xd800], Js::utf16(&[0xdc00])).unwrap();
+    let mut deep = Js::Number(17.0);
+    for _ in 0..150 {
+        deep = Js::object(vec![("unread", deep)]);
+    }
+    extra.define("deep", deep.clone()).unwrap();
+    w.report_error(
+        "native-extra",
+        &ExchangeError::new("source-message"),
+        Some(&extra),
+        true,
+    )
+    .unwrap();
+    let post = h.state.native_posts.borrow().last().unwrap().clone();
+    let sent = post
+        .get("data")
+        .unwrap()
+        .get("1")
+        .unwrap()
+        .get("sentryData")
+        .unwrap()
+        .get("extra")
+        .unwrap();
+    assert!(sent.get("first").unwrap().same_reference(&shared));
+    assert!(sent.get("second").unwrap().same_reference(&shared));
+    assert!(shared.get("self").unwrap().same_reference(&shared));
+    assert!(sent.has_own("missing"));
+    assert!(sent.get("missing").unwrap().is_undefined());
+    assert_eq!(
+        sent.get("zero").unwrap().to_number().unwrap().to_bits(),
+        (-0.0_f64).to_bits()
+    );
+    assert_eq!(
+        sent.get("first")
+            .unwrap()
+            .get("value")
+            .unwrap()
+            .to_number()
+            .unwrap()
+            .to_bits(),
+        f64::INFINITY.to_bits()
+    );
+    assert_eq!(
+        sent.get_key(&[0xd800])
+            .unwrap()
+            .to_js_string()
+            .unwrap()
+            .as_ref(),
+        &[0xdc00]
+    );
+    assert!(sent.get("deep").unwrap().same_reference(&deep));
+    w.log_message(
+        safe_cex_webworker::worker_logging::WorkerLogLevel::Info,
+        "native-context",
+        Some(&extra),
+    )
+    .unwrap();
+    let context = h
+        .state
+        .native_posts
+        .borrow()
+        .last()
+        .unwrap()
+        .get("data")
+        .unwrap()
+        .get("context")
+        .unwrap();
+    assert!(context.get("first").unwrap().same_reference(&shared));
+    assert!(context.has_own("missing"));
+    assert!(context.get("missing").unwrap().is_undefined());
+    assert_eq!(
+        context
+            .get_key(&[0xd800])
+            .unwrap()
+            .to_js_string()
+            .unwrap()
+            .as_ref(),
+        &[0xdc00]
+    );
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/worker_error_oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_str(
+        &String::from_utf8(output.stdout)
+            .unwrap()
+            .replace("\\ud800", "SURROGATE_WITNESS"),
+    )
+    .unwrap();
+    let native = json!({"first":sent.get("first").unwrap().same_reference(&shared),"second":sent.get("second").unwrap().same_reference(&shared),"self":shared.get("self").unwrap().same_reference(&shared),"missing":sent.has_own("missing")&&sent.get("missing").unwrap().is_undefined(),"zero":format!("{:016x}",sent.get("zero").unwrap().to_number().unwrap().to_bits()),"infinity":format!("{:016x}",sent.get("first").unwrap().get("value").unwrap().to_number().unwrap().to_bits()),"text":sent.get_key(&[0xd800]).unwrap().to_js_string().unwrap()[0],"deep":sent.get("deep").unwrap().same_reference(&deep)});
+    assert_eq!(
+        native, source["nativeGraph"],
+        "WORKER-LOG actual worker/source native graph post"
+    );
+    for _ in 0..1000 {
+        w.handle_payload(Js::object(vec![("op", Js::str("buffered"))]))
+            .unwrap();
+    }
+    let raw_ops = [
+        Js::Undefined,
+        Js::utf16(&[0xd800]),
+        Js::Number(f64::INFINITY),
+        Js::Number(-0.0),
+        shared.clone(),
+    ];
+    for op in raw_ops {
+        w.handle_payload(Js::object(vec![("op", op.clone())]))
+            .unwrap();
+        let posted = h
+            .state
+            .native_posts
+            .borrow()
+            .last()
+            .unwrap()
+            .get("data")
+            .unwrap()
+            .get("1")
+            .unwrap()
+            .get("sentryData")
+            .unwrap()
+            .get("extra")
+            .unwrap();
+        assert!(
+            posted.has_own("droppedPayload"),
+            "WORKER-LOG overflow always owns original op"
+        );
+        let actual = posted.get("droppedPayload").unwrap();
+        if let Js::Number(n) = &op {
+            assert_eq!(actual.to_number().unwrap().to_bits(), n.to_bits());
+        } else {
+            assert!(
+                actual.strict_equals(&op),
+                "WORKER-LOG overflow retained original op"
+            );
+        }
+    }
+    // Break the fixture cycle after native identity observations.
+    shared.set("self", Js::Null).unwrap();
 }

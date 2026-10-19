@@ -3,7 +3,7 @@ use safe_cex_exchange::{
     error_reporting::{ExchangeErrorInput, append_http_failure},
     exchange::BaseExchange,
     http::HttpClient,
-    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
+    runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_num::{JsJsonValue, js_json_stringify, js_number_string};
 use safe_cex_transport::{RestAdapter, RestBody, RestRequest, RestResponseBody};
@@ -86,22 +86,7 @@ impl RestAdapter for HttpExecution {
         Box::pin(self.inner.execute_with_receipt(request))
     }
 }
-struct RateClock {
-    runtime: Rc<dyn ExchangeRuntime>,
-}
-impl safe_cex_transport::rate_limit::RateLimitClock for RateClock {
-    fn now_ms(&self) -> u64 {
-        self.runtime.monotonic_now_ms() as u64
-    }
-    fn sleep_ms(&self, ms: u64) -> safe_cex_transport::TransportFuture<'_, ()> {
-        let sleep = self.runtime.sleep(ms);
-        Box::pin(async move {
-            sleep
-                .await
-                .map_err(|e| safe_cex_transport::TransportError::Host(e.message))
-        })
-    }
-}
+
 impl Lane {
     /// createAPI(options, exchange) over the host-built shared client.
     #[expect(clippy::arc_with_non_send_sync)]
@@ -164,11 +149,10 @@ impl Lane {
         )
     }
     /// axios-rate-limit maxRPS over this lane's executor.
-    #[expect(clippy::arc_with_non_send_sync)]
-    pub(crate) fn limit(&self, runtime: Rc<dyn ExchangeRuntime>, max_rps: usize) {
+    pub(crate) fn limit(&self, parent: &BaseExchange, max_rps: usize) {
         self.rate_limits.borrow_mut().push(Rc::new(
             safe_cex_transport::rate_limit::RateLimiter::new(
-                Arc::new(RateClock { runtime }),
+                safe_cex_exchange::runtime::rate_limit_scheduler(parent),
                 max_rps,
                 1000,
             ),

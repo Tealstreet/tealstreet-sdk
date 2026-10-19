@@ -123,9 +123,9 @@ pub trait WorkerBootstrapHost: ExchangeWorkerHost {
     fn post_event(&self, payload: WorkerDataPayload) -> Result<(), ExchangeError>;
     /// Enqueue and drive the whole future; dropping it on a lost race is forbidden.
     fn construct_exchange_start(&self, exchange: Rc<dyn Exchange>) -> ExchangeFuture<'static, ()>;
-    fn error_properties(&self, error: &ExchangeError) -> Value;
+    fn error_properties(&self, error: &ExchangeError) -> Js;
     fn spawn_start_task(&self, task: ExchangeFuture<'static, ()>);
-    fn materialize_error(&self, error: &ExchangeError) -> Result<Value, ExchangeError>;
+    fn materialize_error(&self, error: &ExchangeError) -> Result<Js, ExchangeError>;
     fn console_error_fallback(
         &self,
         message: &str,
@@ -185,22 +185,22 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
         &self,
         level: WorkerLogLevel,
         message: &str,
-        context: Option<&serde_json::Map<String, Value>>,
+        context: Option<&Js>,
     ) -> Result<(), ExchangeError> {
         worker_logging::forward_log(
             self.construction.exchange_name.clone(),
             &self.construction.account_name,
             level,
-            message,
+            &Js::str(message),
             context,
-            |p| self.construction.ctx.post_payload(p),
+            |p| self.construction.ctx.post_event(p),
         )
     }
     pub fn report_error(
         &self,
         message: &str,
         error: &ExchangeError,
-        extra: Option<&Value>,
+        extra: Option<&Js>,
         sentry: bool,
     ) -> Result<(), ExchangeError> {
         let h = &self.construction.ctx;
@@ -211,14 +211,14 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                 self.construction.exchange_name.clone(),
                 &self.construction.account_name,
             ),
-            message,
+            &Js::str(message),
             &raw,
             extra,
             sentry,
             (
                 || Ok(h.now_ms()),
                 || h.materialize_error(error),
-                |p| h.post_payload(p),
+                |p| h.post_event(p),
                 |_, _, _, post_error| h.console_error_fallback(message, error, post_error),
             ),
         )
@@ -330,17 +330,19 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                 }
                 crate::worker_buffer::flush_buffered_messages(
                     &worker.message_buffer,
-                    |m, c| worker.log_message(WorkerLogLevel::Info, m, c.as_object()),
+                    |m, c| worker.log_message(WorkerLogLevel::Info, m, Some(&from_typed(&c)?)),
                     |p| worker.handle_payload(p.clone()),
                     |e: &ExchangeError| Ok(e.js_error_string()),
                     |m, e, payload, index, total| {
-                        let op: Value = to_typed(&payload.get("op")?)?;
+                        let op = payload.get("op")?;
                         worker.report_error(
                             m,
                             &e,
-                            Some(
-                                &json!({"payloadOp":op,"messageIndex":index,"totalBuffered":total}),
-                            ),
+                            Some(&Js::object(vec![
+                                ("payloadOp", op),
+                                ("messageIndex", Js::Number(index as f64)),
+                                ("totalBuffered", Js::Number(total as f64)),
+                            ])),
                             true,
                         )
                     },
@@ -385,7 +387,10 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                                     exchange_text(&worker.construction.exchange_name)
                                 ),
                                 &error,
-                                Some(&json!({"sentryTags":{"worker_error_phase":"startup"}})),
+                                Some(&Js::object(vec![(
+                                    "sentryTags",
+                                    Js::object(vec![("worker_error_phase", Js::str("startup"))]),
+                                )])),
                                 true,
                             )
                             .map(|_| false)
@@ -405,14 +410,18 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
             if count < 1000 {
                 self.message_buffer.borrow_mut().push(payload);
             } else {
-                let op: Value = to_typed(&payload.get("op")?)?;
+                let op = payload.get("op")?;
                 self.report_error(
                     &format!(
                         "Message buffer full for {}, dropping message",
                         exchange_text(&self.construction.exchange_name)
                     ),
                     &ExchangeError::new("Message buffer overflow"),
-                    Some(&json!({"droppedPayload":op,"maxBufferSize":1000,"bufferSize":count})),
+                    Some(&Js::object(vec![
+                        ("droppedPayload", op),
+                        ("maxBufferSize", Js::Number(1000.0)),
+                        ("bufferSize", Js::Number(count as f64)),
+                    ])),
                     false,
                 )?;
             }

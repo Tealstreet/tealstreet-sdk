@@ -1,4 +1,5 @@
 //! Venue-owned state; base lifecycle and platform objects are injected by the host.
+use indexmap::IndexMap;
 use safe_cex_num::JsJsonValue;
 use std::collections::HashMap;
 
@@ -6,7 +7,7 @@ pub struct PublicSocket<P, R, H, T, S, M> {
     pub parent: P,
     pub route: R,
     pub message_handlers: HashMap<String, Vec<H>>,
-    pub topics: HashMap<String, f64>,
+    pub topics: IndexMap<String, f64>,
     pub ping_timer: Option<T>,
     pub subscription_timer: Option<T>,
     pub is_secondary: S,
@@ -40,7 +41,7 @@ pub fn new_public_socket<P, R, H, T, S, M: PartialEq, E>(
         parent,
         route,
         message_handlers: HashMap::new(),
-        topics: HashMap::new(),
+        topics: IndexMap::new(),
         ping_timer: None,
         subscription_timer: None,
         is_secondary,

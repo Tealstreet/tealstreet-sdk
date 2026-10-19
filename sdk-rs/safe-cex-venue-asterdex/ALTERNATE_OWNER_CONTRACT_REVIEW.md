@@ -99,3 +99,44 @@ passes every33-owner receipt plus the conversion test
 passes11 and the all-features inventory passes6 with1explicit discovery export
 ignored (`/tmp/aster-alternate-exchange-refreshed.log` and
 `/tmp/aster-alternate-cancellation-refreshed.log`).
+
+## Parent retained diagnostic contract
+
+Parent's WsParent `emit_and_log_error` already accepts and directly forwards
+`Option<&RetainedJsonInput>`. The row-2 contract still named the former Value
+carrier. Its compiler API expectation now records the actual retained type;
+production method bodies, the two distinct listener failures and their expected
+name/message are unchanged. The included fixture's balance observer unwraps the
+Store Result before inspecting fields, matching the current typed read API.
+The constructor cohort's two options observers likewise unwrap that Result; their
+original boolean expectations remain unchanged.
+The canonical scoped replay selects Parent plus the real constructor owner,
+which supplies its existing sandbox-only scope accessor. Parent stream-carrier
+entries remain separately owned; no production accessor is introduced. The actual
+carrier migration is commit 8c148df7ac (retained native reporting contexts), whose
+Parent body only changed the parameter type and still forwards the same value.
+
+Fresh master rustdoc plus maintained inventory/contract validation reproduces
+`unclassified or changed decoder/conversion entrypoint` with the former row-2
+API, then accepts all eight unchanged Parent entrypoints with the retained type.
+Logs: `/tmp/kxakrb-aster-parent-api-{red,green}.log`. This is a fixture refusal,
+not a production behavioral RED. The canonical native replay remains the runtime
+receipt for the actual constructed Parent and listener-error observations.
+
+The first executable replay passed the diagnostic and constructor cases but
+refused the two old Parent log expectations. Maintained `BaseExchange.log`
+(`packages/safe-cex/src/exchanges/base.ts`) calls `console.log(message, severity)`;
+executing that actual source initializer records `[message, "info"]` for both
+inputs. The native primitive console renders those arguments as `message info`.
+The two console expectations now include that severity; no runtime code changed.
+Source receipt: `/tmp/kxakrb-aster-parent-log-source.log`.
+
+Normal master merges inherit #1251's reviewed worker-dispose edge and #1193's
+Parent stream carriers. The post-merge canonical replay reports two actual
+runtime owners, zero classifications and zero failures: sixteen Parent cases
+and nineteen constructor cases. Isolating only the former row-2 API still fails
+the maintained compiler contract check; the current eight-entry API passes.
+Full index (7563/16268), cancellation (6/1 explicit ignore), override (7/1),
+scoped fmt, Aster/parity native all-target/all-feature Clippy, Aster WASM Clippy,
+wiring (376) and extractor (zero drift) pass. Logs use the
+`/tmp/kxakrb-aster-parent-` prefix.

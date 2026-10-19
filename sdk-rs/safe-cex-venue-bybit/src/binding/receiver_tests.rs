@@ -66,11 +66,10 @@ fn venue_with_options(
         options,
         Rc::new(DefaultStore::new()),
         BybitDependencies {
-            runtime,
+            runtime: runtime.clone(),
             remote_signer: None,
             wire: Arc::new(NoWire),
             http_host: Rc::new(NativeHttpHost::default()),
-            rate_limit_clock: Arc::new(Clock(Instant::now())),
             retry_clock: Rc::new(Clock(Instant::now())),
             clock: VirtualClock::default(),
             external_public_data: None,

@@ -22,6 +22,82 @@ fn drive<F: Future>(rt: &support::Runtime, f: F) -> F::Output {
     }
     panic!("scripted placement remained pending");
 }
+
+#[test]
+fn public_subscription_order_matches_source_over_repeated_constructors() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_store::{Store, StoreUpdate};
+    let output = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/subscription-order-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "source subscription path: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let symbols = source["symbols"].as_array().unwrap();
+    assert_eq!(symbols.len(), 43);
+    for repeat in 0..32 {
+        let (venue, rt, store, _) = support::fixture();
+        let seed = store.markets().unwrap()[0].clone();
+        let markets = symbols
+            .iter()
+            .map(|symbol| {
+                let mut market = seed.clone();
+                market.symbol = symbol.as_str().unwrap().into();
+                market.id = market.symbol.clone();
+                market
+            })
+            .collect();
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                markets: Some(markets),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        rt.dial.set(true);
+        for slot in [SocketSlot::Public, SocketSlot::PublicSecondary] {
+            venue
+                .base()
+                .get_socket(slot)
+                .unwrap()
+                .connect_and_subscribe(false)
+                .unwrap();
+            rt.pump();
+        }
+        for _ in 0..3 {
+            rt.now.set(rt.now.get() + 250.0);
+            rt.pump();
+        }
+        let dials = rt.dialed.borrow();
+        assert_eq!(dials.len(), 2, "both real public sockets repeat {repeat}");
+        for (index, (_, socket)) in dials.iter().enumerate() {
+            let frames: Vec<String> = socket
+                .sent
+                .borrow()
+                .iter()
+                .filter(|frame| frame.contains("\"subscribe\""))
+                .cloned()
+                .collect();
+            assert_eq!(
+                json!(frames),
+                source["frames"][index],
+                "BITUNIX ordered subscription bytes repeat {repeat} lane {index}"
+            );
+        }
+        drop(dials);
+        venue.dispose().unwrap();
+        rt.pump();
+    }
+}
 fn source() -> Value {
     let output = Command::new("node")
         .arg(concat!(
