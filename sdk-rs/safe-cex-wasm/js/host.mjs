@@ -9,88 +9,6 @@
 //   setTimeout(fn, ms), clearTimeout(handle),
 // }
 
-/** Field order of packed ticker deltas (PACKED_TICKER_FIELDS in safe-cex). */
-export const TICKER_FIELDS = [
-  'bid', 'ask', 'last', 'mark', 'index', 'percentage',
-  'openInterest', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume',
-];
-
-/** Split a flat `[index, mask, ...values]` buffer into PackedTickerDelta tuples. */
-export const unpackTickerDeltas = (flat) => {
-  const deltas = [];
-  for (let i = 0; i < flat.length; ) {
-    const index = flat[i];
-    const mask = flat[i + 1];
-    let count = 0;
-    for (let bits = mask; bits; bits &= bits - 1) count++;
-    deltas.push([index, mask, ...flat.subarray(i + 2, i + 2 + count)]);
-    i += 2 + count;
-  }
-  return deltas;
-};
-
-const searchLevel = (levels, price, descending) => {
-  let low = 0;
-  let high = levels.length - 1;
-  while (low <= high) {
-    const mid = (low + high) >>> 1;
-    const midPrice = levels[mid].price;
-    if (midPrice === price) return mid;
-    if (descending ? midPrice > price : midPrice < price) low = mid + 1;
-    else high = mid - 1;
-  }
-  return -(low + 1);
-};
-
-/**
- * A live `{ bids, asks }` book maintained from engine ops. Level objects are
- * reused, and cumulative totals are computed once per flush, not per message.
- */
-export class BookMirror {
-  constructor() {
-    this.book = { bids: [], asks: [] };
-  }
-
-  apply(ops) {
-    const { book } = this;
-    for (let i = 0; i < ops.length; i += 3) {
-      const code = ops[i];
-      if (code === 2) {
-        book.bids = [];
-        book.asks = [];
-        continue;
-      }
-      if (code === 3) {
-        book.bids = [];
-        continue;
-      }
-      if (code === 4) {
-        book.asks = [];
-        continue;
-      }
-      const descending = code === 0;
-      const levels = descending ? book.bids : book.asks;
-      const price = ops[i + 1];
-      const amount = ops[i + 2];
-      const index = searchLevel(levels, price, descending);
-      if (index >= 0) {
-        if (amount === 0) levels.splice(index, 1);
-        else levels[index].amount = amount;
-      } else if (amount !== 0) {
-        levels.splice(-(index + 1), 0, { price, amount, total: 0 });
-      }
-    }
-    for (const levels of [book.bids, book.asks]) {
-      let total = 0;
-      for (const level of levels) {
-        total += level.amount;
-        level.total = total;
-      }
-    }
-    return book;
-  }
-}
-
 export class EngineHost {
   constructor(engine, transport, handlers = {}) {
     this.engine = engine;
@@ -100,7 +18,6 @@ export class EngineHost {
     this.timers = new Map();
     this.commands = new Map();
     this.nextCommand = 1;
-    this.books = new Map();
   }
 
   start() {
@@ -120,20 +37,14 @@ export class EngineHost {
     return promise;
   }
 
-  /** Drain Store, ticker and book changes. Call once per flush interval. */
+  /**
+   * Hand everything that changed since the previous flush to `onFrame` as one
+   * ArrayBuffer (read it with wire.mjs's Frame; transfer it, don't copy it).
+   * Call once per flush interval.
+   */
   flush() {
-    const { engine, handlers } = this;
-    const update = engine.storeUpdate();
-    if (update) handlers.onStoreUpdate?.(JSON.parse(update));
-    const deltas = engine.tickerDeltas();
-    if (deltas.length) handlers.onTickerDeltas?.(deltas);
-    const changed = engine.changedBooks();
-    if (!changed) return;
-    for (const symbol of JSON.parse(changed)) {
-      let mirror = this.books.get(symbol);
-      if (!mirror) this.books.set(symbol, (mirror = new BookMirror()));
-      handlers.onBook?.(symbol, mirror.apply(engine.bookOps(symbol)));
-    }
+    const frame = this.engine.takeFrame(this.transport.now());
+    if (frame) this.handlers.onFrame?.(frame.buffer);
   }
 
   dispose() {
@@ -210,12 +121,6 @@ export class EngineHost {
         else pending.resolve(action.result === undefined ? undefined : JSON.parse(action.result));
         break;
       }
-      case 'fill':
-        this.handlers.onFill?.(action);
-        break;
-      case 'candle':
-        this.handlers.onCandle?.(action.symbol, action.interval, action.candle);
-        break;
       default:
         throw new Error(`unknown engine action: ${action.op}`);
     }

@@ -260,19 +260,6 @@ pub struct UpdateIds {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
-pub struct BookLevel {
-    pub price: f64,
-    pub amount: f64,
-    pub total: f64,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
-pub struct OrderBook {
-    pub bids: Vec<BookLevel>,
-    pub asks: Vec<BookLevel>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Candle {
     pub timestamp: f64,

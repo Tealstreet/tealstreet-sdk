@@ -3,7 +3,7 @@
 //! JavaScript owns sockets, fetch and timers; it forwards each event here and
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none.
-use safe_cex_engine::model::{Candle, PlaceOrderOpts};
+use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, RequestId, SocketId, TimerId, Venue,
 };
@@ -15,10 +15,7 @@ trait AnyEngine {
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
     fn drain(&mut self) -> Vec<Action>;
-    fn store_update(&mut self) -> String;
-    fn ticker_deltas(&mut self) -> Vec<f64>;
-    fn changed_books(&mut self) -> Vec<String>;
-    fn book_ops(&mut self, symbol: &str) -> Vec<f64>;
+    fn frame(&mut self, now: f64) -> Option<Vec<u8>>;
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
@@ -34,29 +31,8 @@ impl<V: Venue> AnyEngine for Engine<V> {
         self.drain_actions().collect()
     }
 
-    fn store_update(&mut self) -> String {
-        let update = self.store_mut().take_update();
-        if update.is_empty() {
-            String::new()
-        } else {
-            serde_json::to_string(&update).unwrap_or_default()
-        }
-    }
-
-    fn ticker_deltas(&mut self) -> Vec<f64> {
-        let mut out = Vec::new();
-        self.store_mut().take_ticker_deltas(&mut out);
-        out
-    }
-
-    fn changed_books(&mut self) -> Vec<String> {
-        self.take_changed_books()
-    }
-
-    fn book_ops(&mut self, symbol: &str) -> Vec<f64> {
-        let mut out = Vec::new();
-        self.take_book_ops(symbol, &mut out);
-        out
+    fn frame(&mut self, now: f64) -> Option<Vec<u8>> {
+        self.take_frame(now).map(<[u8]>::to_vec)
     }
 }
 
@@ -109,18 +85,6 @@ enum ActionOut<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<&'a str>,
     },
-    Fill {
-        order_id: &'a str,
-        symbol: &'a str,
-        side: safe_cex_engine::model::OrderSide,
-        price: f64,
-        amount: f64,
-    },
-    Candle {
-        symbol: &'a str,
-        interval: &'a str,
-        candle: &'a Candle,
-    },
 }
 
 fn encode(actions: &[Action]) -> String {
@@ -167,22 +131,6 @@ fn encode(actions: &[Action]) -> String {
                 command: *command,
                 result: result.as_ref().ok().map(String::as_str),
                 error: result.as_ref().err().map(String::as_str),
-            },
-            Action::Notice(Notice::Fill(fill)) => ActionOut::Fill {
-                order_id: &fill.order_id,
-                symbol: &fill.symbol,
-                side: fill.side,
-                price: fill.price,
-                amount: fill.amount,
-            },
-            Action::Notice(Notice::Candle {
-                symbol,
-                interval,
-                candle,
-            }) => ActionOut::Candle {
-                symbol,
-                interval,
-                candle,
             },
         })
         .collect();
@@ -389,34 +337,11 @@ impl WasmEngine {
         Ok(self.flush())
     }
 
-    /// The Store delta since the previous call as JSON, or "" when unchanged.
-    #[wasm_bindgen(js_name = storeUpdate)]
-    pub fn store_update(&mut self) -> String {
-        self.inner.store_update()
-    }
-
-    /// Symbols whose book changed since the previous call, as a JSON array.
-    #[wasm_bindgen(js_name = changedBooks)]
-    pub fn changed_books(&mut self) -> String {
-        let symbols = self.inner.changed_books();
-        if symbols.is_empty() {
-            String::new()
-        } else {
-            serde_json::to_string(&symbols).unwrap_or_default()
-        }
-    }
-
-    /// Packed ticker deltas since the previous call: `[index, mask, ...values]`
-    /// repeated, in `PACKED_TICKER_FIELDS` order.
-    #[wasm_bindgen(js_name = tickerDeltas)]
-    pub fn ticker_deltas(&mut self) -> Vec<f64> {
-        self.inner.ticker_deltas()
-    }
-
-    /// Book ops for `symbol` since the previous call: `[code, price, amount]`
-    /// triples (0 bid, 1 ask, 2 reset, 3 reset bids, 4 reset asks).
-    #[wasm_bindgen(js_name = bookOps)]
-    pub fn book_ops(&mut self, symbol: &str) -> Vec<f64> {
-        self.inner.book_ops(symbol)
+    /// Everything that changed since the previous call as one flush frame
+    /// (layout: docs/plans/RUST_REWRITE.md), or `undefined` when nothing did.
+    /// Transfer `frame.buffer` to the consumer; it is a fresh copy.
+    #[wasm_bindgen(js_name = takeFrame)]
+    pub fn take_frame(&mut self, now: f64) -> Option<Vec<u8>> {
+        self.inner.frame(now)
     }
 }

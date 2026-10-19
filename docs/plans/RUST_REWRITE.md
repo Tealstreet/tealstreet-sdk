@@ -58,20 +58,65 @@ Action  = WsConnect | WsSend | WsClose
 - The Store holds typed state (`safe-cex-types`) plus the monotonic `updateIds`
   the main thread depends on.
 
-## Worker boundary (browser)
+## Data shapes: the flush frame
 
-Main is unchanged. The Rust worker emits exactly the `StoreWorkerPayload` ops
-and `StoreData` shapes that TS emits today (`store`, `store:delta`,
-`tickerDeltas`, `listenOrderBook[:delta]`, `listenOHLCV`, `fill`, ...). That
-includes the update-id contract and the cloning rules in
-`packages/safe-cex/src/webworker/CLAUDE.md`.
+Every data shape that leaves the engine is redesigned for transfer, not for
+JavaScript object graphs. Clients (web main thread, mobile, server consumers)
+are updated to read these shapes; nothing keeps the old object arrays alive.
 
-- Crossings between Rust and JS happen per store flush (the existing 250 ms
-  throttle) and per subscribed book or candle delta, never per websocket
-  message. A websocket frame crosses in once, as a string or bytes.
-- Phase 1 keeps the TS `ExchangeWorker` shell (chasers, TWAP, CLI, handlers) and
-  swaps only the exchange and Store behind it, through one narrow typed API.
-  Porting the shell comes after the venues.
+The goal is maximum performance with no loss to what the user sees: full book
+depth, every change, and the same or faster update cadence. A shape change is
+acceptable only when it carries the same information at least as fast.
+
+Once per flush (250 ms in the browser) the engine writes **one frame**: a
+single `ArrayBuffer`, transferred to its consumer with zero copies. Consumers
+read numbers through typed-array views over that buffer and decode strings only
+when they display them. There are no per-record JS objects on either side.
+
+### Layout
+
+Little-endian. The header and every section payload start 8-byte aligned so
+`Float64Array` views need no copies.
+
+| Bytes | Field |
+| --- | --- |
+| 4 | magic `SCXF` |
+| 2 | format (1) |
+| 2 | section count |
+| 8 | engine time (ms, f64) |
+
+Each section: `u16 kind`, `u16 reserved`, `u32 payload bytes` (padded to 8),
+then the payload. Absent optional numbers are `NaN`; absent strings are
+`0xFFFFFFFF`. Strings are indices into the frame's `STRINGS` section.
+
+| Kind | Section | Payload |
+| --- | --- | --- |
+| 1 | `STRINGS` | `u32 n`, `u32 offsets[n + 1]`, UTF-8 bytes |
+| 2 | `MARKETS` (replace) | `u32 n`; `u32 strings[n][4]` (id, symbol, base, quote); `u32 flags[n]`; f64 columns: precisionAmount, precisionPrice, minAmount, maxAmount, minLeverage, maxLeverage, minPrice, contractSize, takerFee, makerFee |
+| 3 | `TICKERS` (replace) | `u32 n`; `u32 market[n]`; 11 f64 columns in ticker field order |
+| 4 | `TICKER_DELTAS` | f64 `[ticker, mask, ...changed values]` repeated |
+| 5 | `BOOK` | `u32 market`, `u32 bids`, `u32 asks`, `u32 0`; f64 rows `[price, amount, total]` for bids then asks |
+| 6 | `CANDLES` | `u32 n`; `u32 market[n]`; `u32 interval[n]` (string); f64 rows `[time, open, high, low, close, volume]` |
+| 7 | `ORDERS` (replace) | `u32 n`; `u32 strings[n][3]` (id, clientOrderId, parentId); `u32 market[n]`; `u32 enums[n]`; f64 columns: price, amount, filled, remaining, lastUpdate, takeProfit, stopLoss |
+| 8 | `POSITIONS` (replace) | `u32 n`; `u32 market[n]`; `u32 enums[n]`; f64 columns: entryPrice, notional, leverage, unrealizedPnl, realizedPnl, contracts, liquidationPrice, marginSize, lastUpdate |
+| 9 | `BALANCE` | f64 `[used, free, total, upnl]` |
+| 10 | `STATUS` | `u32 loaded` bits, `u32 0`, f64 latency |
+| 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]` |
+
+A market index is a row of the most recent `MARKETS` section; a ticker index is
+a row of the most recent `TICKERS` section. Enum codes and flag bits are
+defined once in `safe-cex-engine/src/wire.rs` and mirrored by the decoder in
+`safe-cex-wasm/js/wire.mjs`.
+
+### Crossing rules
+
+- A websocket frame crosses into the engine once, as text; an HTTP body once,
+  as bytes. Nothing else crosses per message.
+- Frames cross out once per flush. A section appears only when its data
+  changed; an idle flush writes no frame.
+- Logs and command results are rare and stay JSON.
+- Phase 1 keeps the TS `ExchangeWorker` shell (chasers, TWAP, CLI, handlers)
+  and swaps the exchange and Store behind it. The shell reads the same frame.
 
 ## Correctness gate
 
@@ -84,7 +129,8 @@ byte-identical behaviour.
 
 ## Performance gate
 
-On the same recording, in a worker-equivalent harness:
+On the same recording, in a worker-equivalent harness, TS posting its objects
+as it does today against Rust transferring frames:
 
 - CPU time: Rust < TS.
 - Peak and steady memory (Wasm linear memory plus JS heap retained by the

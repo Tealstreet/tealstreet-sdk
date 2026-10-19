@@ -3,6 +3,7 @@
 use crate::book::Book;
 use crate::model::{Candle, OrderSide, PlaceOrderOpts};
 use crate::store::Store;
+use crate::wire::{FrameWriter, section};
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -59,12 +60,6 @@ pub enum Notice {
     CommandDone {
         command: CommandId,
         result: Result<String, String>,
-    },
-    Fill(Fill),
-    Candle {
-        symbol: String,
-        interval: String,
-        candle: Candle,
     },
 }
 
@@ -172,6 +167,9 @@ struct Io<P> {
     timers: HashMap<TimerId, ()>,
     next_id: u32,
     changed_books: Vec<String>,
+    candles: Vec<(String, String, Candle)>,
+    fills: Vec<Fill>,
+    frame: Vec<u8>,
 }
 
 impl<P> Default for Io<P> {
@@ -182,6 +180,9 @@ impl<P> Default for Io<P> {
             timers: HashMap::new(),
             next_id: 1,
             changed_books: Vec::new(),
+            candles: Vec::new(),
+            fills: Vec::new(),
+            frame: Vec::new(),
         }
     }
 }
@@ -271,16 +272,16 @@ impl<P> Cx<'_, P> {
             .push(Action::Notice(Notice::CommandDone { command, result }));
     }
 
+    /// Queue a live candle for the next frame.
     pub fn candle(&mut self, symbol: &str, interval: &str, candle: Candle) {
-        self.io.actions.push(Action::Notice(Notice::Candle {
-            symbol: symbol.to_owned(),
-            interval: interval.to_owned(),
-            candle,
-        }));
+        self.io
+            .candles
+            .push((symbol.to_owned(), interval.to_owned(), candle));
     }
 
+    /// Queue an execution for the next frame.
     pub fn fill(&mut self, fill: Fill) {
-        self.io.actions.push(Action::Notice(Notice::Fill(fill)));
+        self.io.fills.push(fill);
     }
 }
 
@@ -309,7 +310,6 @@ pub trait Venue {
     fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId);
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
     fn book(&self, symbol: &str) -> Option<&Book>;
-    fn book_mut(&mut self, symbol: &str) -> Option<&mut Book>;
 }
 
 pub struct Engine<V: Venue> {
@@ -395,19 +395,58 @@ impl<V: Venue> Engine<V> {
         !self.io.actions.is_empty()
     }
 
-    /// Symbols whose order book changed since the previous call.
-    pub fn take_changed_books(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.io.changed_books)
-    }
-
+    /// The venue's synchronized book for `symbol`, if any.
     pub fn book(&self, symbol: &str) -> Option<&Book> {
         self.venue.book(symbol)
     }
 
-    /// Append `symbol`'s book ops logged since the previous call to `out`.
-    pub fn take_book_ops(&mut self, symbol: &str, out: &mut Vec<f64>) {
-        if let Some(book) = self.venue.book_mut(symbol) {
-            book.take_ops(out);
+    /// Write everything that changed since the previous call as one flush
+    /// frame. Returns `None` when nothing changed.
+    pub fn take_frame(&mut self, now: f64) -> Option<&[u8]> {
+        let pending = self.store.take_pending();
+        let buffer = std::mem::take(&mut self.io.frame);
+        let mut w = FrameWriter::new(buffer, now);
+        self.store.write(&pending, &mut w);
+        let books = std::mem::take(&mut self.io.changed_books);
+        for symbol in &books {
+            if let (Some(book), Some(market)) =
+                (self.venue.book(symbol), self.store.market_index(symbol))
+            {
+                book.write(market, &mut w);
+            }
         }
+        let candles: Vec<_> = self
+            .io
+            .candles
+            .iter()
+            .filter_map(|(symbol, interval, candle)| {
+                Some((self.store.market_index(symbol)?, interval.as_str(), *candle))
+            })
+            .collect();
+        w.candles(&candles);
+        let fills = std::mem::take(&mut self.io.fills);
+        if !fills.is_empty() {
+            w.begin(section::FILLS);
+            w.u32(fills.len() as u32);
+            let orders: Vec<u32> = fills.iter().map(|f| w.string(&f.order_id)).collect();
+            w.u32s(orders);
+            w.u32s(fills.iter().map(|f| {
+                self.store
+                    .market_index(&f.symbol)
+                    .unwrap_or(crate::wire::NONE)
+            }));
+            w.u32s(fills.iter().map(|f| f.side as u32));
+            w.pad();
+            for f in &fills {
+                w.f64s([f.price, f.amount]);
+            }
+            w.end();
+        }
+        let empty = w.is_empty();
+        let frame = w.finish();
+        drop(candles);
+        self.io.candles.clear();
+        self.io.frame = frame;
+        (!empty).then_some(self.io.frame.as_slice())
     }
 }

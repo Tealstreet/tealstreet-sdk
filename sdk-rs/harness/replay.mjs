@@ -20,7 +20,7 @@ const records = readFileSync(values.tape, 'utf8')
   .split('\n')
   .filter(Boolean)
   .map((line) => JSON.parse(line));
-const books = values.books.split(',').filter(Boolean);
+const bookSymbols = values.books.split(',').filter(Boolean);
 
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
@@ -139,13 +139,16 @@ const marketFields = (m) => ({
 });
 
 async function runRust() {
-  const { EngineHost, TICKER_FIELDS } = await import('../safe-cex-wasm/js/host.mjs');
+  const { EngineHost } = await import('../safe-cex-wasm/js/host.mjs');
+  const { Frame, TickerState, MARKET_COLUMNS } = await import('../safe-cex-wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine();
   const tape = new Tape();
   const encoder = new TextEncoder();
-  const store = { markets: [], tickers: [] };
-  const finalBooks = {};
+  // What the main thread keeps: the latest market table, ticker columns, books.
+  let markets;
+  const tickers = new TickerState();
+  const books = new Map();
   const transport = {
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
@@ -160,33 +163,20 @@ async function runRust() {
     clearTimeout: (handle) => clearTimeout(handle),
   };
   const host = new EngineHost(new WasmEngine('binance', JSON.stringify({ publicDataOnly: true })), transport, {
-    onStoreUpdate: (update) => {
-      if (update.markets) store.markets = update.markets;
-      if (update.tickers) {
-        store.tickers = update.tickers;
-      }
-    },
-    onTickerDeltas: (flat) => {
-      for (let i = 0; i < flat.length; ) {
-        const ticker = store.tickers[flat[i]];
-        const mask = flat[i + 1];
-        i += 2;
-        for (let field = 0; field < TICKER_FIELDS.length; field++) {
-          if (mask & (1 << field)) ticker[TICKER_FIELDS[field]] = flat[i++];
-        }
-      }
-    },
-    onBook: (symbol, book) => {
-      finalBooks[symbol] = book;
-      if (!values['no-egress']) posted += structuredClone(book).bids.length;
+    onFrame: (buffer) => {
+      // Model postMessage(buffer, [buffer]) to main, then main reading it.
+      const received = values['no-egress'] ? buffer : structuredClone(buffer, { transfer: [buffer] });
+      const frame = new Frame(received);
+      markets = frame.markets() ?? markets;
+      tickers.apply(frame);
+      for (const book of frame.books()) books.set(book.market, book);
     },
   });
-  let posted = 0;
   const heapBefore = baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   host.start();
-  for (const symbol of books) host.command({ op: 'subscribeOrderBook', symbol });
+  for (const symbol of bookSymbols) host.command({ op: 'subscribeOrderBook', symbol });
   let lastFlush = -Infinity;
   const frames = await tape.play((t) => {
     if (t - lastFlush >= 250) {
@@ -198,7 +188,36 @@ async function runRust() {
   host.flush();
   const metrics = measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
   host.dispose();
-  return { frames, metrics, unserved: tape.unserved, store, books: finalBooks };
+
+  // Rebuild comparable records outside the measured window.
+  const marketRows = [];
+  for (let i = 0; i < (markets?.count ?? 0); i++) {
+    marketRows.push({
+      id: markets.id(i),
+      symbol: markets.symbol(i),
+      base: markets.base(i),
+      quote: markets.quote(i),
+      active: (markets.flags[i] & 1) !== 0,
+      precision: { amount: markets[MARKET_COLUMNS[0]][i], price: markets[MARKET_COLUMNS[1]][i] },
+      limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
+    });
+  }
+  const tickerRows = [];
+  for (let i = 0; i < tickers.count; i++) {
+    const row = { symbol: markets.symbol(tickers.market[i]) };
+    for (const [field, column] of Object.entries(tickers.columns)) row[field] = column[i];
+    tickerRows.push(row);
+  }
+  const bookRows = {};
+  for (const [market, book] of books) {
+    const levels = (rows) => {
+      const out = [];
+      for (let i = 0; i < rows.length; i += 3) out.push({ price: rows[i], amount: rows[i + 1] });
+      return out;
+    };
+    bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
+  }
+  return { frames, metrics, unserved: tape.unserved, store: { markets: marketRows, tickers: tickerRows }, books: bookRows };
 }
 
 async function runTs() {
@@ -270,7 +289,7 @@ async function runTs() {
   const started = exchange.start();
   const subscribed = (async () => {
     while (!store.markets.length) await new Promise((r) => setTimeout(r, 1));
-    for (const symbol of books) exchange.listenOrderBook(symbol, (book) => (finalBooks[symbol] = book));
+    for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => (finalBooks[symbol] = book));
   })();
   // Model the worker posting each subscribed book to main every 250 ms.
   let lastFlush = -Infinity;
@@ -287,7 +306,7 @@ async function runTs() {
       }
     },
     async () => {
-      while (depthHandlers() < books.length) await new Promise((r) => setTimeout(r, 5));
+      while (depthHandlers() < bookSymbols.length) await new Promise((r) => setTimeout(r, 5));
     },
   );
   await Promise.all([started, subscribed]);

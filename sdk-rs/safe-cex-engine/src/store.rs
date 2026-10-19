@@ -1,8 +1,8 @@
-//! Typed exchange state plus change tracking. Hosts drain changes with
-//! [`Store::take_update`] and [`Store::take_ticker_deltas`] once per flush
-//! instead of per websocket message.
+//! Typed exchange state plus change tracking. Once per flush the engine drains
+//! the changes with [`Store::take_pending`] and writes them into the flush
+//! frame with [`Store::write`].
 use crate::model::{Balance, Loaded, Market, Order, Position, Ticker};
-use serde::Serialize;
+use crate::wire::{self, FrameWriter, loaded_flag, market_flag, section};
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -62,42 +62,15 @@ struct Changes {
     orders: bool,
     positions: bool,
     balance: bool,
-    loaded: bool,
-    latency: bool,
+    status: bool,
 }
 
-/// Everything that changed since the previous flush. Absent fields are unchanged.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StoreUpdate<'a> {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub markets: Option<&'a [Market]>,
-    /// The complete ticker list, sent when the set of tickers was replaced.
-    /// Value changes otherwise travel as packed deltas.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tickers: Option<&'a [Ticker]>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub orders: Option<&'a [Order]>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub positions: Option<&'a [Position]>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub balance: Option<&'a Balance>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub loaded: Option<Loaded>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub latency: Option<f64>,
-}
-
-impl StoreUpdate<'_> {
-    pub fn is_empty(&self) -> bool {
-        self.markets.is_none()
-            && self.tickers.is_none()
-            && self.orders.is_none()
-            && self.positions.is_none()
-            && self.balance.is_none()
-            && self.loaded.is_none()
-            && self.latency.is_none()
-    }
+/// The changes drained for one frame.
+#[derive(Default)]
+pub struct Pending {
+    changes: Changes,
+    /// `(ticker index, changed-field mask)`.
+    ticker_deltas: Vec<(u32, u16)>,
 }
 
 impl Store {
@@ -109,6 +82,11 @@ impl Store {
         self.market_by_symbol
             .get(symbol)
             .map(|&index| &self.markets[index as usize])
+    }
+
+    /// The market's row in the most recent `MARKETS` frame section.
+    pub fn market_index(&self, symbol: &str) -> Option<u32> {
+        self.market_by_symbol.get(symbol).copied()
     }
 
     pub fn market_by_id(&self, id: &str) -> Option<&Market> {
@@ -179,22 +157,6 @@ impl Store {
             self.dirty_tickers.push(index);
         }
         *slot |= mask;
-    }
-
-    /// Append changed tickers as packed deltas, `[index, mask, ...values]`
-    /// each, and reset tracking.
-    pub fn take_ticker_deltas(&mut self, out: &mut Vec<f64>) {
-        for index in self.dirty_tickers.drain(..) {
-            let mask = std::mem::take(&mut self.ticker_masks[index as usize]);
-            let values = ticker_values(&self.tickers[index as usize]);
-            out.push(index as f64);
-            out.push(mask as f64);
-            for (bit, value) in values.iter().enumerate() {
-                if mask & (1 << bit) != 0 {
-                    out.push(*value);
-                }
-            }
-        }
     }
 
     pub fn orders(&self) -> &[Order] {
@@ -277,7 +239,7 @@ impl Store {
     pub fn set_latency(&mut self, latency: f64) {
         if latency != self.latency {
             self.latency = latency;
-            self.changes.latency = true;
+            self.changes.status = true;
         }
     }
 
@@ -285,29 +247,206 @@ impl Store {
         let before = self.loaded;
         update(&mut self.loaded);
         if self.loaded != before {
-            self.changes.loaded = true;
+            self.changes.status = true;
         }
     }
 
-    /// Build the delta since the previous call and reset change tracking.
-    /// Call it once per flush; serialize the result before mutating again.
-    pub fn take_update(&mut self) -> StoreUpdate<'_> {
+    /// Drain change tracking for one frame.
+    pub fn take_pending(&mut self) -> Pending {
         let changes = std::mem::take(&mut self.changes);
-        if changes.tickers_replaced {
-            // The full list supersedes any pending value deltas.
-            for index in self.dirty_tickers.drain(..) {
-                self.ticker_masks[index as usize] = 0;
+        let mut ticker_deltas = Vec::with_capacity(self.dirty_tickers.len());
+        for index in self.dirty_tickers.drain(..) {
+            let mask = std::mem::take(&mut self.ticker_masks[index as usize]);
+            // A replaced list already carries every value.
+            if !changes.tickers_replaced {
+                ticker_deltas.push((index, mask));
             }
         }
-        StoreUpdate {
-            markets: changes.markets.then_some(self.markets.as_slice()),
-            tickers: changes.tickers_replaced.then_some(self.tickers.as_slice()),
-            orders: changes.orders.then_some(self.orders.as_slice()),
-            positions: changes.positions.then_some(self.positions.as_slice()),
-            balance: changes.balance.then_some(&self.balance),
-            loaded: changes.loaded.then_some(self.loaded),
-            latency: changes.latency.then_some(self.latency),
+        Pending {
+            changes,
+            ticker_deltas,
         }
+    }
+
+    /// Write the drained changes as frame sections.
+    pub fn write<'a>(&'a self, pending: &Pending, w: &mut FrameWriter<'a>) {
+        let changes = &pending.changes;
+        if changes.markets {
+            self.write_markets(w);
+        }
+        if changes.tickers_replaced {
+            self.write_tickers(w);
+        } else if !pending.ticker_deltas.is_empty() {
+            w.begin(section::TICKER_DELTAS);
+            for &(index, mask) in &pending.ticker_deltas {
+                let values = ticker_values(&self.tickers[index as usize]);
+                w.f64s([index as f64, mask as f64]);
+                for (bit, value) in values.iter().enumerate() {
+                    if mask & (1 << bit) != 0 {
+                        w.f64(*value);
+                    }
+                }
+            }
+            w.end();
+        }
+        if changes.orders {
+            self.write_orders(w);
+        }
+        if changes.positions {
+            self.write_positions(w);
+        }
+        if changes.balance {
+            let b = &self.balance;
+            w.begin(section::BALANCE);
+            w.f64s([b.used, b.free, b.total, b.upnl]);
+            w.end();
+        }
+        if changes.status {
+            let l = self.loaded;
+            let loaded = [
+                (l.balance, loaded_flag::BALANCE),
+                (l.orders, loaded_flag::ORDERS),
+                (l.markets, loaded_flag::MARKETS),
+                (l.tickers, loaded_flag::TICKERS),
+                (l.positions, loaded_flag::POSITIONS),
+            ]
+            .iter()
+            .filter(|(set, _)| *set)
+            .fold(0, |bits, (_, flag)| bits | flag);
+            w.begin(section::STATUS);
+            w.u32s([loaded, 0]);
+            w.f64(self.latency);
+            w.end();
+        }
+    }
+
+    fn market_ref(&self, symbol: &str) -> u32 {
+        self.market_index(symbol).unwrap_or(wire::NONE)
+    }
+
+    fn write_markets<'a>(&'a self, w: &mut FrameWriter<'a>) {
+        let markets = &self.markets;
+        w.begin(section::MARKETS);
+        w.u32(markets.len() as u32);
+        for m in markets {
+            let refs = [
+                w.string(&m.id),
+                w.string(&m.symbol),
+                w.string(&m.base),
+                w.string(&m.quote),
+            ];
+            w.u32s(refs);
+        }
+        w.u32s(markets.iter().map(|m| {
+            [
+                (Some(m.active), market_flag::ACTIVE),
+                (m.is_inverse, market_flag::INVERSE),
+                (m.is_spot, market_flag::SPOT),
+                (m.is_perpetual, market_flag::PERPETUAL),
+                (m.is_expiring, market_flag::EXPIRING),
+                (m.is_read_only, market_flag::READ_ONLY),
+            ]
+            .iter()
+            .filter(|(set, _)| *set == Some(true))
+            .fold(0, |bits, (_, flag)| bits | flag)
+        }));
+        w.pad();
+        let columns: [fn(&Market) -> f64; 10] = [
+            |m| m.precision.amount,
+            |m| m.precision.price,
+            |m| m.limits.amount.min,
+            |m| m.limits.amount.max,
+            |m| m.limits.leverage.min,
+            |m| m.limits.leverage.max,
+            |m| m.limits.price.map_or(f64::NAN, |p| p.min),
+            |m| m.contract_size.unwrap_or(f64::NAN),
+            |m| m.taker_fee.unwrap_or(f64::NAN),
+            |m| m.maker_fee.unwrap_or(f64::NAN),
+        ];
+        for column in columns {
+            w.f64s(markets.iter().map(column));
+        }
+        w.end();
+    }
+
+    fn write_tickers<'a>(&'a self, w: &mut FrameWriter<'a>) {
+        let tickers = &self.tickers;
+        w.begin(section::TICKERS);
+        w.u32(tickers.len() as u32);
+        w.u32s(tickers.iter().map(|t| self.market_ref(&t.symbol)));
+        w.pad();
+        for column in 0..wire::TICKER_COLUMNS {
+            w.f64s(tickers.iter().map(|t| ticker_values(t)[column]));
+        }
+        w.end();
+    }
+
+    fn write_orders<'a>(&'a self, w: &mut FrameWriter<'a>) {
+        let orders = &self.orders;
+        w.begin(section::ORDERS);
+        w.u32(orders.len() as u32);
+        for o in orders {
+            let refs = [
+                w.string(&o.id),
+                w.optional_string(o.client_order_id.as_deref()),
+                w.optional_string(o.parent_id.as_deref()),
+            ];
+            w.u32s(refs);
+        }
+        w.u32s(orders.iter().map(|o| self.market_ref(&o.symbol)));
+        w.u32s(orders.iter().map(|o| {
+            wire::order_enums(
+                o.status,
+                o.kind,
+                o.side,
+                o.reduce_only,
+                o.close,
+                o.time_in_force,
+                o.trigger_type,
+            )
+        }));
+        w.pad();
+        let columns: [fn(&Order) -> f64; 7] = [
+            |o| o.price,
+            |o| o.amount,
+            |o| o.filled,
+            |o| o.remaining,
+            |o| o.last_update,
+            |o| o.take_profit.unwrap_or(f64::NAN),
+            |o| o.stop_loss.unwrap_or(f64::NAN),
+        ];
+        for column in columns {
+            w.f64s(orders.iter().map(column));
+        }
+        w.end();
+    }
+
+    fn write_positions<'a>(&'a self, w: &mut FrameWriter<'a>) {
+        let positions = &self.positions;
+        w.begin(section::POSITIONS);
+        w.u32(positions.len() as u32);
+        w.u32s(positions.iter().map(|p| self.market_ref(&p.symbol)));
+        w.u32s(
+            positions
+                .iter()
+                .map(|p| wire::position_enums(p.side, p.margin_type, p.position_mode)),
+        );
+        w.pad();
+        let columns: [fn(&Position) -> f64; 9] = [
+            |p| p.entry_price,
+            |p| p.notional,
+            |p| p.leverage,
+            |p| p.unrealized_pnl,
+            |p| p.realized_pnl.unwrap_or(f64::NAN),
+            |p| p.contracts,
+            |p| p.liquidation_price,
+            |p| p.margin_size.unwrap_or(f64::NAN),
+            |p| p.last_update.unwrap_or(f64::NAN),
+        ];
+        for column in columns {
+            w.f64s(positions.iter().map(column));
+        }
+        w.end();
     }
 }
 
@@ -324,15 +463,16 @@ mod tests {
     }
 
     #[test]
-    fn packs_only_changed_ticker_fields_after_the_initial_list() {
+    fn drains_only_changed_ticker_fields_after_the_initial_list() {
         let mut store = Store::default();
         store.set_tickers(vec![ticker("A"), ticker("B"), ticker("C")]);
         store.update_ticker("A", |t| t.bid = 5.0);
-        let first = store.take_update();
-        assert_eq!(first.tickers.map(<[_]>::len), Some(3));
-        let mut deltas = Vec::new();
-        store.take_ticker_deltas(&mut deltas);
-        assert!(deltas.is_empty(), "full list supersedes deltas");
+        let first = store.take_pending();
+        assert!(first.changes.tickers_replaced);
+        assert!(
+            first.ticker_deltas.is_empty(),
+            "full list supersedes deltas"
+        );
 
         store.update_ticker("B", |t| t.last = 1.0);
         store.update_ticker("B", |t| {
@@ -340,12 +480,9 @@ mod tests {
             t.volume = 7.0;
         });
         store.update_ticker("C", |t| t.last = 0.0);
-        assert!(store.take_update().is_empty());
-        store.take_ticker_deltas(&mut deltas);
-        let last_and_volume = (1 << 2) | (1 << 9);
-        assert_eq!(deltas, [1.0, last_and_volume as f64, 2.0, 7.0]);
-        deltas.clear();
-        store.take_ticker_deltas(&mut deltas);
-        assert!(deltas.is_empty());
+        let second = store.take_pending();
+        assert!(!second.changes.tickers_replaced);
+        assert_eq!(second.ticker_deltas, [(1, (1 << 2) | (1 << 9))]);
+        assert!(store.take_pending().ticker_deltas.is_empty());
     }
 }
