@@ -1,5 +1,6 @@
 //! KuCoin Classic Futures on the sans-I/O engine.
 mod account;
+mod funding;
 mod history;
 pub mod sign;
 mod trading;
@@ -33,6 +34,7 @@ pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
+    Funding(funding::Request),
     Markets {
         rows: Vec<Market>,
         invalid: bool,
@@ -115,6 +117,7 @@ pub struct Kucoin {
     account: account::Account,
     trading: trading::Trading,
     history: history::History,
+    funding: funding::Funding,
     connections: Vec<Connection>,
     books: HashMap<String, BookState>,
     candles: BTreeMap<(String, String), u32>,
@@ -211,6 +214,7 @@ impl Kucoin {
             account: Default::default(),
             trading: Default::default(),
             history: Default::default(),
+            funding: Default::default(),
             connections: vec![],
             books: HashMap::new(),
             candles: BTreeMap::new(),
@@ -781,6 +785,7 @@ impl Venue for Kucoin {
         match pending {
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::History(request) => self.history_item(cx, request, item),
+            Pending::Funding(request) => self.funding_item(cx, request, item),
             Pending::Trade(request) => self.trading_item(cx, request, item),
             Pending::Markets { rows, invalid } => match serde_json::from_str::<Instrument>(item) {
                 Ok(row) => {
@@ -817,6 +822,7 @@ impl Venue for Kucoin {
             Pending::Account(request) => self.account_response(cx, request, status, body),
             Pending::Trade(request) => self.trading_response(cx, request, status, body),
             Pending::History(request) => self.history_response(cx, request, status, body),
+            Pending::Funding(request) => self.funding_response(cx, request, status, body),
             Pending::Depth { symbol, generation } => {
                 self.depth_response(cx, symbol, generation, status, body)
             }
@@ -927,6 +933,7 @@ impl Venue for Kucoin {
             Pending::Account(request) => self.account_response(cx, request, 0, error),
             Pending::Trade(request) => self.trading_response(cx, request, 0, error),
             Pending::History(request) => self.history_response(cx, request, 0, error),
+            Pending::Funding(request) => self.funding_response(cx, request, 0, error),
             Pending::Depth { symbol, generation } => {
                 self.depth_failed(cx, &symbol, generation, error)
             }
@@ -946,6 +953,7 @@ impl Venue for Kucoin {
         if self.account_timer(cx, timer)
             || self.trading_timer(cx, timer)
             || self.history_timer(cx, timer)
+            || self.funding_timer(cx, timer)
         {
             return;
         }

@@ -80,3 +80,13 @@ covers stops too. Missing TS futures history surfaces use independently declared
 documented-payload oracles. Live replay found a TS buffered-book suffix loss on
 cached snapshot gaps; a production reference fix and deterministic regression
 are being verified. Private validation uses synthetic documented payloads.
+
+### Query/risk boundary follow-up
+
+Independent final review passes. Added symbol-required itemized funding through
+`/api/v1/funding-history`, 60-day windows, inclusive time overlap/exact ID dedup,
+explicit incomplete/same-ms saturation errors, failed-page rollback, and shared
+350 ms query pacing (11 funding tests). Pending settlement offset -1 is excluded
+before parsing completed ledger cursors. Lot-to-base boundaries quantize to the
+contract multiplier so 3 lots at 0.1 remain exactly 0.3, matching TS safe math.
+Native crate: 67 tests pass; clippy all-targets with warnings denied passes.

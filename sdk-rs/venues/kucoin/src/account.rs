@@ -145,6 +145,9 @@ struct OrderRow<'a> {
     #[serde(default)]
     trade_id: &'a str,
 }
+pub(crate) fn base_amount(lots: f64, multiplier: f64) -> f64 {
+    safe_cex_engine::num::adjust(lots * multiplier, multiplier)
+}
 pub(crate) fn contract_size(store: &Store, symbol: &str) -> f64 {
     store
         .market(symbol)
@@ -258,9 +261,9 @@ impl OrderRow<'_> {
             kind,
             side,
             price,
-            amount: self.size.get() * multiplier,
-            filled: self.filled_size.get() * multiplier,
-            remaining: remaining * multiplier,
+            amount: base_amount(self.size.get(), multiplier),
+            filled: base_amount(self.filled_size.get(), multiplier),
+            remaining: base_amount(remaining, multiplier),
             reduce_only: self.reduce_only,
             close: Some(self.close_order),
             client_order_id: self.client_oid.map(str::to_owned),
@@ -393,7 +396,7 @@ impl PositionRow<'_> {
                 && self.position_mode.is_none()
                 && self.hold_mode.is_empty()
                 && store.hedged();
-        let contracts = self.current_qty.get().abs() * contract_size(store, &symbol);
+        let contracts = base_amount(self.current_qty.get().abs(), contract_size(store, &symbol));
         let stamp = timestamp(if self.current_timestamp.get() > 0.0 {
             self.current_timestamp.get()
         } else {
@@ -922,7 +925,10 @@ impl Kucoin {
                         symbol: orders[0].symbol.clone(),
                         side: orders[0].side,
                         price: row.match_price.get(),
-                        amount: row.match_size.get() * contract_size(cx.store, &orders[0].symbol),
+                        amount: base_amount(
+                            row.match_size.get(),
+                            contract_size(cx.store, &orders[0].symbol),
+                        ),
                     });
                 }
             }

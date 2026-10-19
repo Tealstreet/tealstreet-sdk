@@ -17,7 +17,7 @@ enum Kind {
 #[derive(Default)]
 pub struct History {
     waiting: HashMap<TimerId, Request>,
-    next_at: f64,
+    pub(crate) next_at: f64,
 }
 pub struct Request {
     command: CommandId,
@@ -230,6 +230,10 @@ impl Kucoin {
         command: CommandId,
         query: Query,
     ) {
+        if matches!(&query, Query::Income { kind: Some(kind), .. } if kind == "FUNDING_FEE") {
+            self.funding_command(cx, command, query);
+            return;
+        }
         let (kind, symbol, order, filter, from, to, limit) = match query {
             Query::Fills {
                 symbol,
@@ -324,7 +328,7 @@ impl Kucoin {
     }
     fn history_schedule_after(&mut self, cx: &mut Cx<'_, Pending>, request: Request, delay: f64) {
         let at = self.history.next_at.max(cx.now + delay);
-        self.history.next_at = at + 100.0;
+        self.history.next_at = at + 350.0;
         if at > cx.now {
             let timer = cx.set_timer(at - cx.now);
             self.history.waiting.insert(timer, request);
@@ -412,7 +416,10 @@ impl Kucoin {
                         symbol: m.symbol.clone(),
                         order_id: v.order_id.into(),
                         price: number(v.price),
-                        qty: number(v.size) * m.contract_size.unwrap_or(1.0),
+                        qty: crate::account::base_amount(
+                            number(v.size),
+                            m.contract_size.unwrap_or(1.0),
+                        ),
                         side: v.side.into(),
                         commission: number(v.fee),
                         commission_asset: v.fee_currency.into(),
@@ -424,7 +431,10 @@ impl Kucoin {
                     let Some(m) = cx.store.markets().iter().find(|m| m.id == v.symbol) else {
                         return Ok(());
                     };
-                    let filled = number(v.deal_size) * m.contract_size.unwrap_or(1.0);
+                    let filled = crate::account::base_amount(
+                        number(v.deal_size),
+                        m.contract_size.unwrap_or(1.0),
+                    );
                     let avg = v
                         .avg_deal_price
                         .map(number)
@@ -448,7 +458,10 @@ impl Kucoin {
                         status: if v.cancel_exist { "canceled" } else { "closed" },
                         price: number(v.price),
                         average_price: avg,
-                        amount: number(v.size) * m.contract_size.unwrap_or(1.0),
+                        amount: crate::account::base_amount(
+                            number(v.size),
+                            m.contract_size.unwrap_or(1.0),
+                        ),
                         filled,
                         reduce_only: v.reduce_only,
                         created_time: v.created_at as f64,
@@ -461,11 +474,13 @@ impl Kucoin {
                 }
                 Kind::Income => {
                     let v: IncomeRow = serde_json::from_str(item).map_err(|e| e.to_string())?;
-                    let offset = integer(v.offset).ok_or("invalid ledger offset")?;
-                    r.minimum_offset = Some(r.minimum_offset.map_or(offset, |old| old.min(offset)));
+                    // Pending settlement rows use the sentinel offset -1; only
+                    // completed records can advance the stable history cursor.
                     if v.status != "Completed" {
                         return Ok(());
                     }
+                    let offset = integer(v.offset).ok_or("invalid ledger offset")?;
+                    r.minimum_offset = Some(r.minimum_offset.map_or(offset, |old| old.min(offset)));
                     let (kind, category) = match v.kind.to_ascii_lowercase().as_str() {
                         "realisedpnl" | "realizedpnl" => ("REALIZED_PNL", "realized_pnl"),
                         "fundingfee" => ("FUNDING_FEE", "funding"),
@@ -498,7 +513,8 @@ impl Kucoin {
                     let v: TradeRow = serde_json::from_str(item).map_err(|e| e.to_string())?;
                     let m = cx.store.market(r.symbol.as_ref().unwrap()).unwrap();
                     let price = number(v.price);
-                    let qty = number(v.size) * m.contract_size.unwrap_or(1.0);
+                    let qty =
+                        crate::account::base_amount(number(v.size), m.contract_size.unwrap_or(1.0));
                     Row::Trade(Trade {
                         id: v.trade_id.into(),
                         symbol: m.symbol.clone(),
@@ -778,7 +794,7 @@ mod tests {
         let actions = reply(
             &mut e,
             r,
-            r#"{"code":"200000","data":{"dataList":[{"time":1500,"type":"RealisedPNL","amount":2,"offset":9007199254740999,"currency":"USDT","status":"Completed","remark":"XBTUSDTM"},{"time":1400,"type":"FundingFee","amount":-0.1,"offset":9007199254740993,"currency":"USDT","status":"Completed","remark":"XBTUSDTM"}],"hasMore":true}}"#,
+            r#"{"code":"200000","data":{"dataList":[{"time":1500,"type":"RealisedPNL","amount":2,"offset":9007199254740999,"currency":"USDT","status":"Completed","remark":"XBTUSDTM"},{"time":1400,"type":"TransferIn","amount":-0.1,"offset":9007199254740993,"currency":"USDT","status":"Completed","remark":"XBTUSDTM"}],"hasMore":true}}"#,
         );
         let (timer, at) = actions
             .iter()
@@ -889,5 +905,27 @@ mod tests {
             a,
             Action::Notice(Notice::CommandDone { result: Err(_), .. })
         )));
+    }
+    #[test]
+    fn pending_settlement_sentinel_does_not_corrupt_completed_ledger_cursor() {
+        let mut e = engine();
+        let r = query(
+            &mut e,
+            Query::Income {
+                symbol: None,
+                kind: None,
+                from_ms: Some(1000.0),
+                to_ms: Some(2000.0),
+                limit: None,
+            },
+        );
+        let actions = reply(
+            &mut e,
+            r,
+            r#"{"code":"200000","data":{"dataList":[{"time":1500,"type":"RealisedPNL","amount":0,"offset":-1,"currency":"USDT","status":"Pending","remark":"XBTUSDTM"},{"time":1400,"type":"RealisedPNL","amount":2,"offset":7,"currency":"USDT","status":"Completed","remark":"XBTUSDTM"}],"hasMore":false}}"#,
+        );
+        let result = done(&actions);
+        assert!(result.contains("\"tranId\":\"7\""));
+        assert!(!result.contains("-1"));
     }
 }

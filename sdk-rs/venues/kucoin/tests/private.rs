@@ -385,3 +385,16 @@ fn documented_partial_position_change_preserves_risk_and_settings() {
             .all(|p| p.symbol != "ETHUSDT")
     );
 }
+
+#[test]
+fn decimal_contract_multipliers_do_not_leak_binary_lot_noise() {
+    let mut h = Harness::new();
+    h.ready();
+    let mut market = h.engine.store().markets()[0].clone();
+    market.contract_size = Some(0.1);
+    h.engine.store_mut().set_markets(vec![market]);
+    h.ws("/contractMarket/tradeOrders",r#"{"orderId":"decimal-lots","symbol":"XBTUSDTM","type":"match","orderType":"limit","status":"match","side":"buy","size":7,"filledSize":3,"remainSize":4,"matchSize":3,"matchPrice":"90","tradeId":"decimal-fill"}"#);
+    let o = h.engine.store().order("decimal-lots").unwrap();
+    assert_eq!((o.amount, o.filled, o.remaining), (0.7, 0.3, 0.4));
+    assert_eq!(h.fill_rows(), vec![(90.0, 0.3)]);
+}
