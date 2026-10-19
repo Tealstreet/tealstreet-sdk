@@ -41,6 +41,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   okxeu: 'okxeu',
   okxdemo: 'okxdemo',
   okxeudemo: 'okxeudemo',
+  weex: 'weex',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
@@ -104,7 +105,12 @@ export class RustEngineExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
     this.applier = new FrameApplier(store);
+    this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
   }
+
+  private updateTickerSymbols = () => {
+    if (this.host) void this.host.command({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
+  };
 
   start = async () => {
     if (!this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
@@ -115,18 +121,21 @@ export class RustEngineExchange extends BaseExchange {
     if (this.isDisposed) return;
     const { key, secret, passphrase, testnet } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
+    const transport = engineTransport();
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
       JSON.stringify({
         key, secret, passphrase, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly),
+        privateWsHeaders: Boolean(transport.webSocketHeaders),
         extra: this.name === 'kucoin' ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
       }),
     );
-    this.host = new EngineHost(engine, engineTransport(), {
+    this.host = new EngineHost(engine, transport, {
       onFrame: this.receiveFrame,
       onLog: this.receiveLog,
     });
     this.host.start();
+    this.updateTickerSymbols();
     // Books, candles and fills go out at the venue's book cadence, the rest
     // at the store's, matching what the TS worker posts today.
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;

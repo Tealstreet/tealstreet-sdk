@@ -502,3 +502,26 @@ fn book_subscription_before_market_seed_is_retained_and_cancelled_by_reference_c
     );
     assert!(e.book("BTCUSDT").is_none());
 }
+
+#[test]
+fn ticker_interest_hints_are_safe_before_and_after_startup() {
+    let mut e = Engine::new(Kucoin::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.handle(
+        0.0,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["BTCUSDT".into()],
+        }),
+    );
+    assert!(!e.has_actions());
+    let (mut e, _) = ready();
+    e.handle(
+        1.0,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["BTCUSDT".into()],
+        }),
+    );
+    assert!(!e.has_actions());
+}

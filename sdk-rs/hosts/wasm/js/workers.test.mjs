@@ -140,3 +140,18 @@ test('the Durable Object runs an engine and streams frames to its clients', asyn
   client.close();
   assert.equal(object.host, undefined, 'the last client leaving stops the engine');
 });
+
+test('Workers derives private upgrade capability from its transport', async () => {
+  let options;
+  const EngineObject = createEngineObject({ loadEngine: async () => ({ WasmEngine: class {
+    constructor(_, json) { options = JSON.parse(json); }
+    start() { return ''; }
+  } }) });
+  const object = new EngineObject({ storage: { setAlarm() {} } });
+  const client = { send() {} };
+  try {
+    await object.receive(client, JSON.stringify({ op: 'start', venue: 'weex', options: { key: 'replay-key' } }));
+    assert.equal(options.privateWsHeaders, true);
+    assert.equal(options.key, 'replay-key');
+  } finally { object.leave(client); }
+});

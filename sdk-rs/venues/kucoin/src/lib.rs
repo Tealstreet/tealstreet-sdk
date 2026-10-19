@@ -990,6 +990,7 @@ impl Venue for Kucoin {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
                     cx.log(LogLevel::Error, "unknown KuCoin market");

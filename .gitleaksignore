@@ -1,0 +1,4 @@
+# Published Binance Futures HMAC signing example, in a unit test in the
+# original rewrite history (before the nested workspace move):
+# https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/general-info
+879fdc74610ec6b2504c9faf8a8d8ffbaff576c7:sdk-rs/safe-cex-venue-binance/src/sign.rs:generic-api-key:103

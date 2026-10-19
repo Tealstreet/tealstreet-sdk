@@ -46,6 +46,42 @@ const okx = (name) => ({
 
 export const VENUES = {
   kucoin,
+  weex: {
+    rust: 'weex',
+    ts: { module: `${root}/weex/weex.exchange.ts`, className: 'WeexExchange', name: 'weex' },
+    privateSocket: '/v3/ws/private',
+    matchRequestBody: true,
+    volatileBodyFields: true,
+    // WEEX's income history is a read despite using POST.
+    isWrite: (method, url) => method !== 'GET' && !(method === 'POST' && new URL(url).pathname === '/capi/v3/account/income'),
+    options: { passphrase: 'replay-passphrase', privateWsHeaders: true },
+    tsBooksSubscribed: (exchange, count) => [...exchange.publicWebsocket.topics].filter((t) => t.endsWith('@depth200')).length >= count,
+    prepareTs(exchange, WebSocket) {
+      for (const socket of [exchange.publicWebsocket, exchange.privateWebsocket]) {
+        socket.createWebsocket = (url, protocols, options = {}) => {
+          const headers = typeof options.headers === 'function' ? options.headers() : options.headers;
+          const ws = new WebSocket(url, protocols, { headers });
+          ws.addEventListener('open', socket.trackConnected);
+          return ws;
+        };
+      }
+    },
+    validateRequest({ method, url, body = '', headers = {} }) {
+      const parsed = new URL(url);
+      if (parsed.pathname.startsWith('/capi/v3/market/')) return;
+      const lookup = (name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
+      const time = lookup('ACCESS-TIMESTAMP');
+      const signature = createHmac('sha256', 'replay-secret').update(`${time}${method}${parsed.pathname}${parsed.search}${body || ''}`).digest('base64');
+      if (lookup('ACCESS-KEY') !== 'replay-key' || lookup('ACCESS-PASSPHRASE') !== 'replay-passphrase' || lookup('ACCESS-SIGN') !== signature) throw new Error(`invalid WEEX signed request: ${method} ${parsed.pathname}`);
+    },
+    validateSocket(url, headers = {}) {
+      if (!url.includes('/v3/ws/private')) return;
+      const lookup = (name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
+      const time = lookup('ACCESS-TIMESTAMP');
+      const signature = createHmac('sha256', 'replay-secret').update(`${time}/v3/ws/private`).digest('base64');
+      if (lookup('ACCESS-KEY') !== 'replay-key' || lookup('ACCESS-PASSPHRASE') !== 'replay-passphrase' || lookup('ACCESS-SIGN') !== signature) throw new Error('invalid WEEX upgrade authentication');
+    },
+  },
   cryptocom: {
     rust: 'cryptocom',
     ts: { module: root + '/cryptocom/cryptocom.exchange.ts', className: 'CryptocomExchange', name: 'cryptocom' },
@@ -58,7 +94,7 @@ export const VENUES = {
       return seed ? JSON.parse(seed.body).result.data.filter((r) => r.inst_type === 'PERPETUAL_SWAP' && r.tradable).map((r) => r.symbol) : [];
     },
     // KNOWN_TS_FIXES: public-only startup returns before market subscriptions.
-    prepareTs: (exchange, { isPrivate }) => {
+    prepareTsReady: (exchange, { isPrivate }) => {
       if (!isPrivate) exchange.publicWebsocket.subscribeToMarketData(exchange.store.markets.map((m) => ({ instrumentName: m.id, indexInstrumentName: m.info?.underlyingSymbol })));
     },
     // KNOWN_TS_FIXES: the global ticker/book throttles drop updates across
@@ -151,6 +187,7 @@ export const VENUES = {
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >= count,
     privateSocket: '/private/ws',
+    volatileBodyFields: true,
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
   },
   bybit: {

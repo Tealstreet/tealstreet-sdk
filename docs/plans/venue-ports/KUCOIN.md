@@ -114,3 +114,21 @@ Native crate: 67 tests pass; clippy all-targets with warnings denied passes.
 
 Next: merge latest landing (WEEX), rebuild and run all landing replay gates,
 then PR, adversarial reviews posted on PR, green CI, merge and follow-up branch.
+
+### WEEX landing integration checkpoint
+
+Merged landing 6cd219ce4c with both venue registrations, broker/upgrade options,
+header validation and timed replay templates intact. Merge review found the new
+unconditional `SetTickerSymbols` startup hint reached KuCoin's trading fallback;
+added a no-op (its complete snapshot pool is already subscribed) and native
+before/after-start regression. Crate 68 tests and wasm integration 18 tests pass;
+workspace tests/clippy and package typecheck/lint pass. Combined six-venue wasm
+was measured at 2,457,294 bytes before the tiny hint handler; budget 2.5 MiB.
+
+Funding tape wiring was corrected from `kind` to the wasm command's `incomeType`
+field; the dedicated funding command now matches its independent expected row.
+KuCoin private gate PASS at 32 frames/17 commands. The public replay exposed a
+remaining TS startup/book race after the landing harness change; investigation is
+active and that gate is not counted passing at this checkpoint. The landing
+branch has since advanced through BingX and a startup-subscription harness fix;
+merge that next, then rerun the complete gate set before PR publication.

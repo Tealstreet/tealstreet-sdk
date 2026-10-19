@@ -55,19 +55,25 @@ const isPrivate = records.some((r) =>
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 const PASSPHRASE = 'replay-passphrase';
-const callerIds = new Set(records.flatMap((r) => r.type === 'command' ? (r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean) : []));
 
 /** Per-request values: clocks, signatures, request ids and generated client ids. */
+const callerIds = new Set(records.flatMap((r) => r.type === 'command' ? (r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean) : []));
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams]
-    .filter(([name]) => !VOLATILE.has(name) && !venue.volatileQueryFields?.includes(name))
-    .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"[^"]*",?/g, '')])
+    .filter(([name, value]) => (!VOLATILE.has(name) || callerIds.has(value)) && !venue.volatileQueryFields?.includes(name))
+    .map(([name, value]) => [name, /^[\[{]/.test(value) ? canonicalBody(value) : value])
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
 
+/**
+ * A JSON request body with its keys sorted and generated fields dropped, so
+ * venues that sign headers and send parameters in the body (Bybit) key their
+ * writes by what they ask for. Caller-supplied IDs remain part of the match.
+ * Empty for a body-less request.
+ */
 const canonicalBody = (body) => {
   if (body === undefined || body === null || body === '') return '';
   let value = body;
@@ -79,8 +85,10 @@ const canonicalBody = (body) => {
   const sorted = (value) => {
     if (Array.isArray(value)) return value.map(sorted);
     if (value === null || typeof value !== 'object') return value;
-    const keys = Object.keys(value).filter((key) => value[key] !== undefined && !(venue.volatileBodyFields && VOLATILE.has(key))).sort();
-    return Object.fromEntries(keys.map((key) => [key,
+    const keys = Object.keys(value).filter((key) => value[key] !== undefined
+      && !(venue.volatileBodyFields && VOLATILE.has(key) && !callerIds.has(String(value[key])))).sort();
+    return Object.fromEntries(keys.map((key) => [
+      key,
       !callerIds.has(value[key]) && venue.generatedBodyId?.(key, value[key]) ? '<generated>' : sorted(value[key]),
     ]));
   };
@@ -89,11 +97,13 @@ const canonicalBody = (body) => {
 const requestKey = (method, url, body) =>
   `${method} ${canonicalUrl(url)}${venue.matchRequestBody && method !== 'GET' ? ` ${canonicalBody(body)}` : ''}`;
 
+const isWriteRequest = (method, url) => venue.isWrite?.(method, url) ?? method !== 'GET';
+
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
   constructor(impl) {
     this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records), records });
-    this.responses = new Responses(records, requestKey, venue.checkRequest, venue.isWrite);
+    this.responses = new Responses(records, requestKey, venue.checkRequest, isWriteRequest);
     this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
     this.open = new Map();
     this.waiters = [];
@@ -103,7 +113,32 @@ class Tape {
   get unserved() { return this.responses.unserved; }
 
   respond(method, url, body, headers) {
-    return this.responses.respond(method, url, body, this.commandIndex, headers);
+    venue.validateRequest?.({ method, url, body, headers });
+    const key = requestKey(method, url, body);
+    const queue = venue.checkRequest?.(method, url, body, headers) === false ? undefined : this.responses.queues.get(key);
+    if (!queue?.length) {
+      this.responses.unserved++;
+      console.error(`Unserved request: ${key}`);
+      return { status: 599, body: '' };
+    }
+    // Staged snapshots become available only once their command starts.
+    const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= this.commandIndex);
+    if (!eligible.length) {
+      this.responses.unserved++;
+      console.error(`Request preceded its taped stage: ${key}`);
+      return { status: 599, body: '' };
+    }
+    const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
+    const current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
+    // Timed read snapshots remain reusable templates for safety reconciliation.
+    const timed = current.filter((r) => r.effectiveAt !== undefined && r.effectiveAt <= (this.time ?? 0));
+    const timedRead = !isWriteRequest(method, url) && current.some((r) => r.effectiveAt !== undefined);
+    const record = timedRead ? (timed.at(-1) ?? current[0]) : current[0];
+    // Every mutation needs its own row; ordinary reads may reconcile repeatedly.
+    if (!timedRead && (current.length > 1 || isWriteRequest(method, url))) queue.splice(queue.indexOf(record), 1);
+    const sent = body ? (typeof body === 'string' ? parseRequestJson(body) : body) : {};
+    const responseBody = record.body.replace(/"\$(clientAlgoId|newClientOrderId)"/g, (_, field) => JSON.stringify(sent[field] ?? null));
+    return { status: record.status, headers: record.headers ?? '', body: responseBody };
   }
 
   connect(url, onOpen, onMessage) {
@@ -196,7 +231,13 @@ class Tape {
   async socketFor(rawUrl) {
     const url = canonicalUrl(rawUrl);
     while (!this.open.get(url) || this.open.get(url).closed) {
-      await new Promise((resolve) => this.waiters.push(() => (this.open.get(url) ? (resolve(), true) : false)));
+      let timer;
+      try {
+        await Promise.race([
+          new Promise((resolve) => this.waiters.push(() => (this.open.get(url) && !this.open.get(url).closed ? (resolve(), true) : false))),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`socket did not open: ${url}`)), 30_000); }),
+        ]);
+      } finally { clearTimeout(timer); }
     }
     return this.open.get(url);
   }
@@ -221,6 +262,7 @@ class Tape {
         const wait = frame.t - (performance.now() - start);
         if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
       }
+      this.time = frame.t;
       if (frame.type === 'command') {
         this.commandIndex++;
         this.results.push(await within(runCommand(frame), 15_000, `Command ${frame.op}`).then((ids) => ({ ok: ids }), (error) => {
@@ -333,12 +375,14 @@ async function runRust() {
   const fills = [];
   const transport = {
     now: () => Date.now(),
-    connect: (url, { onOpen, onMessage }) => {
+    webSocketHeaders: true,
+    connect: (url, { headers, onOpen, onMessage }) => {
+      venue.validateSocket?.(url, headers);
       const socket = tape.connect(url, onOpen, (text) => { tape.audit?.received(url, text); onMessage(text); });
       return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
-    request: async ({ method, url, body: requestBody, headers: requestHeaders }) => {
-      const { status, headers = '', body } = tape.respond(method, url, requestBody, requestHeaders);
+    request: async ({ method, url, body: requestBody, headers }) => {
+      const { status, headers: responseHeaders = '', body } = tape.respond(method, url, requestBody, headers);
       // Model nativeTransport's chunks so streamed lists do not allocate a whole
       // response in wasm before the venue sees the first item.
       const chunks = async function* () {
@@ -347,7 +391,7 @@ async function runRust() {
           yield bytes.subarray(offset, offset + 16 * 1024);
         }
       };
-      return { status, headers, body: chunks() };
+      return { status, headers: responseHeaders, body: chunks() };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
@@ -474,7 +518,8 @@ async function runTs() {
     static OPEN = 1;
     static CLOSING = 2;
     static CLOSED = 3;
-    constructor(url) {
+    constructor(url, _protocols, options = {}) {
+      venue.validateSocket?.(url, options.headers);
       this.url = url;
       this.readyState = 0;
       this.listeners = { open: [], message: [], close: [], error: [] };
@@ -514,9 +559,9 @@ async function runTs() {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data, config.headers);
+    const { status, body, headers: responseHeaders } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data, config.headers?.toJSON?.() ?? config.headers);
     // The raw body: the client's own transformResponse parses it, big ids included.
-    const response = { data: body, status, statusText: String(status), headers: {}, config, request: {} };
+    const response = { data: body, status, statusText: String(status), headers: Object.fromEntries((responseHeaders ?? '').split('\n').filter(Boolean).map((line) => { const colon = line.indexOf(':'); return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()]; })), config, request: {} };
     if (status >= 400) {
       const error = new Error(`Request failed with status code ${status}`);
       error.response = response;
@@ -540,6 +585,7 @@ async function runTs() {
   const options = { ...venue.options, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { key: '', secret: '', publicDataOnly: true }) };
   const exchange = new Exchange(venue.ts.name, options, store);
   venue.configureTs?.(exchange);
+  venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
@@ -566,7 +612,7 @@ async function runTs() {
       }
     },
     async () => {
-      venue.prepareTs?.(exchange, { isPrivate });
+      venue.prepareTsReady?.(exchange, { isPrivate });
       while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
       const loaded = () => Object.values(store.loaded).every(Boolean);
       while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
@@ -594,7 +640,7 @@ async function runTs() {
         // Zero-size placeholders carry each market's leverage and margin type.
         positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
         settings: [...new Map(store.positions.filter((p) => p.leverage > 0).map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }])).values()],
-        fills: executions.map((f) => ({ id: f.id, symbol: f.symbol, side: f.side, amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
+        fills: executions.map((f) => ({ id: f.orderId ?? f.id, symbol: f.symbol, side: f.side, amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
       }
     : undefined;
   exchange.dispose();

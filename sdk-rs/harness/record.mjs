@@ -29,6 +29,7 @@ const recording = {
   ...live,
   connect(url, handlers) {
     return live.connect(url, {
+      headers: handlers.headers,
       onOpen: () => {
         write({ type: 'open', url });
         handlers.onOpen();
@@ -69,9 +70,10 @@ const recording = {
 
 const { WasmEngine } = await loadEngine();
 let frames = 0;
+let updates = 0;
 const seenBooks = new Set();
 const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: true })), recording, {
-  onFrame: (buffer) => { for (const book of new Frame(buffer).books()) seenBooks.add(book.market); },
+  onFrame: (buffer) => { updates++; for (const book of new Frame(buffer).books()) seenBooks.add(book.market); },
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });
 host.start();
@@ -84,7 +86,7 @@ setTimeout(() => {
   host.flush();
   host.dispose();
   tape.end(() => {
-    console.log(JSON.stringify({ out, seconds: Number(values.seconds), frames, books: seenBooks.size }));
+    console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, books: seenBooks.size }));
     process.exit(frames > 0 && seenBooks.size >= values.books.split(',').filter(Boolean).length ? 0 : 1);
   });
 }, Number(values.seconds) * 1000);
