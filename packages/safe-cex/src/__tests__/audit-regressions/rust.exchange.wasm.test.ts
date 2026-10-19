@@ -3,11 +3,11 @@ import type { OrderBook } from '../../types';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { BaseExchange } from '../../exchanges/base';
+import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
+import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
-import { BaseExchange } from '../base';
-import { loadNodeEngine } from './loadNodeEngine';
-import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from './rust.exchange';
 
 const EXCHANGE_INFO = JSON.stringify({
   symbols: [
@@ -39,7 +39,8 @@ const RESPONSES: Record<string, string> = {
   dual: '{"dualSidePosition":false}',
   positionRisk: '[]',
   symbolConfig: '[{"symbol":"BTCUSDT","marginType":"CROSSED","leverage":20}]',
-  account: '{"assets":[{"asset":"USDT","walletBalance":"1000","availableBalance":"900","initialMargin":"100","unrealizedProfit":"0"}]}',
+  account:
+    '{"assets":[{"asset":"USDT","walletBalance":"1000","availableBalance":"900","initialMargin":"100","unrealizedProfit":"0"}]}',
   openOrders: '[]',
   openAlgoOrders: '[]',
   order: '{"orderId":4242,"status":"NEW"}',

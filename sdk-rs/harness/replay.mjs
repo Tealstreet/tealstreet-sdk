@@ -39,18 +39,51 @@ const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrde
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams]
-    .filter(([name]) => !VOLATILE.has(name))
+    .filter(
+      ([name, value]) => !VOLATILE.has(name) && !(value === '' && venue.cacheBustPaths?.includes(parsed.pathname)),
+    )
     .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"[^"]*",?/g, '')])
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
+
+const callerIds = new Set();
+const collectCallerIds = (value) => {
+  if (!value || typeof value !== 'object') return;
+  if (typeof value.clientOrderId === 'string') callerIds.add(value.clientOrderId);
+  for (const nested of Object.values(value)) collectCallerIds(nested);
+};
+for (const record of records) if (record.type === 'command') collectCallerIds(record);
+
+/** Canonical JSON write payloads, keeping caller IDs and removing only minted IDs. */
+const canonicalBody = (raw) => {
+  if (!venue.requestBodies || raw === undefined || raw === null || raw === '') return '';
+  const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  const walk = (value) => {
+    if (Array.isArray(value)) return value.map(walk);
+    if (value && typeof value === 'object')
+      return Object.fromEntries(
+        Object.keys(value)
+          .sort()
+          .filter(
+            (key) =>
+              (callerIds.has(value[key]) || !venue.generatedId?.(key, String(value[key]))) &&
+              venue.defaultBodyValues?.[key] !== value[key],
+          )
+          .map((key) => [key, walk(value[key])]),
+      );
+    return value;
+  };
+  return JSON.stringify(walk(parsed));
+};
+const requestKey = (method, url, body) => `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
   constructor() {
     this.responses = new Map();
     for (const record of records.filter((r) => r.type === 'http')) {
-      const key = `${record.method} ${canonicalUrl(record.url)}`;
+      const key = requestKey(record.method, record.url, record.requestBody);
       if (!this.responses.has(key)) this.responses.set(key, []);
       this.responses.get(key).push(record);
     }
@@ -60,13 +93,14 @@ class Tape {
     this.unserved = 0;
   }
 
-  respond(method, url) {
-    const queue = this.responses.get(`${method} ${canonicalUrl(url)}`);
+  respond(method, url, body) {
+    const queue = this.responses.get(requestKey(method, url, body));
     if (!queue?.length) {
       this.unserved++;
+      if (this.unserved <= 10) console.error(`unserved: ${requestKey(method, url, body)}`);
       return { status: 599, body: '' };
     }
-    const record = queue.length > 1 ? queue.shift() : queue[0];
+    const record = method !== 'GET' || queue.length > 1 ? queue.shift() : queue[0];
     return { status: record.status, body: record.body };
   }
 
@@ -107,7 +141,12 @@ class Tape {
         if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
       }
       if (frame.type === 'command') {
-        this.results.push(await runCommand(frame).then((ids) => ({ ok: ids }), (error) => ({ error: String(error?.message ?? error) })));
+        this.results.push(
+          await runCommand(frame).then(
+            (ids) => ({ ok: ids }),
+            (error) => ({ error: String(error?.message ?? error) }),
+          ),
+        );
       } else {
         const socket = await this.socketFor(frame.url);
         socket.onMessage(frame.text);
@@ -119,7 +158,28 @@ class Tape {
     return delivered;
   }
 
+  get unusedWrites() {
+    return [...this.responses.entries()]
+      .filter(([key]) => !key.startsWith('GET '))
+      .reduce((count, [, queue]) => count + queue.length, 0);
+  }
   results = [];
+  sentRequests = new Set();
+  sent(url, text) {
+    if (!venue.requestBodies || text === 'ping' || text === 'pong') return;
+    let message;
+    try {
+      message = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (message.op === 'subscribe' || message.op === 'unsubscribe') {
+      for (const topic of message.args ?? []) this.sentRequests.add(JSON.stringify({ url, op: message.op, topic }));
+    } else if (message.op === 'login') {
+      const args = message.args.map(({ timestamp, nonce, sign, ...credentials }) => credentials);
+      this.sentRequests.add(JSON.stringify({ url, op: 'login', args }));
+    }
+  }
 }
 
 const settle = async () => {
@@ -159,7 +219,18 @@ const sortBook = (book) => ({
   asks: book.asks.map(({ price, amount }) => [price, amount]),
 });
 
-const tickerFields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume'];
+const tickerFields = [
+  'bid',
+  'ask',
+  'last',
+  'mark',
+  'index',
+  'percentage',
+  'fundingRate',
+  'fundingTime',
+  'volume',
+  'quoteVolume',
+];
 const marketFields = (m) => ({
   id: m.id,
   symbol: m.symbol,
@@ -191,16 +262,16 @@ async function runRust() {
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
       const socket = tape.connect(url, onOpen, onMessage);
-      return { send: () => {}, close: () => (socket.closed = true) };
+      return { send: (text) => tape.sent(url, text), close: () => (socket.closed = true) };
     },
-    request: async ({ method, url }) => {
-      const { status, body } = tape.respond(method, url);
+    request: async ({ method, url, body: requestBody }) => {
+      const { status, body } = tape.respond(method, url, requestBody);
       return { status, headers: '', body: encoder.encode(body) };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
-  const options = isPrivate ? { key: KEY, secret: SECRET } : { publicDataOnly: true };
+  const options = isPrivate ? { key: KEY, secret: SECRET, ...venue.options } : { publicDataOnly: true };
   const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
@@ -216,7 +287,13 @@ async function runRust() {
       status = frame.status() ?? status;
       const executed = frame.fills();
       for (let i = 0; i < (executed?.count ?? 0); i++) {
-        fills.push({ market: executed.market[i], side: executed.side[i], amount: executed.rows[i * 2 + 1], id: executed.orderId(i) });
+        fills.push({
+          market: executed.market[i],
+          side: executed.side[i],
+          amount: executed.rows[i * 2 + 1],
+          ...(venue.compareFillPrices ? { price: executed.rows[i * 2] } : {}),
+          id: executed.orderId(i),
+        });
       }
     },
   });
@@ -278,11 +355,20 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, unserved: tape.unserved, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return {
+    frames,
+    metrics,
+    unserved: tape.unserved,
+    unusedWrites: tape.unusedWrites,
+    wsRequests: [...tape.sentRequests].sort(),
+    store: { markets: marketRows, tickers: tickerRows },
+    books: bookRows,
+    account,
+    commands: tape.results,
+  };
 }
 
 const commandArgs = ({ t, type, ...args }) => args;
-
 
 /** Main-thread view of the account, rebuilt from the latest frame tables. */
 function rustAccount({ markets, orders, positions, balance, settings, status, fills }) {
@@ -301,7 +387,13 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   }
   const settingRows = [];
   for (let i = 0; i < (settings?.count ?? 0); i++) {
-    settingRows.push({ symbol: symbol(settings.market[i]), leverage: settings.leverage[i], marginType: settings.marginType(i) });
+    // TS has no margin-only placeholder; frames retain it for actual consumers.
+    if (!(settings.leverage[i] > 0)) continue;
+    settingRows.push({
+      symbol: symbol(settings.market[i]),
+      leverage: settings.leverage[i],
+      marginType: settings.marginType(i),
+    });
   }
   return {
     hedged: status?.hedged ?? false,
@@ -309,7 +401,13 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
     orders: orderRows,
     positions: positionRows,
     settings: settingRows,
-    fills: fills.map((f) => ({ id: f.id, symbol: symbol(f.market), side: f.side === 0 ? 'buy' : 'sell', amount: f.amount })),
+    fills: fills.map((f) => ({
+      id: f.id,
+      symbol: symbol(f.market),
+      side: f.side === 0 ? 'buy' : 'sell',
+      amount: f.amount,
+      ...(venue.compareFillPrices ? { price: f.price } : {}),
+    })),
   };
 }
 
@@ -343,7 +441,9 @@ async function runTs() {
     removeEventListener(type, fn) {
       this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
     }
-    send() {}
+    send(text) {
+      tape.sent(this.url, text);
+    }
     close() {
       this.readyState = 3;
       this.socket.closed = true;
@@ -358,7 +458,7 @@ async function runTs() {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString());
+    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data);
     // The raw body: the client's own transformResponse parses it, big ids included.
     const response = { data: body, status, statusText: String(status), headers: {}, config, request: {} };
     if (status >= 400) {
@@ -370,7 +470,9 @@ async function runTs() {
     return response;
   };
   const store = new DefaultStore();
-  const options = isPrivate ? { key: KEY, secret: SECRET } : { key: '', secret: '', publicDataOnly: true };
+  const options = isPrivate
+    ? { key: KEY, secret: SECRET, ...venue.options }
+    : { key: '', secret: '', publicDataOnly: true };
   const exchange = new Exchange(venue.ts.name, options, store);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
@@ -411,6 +513,26 @@ async function runTs() {
         await exchange.cancelSymbolOrders(record.symbol);
         return [];
       }
+      if (record.op === 'amendOrder') {
+        const order = store.orders.find((o) => o.id === record.id);
+        return exchange.updateOrder({ order, update: { price: record.price, amount: record.amount } });
+      }
+      if (record.op === 'setLeverage') {
+        await exchange.setLeverage(record.symbol, record.leverage);
+        return [];
+      }
+      if (record.op === 'setMarginType') {
+        await exchange.changeMarginType(record.isolated, record.symbol);
+        return [];
+      }
+      if (record.op === 'setPositionMode') {
+        await exchange.changePositionMode(record.hedged);
+        return [];
+      }
+      if (record.op === 'fetchFills') return exchange.fetchHistoricalFills(commandArgs(record));
+      if (record.op === 'fetchOrderHistory') return exchange.fetchHistoricalOrders(commandArgs(record));
+      if (record.op === 'fetchIncome') return exchange.fetchIncomeHistory(commandArgs(record));
+      if (record.op === 'fetchCandles') return exchange.fetchOHLCV(commandArgs(record));
       throw new Error(`unknown command ${record.op}`);
     },
   );
@@ -427,16 +549,43 @@ async function runTs() {
   const account = isPrivate
     ? {
         hedged: Boolean(store.options.isHedged),
-        balance: { used: store.balance.used, free: store.balance.free, total: store.balance.total, upnl: store.balance.upnl },
+        balance: {
+          used: store.balance.used,
+          free: store.balance.free,
+          total: store.balance.total,
+          upnl: store.balance.upnl,
+        },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.
         positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
-        settings: [...new Map(store.positions.filter((p) => p.leverage > 0).map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }])).values()],
-        fills: executions.map((f) => ({ id: f.id, symbol: f.symbol, side: f.side, amount: f.amount })),
+        settings: [
+          ...new Map(
+            store.positions
+              .filter((p) => p.leverage > 0)
+              .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
+          ).values(),
+        ],
+        fills: executions.map((f) => ({
+          id: f.id,
+          symbol: f.symbol,
+          side: f.side,
+          amount: f.amount,
+          ...(venue.compareFillPrices ? { price: f.price } : {}),
+        })),
       }
     : undefined;
   exchange.dispose();
-  return { frames, metrics, unserved: tape.unserved, store: snapshot, books: bookCopies, account, commands: tape.results };
+  return {
+    frames,
+    metrics,
+    unserved: tape.unserved,
+    unusedWrites: tape.unusedWrites,
+    wsRequests: [...tape.sentRequests].sort(),
+    store: snapshot,
+    books: bookCopies,
+    account,
+    commands: tape.results,
+  };
 }
 
 /** The fields both implementations carry, in one shape. */
@@ -488,9 +637,13 @@ writeFileSync(
     impl: values.impl,
     frames: result.frames,
     unserved: result.unserved,
+    unusedWrites: result.unusedWrites,
+    wsRequests: result.wsRequests,
     metrics: result.metrics,
     markets: result.store.markets.map(marketFields),
-    tickers: result.store.tickers.map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, t[f]])])),
+    tickers: result.store.tickers.map((t) =>
+      Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, t[f]])]),
+    ),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
     commands: result.commands,

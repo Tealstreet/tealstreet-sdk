@@ -3,12 +3,26 @@
 const root = '../../packages/safe-cex/src/exchanges';
 
 export const VENUES = {
+  blofin: {
+    rust: 'blofin',
+    ts: { module: `${root}/blofin/blofin.exchange.ts`, className: 'BlofinExchange', name: 'blofin' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('books.')).length >= count,
+    privateSocket: '/ws/private',
+    compareFillPrices: true,
+    options: { passphrase: 'replay-passphrase' },
+    cacheBustPaths: ['/api/v1/market/instruments'],
+    requestBodies: true,
+    defaultBodyValues: { tpTriggerPriceType: 'last', slTriggerPriceType: 'last', triggerPriceType: 'last' },
+    generatedId: (key, value) => key === 'clientOrderId' && value.startsWith('b3cdedc0a20880ba'),
+  },
   binance: {
     rust: 'binance',
     ts: { module: `${root}/binance/binance.exchange.ts`, className: 'BinanceExchange', name: 'binance' },
     /** Depth topics are registered once each book subscription reaches the socket. */
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >= count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >=
+      count,
     privateSocket: '/private/ws',
   },
 };

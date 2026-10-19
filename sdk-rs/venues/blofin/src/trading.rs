@@ -622,6 +622,9 @@ impl Blofin {
             let Some(order) = cx.store.order(id) else {
                 continue;
             };
+            if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
+                continue;
+            }
             let m = cx
                 .store
                 .market(&order.symbol)
@@ -713,6 +716,9 @@ impl Blofin {
         price: Option<f64>,
         amount: Option<f64>,
     ) -> Result<Vec<(u8, Placement, Order)>, String> {
+        if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
+            return Err("Cannot amend a terminal BloFin order".into());
+        }
         if amount.is_some_and(|v| !v.is_finite() || v < 0.0) {
             return Err("BloFin replacement amount is invalid".into());
         }
@@ -845,7 +851,8 @@ impl Blofin {
                             continue;
                         }
                         for opposite in cx.store.orders().iter().filter(|o| {
-                            o.symbol == order.symbol
+                            !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
+                                && o.symbol == order.symbol
                                 && o.side == order.side
                                 && o.amount <= 0.0
                                 && matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
@@ -864,12 +871,14 @@ impl Blofin {
                     let mut seen = HashSet::new();
                     for id in &ids {
                         if let Some(order) = cx.store.order(id)
+                            && !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled)
                             && order.amount <= 0.0
                             && matches!(order.kind, OrderType::StopLoss | OrderType::TakeProfit)
                         {
                             let real = id.split("__").next().unwrap_or(id);
                             for sibling in cx.store.orders().iter().filter(|o| {
-                                o.id != *id
+                                !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
+                                    && o.id != *id
                                     && !ids.contains(&o.id)
                                     && o.id.split("__").next() == Some(real)
                                     && o.amount <= 0.0
@@ -894,7 +903,7 @@ impl Blofin {
                         .store
                         .orders()
                         .iter()
-                        .filter(|o| o.symbol == symbol)
+                        .filter(|o| o.symbol == symbol && o.status == OrderStatus::Open)
                         .map(|o| o.id.clone())
                         .collect::<Vec<_>>();
                     Self::add_cancels(&mut job, self.cancel_targets(cx, &ids)?);
@@ -907,7 +916,8 @@ impl Blofin {
                     let real = id.split("__").next().unwrap_or(&id);
                     // Preserve every other protection on a shared native target.
                     for sibling in cx.store.orders().iter().filter(|o| {
-                        o.id != id
+                        !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
+                            && o.id != id
                             && o.id.split("__").next() == Some(real)
                             && matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
                     }) {
@@ -1250,7 +1260,13 @@ impl Blofin {
                             .iter()
                             .map(String::as_str)
                             .collect::<Vec<_>>();
-                        cx.store.remove_orders(&ids);
+                        if gone {
+                            cx.store.remove_orders(&ids);
+                        } else {
+                            for id in &target.store_ids {
+                                cx.store.set_order_status(id, OrderStatus::Canceled);
+                            }
+                        }
                         for id in &target.store_ids {
                             self.account.sources.remove(id);
                         }

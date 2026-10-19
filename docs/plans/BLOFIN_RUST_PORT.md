@@ -170,3 +170,20 @@ merge that PR, and create a fresh follow-up branch. No rebase or force push.
 - Run root typecheck/lint/tests plus required Rust checks. Record exact results
   and phase review; merge landing branch, rerun affected checks, then PR reviews
   and merge only after every required gate is green.
+
+### Phase 5 review checkpoint
+
+- Registered BloFin in wasm and SDK, including passphrase forwarding. Added
+  replay body matching, exact caller-ID preservation (including broker-prefix
+  IDs), one-shot recorded mutations, missing-write detection, logical private
+  subscriptions, and per-execution fill-price comparisons.
+- Review found terminal-row resurrection in amend/protection merging after
+  retaining terminal statuses. All planners now reject/skip terminal targets and
+  siblings; late partial frames cannot reopen terminal rows. A regression covers
+  terminal amendment, repeated cancellation, and new protection after cancellation.
+- Paired TS fix: cancel-all filters open rows instead of resending retained
+  terminal orders. Other defensive TS divergences are listed in gate.mjs.
+- Fixed live recorder handling of streamed transport bodies. Recorded 20 seconds
+  of BTC/ETH public traffic (2,922 records); public performance gate is running.
+- 44 BloFin tests and clippy pass after review fixes. Root typecheck (44 tasks)
+  and lint (28 tasks) pass; root tests and stable wasm/gates remain in progress.

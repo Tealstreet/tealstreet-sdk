@@ -44,9 +44,12 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const body = new TextDecoder().decode(response.body);
+    const parts = [];
+    for await (const chunk of response.body instanceof Uint8Array ? [response.body] : response.body) parts.push(chunk);
+    const bytes = Buffer.concat(parts);
+    const body = new TextDecoder().decode(bytes);
     write({ type: 'http', method: request.method, url: request.url, status: response.status, body });
-    return response;
+    return { ...response, body: bytes };
   },
 };
 
@@ -62,12 +65,15 @@ for (const symbol of values.books.split(',').filter(Boolean)) {
   host.command({ op: 'subscribeOrderBook', symbol });
 }
 const flush = setInterval(() => host.flush(), 250);
-setTimeout(() => {
-  clearInterval(flush);
-  host.flush();
-  host.dispose();
-  tape.end(() => {
-    console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames }));
-    process.exit(0);
-  });
-}, Number(values.seconds) * 1000);
+setTimeout(
+  () => {
+    clearInterval(flush);
+    host.flush();
+    host.dispose();
+    tape.end(() => {
+      console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames }));
+      process.exit(0);
+    });
+  },
+  Number(values.seconds) * 1000,
+);

@@ -3624,6 +3624,7 @@ dependencies = [
  "js-sys",
  "safe-cex-engine",
  "safe-cex-venue-binance",
+ "safe-cex-venue-blofin",
  "serde",
  "serde_json",
  "wasm-bindgen",

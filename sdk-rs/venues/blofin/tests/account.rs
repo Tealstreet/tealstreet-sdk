@@ -68,9 +68,13 @@ fn cumulative_fills_emit_execution_deltas_and_prices_once() {
     h.ws(&event("0.2", "110", "partially_filled"));
     h.ws(&event("0.5", "140", "filled"));
     h.ws(&event("0.5", "140", "filled"));
+    h.ws(&event("0.3", "120", "partially_filled"));
     let fills = executions(h.e.take_frame(2.0).unwrap());
     assert_eq!(fills, [(100.0, 0.0001), (130.0, 0.0002), (170.0, 0.0002)]);
-    assert!(h.e.store().orders().is_empty());
+    assert_eq!(
+        h.e.store().orders()[0].status,
+        safe_cex_engine::model::OrderStatus::Closed
+    );
 }
 #[test]
 fn stale_rest_cannot_reopen_a_filled_order() {

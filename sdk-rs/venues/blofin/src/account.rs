@@ -935,12 +935,20 @@ impl Blofin {
                         }
                         let source = Self::source(&row);
                         for order in orders {
+                            if cx.store.order(&order.id).is_some_and(|existing| {
+                                matches!(
+                                    existing.status,
+                                    OrderStatus::Closed | OrderStatus::Canceled
+                                )
+                            }) {
+                                continue;
+                            }
                             self.account
                                 .sources
                                 .insert(order.id.clone(), source.clone());
                             if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
                                 self.account.sources.remove(&order.id);
-                                cx.store.remove_orders(&[&order.id]);
+                                cx.store.set_order_status(&order.id, order.status);
                             } else {
                                 cx.store.upsert_order(order);
                             }

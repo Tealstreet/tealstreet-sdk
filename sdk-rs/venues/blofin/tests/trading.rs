@@ -545,3 +545,48 @@ fn editing_inline_virtual_protection_recreates_the_entry_and_both_brackets() {
     assert_eq!(p[0]["tpTriggerPrice"], "66000");
     assert_eq!(p[0]["attachAlgoOrders"][0]["slTriggerPrice"], "55000");
 }
+
+#[test]
+fn terminal_rows_cannot_be_amended_or_resurrect_protection() {
+    let mut h = Harness::new();
+    h.seed();
+    seed_order(&mut h, "12", "");
+    h.ws(r#"{"arg":{"channel":"orders"},"data":[{"instId":"BTC-USDT","orderId":"12","orderCategory":"normal","orderType":"limit","side":"buy","size":"10","price":"60000","state":"canceled"}]}"#);
+    h.e.handle(
+        1.0,
+        Event::Command(Command::AmendOrder {
+            command: 7,
+            id: "12".into(),
+            price: Some(61000.0),
+            amount: None,
+        }),
+    );
+    h.collect();
+    assert!(done(&h));
+    assert!(h.pending.is_empty());
+    let pair = |state| {
+        format!(
+            r#"{{"arg":{{"channel":"orders-algo"}},"data":[{{"instId":"BTC-USDT","tpslId":"91","side":"sell","size":"-1","marginMode":"cross","positionSide":"net","tpTriggerPrice":"65000","tpOrderPrice":"-1","slTriggerPrice":"55000","slOrderPrice":"-1","state":"{state}"}}]}}"#
+        )
+    };
+    h.ws(&pair("live"));
+    h.ws(&pair("canceled"));
+    h.e.handle(
+        2.0,
+        Event::Command(Command::CancelOrders {
+            command: 8,
+            ids: vec!["91__take_profit".into()],
+        }),
+    );
+    h.collect();
+    assert!(h.pending.is_empty());
+    place(
+        &mut h,
+        r#"[{"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":0,"price":54000}]"#,
+    );
+    let request = h.take("order-tpsl");
+    let payload: serde_json::Value = serde_json::from_str(request.body.as_ref().unwrap()).unwrap();
+    assert!(payload.get("tpTriggerPrice").is_none());
+    assert_eq!(payload["slTriggerPrice"], "54000");
+    assert!(h.pending.is_empty());
+}

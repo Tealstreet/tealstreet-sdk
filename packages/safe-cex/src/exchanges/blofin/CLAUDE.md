@@ -790,3 +790,8 @@ Income walks fail rather than silently returning a partial ledger after a failed
 page or an exhausted pagination bound. Query JSON shapes match the engine's
 Binance history surface, including seconds for execution timestamps and
 milliseconds for order/income/public-trade timestamps.
+
+Terminal order rows remain until reconciliation, and cancel-all selects only open
+orders in both TS and Rust. Rust additionally keeps terminal socket states
+monotonic and rejects amending or merging terminal protection, preventing late
+frames or retained canceled legs from creating new orders.
