@@ -774,3 +774,10 @@ cleanup and shuts down each context. Required error reporting lets later owned
 resources finish cleanup after a handler failure. The existing module-drop and
 perf-disposal binding tests pin retained-handle cleanup; the inventory guard must
 continue to detect any change in this body's hook receiver or multiplicity.
+
+Worker log helpers read native Js, including repeated control getters and the
+Object.entries-before-filter sequence. Keep controls/extras live through error
+materialization and use the shared native Map for cooldown key identity. Both
+worker and FFI startup deliver WorkerDataPayload directly; do not rebuild a JSON
+scaffold or patch retained fields after serialization. Typed constructor identities
+and the remaining payload consumers keep their separate audit boundaries.

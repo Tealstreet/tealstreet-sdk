@@ -1,6 +1,6 @@
 //! Concrete Spot Exchange assembled from the existing Spot class bodies.
 use crate::{
-    binding::{Binding, HyperliquidDependencies, RuntimeClock, base_exchange_rejection, opt},
+    binding::{Binding, HyperliquidDependencies, base_exchange_rejection, opt},
     cloid::hyperliquid_client_order_id_rule,
     realm::{
         Realm, Value,
@@ -26,7 +26,7 @@ use safe_cex_types::{
     PlaceOrderOpts, Position, PositionSide, PublicTrade, Ticker, UpdateOrderOpts,
     ValidateAccountResult,
 };
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::RefCell, rc::Rc};
 
 pub struct HyperliquidSpotExchange {
     base: Rc<BaseExchange>,
@@ -74,7 +74,6 @@ impl HyperliquidSpotExchange {
             RestDependencies {
                 http: deps.http,
                 limiter: deps.limiter,
-                clock: Arc::new(RuntimeClock::new(deps.runtime.clone())),
             },
         );
         let base = base_exchange_class(&mut realm, venue.base.clone(), deps.external_public_data);

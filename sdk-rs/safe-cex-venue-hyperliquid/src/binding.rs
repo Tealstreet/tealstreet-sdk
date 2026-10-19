@@ -136,7 +136,6 @@ impl HyperliquidExchange {
             RestDependencies {
                 http: deps.http.clone(),
                 limiter: deps.limiter.clone(),
-                clock: Arc::new(RuntimeClock(deps.runtime.clone())),
             },
         );
         let socket_base = base_websocket_class(

@@ -6,6 +6,7 @@ use crate::payload::StoreWorkerOp;
 use crate::payload::StoreWorkerStorePayload;
 use crate::settings::AppSettingsWorkerType;
 use crate::settings::ExchangeMetadataWorkerType;
+use safe_cex_exchange::js_runtime::value::Js;
 use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::store_delivery::StoreFrame;
 use safe_cex_exchange::store_delivery::StoreUpdateThrottle;
@@ -74,7 +75,7 @@ pub struct ExchangeWorker<H: ExchangeWorkerHost> {
     pub postprocessors: RefCell<ProcessorList>,
     pub exchange_dependent_postprocessors: RefCell<ProcessorList>,
     preparer: RefCell<StorePayloadPreparer>,
-    pub sentry_report_cooldowns: RefCell<std::collections::HashMap<String, (f64, f64)>>,
+    pub sentry_report_cooldowns: Js,
 }
 impl<H: ExchangeWorkerHost> ExchangeWorker<H> {
     // ts: constructor. Retain input identity, construct fresh real store and throttle.
@@ -125,7 +126,7 @@ impl<H: ExchangeWorkerHost> ExchangeWorker<H> {
                 postprocessors: RefCell::new(Rc::default()),
                 exchange_dependent_postprocessors: RefCell::new(Rc::default()),
                 preparer: RefCell::default(),
-                sentry_report_cooldowns: RefCell::default(),
+                sentry_report_cooldowns: Js::new_map(),
             }
         })
     }

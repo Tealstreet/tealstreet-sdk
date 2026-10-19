@@ -179,7 +179,7 @@ impl SharedExchangeOptions {
 }
 
 pub struct BaseExchange {
-    owned_tasks: Rc<crate::owned_tasks::OwnedTasks>,
+    pub(crate) owned_tasks: Rc<crate::owned_tasks::OwnedTasks>,
     pub name: ExchangeName,
     pub(crate) options: SharedExchangeOptions,
     pub store: Rc<dyn Store>,
