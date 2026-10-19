@@ -262,3 +262,8 @@ merge that PR, and create a fresh follow-up branch. No rebase or force push.
   below the original1.2MiB budget. Landing already raises its shared three-venue
   budget to1.4MiB; this lane does not increase it. Post-merge wasm build, SDK
   tests and all three venues' replay regressions will be recorded next.
+
+- Three-venue release initially exceeded landing's existing1.4MiB budget by
+  37,455 bytes. Optimizing only wasm dispatch/serialization glue for size (`z`)
+  reduces it to1,461,186 bytes, below1,468,006. Engine and venues remain O3.
+  The budget is unchanged. Final SDK/replay checks run on this exact artifact.

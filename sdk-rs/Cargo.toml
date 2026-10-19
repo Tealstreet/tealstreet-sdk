@@ -73,3 +73,7 @@ debug = "line-tables-only"
 lto = "fat"
 codegen-units = 1
 opt-level = 3
+
+# Keep dispatch/serialization glue small; venue and engine hot paths stay at O3.
+[profile.release.package.safe-cex-wasm]
+opt-level = "z"
