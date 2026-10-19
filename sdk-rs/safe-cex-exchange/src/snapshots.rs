@@ -7,7 +7,7 @@ use std::{
     task::Poll,
 };
 
-pub type AccountMarketOverlay = Rc<dyn Fn(Vec<Market>) -> Vec<Market>>;
+pub type AccountMarketOverlay = Rc<dyn Fn(Vec<Market>) -> Result<Vec<Market>, ExchangeError>>;
 
 pub struct MarketChanges {
     pub added: Vec<Market>,

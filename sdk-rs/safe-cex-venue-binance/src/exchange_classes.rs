@@ -1951,7 +1951,7 @@ impl ExchangeState {
                         .map(|overlay| {
                             let overlay = Rc::new(overlay);
                             let transform: safe_cex_exchange::snapshots::AccountMarketOverlay =
-                                Rc::new(move |markets| overlay.apply(markets));
+                                Rc::new(move |markets| Ok(overlay.apply(markets)));
                             Some(transform)
                         })
                         .map_err(|e| (*e).clone())

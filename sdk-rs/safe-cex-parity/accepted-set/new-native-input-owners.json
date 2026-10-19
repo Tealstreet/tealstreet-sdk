@@ -51,37 +51,44 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::base_exchange::create",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: bounded native BaseExchange binding observations; exact compiler API and executed conversion/capability receipts. See safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md for this owner, typed/worker boundaries and individual evidence."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::base_exchange::create_xhr_with_secondary_key",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: bounded native BaseExchange binding observations; exact compiler API and executed conversion/capability receipts. See safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md for this owner, typed/worker boundaries and individual evidence."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::base_exchange::exchange_options",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: bounded native BaseExchange binding observations; exact compiler API and executed conversion/capability receipts. See safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md for this owner, typed/worker boundaries and individual evidence."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::base_exchange::market_overlay",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: AccountMarketOverlay now propagates the original callback/conversion failure through its fallible result; removed the report-and-return-unadapted fallback. Actual installed native binding compiled RED->GREEN versus maintained BaseExchange, retaining original thrown identity/name/UTF-16 message. See safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::base_exchange::reads_on",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: bounded native BaseExchange binding observations; exact compiler API and executed conversion/capability receipts. See safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md for this owner, typed/worker boundaries and individual evidence."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::base_exchange::text",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: bounded native BaseExchange binding observations; exact compiler API and executed conversion/capability receipts. See safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md for this owner, typed/worker boundaries and individual evidence."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::base_exchange::worker_rpc",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: bounded native BaseExchange binding observations; exact compiler API and executed conversion/capability receipts. See safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md for this owner, typed/worker boundaries and individual evidence."
     },
     {
       "package": "safe-cex-exchange",

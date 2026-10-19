@@ -949,7 +949,7 @@ impl PublicDataParent for StoreParent {
         Ok(Rc::new(RefCell::new(self.0.store.tickers()?)))
     }
     fn adapt_markets(&self, markets: MarketBatch) -> Result<MarketBatch, ExchangeError> {
-        let adapted = self.0.adapt_external_markets(markets.borrow().clone());
+        let adapted = self.0.adapt_external_markets(markets.borrow().clone())?;
         Ok(Rc::new(RefCell::new(adapted)))
     }
     fn update(&self, update: PublicDataUpdate) -> Result<(), ExchangeError> {

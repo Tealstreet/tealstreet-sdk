@@ -1183,6 +1183,12 @@ The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
 worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
 completion hook and reconstructed error properties. Arguments/results use the
 existing JSON worker boundary; it does not create a parallel worker protocol.
+The seven native-input owner contracts and their individual boundary rulings are
+recorded in BASE_NATIVE_INPUT_REVIEW.md, with actual installed/source probes.
+AccountMarketOverlay is fallible: callback and typed conversion failures propagate
+through adapt_external_markets with the original local cause. The shared bridge
+never substitutes the original markets; loadAccountMarketOverlay retains its
+source-owned load/initial-Store-update catch.
 
 JS venue imports of safeCexAxiosCreate use `js_runtime::client::factory::create`
 with the venue runtime's TransportProvider. Raw `client::create` only supplies

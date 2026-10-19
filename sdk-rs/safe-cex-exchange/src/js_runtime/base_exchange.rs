@@ -551,7 +551,7 @@ pub fn create(
                                 load.call(Js::Undefined, vec![])?,
                             )
                             .await?;
-                            Ok(market_overlay(value, reporter))
+                            Ok(market_overlay(value))
                         });
                         base.load_account_market_overlay(overlay).await?;
                         Ok(Js::Undefined)
@@ -927,27 +927,15 @@ fn external_provider_object(
 }
 
 /// A JS `(markets) => markets` overlay as the core's typed overlay; null is none.
-/// A throwing or malformed overlay is reported and leaves the markets unchanged.
-fn market_overlay(
-    value: Js,
-    reporter: Rc<dyn ExchangeRuntime>,
-) -> Option<crate::snapshots::AccountMarketOverlay> {
+/// Abrupt completion crosses the typed boundary with the original thrown value.
+fn market_overlay(value: Js) -> Option<crate::snapshots::AccountMarketOverlay> {
     if value.is_nullish() {
         return None;
     }
     Some(Rc::new(move |markets: Vec<Market>| {
-        let mapped = from_typed(&markets)
-            .and_then(|m| value.call(Js::Undefined, vec![m]))
-            .and_then(|m| to_typed::<Vec<Market>>(&m));
-        match mapped {
-            Ok(mapped) => mapped,
-            Err(error) => {
-                reporter.report_exception(
-                    &error.to_exchange_error(),
-                    &serde_json::json!({"source": "accountMarketOverlay"}).into(),
-                );
-                markets
-            }
-        }
+        from_typed(&markets)
+            .and_then(|markets| value.call(Js::Undefined, vec![markets]))
+            .and_then(|mapped| to_typed::<Vec<Market>>(&mapped))
+            .map_err(Into::into)
     }))
 }

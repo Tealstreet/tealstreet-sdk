@@ -1913,11 +1913,14 @@ impl BaseExchange {
         Ok(positions)
     }
 
-    pub fn adapt_external_markets(&self, markets: Vec<Market>) -> Vec<Market> {
+    pub fn adapt_external_markets(
+        &self,
+        markets: Vec<Market>,
+    ) -> Result<Vec<Market>, ExchangeError> {
         let overlay = self.account_market_overlay.borrow().clone();
         match overlay {
             Some(overlay) => overlay(markets),
-            None => markets,
+            None => Ok(markets),
         }
     }
 
@@ -1936,7 +1939,7 @@ impl BaseExchange {
             }
             self.store.update(
                 StoreUpdate {
-                    markets: Some(self.adapt_external_markets(markets)),
+                    markets: Some(self.adapt_external_markets(markets)?),
                     ..Default::default()
                 },
                 false,

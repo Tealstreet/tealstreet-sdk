@@ -187,10 +187,7 @@ fn native_base_input_secondary_keeps_capabilities_and_original_failures() {
             let tag = options.get("key")?;
             Ok(Js::object(vec![
                 ("tag", tag),
-                (
-                    "get",
-                    Js::function("get", |_, args| Ok(arg(&args, 0))),
-                ),
+                ("get", Js::function("get", |_, args| Ok(arg(&args, 0)))),
                 (
                     "post",
                     Js::function("post", |this, args| {
@@ -216,13 +213,18 @@ fn native_base_input_secondary_keeps_capabilities_and_original_failures() {
             vec![options.clone(), create, Js::Undefined],
         );
         let observation = match result {
-            Err(error) => serde_json::json!({"mode":mode,"calls":calls.get(),"causeIdentity":error.value.same_reference(&cause)}),
+            Err(error) => {
+                serde_json::json!({"mode":mode,"calls":calls.get(),"causeIdentity":error.value.same_reference(&cause)})
+            }
             Ok(xhr) => {
                 assert!(seen.borrow()[0].same_reference(&options));
                 for opts in seen.borrow().iter() {
                     assert!(opts.get("remoteSigner").unwrap().same_reference(&signer));
                     assert!(opts.get("payloadSigner").unwrap().same_reference(&signer));
-                    assert_eq!(opts.get("unread").unwrap().to_js_string().unwrap().as_ref(), &[0xd800]);
+                    assert_eq!(
+                        opts.get("unread").unwrap().to_js_string().unwrap().as_ref(),
+                        &[0xd800]
+                    );
                 }
                 let get = xhr.call_method("get", vec![payload]).unwrap();
                 let post = xhr.call_method("post", vec![alias.clone()]).unwrap();
@@ -270,7 +272,7 @@ fn native_base_input_overlay_runs_the_installed_callable() {
             )
             .await
             .unwrap();
-            let markets = owner.base().adapt_external_markets(vec![]);
+            let markets = owner.base().adapt_external_markets(vec![]).unwrap();
             rows.push(serde_json::json!({"mode":mode,"undefinedResult":result.is_undefined(),"calls":calls.get(),"length":markets.len()}));
         }
         assert_eq!(serde_json::json!(rows), expected["overlayOwners"]);
@@ -305,7 +307,7 @@ fn native_base_input_worker_rpc_keeps_the_reached_wire_fields() {
             let result=await_js(&(shared.runtime.clone() as Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>),result).await;
             rows.push(match result {
                 Ok(value)=>serde_json::json!({"success":true,"removed":value.get("removed").unwrap().to_display()}),
-                Err(error)=>serde_json::json!({"success":false,"name":error.value.get("name").unwrap().to_display(),"message":error.message(),"code":error.value.get("code").unwrap().to_number().unwrap(),"stack":error.value.get("stack").unwrap().to_display()})
+                Err(error)=>serde_json::json!({"success":false,"name":error.value.get("name").unwrap().to_display(),"message":error.message(),"codeBits":error.value.get("code").unwrap().to_number().unwrap().to_bits().to_string(),"stack":error.value.get("stack").unwrap().to_display()})
             });
             // The installed converter must retain the exact original coercion failure.
             let cause = Js::object(vec![("opaque",Js::utf16(&[0xd800]))]);
@@ -335,9 +337,48 @@ fn native_base_overlay_propagates_original_throw_instead_of_markets() {
         let overlay = Js::function("throwing overlay", move |_, _| {
             Err(Thrown::new(original.clone()))
         });
-        let loading = this.call_method("loadAccountMarketOverlay", vec![Js::function("load", move |_, _| Ok(overlay.clone()))]).unwrap();
-        await_js(&(shared.runtime.clone() as Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>), loading).await.unwrap();
+        let loading = this
+            .call_method(
+                "loadAccountMarketOverlay",
+                vec![Js::function("load", move |_, _| Ok(overlay.clone()))],
+            )
+            .unwrap();
+        await_js(
+            &(shared.runtime.clone() as Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>),
+            loading,
+        )
+        .await
+        .unwrap();
         let outcome = owner.base().adapt_external_markets(vec![]);
-        assert!(format!("{outcome:?}").starts_with("Err("), "OVERLAY_ORIGINAL_THROW: source rejects instead of returning unadapted markets");
+        let error = outcome.expect_err(
+            "OVERLAY_ORIGINAL_THROW: source rejects instead of returning unadapted markets",
+        );
+        let thrown = Thrown::from(error);
+        assert!(
+            thrown.value.same_reference(&cause),
+            "original callback referent"
+        );
+        assert_eq!(
+            thrown.value.get("name").unwrap().to_display(),
+            expected["overlayThrow"]["name"]
+        );
+        let units = thrown.value.get("message").unwrap().to_js_string().unwrap();
+        assert_eq!(
+            serde_json::json!(units.as_ref()),
+            expected["overlayThrow"]["units"]
+        );
     });
+}
+
+#[test]
+fn base_native_text_contract_matches_source_typed_string_boundary() {
+    let expected = oracle();
+    let contracts: serde_json::Value = serde_json::from_str(include_str!(
+        "../../safe-cex-parity/accepted-set/contracts/safe-cex-exchange.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        contracts["safe_cex_exchange::js_runtime::base_exchange::text"]["cases"],
+        expected["textOwners"]
+    );
 }

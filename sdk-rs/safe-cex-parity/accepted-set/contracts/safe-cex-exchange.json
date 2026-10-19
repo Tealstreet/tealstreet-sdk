@@ -8344,7 +8344,7 @@
   "safe_cex_exchange::snapshots::AccountMarketOverlay": {
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/src/snapshots.rs::AccountMarketOverlay; actual compiler alias target and seven raw construction traits are probed. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to retained runtime handles.",
-    "reason": "Owned Rc callback over already typed Market rows; the closure is not a wire decoder. Snapshot/model parsing is independently inventoried.",
+    "reason": "Owned fallible Rc callback over already typed Market rows, returning the original ExchangeError on abrupt completion. The closure is not a wire decoder. Snapshot/model parsing is independently inventoried.",
     "target": {
       "resolved_path": {
         "path": "alloc::rc::Rc",
@@ -8384,14 +8384,36 @@
                               ],
                               "output": {
                                 "resolved_path": {
-                                  "path": "alloc::vec::Vec",
+                                  "path": "core::result::Result",
                                   "args": {
                                     "angle_bracketed": {
                                       "args": [
                                         {
                                           "type": {
                                             "resolved_path": {
-                                              "path": "safe_cex_types::Market",
+                                              "path": "alloc::vec::Vec",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_types::Market",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
                                               "args": null
                                             }
                                           }
@@ -37793,5 +37815,1169 @@
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
     "reason": "Defines the nine constant descriptors and four native callable imports on an existing Js globals object. It does not inspect or decode a user payload. All installed CCXT binding tests execute this actual constructor through install_library and check every constant and callable; no decoder permission transfers to the installed callbacks."
+  },
+  "safe_cex_exchange::js_runtime::base_exchange::text": {
+    "api": {
+      "kind": "function",
+      "name": "text",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md; tests/js_async_facade.rs actual NativeRuntime BaseExchange composition; tests/js_runtime.rs constructor, secondary-key and worker-RPC binding regressions; tests/js_async_facade_source.cjs maintained BaseExchange/createApiWithSecondaryKey source.",
+    "call": "{ use crate::js_runtime::value::{Js,Thrown}; let value=match $value[\"kind\"].as_str().unwrap() { \"text\"=>Js::str($value[\"text\"].as_str().unwrap()), \"utf16\"=>Js::utf16(&[0xd800]), \"undefined\"=>Js::Undefined,\"null\"=>Js::Null,\"number\"=>Js::Number(17.0), \"throw\"=>Js::object(vec![(\"toString\",Js::function(\"source\",|_,_|Err(Thrown::new(Js::str(\"original\")))))]), _=>unreachable!() }; let result=$type(&value); match result { Ok(value)=>serde_json::json!({\"ok\":true,\"units\":value.encode_utf16().collect::<Vec<_>>()}), Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.value.get(\"name\").unwrap().to_display(),\"message\":error.message()}) } }",
+    "cases": [
+      {
+        "input": {
+          "kind": "text",
+          "text": "BTC"
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            66,
+            84,
+            67
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "utf16",
+          "text": "BTC"
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            65533
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "undefined",
+          "text": "BTC"
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            117,
+            110,
+            100,
+            101,
+            102,
+            105,
+            110,
+            101,
+            100
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "null",
+          "text": "BTC"
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            110,
+            117,
+            108,
+            108
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "number",
+          "text": "BTC"
+        },
+        "output": {
+          "ok": true,
+          "units": [
+            49,
+            55
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "throw"
+        },
+        "output": {
+          "ok": false,
+          "name": "undefined",
+          "message": "original"
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::base_exchange::exchange_options": {
+    "api": {
+      "kind": "function",
+      "name": "exchange_options",
+      "signature": {
+        "inputs": [
+          [
+            "options",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::ExchangeOptions",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md; tests/js_async_facade.rs actual NativeRuntime BaseExchange composition; tests/js_runtime.rs constructor, secondary-key and worker-RPC binding regressions; tests/js_async_facade_source.cjs maintained BaseExchange/createApiWithSecondaryKey source.",
+    "call": "{ use crate::js_runtime::value::Js; let key=$value[\"key\"].as_str().unwrap(); let options=Js::object(vec![(\"key\",Js::str(key)),(\"secret\",Js::str(\"secret\")),(\"remoteSigner\",Js::function(\"host\",|_,_|Ok(Js::Undefined))),(\"payloadSigner\",Js::object(vec![(\"opaque\",Js::utf16(&[0xd800]))])),(\"unread\",Js::utf16(&[0xd800]))]); let before=options.get(\"payloadSigner\").unwrap(); let decoded=$type(&options).unwrap(); serde_json::json!({\"ok\":true,\"key\":decoded.key,\"secret\":decoded.secret,\"capabilityRetained\":options.get(\"payloadSigner\").unwrap().same_reference(&before),\"rawUnits\":options.get(\"unread\").unwrap().to_js_string().unwrap().as_ref()}) }",
+    "cases": [
+      {
+        "input": {
+          "key": "primary"
+        },
+        "output": {
+          "ok": true,
+          "key": "primary",
+          "secret": "secret",
+          "capabilityRetained": true,
+          "rawUnits": [
+            55296
+          ]
+        }
+      },
+      {
+        "input": {
+          "key": ""
+        },
+        "output": {
+          "ok": true,
+          "key": "",
+          "secret": "secret",
+          "capabilityRetained": true,
+          "rawUnits": [
+            55296
+          ]
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ use crate::js_runtime::value::Js; let key=$value[\"key\"].as_str().unwrap(); let options=Js::object(vec![(\"key\",Js::str(key)),(\"secret\",Js::str(\"secret\")),(\"remoteSigner\",Js::function(\"host\",|_,_|Ok(Js::Undefined))),(\"payloadSigner\",Js::object(vec![(\"opaque\",Js::utf16(&[0xd800]))])),(\"unread\",Js::utf16(&[0xd800]))]); let before=options.get(\"payloadSigner\").unwrap(); let decoded=$type(&options).unwrap(); serde_json::json!({\"ok\":true,\"key\":decoded.key,\"secret\":decoded.secret,\"capabilityRetained\":options.get(\"payloadSigner\").unwrap().same_reference(&before),\"rawUnits\":options.get(\"unread\").unwrap().to_js_string().unwrap().as_ref()}) }",
+      "cases": [
+        {
+          "input": {
+            "key": "primary"
+          },
+          "output": {
+            "ok": true,
+            "key": "primary",
+            "secret": "secret",
+            "capabilityRetained": true,
+            "rawUnits": [
+              55296
+            ]
+          }
+        },
+        {
+          "input": {
+            "key": ""
+          },
+          "output": {
+            "ok": true,
+            "key": "",
+            "secret": "secret",
+            "capabilityRetained": true,
+            "rawUnits": [
+              55296
+            ]
+          }
+        }
+      ],
+      "nativeFields": [
+        "key",
+        "capabilityRetained",
+        "rawUnits"
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::base_exchange::reads_on": {
+    "api": {
+      "kind": "function",
+      "name": "reads_on",
+      "signature": {
+        "inputs": [
+          [
+            "primary",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "secondary",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md; tests/js_async_facade.rs actual NativeRuntime BaseExchange composition; tests/js_runtime.rs constructor, secondary-key and worker-RPC binding regressions; tests/js_async_facade_source.cjs maintained BaseExchange/createApiWithSecondaryKey source.",
+    "call": "{ use crate::js_runtime::value::Js; let tag=Js::utf16(&[0xd800]); let primary=Js::object(vec![(\"tag\",tag.clone()),(\"post\",Js::function(\"post\",|this,args|Ok(Js::array(vec![this.get(\"tag\")?,crate::js_runtime::value::arg(&args,0)]))))]); let secondary=Js::object(vec![(\"get\",Js::function(\"get\",|_,args|Ok(crate::js_runtime::value::arg(&args,0))))]); let routed=$type(&primary,&secondary); let payload=if $value.as_bool().unwrap(){Js::object(vec![(\"opaque\",Js::Undefined)])}else{Js::array(vec![Js::Number(f64::NAN)])}; let got=routed.call_method(\"get\",vec![payload.clone()]).unwrap(); let post=routed.call_method(\"post\",vec![payload.clone()]).unwrap(); serde_json::json!({\"ok\":true,\"getIdentity\":got.same_reference(&payload),\"postIdentity\":post.get(\"1\").unwrap().same_reference(&payload),\"units\":post.get(\"0\").unwrap().to_js_string().unwrap().as_ref(),\"primaryUntouched\":primary.get(\"get\").unwrap().is_undefined(),\"array\":payload.is_array()}) }",
+    "cases": [
+      {
+        "input": true,
+        "output": {
+          "ok": true,
+          "getIdentity": true,
+          "postIdentity": true,
+          "units": [
+            55296
+          ],
+          "primaryUntouched": true,
+          "array": false
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "ok": true,
+          "getIdentity": true,
+          "postIdentity": true,
+          "units": [
+            55296
+          ],
+          "primaryUntouched": true,
+          "array": true
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ use crate::js_runtime::value::Js; let tag=Js::utf16(&[0xd800]); let primary=Js::object(vec![(\"tag\",tag.clone()),(\"post\",Js::function(\"post\",|this,args|Ok(Js::array(vec![this.get(\"tag\")?,crate::js_runtime::value::arg(&args,0)]))))]); let secondary=Js::object(vec![(\"get\",Js::function(\"get\",|_,args|Ok(crate::js_runtime::value::arg(&args,0))))]); let routed=$type(&primary,&secondary); let payload=if $value.as_bool().unwrap(){Js::object(vec![(\"opaque\",Js::Undefined)])}else{Js::array(vec![Js::Number(f64::NAN)])}; let got=routed.call_method(\"get\",vec![payload.clone()]).unwrap(); let post=routed.call_method(\"post\",vec![payload.clone()]).unwrap(); serde_json::json!({\"ok\":true,\"getIdentity\":got.same_reference(&payload),\"postIdentity\":post.get(\"1\").unwrap().same_reference(&payload),\"units\":post.get(\"0\").unwrap().to_js_string().unwrap().as_ref(),\"primaryUntouched\":primary.get(\"get\").unwrap().is_undefined(),\"array\":payload.is_array()}) }",
+      "cases": [
+        {
+          "input": true,
+          "output": {
+            "ok": true,
+            "getIdentity": true,
+            "postIdentity": true,
+            "units": [
+              55296
+            ],
+            "primaryUntouched": true,
+            "array": false
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "ok": true,
+            "getIdentity": true,
+            "postIdentity": true,
+            "units": [
+              55296
+            ],
+            "primaryUntouched": true,
+            "array": true
+          }
+        }
+      ],
+      "nativeFields": [
+        "getIdentity",
+        "postIdentity",
+        "units"
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::base_exchange::create": {
+    "api": {
+      "kind": "function",
+      "name": "create",
+      "signature": {
+        "inputs": [
+          [
+            "context",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::sockets::JsSocketContext",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "parts",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::base_exchange::BaseExchangeParts",
+                "args": null
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "options",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "store",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "initialize_fields",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_exchange::exchange::BaseExchange",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnOnce(&Js) -> Result<(), Thrown>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "safe_cex_exchange::js_runtime::value::Js",
+                                      "args": null
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md; tests/js_async_facade.rs actual NativeRuntime BaseExchange composition; tests/js_runtime.rs constructor, secondary-key and worker-RPC binding regressions; tests/js_async_facade_source.cjs maintained BaseExchange/createApiWithSecondaryKey source.",
+    "call": "{ use crate::js_runtime::value::Js; use std::rc::Rc; let runtime: Rc<dyn crate::runtime::ExchangeRuntime> = crate::native::native_runtime(); let context=crate::js_runtime::sockets::JsSocketContext::new(crate::native::native_runtime()); let options=Js::object(vec![(\"key\",Js::str(\"primary\")),(\"secret\",Js::str(\"secret\"))]); let store=Js::object(vec![(\"opaque\",Js::utf16(&[0xd800]))]); let options_alias=options.clone(); let store_alias=store.clone(); let spot=$value[\"spot\"].as_bool().unwrap(); let demo=$value[\"demo\"].as_bool().unwrap(); let (_,_) = (&runtime,&context); let (object,base)=$type(&context,crate::js_runtime::base_exchange::BaseExchangeParts {name:safe_cex_types::ExchangeName::Bybit,options:crate::js_runtime::base_exchange::exchange_options(&options).unwrap(),store:Rc::new(crate::native_store::DefaultStore::new()),settings:Default::default(),external_public_data:None},Js::str(\"bybit\"),options,store,move |this|{this.define(\"isSpot\",Js::Bool(spot))?;this.define(\"isDemo\",Js::Bool(demo))}).unwrap(); serde_json::json!({\"ok\":true,\"spot\":base.is_spot,\"demo\":base.is_demo,\"optionsIdentity\":object.get(\"options\").unwrap().same_reference(&options_alias),\"storeIdentity\":object.get(\"store\").unwrap().same_reference(&store_alias)}) }",
+    "cases": [
+      {
+        "input": {
+          "spot": true,
+          "demo": false
+        },
+        "output": {
+          "ok": true,
+          "spot": true,
+          "demo": false,
+          "optionsIdentity": true,
+          "storeIdentity": true
+        }
+      },
+      {
+        "input": {
+          "spot": false,
+          "demo": true
+        },
+        "output": {
+          "ok": true,
+          "spot": false,
+          "demo": true,
+          "optionsIdentity": true,
+          "storeIdentity": true
+        }
+      }
+    ],
+    "requiredFeatures": [
+      "native"
+    ],
+    "nativeObservation": {
+      "call": "{ use crate::js_runtime::value::Js; use std::rc::Rc; let runtime: Rc<dyn crate::runtime::ExchangeRuntime> = crate::native::native_runtime(); let context=crate::js_runtime::sockets::JsSocketContext::new(crate::native::native_runtime()); let options=Js::object(vec![(\"key\",Js::str(\"primary\")),(\"secret\",Js::str(\"secret\"))]); let store=Js::object(vec![(\"opaque\",Js::utf16(&[0xd800]))]); let options_alias=options.clone(); let store_alias=store.clone(); let spot=$value[\"spot\"].as_bool().unwrap(); let demo=$value[\"demo\"].as_bool().unwrap(); let (_,_) = (&runtime,&context); let (object,base)=$type(&context,crate::js_runtime::base_exchange::BaseExchangeParts {name:safe_cex_types::ExchangeName::Bybit,options:crate::js_runtime::base_exchange::exchange_options(&options).unwrap(),store:Rc::new(crate::native_store::DefaultStore::new()),settings:Default::default(),external_public_data:None},Js::str(\"bybit\"),options,store,move |this|{this.define(\"isSpot\",Js::Bool(spot))?;this.define(\"isDemo\",Js::Bool(demo))}).unwrap(); serde_json::json!({\"ok\":true,\"spot\":base.is_spot,\"demo\":base.is_demo,\"optionsIdentity\":object.get(\"options\").unwrap().same_reference(&options_alias),\"storeIdentity\":object.get(\"store\").unwrap().same_reference(&store_alias)}) }",
+      "cases": [
+        {
+          "input": {
+            "spot": true,
+            "demo": false
+          },
+          "output": {
+            "ok": true,
+            "spot": true,
+            "demo": false,
+            "optionsIdentity": true,
+            "storeIdentity": true
+          }
+        },
+        {
+          "input": {
+            "spot": false,
+            "demo": true
+          },
+          "output": {
+            "ok": true,
+            "spot": false,
+            "demo": true,
+            "optionsIdentity": true,
+            "storeIdentity": true
+          }
+        }
+      ],
+      "nativeFields": [
+        "spot",
+        "demo",
+        "optionsIdentity"
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::base_exchange::create_xhr_with_secondary_key": {
+    "api": {
+      "kind": "function",
+      "name": "create_xhr_with_secondary_key",
+      "signature": {
+        "inputs": [
+          [
+            "runtime",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_exchange::runtime::ExchangeRuntime",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "transport",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::provider::TransportProvider",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "receiver",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "a",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_exchange::js_runtime::value::Js",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md; tests/js_async_facade.rs actual NativeRuntime BaseExchange composition; tests/js_runtime.rs constructor, secondary-key and worker-RPC binding regressions; tests/js_async_facade_source.cjs maintained BaseExchange/createApiWithSecondaryKey source.",
+    "call": "{ use crate::js_runtime::value::{Js,Thrown}; use std::rc::Rc; let runtime: Rc<dyn crate::runtime::ExchangeRuntime> = crate::native::native_runtime(); let mode=$value.as_str().unwrap(); let options=Js::object(vec![(\"key\",Js::str(\"primary\")),(\"secret\",Js::str(\"secret\")),(\"secondary_key\",Js::str(if mode==\"single\"{\"\"}else{\"secondary\"})),(\"unread\",Js::utf16(&[0xd800]))]); let calls=Rc::new(std::cell::Cell::new(0)); let seen=calls.clone(); let cause=Js::object(vec![(\"cause\",Js::utf16(&[0xd800]))]); let thrown=cause.clone(); let fail=mode==\"throw\"; let factory=Js::function(\"createApi\",move |_,args|{seen.set(seen.get()+1); if fail{return Err(Thrown::new(thrown.clone()));}let opts=crate::js_runtime::value::arg(&args,0); Ok(Js::object(vec![(\"key\",opts.get(\"key\")?),(\"unread\",opts.get(\"unread\")?)]))}); match $type(&runtime,&safe_cex_transport::DirectTransport,&Js::object(vec![]),&[options,factory,Js::Undefined]){Ok((routed,primary,secondary))=>serde_json::json!({\"ok\":true,\"calls\":calls.get(),\"shared\":routed.same_reference(&primary)&&primary.same_reference(&secondary),\"key\":secondary.get(\"key\").unwrap().to_display(),\"units\":secondary.get(\"unread\").unwrap().to_js_string().unwrap().as_ref()}),Err(error)=>serde_json::json!({\"ok\":false,\"calls\":calls.get(),\"causeIdentity\":error.value.same_reference(&cause)})} }",
+    "cases": [
+      {
+        "input": "single",
+        "output": {
+          "ok": true,
+          "calls": 1,
+          "shared": true,
+          "key": "primary",
+          "units": [
+            55296
+          ]
+        }
+      },
+      {
+        "input": "split",
+        "output": {
+          "ok": true,
+          "calls": 2,
+          "shared": false,
+          "key": "secondary",
+          "units": [
+            55296
+          ]
+        }
+      },
+      {
+        "input": "throw",
+        "output": {
+          "ok": false,
+          "calls": 1,
+          "causeIdentity": true
+        }
+      }
+    ],
+    "requiredFeatures": [
+      "native"
+    ]
+  },
+  "safe_cex_exchange::js_runtime::base_exchange::market_overlay": {
+    "api": {
+      "kind": "function",
+      "name": "market_overlay",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::snapshots::AccountMarketOverlay",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md; tests/js_async_facade.rs actual NativeRuntime BaseExchange composition; tests/js_runtime.rs constructor, secondary-key and worker-RPC binding regressions; tests/js_async_facade_source.cjs maintained BaseExchange/createApiWithSecondaryKey source.",
+    "call": "{ use crate::js_runtime::value::{Js,Thrown}; use std::rc::Rc; let mode=match $value.as_str().unwrap(){\"null\"=>\"null\",\"undefined\"=>\"undefined\",\"throw\"=>\"throw\",_=>\"identity\"}; let invoked=Rc::new(std::cell::Cell::new(0)); let observed=invoked.clone(); let value=match mode{\"null\"=>Js::Null,\"undefined\"=>Js::Undefined,_=>Js::function(\"overlay\",move |_,args|{observed.set(observed.get()+1);if mode==\"throw\"{Err(Thrown::new(Js::utf16(&[0xd800])))}else{Ok(crate::js_runtime::value::arg(&args,0))}})}; let overlay=$type(value); let present=overlay.is_some(); let result=overlay.map(|apply|apply(vec![])).transpose(); match result {Ok(result)=>serde_json::json!({\"ok\":true,\"present\":present,\"calls\":invoked.get(),\"length\":result.map(|items|items.len())}),Err(error)=>{let thrown=Thrown::from(error);serde_json::json!({\"ok\":false,\"present\":present,\"calls\":invoked.get(),\"units\":thrown.value.to_js_string().unwrap().as_ref()})}} }",
+    "cases": [
+      {
+        "input": "null",
+        "output": {
+          "ok": true,
+          "present": false,
+          "calls": 0,
+          "length": null
+        }
+      },
+      {
+        "input": "undefined",
+        "output": {
+          "ok": true,
+          "present": false,
+          "calls": 0,
+          "length": null
+        }
+      },
+      {
+        "input": "identity",
+        "output": {
+          "ok": true,
+          "present": true,
+          "calls": 1,
+          "length": 0
+        }
+      },
+      {
+        "input": "throw",
+        "output": {
+          "ok": false,
+          "present": true,
+          "calls": 1,
+          "units": [
+            55296
+          ]
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ use crate::js_runtime::value::{Js,Thrown}; use std::rc::Rc; let mode=match $value.as_str().unwrap(){\"null\"=>\"null\",\"undefined\"=>\"undefined\",\"throw\"=>\"throw\",_=>\"identity\"}; let invoked=Rc::new(std::cell::Cell::new(0)); let observed=invoked.clone(); let value=match mode{\"null\"=>Js::Null,\"undefined\"=>Js::Undefined,_=>Js::function(\"overlay\",move |_,args|{observed.set(observed.get()+1);if mode==\"throw\"{Err(Thrown::new(Js::utf16(&[0xd800])))}else{Ok(crate::js_runtime::value::arg(&args,0))}})}; let overlay=$type(value); let present=overlay.is_some(); let result=overlay.map(|apply|apply(vec![])).transpose(); match result {Ok(result)=>serde_json::json!({\"ok\":true,\"present\":present,\"calls\":invoked.get(),\"length\":result.map(|items|items.len())}),Err(error)=>{let thrown=Thrown::from(error);serde_json::json!({\"ok\":false,\"present\":present,\"calls\":invoked.get(),\"units\":thrown.value.to_js_string().unwrap().as_ref()})}} }",
+      "cases": [
+        {
+          "input": "null",
+          "output": {
+            "ok": true,
+            "present": false,
+            "calls": 0,
+            "length": null
+          }
+        },
+        {
+          "input": "undefined",
+          "output": {
+            "ok": true,
+            "present": false,
+            "calls": 0,
+            "length": null
+          }
+        },
+        {
+          "input": "identity",
+          "output": {
+            "ok": true,
+            "present": true,
+            "calls": 1,
+            "length": 0
+          }
+        },
+        {
+          "input": "throw",
+          "output": {
+            "ok": false,
+            "present": true,
+            "calls": 1,
+            "units": [
+              55296
+            ]
+          }
+        }
+      ],
+      "nativeFields": [
+        "present",
+        "calls",
+        "length"
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::base_exchange::worker_rpc": {
+    "api": {
+      "kind": "function",
+      "name": "worker_rpc",
+      "signature": {
+        "inputs": [
+          [
+            "context",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Weak",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::sockets::JsSocketContext",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BASE_NATIVE_INPUT_REVIEW.md; tests/js_async_facade.rs actual NativeRuntime BaseExchange composition; tests/js_runtime.rs constructor, secondary-key and worker-RPC binding regressions; tests/js_async_facade_source.cjs maintained BaseExchange/createApiWithSecondaryKey source.",
+    "call": "{ use crate::js_runtime::value::Js; use std::rc::Rc; let live=$value.as_bool().unwrap(); let host=crate::native::native_runtime(); let context=crate::js_runtime::sockets::JsSocketContext::new(host); let weak=Rc::downgrade(&context); if !live{drop(context);} let executor=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap(); tokio::task::LocalSet::new().block_on(&executor,async {let result=match $type(&weak,vec![Js::str(\"removeOrders\"),Js::array(vec![])]){Ok(value)=>{let runtime:Rc<dyn crate::runtime::ExchangeRuntime>=crate::native::native_runtime();crate::js_runtime::promise::await_js(&runtime,value).await},Err(error)=>Err(error)};let error=result.unwrap_err();serde_json::json!({\"ok\":false,\"live\":live,\"message\":error.message()})}) }",
+    "cases": [
+      {
+        "input": true,
+        "output": {
+          "ok": false,
+          "live": true,
+          "message": "exchange is not assembled"
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "ok": false,
+          "live": false,
+          "message": "exchange is not assembled"
+        }
+      }
+    ],
+    "requiredFeatures": [
+      "native"
+    ]
   }
 }

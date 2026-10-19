@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ts = require(process.env.SAFE_CEX_TYPESCRIPT_PATH || 'typescript');
+const numberBits = value => { const bytes=Buffer.alloc(8); bytes.writeDoubleLE(value); return bytes.readBigUInt64LE().toString(); };
 const file = path.resolve(__dirname, '../../../packages/safe-cex/src/exchanges/base.ts');
 const tree = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
 assert.equal(tree.parseDiagnostics.length, 0);
@@ -95,13 +96,21 @@ vm.runInNewContext(ts.transpileModule(`class Source { ${members.concat(additiona
     assert.equal(request.method,'removeOrders');
     listeners.get('callMethod:done')({requestId:request.requestId,success,result:success?{removed:'wire'}:{name:'WorkerFailure',message:'rejected',code:409,stack:'worker stack'}});
     try {const result=await promise;workerOwners.push({success:true,removed:result.removed});}
-    catch(error){workerOwners.push({success:false,name:error.name,message:error.message,code:error.code,stack:error.stack});}
+    catch(error){workerOwners.push({success:false,name:error.name,message:error.message,codeBits:numberBits(error.code),stack:error.stack});}
   }
   const receiver=new scope.Source();receiver.store={markets:[]};receiver.isDisposed=false;
-  const cause={name:'RangeError',message:'b\ud800'};
+  const cause=new RangeError('b\ud800');
   await receiver.loadAccountMarketOverlay(()=>()=>{throw cause;});
   let overlayThrow;
   try {receiver.adaptExternalMarkets([]);overlayThrow={propagates:false};}
   catch(error){overlayThrow={propagates:true,identity:error===cause,name:error.name,units:Array.from(error.message,c=>c.charCodeAt(0))};}
-  process.stdout.write(JSON.stringify({ rows, guarded, secondaryOwners, overlayOwners, workerOwners, overlayThrow }));
+  const textInputs=['text','utf16','undefined','null','number','throw'].map(kind=>kind==='throw'?{kind}:{kind,text:'BTC'});
+  const textOwners=textInputs.map(input=>{
+    const value=({text:'BTC',utf16:'\ud800',undefined:undefined,null:null,number:17,throw:{toString(){throw 'original';}}})[input.kind];
+    let output;
+    try {const text=String(value);output={ok:true,units:Array.from(text.toWellFormed(),c=>c.charCodeAt(0))};}
+    catch(error){output={ok:false,name:String(error.name),message:String(error)};}
+    return {input,output};
+  });
+  process.stdout.write(JSON.stringify({ rows, guarded, secondaryOwners, overlayOwners, workerOwners, overlayThrow, textOwners }));
 })().catch(error => { console.error(error); process.exitCode = 1; });
