@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
+import { fixWeexConditionals } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { venueOf } from './venues.mjs';
 
@@ -112,6 +113,21 @@ const KNOWN_TS_FIXES = {
     'new account equity survives delayed snapshots and local balance ticks',
     'acknowledged leverage survives failed post-write snapshots',
   ],
+  weex(account) {
+    // TS reads opening STOP/TP stream rows as protective orders and displays
+    // the execution price as their trigger, corrupting conditional size amends.
+    const bytes = readFileSync(values.tape);
+    const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
+      .toString('utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    fixWeexConditionals(account, records);
+    // Additional deliberate fixes, covered by native regressions: failed
+    // normal/algo reads retain the complete last snapshot; stale depth/private
+    // frames cannot undo newer state; repeated fill IDs emit once; missing
+    // placement IDs fail rather than fabricating an ID; rejected cancellations
+    // retain their order; per-symbol margin changes preserve that symbol's mode.
+    // Price-only replacement preserves remaining quantity and refuses uncertain
+    // fill/bracket state; positive income cursors always report INCOMPLETE.
+  },
   bingx: (account, rustAccount) => {
   if (values.venue === 'bingx') {
     // BingX TS emits a terminal cumulative fill, ignores partial executions,
@@ -239,7 +255,9 @@ for (let run = 0; run < runs; run++) {
     const unserved = output.unserved;
     if (Boolean(output.account) !== isPrivate) differences.push(impl + ': account presence differs from tape classification');
     // Paced private tapes gate correctness; their unscored heap can shed loaded code.
-    if (!isPrivate && (output.metrics.retainedBytes < 0 || output.metrics.bufferRetainedBytes < 0)) differences.push(impl + ': negative retained memory component; baseline is invalid');
+    if (!isPrivate) for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
+      if (!Number.isFinite(output.metrics[field]) || output.metrics[field] < 0) differences.push(`${impl}: invalid ${field} (${output.metrics[field]}); baseline is invalid`);
+    }
     if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
     for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
     for (const symbol of values.books.split(',').filter(Boolean)) {
@@ -250,6 +268,7 @@ for (let run = 0; run < runs; run++) {
   }
   if (isPrivate && ts.account && rust.account) {
     if (values.venue === 'bingx') KNOWN_TS_FIXES.bingx(ts.account, rust.account);
+    if (values.venue === 'weex') KNOWN_TS_FIXES.weex(ts.account);
     if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
     if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
     if (values.venue === 'bybit') KNOWN_TS_FIXES.bybit(ts.account, rust.account, ts);

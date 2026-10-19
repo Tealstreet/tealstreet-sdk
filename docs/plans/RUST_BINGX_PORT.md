@@ -349,3 +349,17 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   wasmclippy, bans and fmt pass. Latest public BingX gate:CPU95.1/60.4ms TS/Rust,
   steady36.1/22.9ms, retained3.50/1.97MB; Binance871,Bybit8742,Crypto.com2177,
   OKX8902-frame public gates pass. Final private variants/CI continue before merge.
+
+### Concurrent WEEX landing integration
+
+- Synced latest landing6cd219ce4c after WEEX landed during final PR CI startup.
+  Retained its header-authenticated socket/HTTP transport, disposal behavior,
+  ticker-symbol command, generated acknowledgement templates and effectiveAt
+  snapshots alongside BingX's decompression,16KiB chunks, typed/staged matching,
+  reconnect delivery, paced-subscription barrier and memory measurement rules.
+- Independent host and harness merge reviews are clear; header/gzip/deflate probe
+  and10host tests pass. Engine now follows landing's bounded1MiB emptied metadata
+  envelopes for every selector; preserves BingX aliases, UTF8/overflow safeguards,
+  compact interner and indexed ticker API. Engine33+BingX92+WEEX76tests pass,
+  as do workspace clippy and refreshed SDK typecheck. Full rebuilt six-venue
+  gates/aggregate size and final-head CI remain required before landing.

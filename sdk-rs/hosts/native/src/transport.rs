@@ -4,7 +4,11 @@ use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::{HttpRequest, Method, SocketId};
 use std::io::Read;
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{
+    Message,
+    client::IntoClientRequest,
+    http::{HeaderName, HeaderValue},
+};
 
 pub trait Transport {
     /// Open a socket; report it on `events` and return where to send text.
@@ -15,7 +19,19 @@ pub trait Transport {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String>;
+    /// Unsupported transports report a close instead of dropping authentication.
+    fn connect_with_headers(
+        &self,
+        socket: SocketId,
+        _url: String,
+        _headers: Vec<(&'static str, String)>,
+        events: Events,
+    ) -> mpsc::UnboundedSender<String> {
+        let _ = events.send(HostEvent::WsClosed(socket, 1006));
+        mpsc::unbounded_channel().0
+    }
     /// Run a request, reporting its start, body chunks and end on `events`.
+    /// Bound its lifetime and report `HttpFailed` on timeout, including the body.
     fn request(&self, request: HttpRequest, events: Events);
 }
 
@@ -31,6 +47,7 @@ impl NetworkTransport {
         let _ = rustls::crypto::ring::default_provider().install_default();
         Self {
             http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(20))
                 .build()
                 .expect("an HTTP client with the default configuration"),
         }
@@ -50,9 +67,33 @@ impl Transport for NetworkTransport {
         url: String,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        self.connect_with_headers(socket, url, vec![], events)
+    }
+
+    fn connect_with_headers(
+        &self,
+        socket: SocketId,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        events: Events,
+    ) -> mpsc::UnboundedSender<String> {
         let (outgoing, mut pending) = mpsc::unbounded_channel::<String>();
         tokio::spawn(async move {
-            let mut ws = match tokio_tungstenite::connect_async(url.as_str()).await {
+            let request = (|| {
+                let mut request = url.into_client_request().ok()?;
+                for (name, value) in headers {
+                    request.headers_mut().insert(
+                        HeaderName::from_bytes(name.as_bytes()).ok()?,
+                        HeaderValue::from_str(&value).ok()?,
+                    );
+                }
+                Some(request)
+            })();
+            let Some(request) = request else {
+                let _ = events.send(HostEvent::WsClosed(socket, 1006));
+                return;
+            };
+            let mut ws = match tokio_tungstenite::connect_async(request).await {
                 Ok((ws, _)) => ws,
                 Err(_) => {
                     let _ = events.send(HostEvent::WsClosed(socket, 1006));
