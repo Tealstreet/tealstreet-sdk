@@ -189,3 +189,74 @@ fn maintained_source_preserves_six_callback_throws() {
     );
     assert_eq!(String::from_utf8(output.stdout).unwrap(), "6");
 }
+
+fn book_state_socket() -> (Harness, Js) {
+    let h = harness(ExchangeName::Okx, options(), |_| {});
+    let socket = h.exchange.scope.shared.globals.get("OKXPublicWebsocket").unwrap()
+        .construct(vec![h.exchange.scope.this.clone()], None).unwrap();
+    (h, socket)
+}
+fn book_frame(action: &str, sequence: &str, previous: &str) -> Js {
+    Js::object(vec![("action", Js::str(action)), ("data", Js::array(vec![Js::object(vec![
+        ("seqId", Js::str(sequence)), ("prevSeqId", Js::str(previous)),
+    ])]))])
+}
+#[test]
+fn book_state_snapshot_does_not_read_unrelated_entries_or_topics() {
+    let (_h, socket) = book_state_socket();
+    let original = Js::object(vec![("opaque", Js::Bool(true))]);
+    let cause = original.clone();
+    let poison = Js::object(vec![("toString", Js::function("poison", move |_, _| Err(Thrown::new(cause.clone()))))]);
+    let sequences = socket.get("orderBookSequenceByHandler").unwrap();
+    sequences.call_method("set", vec![Js::str("unrelated"), poison.clone()]).unwrap();
+    let topics = Js::object(vec![]);
+    let cause = original.clone();
+    topics.define_accessor("unrelated", Some(Rc::new(move |_| Err(Thrown::new(cause.clone())))), None).unwrap();
+    socket.set("topics", topics).unwrap();
+    let accepted = socket.call_method("acceptOrderBookSequence", vec![Js::str("books.BTC"), book_frame("snapshot", "10", "")]);
+    assert!(matches!(accepted, Ok(Js::Bool(true))), "snapshot must touch only the selected state entry: {accepted:?}");
+    assert!(sequences.call_method("get", vec![Js::str("unrelated")]).unwrap().strict_equals(&poison));
+    assert!(sequences.call_method("get", vec![Js::str("books.BTC")]).unwrap().strict_equals(&Js::str("10")));
+}
+#[test]
+fn book_state_recovery_commits_before_selected_topic_throws() {
+    let (_h, socket) = book_state_socket();
+    let sequences = socket.get("orderBookSequenceByHandler").unwrap();
+    let recovering = socket.get("recoveringOrderBooks").unwrap();
+    sequences.call_method("set", vec![Js::str("books.BTC"), Js::str("10")]).unwrap();
+    let original = Js::object(vec![("opaque", Js::Bool(true))]);
+    let cause = original.clone();
+    let topics = Js::object(vec![]);
+    topics.define_accessor("books.BTC", Some(Rc::new(move |_| Err(Thrown::new(cause.clone())))), None).unwrap();
+    socket.set("topics", topics).unwrap();
+    let error = socket.call_method("recoverOrderBook", vec![Js::str("books.BTC")]).unwrap_err();
+    assert!(error.value.strict_equals(&original), "original topic getter throw");
+    assert!(!sequences.call_method("has", vec![Js::str("books.BTC")]).unwrap().truthy(), "delete happens before the topic read");
+    assert!(recovering.call_method("has", vec![Js::str("books.BTC")]).unwrap().truthy(), "add happens before the topic read");
+}
+#[test]
+fn book_state_sequence_uses_the_live_selected_map_methods() {
+    let (_h, socket) = book_state_socket();
+    let trace = Rc::new(RefCell::new(Vec::new()));
+    let calls = trace.clone();
+    let sequences = Js::object(vec![("set", Js::function("set", move |receiver, args| {
+        calls.borrow_mut().push((receiver, args)); Ok(Js::Undefined)
+    }))]);
+    socket.set("orderBookSequenceByHandler", sequences.clone()).unwrap();
+    let accepted = socket.call_method("acceptOrderBookSequence", vec![Js::str("books.BTC"), book_frame("snapshot", "10", "")]).unwrap();
+    assert!(accepted.truthy());
+    let calls = trace.borrow();
+    assert_eq!(calls.len(), 1, "source calls the selected Map method once");
+    assert!(calls[0].0.strict_equals(&sequences));
+    assert!(calls[0].1[0].strict_equals(&Js::str("books.BTC")));
+    assert!(calls[0].1[1].strict_equals(&Js::str("10")));
+}
+
+#[test]
+fn book_state_maintained_source_access_and_commit_order() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/book-state-source.mjs"))
+        .output().expect("maintained source state oracle");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), "3 maintained source state observations PASS");
+}
