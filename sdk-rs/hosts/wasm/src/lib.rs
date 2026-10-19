@@ -9,6 +9,7 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
+use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
@@ -459,6 +460,12 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
+            }))),
+            "bitrue" => Box::new(Engine::new(Bitrue::new(BitrueOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                ..BitrueOptions::default()
             }))),
             "blofin" => Box::new(Engine::new(Blofin::new(BlofinOptions {
                 testnet: options.testnet,

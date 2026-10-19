@@ -40,3 +40,19 @@ create a clean follow-up branch. Never stash, rebase, force-push or touch master
 - Plan committed; source/API audit in progress. Official documentation:
   https://www.bitrue.com/api_docs_includes_file/futures/index.html and
   https://github.com/Bitrue-exchange/USDT-M-Future-open-api-docs/tree/main/v2 .
+
+### Public checkpoint
+
+- Implemented typed public state and registered the venue with the WASM/SDK and
+  replay harness; private/trading/query module groundwork compiles alongside it.
+- Sub-agent public review PASS after fixing candle routing on reconnect,
+  per-channel request serialization/correlation, timeout isolation, error replies,
+  and symbol aliases. Five independent review regressions pass.
+- Live 20-second tape: 776 markets/tickers, two full books, 3,287 replay frames.
+  Gate PASS: TS/Rust CPU 243.8/151.7 ms; steady 131.6/89.3 ms;
+  retained 2.9/2.4 MB. Fixture committed.
+- Native public tests (8) and review tests (5) pass; private/trading/query phase
+  audits and the documented private gate are still in progress.
+- TS correction discovered from official payload units: apply contract size to
+  public depth/ticker/candle volumes and retain contractSize metadata. Private
+  units, lifecycle and cancellation corrections are being validated separately.

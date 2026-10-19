@@ -95,12 +95,12 @@ export const subscriptionKeys = (url, text) => {
   } catch {
     return [];
   }
-  const method = String(message.method ?? message.reqType ?? message.op ?? '').toUpperCase();
+  const method = String(message.method ?? message.reqType ?? message.op ?? message.event ?? '').toUpperCase();
   if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return [];
   const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
   const parsed = new URL(url);
   const topics =
-    message.params?.channels ?? message.params ?? message.args ?? (message.dataType ? [message.dataType] : []);
+    message.params?.channels ?? (message.params?.channel ? [message.params.channel] : message.params) ?? message.args ?? (message.dataType ? [message.dataType] : []);
   if (!Array.isArray(topics)) return [];
   return topics.map(
     (topic) =>

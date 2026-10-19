@@ -44,6 +44,77 @@ const okx = (name) => ({
 });
 
 export const VENUES = {
+  bitrue: {
+    rust: 'bitrue',
+    ts: { module: `${root}/bitrue/bitrue.exchange.ts`, className: 'BitrueExchange', name: 'bitrue' },
+    privateSocket: '/stream?listenKey=',
+    compareFillPrices: true,
+    volatileBodyFields: true,
+    generatedBodyId: (key) => key === 'clientOrderId',
+    isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.includes('/listenKey'),
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('_simple_depth_step0')).length >= count,
+    validateRequest: ({ method, url, body, headers }) => {
+      const parsed = new URL(url);
+      if (!['fapi.bitrue.com', 'fapiws-auth.bitrue.com'].includes(parsed.hostname))
+        throw new Error('Bitrue must emit a real upstream URL');
+      const fields = Object.fromEntries(Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), String(value)]));
+      if (!fields['x-ch-apikey']) return;
+      if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
+      const timestamp = fields['x-ch-ts'];
+      const payload = timestamp + method + parsed.pathname + parsed.search + (body ?? '');
+      if (fields['x-ch-apikey'] !== 'replay-key' || !/^\d+$/.test(timestamp) ||
+          Math.abs(Date.now() - Number(timestamp)) > 60_000 ||
+          fields['x-ch-sign'] !== createHmac('sha256', 'replay-secret').update(payload).digest('hex'))
+        throw new Error('Invalid Bitrue REST signature');
+    },
+    createSocketAudit: (_impl, { isPrivate, books }) => {
+      const states = new Map();
+      const failures = [];
+      const state = (url) => {
+        if (!states.has(url)) states.set(url, { channels: new Set(), pings: new Set() });
+        return states.get(url);
+      };
+      return {
+        received(url, text) {
+          const frame = JSON.parse(text);
+          const current = state(url);
+          if (frame.ping !== undefined) current.pings.add(JSON.stringify({ pong: frame.ping }));
+          else if (frame.event === 'ping') current.pings.add(JSON.stringify(frame.ts === undefined ? { event: 'pong' } : { event: 'pong', ts: frame.ts }));
+          if (frame.channel && (frame.tick || frame.data) && frame.event_rep !== 'rep' && !current.channels.has(frame.channel))
+            failures.push('data arrived without subscription: ' + frame.channel);
+        },
+        sent(url, text) {
+          const current = state(url);
+          if (text === 'pong') return;
+          const frame = JSON.parse(text);
+          if (frame.event === 'sub') current.channels.add(frame.params.channel);
+          if (frame.event === 'unsub') current.channels.delete(frame.params.channel);
+          if (frame.event === 'pong' || frame.pong !== undefined) {
+            const expected = [...current.pings].find((raw) => {
+              const ping = JSON.parse(raw);
+              return Object.entries(ping).every(([key, value]) => frame[key] === value);
+            });
+            if (!expected) failures.push('unexpected Bitrue heartbeat reply');
+            else current.pings.delete(expected);
+          }
+        },
+        ready() {
+          return !isPrivate || [...states].some(([url, s]) => url.startsWith('wss://fapiws.bitrue.com/stream?listenKey=') && s.channels.has('user_account_update'));
+        },
+        errors() {
+          for (const [url, s] of states) {
+            if (s.pings.size) failures.push('missing Bitrue heartbeat reply');
+            if (url.includes('fmarket-ws')) for (const symbol of books) {
+              const native = 'e_' + symbol.replace(/^E-/, '').replaceAll('-', '').toLowerCase();
+              if (!s.channels.has(`market_${native}_simple_depth_step0`)) failures.push('missing Bitrue depth subscription: ' + symbol);
+            }
+          }
+          return failures;
+        },
+      };
+    },
+  },
   blofin: {
     rust: 'blofin',
     ts: { module: `${root}/blofin/blofin.exchange.ts`, className: 'BlofinExchange', name: 'blofin' },

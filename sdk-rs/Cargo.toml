@@ -26,6 +26,7 @@ js-sys = "0.3.106"
 safe-cex-crypto = { path = "crypto" }
 safe-cex-engine = { path = "engine" }
 safe-cex-venue-binance = { path = "venues/binance" }
+safe-cex-venue-bitrue = { path = "venues/bitrue" }
 safe-cex-venue-blofin = { path = "venues/blofin" }
 safe-cex-venue-mexc = { path = "venues/mexc" }
 safe-cex-venue-bingx = { path = "venues/bingx" }

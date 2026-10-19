@@ -37,6 +37,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   binancepm: 'binancepm',
   blofin: 'blofin',
+  bitrue: 'bitrue',
   mexc: 'mexc',
   bingx: 'bingx',
   bybit: 'bybit',
@@ -64,6 +65,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     requirement: 'be 1-40 characters with no uppercase letters',
     isValid: (id) => id.length >= 1 && id.length <= 40 && id === id.toLowerCase(),
   },
+  bitrue: patternClientOrderIdRule('Bitrue', /^.{1,31}$/),
   bybit: patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/),
   okx: okxClientOrderIdRule,
   okxeu: okxClientOrderIdRule,
@@ -299,14 +301,14 @@ export class RustEngineExchange extends BaseExchange {
     return this.command<Execution[]>({
       op: 'fetchFills',
       ...opts,
-      ...(this.name === 'blofin' ? { from: milliseconds(opts.from), to: milliseconds(opts.to) } : {}),
+      ...(['blofin', 'bitrue'].includes(this.name) ? { from: milliseconds(opts.from), to: milliseconds(opts.to) } : {}),
     });
   };
 
   fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
     try {
       let leverage: FetchedLeverage;
-      if (this.name === 'blofin') leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      if (['blofin', 'bitrue'].includes(this.name)) leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
       else {
         const value = await this.fetchSymbolMaxLeverage(symbol);
         leverage = { buyLeverage: value, sellLeverage: value };

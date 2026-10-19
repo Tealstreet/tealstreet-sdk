@@ -129,6 +129,11 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
+  // Paired TS corrections: contract-sized public volumes; private z/l units,
+  // execution L prices, monotonic terminal state, and ping timestamp echo.
+  // Rust also fails unknown leverage/margin, preserves exact split quantities,
+  // verifies cancel/replacement final state, and never retries uncertain writes.
+  bitrue() {},
   blofin(account, rustAccount) {
     binanceFixes(account, rustAccount);
     if (account.positions.length === 0) {
