@@ -26,6 +26,9 @@ to know which path applies to them:
   accounts there.
 - If you already use V3 with Tealstreet IP whitelisting enabled, update the IP
   whitelist on each exchange API key during the overlap window.
+- If you use V3 on multiple devices, turn on
+  [Cloud Sync for API Keys](/docs/connect/cloud-sync) before the cutover so the
+  same Tealstreet API key list is available everywhere you sign in.
 
 ## Which one am I?
 
@@ -89,6 +92,8 @@ and add your exchange API keys there.
 6. Add the Tealstreet IP whitelist values shown in the V3 API key form.
 7. Paste the API key and secret into Tealstreet V3.
 8. Save the key and confirm that the account connects successfully.
+9. Turn on [Cloud Sync for API Keys](/docs/connect/cloud-sync) if you want the
+   new V3 key to follow you to your other Tealstreet devices.
 
 Start with the general API walkthrough, then use the guide for your exchange:
 
@@ -129,6 +134,11 @@ Tealstreet is replacing the old AWS IP addresses used by the Tealstreet Network
 with new Tealstreet IP addresses. For a short overlap window, both sets should
 work. After the migration window closes, keys that still allow only the old IPs
 may stop connecting through Tealstreet.
+
+Cloud sync can help make your Tealstreet API key list available on every device
+while you work through this migration. It does not edit the exchange API key or
+its IP whitelist, so complete the whitelist update below for each affected
+exchange account.
 
 ### IP list
 
