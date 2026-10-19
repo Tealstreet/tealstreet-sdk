@@ -158,24 +158,27 @@ impl Blofin {
         let Some(socket) = self.public.socket.filter(|_| self.public.open) else {
             return;
         };
+        let overhead = serde_json::to_string(&Subscription { op, args: &[] })
+            .unwrap()
+            .len();
         let mut start = 0;
-        for end in 1..=topics.len() {
-            let frame = serde_json::to_string(&Subscription {
-                op,
-                args: &topics[start..end],
-            })
-            .unwrap();
-            if frame.len() > 4096 && end > start + 1 {
+        let mut length = overhead;
+        // Measure each topic once; serializing every growing prefix is quadratic.
+        for (end, topic) in topics.iter().enumerate() {
+            let size = serde_json::to_string(topic).unwrap().len();
+            if length + size + usize::from(end > start) > 4096 && end > start {
                 cx.send(
                     socket,
                     serde_json::to_string(&Subscription {
                         op,
-                        args: &topics[start..end - 1],
+                        args: &topics[start..end],
                     })
                     .unwrap(),
                 );
-                start = end - 1;
+                start = end;
+                length = overhead;
             }
+            length += size + usize::from(end > start);
         }
         if start < topics.len() {
             cx.send(

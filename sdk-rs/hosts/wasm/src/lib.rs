@@ -10,6 +10,7 @@ use safe_cex_engine::{
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
+use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -438,6 +439,12 @@ impl WasmEngine {
                 passphrase: options.passphrase,
             }))),
             "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
+            "cryptocom" => Box::new(Engine::new(Cryptocom::new(CryptocomOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,

@@ -343,3 +343,24 @@ and three-run public medians:
   asymmetric leverage settings. Findings are posted on PR1300.
 - PR1300 is mergeable into `feat/rust-rewrite`. Awaiting green CI before merge
   and creation of a fresh follow-up branch; no pending code changes identified.
+
+### CI performance correction and Crypto.com landing
+
+- CI passed native tests/fmt/clippy, wasm, root repository checks and secrets,
+  but BloFin total CPU failed130.8/154.3ms (TS/Rust), despite steady91.0/72.7ms,
+  exact correctness and lower retained memory. This supersedes the local-only
+  all-gates claim above; landing still requires green final CI.
+- Review identified quadratic subscription sizing:1052 topics caused48,808 topic
+  serializations and2,242,126 candidate bytes for48,050 emitted bytes. Count each
+  topic once before serializing final bounded slices, preserving frame ordering
+  and limits. Existing400-topic boundary regression and independent review cover
+  the builder. Module loading precedes the CPU measurement.
+- Merged Crypto.com landing `c63c3e5670`, retaining all five registrations,
+  stricter body/signature/subscription audit, one-shot write queues, staged GETs,
+  backing-buffer memory accounting and BloFin exact IDs/cache-bust filtering.
+  Crypto.com explicitly rejects the newly added unsupported leverage query.
+- Landing's existing shared budget is now1.8MiB (1,887,436bytes). Restore BloFin
+  and serde_json O3 to address startup CPU; other venue/host size overrides stay.
+  Final five-venue correctness/performance/size checks are running. Shared-engine
+  merge review passes21 tests and clippy; host/SDK integration review has no
+  concrete blockers. No master, rebase, force push, stash or gate relaxation.
