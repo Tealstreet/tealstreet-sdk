@@ -1,6 +1,6 @@
 # Accepted-input contract review
 
-The 33 selected native/default census keys are reviewed individually in
+The 25 retained native/default census keys are reviewed individually in
 [the SDK contract file](../safe-cex-parity/accepted-set/contracts/safe-cex-lighter-sdk.json). Exact compiler APIs and the
 per-owner reasons are part of each contract. The review follows the shared
 [string](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary) and
@@ -20,21 +20,19 @@ checks actual native conversion/decoder traits and compiler target identity.
 The alias integration test also executes receiver refusal, original callback
 errors, immediate results and polled future results.
 
-Nine constructors receive typed values or host capabilities. Existing native
+Six constructors receive typed values or host capabilities. Existing native
 SDK tests inspect their fields, optional lists, nested shared identity, errors,
-UTF-16 units and numeric values. Twelve production client-host tests in
+UTF-16 units and numeric values. Production client-host tests in
 `safe-cex-venue-lighter::binding::sdk_client::tests` execute the real SDK client
-against its native host. The 17 selected free helpers have individual
-non-decoder reasons: text/field output construction, host property access,
-protocol/error routing, interceptor dispatch or byte-to-hex encoding.
+against its native host. The 13 retained free helpers have individual non-decoder
+reasons for text/field output, host property access, protocol/error routing and
+interceptor dispatch.
 
-`PoseidonKeyHost` retains its exact ten selected trait entrypoints. The raw
-property selector is executed directly against native key variants; expected
-private/public key units and unknown-property `Undefined` are independent of
-serialization. The probe's unused index and scheduler panic if invoked, so the
-accessor cannot gain an unobserved loader or scheduling effect. Other selected
-methods retain their individually reviewed typed APIs and the existing
-production bridge test.
+The unused standalone signer and Poseidon adapter contracts and their exclusive
+native observations were removed after the shipped-caller census. All 25 retained
+contract entries are unchanged. See `SIGNER_RETIREMENT_REVIEW.md` for the deletion
+boundary; earlier 33-key receipts included the retired adapter and do not describe
+the current package.
 
 Run the ordinary scoped native gate from the repository root:
 
@@ -56,21 +54,6 @@ The helper's census report covers selected module-scope native/default keys.
 It is not a runtime receipt or feature/wasm matrix result. Ordinary source
 inventory additionally sees local scopes; the client callback macro expansion
 is a separate production source-discovery repair.
-
-The compiling negative control replaces the production `privateKey` accessor's
-text result with `Undefined`. The ordinary native gate then fails the
-`PoseidonKeyHost` witness: expected native units `[55296]`, observed
-`Undefined`. Restoring the source byte for byte passes the same gate with two
-production runtime results, 31 explicit classifications and zero failed owners.
-The native SDK evidence suite passes all 28 tests, including both fixed-alias
-tests. This control tests the native value before any serialization can hide it.
-
-The ordinary wasm gate, using the same command with
-`--target=wasm32-unknown-unknown`, independently discovers the same 33 keys and
-returns two production runtime results, 31 explicit classifications and zero
-failed owners. The native and wasm receipts together pass the scoped ratchet;
-the shared defect ledger is unchanged. This package has no additional feature
-combinations.
 
 ## Referral constructor ownership audit
 

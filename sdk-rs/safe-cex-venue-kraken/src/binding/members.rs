@@ -409,30 +409,224 @@ pub(crate) fn dispatch(
             from_typed(&balance)
         }),
         ("reads", "fetch_account_log_page") => future(async move {
-            let params = number_input(&a0)?
-                .ok_or_else(|| Thrown::type_error("account-log params are required"))?;
-            let store = rt.shared.store.clone();
-            let mut identity = |n: f64| n;
-            let records = reads::fetch_account_log_page(
-                params,
-                store.as_ref(),
-                |endpoint, params| {
-                    let request = get_data(
-                        &rt,
-                        "historyXhr",
-                        "get",
-                        vec![
-                            Js::str(endpoint),
-                            Js::object(vec![("params", json_value(&params))]),
-                        ],
+            // Keep the actual parsed/native graph until source-selected fields
+            // have been coerced. JSON materialization rejects a NaN/Infinity in
+            // one field before the source's finite-number guard can skip it.
+            let params = Js::object(vec![
+                ("since", a0.get("startTime")?),
+                ("count", a0.get("limit")?),
+            ]);
+            let pending = rt.this.get("historyXhr")?.call_method(
+                "get",
+                vec![
+                    Js::str("/history/v3/account-log"),
+                    Js::object(vec![("params", params)]),
+                ],
+            )?;
+            let data = await_js(&rt.exchange_runtime(), pending)
+                .await?
+                .get("data")?;
+            let logs = if data.is_nullish() {
+                Js::Undefined
+            } else {
+                data.get("logs")?
+            };
+            let array = rt
+                .global("Array")?
+                .call_method("isArray", vec![logs.clone()])?
+                .truthy();
+            if data.is_object() && !array {
+                let status = data.get("status")?;
+                let reason = data.get("reason")?;
+                let text = |value: Js| -> Result<Js, Thrown> {
+                    rt.global("String")?.call(
+                        Js::Undefined,
+                        vec![if value.is_nullish() {
+                            Js::str("")
+                        } else {
+                            value
+                        }],
+                    )
+                };
+                let status = text(status)?.to_js_string()?;
+                let reason = text(reason)?.to_js_string()?;
+                let mut detail = Vec::new();
+                if !status.is_empty() || !reason.is_empty() {
+                    detail.extend(" — ".encode_utf16());
+                    detail.extend_from_slice(&status);
+                    if !reason.is_empty() {
+                        detail.extend(": ".encode_utf16());
+                        detail.extend_from_slice(&reason);
+                    }
+                } else {
+                    detail.extend(" (envelope: ".encode_utf16());
+                    let keys = rt.global("Object")?.call_method("keys", vec![data])?;
+                    detail.extend_from_slice(
+                        &keys
+                            .call_method("join", vec![Js::str(",")])?
+                            .to_js_string()?,
                     );
-                    async move { request.map_err(boxed)?.await.map_err(boxed) }
-                },
-                &mut identity,
-            )
-            .await
-            .map_err(|e| Thrown::error("Error", &e.to_string()))?;
-            from_typed(&records)
+                    detail.extend(")".encode_utf16());
+                }
+                let mut message = "kraken account-log did not return a log array"
+                    .encode_utf16()
+                    .collect::<Vec<_>>();
+                message.extend(detail);
+                return Err(super::host::new_error(&Js::utf16(&message), None, None));
+            }
+            let mut records = Vec::new();
+            if array {
+                let length = logs.get("length")?.to_number()? as usize;
+                for index in 0..length {
+                    let row = logs.get(&index.to_string())?;
+                    if !row.truthy() {
+                        continue;
+                    }
+                    let field = |key| -> Result<Js, Thrown> { row.get(key) };
+                    let text = |value: Js| -> Result<Js, Thrown> {
+                        rt.global("String")?.call(
+                            Js::Undefined,
+                            vec![if value.is_nullish() {
+                                Js::str("")
+                            } else {
+                                value
+                            }],
+                        )
+                    };
+                    let asset = text(field("asset")?)?.call_method("toLowerCase", vec![])?;
+                    let contract = text(field("contract")?)?.call_method("toLowerCase", vec![])?;
+                    if asset.truthy() && asset.strict_equals(&contract) {
+                        continue;
+                    }
+                    let date = text(field("date")?)?;
+                    let timestamp = safe_cex_num::js_date_parse_utf16(&date.to_js_string()?, |n| n);
+                    let timestamp = if timestamp.is_finite() {
+                        timestamp
+                    } else {
+                        0.0
+                    };
+                    let booking_uid = field("booking_uid")?;
+                    let booking_uid = text(if booking_uid.is_nullish() {
+                        field("id")?
+                    } else {
+                        booking_uid
+                    })?;
+                    if timestamp == 0.0 || !booking_uid.truthy() {
+                        continue;
+                    }
+                    let contract = text(field("contract")?)?;
+                    let info = field("info")?;
+                    let info = text(if info.is_nullish() {
+                        Js::str("unknown")
+                    } else {
+                        info
+                    })?;
+                    let symbol = if contract.truthy() {
+                        let key = contract
+                            .call_method("toUpperCase", vec![])?
+                            .to_js_string()?;
+                        let market = rt
+                            .this
+                            .get("store")?
+                            .get("marketsBySymbol")?
+                            .get_key(&key)?;
+                        let symbol = if market.is_nullish() {
+                            Js::Undefined
+                        } else {
+                            market.get("symbol")?
+                        };
+                        if symbol.is_nullish() {
+                            contract
+                        } else {
+                            symbol
+                        }
+                    } else {
+                        Js::str("")
+                    };
+                    let asset = text(field("asset")?)?.call_method("toUpperCase", vec![])?;
+                    let execution = field("execution")?;
+                    let trade_id = if execution.truthy() {
+                        text(execution)?
+                    } else {
+                        Js::Undefined
+                    };
+                    let number = |key| -> Result<Option<f64>, Thrown> {
+                        let value = field(key)?;
+                        if value.is_nullish() || value.strict_equals(&Js::str("")) {
+                            return Ok(None);
+                        }
+                        let value = rt
+                            .global("Number")?
+                            .call(Js::Undefined, vec![value])?
+                            .to_number()?;
+                        Ok(value.is_finite().then_some(value))
+                    };
+                    // Read all four source numeric fields before constructing rows.
+                    let pnl = number("realized_pnl")?;
+                    let funding = number("realized_funding")?;
+                    let fee = number("fee")?;
+                    let liquidation = number("liquidation_fee")?;
+                    let mut append = |suffix: &str,
+                                      label: &str,
+                                      income: f64,
+                                      category: &str|
+                     -> Result<(), Thrown> {
+                        let mut id = booking_uid.to_js_string()?.to_vec();
+                        id.extend(suffix.encode_utf16());
+                        let mut income_type = info.to_js_string()?.to_vec();
+                        income_type.extend(label.encode_utf16());
+                        records.push(Js::object(vec![
+                            ("symbol", symbol.clone()),
+                            ("incomeType", Js::utf16(&income_type)),
+                            ("asset", asset.clone()),
+                            ("timestamp", Js::Number(timestamp)),
+                            ("tradeId", trade_id.clone()),
+                            ("tranId", Js::utf16(&id)),
+                            ("income", Js::Number(income)),
+                            ("category", Js::str(category)),
+                        ]));
+                        Ok(())
+                    };
+                    let mut count = 0;
+                    for (value, suffix, label, category, sign) in [
+                        (pnl, ":pnl", "", "realized_pnl", 1.0),
+                        (funding, ":funding", "_funding", "funding", 1.0),
+                        (fee, ":fee", "_fee", "commission", -1.0),
+                        (
+                            liquidation,
+                            ":liquidation",
+                            "_liquidation_fee",
+                            "liquidation",
+                            -1.0,
+                        ),
+                    ] {
+                        if let Some(value) = value.filter(|value| *value != 0.0) {
+                            append(suffix, label, value * sign, category)?;
+                            count += 1;
+                        }
+                    }
+                    if count == 0 {
+                        let delta = number("new_balance")?.unwrap_or(0.0)
+                            - number("old_balance")?.unwrap_or(0.0);
+                        if delta != 0.0 {
+                            let lower = info.call_method("toLowerCase", vec![])?.to_js_string()?;
+                            let transfer = ["transfer", "conversion", "deposit", "withdraw"]
+                                .iter()
+                                .any(|word| {
+                                    let units = word.encode_utf16().collect::<Vec<_>>();
+                                    lower.windows(units.len()).any(|part| part == units)
+                                });
+                            append(
+                                if transfer { ":transfer" } else { ":other" },
+                                "",
+                                delta,
+                                if transfer { "transfer" } else { "other" },
+                            )?;
+                        }
+                    }
+                }
+            }
+            Ok(Js::array(records))
         }),
         ("reads", "fetch_historical_positions") => future(async move {
             let options = number_input(&a0)?
