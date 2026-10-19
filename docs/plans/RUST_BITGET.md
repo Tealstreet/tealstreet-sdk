@@ -249,3 +249,11 @@ lanes changed absolute timings; all comparisons retain the original thresholds.
 - Native workspace tests/clippy, engine 18, Bitget 67, harness 5, bans, fmt and
   WASM workspace clippy: PASS. Repository typecheck 44 and lint 28 tasks PASS.
 - Landing is still 693ad4f139 after the final fetch. No extra merge is needed.
+
+## PR checkpoint
+
+- PR #1308 targets feat/rust-rewrite. Adversarial reviews are running across
+  public/parser, account/trading and queries/harness, with findings to be posted.
+- Post-merge safe-cex suite: 453 files / 6,494 tests PASS with one worker and
+  30s cold-import timeout; WASM adapter 16 and Worker host 2 PASS.
+- Remaining: review findings, green PR CI, merge into landing and fresh branch.
