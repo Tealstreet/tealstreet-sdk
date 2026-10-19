@@ -72,6 +72,18 @@ target exercise actual signed Binance reads containing nonfinite prices.
 The signer-rejection Node and Rust targets drive failed signing through actual
 Binance accounts and verify that no terminal HTTP request is sent.
 
+Each account delivers Store slices, events, stream listener results and startup
+logs through one unbounded FIFO ThreadsafeFunction. Separate callbacks still
+receive one original payload argument; their return values are ignored and their
+exceptions reach the JS host unchanged. One queue preserves the source order
+across `onEvent` and `onStore`, including under a busy JS event loop.
+
+`nativeAccountOpen` is the only multi-callback notification entry. The worker
+stream bridge and exchange-server's `rust-exchange.ts` both use this entry, so
+they share its ordering. Signer and proxy-token callbacks use independent
+request/reply channels; method, close and availability calls settle Promises.
+The Wasm exports do not expose native accounts.
+
 Store delivery uses the shared worker payload preparer and leading/trailing
 throttle (250ms times `tuning.dataUpdateThrottleMultiplier`). Startup posts a
 forced full snapshot; live posts omit stable markets, orders and positions.
@@ -130,6 +142,11 @@ the native registry path. Both use loopback HTTP.
 Node process. Open accounts own JS signer and proxy-token callbacks; venue runtime
 closures hold weak references so disposal releases callbacks even when a venue
 runtime remains retained. Close rejects pending callback requests with a visible closed-account error. The child must exit naturally after close.
+The same suite verifies that close releases both notification callbacks, and
+that a thrown callback preserves its original error without blocking later
+notifications. `tests/native-account-delivery-order.test.mjs` replays the complete
+147-frame Crypto.com capture through maintained TS and native accounts, checks
+all drain fences and compares combined Store/book/candle delivery over repeats.
 
 Native `start` follows the worker startup result: `true` after the forced full
 Store post and `false` after cancellation or failure. Disposal, close and

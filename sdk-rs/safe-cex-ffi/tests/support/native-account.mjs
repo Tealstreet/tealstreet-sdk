@@ -19,7 +19,7 @@ function textFrame(value) {
   else { header[1] = 126; header.writeUInt16BE(body.length, 2); }
   return Buffer.concat([header, body]);
 }
-export async function openStartedAccount(t, options = {}) {
+export async function openStartedAccount(t, options = {}, callbacks = {}) {
   const seen = [];
   const sockets = new Set();
   const received = [];
@@ -92,7 +92,13 @@ export async function openStartedAccount(t, options = {}) {
     key: 'test-key', secret: 'test-secret', publicDataOnly: true, overrideProxyUrl: `http://${origin}`,
     ...options,
     externalPublicData: { type: 'websocket', url: `ws://${origin}/gateway`, exchangeId: 'binance' },
-  } }, event => events.push(event), store => stores.push(store));
+  } }, function (event) {
+    events.push(event);
+    return callbacks.event?.apply(this, arguments);
+  }, function (store) {
+    stores.push(store);
+    return callbacks.store?.apply(this, arguments);
+  });
   const call = async (method, ...args) => await native.nativeAccountCallMethod(id, method, args);
   await call('start');
   return { call, seen, events, stores, received, close: async () => {
