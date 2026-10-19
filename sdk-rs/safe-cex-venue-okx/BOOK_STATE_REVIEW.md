@@ -20,15 +20,22 @@ maintained-method oracle `tests/book-state-source.mjs` establish these boundarie
 
 The first three native probes fail on master `523e1ebf0d`. All five source
 observations pass against the actual TypeScript method bodies extracted through
-its AST. The candidate passes six native tests, including its maintained-source
-oracle.
+its AST. The initial selected-method candidate passed six native tests, including its
+maintained-source oracle. A further compiled public-frame RED pins the remaining
+legacy adapter: a snapshot must commit only its selected sequence before calling
+the actual book callback, without enumerating unrelated topics. After inheriting
+#1218 and deleting the orphan adapter, all seven state tests and the combined
+handler-registry library tests pass.
 
 The implementation must keep canonical Js state as its only material owner.
 Selected Map/Set calls use the existing shared runtime methods; there is no
 cached typed collection or copy-back stage. Sequence properties retain the
 source's repeated reads and String call. Recovery retains its original topic
 reference across the two sends. Handler lookup and statistics are owned by
-#1218, separately from this state access change.
+#1218, separately from this state access change. That routing change also avoids
+`with_book` for non-book frames. The comparison below therefore builds on the
+same #1218 source on both sides and measures only the remaining book/recovery
+state-copy delta; it does not attribute the earlier non-book routing gain here.
 
 ## Release comparison protocol
 

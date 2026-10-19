@@ -492,7 +492,6 @@ fn book_state_public_frame_does_not_enumerate_topic_state() {
     );
 }
 
-
 #[test]
 fn actual_socket_dispatch_reads_only_the_live_selected_handler() {
     for field in ["publicWebsocket", "businessWebsocket"] {
