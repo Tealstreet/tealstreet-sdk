@@ -115,6 +115,8 @@ pub struct Instrument<'a> {
     #[serde(borrow, default)]
     pub status: Str<'a>,
     #[serde(borrow, default)]
+    pub contract_type: Str<'a>,
+    #[serde(borrow, default)]
     pub base_coin: Str<'a>,
     #[serde(borrow, default)]
     pub quote_coin: Str<'a>,
@@ -147,6 +149,12 @@ pub struct PriceFilter<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LotSizeFilter<'a> {
+    #[serde(borrow, default)]
+    pub base_precision: Opt<'a>,
+    #[serde(borrow, default)]
+    pub max_limit_order_qty: Opt<'a>,
+    #[serde(borrow, default)]
+    pub max_market_order_qty: Opt<'a>,
     #[serde(borrow, default)]
     pub qty_step: Opt<'a>,
     #[serde(borrow, default)]
@@ -254,6 +262,8 @@ pub struct KlineRow<'a>(#[serde(borrow)] pub Vec<Str<'a>>);
 #[derive(Deserialize)]
 pub struct OpFrame<'a> {
     #[serde(borrow, default)]
+    pub req_id: Opt<'a>,
+    #[serde(borrow, default)]
     pub op: Opt<'a>,
     #[serde(default)]
     pub success: Option<bool>,
@@ -300,6 +310,8 @@ pub struct OrderRow<'a> {
     #[serde(borrow, default)]
     pub cum_exec_qty: Opt<'a>,
     #[serde(borrow, default)]
+    pub cum_exec_value: Opt<'a>,
+    #[serde(borrow, default)]
     pub time_in_force: Opt<'a>,
     #[serde(borrow, default)]
     pub order_type: Opt<'a>,
@@ -307,6 +319,8 @@ pub struct OrderRow<'a> {
     pub stop_order_type: Opt<'a>,
     #[serde(borrow, default)]
     pub trigger_price: Opt<'a>,
+    #[serde(default, deserialize_with = "integer")]
+    pub trigger_direction: Option<i64>,
     #[serde(borrow, default)]
     pub take_profit: Opt<'a>,
     #[serde(borrow, default)]
@@ -347,6 +361,8 @@ pub struct PositionRow<'a> {
     pub position_idx: Option<i64>,
     #[serde(borrow, default)]
     pub avg_price: Opt<'a>,
+    #[serde(borrow, default)]
+    pub mark_price: Opt<'a>,
     #[serde(borrow, default)]
     pub entry_price: Opt<'a>,
     #[serde(borrow, default)]
@@ -404,6 +420,8 @@ pub struct ExecutionRow<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct WalletAccount<'a> {
     #[serde(borrow, default)]
+    pub account_type: Opt<'a>,
+    #[serde(borrow, default)]
     pub total_equity: Opt<'a>,
     #[serde(borrow, default)]
     pub total_wallet_balance: Opt<'a>,
@@ -422,6 +440,8 @@ pub struct WalletAccount<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WalletCoin<'a> {
+    #[serde(borrow, default)]
+    pub coin: Opt<'a>,
     #[serde(borrow, default)]
     pub equity: Opt<'a>,
     #[serde(borrow, default)]

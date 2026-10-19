@@ -203,12 +203,17 @@ export class Frame {
     const refs = new Uint32Array(buffer, section.offset + 4, count * 3);
     const market = new Uint32Array(buffer, section.offset + 4 + count * 12, count);
     const enums = new Uint32Array(buffer, section.offset + 4 + count * 16, count);
+    const data = align8(section.offset + 4 + count * 20);
+    const native = data + count * ORDER_COLUMNS.length * 8;
     const frame = this;
     return {
       count,
       market,
       enums,
-      ...columns(buffer, align8(section.offset + 4 + count * 20), count, ORDER_COLUMNS),
+      ...columns(buffer, data, count, ORDER_COLUMNS),
+      ...(count && native + count * 8 <= section.offset + section.length
+        ? { remainingNative: new Float64Array(buffer, native, count) }
+        : {}),
       id: (i) => frame.string(refs[i * 3]),
       clientOrderId: (i) => frame.string(refs[i * 3 + 1]),
       parentId: (i) => frame.string(refs[i * 3 + 2]),

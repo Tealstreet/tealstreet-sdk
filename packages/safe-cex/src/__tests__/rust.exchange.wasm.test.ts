@@ -4,6 +4,7 @@ import type { OrderBook } from '../types';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { BaseExchange } from '../exchanges/base';
+import { HYROTRADER_PROD_URL, HYROTRADER_SIMULATOR_URL } from '../exchanges/bybit/bybit.types';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
@@ -74,18 +75,23 @@ const recordedTransport = (overrides: Record<string, { status: number; body: str
 };
 
 /** Bybit V5 envelopes for one linear market and an empty unified account. */
-const bybitTransport = () => {
+const bybitTransport = (category: 'linear' | 'inverse' | 'spot' = 'linear') => {
   const sockets = new Map<string, (text: string) => void>();
   const writes: Array<{ path: string; body?: string }> = [];
+  const requests: Array<{ method: string; url: string; body?: string }> = [];
+  const socketUrls: string[] = [];
+  const symbol = category === 'inverse' ? 'BTCUSD' : 'BTCUSDT';
   const list = (rows: unknown[]) => ({ list: rows, nextPageCursor: '' });
   const transport: Transport = {
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
+      socketUrls.push(url);
       sockets.set(new URL(url).pathname, onMessage);
       setTimeout(onOpen, 0);
       return { send: () => {}, close: () => {} };
     },
     request: async ({ method, url, body }) => {
+      requests.push({ method, url, body });
       const { pathname: path, searchParams } = new URL(url);
       if (method !== 'GET') writes.push({ path, body });
       let result: unknown;
@@ -97,18 +103,21 @@ const bybitTransport = () => {
               ? []
               : [
                   {
-                    symbol: 'BTCUSDT',
+                    symbol,
                     status: 'Trading',
                     baseCoin: 'BTC',
-                    quoteCoin: 'USDT',
+                    quoteCoin: category === 'inverse' ? 'USD' : 'USDT',
                     priceFilter: { tickSize: '0.10' },
-                    lotSizeFilter: { qtyStep: '0.001', minOrderQty: '0.001', maxOrderQty: '120' },
+                    lotSizeFilter:
+                      category === 'spot'
+                        ? { basePrecision: '0.000001', minOrderQty: '0.00001', maxLimitOrderQty: '120', maxMarketOrderQty: '12' }
+                        : { qtyStep: category === 'inverse' ? '1' : '0.001', minOrderQty: '0.001', maxOrderQty: '120' },
                   },
                 ],
           );
           break;
         case '/v5/market/tickers':
-          result = list([{ symbol: 'BTCUSDT', lastPrice: '90000', bid1Price: '89999.9', ask1Price: '90000.1' }]);
+          result = list([{ symbol, lastPrice: '90000', bid1Price: '89999.9', ask1Price: '90000.1' }]);
           break;
         case '/v5/account/info':
           result = { marginMode: 'REGULAR_MARGIN', unifiedMarginStatus: 6 };
@@ -123,6 +132,9 @@ const bybitTransport = () => {
               totalPerpUPL: '0',
             },
           ]);
+          break;
+        case '/v5/order/create':
+          result = { orderId: '4242' };
           break;
         case '/v5/order/create-batch':
           result = list([{ orderId: '4242' }]);
@@ -148,7 +160,7 @@ const bybitTransport = () => {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   };
-  return { transport, sockets, writes };
+  return { transport, sockets, writes, requests, socketUrls };
 };
 
 const until = async (check: () => boolean) => {
@@ -294,6 +306,116 @@ describe('RustEngineExchange', () => {
       ]),
     ).rejects.toThrow('duplicated in one batch');
     expect(tape.writes).toEqual([]);
+  });
+
+  it('routes inverse native contract quantities and caller IDs through the shared crate', async () => {
+    const tape = bybitTransport('inverse');
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    const store = new DefaultStore();
+    exchange = new RustEngineExchange('bybitinverse', { key: 'k', secret: 's' }, store);
+    await exchange.start();
+    expect(store.marketsBySymbol.BTCUSD).toMatchObject({ isInverse: true, precision: { amount: 1 } });
+    const opts = { symbol: 'BTCUSD', type: OrderType.Limit, side: OrderSide.Buy, amount: 2, price: 90000 };
+    expect(await exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: 'inverse-01' })).toEqual({
+      orderIds: ['4242'], clientOrderId: 'inverse-01',
+    });
+    const payload = JSON.parse(tape.writes[0].body!);
+    expect(payload).toMatchObject({ category: 'inverse', request: [{ symbol: 'BTCUSD', qty: '2', orderLinkId: 'inverse-01' }] });
+    expect(tape.socketUrls.some((url) => url.includes('/v5/public/inverse'))).toBe(true);
+    await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'invalid.id' }])).rejects.toThrow('clientOrderId must match');
+    expect(tape.writes).toHaveLength(1);
+  });
+
+  it('keeps inverse native sizing through the Rust frame and TypeScript store bridge', async () => {
+    const tape = bybitTransport('inverse');
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    const store = new DefaultStore();
+    exchange = new RustEngineExchange('bybitinverse', { key: 'k', secret: 's' }, store);
+    await exchange.start();
+    await until(() => tape.sockets.has('/v5/private'));
+    const privateSocket = tape.sockets.get('/v5/private')!;
+    privateSocket(JSON.stringify({ topic: 'position.inverse', data: [{
+      category: 'inverse', symbol: 'BTCUSD', positionIdx: 0, side: 'Buy', size: '1000',
+      avgPrice: '80000', leverage: '10', unrealisedPnl: '0.002',
+    }] }));
+    privateSocket(JSON.stringify({ topic: 'order.inverse', data: [{
+      category: 'inverse', symbol: 'BTCUSD', orderId: 'full-stop', side: 'Sell', orderStatus: 'Untriggered',
+      orderType: 'Market', stopOrderType: 'StopLoss', tpslMode: 'Full', triggerPrice: '80000',
+      qty: '11', leavesQty: '7', cumExecQty: '4', reduceOnly: true,
+    }] }));
+    await until(() => store.positions.length === 1 && store.orders.some((o) => o.id === 'full-stop'));
+    expect(store.positions[0]).toMatchObject({ notional: 1000, extra: { contractsNative: 1000, unrealizedPnlNative: 0.002 } });
+    expect(store.orders.find((o) => o.id === 'full-stop')).toMatchObject({
+      amount: 0, filled: 4, extra: { remainingNative: 7, remainingNotional: 7 },
+    });
+  });
+
+  it('starts spot without derivatives reads and sends one native order with a caller ID', async () => {
+    const tape = bybitTransport('spot');
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    const store = new DefaultStore();
+    exchange = new RustEngineExchange('bybitspot', { key: 'k', secret: 's' }, store);
+    await exchange.start();
+    expect(exchange.isSpot).toBe(true);
+    expect(store.marketsBySymbol.BTCUSDT).toMatchObject({
+      isSpot: true, precision: { amount: 0.000001 }, limits: { leverage: { min: 1, max: 1 } },
+    });
+    expect(store.positions).toEqual([]);
+    expect(tape.requests.some(({ url }) => /position|account\/info|fee-rate|PreLaunch/.test(url))).toBe(false);
+    expect(tape.requests.filter(({ url }) => url.includes('instruments-info')).every(({ url }) => !url.includes('limit='))).toBe(true);
+    const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.001, price: 90000 };
+    expect(await exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: 'spot-01' })).toEqual({
+      orderIds: ['4242'], clientOrderId: 'spot-01',
+    });
+    expect(tape.writes).toHaveLength(1);
+    expect(tape.writes[0].path).toBe('/v5/order/create');
+    expect(JSON.parse(tape.writes[0].body!)).toMatchObject({ category: 'spot', symbol: 'BTCUSDT', qty: '0.001', orderLinkId: 'spot-01' });
+    await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'invalid.id' }])).rejects.toThrow('clientOrderId must match');
+    expect(tape.writes).toHaveLength(1);
+  });
+
+  it.each([false, true])('selects the demo REST and socket environments (testnet=%s)', async (testnet) => {
+    const tape = bybitTransport();
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    exchange = new RustEngineExchange('bybitdemo', { key: 'k', secret: 's', testnet }, new DefaultStore());
+    await exchange.start();
+    const restHost = testnet ? 'api-testnet.bybit.com' : 'api-demo.bybit.com';
+    expect(tape.requests.every(({ url }) => new URL(url).hostname === restHost)).toBe(true);
+    await until(() => tape.socketUrls.some((url) => url.includes('/v5/private')));
+    expect(new URL(tape.socketUrls.find((url) => url.includes('/v5/private'))!).hostname).toBe(
+      testnet ? 'stream-testnet.bybit.com' : 'stream-demo.bybit.com',
+    );
+    expect(new URL(tape.socketUrls.find((url) => url.includes('/v5/public/linear'))!).hostname).toBe(
+      testnet ? 'stream-testnet.bybit.com' : 'stream.bybit.com',
+    );
+    expect(exchange.isDemo).toBe(true);
+    const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.001, price: 90000 };
+    await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'invalid.id' }])).rejects.toThrow('clientOrderId must match');
+    expect(tape.writes).toEqual([]);
+  });
+
+  it('rejects Hyro without configured origins before any transport I/O', async () => {
+    const prod = { ...HYROTRADER_PROD_URL };
+    const simulator = { ...HYROTRADER_SIMULATOR_URL };
+    const tape = bybitTransport();
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    try {
+      Object.assign(HYROTRADER_PROD_URL, { livenet: '', testnet: '' });
+      Object.assign(HYROTRADER_SIMULATOR_URL, { livenet: '', testnet: '' });
+      exchange = new RustEngineExchange('hyrotrader', { key: 'k', secret: 's' }, new DefaultStore());
+      expect(exchange.mintClientOrderId({ symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 90000 })).toBeUndefined();
+      await expect(exchange.start()).rejects.toThrow('URLs are not configured');
+      expect(tape.requests).toEqual([]);
+      expect(tape.socketUrls).toEqual([]);
+    } finally {
+      Object.assign(HYROTRADER_PROD_URL, prod);
+      Object.assign(HYROTRADER_SIMULATOR_URL, simulator);
+    }
   });
 
   it('forwards frames that rebuild the same store and book events on the main thread', async () => {

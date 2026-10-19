@@ -527,6 +527,19 @@ impl Store {
         for column in columns {
             w.f64s(orders.iter().map(column));
         }
+        // Native leavesQty cannot be recovered from rounded base quantities or
+        // amount=0 full-position stops. Older readers ignore this optional tail.
+        if orders
+            .iter()
+            .any(|o| o.extra.as_ref().and_then(|e| e.remaining_native).is_some())
+        {
+            w.f64s(orders.iter().map(|o| {
+                o.extra
+                    .as_ref()
+                    .and_then(|e| e.remaining_native)
+                    .unwrap_or(f64::NAN)
+            }));
+        }
         w.end();
     }
 

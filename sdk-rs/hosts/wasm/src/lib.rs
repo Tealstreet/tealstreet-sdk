@@ -8,7 +8,9 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
-use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
+use safe_cex_venue_bybit::{
+    BybitLinear, Endpoints as BybitEndpoints, Options as BybitOptions, Variant as BybitVariant,
+};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -57,6 +59,16 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
+    #[serde(default)]
+    endpoints: Option<EndpointOptions>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EndpointOptions {
+    rest: String,
+    public_ws: String,
+    private_ws: String,
 }
 
 #[derive(Serialize)]
@@ -418,12 +430,28 @@ impl WasmEngine {
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
             }))),
-            "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-            }))),
+            "bybit" | "bybitinverse" | "bybitspot" | "bybitdemo" | "hyrotrader" => {
+                let options = BybitOptions {
+                    variant: match venue {
+                        "bybitinverse" => BybitVariant::Inverse,
+                        "bybitspot" => BybitVariant::Spot,
+                        "bybitdemo" => BybitVariant::Demo,
+                        "hyrotrader" => BybitVariant::Hyrotrader,
+                        _ => BybitVariant::Linear,
+                    },
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    endpoints: options.endpoints.map(|e| BybitEndpoints {
+                        rest: e.rest,
+                        public_ws: e.public_ws,
+                        private_ws: e.private_ws,
+                    }),
+                };
+                options.validate().map_err(|e| JsError::new(&e))?;
+                Box::new(Engine::new(BybitLinear::new(options)))
+            }
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };
         Ok(Self { inner })

@@ -1917,3 +1917,26 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 - Linear, inverse and spot send `orderLinkId`, rule `^[A-Za-z0-9_-]{1,36}$`, on the single-order path and on the batch path (`formatOrderForBatch`).
 - **HyroTrader rejects caller IDs** (`clientOrderIdRule = undefined`): its order recovery re-mints `orderLinkId` after a reject, which would rewrite a caller's ID. Its own `placeOrders` override must keep calling `assertCallerClientOrderIds` first.
 - Regular-order `updateOrder` uses `REPLACE_ORDER` (amend), which keeps `orderLinkId`.
+
+## Rust engine variants
+
+With `engine: 'rust'`, `bybit`, `bybitinverse`, `bybitspot`, `bybitdemo` and
+`hyrotrader` use one `sdk-rs/venues/bybit` state machine with a variant/paths
+option. Demo/testnet routing and the Hyro configured-origin selection remain
+as described above. Hyro native callers must supply all three endpoints; an
+absent configuration fails before I/O.
+
+Inverse keeps native USD order amounts and coin position PnL. The frame bridge
+preserves native order remainder and reconstructs native position size for
+copiers. Its wallet PnL is converted to USD, fixing the TS aggregate-unit bug.
+Spot reads current instrument precision/quantity fields, sends base-coin market
+buy units, and uses spot conditional/cancellation families. It refuses trailing
+position stops. Hyro keeps its order/position-only private subscription and
+emits incremental fills from cumulative order executions; ordinary Bybit variants
+use individual execution events.
+
+The TS implementations remain the replay oracle and support existing TS-engine
+callers and opt-in linear options/inverse combinations outside this port. No
+proven-unused helper or alternate Rust venue crate is retained. Verification,
+known TS defects and live-connectivity limits are recorded in
+`docs/plans/BYBIT_VARIANTS_PORT.md`.

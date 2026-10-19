@@ -6,6 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { gunzipSync } from 'node:zlib';
 
 const { values } = parseArgs({
   options: {
@@ -16,7 +17,7 @@ const { values } = parseArgs({
     'no-egress': { type: 'boolean', default: false },
   },
 });
-const outDir = 'sdk-rs/harness/out';
+const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 
 const replay = (impl, run) => {
@@ -24,7 +25,7 @@ const replay = (impl, run) => {
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
   args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
   if (values['no-egress']) args.push('--no-egress');
-  const result = spawnSync(process.execPath, args, { encoding: 'utf8' });
+  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 120000 });
   if (result.status !== 0) throw new Error(`${impl} replay failed:\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
 };
@@ -57,6 +58,11 @@ for (const impl of ['ts', 'rust']) {
   if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
 }
 const isPrivate = Boolean(ts.account);
+const tapeBytes = readFileSync(values.tape);
+const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes).toString().trim().split('\n').map(JSON.parse);
+const instrumentRows = records.filter((r) => r.type === 'http' && new URL(r.url).pathname === '/v5/market/instruments-info')
+  .flatMap((r) => JSON.parse(r.body).result?.list ?? []);
+const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 //  - A position first seen on the user stream keeps the margin size of TS's
 //    zero-size placeholder (0); Rust takes the isolated wallet, or notional
@@ -74,6 +80,21 @@ const isPrivate = Boolean(ts.account);
 //    coverage; the committed replay tapes require no normalization for them.
 //  - Bybit: with no mark price, TS can add a second Partial stop on amend;
 //    Rust amends the existing native order ID.
+//  - Bybit inverse: TS clamps USD contracts before splitting, silently shrinking
+//    large requests; Rust preserves the requested total in max lots + remainder.
+//  - Bybit inverse: TS sums coin PnL into the USD wallet; Rust converts using
+//    the position's USD notional/base contracts while preserving coin position PnL.
+//  - Bybit spot: TS reads absent qtyStep and deprecated maxOrderQty; Rust reads
+//    basePrecision and the conservative minimum of documented limit/market maxima.
+//    TS also sends invalid spot instrument pagination parameters; Rust omits them.
+//  - Bybit spot: documented tpslOrder rows become protective orders; TS has no
+//    mapping for that spelling. PartiallyFilledCanceled events now retire orders
+//    instead of leaving them open after their remaining quantity was cancelled.
+//  - Bybit spot: Rust sends marketUnit=baseCoin for market buys, uses native
+//    spot conditional/amend/cancel families, and rejects unsupported trailing
+//    orders instead of calling derivative position/trading-stop endpoints.
+//  - Hyro: seed cumulative fills from accepted reconnect snapshots; TS starts
+//    its incremental tracker empty and can re-emit the historical partial fill.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
   for (const position of account.positions) {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
@@ -84,8 +105,24 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
     if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled') order.rejectReason = 'PostOnly';
   }
 };
+// Normalize documented TS defects from the taped upstream payload, never from
+// the Rust result: a wrong Rust mapper must still fail this comparison.
+if (values.venue === 'bybitspot') {
+  for (const market of ts.markets) {
+    const lot = instruments.get(market.symbol)?.lotSizeFilter;
+    if (!lot) continue;
+    market.precision.amount = Number(lot.qtyStep ?? lot.basePrecision);
+    const maxima = [lot.maxLimitOrderQty, lot.maxMarketOrderQty, lot.maxOrderQty].map(Number).filter((n) => Number.isFinite(n) && n > 0);
+    if (maxima.length) market.limits.amount.max = Math.min(...maxima);
+  }
+}
 if (isPrivate) {
   KNOWN_TS_FIXES(ts.account, rust.account);
+  if (values.venue === 'bybitinverse') {
+    const upnl = ts.account.positions.reduce((sum, p) => sum + (p.contracts > 0 ? p.unrealizedPnl * p.notional / p.contracts : 0), 0);
+    ts.account.balance.total = Math.round((ts.account.balance.total + ts.account.balance.upnl - upnl) * 1e8) / 1e8;
+    ts.account.balance.upnl = upnl;
+  }
   for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
     const left = JSON.stringify(ts.account[field]);
     const right = JSON.stringify(rust.account[field]);

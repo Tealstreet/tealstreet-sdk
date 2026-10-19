@@ -272,6 +272,13 @@ pub struct Candle {
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BybitBbo {
+    pub side_type: String,
+    pub level: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PlaceOrderOpts {
     pub symbol: String,
     #[serde(rename = "type")]
@@ -300,4 +307,10 @@ pub struct PlaceOrderOpts {
     pub client_order_id: Option<String>,
     #[serde(default)]
     pub close: Option<bool>,
+    #[serde(default)]
+    pub max_slippage_pct: Option<f64>,
+    #[serde(default)]
+    pub bybit_bbo: Option<BybitBbo>,
+    #[serde(default)]
+    pub bybit_slippage_tolerance_ticks: Option<f64>,
 }

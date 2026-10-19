@@ -8,6 +8,7 @@ import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
+import { configuredOptions } from './venues.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -58,10 +59,12 @@ const recording = {
   },
 };
 
+const options = { ...configuredOptions(values.venue), publicDataOnly: true };
+if (options.endpoints) write({ type: 'config', options });
 const { WasmEngine } = await loadEngine();
 let frames = 0;
 let updates = 0;
-const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: false })), recording, {
+const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify(options)), recording, {
   onStoreUpdate: () => updates++,
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });

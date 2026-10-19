@@ -403,6 +403,12 @@ impl BinanceFutures {
         orders: &[PlaceOrderOpts],
     ) -> Result<Job, String> {
         check_client_order_ids(orders)?;
+        if orders
+            .iter()
+            .any(|o| o.bybit_bbo.is_some() || o.bybit_slippage_tolerance_ticks.is_some())
+        {
+            return Err("Bybit execution controls are supported only on Bybit".into());
+        }
         let mut job = Job::default();
         let mut regular = Vec::new();
         let mut algo = Vec::new();
@@ -641,6 +647,9 @@ impl BinanceFutures {
                 .then_some(order.trigger_type)
                 .flatten(),
             client_order_id: None,
+            max_slippage_pct: None,
+            bybit_bbo: None,
+            bybit_slippage_tolerance_ticks: None,
             close: Some(order.close.unwrap_or(false)),
         };
         let mut job = self.plan_cancel(std::slice::from_ref(&order));

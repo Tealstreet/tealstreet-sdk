@@ -27,6 +27,12 @@ const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes
   .split('\n')
   .filter(Boolean)
   .map((line) => JSON.parse(line));
+const replayOptions = records.find((r) => r.type === 'config')?.options ?? {};
+if (values.venue === 'hyrotrader' && replayOptions.endpoints) {
+  process.env.NEXT_PUBLIC_HYROTRADER_PROD_REST_URL = replayOptions.endpoints.rest;
+  process.env.NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL = replayOptions.endpoints.publicWs;
+  process.env.NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL = replayOptions.endpoints.privateWs;
+}
 const bookSymbols = values.books.split(',').filter(Boolean);
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
@@ -36,8 +42,16 @@ const SECRET = 'replay-secret';
 
 /** Per-request values: clocks, signatures, request ids and generated client ids. */
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
+// Hyro mandates generated IDs; identity/recovery is verified by the native tests.
+if (values.venue === 'hyrotrader') VOLATILE.add('orderLinkId');
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
+  // Spot instruments are unpaginated: TS sends invalid limit=1000 while
+  // Rust omits it, as required by V5. Both ask for the same complete list.
+  if (parsed.pathname === '/v5/market/instruments-info' && parsed.searchParams.get('category') === 'spot') {
+    parsed.searchParams.delete('limit');
+    parsed.searchParams.delete('cursor');
+  }
   const query = [...parsed.searchParams]
     .filter(([name]) => !VOLATILE.has(name))
     .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"[^"]*",?/g, '')])
@@ -68,6 +82,14 @@ const canonicalBody = (body) => {
 };
 const requestKey = (method, url, body) => `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
 
+const until = async (predicate, label) => {
+  const deadline = Date.now() + 30000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`replay waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+};
+
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
   constructor() {
@@ -87,6 +109,7 @@ class Tape {
     const queue = this.responses.get(requestKey(method, url, body));
     if (!queue?.length) {
       this.unserved++;
+      console.error(`unserved: ${requestKey(method, url, body)}`);
       return { status: 599, body: '' };
     }
     const record = queue.length > 1 ? queue.shift() : queue[0];
@@ -94,7 +117,7 @@ class Tape {
   }
 
   connect(url, onOpen, onMessage) {
-    const socket = { url, onMessage, closed: false };
+    const socket = { url, onMessage, closed: false, requests: new Map() };
     setImmediate(() => {
       if (socket.closed) return;
       // Keyed without volatile query params (Bybit's per-connection requestId).
@@ -105,11 +128,15 @@ class Tape {
     return socket;
   }
 
+  sent(socket, text) {
+    if (values.venue !== 'hyrotrader') return;
+    const frame = JSON.parse(text);
+    if (frame.op && frame.req_id) socket.requests.set(frame.op, frame.req_id);
+  }
+
   async socketFor(rawUrl) {
     const url = canonicalUrl(rawUrl);
-    while (!this.open.get(url) || this.open.get(url).closed) {
-      await new Promise((resolve) => this.waiters.push(() => (this.open.get(url) ? (resolve(), true) : false)));
-    }
+    await until(() => this.open.get(url) && !this.open.get(url).closed, `socket ${url}; unserved=${this.unserved}`);
     return this.open.get(url);
   }
 
@@ -121,7 +148,7 @@ class Tape {
   async play(onTick, ready = async () => {}, runCommand = async () => {}) {
     const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
     for (const url of urls) await this.socketFor(url);
-    await ready();
+    await ready(false);
     const start = performance.now();
     let delivered = 0;
     const warm = Math.floor(this.frames.length / 4);
@@ -132,10 +159,23 @@ class Tape {
         if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
       }
       if (frame.type === 'command') {
+        await ready(true);
         this.results.push(await runCommand(frame).then((ids) => ({ ok: ids }), (error) => ({ error: String(error?.message ?? error) })));
       } else {
         const socket = await this.socketFor(frame.url);
-        socket.onMessage(frame.text);
+        let text = frame.text;
+        // Handshake IDs are connection-local; the documented ack echoes the
+        // actual request instead of pinning either implementation's generator.
+        if (values.venue === 'hyrotrader') {
+          const message = JSON.parse(text);
+          if (message.req_id === '@latest') {
+            await until(() => socket.requests.has(message.op), `${message.op} request for acknowledgement`);
+            const reqId = socket.requests.get(message.op);
+            if (!reqId) throw new Error(`no ${message.op} request for acknowledgement`);
+            text = JSON.stringify({ ...message, req_id: reqId });
+          }
+        }
+        socket.onMessage(text);
       }
       delivered++;
       onTick?.(frame.t);
@@ -168,7 +208,7 @@ const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
     rssBytes: memory.rss,
     heapUsedBytes: memory.heapUsed,
     wasmBytes,
-    // What the implementation keeps alive beyond the harness and loaded code.
+    // The complete implementation heap plus reserved wasm, above the harness baseline.
     retainedBytes: memory.heapUsed - heapBefore + wasmBytes,
   };
 };
@@ -191,11 +231,15 @@ const marketFields = (m) => ({
   base: m.base,
   quote: m.quote,
   active: m.active,
+  isInverse: Boolean(m.isInverse),
+  isSpot: Boolean(m.isSpot),
+  isExpiring: Boolean(m.isExpiring),
   precision: m.precision,
   limits: { amount: m.limits.amount },
 });
 
 async function runRust() {
+  const heapBefore = baseline();
   const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
@@ -216,7 +260,7 @@ async function runRust() {
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
       const socket = tape.connect(url, onOpen, onMessage);
-      return { send: () => {}, close: () => (socket.closed = true) };
+      return { send: (text) => tape.sent(socket, text), close: () => (socket.closed = true) };
     },
     request: async ({ method, url, body: requestBody }) => {
       const { status, body } = tape.respond(method, url, requestBody);
@@ -225,8 +269,9 @@ async function runRust() {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
-  const options = isPrivate ? { key: KEY, secret: SECRET } : { publicDataOnly: true };
+  const options = { ...replayOptions, ...(isPrivate ? { key: KEY, secret: SECRET, publicDataOnly: false } : { publicDataOnly: true }) };
   const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
+    onLog: (level, message) => { if (level === 'error') console.error(message); },
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
       const received = values['no-egress'] ? buffer : structuredClone(buffer, { transfer: [buffer] });
@@ -245,7 +290,6 @@ async function runRust() {
       }
     },
   });
-  const heapBefore = baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   host.start();
@@ -260,8 +304,9 @@ async function runRust() {
         lastFlush = t;
       }
     },
-    async () => {
-      while (isPrivate && (status?.loaded ?? 0) !== allLoaded) await new Promise((r) => setTimeout(r, 5));
+    async (accountReady) => {
+      const ready = () => accountReady ? (status?.loaded ?? 0) === allLoaded : ((status?.loaded ?? 0) & 12) === 12;
+      if (isPrivate) await until(ready, `Rust loaded state ${accountReady ? 'account' : 'public'}; unserved=${tape.unserved}`);
     },
     (record) => {
       const { op, ...rest } = record;
@@ -283,6 +328,9 @@ async function runRust() {
       base: markets.base(i),
       quote: markets.quote(i),
       active: (markets.flags[i] & 1) !== 0,
+      isInverse: (markets.flags[i] & 2) !== 0,
+      isSpot: (markets.flags[i] & 4) !== 0,
+      isExpiring: (markets.flags[i] & 16) !== 0,
       precision: { amount: markets[MARKET_COLUMNS[0]][i], price: markets[MARKET_COLUMNS[1]][i] },
       limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
     });
@@ -339,6 +387,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 }
 
 async function runTs() {
+  const heapBefore = baseline();
   const tape = new Tape();
   class TapeWebSocket {
     static CONNECTING = 0;
@@ -368,7 +417,7 @@ async function runTs() {
     removeEventListener(type, fn) {
       this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
     }
-    send() {}
+    send(text) { tape.sent(this.socket, text); }
     close() {
       this.readyState = 3;
       this.socket.closed = true;
@@ -395,13 +444,12 @@ async function runTs() {
     return response;
   };
   const store = new DefaultStore();
-  const options = isPrivate ? { key: KEY, secret: SECRET } : { key: '', secret: '', publicDataOnly: true };
+  const options = { ...replayOptions, ...(isPrivate ? { key: KEY, secret: SECRET, publicDataOnly: false } : { key: '', secret: '', publicDataOnly: true }) };
   const exchange = new Exchange(venue.ts.name, options, store);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
   const finalBooks = {};
-  const heapBefore = baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   const started = exchange.start();
@@ -421,10 +469,10 @@ async function runTs() {
         lastFlush = t;
       }
     },
-    async () => {
-      while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
-      const loaded = () => Object.values(store.loaded).every(Boolean);
-      while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
+    async (accountReady) => {
+      await until(() => venue.tsBooksSubscribed(exchange, bookSymbols.length), 'TS book subscriptions');
+      const loaded = () => accountReady ? Object.values(store.loaded).every(Boolean) : store.loaded.markets && store.loaded.tickers;
+      if (isPrivate) await until(loaded, `TS loaded state ${accountReady ? 'account' : 'public'}; unserved=${tape.unserved}`);
     },
     async (record) => {
       if (record.op === 'placeOrders') return exchange.placeOrders(record.orders);
@@ -510,7 +558,10 @@ function normalizeAccount(account) {
   };
 }
 
-const result = values.impl === 'ts' ? await runTs() : await runRust();
+const result = await Promise.race([
+  values.impl === 'ts' ? runTs() : runRust(),
+  new Promise((_, reject) => setTimeout(() => reject(new Error(`${values.impl} replay timed out waiting for taped I/O or readiness`)), 60000).unref()),
+]);
 const { writeFileSync } = await import('node:fs');
 writeFileSync(
   values.out,

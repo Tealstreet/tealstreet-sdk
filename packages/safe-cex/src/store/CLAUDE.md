@@ -227,3 +227,18 @@ a non-final "Triggered" to Closed; Binance sends `EXPIRED` when a stop
 triggers). Only a venue whose stream event is FINAL calls it — OKX's `filled` /
 `canceled` today. `fromWorker` is skipped because the worker's store has already
 applied it. Proven by the gap-4 cases in `__tests__/faultBench/badLink.scenarios.test.ts`.
+
+## Rust frame native units
+
+`FrameApplier` preserves inverse sizing metadata across the worker bridge.
+Inverse position `notional` is the native quote-contract size, so the applier
+also publishes it as `extra.contractsNative`; `extra.unrealizedPnlNative`
+keeps the native PnL. Copier closes consume the native size rather than the
+rounded base-coin `contracts` field.
+
+An optional trailing `ORDERS.remainingNative` frame column carries the venue's
+exact native leaves quantity into `extra.remainingNative` and
+`extra.remainingNotional`. Do not infer it by multiplying rounded base remainder
+by price, or from an amount-zero Full position stop. Legacy seven-column frames
+remain readable and leave those extras absent. Order rejection metadata must
+survive alongside the native sizing fields.

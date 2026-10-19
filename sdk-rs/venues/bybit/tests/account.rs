@@ -98,6 +98,9 @@ fn limit(symbol: &str, side: OrderSide, amount: f64, price: f64) -> PlaceOrderOp
         sl_trigger_type: None,
         client_order_id: None,
         close: None,
+        max_slippage_pct: None,
+        bybit_bbo: None,
+        bybit_slippage_tolerance_ticks: None,
     }
 }
 

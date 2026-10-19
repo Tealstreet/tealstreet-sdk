@@ -1,10 +1,14 @@
-//! Bybit V5 linear (USDT and USDC settled) contracts on the sans-I/O engine.
+//! Bybit V5 products and compatible HyroTrader accounts on the sans-I/O engine.
 mod account;
 mod history;
+mod hyro;
+mod paths;
 mod sign;
 mod trading;
 mod wire;
 
+use paths::Paths;
+pub use paths::{Endpoints, Variant};
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
@@ -22,7 +26,6 @@ const MAX_RECONNECT_DELAY_MS: f64 = 30_000.0;
 const WATCHDOG_INTERVAL_MS: f64 = 5_000.0;
 const PING_AFTER_MS: f64 = 10_000.0;
 const SILENCE_LIMIT_MS: f64 = 20_000.0;
-const BOOK_DEPTH: u32 = 1000;
 /// A book that skipped an update is unsubscribed, then subscribed again for a
 /// fresh snapshot this long after.
 const RESUBSCRIBE_DELAY_MS: f64 = 100.0;
@@ -37,35 +40,13 @@ const MARKETS_PATH: &[&str] = &["result", "list"];
 
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    pub variant: Variant,
+    pub endpoints: Option<Endpoints>,
     pub testnet: bool,
     /// Markets, tickers, books and candles only; no account.
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
-}
-
-struct Urls {
-    rest: &'static str,
-    public_ws: &'static str,
-    private_ws: &'static str,
-}
-
-impl Urls {
-    fn for_options(options: &Options) -> Self {
-        if options.testnet {
-            Self {
-                rest: "https://api-testnet.bybit.com",
-                public_ws: "wss://stream-testnet.bybit.com/v5/public/linear",
-                private_ws: "wss://stream-testnet.bybit.com/v5/private",
-            }
-        } else {
-            Self {
-                rest: "https://api.bybit.com",
-                public_ws: "wss://stream.bybit.com/v5/public/linear",
-                private_ws: "wss://stream.bybit.com/v5/private",
-            }
-        }
-    }
 }
 
 /// One REST request as sent, kept so a rejected signature can be resent.
@@ -210,7 +191,9 @@ struct Startup {
 }
 
 pub struct BybitLinear {
-    urls: Urls,
+    variant: Variant,
+    paths: Paths,
+    config_error: Option<String>,
     credentials: Option<Credentials>,
     public: Connection,
     private: Connection,
@@ -285,7 +268,8 @@ fn resendable(text: &str) -> Option<Option<f64>> {
 
 impl BybitLinear {
     pub fn new(options: Options) -> Self {
-        let urls = Urls::for_options(&options);
+        let paths = Paths::for_options(&options);
+        let config_error = options.validate().err();
         let credentials = match (&options.key, &options.secret) {
             (Some(key), Some(secret)) if !options.public_data_only && !key.is_empty() => {
                 Some(Credentials {
@@ -296,7 +280,9 @@ impl BybitLinear {
             _ => None,
         };
         Self {
-            urls,
+            variant: options.variant,
+            paths,
+            config_error,
             credentials,
             public: Connection::new(),
             private: Connection::new(),
@@ -304,6 +290,8 @@ impl BybitLinear {
             candles: HashMap::new(),
             startup: Startup {
                 retry_ms: STARTUP_RETRY_MIN_MS,
+                prelaunch: (options.variant.is_spot() || options.variant.is_hyro()).then(Vec::new),
+                fees: (options.variant.is_spot() || options.variant.is_hyro()).then(HashMap::new),
                 ..Startup::default()
             },
             clock_offset_ms: 0.0,
@@ -332,7 +320,10 @@ impl BybitLinear {
 
     /// Send one REST request; a signed one needs credentials.
     fn send(&self, cx: &mut Cx<'_, Pending>, rest: Rest, then: Then) {
-        let mut url = format!("{}{}", self.urls.rest, rest.path);
+        if self.config_error.is_some() {
+            return;
+        }
+        let mut url = format!("{}{}", self.paths.rest, rest.path);
         if rest.method == Method::Get && !rest.payload.is_empty() {
             url.push('?');
             url.push_str(&rest.payload);
@@ -382,8 +373,8 @@ impl BybitLinear {
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel) {
         let url = match channel {
-            Channel::Public => self.urls.public_ws,
-            Channel::Private => self.urls.private_ws,
+            Channel::Public => self.paths.public_ws.as_str(),
+            Channel::Private => self.paths.private_ws.as_str(),
         };
         let socket = cx.connect(url);
         let connection = self.connection(channel);
@@ -433,7 +424,7 @@ impl BybitLinear {
         let timer = cx.set_timer(delay);
         self.connection(channel).reconnect = Some(timer);
         if channel == Channel::Private {
-            self.account.authed = false;
+            self.on_private_closed(cx);
         }
         cx.log(
             LogLevel::Warning,
@@ -471,8 +462,8 @@ impl BybitLinear {
         }
     }
 
-    fn book_topic(symbol: &str) -> String {
-        format!("orderbook.{BOOK_DEPTH}.{symbol}")
+    fn book_topic(depth: u32, symbol: &str) -> String {
+        format!("orderbook.{depth}.{symbol}")
     }
 
     fn kline_topic(symbol: &str, interval: &str) -> Option<String> {
@@ -480,11 +471,13 @@ impl BybitLinear {
     }
 
     fn request_markets(&self, cx: &mut Cx<'_, Pending>, prelaunch: bool, cursor: Option<&str>) {
-        let query = Query::new()
-            .str("category", "linear")
-            .num("limit", f64::from(MARKETS_PAGE_LIMIT))
-            .opt_str("status", prelaunch.then_some("PreLaunch"))
-            .opt_str("cursor", cursor);
+        let mut query = Query::new().str("category", self.paths.category);
+        if !self.variant.is_spot() {
+            query = query
+                .num("limit", f64::from(MARKETS_PAGE_LIMIT))
+                .opt_str("status", prelaunch.then_some("PreLaunch"))
+                .opt_str("cursor", cursor);
+        }
         let markets = Vec::new();
         self.send(
             cx,
@@ -514,7 +507,7 @@ impl BybitLinear {
             && !self.startup.tickers_in_flight
         {
             self.startup.tickers_in_flight = true;
-            let query = Query::new().str("category", "linear");
+            let query = Query::new().str("category", self.paths.category);
             self.send(
                 cx,
                 Rest::get("/v5/market/tickers", query).streamed(),
@@ -527,7 +520,7 @@ impl BybitLinear {
             && !self.startup.fees_in_flight
         {
             self.startup.fees_in_flight = true;
-            let query = Query::new().str("category", "linear");
+            let query = Query::new().str("category", self.paths.category);
             self.send(
                 cx,
                 Rest::get("/v5/account/fee-rate", query).streamed().signed(),
@@ -574,7 +567,7 @@ impl BybitLinear {
             &mut self.startup.trading_pages
         };
         pages.append(&mut markets);
-        if let Some(cursor) = cursor {
+        if let Some(cursor) = cursor.filter(|_| !self.variant.is_spot()) {
             self.request_markets(cx, prelaunch, Some(&cursor));
             return;
         }
@@ -651,6 +644,10 @@ impl BybitLinear {
                     ticker.funding_rate = 0.0;
                     ticker.funding_time = 0.0;
                 }
+                if self.variant.is_spot() {
+                    ticker.funding_rate = 0.0;
+                    ticker.funding_time = 0.0;
+                }
                 ticker.id = market.id.clone();
                 Some(ticker)
             })
@@ -680,7 +677,7 @@ impl BybitLinear {
         };
         if topic.starts_with("tickers.") {
             if let Ok(event) = serde_json::from_str::<TickerEvent>(text) {
-                on_ticker(cx, &event.data);
+                on_ticker(cx, &event.data, self.variant);
             }
         } else if topic.starts_with("orderbook.") {
             if let Ok(event) = serde_json::from_str::<BookEvent>(text) {
@@ -722,7 +719,7 @@ impl BybitLinear {
                     // A skipped update: drop the book and subscribe again for a snapshot.
                     state.book.clear();
                     state.sync = Sync::Resubscribing(cx.set_timer(RESUBSCRIBE_DELAY_MS));
-                    let topic = Self::book_topic(&data.s);
+                    let topic = Self::book_topic(self.paths.book_depth, &data.s);
                     self.subscribe(cx, "unsubscribe", &[topic]);
                     return;
                 }
@@ -781,7 +778,11 @@ impl BybitLinear {
             });
         state.subscribers += 1;
         if state.subscribers == 1 {
-            self.subscribe(cx, "subscribe", &[Self::book_topic(&symbol)]);
+            self.subscribe(
+                cx,
+                "subscribe",
+                &[Self::book_topic(self.paths.book_depth, &symbol)],
+            );
         }
     }
 
@@ -798,7 +799,11 @@ impl BybitLinear {
             {
                 cx.clear_timer(timer);
             }
-            self.subscribe(cx, "unsubscribe", &[Self::book_topic(symbol)]);
+            self.subscribe(
+                cx,
+                "unsubscribe",
+                &[Self::book_topic(self.paths.book_depth, symbol)],
+            );
         }
     }
 
@@ -845,7 +850,7 @@ impl BybitLinear {
             return;
         };
         let query = Query::new()
-            .str("category", "linear")
+            .str("category", self.paths.category)
             .str("symbol", symbol)
             .str("interval", code)
             .opt_num("start", from_ms)
@@ -860,12 +865,17 @@ impl BybitLinear {
     }
 }
 
-fn on_item_public(then: &mut Then, item: &str) {
+fn on_item_public(then: &mut Then, item: &str, variant: Variant) {
     {
         match then {
             Then::Markets { markets, .. } => {
-                if let Ok(m) = serde_json::from_str::<Instrument>(item) {
-                    markets.push(market_from_wire(&m));
+                if let Ok(m) = serde_json::from_str::<Instrument>(item)
+                    && (!variant.is_hyro()
+                        || (m.quote_coin == "USDT"
+                            && (m.contract_type.is_empty()
+                                || m.contract_type == "LinearPerpetual")))
+                {
+                    markets.push(market_from_wire(&m, variant));
                 }
             }
             Then::Fees(fees) => {
@@ -954,7 +964,7 @@ impl BybitLinear {
     }
 }
 
-fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerRow<'_>) {
+fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerRow<'_>, variant: Variant) {
     let field = |value: &Option<Str<'_>>| present(value).map(float);
     let bid = field(&d.bid1_price);
     let ask = field(&d.ask1_price);
@@ -963,8 +973,16 @@ fn on_ticker(cx: &mut Cx<'_, Pending>, d: &TickerRow<'_>) {
     let index = field(&d.index_price);
     let percentage = field(&d.price24h_pcnt).map(|p| p * 100.0);
     let open_interest = field(&d.open_interest);
-    let funding_rate = field(&d.funding_rate);
-    let funding_time = field(&d.next_funding_time);
+    let funding_rate = if variant.is_spot() {
+        Some(0.0)
+    } else {
+        field(&d.funding_rate)
+    };
+    let funding_time = if variant.is_spot() {
+        Some(0.0)
+    } else {
+        field(&d.next_funding_time)
+    };
     let volume = field(&d.volume24h);
     let quote_volume = field(&d.turnover24h);
     cx.store.update_ticker(&d.symbol, |t| {
@@ -1010,23 +1028,31 @@ fn ticker_from_rest(t: &TickerRow<'_>) -> Ticker {
     }
 }
 
-fn market_from_wire(m: &Instrument<'_>) -> Market {
+fn market_from_wire(m: &Instrument<'_>, variant: Variant) -> Market {
     let lot = m.lot_size_filter.as_ref();
     let leverage = m.leverage_filter.as_ref();
-    let expiring = m
-        .delivery_time
-        .as_deref()
-        .map(float)
-        .is_some_and(|t| t != 0.0 && !t.is_nan());
+    let expiring = !variant.is_spot()
+        && m.delivery_time
+            .as_deref()
+            .map(float)
+            .is_some_and(|t| t != 0.0 && !t.is_nan());
     Market {
         id: m.symbol.to_string(),
         symbol: m.symbol.to_string(),
         pretty_symbol: None,
         base: m.base_coin.to_string(),
         quote: m.quote_coin.to_string(),
-        active: matches!(m.status.as_ref(), "Trading" | "PreLaunch"),
+        active: m.status == "Trading" || (!variant.is_spot() && m.status == "PreLaunch"),
         precision: Precision {
-            amount: lot.map_or(f64::NAN, |l| float_of(&l.qty_step)),
+            amount: lot.map_or(f64::NAN, |l| {
+                if variant.is_spot() {
+                    present(&l.qty_step)
+                        .or_else(|| present(&l.base_precision))
+                        .map_or(f64::NAN, float)
+                } else {
+                    float_of(&l.qty_step)
+                }
+            }),
             price: m
                 .price_filter
                 .as_ref()
@@ -1035,19 +1061,42 @@ fn market_from_wire(m: &Instrument<'_>) -> Market {
         limits: Limits {
             amount: MinMax {
                 min: lot.map_or(f64::NAN, |l| float_of(&l.min_order_qty)),
-                max: lot.map_or(f64::NAN, |l| float_of(&l.max_order_qty)),
+                max: lot.map_or(f64::NAN, |l| {
+                    if variant.is_spot() {
+                        [
+                            &l.max_limit_order_qty,
+                            &l.max_market_order_qty,
+                            &l.max_order_qty,
+                        ]
+                        .into_iter()
+                        .filter_map(|v| present(v).map(float))
+                        .filter(|n| n.is_finite() && *n > 0.0)
+                        .reduce(f64::min)
+                        .unwrap_or(f64::NAN)
+                    } else {
+                        float_of(&l.max_order_qty)
+                    }
+                }),
             },
             leverage: MinMax {
-                min: leverage.map_or(f64::NAN, |l| float_of(&l.min_leverage)),
-                max: leverage.map_or(f64::NAN, |l| float_of(&l.max_leverage)),
+                min: if variant.is_spot() {
+                    1.0
+                } else {
+                    leverage.map_or(f64::NAN, |l| float_of(&l.min_leverage))
+                },
+                max: if variant.is_spot() {
+                    1.0
+                } else {
+                    leverage.map_or(f64::NAN, |l| float_of(&l.max_leverage))
+                },
             },
             price: None,
         },
         contract_size: None,
         is_expiring: Some(expiring),
-        is_inverse: None,
-        is_spot: None,
-        is_perpetual: Some(!expiring),
+        is_inverse: variant.is_inverse().then_some(true),
+        is_spot: variant.is_spot().then_some(true),
+        is_perpetual: Some(!variant.is_spot() && !expiring),
         is_read_only: None,
         taker_fee: None,
         maker_fee: None,
@@ -1058,6 +1107,10 @@ impl Venue for BybitLinear {
     type Pending = Pending;
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(error) = &self.config_error {
+            cx.log(LogLevel::Error, error.clone());
+            return;
+        }
         self.request_startup(cx);
         if self.credentials.is_some() {
             self.request_account_info(cx);
@@ -1081,7 +1134,11 @@ impl Venue for BybitLinear {
                     .store
                     .markets()
                     .iter()
-                    .filter(|m| matches!(m.quote.as_str(), "USDT" | "USDC"))
+                    .filter(|m| {
+                        self.variant.is_inverse()
+                            || self.variant.is_spot()
+                            || matches!(m.quote.as_str(), "USDT" | "USDC")
+                    })
                     .map(|m| format!("tickers.{}", m.symbol))
                     .collect();
                 for (symbol, state) in &mut self.books {
@@ -1090,7 +1147,7 @@ impl Venue for BybitLinear {
                         cx.clear_timer(timer);
                     }
                     state.sync = Sync::Waiting;
-                    topics.push(Self::book_topic(symbol));
+                    topics.push(Self::book_topic(self.paths.book_depth, symbol));
                 }
                 topics.extend(
                     self.candles
@@ -1134,7 +1191,7 @@ impl Venue for BybitLinear {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match &mut pending.then {
             Then::Account(request) => self.on_account_item(cx, request, item),
-            then => on_item_public(then, item),
+            then => on_item_public(then, item, self.variant),
         }
     }
 
@@ -1154,7 +1211,7 @@ impl Venue for BybitLinear {
         for (symbol, state) in &mut self.books {
             if matches!(state.sync, Sync::Resubscribing(t) if t == timer) {
                 state.sync = Sync::Waiting;
-                resubscribe.push(Self::book_topic(symbol));
+                resubscribe.push(Self::book_topic(self.paths.book_depth, symbol));
             }
         }
         if !resubscribe.is_empty() {

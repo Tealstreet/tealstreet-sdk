@@ -77,6 +77,8 @@ export interface CandleRows {
   rows: Float64Array;
 }
 export type OrderTable = { count: number; market: Uint32Array; enums: Uint32Array } & Columns<OrderColumn> & {
+  /** Optional trailing column; absent in legacy frames, NaN for rows without native units. */
+  remainingNative?: Float64Array;
   id(i: number): string;
   clientOrderId(i: number): string | undefined;
   parentId(i: number): string | undefined;

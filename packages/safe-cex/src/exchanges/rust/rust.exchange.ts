@@ -26,6 +26,12 @@ import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
 import { LogSeverity } from '../../types';
 import { BaseExchange } from '../base';
+import {
+  HYROTRADER_PROD_URL,
+  HYROTRADER_PROD_WS_URL,
+  HYROTRADER_SIMULATOR_URL,
+  HYROTRADER_SIMULATOR_WS_URL,
+} from '../bybit/bybit.types';
 import { patternClientOrderIdRule } from '../clientOrderId';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
@@ -33,6 +39,10 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   binancepm: 'binancepm',
   bybit: 'bybit',
+  bybitinverse: 'bybitinverse',
+  bybitspot: 'bybitspot',
+  bybitdemo: 'bybitdemo',
+  hyrotrader: 'hyrotrader',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
@@ -83,8 +93,12 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
+    this.isSpot = exchangeName === 'bybitspot';
+    this.isDemo = exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     this.clientOrderIdRule =
-      exchangeName === 'bybit' ? patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/) : undefined;
+      ['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo'].includes(exchangeName)
+        ? patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/)
+        : undefined;
     this.applier = new FrameApplier(store);
   }
 
@@ -93,9 +107,10 @@ export class RustEngineExchange extends BaseExchange {
     const { WasmEngine } = await loadWasmEngine();
     if (this.isDisposed) return;
     const { key, secret, testnet, publicDataOnly } = this.options;
+    const endpoints = this.name === 'hyrotrader' ? this.hyroEndpoints() : undefined;
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
-      JSON.stringify({ key, secret, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly) }),
+      JSON.stringify({ key, secret, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly), endpoints }),
     );
     this.host = new EngineHost(engine, engineTransport(), {
       onFrame: this.receiveFrame,
@@ -111,6 +126,17 @@ export class RustEngineExchange extends BaseExchange {
       this.flushTimers.push(setInterval(() => this.host?.flush(true), bookMs));
     }
     await this.untilLoaded();
+  };
+
+  private hyroEndpoints = () => {
+    const simulator = this.options.extra?.hyrotraderMode === 'demo' || !HYROTRADER_PROD_URL.livenet;
+    const rest = simulator ? HYROTRADER_SIMULATOR_URL : HYROTRADER_PROD_URL;
+    const ws = simulator ? HYROTRADER_SIMULATOR_WS_URL : HYROTRADER_PROD_WS_URL;
+    const network = this.options.testnet ? 'testnet' : 'livenet';
+    if (!rest[network] || !ws.public.linear[network] || !ws.private[network]) {
+      throw new Error('HyroTrader REST/public/private URLs are not configured');
+    }
+    return { rest: rest[network], publicWs: ws.public.linear[network], privateWs: ws.private[network] };
   };
 
   /** The whole current state as one frame, for a consumer that starts late. */
@@ -183,7 +209,18 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (this.name === 'bybit') this.assertCallerClientOrderIds(orders);
+    if (['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name)) {
+      this.assertCallerClientOrderIds(orders);
+      for (const order of orders) {
+        if (this.name === 'hyrotrader' &&
+          (order.maxSlippagePct !== undefined || 'bybitBbo' in order || 'bybitSlippageToleranceTicks' in order)) {
+          this.rejectPreflight('HyroTrader does not support client-defined slippage or Bybit execution controls');
+        }
+        if (order.maxSlippagePct !== undefined && !Number.isFinite(order.maxSlippagePct)) {
+          this.rejectPreflight('Bybit maxSlippagePct must be finite');
+        }
+      }
+    }
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 
