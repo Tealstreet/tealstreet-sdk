@@ -432,6 +432,33 @@ describe('RustEngineExchange', () => {
     expect(tape.requests).toEqual([]);
   });
 
+  it.each(['bitget', 'bitgetusdc'] as const)('rejects private %s without a nonempty passphrase', async (venue) => {
+    const { WasmEngine } = await loadNodeEngine();
+    for (const passphrase of [undefined, '']) {
+      expect(() => new WasmEngine(venue, JSON.stringify({ key: 'k', secret: 's', passphrase }))).toThrow(
+        'Bitget requires a passphrase',
+      );
+    }
+  });
+
+  it.each(['bitget', 'bitgetusdc'] as const)(
+    'accepts %s with its passphrase or public-only credentials',
+    async (venue) => {
+      const { WasmEngine } = await loadNodeEngine();
+      const options: Partial<ExchangeOptions>[] = [
+        { key: 'k', secret: 's', passphrase: 'p' },
+        { key: 'k', secret: 's', publicDataOnly: true },
+        { key: 'k', secret: 's', passphrase: '', publicDataOnly: true },
+        {},
+        { key: 'k' },
+        { secret: 's' },
+      ];
+      for (const value of options) {
+        expect(() => new WasmEngine(venue, JSON.stringify(value))).not.toThrow();
+      }
+    },
+  );
+
   it('rejects payload-only private signing before transport starts', async () => {
     const tape = recordedTransport();
     setWasmEngineLoader(loadNodeEngine);
@@ -533,7 +560,7 @@ describe('RustEngineExchange', () => {
     expect(tape.requests.filter((request) => request.method === 'POST')).toHaveLength(1);
   });
 
-  it.each(['cryptocom', 'weex'] as const)('honors %s caller IDs through the inherited shell helpers', async (venue) => {
+  it.each(['cryptocom', 'weex', 'bitget', 'bitgetusdc'] as const)('honors %s caller IDs through the inherited shell helpers', async (venue) => {
     // Reuse the existing wasm fixture to seed the shell's market preflight.
     const tape = recordedTransport();
     setWasmEngineLoader(loadNodeEngine);
@@ -582,6 +609,26 @@ describe('RustEngineExchange', () => {
       found: false,
       definitive: false,
     });
+    if (venue === 'bitget' || venue === 'bitgetusdc') {
+      for (const invalid of ['', 'invalid@id', 'a'.repeat(33)]) {
+        await expect(exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: invalid })).rejects.toThrow(
+          'clientOrderId must match',
+        );
+        await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: invalid }])).rejects.toThrow(
+          'clientOrderId must match',
+        );
+      }
+      await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'bracket', stopLoss: 80000 }])).rejects.toThrow(
+        'order shape',
+      );
+      await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'split', amount: 1001 }])).rejects.toThrow(
+        'max size',
+      );
+      await expect(exchange.placeOrders([opts, opts])).rejects.toThrow('duplicated in one batch');
+      expect(exchange.mintClientOrderId({ ...opts, stopLoss: 80000 })).toBeUndefined();
+      expect(exchange.mintClientOrderId({ ...opts, amount: 1001 })).toBeUndefined();
+      expect(sent).toEqual([opts.clientOrderId]);
+    }
   });
 
   it('returns no outbound action payload for ticker updates and preserves socket errors', async () => {

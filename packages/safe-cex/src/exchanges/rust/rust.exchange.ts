@@ -44,6 +44,8 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   backpack: 'backpack',
   binancepm: 'binancepm',
+  bitget: 'bitget',
+  bitgetusdc: 'bitgetusdc',
   blofin: 'blofin',
   mexc: 'mexc',
   bingx: 'bingx',
@@ -66,7 +68,10 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
+const bitgetClientOrderIdRule = patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/);
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  bitget: bitgetClientOrderIdRule,
+  bitgetusdc: bitgetClientOrderIdRule,
   backpack: {
     label: 'Backpack',
     isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
@@ -309,7 +314,7 @@ export class RustEngineExchange extends BaseExchange {
         }
       }
     }
-    if (this.name === 'bingx' || this.name === 'backpack') this.assertCallerClientOrderIds(orders);
+    if (['bingx', 'backpack', 'bitget', 'bitgetusdc'].includes(this.name)) this.assertCallerClientOrderIds(orders);
     if (isBybit) {
       this.assertCallerClientOrderIds(orders);
       for (const order of orders) {

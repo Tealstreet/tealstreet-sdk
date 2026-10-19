@@ -79,21 +79,26 @@ lto = "fat"
 codegen-units = 1
 opt-level = 3
 
-# Keep dispatch and cold venue code compact; optimize the engine and Bybit feeds.
-[profile.release.package.safe-cex-engine]
-opt-level = 3
-
+# Optimize final dispatch for throughput; venue crates retain size profiles.
 [profile.release.package.safe-cex-wasm]
-opt-level = "z"
+opt-level = 3
 
 [profile.release.package.safe-cex-venue-binance]
 opt-level = "z"
 
 [profile.release.package.safe-cex-venue-bybit]
-opt-level = 3
+opt-level = "s"
 
 [profile.release.package.safe-cex-venue-bingx]
 opt-level = "z"
 
 [profile.release.package.safe-cex-venue-weex]
 opt-level = "z"
+
+# Bitget's streamed ticker decoder is CPU-bound; keep its hot loops optimized
+# for throughput while the aggregate WASM build optimizes other crates for size.
+[profile.release.package.safe-cex-venue-bitget]
+opt-level = 3
+
+[profile.release.package.safe-cex-engine]
+opt-level = 3

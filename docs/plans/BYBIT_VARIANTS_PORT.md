@@ -421,3 +421,34 @@ profile precedence passes. No further defects remain from that review.
 
 Bitget landed at `3a7b46407d` before the final push. Integrate its shared
 harness/host changes and rerun required gates and final-head CI before merge.
+
+## Bitget integration checkpoint
+
+Merged the tenth venue at `3a7b46407d`, preserving its `createTape` factory,
+pre-consumption write/signature audits, generated-ID aliases, topic routing and
+stronger symmetric constructor CPU window. Keep before-import settled memory,
+CPU capture before final GC, all four finite/nonnegative components on every
+run, strict implementation filtering, typed request hooks and Hyro readiness.
+All 127 harness tests (including every prior test name) pass; undefined-symbol
+and independent extraction audits pass.
+
+The new Bitget planner rejects Bybit-only controls before any batch write and
+its amendment options include the new fields. All 78 native Bitget cases pass,
+including a proved red/green Classic/UTA regression. The shared shell now honors
+Bitget/BitgetUSDC caller IDs; both aliases reproduced the missing-rule failure
+before the fix and pass inherited-helper regressions.
+
+Independent review also found named array paths accepting an array element as
+an object field in the new shared splitter. Bybit rejects that malformed root
+envelope later; no account corruption was demonstrated. Track seeking container
+kinds so named paths require object parents while explicit root arrays remain
+supported. The regression is proved red/green, all 50 engine tests and strict
+Clippy pass, and a second independent review passes valid Bitget/Bybit paths and
+chunk boundaries.
+
+The all-O3 hot-path build was 3,724,964 bytes, over the inherited 3,670,016-byte
+budget. O2 dispatch only reduced that to 3,721,305 bytes. Keep incoming dispatch,
+engine and Bitget O3, and use Bybit's `s` profile with the source allocation fixes.
+The resulting artifact is 3,658,339 bytes, within the unchanged inherited 3.5 MiB
+budget. The full matrix is now 31 gates (14 public, 17 private) and is running;
+final-head CI must be green before merge. No fixture or gate threshold changed.
