@@ -33,11 +33,10 @@ const INITIAL_CHASER_STATE: ChaserOrderState = ChaserOrderState {
     current_orders_ids: Vec::new(),
 };
 
-thread_local! {
-    static CHASER_DEFAULT: std::cell::OnceCell<Js> = const { std::cell::OnceCell::new() };
-}
-
 pub fn default_chaser_state() -> Result<Js, Thrown> {
+    thread_local! {
+        static CHASER_DEFAULT: std::cell::OnceCell<Js> = const { std::cell::OnceCell::new() };
+    }
     CHASER_DEFAULT.with(|slot| {
         if let Some(value) = slot.get() {
             return Ok(value.clone());
