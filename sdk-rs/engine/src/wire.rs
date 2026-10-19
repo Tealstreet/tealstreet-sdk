@@ -92,6 +92,7 @@ pub struct FrameWriter<'a> {
     sections: u16,
     open: Option<usize>,
     strings: Vec<&'a str>,
+    string_bytes: usize,
     string_index: HashMap<&'a str, u32>,
 }
 
@@ -107,8 +108,20 @@ impl<'a> FrameWriter<'a> {
             sections: 0,
             open: None,
             strings: Vec::new(),
+            string_bytes: 0,
             string_index: HashMap::new(),
         }
+    }
+
+    /// Reserve a whole section, including strings accumulated by earlier
+    /// sections. Exact growth avoids transient doubling of large wasm frames.
+    pub fn reserve(&mut self, additional: usize) {
+        let strings = if self.strings.is_empty() {
+            0
+        } else {
+            8 + (8 + 4 * self.strings.len() + self.string_bytes).next_multiple_of(8)
+        };
+        self.buf.reserve_exact(additional + strings);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -121,6 +134,7 @@ impl<'a> FrameWriter<'a> {
         }
         let index = self.strings.len() as u32;
         self.strings.push(value);
+        self.string_bytes += value.len();
         self.string_index.insert(value, index);
         index
     }
@@ -176,6 +190,8 @@ impl<'a> FrameWriter<'a> {
         if rows.is_empty() {
             return;
         }
+        let interval_bytes: usize = rows.iter().map(|(_, interval, _)| 4 + interval.len()).sum();
+        self.reserve(32 + 56 * rows.len() + interval_bytes.next_multiple_of(8));
         self.begin(section::CANDLES);
         self.u32(rows.len() as u32);
         self.u32s(rows.iter().map(|(market, ..)| *market));
@@ -191,6 +207,7 @@ impl<'a> FrameWriter<'a> {
     /// Append the strings section, patch the section count and return the frame.
     pub fn finish(mut self) -> Vec<u8> {
         if !self.strings.is_empty() {
+            self.reserve(0);
             let strings = std::mem::take(&mut self.strings);
             self.begin(section::STRINGS);
             self.u32(strings.len() as u32);
@@ -257,6 +274,33 @@ mod tests {
     }
 
     #[test]
+    fn candles_reserve_their_string_section_before_writing() {
+        let mut writer = FrameWriter::new(Vec::new(), 0.0);
+        writer.candles(&[(
+            0,
+            "1m",
+            Candle {
+                timestamp: 1.0,
+                open: 2.0,
+                high: 3.0,
+                low: 1.0,
+                close: 2.5,
+                volume: 4.0,
+            },
+        )]);
+        let allocation = writer.buf.as_ptr();
+        let capacity = writer.buf.capacity();
+        let frame = writer.finish();
+        assert_eq!(frame.len(), 112);
+        assert_eq!(capacity, frame.capacity());
+        assert_eq!(
+            allocation,
+            frame.as_ptr(),
+            "the final strings fit without reallocating"
+        );
+    }
+
+    #[test]
     fn frames_are_aligned_and_self_describing() {
         let mut store = Store::default();
         store.set_markets(vec![Market {
@@ -309,6 +353,15 @@ mod tests {
         };
         w.candles(&[(0, "1m", candle)]);
         let frame = w.finish();
+
+        let mut reused = FrameWriter::new(vec![255; frame.len() * 2], 1234.0);
+        store.write(&pending, &mut reused);
+        reused.candles(&[(0, "1m", candle)]);
+        assert_eq!(
+            frame,
+            reused.finish(),
+            "buffer capacity does not change the wire"
+        );
 
         assert_eq!(&frame[..4], b"SCXF");
         assert_eq!(u16::from_le_bytes([frame[4], frame[5]]), FORMAT);

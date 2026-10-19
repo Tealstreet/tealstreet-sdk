@@ -81,3 +81,23 @@ The initial batching run improved CPU but regressed memory; gates remain open.
   keeps the earlier pacing; `--delivery single` isolates batching changes.
   Re-running the original isolated binary with identical cadence and strengthened
   ArrayBuffer accounting for the controlled before/after table.
+
+### Allocation follow-up (reviewed)
+
+Measured Bybit's first frame allocation added five pages by repeatedly growing
+its output Vec. Whole-section reservations eliminate that growth; standalone
+trace saves four pages overall (1,835,008 -> 1,572,864 bytes after later batches).
+Store now offers an allocation-free instrument-ID ticker update, preserving
+symbol lookup and dirty masks across reordered/replaced lists. OKX subscriptions
+serialize only 100 borrowed topics at a time with identical original ordering;
+ticker updates borrow native IDs and stop allocating duplicate set keys.
+
+Two independent static reviews pass; engine's 16 tests and clippy pass. Full
+workspace tests/build plus repository typecheck/lint/tests are running.
+
+Final optional diagnostics (recorded cadence, three instrumented runs) observed
+OKX 8,904 single calls -> 427 batches, Bybit 8,742 -> 126. Raw text crossing is
+~4 ms CPU per fixture, prepared 64-message buffer crossing ~0.1 ms. Combined
+instrumented WS wall medians: OKX 240.23 -> 34.17 ms, Bybit 48.84 -> 18.96 ms;
+frame calls 4.49 -> 3.24 / 3.64 -> 3.45 ms. Wall samples include scheduler noise;
+these are diagnostics, not final uninstrumented CPU gate numbers.

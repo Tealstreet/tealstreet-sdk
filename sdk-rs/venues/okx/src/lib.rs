@@ -211,40 +211,38 @@ impl Okx {
 
     fn subscribe(&self, cx: &mut Cx<'_, Pending>, channel: usize) {
         if channel == PUBLIC {
-            let args: Vec<_> = [
+            let channels = [
                 "tickers",
                 "mark-price",
                 "index-tickers",
                 "open-interest",
                 "funding-rate",
-            ]
-            .into_iter()
-            .flat_map(|name| {
-                cx.store.markets().iter().map(move |m| Topic {
-                    channel: name,
-                    inst_id: Some(if name == "index-tickers" {
-                        m.id.strip_suffix("-SWAP").unwrap_or(&m.id)
-                    } else {
-                        &m.id
-                    }),
-                    inst_type: None,
-                })
-            })
-            .collect();
-            // Release the store borrow before handing topics to Cx.
-            let text: Vec<_> = args
-                .chunks(100)
-                .map(|args| {
-                    serde_json::to_string(&Subscription {
-                        op: "subscribe",
-                        args,
-                    })
-                    .expect("topics")
-                })
-                .collect();
+            ];
             if let Some(socket) = self.connections[PUBLIC].socket {
-                for t in text {
-                    cx.send(socket, t);
+                let count = cx.store.markets().len();
+                for start in (0..channels.len() * count).step_by(100) {
+                    // Only one wire chunk borrows the store at a time.
+                    let args: Vec<_> = (start..(start + 100).min(channels.len() * count))
+                        .map(|index| {
+                            let name = channels[index / count];
+                            let m = &cx.store.markets()[index % count];
+                            Topic {
+                                channel: name,
+                                inst_id: Some(if name == "index-tickers" {
+                                    m.id.strip_suffix("-SWAP").unwrap_or(&m.id)
+                                } else {
+                                    &m.id
+                                }),
+                                inst_type: None,
+                            }
+                        })
+                        .collect();
+                    let text = serde_json::to_string(&Subscription {
+                        op: "subscribe",
+                        args: &args,
+                    })
+                    .expect("topics");
+                    cx.send(socket, text);
                 }
             }
             for symbol in self.books.keys() {
@@ -358,21 +356,20 @@ impl Okx {
         }
         let _ = json::each::<wire::Prices<'_>>(data.get(), |p| {
             let id = if channel == "index-tickers" {
-                format!("{}-SWAP", p.inst_id)
+                std::borrow::Cow::Owned(format!("{}-SWAP", p.inst_id))
             } else {
-                p.inst_id.to_owned()
+                std::borrow::Cow::Borrowed(p.inst_id)
             };
-            let Some(m) = cx.store.market_by_id(&id) else {
+            if cx.store.market_by_id(&id).is_none() {
                 return;
-            };
-            let symbol = m.symbol.clone();
-            if channel == "mark-price" {
-                self.marks.insert(id.clone());
             }
-            if channel == "index-tickers" {
-                self.indexes.insert(id.clone());
+            if channel == "mark-price" && !self.marks.contains(id.as_ref()) {
+                self.marks.insert(id.to_string());
             }
-            cx.store.update_ticker(&symbol, |t| match channel {
+            if channel == "index-tickers" && !self.indexes.contains(id.as_ref()) {
+                self.indexes.insert(id.to_string());
+            }
+            cx.store.update_ticker_by_market_id(&id, |t| match channel {
                 "tickers" => {
                     t.bid = num::parse(p.bid_px);
                     t.ask = num::parse(p.ask_px);

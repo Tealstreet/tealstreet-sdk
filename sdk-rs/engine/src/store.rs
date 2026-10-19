@@ -150,6 +150,24 @@ impl Store {
         let Some(&index) = self.ticker_by_symbol.get(symbol) else {
             return;
         };
+        self.update_ticker_at(index, update);
+    }
+
+    /// Update by venue instrument ID without allocating a copy of its symbol.
+    pub fn update_ticker_by_market_id(&mut self, id: &str, update: impl FnOnce(&mut Ticker)) {
+        let Some(&market) = self.market_by_id.get(id) else {
+            return;
+        };
+        let Some(&index) = self
+            .ticker_by_symbol
+            .get(&self.markets[market as usize].symbol)
+        else {
+            return;
+        };
+        self.update_ticker_at(index, update);
+    }
+
+    fn update_ticker_at(&mut self, index: u32, update: impl FnOnce(&mut Ticker)) {
         let ticker = &mut self.tickers[index as usize];
         let before = ticker_values(ticker);
         update(ticker);
@@ -371,6 +389,7 @@ impl Store {
     /// Write the drained changes as frame sections.
     pub fn write<'a>(&'a self, pending: &Pending, w: &mut FrameWriter<'a>) {
         let changes = &pending.changes;
+        w.reserve(self.frame_size_hint(pending));
         if changes.markets {
             self.write_markets(w);
         }
@@ -426,6 +445,70 @@ impl Store {
             w.f64(self.latency);
             w.end();
         }
+    }
+
+    fn frame_size_hint(&self, pending: &Pending) -> usize {
+        let changes = &pending.changes;
+        let mut size = 0;
+        let mut strings = 0;
+        let mut string_bytes = 0;
+        if changes.markets {
+            let count = self.markets.len();
+            size += 8 + (4 + 20 * count).next_multiple_of(8) + 80 * count;
+            for market in &self.markets {
+                for value in [&market.id, &market.symbol, &market.base, &market.quote] {
+                    strings += 1;
+                    string_bytes += value.len();
+                }
+            }
+        }
+        if changes.tickers_replaced {
+            let count = self.tickers.len();
+            size += 8 + (4 + 4 * count).next_multiple_of(8) + 88 * count;
+        } else if !pending.ticker_deltas.is_empty() {
+            size += 8 + pending
+                .ticker_deltas
+                .iter()
+                .map(|(_, mask)| 8 * (2 + mask.count_ones() as usize))
+                .sum::<usize>();
+        }
+        if changes.orders {
+            let count = self.orders.len();
+            size += 8 + (4 + 20 * count).next_multiple_of(8) + 56 * count;
+            for order in &self.orders {
+                for value in [
+                    Some(order.id.as_str()),
+                    order.client_order_id.as_deref(),
+                    order.parent_id.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    strings += 1;
+                    string_bytes += value.len();
+                }
+            }
+        }
+        if changes.positions {
+            let count = self.positions.len();
+            size += 8 + (4 + 8 * count).next_multiple_of(8) + 72 * count;
+        }
+        if changes.balance {
+            size += 40;
+        }
+        if changes.settings {
+            let count = self.settings.len();
+            size += 8 + (4 + 8 * count).next_multiple_of(8) + 8 * count;
+        }
+        if changes.status {
+            size += 24;
+        }
+        if strings > 0 {
+            // Duplicate references make this a small upper bound; registration
+            // still happens in section order and retains the existing wire IDs.
+            size += 8 + (8 + 4 * strings + string_bytes).next_multiple_of(8);
+        }
+        size
     }
 
     fn market_ref(&self, symbol: &str) -> u32 {
@@ -584,6 +667,64 @@ mod tests {
             symbol: symbol.into(),
             ..Ticker::default()
         }
+    }
+
+    #[test]
+    fn instrument_updates_follow_symbol_mapping_after_replacement_and_reordering() {
+        use crate::model::{Limits, MinMax, Precision};
+        let market = |id: &str, symbol: &str| Market {
+            id: id.into(),
+            symbol: symbol.into(),
+            pretty_symbol: None,
+            base: symbol.into(),
+            quote: "USD".into(),
+            active: true,
+            precision: Precision {
+                amount: 1.0,
+                price: 1.0,
+            },
+            limits: Limits {
+                amount: MinMax {
+                    min: 1.0,
+                    max: 10.0,
+                },
+                leverage: MinMax {
+                    min: 1.0,
+                    max: 10.0,
+                },
+                price: None,
+            },
+            contract_size: None,
+            is_expiring: None,
+            is_inverse: None,
+            is_spot: None,
+            is_perpetual: None,
+            is_read_only: None,
+            taker_fee: None,
+            maker_fee: None,
+        };
+        let mut store = Store::default();
+        store.set_markets(vec![market("A-SWAP", "A"), market("B-SWAP", "B")]);
+        store.set_tickers(vec![ticker("B"), ticker("A")]);
+        store.take_pending();
+        store.update_ticker_by_market_id("A-SWAP", |ticker| ticker.last = 7.0);
+        store.update_ticker_by_market_id("missing", |_| panic!("missing ID must not update"));
+        assert_eq!(store.ticker("A").unwrap().last, 7.0);
+        assert_eq!(store.ticker("B").unwrap().last, 0.0);
+        assert_eq!(store.take_pending().ticker_deltas, [(1, 1 << 2)]);
+
+        store.set_markets(vec![market("C-SWAP", "A"), market("D-SWAP", "B")]);
+        store.set_tickers(vec![ticker("A"), ticker("B")]);
+        store.take_pending();
+        store.update_ticker_by_market_id("A-SWAP", |_| panic!("old ID must not update"));
+        store.update_ticker_by_market_id("C-SWAP", |ticker| ticker.bid = 9.0);
+        assert_eq!(store.ticker("A").unwrap().bid, 9.0);
+        assert_eq!(store.take_pending().ticker_deltas, [(0, 1)]);
+
+        store.set_tickers(vec![ticker("B")]);
+        store.take_pending();
+        store.update_ticker_by_market_id("C-SWAP", |_| panic!("missing ticker must not update"));
+        assert!(store.take_pending().ticker_deltas.is_empty());
     }
 
     #[test]
