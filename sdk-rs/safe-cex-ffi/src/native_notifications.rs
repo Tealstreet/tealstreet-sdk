@@ -1,13 +1,13 @@
 use crate::native_value::{JsData, check_status};
 use napi::{
     Env, JsValue, Status,
-    bindgen_prelude::{Function, Unknown},
+    bindgen_prelude::{FnArgs, Function, Unknown},
     sys,
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 
 pub(crate) struct Notifications {
-    queue: ThreadsafeFunction<(bool, JsData), (), (bool, JsData), Status, false>,
+    queue: ThreadsafeFunction<FnArgs<(bool, JsData)>, (), FnArgs<(bool, JsData)>, Status, false>,
 }
 
 impl Notifications {
@@ -18,7 +18,7 @@ impl Notifications {
     ) -> napi::Result<Self> {
         let on_event = on_event.create_ref()?;
         let on_store = on_store.create_ref()?;
-        let dispatch = env.create_function_from_closure::<(bool, JsData), (), _>(
+        let dispatch = env.create_function_from_closure::<FnArgs<(bool, JsData)>, (), _>(
             "nativeAccountNotification",
             move |context| {
                 let callback = if context.get::<bool>(0)? {
@@ -48,7 +48,7 @@ impl Notifications {
         )?;
         Ok(Self {
             queue: dispatch
-                .build_threadsafe_function::<(bool, JsData)>()
+                .build_threadsafe_function::<FnArgs<(bool, JsData)>>()
                 .callee_handled::<false>()
                 .max_queue_size::<0>()
                 .build()?,
@@ -66,7 +66,7 @@ impl Notifications {
     fn deliver(&self, store: bool, value: JsData) -> Status {
         let status = self
             .queue
-            .call((store, value), ThreadsafeFunctionCallMode::NonBlocking);
+            .call((store, value).into(), ThreadsafeFunctionCallMode::NonBlocking);
         if status != Status::Ok {
             let channel = if store { "Store" } else { "event" };
             eprintln!("native account {channel} notification delivery failed: {status:?}");
