@@ -343,3 +343,14 @@ its isolated target with original unbatched runtime and original opt=s/host=z:
 2863225 bytes, SHA256
 `58cb11561450d4544b1f1ad3f1d709048bd578981e9c6a361b070112afda2c4e`.
 Final runtime helper copy waits until merge verification completes.
+
+Nine-family integration checks pass: all9 isolated wasm clippys and fixed
+web/Node size budgets;67 host/socket/Workers/loader tests;25 SDK WASM tests;
+86 harness regressions;44 repository typecheck,28 lint and27 full test tasks
+(full tests7m12s). Workspace fmt/bans/native clippy pass; warning-denied Rust
+workspace tests and final wasm workspace clippy are still running.
+Fresh page traces against exact baseline9 demonstrate Bybit1572864→1179648,
+BingX1507328→1441792, BloFin851968→786432, WEEX1572864→1376256,
+Binance1507328→1376256 bytes. These are allocation diagnostics, not final
+retained ratios or CPU numbers. All12 private fixtures regenerated; correctness
+gates passing through MEXC, with OKX variants and WEEX still in progress.
