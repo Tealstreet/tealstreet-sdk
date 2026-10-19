@@ -292,5 +292,7 @@ Axios rate windows use an injected RateLimitScheduler with one independent,
 cancelable reset callback. The exchange implementation registers that timer with
 its BaseExchange task owner; dispose cancels it even if JS HTTP clients survive.
 Dropping the limiter also cancels its reset. Retry clocks keep their sleep API.
+Under the accepted drop==dispose policy, cancellation visibly rejects queued
+admission instead of allowing TS's surviving timer to release requests afterward.
 The constructed Bybit controlled-clock regression covers idle windows and both
 cancellation paths; Hyperliquid startup also runs with fixed and advancing clocks.
