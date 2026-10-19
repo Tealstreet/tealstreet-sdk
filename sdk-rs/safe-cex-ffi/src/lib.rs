@@ -28,3 +28,5 @@ mod native_value;
 
 #[cfg(feature = "node")]
 mod native_lifecycle;
+#[cfg(feature = "node")]
+mod native_notifications;

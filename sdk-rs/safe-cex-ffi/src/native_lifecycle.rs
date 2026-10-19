@@ -1,5 +1,5 @@
-use crate::{native_exchange::Notify, native_value::JsData};
-use napi::{Status, threadsafe_function::ThreadsafeFunctionCallMode};
+use crate::{native_notifications::Notifications, native_value::JsData};
+use napi::Status;
 use safe_cex::{js_runtime::value::Js, runtime::ExchangeError};
 use safe_cex_registry::{
     native_account::{NativeAccount, NativeAccountFuture, native_account_call},
@@ -24,16 +24,20 @@ pub(crate) struct NativeStartup {
     generation: watch::Sender<u64>,
     name: String,
     account: Option<String>,
-    on_event: Rc<Notify>,
+    notifications: Rc<Notifications>,
     cooldowns: Js,
 }
 impl NativeStartup {
-    pub(crate) fn new(name: &str, account: Option<String>, on_event: Rc<Notify>) -> Self {
+    pub(crate) fn new(
+        name: &str,
+        account: Option<String>,
+        notifications: Rc<Notifications>,
+    ) -> Self {
         Self {
             generation: watch::channel(0).0,
             name: name.into(),
             account,
-            on_event,
+            notifications,
             cooldowns: Js::new_map(),
         }
     }
@@ -60,13 +64,10 @@ impl NativeStartup {
             StoreWorkerOp::Log => "log",
             _ => unreachable!("native startup posts only worker logs"),
         };
-        let status = self.on_event.call(
-            JsData(NativeValue::object([
-                ("event", NativeValue::string(event)),
-                ("data", NativeValue::from_js(&data)?),
-            ])),
-            ThreadsafeFunctionCallMode::NonBlocking,
-        );
+        let status = self.notifications.event(JsData(NativeValue::object([
+            ("event", NativeValue::string(event)),
+            ("data", NativeValue::from_js(&data)?),
+        ])));
         if status != Status::Ok {
             return Err(ExchangeError::new(format!(
                 "native startup log delivery failed: {status:?}"
