@@ -747,3 +747,16 @@ messages retain their native referents. Module disposal cancels all pending time
 and closes the service even when callers retain a session or service handle.
 The actual listener round trip and Node structuredClone graph probes cover the
 native implementation; perfFixture.ts remains the maintained behavioral source.
+
+## Module Drop override review
+
+`WorkerModule::drop` is a production teardown boundary under the approved native
+module drop-equals-dispose policy. Its direct `self.perf.dispose()` call closes
+the module-owned recorder and cancels every pending metronome timer. The hook
+inventory records that one dynamic dispose edge; it is not a test-only call.
+Drop then unregisters listeners, removes port mappings, drains both worker maps,
+uses the shared fallible worker disposal pipeline, performs native final-drop
+cleanup and shuts down each context. Required error reporting lets later owned
+resources finish cleanup after a handler failure. The existing module-drop and
+perf-disposal binding tests pin retained-handle cleanup; the inventory guard must
+continue to detect any change in this body's hook receiver or multiplicity.
