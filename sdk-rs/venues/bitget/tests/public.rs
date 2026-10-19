@@ -206,3 +206,52 @@ fn connecting_socket_watchdog_waits_for_open_and_incomplete_snapshot_is_rejected
     );
     assert!(h.engine.book("BTCUSDT").is_none());
 }
+
+#[test]
+fn tick_sizes_decode_decimal_contract_steps_without_power_drift() {
+    for (place, step, expected) in [(5, 1, 1e-5), (7, 1, 1e-7), (9, 5, 5e-9)] {
+        let mut h = Harness::started(Options {
+            public_data_only: true,
+            ..Options::default()
+        });
+        h.respond(
+            "/contracts",
+            200,
+            &CONTRACTS
+                .replace(
+                    "\"pricePlace\":\"1\"",
+                    &format!("\"pricePlace\":\"{place}\""),
+                )
+                .replace(
+                    "\"priceEndStep\":\"1\"",
+                    &format!("\"priceEndStep\":\"{step}\""),
+                ),
+        );
+        assert_eq!(
+            h.engine.store().market("BTCUSDT").unwrap().precision.price,
+            expected
+        );
+    }
+}
+#[test]
+fn public_envelope_accepts_data_before_arg_and_preserves_partial_ticker_fields() {
+    let mut h = Harness::public();
+    h.message(r#"{"data":[{"instId":"BTCUSDT","lastPr":"101"}],"action":"snapshot","arg":{"instType":"USDT-FUTURES","channel":"ticker","instId":"BTCUSDT"}}"#);
+    let ticker = h.engine.store().ticker("BTCUSDT").unwrap();
+    assert_eq!(ticker.last, 101.0);
+    assert_eq!(ticker.bid, 99.9);
+}
+
+#[test]
+fn malformed_book_data_shape_invalidates_a_previously_synced_book() {
+    for data in ["{}", "\"bad\"", "[true]"] {
+        let mut h = Harness::public();
+        h.book();
+        h.message(r#"{"arg":{"channel":"books","instId":"BTCUSDT"},"action":"snapshot","data":[{"seq":10,"bids":[["99","1"]],"asks":[["101","1"]]}]}"#);
+        assert!(h.engine.book("BTCUSDT").is_some());
+        h.message(&format!(
+            r#"{{"arg":{{"channel":"books","instId":"BTCUSDT"}},"action":"update","data":{data}}}"#
+        ));
+        assert!(h.engine.book("BTCUSDT").is_none());
+    }
+}

@@ -8,7 +8,7 @@ publish.workspace = true
 safe-cex-engine.workspace = true
 safe-cex-crypto.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 
 [lints]
 workspace = true

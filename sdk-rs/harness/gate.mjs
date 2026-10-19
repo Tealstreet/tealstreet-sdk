@@ -16,13 +16,25 @@ const { values } = parseArgs({
     'no-egress': { type: 'boolean', default: false },
   },
 });
-const outDir = 'sdk-rs/harness/out';
+const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
-  args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
+  args.push(
+    'sdk-rs/harness/replay.mjs',
+    '--impl',
+    impl,
+    '--venue',
+    values.venue,
+    '--tape',
+    values.tape,
+    '--books',
+    values.books,
+    '--out',
+    out,
+  );
   if (values['no-egress']) args.push('--no-egress');
   const result = spawnSync(process.execPath, args, { encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`${impl} replay failed:\n${result.stderr}`);
@@ -55,6 +67,8 @@ if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${
 for (const impl of ['ts', 'rust']) {
   const unserved = results[impl][0].unserved;
   if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
+  const unused = results[impl][0].unusedWrites;
+  if (unused) differences.push(`${impl}: ${unused} taped write(s) were not sent`);
 }
 const isPrivate = Boolean(ts.account);
 // Explicit TS defects Rust fixes; only documented comparator differences normalize.
@@ -120,9 +134,13 @@ const summary = (impl) => ({
 });
 const t = summary('ts');
 const r = summary('rust');
-console.log(`frames ${ts.frames}, markets ${ts.markets.length}, tickers ${ts.tickers.length}, books ${Object.keys(ts.books).length}`);
+console.log(
+  `frames ${ts.frames}, markets ${ts.markets.length}, tickers ${ts.tickers.length}, books ${Object.keys(ts.books).length}`,
+);
 const row = (label, a, b, unit = 'ms') =>
-  console.log(`${label.padEnd(16)} ts ${a.toFixed(1).padStart(8)} ${unit}   rust ${b.toFixed(1).padStart(8)} ${unit}   ${(a / b).toFixed(2)}x`);
+  console.log(
+    `${label.padEnd(16)} ts ${a.toFixed(1).padStart(8)} ${unit}   rust ${b.toFixed(1).padStart(8)} ${unit}   ${(a / b).toFixed(2)}x`,
+  );
 row('main-thread cpu', t.cpuMs, r.cpuMs);
 row('steady cpu', t.steadyCpuMs, r.steadyCpuMs);
 row('process cpu', t.processCpuMs, r.processCpuMs);

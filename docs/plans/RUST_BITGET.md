@@ -145,3 +145,28 @@ range boundaries, malformed pages and retry failure; sub-agent review afterward.
   subscription routing for same-URL sockets, passphrase options, documented
   Classic private tape. Initial Bitget private and both Binance gates PASS.
   Public 20-second two-symbol recording captured; fixture gate running.
+
+## Harness checkpoint (gate execution continues)
+
+- Captured the required 20-second BTCUSDT/ETHUSDT public stream; committed
+  fixture candidate is its first six seconds, 36,631 replay frames, 846 markets
+  and tickers, two books. Tick precision drift fixed by decimal contract-step
+  decoding. All public outputs now compare identically; latest completed run
+  still misses both CPU thresholds by about 6%, memory passes (2.1 vs 2.7 MB).
+- Single-pass typed public router preserves reordered-envelope support and
+  malformed-book recovery. Numeric visitor avoids untagged buffering. Exact
+  fixed-decimal fast path (53-bit mantissa / exact power-of-ten divisor) falls
+  back to standard float parsing for longer inputs/exponents; numeric tests and
+  sub-agent arithmetic audit pass. Release build / public gate rerun pending.
+- Strict shared replay transport: compare request JSON, preserve caller IDs,
+  generated-ID presence/type/freshness, consume mutation replies exactly once,
+  report omitted writes, route same-URL sockets by product/topic/symbol. Only
+  documented Classic batch margin spelling normalizes. Five harness tests pass.
+- Phase sub-agent audit found and fixed missing generated-ID checks, reusable
+  write responses, omitted writes not reaching final JSON, missing product in
+  routing, overly broad margin normalization, and malformed book data fallback.
+- Stronger Bitget private gate PASS (latest 53.7/39.9 ms TS/Rust CPU); Binance
+  private PASS and public PASS (218.8/115.6 ms, 2.4/2.2 MB) before the latest
+  strict transport changes. Re-run all gates on the final integrated branch.
+- Native 66 tests and fmt/clippy PASS. Repository checks running. Latest landing
+  Process adds green CI before PR merge; enforce it. No push/PR until every gate.

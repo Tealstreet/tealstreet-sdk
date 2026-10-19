@@ -218,43 +218,42 @@ impl BitgetFutures {
     }
 
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
-        let Ok(header) = serde_json::from_str::<Message<'_, IgnoredAny>>(text) else {
-            return;
-        };
-        if header.event == "error" {
-            cx.log(LogLevel::Error, format!("Bitget WS: {}", header.msg));
-            return;
-        }
-        match header.arg.channel.as_ref() {
-            "ticker" => {
-                if let Ok(message) = serde_json::from_str::<Message<'_, TickerRow<'_>>>(text)
-                    && let Some(rows) = message.data
+        let message = match serde_json::from_str::<PublicMessage<'_>>(text) {
+            Ok(message) => message,
+            Err(_) => {
+                if let Ok(header) = serde_json::from_str::<PublicHeader<'_>>(text)
+                    && header.arg.channel == "books"
                 {
-                    for row in rows {
-                        let symbol = if row.inst_id.is_empty() {
-                            &row.symbol
-                        } else {
-                            &row.inst_id
-                        };
-                        cx.store
-                            .update_ticker(symbol, |ticker| update_ticker(ticker, &row));
+                    let symbol = header.arg.inst_id.as_ref();
+                    if let Some(state) = self.books.get_mut(symbol) {
+                        state.reset();
+                        let topics = [("books".into(), symbol.to_owned())];
+                        self.subscribe(cx, "unsubscribe", &topics);
+                        self.subscribe(cx, "subscribe", &topics);
                     }
                 }
+                return;
             }
-            "books" => {
-                let symbol = header.arg.inst_id.as_ref();
+        };
+        if message.event == "error" {
+            cx.log(LogLevel::Error, format!("Bitget WS: {}", message.msg));
+            return;
+        }
+        match message.data {
+            PublicData::Tickers(rows) => {
+                for row in rows {
+                    let symbol = if row.inst_id.is_empty() {
+                        &row.symbol
+                    } else {
+                        &row.inst_id
+                    };
+                    cx.store
+                        .update_ticker(symbol, |ticker| update_ticker(ticker, &row));
+                }
+            }
+            PublicData::Books(rows) => {
+                let symbol = message.arg.inst_id.as_ref();
                 let Some(state) = self.books.get_mut(symbol) else {
-                    return;
-                };
-                let Ok(message) = serde_json::from_str::<Message<'_, Depth<'_>>>(text) else {
-                    state.reset();
-                    cx.log(LogLevel::Warning, "invalid Bitget book frame");
-                    let topics = [("books".to_owned(), symbol.to_owned())];
-                    self.subscribe(cx, "unsubscribe", &topics);
-                    self.subscribe(cx, "subscribe", &topics);
-                    return;
-                };
-                let Some(rows) = message.data else {
                     return;
                 };
                 for row in rows {
@@ -264,7 +263,7 @@ impl BitgetFutures {
                         Err(error) => {
                             state.reset();
                             cx.log(LogLevel::Warning, error);
-                            let topics = [("books".to_owned(), symbol.to_owned())];
+                            let topics = [("books".into(), symbol.to_owned())];
                             self.subscribe(cx, "unsubscribe", &topics);
                             self.subscribe(cx, "subscribe", &topics);
                             break;
@@ -272,29 +271,25 @@ impl BitgetFutures {
                     }
                 }
             }
-            channel if channel.starts_with("candle") => {
-                let native = &channel[6..];
-                let symbol = header.arg.inst_id.as_ref();
-                let interval = self
-                    .candles
-                    .keys()
-                    .find(|(s, i)| s == symbol && interval(i) == Some(native))
-                    .map(|(_, i)| i.clone());
-                if header.action == "update"
-                    && let Some(interval) = interval
-                    && let Ok(message) = serde_json::from_str::<Message<'_, CandleRow>>(text)
-                    && let Some(rows) = message.data
+            PublicData::Candles(rows) => {
+                let symbol = message.arg.inst_id.as_ref();
+                let native = message.arg.channel.strip_prefix("candle").unwrap_or("");
+                if message.action == "update"
+                    && let Some((_, value)) = self
+                        .candles
+                        .keys()
+                        .find(|(s, i)| s == symbol && interval(i) == Some(native))
                 {
                     for row in rows {
                         if row.iter().all(|n| n.0.is_some()) {
-                            cx.candle(symbol, &interval, candle(&row));
+                            cx.candle(symbol, value, candle(&row));
                         } else {
                             cx.log(LogLevel::Warning, "invalid Bitget candle");
                         }
                     }
                 }
             }
-            _ => {}
+            PublicData::None => {}
         }
     }
 }
@@ -333,7 +328,9 @@ fn market(row: &Contract<'_>) -> Market {
         ),
         precision: Precision {
             amount: row.size_multiplier.get(),
-            price: 10f64.powf(-row.price_place.get()) * row.price_end_step.get(),
+            price: format!("{}e-{}", row.price_end_step.get(), row.price_place.get())
+                .parse::<f64>()
+                .unwrap_or(0.0),
         },
         limits: Limits {
             amount: MinMax {
@@ -483,6 +480,8 @@ impl Venue for BitgetFutures {
                     if row.symbol.is_empty()
                         || row.base_coin.is_empty()
                         || row.price_place.0.is_none()
+                        || row.price_place.get().fract() != 0.0
+                        || !(0.0..=18.0).contains(&row.price_place.get())
                         || !market(&row).precision.price.is_finite()
                         || market(&row).precision.price <= 0.0
                         || row.price_end_step.get() <= 0.0

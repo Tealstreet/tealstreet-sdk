@@ -15,20 +15,70 @@ impl Number {
 
 impl<'de> Deserialize<'de> for Number {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Wire<'a> {
-            Text(#[serde(borrow)] Cow<'a, str>),
-            Numeric(f64),
-            Null,
+        struct Numeric;
+        impl<'de> serde::de::Visitor<'de> for Numeric {
+            type Value = Number;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a numeric string, number, or null")
+            }
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Number, E> {
+                Ok(Number(decimal(value).filter(|v| v.is_finite())))
+            }
+            fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<Number, E> {
+                Ok(Number(value.is_finite().then_some(value)))
+            }
+            fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Number, E> {
+                self.visit_f64(value as f64)
+            }
+            fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Number, E> {
+                self.visit_f64(value as f64)
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> Result<Number, E> {
+                Ok(Number(None))
+            }
         }
-        let value = match Wire::deserialize(d)? {
-            Wire::Text(text) => text.parse::<f64>().ok(),
-            Wire::Numeric(value) => Some(value),
-            Wire::Null => None,
-        };
-        Ok(Self(value.filter(|v| v.is_finite())))
+        d.deserialize_any(Numeric)
     }
+}
+
+// Feed decimals whose mantissa and divisor are exact doubles need one native
+// division. Exponents and longer inputs use Rust's general float parser.
+fn decimal(text: &str) -> Option<f64> {
+    const POWERS: [f64; 23] = [
+        1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16,
+        1e17, 1e18, 1e19, 1e20, 1e21, 1e22,
+    ];
+    let bytes = text.as_bytes();
+    let negative = bytes.first() == Some(&b'-');
+    let digits = if negative { &bytes[1..] } else { bytes };
+    let mut mantissa = 0u64;
+    let mut scale = 0usize;
+    let mut dot = false;
+    let mut count = 0;
+    for &byte in digits {
+        if byte.is_ascii_digit() {
+            mantissa = mantissa * 10 + u64::from(byte - b'0');
+            if mantissa > 9_007_199_254_740_991 {
+                return text.parse().ok();
+            }
+            count += 1;
+            if dot {
+                scale += 1;
+                if scale > 22 {
+                    return text.parse().ok();
+                }
+            }
+        } else if byte == b'.' && !dot {
+            dot = true;
+        } else {
+            return text.parse().ok();
+        }
+    }
+    if count == 0 {
+        return text.parse().ok();
+    }
+    let value = (mantissa as f64) / POWERS[scale];
+    Some(if negative { -value } else { value })
 }
 
 #[derive(Deserialize)]
@@ -514,4 +564,173 @@ pub struct FillRow<'a> {
     pub exec_qty: Number,
     #[serde(borrow)]
     pub side: Cow<'a, str>,
+}
+
+#[derive(Deserialize)]
+pub struct PublicHeader<'a> {
+    #[serde(borrow)]
+    pub arg: Argument<'a>,
+}
+
+pub enum PublicData<'a> {
+    None,
+    Tickers(Vec<TickerRow<'a>>),
+    Books(Vec<Depth<'a>>),
+    Candles(Vec<CandleRow>),
+}
+
+pub struct PublicMessage<'a> {
+    pub arg: Argument<'a>,
+    pub action: Cow<'a, str>,
+    pub event: Cow<'a, str>,
+    pub msg: Cow<'a, str>,
+    pub data: PublicData<'a>,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(field_identifier, rename_all = "camelCase")]
+enum PublicField {
+    Arg,
+    Action,
+    Event,
+    Msg,
+    Data,
+    #[serde(other)]
+    Other,
+}
+
+impl<'de> Deserialize<'de> for PublicMessage<'de> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Public;
+        impl<'de> serde::de::Visitor<'de> for Public {
+            type Value = PublicMessage<'de>;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a Bitget public envelope")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut map: M,
+            ) -> Result<Self::Value, M::Error> {
+                let mut message = PublicMessage {
+                    arg: Argument::default(),
+                    action: Cow::Borrowed(""),
+                    event: Cow::Borrowed(""),
+                    msg: Cow::Borrowed(""),
+                    data: PublicData::None,
+                };
+                let mut deferred: Option<&'de serde_json::value::RawValue> = None;
+                let mut seen = 0u8;
+                while let Some(key) = map.next_key::<PublicField>()? {
+                    let (bit, name) = match key {
+                        PublicField::Arg => (1, "arg"),
+                        PublicField::Action => (2, "action"),
+                        PublicField::Event => (4, "event"),
+                        PublicField::Msg => (8, "msg"),
+                        PublicField::Data => (16, "data"),
+                        PublicField::Other => (0, ""),
+                    };
+                    if bit != 0 && seen & bit != 0 {
+                        return Err(serde::de::Error::duplicate_field(name));
+                    }
+                    seen |= bit;
+                    match key {
+                        PublicField::Arg => message.arg = map.next_value()?,
+                        PublicField::Action => message.action = map.next_value()?,
+                        PublicField::Event => message.event = map.next_value()?,
+                        PublicField::Msg => message.msg = map.next_value()?,
+                        PublicField::Data => {
+                            message.data = match message.arg.channel.as_ref() {
+                                "ticker" => map
+                                    .next_value::<Option<Vec<TickerRow<'de>>>>()?
+                                    .map(PublicData::Tickers)
+                                    .unwrap_or(PublicData::None),
+                                "books" => map
+                                    .next_value::<Option<Vec<Depth<'de>>>>()?
+                                    .map(PublicData::Books)
+                                    .unwrap_or(PublicData::None),
+                                channel if channel.starts_with("candle") => map
+                                    .next_value::<Option<Vec<CandleRow>>>()?
+                                    .map(PublicData::Candles)
+                                    .unwrap_or(PublicData::None),
+                                _ => {
+                                    deferred = map.next_value()?;
+                                    PublicData::None
+                                }
+                            }
+                        }
+                        PublicField::Other => {
+                            let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                // Field order is not contractual. The usual arg-before-data path
+                // reads each typed row once; reordered envelopes borrow raw data.
+                if let Some(raw) = deferred {
+                    message.data = match message.arg.channel.as_ref() {
+                        "ticker" => PublicData::Tickers(
+                            serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?,
+                        ),
+                        "books" => PublicData::Books(
+                            serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?,
+                        ),
+                        channel if channel.starts_with("candle") => PublicData::Candles(
+                            serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?,
+                        ),
+                        _ => PublicData::None,
+                    };
+                }
+                Ok(message)
+            }
+        }
+        d.deserialize_map(Public)
+    }
+}
+
+#[cfg(test)]
+mod numeric_tests {
+    use super::decimal;
+    #[test]
+    fn fixed_decimals_match_standard_float_decoding() {
+        for text in [
+            "0",
+            "-0",
+            ".1",
+            "1.",
+            "000001.001",
+            "0.000009999999999999999",
+            "9007199254740991",
+            "9007199254740992",
+            "1792428168600",
+            "81999.7",
+            "-0.00000000000000123456789",
+            "1e-23",
+            "1.234e10",
+            "+1",
+            "NaN",
+            "",
+            ".",
+            "--1",
+            "1.2.3",
+        ] {
+            assert_eq!(
+                decimal(text).map(f64::to_bits),
+                text.parse::<f64>().ok().map(f64::to_bits),
+                "{text}"
+            );
+        }
+        for value in [1, 7, 999, 123456789, 9007199254740991u64] {
+            for scale in 0..=22 {
+                let text = if scale == 0 {
+                    value.to_string()
+                } else {
+                    format!("0.{value:0width$}", width = scale)
+                };
+                assert_eq!(
+                    decimal(&text).unwrap().to_bits(),
+                    text.parse::<f64>().unwrap().to_bits(),
+                    "{text}"
+                );
+            }
+        }
+    }
 }

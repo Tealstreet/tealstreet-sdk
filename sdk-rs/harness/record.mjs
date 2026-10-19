@@ -44,17 +44,28 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const body = new TextDecoder().decode(response.body);
-    write({ type: 'http', method: request.method, url: request.url, status: response.status, body });
-    return response;
+    const chunks = [];
+    if (response.body?.[Symbol.asyncIterator]) {
+      for await (const chunk of response.body) chunks.push(chunk);
+    } else chunks.push(response.body);
+    const bytes = Buffer.concat(chunks);
+    const body = new TextDecoder().decode(bytes);
+    write({
+      type: 'http',
+      method: request.method,
+      url: request.url,
+      status: response.status,
+      requestBody: request.body,
+      body,
+    });
+    return { ...response, body: bytes };
   },
 };
 
 const { WasmEngine } = await loadEngine();
 let frames = 0;
-let updates = 0;
 const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: false })), recording, {
-  onStoreUpdate: () => updates++,
+  onFrame: () => frames++,
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });
 host.start();
@@ -62,12 +73,15 @@ for (const symbol of values.books.split(',').filter(Boolean)) {
   host.command({ op: 'subscribeOrderBook', symbol });
 }
 const flush = setInterval(() => host.flush(), 250);
-setTimeout(() => {
-  clearInterval(flush);
-  host.flush();
-  host.dispose();
-  tape.end(() => {
-    console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames }));
-    process.exit(0);
-  });
-}, Number(values.seconds) * 1000);
+setTimeout(
+  () => {
+    clearInterval(flush);
+    host.flush();
+    host.dispose();
+    tape.end(() => {
+      console.log(JSON.stringify({ out, seconds: Number(values.seconds), frames }));
+      process.exit(0);
+    });
+  },
+  Number(values.seconds) * 1000,
+);
