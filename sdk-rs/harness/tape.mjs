@@ -1,5 +1,12 @@
 // Shared tape transport: matching is strict except documented generated fields.
 import { setTimeout as realTimeout } from 'node:timers';
+import { LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
+
+export const replayStoreReady = (loaded, isPrivate) => {
+  const publicMask = LOADED_FLAG.MARKETS | LOADED_FLAG.TICKERS;
+  const required = isPrivate ? publicMask | LOADED_FLAG.BALANCE | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS : publicMask;
+  return (loaded & required) === required;
+};
 /** Per-request values: clocks, signatures and generated client ids. */
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
 export const canonicalUrl = (url) => {

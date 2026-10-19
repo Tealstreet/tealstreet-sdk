@@ -208,3 +208,25 @@ and cut a follow-up branch. Never touch master or force-push.
 - Four-venue release at opt-level 3 is 1777584 bytes, above unchanged 1468006
   limit. A size-optimized build is being measured against the same size and CPU
   gates; no budget change or output exemption is permitted for this integration.
+
+- Final integrated acceptance: all ELEVEN gates PASS (4 public; 7 private,
+  including every OKX alias). Public medians TS -> Rust (ms / retained MB):
+  MEXC CPU 1036.6 -> 667.7, steady 711.3 -> 417.6, memory 5.2 -> 2.8;
+  Binance CPU 226.7 -> 134.8, steady 127.5 -> 59.6, memory 2.4 -> 2.0;
+  Bybit CPU 425.7 -> 414.2, steady 295.7 -> 259.7, memory 3.1 -> 2.3;
+  OKX CPU 881.5 -> 728.6, steady 671.6 -> 553.1, memory 2.7 -> 2.6.
+  Frame counts 14701 / 873 / 8743 / 8904; every public run matches. Private
+  counts MEXC21/Binance14/Bybit18/eachOKX29; no unmatched writes or reads.
+- Build uses wasm-only opt-level z (native release remains3), producing
+  1390545 bytes < unchanged1468006 budget; all existing CPU/memory gates pass.
+  Size adjustment independently reviewed. The integrated harness correctly waits
+  for public market/ticker flags12 or private all-flags31, plus an initial socket;
+  its regression catches the merge's accidental private-only public readiness.
+- Workspace verification: 238 Rust tests (including engine18 and MEXC51), bans,
+  all-workspace fmt/clippy and wasm clippy PASS. TS root typecheck44/lint28 PASS;
+  SDK full rerun6562/6562 PASS (single worker, local15s timeout after unrelated
+  HyroTrader5s dynamic-import timeouts under host contention; CI defaults remain
+  unchanged). Other root tasks pass. Wasm shell16/host5/harness12 tests PASS.
+- All adversarial findings resolved and independently rereviewed; final review
+  posted at PR1304#issuecomment-6273120982. Push final evidence and wait for
+  fresh CI to be green before merging; then create a fresh follow-up branch.

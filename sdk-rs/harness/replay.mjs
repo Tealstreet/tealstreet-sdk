@@ -9,7 +9,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
-import { canonicalUrl, ReplayClock, Tape as SharedTape } from './tape.mjs';
+import { canonicalUrl, replayStoreReady, ReplayClock, Tape as SharedTape } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 
 const { values } = parseArgs({
@@ -317,7 +317,6 @@ async function runRust() {
   host.start();
   for (const symbol of bookSymbols) host.command({ op: 'subscribeOrderBook', symbol });
   let lastFlush = -Infinity;
-  const allLoaded = 31;
   const flushTimer = isPrivate ? setInterval(() => host.flush(), 250) : undefined;
   const frames = await tape.play(
     (t) => {
@@ -329,7 +328,7 @@ async function runRust() {
     async () => {
       await until(() => {
         host.flush();
-        return (status?.loaded ?? 0) === allLoaded;
+        return replayStoreReady(status?.loaded ?? 0, isPrivate);
       }, 'Rust startup');
       await until(() => tape.open.size > 0, 'Rust initial socket');
     },

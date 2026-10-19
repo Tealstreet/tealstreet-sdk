@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bodyBytes, canonicalBody, canonicalUrl, ReplayClock, Tape } from './tape.mjs';
+import { bodyBytes, canonicalBody, canonicalUrl, replayStoreReady, ReplayClock, Tape } from './tape.mjs';
 
 const url = 'https://api.mexc.com/api/v1/private/order/cancel';
 test('POST matching preserves snowflakes and consumes every accepted write once', () => {
@@ -183,4 +183,12 @@ test('Bybit PostOnly rejection derives from the original TS row, independently o
   assert.equal(reason({ status: 'canceled', info: { rejectReason: 'EC_PostOnlyWillTakeLiquidity' } }), 'PostOnly');
   assert.equal(reason({ status: 'canceled', info: { rejectReason: 'EC_PerCancelRequest' } }), undefined);
   assert.equal(reason({ status: 'open', info: { rejectReason: 'EC_PostOnlyWillTakeLiquidity' } }), undefined);
+});
+
+test('public replay starts with market/ticker seed while private replay waits for account state', () => {
+  assert.equal(replayStoreReady(12, false), true);
+  assert.equal(replayStoreReady(12, true), false);
+  assert.equal(replayStoreReady(31, true), true);
+  assert.equal(replayStoreReady(8, false), false);
+  assert.equal(replayStoreReady(4, false), false);
 });
