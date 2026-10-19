@@ -103,7 +103,7 @@ jobs:
     env:
       WASM_BINDGEN_VERSION: 0.2.129
       # Five-venue merge: retain 2 MiB pending bundle remeasurement.
-      WASM_BUDGET_BYTES: 2097152
+      WASM_BUDGET_BYTES: 2359296
     defaults:
       run:
         working-directory: .

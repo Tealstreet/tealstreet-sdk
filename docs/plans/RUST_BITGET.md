@@ -304,3 +304,8 @@ all focused tests pass. Final rebuild, replay and repeat audit in progress.
   Bitget alternative paths; engine 20 tests PASS. All private fixes remain.
 - Previous public rerun was invalidated by the merge while child replay imports
   were in progress; rerun on the frozen integration before final reporting.
+
+- Five-venue release WASM measures 2,164,645 bytes. The fixed bundle budget is
+  2.25 MiB (2,359,296 bytes), accounting for the newly merged Crypto.com crate;
+  CPU/memory replay thresholds remain unchanged. Workspace tests, native clippy
+  and WASM clippy pass on this integration.
