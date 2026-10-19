@@ -34,8 +34,8 @@ const isPrivate = records.some((r) => r.url?.includes(venue.privateSocket));
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 
-/** Per-request values: clocks, signatures and generated client ids. */
-const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId']);
+/** Per-request values: clocks, signatures, request ids and generated client ids. */
+const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams]
@@ -55,10 +55,17 @@ const collectCallerIds = (value) => {
 };
 for (const record of records) if (record.type === 'command') collectCallerIds(record);
 
-/** Canonical JSON write payloads, keeping caller IDs and removing only minted IDs. */
+/** Canonical JSON payloads, keeping caller IDs and removing only volatile or minted values. */
 const canonicalBody = (raw) => {
-  if (!venue.requestBodies || raw === undefined || raw === null || raw === '') return '';
-  const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  if (raw === undefined || raw === null || raw === '') return '';
+  let parsed = raw;
+  if (typeof raw === 'string' || raw instanceof ArrayBuffer || ArrayBuffer.isView(raw)) {
+    try {
+      parsed = JSON.parse(typeof raw === 'string' ? raw : new TextDecoder().decode(raw));
+    } catch {
+      return String(raw);
+    }
+  }
   const walk = (value) => {
     if (Array.isArray(value)) return value.map(walk);
     if (value && typeof value === 'object')
@@ -67,7 +74,8 @@ const canonicalBody = (raw) => {
           .sort()
           .filter(
             (key) =>
-              (callerIds.has(value[key]) || !venue.generatedId?.(key, String(value[key]))) &&
+              value[key] !== undefined &&
+              (callerIds.has(value[key]) || (!VOLATILE.has(key) && !venue.generatedId?.(key, String(value[key])))) &&
               venue.defaultBodyValues?.[key] !== value[key],
           )
           .map((key) => [key, walk(value[key])]),
@@ -108,14 +116,16 @@ class Tape {
     const socket = { url, onMessage, closed: false };
     setImmediate(() => {
       if (socket.closed) return;
-      this.open.set(url, socket);
+      // Keyed without volatile query params (Bybit's per-connection requestId).
+      this.open.set(canonicalUrl(url), socket);
       onOpen();
       this.waiters = this.waiters.filter((waiter) => !waiter());
     });
     return socket;
   }
 
-  async socketFor(url) {
+  async socketFor(rawUrl) {
+    const url = canonicalUrl(rawUrl);
     while (!this.open.get(url) || this.open.get(url).closed) {
       await new Promise((resolve) => this.waiters.push(() => (this.open.get(url) ? (resolve(), true) : false)));
     }
@@ -509,16 +519,17 @@ async function runTs() {
         await exchange.cancelOrders(store.orders.filter((order) => record.ids.includes(order.id)));
         return [];
       }
+      if (record.op === 'amendOrder') {
+        const order = store.orders.find((o) => o.id === record.id);
+        const update = {
+          ...(record.price !== undefined && { price: record.price }),
+          ...(record.amount !== undefined && { amount: record.amount }),
+        };
+        return exchange.updateOrder({ order, update });
+      }
       if (record.op === 'cancelSymbolOrders') {
         await exchange.cancelSymbolOrders(record.symbol);
         return [];
-      }
-      if (record.op === 'amendOrder') {
-        const order = store.orders.find((o) => o.id === record.id);
-        const update = {};
-        if ('price' in record) update.price = record.price;
-        if ('amount' in record) update.amount = record.amount;
-        return exchange.updateOrder({ order, update });
       }
       if (record.op === 'setLeverage') {
         await exchange.setLeverage(record.symbol, record.leverage);

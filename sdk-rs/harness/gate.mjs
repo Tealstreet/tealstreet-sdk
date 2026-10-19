@@ -102,6 +102,17 @@ const isPrivate = Boolean(ts.account);
 // BloFin books5 formerly overwrote N array slots, corrupting ordering when the
 // top moved. Both TS and Rust now merge by price boundary; full books are still
 // compared without normalization or exclusions for this corrected TS defect.
+//  - Bybit: TS drops the reject reason of a post-only order cancelled for taking
+//    liquidity (`EC_PostOnlyWillTakeLiquidity`); Rust reports it as PostOnly.
+//  - Bybit: TS can round split quantities away from the requested total;
+//    Rust uses maximum-size lots and the exact remainder.
+//  - Bybit: TS falls back from failed batch writes to single creates, even
+//    after ambiguous HTTP/transport failures; Rust never resends those writes.
+//  - Bybit: TS may drop the initial ticker snapshot before a slow REST seed;
+//    Rust installs the seed before connecting. These cases have native regression
+//    coverage; the committed replay tapes require no normalization for them.
+//  - Bybit: with no mark price, TS can add a second Partial stop on amend;
+//    Rust amends the existing native order ID.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
   if (values.venue === 'blofin' && account.positions.length === 0) {
     account.balance.used = 0;
@@ -110,6 +121,11 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
   for (const position of account.positions) {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
     if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+  }
+  for (const order of account.orders) {
+    const fixed = rustAccount.orders.find((o) => o.id === order.id);
+    if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled')
+      order.rejectReason = 'PostOnly';
   }
 };
 if (isPrivate) {

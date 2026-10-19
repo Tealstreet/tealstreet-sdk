@@ -246,3 +246,19 @@ merge that PR, and create a fresh follow-up branch. No rebase or force push.
 - Secret-scan diagnosis: the initial branch-push range included a pre-existing
   Binance signing fixture in landing commit `879fdc7461`; the PR's own diff scan
   passed. No credentials were introduced by this port.
+
+### Landing integration after review
+
+- Fetched/merged `20dd66dddb`, including the completed Bybit port and explicit
+  green-CI landing rule. Resolved shared engine/wasm/SDK/harness conflicts as
+  a union: nested `result.list` streaming and BloFin envelope validation share
+  one splitter; both venue rules/registrations/private tapes survive.
+- Bybit settings initialize optional side leverage with scalar fallback; the
+  new BloFin leverage query is explicitly unsupported in Bybit's query dispatcher.
+- Added merged streaming regressions: large nested arrays keep error codes and
+  cursors, while malformed/truncated/oversized envelopes fail. Native validation:
+  engine15 +BloFin67 +Bybit43 pass (125); Binance recheck is running.
+- Pre-merge stable release was1,132,561 bytes after stripping names/producers,
+  below the original1.2MiB budget. Landing already raises its shared three-venue
+  budget to1.4MiB; this lane does not increase it. Post-merge wasm build, SDK
+  tests and all three venues' replay regressions will be recorded next.

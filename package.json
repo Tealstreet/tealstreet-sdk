@@ -19,6 +19,7 @@
     "rust:record": "node sdk-rs/harness/record.mjs",
     "rust:private-tape": "node sdk-rs/harness/private-tape.mjs",
     "rust:private-tape:blofin": "node sdk-rs/harness/private-tape-blofin.mjs",
+    "rust:private-tape-bybit": "node sdk-rs/harness/private-tape-bybit.mjs",
     "rust:trim-tape": "node sdk-rs/harness/trim-tape.mjs",
     "rust:gate": "node sdk-rs/harness/gate.mjs",
     "rust:replay": "node --expose-gc --import tsx sdk-rs/harness/replay.mjs"

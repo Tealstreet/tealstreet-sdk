@@ -53,7 +53,7 @@ Action  = WsConnect | WsSend | WsClose
 - Symbols are interned to a `u32` market index. Tickers live in a `Vec` indexed
   by it, with a per-field dirty mask.
 - Order books are sorted `Vec<(price, amount)>` per side, keyed per market.
-- The Store holds typed state (`safe-cex-engine/src/model.rs`) and change
+- The Store holds typed state (`sdk-rs/engine/src/model.rs`) and change
   tracking; it is written out only as flush frames.
 
 ## Data shapes: the flush frame
@@ -109,7 +109,7 @@ zero-size placeholder positions TS kept for every market. SETTINGS may append
 independent buy/sell leverage columns; absent/non-finite side values fall back
 to the scalar leverage, so older frames remain readable. An order's packed
 enum word carries its reject reason (flags bits 4-5). Enum codes and flag bits are
-defined once in `safe-cex-engine/src/wire.rs` and mirrored by the decoder in
+defined once in `sdk-rs/engine/src/wire.rs` and mirrored by the decoder in
 `hosts/wasm/js/wire.mjs`.
 
 ### Crossing rules
@@ -277,7 +277,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Venue | State |
 | --- | --- |
 | Binance USD-M, Binance PM | done |
-| Bybit linear | ported, gates pass; PR review pending |
+| Bybit linear | done ([#1298](https://github.com/Tealstreet/tealstreet-sdk/pull/1298)) |
 | OKX (+EU, demo), Bitget, Hyperliquid, BloFin, BingX, MEXC, WEEX, Bitunix, Crypto.com, Backpack | wave 1 lanes running |
 | WOO, KuCoin, Phemex, Lighter, Paradex, GRVT, AsterDEX, Orderly family, ApeX Omni, Kraken, Coinbase, Bitrue, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse, Bybit inverse/spot/demo | wave 2, as wave 1 lanes merge |
 
