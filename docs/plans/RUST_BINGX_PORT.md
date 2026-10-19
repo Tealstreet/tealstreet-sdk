@@ -331,3 +331,21 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   subscription batches finishing after accelerated replay, so adding explicit
   subscription readiness before delivering its frames. No subscription mismatch
   is normalized away. Native326tests and wasm clippy pass; SDK18/host5 are green.
+
+### CI replay startup and gate scope
+
+- Fast CI finished Bybit replay before its10ms subscription batches drained.
+  Both implementations now wait for all seed-derived outgoing ticker/book topics
+  under the existing15s deadline. Exact per-generation comparison stays intact.
+  Expected-topic Map storage survives both memory samples. Independent helpers23
+  pass; Bybit8742frame public gate passes with914matching subscriptions.
+- Per spec, public fixtures alone gate performance. Private paced tapes still
+  enforce all state/request/write/protocol checks; their raw CPU/memory figures
+  are informational (long-lived code GC can make tiny-state heap deltas negative).
+  Classification derives from tape sockets identically to replay; missing/extra
+  account output fails parity. Public negative-memory/performance checks unchanged.
+- Root validation passes:44typecheck tasks,28lint tasks,27test tasks, including
+  both6494-test safe-cex runs. Native workspace326tests, all-target clippy,
+  wasmclippy, bans and fmt pass. Latest public BingX gate:CPU95.1/60.4ms TS/Rust,
+  steady36.1/22.9ms, retained3.50/1.97MB; Binance871,Bybit8742,Crypto.com2177,
+  OKX8902-frame public gates pass. Final private variants/CI continue before merge.

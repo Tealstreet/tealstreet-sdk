@@ -166,6 +166,21 @@ export const VENUES = {
     /** Book topics get a message handler once each subscription reaches the socket. */
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >= count,
+    startupSubscriptions: (records, books) => {
+      const symbols = new Set();
+      for (const record of records) {
+        if (record.type !== 'http' || record.method !== 'GET' || !(record.status >= 200 && record.status < 300) ||
+            new URL(record.url).pathname !== '/v5/market/instruments-info') continue;
+        const body = JSON.parse(record.body);
+        if (Number(body.retCode) !== 0) continue;
+        for (const row of body.result?.list ?? []) {
+          if (['USDT', 'USDC'].includes(row.quoteCoin) && typeof row.symbol === 'string' && row.symbol) symbols.add(row.symbol);
+        }
+      }
+      const socket = 'wss://stream.bybit.com/v5/public/linear subscribe ';
+      return [...symbols].map((symbol) => `${socket}tickers.${symbol}`)
+        .concat(books.map((symbol) => `${socket}orderbook.1000.${symbol}`));
+    },
     privateSocket: '/v5/private',
     isWrite: (method) => method === 'POST',
     matchRequestBody: true,

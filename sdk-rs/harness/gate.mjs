@@ -8,6 +8,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { parseRequestJson } from './request-json.mjs';
+import { venueOf } from './venues.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -60,7 +61,10 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
-const isPrivate = Boolean(ts.account);
+const venue = venueOf(values.venue);
+const isPrivate = tapeRecords.some((record) =>
+  venue.isPrivateRecord ? venue.isPrivateRecord(record) : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
+);
 
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 // BingX additionally fixes write/read defects covered by native contract tests:
@@ -233,7 +237,9 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) {
     const output = impl === 'ts' ? ts : rust;
     const unserved = output.unserved;
-    if (output.metrics.retainedBytes < 0 || output.metrics.bufferRetainedBytes < 0) differences.push(impl + ': negative retained memory component; baseline is invalid');
+    if (Boolean(output.account) !== isPrivate) differences.push(impl + ': account presence differs from tape classification');
+    // Paced private tapes gate correctness; their unscored heap can shed loaded code.
+    if (!isPrivate && (output.metrics.retainedBytes < 0 || output.metrics.bufferRetainedBytes < 0)) differences.push(impl + ': negative retained memory component; baseline is invalid');
     if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
     for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
     for (const symbol of values.books.split(',').filter(Boolean)) {
@@ -242,8 +248,7 @@ for (let run = 0; run < runs; run++) {
     if (!output.markets.length || !output.tickers.length) differences.push(`${impl}: empty public seed`);
     if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
   }
-  const isPrivate = Boolean(ts.account);
-  if (isPrivate) {
+  if (isPrivate && ts.account && rust.account) {
     if (values.venue === 'bingx') KNOWN_TS_FIXES.bingx(ts.account, rust.account);
     if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
     if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
@@ -294,7 +299,7 @@ row('steady cpu', t.steadyCpuMs, r.steadyCpuMs);
 row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
-if (ts.account) console.log('(private tape: paced in real time, so it gates correctness only)');
+if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
 if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
 
 const failures = [...differences];

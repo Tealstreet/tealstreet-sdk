@@ -77,6 +77,10 @@ class Tape {
     this.commandIndex = 0;
     this.time = 0;
     this.subscriptions = new Set();
+    // Retain expected keys/backing storage across both memory samples: deleting
+    // startup-only harness state would subtract it from workload retained memory.
+    this.startupSubscriptions = new Map(Array.from(venue.startupSubscriptions?.(records, bookSymbols) ?? [], (key) => [key, false]));
+    this.pendingStartupSubscriptions = this.startupSubscriptions.size;
     this.generations = new Map();
   }
 
@@ -102,7 +106,13 @@ class Tape {
   }
 
   send(socket, text) {
-    for (const key of subscriptionKeys(socket.url, text)) this.subscriptions.add(`${socket.generation} ${key}`);
+    for (const key of subscriptionKeys(socket.url, text)) {
+      this.subscriptions.add(`${socket.generation} ${key}`);
+      if (this.startupSubscriptions.get(key) === false) {
+        this.startupSubscriptions.set(key, true);
+        this.pendingStartupSubscriptions--;
+      }
+    }
     this.audit?.sent(socket.url, text);
     if (venue.respondToPing && text === 'ping') {
       setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
@@ -192,6 +202,9 @@ class Tape {
     await within((async () => {
       if (urls.length) await this.socketFor(urls[0]);
       await ready();
+      // Native and TS outboxes batch sends independently of handler registration.
+      // Begin the tape only after every seed-derived startup topic reached send.
+      while (this.pendingStartupSubscriptions) await new Promise((resolve) => setTimeout(resolve, 1));
     })(), 15_000, 'Replay startup');
     const start = performance.now();
     let delivered = 0;
