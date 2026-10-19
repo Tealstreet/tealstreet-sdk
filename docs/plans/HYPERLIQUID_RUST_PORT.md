@@ -48,7 +48,11 @@ sub-agent implementation review and fixes before every phase commit.
 ## Progress and evidence
 
 - Planning: architecture, TS contracts, signing helpers and harness inspected.
-- Phase 1: pending.
+- Phase 1: implemented and reviewed by `review_public`. Fixed all five findings:
+  tuple arity/alignment, finite numbers, bounded metadata read retries, candle
+  limit/from semantics, Unicode interval panic. Six documented-payload tests
+  pass; bans, formatting and clippy pass. Registration in wasm/harness remains
+  in phase 5, so phase 1 does not enable an incomplete venue in user flows.
 - Phase 2: pending.
 - Phase 3: pending.
 - Phase 4: pending.

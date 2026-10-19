@@ -353,7 +353,20 @@ impl<P> Cx<'_, P> {
         at: ArrayAt,
         pending: P,
     ) -> RequestId {
-        let id = self.request(method, url, headers, None, pending);
+        self.request_streamed_body(method, url, headers, None, at, pending)
+    }
+
+    /// Stream a POSTed read while retaining its typed request body.
+    pub fn request_streamed_body(
+        &mut self,
+        method: Method,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        body: Option<String>,
+        at: ArrayAt,
+        pending: P,
+    ) -> RequestId {
+        let id = self.request(method, url, headers, body, pending);
         self.io.streams.insert(id, at);
         id
     }
