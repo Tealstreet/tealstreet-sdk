@@ -34,42 +34,51 @@ globalThis.api = new Subject(); globalThis.timeframes = new Timeframes().timefra
 vm.runInContext(ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
 }).outputText.replace(/export /g, ''), context);
-const api = context.api;
 const candles = [], latencies = [];
-api.parent = { timeframes: context.timeframes };
-api.topics = {};
-api.messageHandlers = {};
-api.isConnected = true;
-api.isDisposed = false;
-api.requestId = 1200;
-api.trackLastReceived = () => {};
-api.recordMessageHandlerStats = () => {};
-api.updateSubscriptionLimitWarning = () => {};
-api.send = () => {};
-api.shouldEnforcePongMissReconnect = () => false;
-api.store = { update: ({ latency }) => latencies.push(latency) };
+function subject(update) {
+  const api = vm.runInContext('new Subject()', context);
+  api.parent = { timeframes: context.timeframes };
+  api.topics = {};
+  api.messageHandlers = {};
+  api.isConnected = true;
+  api.isDisposed = false;
+  api.requestId = 1200;
+  api.pingAt = 0;
+  api.trackLastReceived = () => {};
+  api.recordMessageHandlerStats = () => {};
+  api.updateSubscriptionLimitWarning = () => {};
+  api.send = () => {};
+  api.shouldEnforcePongMissReconnect = () => false;
+  api.store = { update };
+  return api;
+}
+const api = subject(() => {});
 api.listenOHLCV({ symbol: input.symbol, interval: '1m' }, candle => candles.push(candle));
 assert.equal(input.frames.length, 906);
-let pongs = 0, kline = 0, books = 0;
+let kline = 0, books = 0;
+const pongFrames = [];
 for (const frame of input.frames) {
   const raw = Buffer.from(frame.base64, 'base64').toString('utf8');
   const json = JSON.parse(raw);
   now = frame.atMs + 1;
   if (json.kline_p) kline++;
   if (json.orderbook_p) books++;
-  if (json.result === 'pong' || json.method === 'server.ping') {
-    // Controlled elapsed times prevent unrelated scheduled pings in the native witness.
-    const at = 100 + pongs * 100;
-    now = at - [0, 7, 18, 1, 30, 4][pongs % 6];
-    api.ping();
-    now = at;
-    pongs++;
-  }
+  if (json.result === 'pong' || json.method === 'server.ping') pongFrames.push(raw);
   api.onMessage({ data: raw });
+}
+// The separate latency witness uses monotonic controlled times before scheduled pings.
+now = 1;
+const latencyApi = subject(({ latency }) => latencies.push(latency));
+for (const [index, raw] of pongFrames.entries()) {
+  const at = 100 + index * 100;
+  now = at - [0, 7, 18, 1, 30, 4][index % 6];
+  latencyApi.ping();
+  now = at;
+  latencyApi.onMessage({ data: raw });
 }
 assert.equal(kline, 16);
 assert.equal(books, 854);
-assert.equal(pongs, 12);
+assert.equal(pongFrames.length, 12);
 assert.equal(candles.length, 19);
 for (const candle of candles) {
   assert.equal(typeof candle.timestamp, 'number');
