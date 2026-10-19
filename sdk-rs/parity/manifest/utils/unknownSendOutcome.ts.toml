@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/utils/unknownSendOutcome.ts"
-rust_files = [ "safe-cex-store/src/remaining_utils.rs", "safe-cex-exchange/src/js_runtime/library.rs" ]
+rust_files = [ "safe-cex-store/src/remaining_utils.rs", "safe-cex-exchange/src/js_runtime/library.rs", "safe-cex-exchange/src/js_runtime/ops.rs" ]
 
 [[symbol]]
 ts = "isUnsentSigningFailure"

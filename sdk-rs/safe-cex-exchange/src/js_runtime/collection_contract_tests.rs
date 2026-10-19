@@ -197,3 +197,35 @@ fn accepted_iterator_js_protocol_entrypoints() {
         );
     }
 }
+
+mod input_observations {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/scripts/collection-input-observers.rs"
+    ));
+}
+#[test]
+fn native_collection_input_protocol_matches_node() {
+    for row in expectations()["nativeCollections"].as_array().unwrap() {
+        assert_eq!(
+            input_observations::collection(&row["input"], collection_iterator),
+            row["output"],
+            "collection_iterator {}",
+            row["input"]
+        );
+    }
+    for row in expectations()["nativeLookup"].as_array().unwrap() {
+        assert_eq!(
+            input_observations::method(&row["input"], iterator_method),
+            row["output"],
+            "iterator_method {}",
+            row["input"]
+        );
+        assert_eq!(
+            input_observations::lookup(&row["input"], iterator_method_receiver),
+            row["output"],
+            "iterator_method_receiver {}",
+            row["input"]
+        );
+    }
+}
