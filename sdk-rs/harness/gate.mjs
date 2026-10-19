@@ -9,6 +9,7 @@ import { parseArgs } from 'node:util';
 
 const { values } = parseArgs({
   options: {
+    venue: { type: 'string', default: 'binance' },
     tape: { type: 'string' },
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
     runs: { type: 'string', default: '3' },
@@ -21,7 +22,7 @@ mkdirSync(outDir, { recursive: true });
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
-  args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--tape', values.tape, '--books', values.books, '--out', out);
+  args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
   if (values['no-egress']) args.push('--no-egress');
   const result = spawnSync(process.execPath, args, { encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`${impl} replay failed:\n${result.stderr}`);

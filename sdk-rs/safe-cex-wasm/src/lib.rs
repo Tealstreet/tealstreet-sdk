@@ -5,8 +5,7 @@
 //! JSON array string, or an empty string when there are none.
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, Response, SocketId,
-    TimerId, Venue,
+    Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use serde::{Deserialize, Serialize};
@@ -16,7 +15,7 @@ trait AnyEngine {
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
     fn drain(&mut self) -> Vec<Action>;
-    fn frame(&mut self, now: f64) -> Option<Vec<u8>>;
+    fn frame(&mut self, now: f64) -> Option<&[u8]>;
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
@@ -32,8 +31,8 @@ impl<V: Venue> AnyEngine for Engine<V> {
         self.drain_actions().collect()
     }
 
-    fn frame(&mut self, now: f64) -> Option<Vec<u8>> {
-        self.take_frame(now).map(<[u8]>::to_vec)
+    fn frame(&mut self, now: f64) -> Option<&[u8]> {
+        self.take_frame(now)
     }
 }
 
@@ -443,38 +442,33 @@ impl WasmEngine {
         self.flush()
     }
 
-    /// `headers` is `name: value` lines; `body` is the raw response bytes.
-    /// Invalid UTF-8 is reported as a failure.
-    #[wasm_bindgen(js_name = httpResponse)]
-    pub fn http_response(
-        &mut self,
-        request: u32,
-        status: u16,
-        headers: &str,
-        body: &[u8],
-        now: f64,
-    ) -> String {
+    /// A response begins; `headers` is `name: value` lines. The body follows
+    /// as chunks so a large list never has to fit in memory at once.
+    #[wasm_bindgen(js_name = httpStart)]
+    pub fn http_start(&mut self, request: u32, status: u16, headers: &str, now: f64) -> String {
         let request = RequestId(request);
-        match std::str::from_utf8(body) {
-            Ok(body) => self.inner.handle(
-                now,
-                Event::HttpResponse {
-                    request,
-                    response: Response {
-                        status,
-                        headers,
-                        body,
-                    },
-                },
-            ),
-            Err(_) => self.inner.handle(
-                now,
-                Event::HttpFailed {
-                    request,
-                    error: "response body is not UTF-8",
-                },
-            ),
-        }
+        self.inner.handle(
+            now,
+            Event::HttpStart {
+                request,
+                status,
+                headers,
+            },
+        );
+        self.flush()
+    }
+
+    #[wasm_bindgen(js_name = httpChunk)]
+    pub fn http_chunk(&mut self, request: u32, data: &[u8], now: f64) -> String {
+        let request = RequestId(request);
+        self.inner.handle(now, Event::HttpChunk { request, data });
+        self.flush()
+    }
+
+    #[wasm_bindgen(js_name = httpEnd)]
+    pub fn http_end(&mut self, request: u32, now: f64) -> String {
+        let request = RequestId(request);
+        self.inner.handle(now, Event::HttpEnd { request });
         self.flush()
     }
 
@@ -499,9 +493,10 @@ impl WasmEngine {
 
     /// Everything that changed since the previous call as one flush frame
     /// (layout: docs/plans/RUST_REWRITE.md), or `undefined` when nothing did.
-    /// Transfer `frame.buffer` to the consumer; it is a fresh copy.
+    /// Transfer `frame.buffer` to the consumer: it is copied once, straight
+    /// out of the engine's reused frame buffer.
     #[wasm_bindgen(js_name = takeFrame)]
-    pub fn take_frame(&mut self, now: f64) -> Option<Vec<u8>> {
-        self.inner.frame(now)
+    pub fn take_frame(&mut self, now: f64) -> Option<js_sys::Uint8Array> {
+        self.inner.frame(now).map(js_sys::Uint8Array::from)
     }
 }

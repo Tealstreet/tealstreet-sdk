@@ -6,9 +6,10 @@ mod trading;
 mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
+use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, json, num,
+    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
 use sign::{Credentials, Query};
 use std::collections::HashMap;
@@ -60,13 +61,21 @@ impl Urls {
     }
 }
 
+/// Startup lists and klines stream in element by element (see
+/// `Cx::request_streamed`); their continuations collect the decoded rows.
 pub enum Pending {
-    ExchangeInfo,
+    ExchangeInfo(Vec<Market>),
     Daily,
     BookTickers,
     PremiumIndex,
-    DepthSnapshot { symbol: String, generation: u32 },
-    Klines { command: CommandId },
+    DepthSnapshot {
+        symbol: String,
+        generation: u32,
+    },
+    Klines {
+        command: CommandId,
+        candles: Vec<Candle>,
+    },
     Account(account::Request),
     Trade(trading::Request),
     History(history::Request),
@@ -140,12 +149,23 @@ const RATE_LIMIT_PAUSE_MS: f64 = 10_000.0;
 const IP_BAN_PAUSE_MS: f64 = 120_000.0;
 const MAX_SNAPSHOT_BACKOFF_MS: f64 = 60_000.0;
 
-/// The three REST ticker sources, joined once all have arrived.
+/// Tickers filled in place, one per market, by the three REST lists as they
+/// stream in. A market becomes a ticker once all three have reported it.
 #[derive(Default)]
 struct TickerSeed {
-    daily: Option<HashMap<String, (f64, f64, f64, f64)>>,
-    books: Option<Vec<(String, f64, f64)>>,
-    premium: Option<HashMap<String, (f64, f64, f64, f64)>>,
+    tickers: Vec<Ticker>,
+    /// Which sources have reported each market.
+    reported: Vec<u8>,
+    /// Which sources have finished.
+    finished: u8,
+    failed: bool,
+}
+
+mod source {
+    pub const DAILY: u8 = 1;
+    pub const BOOK: u8 = 2;
+    pub const PREMIUM: u8 = 4;
+    pub const ALL: u8 = DAILY | BOOK | PREMIUM;
 }
 
 pub struct BinanceFutures {
@@ -229,6 +249,16 @@ impl BinanceFutures {
         );
     }
 
+    fn get_streamed(&self, cx: &mut Cx<'_, Pending>, path: &str, at: ArrayAt, pending: Pending) {
+        cx.request_streamed(
+            Method::Get,
+            format!("{}{}", self.urls.rest, path),
+            Vec::new(),
+            at,
+            pending,
+        );
+    }
+
     /// A signed request; every parameter travels in the query string.
     fn signed(
         &self,
@@ -238,17 +268,39 @@ impl BinanceFutures {
         query: Query,
         pending: Pending,
     ) {
+        self.signed_request(cx, method, path, query, None, pending);
+    }
+
+    /// A signed GET whose array streams in element by element.
+    fn signed_streamed(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        path: &str,
+        query: Query,
+        pending: Pending,
+    ) {
+        self.signed_request(cx, Method::Get, path, query, Some(ArrayAt::Root), pending);
+    }
+
+    fn signed_request(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        method: Method,
+        path: &str,
+        query: Query,
+        stream: Option<ArrayAt>,
+        pending: Pending,
+    ) {
         let Some(credentials) = &self.credentials else {
             return;
         };
         let query = query.signed(credentials, cx.now);
-        cx.request(
-            method,
-            format!("{}{path}?{query}", self.urls.rest),
-            vec![("X-MBX-APIKEY", credentials.key.clone())],
-            None,
-            pending,
-        );
+        let url = format!("{}{path}?{query}", self.urls.rest);
+        let headers = vec![("X-MBX-APIKEY", credentials.key.clone())];
+        match stream {
+            Some(at) => cx.request_streamed(method, url, headers, at, pending),
+            None => cx.request(method, url, headers, None, pending),
+        };
     }
 
     fn connect_url(&mut self, cx: &mut Cx<'_, Pending>, channel: Channel, url: &str) {
@@ -382,58 +434,107 @@ impl BinanceFutures {
             .collect()
     }
 
-    fn on_markets(&mut self, cx: &mut Cx<'_, Pending>, body: &str) {
-        let mut markets = Vec::new();
-        let decoded = json::each_in_field::<SymbolInfo>(body, "symbols", |m| {
-            if matches!(&*m.contract_type, "PERPETUAL" | "TRADIFI_PERPETUAL")
-                && matches!(&*m.margin_asset, "USDT" | "USDC")
-            {
-                markets.push(market_from_wire(&m));
-            }
-        });
-        if let Err(error) = decoded {
-            cx.log(LogLevel::Error, format!("Binance exchangeInfo: {error}"));
+    fn on_markets(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        markets: Vec<Market>,
+        response: Response<'_>,
+    ) {
+        if response.status != 200 {
+            cx.log(
+                LogLevel::Error,
+                format!(
+                    "Binance exchangeInfo HTTP {}: {}",
+                    response.status, response.body
+                ),
+            );
             return;
         }
+        self.ticker_seed = TickerSeed {
+            tickers: markets
+                .iter()
+                .map(|m| Ticker {
+                    id: m.id.clone(),
+                    symbol: m.symbol.clone(),
+                    ..Ticker::default()
+                })
+                .collect(),
+            reported: vec![0; markets.len()],
+            finished: 0,
+            failed: false,
+        };
         cx.store.set_markets(markets);
         if self.credentials.is_some() {
             self.request_leverage_brackets(cx);
         }
-        self.get(cx, "/fapi/v1/ticker/24hr", Pending::Daily);
-        self.get(cx, "/fapi/v1/ticker/bookTicker", Pending::BookTickers);
-        self.get(cx, "/fapi/v1/premiumIndex", Pending::PremiumIndex);
+        self.get_streamed(cx, "/fapi/v1/ticker/24hr", ArrayAt::Root, Pending::Daily);
+        self.get_streamed(
+            cx,
+            "/fapi/v1/ticker/bookTicker",
+            ArrayAt::Root,
+            Pending::BookTickers,
+        );
+        self.get_streamed(
+            cx,
+            "/fapi/v1/premiumIndex",
+            ArrayAt::Root,
+            Pending::PremiumIndex,
+        );
+    }
+
+    /// Fill one market's ticker from one source.
+    fn seed(
+        &mut self,
+        cx: &Cx<'_, Pending>,
+        symbol: &str,
+        from: u8,
+        fill: impl FnOnce(&mut Ticker),
+    ) {
+        let Some(index) = cx.store.market_index(symbol) else {
+            return;
+        };
+        let seed = &mut self.ticker_seed;
+        if let Some(ticker) = seed.tickers.get_mut(index as usize) {
+            fill(ticker);
+            seed.reported[index as usize] |= from;
+        }
+    }
+
+    /// One source finished (or failed: TS then loads no tickers at all).
+    fn source_finished(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        from: u8,
+        response: Result<Response<'_>, &str>,
+    ) {
+        let failure = match response {
+            Ok(response) if response.status == 200 => None,
+            Ok(response) => Some(format!("HTTP {}: {}", response.status, response.body)),
+            Err(error) => Some(error.to_owned()),
+        };
+        if let Some(failure) = failure {
+            cx.log(LogLevel::Error, format!("Binance tickers: {failure}"));
+            self.ticker_seed.failed = true;
+        }
+        self.ticker_seed.finished |= from;
+        self.try_seed_tickers(cx);
     }
 
     fn try_seed_tickers(&mut self, cx: &mut Cx<'_, Pending>) {
-        let seed = &mut self.ticker_seed;
-        let (Some(daily), Some(books), Some(premium)) = (&seed.daily, &seed.books, &seed.premium)
-        else {
+        if self.ticker_seed.finished != source::ALL {
             return;
+        }
+        let seed = std::mem::take(&mut self.ticker_seed);
+        let tickers: Vec<Ticker> = if seed.failed {
+            Vec::new()
+        } else {
+            seed.tickers
+                .into_iter()
+                .zip(seed.reported)
+                .filter(|(_, reported)| *reported == source::ALL)
+                .map(|(ticker, _)| ticker)
+                .collect()
         };
-        let tickers: Vec<Ticker> = books
-            .iter()
-            .filter_map(|(symbol, bid, ask)| {
-                let market = cx.store.market(symbol)?;
-                let &(last, percentage, volume, quote_volume) = daily.get(symbol)?;
-                let &(mark, index, funding_rate, funding_time) = premium.get(symbol)?;
-                Some(Ticker {
-                    id: market.id.clone(),
-                    symbol: market.symbol.clone(),
-                    bid: *bid,
-                    ask: *ask,
-                    last,
-                    mark,
-                    index,
-                    mid_price: None,
-                    percentage,
-                    open_interest: 0.0,
-                    funding_rate,
-                    funding_time,
-                    volume,
-                    quote_volume,
-                })
-            })
-            .collect();
         cx.log(
             LogLevel::Info,
             format!(
@@ -441,7 +542,6 @@ impl BinanceFutures {
                 tickers.len().min(cx.store.markets().len())
             ),
         );
-        self.ticker_seed = TickerSeed::default();
         cx.store.set_tickers(tickers);
         if self.credentials.is_some() {
             self.start_account(cx);
@@ -703,7 +803,13 @@ impl BinanceFutures {
         }
     }
 
-    fn on_klines(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, response: Response<'_>) {
+    fn on_klines(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        candles: Vec<Candle>,
+        response: Response<'_>,
+    ) {
         let Response { status, body, .. } = response;
         if status != 200 {
             cx.done(
@@ -712,19 +818,10 @@ impl BinanceFutures {
             );
             return;
         }
-        match serde_json::from_str::<Vec<KlineRow>>(body) {
-            Ok(rows) => {
-                let candles: Vec<Candle> = rows
-                    .iter()
-                    .map(|row| kline_candle(row.0, &row.1, &row.2, &row.3, &row.4, &row.5))
-                    .collect();
-                cx.done(
-                    command,
-                    Ok(serde_json::to_string(&candles).unwrap_or_default()),
-                );
-            }
-            Err(error) => cx.done(command, Err(format!("Binance klines: {error}"))),
-        }
+        cx.done(
+            command,
+            Ok(serde_json::to_string(&candles).unwrap_or_default()),
+        );
     }
 }
 
@@ -799,7 +896,12 @@ impl Venue for BinanceFutures {
     type Pending = Pending;
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.get(cx, "/fapi/v1/exchangeInfo", Pending::ExchangeInfo);
+        self.get_streamed(
+            cx,
+            "/fapi/v1/exchangeInfo",
+            ArrayAt::Field("symbols"),
+            Pending::ExchangeInfo(Vec::new()),
+        );
     }
 
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -857,57 +959,71 @@ impl Venue for BinanceFutures {
         self.observe_weight(cx, &response);
         let Response { status, body, .. } = response;
         match pending {
-            Pending::ExchangeInfo => self.on_markets(cx, body),
-            Pending::Daily => {
-                let mut daily = HashMap::new();
-                let _ = json::each::<Daily>(body, |d| {
-                    let values = (
-                        num::parse(&d.last_price),
-                        num::parse(&d.price_change_percent),
-                        num::parse(&d.volume),
-                        num::parse(&d.quote_volume),
-                    );
-                    daily.insert(d.symbol.into_owned(), values);
-                });
-                self.ticker_seed.daily = Some(daily);
-                self.try_seed_tickers(cx);
-            }
-            Pending::BookTickers => {
-                let mut books = Vec::new();
-                let _ = json::each::<BookTickerRest>(body, |b| {
-                    let (bid, ask) = (num::parse(&b.bid_price), num::parse(&b.ask_price));
-                    books.push((b.symbol.into_owned(), bid, ask));
-                });
-                self.ticker_seed.books = Some(books);
-                self.try_seed_tickers(cx);
-            }
-            Pending::PremiumIndex => {
-                let mut premium = HashMap::new();
-                let _ = json::each::<PremiumIndex>(body, |p| {
-                    let values = (
-                        num::parse(&p.mark_price),
-                        num::parse(&p.index_price),
-                        num::parse(&p.last_funding_rate),
-                        p.next_funding_time,
-                    );
-                    premium.insert(p.symbol.into_owned(), values);
-                });
-                self.ticker_seed.premium = Some(premium);
-                self.try_seed_tickers(cx);
-            }
+            Pending::ExchangeInfo(markets) => self.on_markets(cx, markets, response),
+            Pending::Daily => self.source_finished(cx, source::DAILY, Ok(response)),
+            Pending::BookTickers => self.source_finished(cx, source::BOOK, Ok(response)),
+            Pending::PremiumIndex => self.source_finished(cx, source::PREMIUM, Ok(response)),
             Pending::DepthSnapshot { symbol, generation } => {
                 self.on_depth_snapshot(cx, symbol, generation, status, body)
             }
-            Pending::Klines { command } => self.on_klines(cx, command, response),
+            Pending::Klines { command, candles } => self.on_klines(cx, command, candles, response),
             Pending::Account(request) => self.on_account_response(cx, request, response),
             Pending::Trade(request) => self.on_trade_response(cx, request, Ok(response)),
             Pending::History(request) => self.on_history_response(cx, request, Ok(response)),
         }
     }
 
+    fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        match pending {
+            Pending::ExchangeInfo(markets) => {
+                if let Ok(m) = serde_json::from_str::<SymbolInfo>(item)
+                    && matches!(&*m.contract_type, "PERPETUAL" | "TRADIFI_PERPETUAL")
+                    && matches!(&*m.margin_asset, "USDT" | "USDC")
+                {
+                    markets.push(market_from_wire(&m));
+                }
+            }
+            Pending::Daily => {
+                if let Ok(d) = serde_json::from_str::<Daily>(item) {
+                    self.seed(cx, &d.symbol, source::DAILY, |t| {
+                        t.last = num::parse(&d.last_price);
+                        t.percentage = num::parse(&d.price_change_percent);
+                        t.volume = num::parse(&d.volume);
+                        t.quote_volume = num::parse(&d.quote_volume);
+                    });
+                }
+            }
+            Pending::BookTickers => {
+                if let Ok(b) = serde_json::from_str::<BookTickerRest>(item) {
+                    self.seed(cx, &b.symbol, source::BOOK, |t| {
+                        t.bid = num::parse(&b.bid_price);
+                        t.ask = num::parse(&b.ask_price);
+                    });
+                }
+            }
+            Pending::PremiumIndex => {
+                if let Ok(p) = serde_json::from_str::<PremiumIndex>(item) {
+                    self.seed(cx, &p.symbol, source::PREMIUM, |t| {
+                        t.mark = num::parse(&p.mark_price);
+                        t.index = num::parse(&p.index_price);
+                        t.funding_rate = num::parse(&p.last_funding_rate);
+                        t.funding_time = p.next_funding_time;
+                    });
+                }
+            }
+            Pending::Klines { candles, .. } => {
+                if let Ok(row) = serde_json::from_str::<KlineRow>(item) {
+                    candles.push(kline_candle(row.0, &row.1, &row.2, &row.3, &row.4, &row.5));
+                }
+            }
+            Pending::Account(request) => self.on_account_item(cx, request, item),
+            _ => {}
+        }
+    }
+
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Klines { command } => cx.done(command, Err(error.to_owned())),
+            Pending::Klines { command, .. } => cx.done(command, Err(error.to_owned())),
             Pending::DepthSnapshot { symbol, generation } => {
                 if let Some(state) = self.books.get_mut(&symbol)
                     && state.generation == generation
@@ -916,6 +1032,9 @@ impl Venue for BinanceFutures {
                 }
             }
             Pending::Account(request) => self.on_account_failed(cx, request, error),
+            Pending::Daily => self.source_finished(cx, source::DAILY, Err(error)),
+            Pending::BookTickers => self.source_finished(cx, source::BOOK, Err(error)),
+            Pending::PremiumIndex => self.source_finished(cx, source::PREMIUM, Err(error)),
             Pending::Trade(request) => self.on_trade_response(cx, request, Err(error)),
             Pending::History(request) => self.on_history_response(cx, request, Err(error)),
             _ => cx.log(
@@ -988,7 +1107,13 @@ impl Venue for BinanceFutures {
                 if let Some(to) = to_ms {
                     path.push_str(&format!("&endTime={}", num::format(to)));
                 }
-                self.get(cx, &path, Pending::Klines { command });
+                let candles = Vec::new();
+                self.get_streamed(
+                    cx,
+                    &path,
+                    ArrayAt::Root,
+                    Pending::Klines { command, candles },
+                );
             }
             Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.on_trade_command(cx, trade),

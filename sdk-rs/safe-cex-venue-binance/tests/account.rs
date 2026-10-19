@@ -607,3 +607,42 @@ fn income_over_a_range_walks_every_page() {
     assert_eq!(result.matches("tranId").count(), 1000);
     assert!(result.starts_with(r#"[{"symbol":"BTCUSDT","incomeType":"COMMISSION","income":-0.01,"asset":"USDT","timestamp":1000"#));
 }
+
+#[test]
+fn an_error_envelope_in_place_of_a_list_keeps_the_last_snapshot() {
+    let mut h = ready();
+    h.advance(75_000.0);
+    let risk = h.take("/fapi/v3/positionRisk");
+    h.reply(risk.id, 200, "", r#"{"code":-1001,"msg":"Internal error"}"#);
+    h.respond("/fapi/v1/symbolConfig", 200, SYMBOL_CONFIG);
+    assert_eq!(
+        h.engine.store().positions().len(),
+        1,
+        "positions were not wiped"
+    );
+    assert!(
+        h.logs.iter().any(
+            |m| m.contains("did not contain the expected list") && m.contains("Internal error")
+        )
+    );
+}
+
+#[test]
+fn streamed_lists_arrive_in_chunks() {
+    let mut h = Harness::started(credentials());
+    let request = h.take("/fapi/v1/exchangeInfo").id;
+    h.event(Event::HttpStart {
+        request,
+        status: 200,
+        headers: "",
+    });
+    for chunk in support::EXCHANGE_INFO.as_bytes().chunks(5) {
+        h.event(Event::HttpChunk {
+            request,
+            data: chunk,
+        });
+    }
+    h.event(Event::HttpEnd { request });
+    assert_eq!(h.engine.store().markets().len(), 1);
+    assert_eq!(h.engine.store().markets()[0].limits.amount.max, 120.0);
+}

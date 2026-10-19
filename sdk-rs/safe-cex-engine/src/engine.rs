@@ -1,6 +1,7 @@
 //! The sans-I/O driver. Hosts feed [`Event`]s in and execute the [`Action`]s
 //! that come out; venues never touch sockets, HTTP clients or clocks directly.
 use crate::book::Book;
+use crate::json::{ArrayAt, ArraySplitter};
 use crate::model::{Candle, OrderSide, PlaceOrderOpts};
 use crate::store::Store;
 use crate::wire::{FrameWriter, section};
@@ -210,9 +211,23 @@ pub enum Event<'a> {
         socket: SocketId,
         code: u16,
     },
+    /// A complete response.
     HttpResponse {
         request: RequestId,
         response: Response<'a>,
+    },
+    /// A response delivered in parts: start, any number of chunks, end.
+    HttpStart {
+        request: RequestId,
+        status: u16,
+        headers: &'a str,
+    },
+    HttpChunk {
+        request: RequestId,
+        data: &'a [u8],
+    },
+    HttpEnd {
+        request: RequestId,
     },
     HttpFailed {
         request: RequestId,
@@ -231,9 +246,25 @@ pub struct Cx<'a, P> {
     io: &'a mut Io<P>,
 }
 
+/// A response arriving in parts.
+struct Incoming {
+    status: u16,
+    headers: String,
+    /// Splits a streamed array out of a successful body.
+    splitter: Option<ArraySplitter>,
+    /// Everything not streamed: error bodies and unstreamed requests. A
+    /// streamed body keeps only its start, to explain a missing array.
+    body: Vec<u8>,
+}
+
+/// How much of a streamed body is kept to report a response without its array.
+const STREAM_PREVIEW_BYTES: usize = 512;
+
 struct Io<P> {
     actions: Vec<Action>,
     pending: HashMap<RequestId, P>,
+    streams: HashMap<RequestId, ArrayAt>,
+    incoming: HashMap<RequestId, Incoming>,
     timers: HashMap<TimerId, ()>,
     next_id: u32,
     changed_books: Vec<String>,
@@ -247,6 +278,8 @@ impl<P> Default for Io<P> {
         Self {
             actions: Vec::new(),
             pending: HashMap::new(),
+            streams: HashMap::new(),
+            incoming: HashMap::new(),
             timers: HashMap::new(),
             next_id: 1,
             changed_books: Vec::new(),
@@ -304,6 +337,22 @@ impl<P> Cx<'_, P> {
             headers,
             body,
         }));
+        id
+    }
+
+    /// Issue a request whose successful body holds a large array: each element
+    /// goes to [`Venue::on_item`] as it arrives, then [`Venue::on_response`]
+    /// runs with an empty body. Error bodies arrive whole.
+    pub fn request_streamed(
+        &mut self,
+        method: Method,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        at: ArrayAt,
+        pending: P,
+    ) -> RequestId {
+        let id = self.request(method, url, headers, None, pending);
+        self.io.streams.insert(id, at);
         id
     }
 
@@ -370,6 +419,14 @@ pub trait Venue {
         pending: Self::Pending,
         response: Response<'_>,
     );
+    /// One element of a streamed response's array (see [`Cx::request_streamed`]).
+    fn on_item(
+        &mut self,
+        _cx: &mut Cx<'_, Self::Pending>,
+        _pending: &mut Self::Pending,
+        _item: &str,
+    ) {
+    }
     fn on_request_failed(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -433,11 +490,20 @@ impl<V: Venue> Engine<V> {
             Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
             Event::WsClosed { socket, code } => self.venue.on_close(&mut cx, socket, code),
             Event::HttpResponse { request, response } => {
-                if let Some(pending) = cx.io.pending.remove(&request) {
-                    self.venue.on_response(&mut cx, pending, response);
-                }
+                self.http_start(now, request, response.status, response.headers);
+                self.http_chunk(now, request, response.body.as_bytes());
+                self.http_end(now, request);
             }
+            Event::HttpStart {
+                request,
+                status,
+                headers,
+            } => self.http_start(now, request, status, headers),
+            Event::HttpChunk { request, data } => self.http_chunk(now, request, data),
+            Event::HttpEnd { request } => self.http_end(now, request),
             Event::HttpFailed { request, error } => {
+                cx.io.streams.remove(&request);
+                cx.io.incoming.remove(&request);
                 if let Some(pending) = cx.io.pending.remove(&request) {
                     self.venue.on_request_failed(&mut cx, pending, error);
                 }
@@ -448,6 +514,100 @@ impl<V: Venue> Engine<V> {
                 }
             }
             Event::Command(command) => self.venue.on_command(&mut cx, command),
+        }
+    }
+
+    fn http_start(&mut self, _now: f64, request: RequestId, status: u16, headers: &str) {
+        if !self.io.pending.contains_key(&request) {
+            return;
+        }
+        let at = self.io.streams.remove(&request);
+        let splitter = at
+            .filter(|_| (200..300).contains(&status))
+            .map(ArraySplitter::new);
+        self.io.incoming.insert(
+            request,
+            Incoming {
+                status,
+                headers: headers.to_owned(),
+                splitter,
+                body: Vec::new(),
+            },
+        );
+    }
+
+    fn http_chunk(&mut self, now: f64, request: RequestId, data: &[u8]) {
+        let Some(incoming) = self.io.incoming.get_mut(&request) else {
+            return;
+        };
+        let Some(splitter) = incoming.splitter.as_mut() else {
+            incoming.body.extend_from_slice(data);
+            return;
+        };
+        let room = STREAM_PREVIEW_BYTES.saturating_sub(incoming.body.len());
+        incoming
+            .body
+            .extend_from_slice(&data[..room.min(data.len())]);
+        // The continuation leaves the map while the venue holds it.
+        let Some(mut pending) = self.io.pending.remove(&request) else {
+            return;
+        };
+        let mut splitter = std::mem::replace(splitter, ArraySplitter::new(ArrayAt::Root));
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        let venue = &mut self.venue;
+        splitter.feed(data, |item| venue.on_item(&mut cx, &mut pending, item));
+        self.io.pending.insert(request, pending);
+        if let Some(incoming) = self.io.incoming.get_mut(&request) {
+            incoming.splitter = Some(splitter);
+        }
+    }
+
+    fn http_end(&mut self, now: f64, request: RequestId) {
+        let (Some(incoming), Some(pending)) = (
+            self.io.incoming.remove(&request),
+            self.io.pending.remove(&request),
+        ) else {
+            return;
+        };
+        let mut cx = Cx {
+            now,
+            store: &mut self.store,
+            io: &mut self.io,
+        };
+        // A 2xx without the expected array (an error envelope, a truncated
+        // body) must never read as an authoritative empty list.
+        if let Some(splitter) = &incoming.splitter {
+            if !splitter.finished() {
+                let preview = String::from_utf8_lossy(&incoming.body);
+                let message = format!("response did not contain the expected list: {preview}");
+                self.venue.on_request_failed(&mut cx, pending, &message);
+                return;
+            }
+            let response = Response {
+                status: incoming.status,
+                headers: &incoming.headers,
+                body: "",
+            };
+            self.venue.on_response(&mut cx, pending, response);
+            return;
+        }
+        match std::str::from_utf8(&incoming.body) {
+            Ok(body) => self.venue.on_response(
+                &mut cx,
+                pending,
+                Response {
+                    status: incoming.status,
+                    headers: &incoming.headers,
+                    body,
+                },
+            ),
+            Err(_) => self
+                .venue
+                .on_request_failed(&mut cx, pending, "response body is not UTF-8"),
         }
     }
 

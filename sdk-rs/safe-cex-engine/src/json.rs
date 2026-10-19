@@ -97,9 +97,183 @@ pub fn each_in_field<'de, T: Deserialize<'de>>(
     Ok(found)
 }
 
+/// Where the array to stream sits in a response body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArrayAt {
+    /// The body is the array.
+    Root,
+    /// The array is this field of the top-level object.
+    Field(&'static str),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    Seeking,
+    InArray,
+    Done,
+}
+
+/// Splits an array out of a body that arrives in chunks, handing over each
+/// element's text as soon as it is complete. Only the element in progress is
+/// buffered, so memory stays at the size of one element however large the
+/// body is.
+pub struct ArraySplitter {
+    at: ArrayAt,
+    phase: Phase,
+    depth: u32,
+    array_depth: u32,
+    in_string: bool,
+    escaped: bool,
+    /// The most recent string at depth 1 while seeking a field.
+    key: Vec<u8>,
+    capturing_key: bool,
+    /// The wanted key and its colon were just seen.
+    armed: bool,
+    item: Vec<u8>,
+}
+
+impl ArraySplitter {
+    pub fn new(at: ArrayAt) -> Self {
+        Self {
+            at,
+            phase: Phase::Seeking,
+            depth: 0,
+            array_depth: 0,
+            in_string: false,
+            escaped: false,
+            key: Vec::new(),
+            capturing_key: false,
+            armed: false,
+            item: Vec::new(),
+        }
+    }
+
+    /// Whether the array was found and closed.
+    pub fn finished(&self) -> bool {
+        self.phase == Phase::Done
+    }
+
+    pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
+        for &byte in data {
+            if self.phase == Phase::Done {
+                return;
+            }
+            if self.in_string {
+                if self.phase == Phase::InArray {
+                    self.item.push(byte);
+                } else if self.capturing_key {
+                    self.key.push(byte);
+                }
+                if self.escaped {
+                    self.escaped = false;
+                } else if byte == b'\\' {
+                    self.escaped = true;
+                } else if byte == b'"' {
+                    self.in_string = false;
+                    if self.capturing_key {
+                        self.capturing_key = false;
+                        self.key.pop();
+                    }
+                }
+                continue;
+            }
+            let at_array_level = self.phase == Phase::InArray && self.depth == self.array_depth;
+            match byte {
+                b'"' => {
+                    self.in_string = true;
+                    if self.phase == Phase::Seeking && self.depth == 1 {
+                        self.key.clear();
+                        self.capturing_key = true;
+                        self.armed = false;
+                    }
+                }
+                b':' if self.phase == Phase::Seeking && self.depth == 1 => {
+                    self.armed =
+                        matches!(self.at, ArrayAt::Field(name) if name.as_bytes() == self.key);
+                    continue;
+                }
+                b'[' | b'{' => {
+                    self.depth += 1;
+                    if self.phase == Phase::Seeking {
+                        let found = byte == b'['
+                            && match self.at {
+                                ArrayAt::Root => self.depth == 1,
+                                ArrayAt::Field(_) => self.armed && self.depth == 2,
+                            };
+                        self.armed = false;
+                        if found {
+                            self.phase = Phase::InArray;
+                            self.array_depth = self.depth;
+                            continue;
+                        }
+                    }
+                }
+                b']' | b'}' => {
+                    if at_array_level && byte == b']' {
+                        self.emit(&mut on_item);
+                        self.phase = Phase::Done;
+                        continue;
+                    }
+                    self.depth = self.depth.saturating_sub(1);
+                }
+                b',' if at_array_level => {
+                    self.emit(&mut on_item);
+                    continue;
+                }
+                b' ' | b'\n' | b'\r' | b'\t' if at_array_level => continue,
+                b' ' | b'\n' | b'\r' | b'\t' => {}
+                _ if self.phase == Phase::Seeking && self.depth == 1 => self.armed = false,
+                _ => {}
+            }
+            if self.phase == Phase::InArray {
+                self.item.push(byte);
+            }
+        }
+    }
+
+    fn emit(&mut self, on_item: &mut impl FnMut(&str)) {
+        if !self.item.is_empty() {
+            if let Ok(text) = std::str::from_utf8(&self.item) {
+                on_item(text);
+            }
+            self.item.clear();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn split(at: ArrayAt, body: &str, chunk: usize) -> Vec<String> {
+        let mut splitter = ArraySplitter::new(at);
+        let mut items = Vec::new();
+        for part in body.as_bytes().chunks(chunk) {
+            splitter.feed(part, |item| items.push(item.to_owned()));
+        }
+        assert!(splitter.finished());
+        items
+    }
+
+    #[test]
+    fn splits_elements_across_any_chunking() {
+        let body = r#"{"timezone":"UTC","rateLimits":[{"a":1}],"symbols" : [ {"s":"a,]\"}","f":[{"x":[1,2]}]} , {"s":"é"} ],"after":[9]}"#;
+        for chunk in [1, 2, 3, 7, 1024] {
+            assert_eq!(
+                split(ArrayAt::Field("symbols"), body, chunk),
+                [r#"{"s":"a,]\"}","f":[{"x":[1,2]}]}"#, r#"{"s":"é"}"#],
+                "chunk {chunk}"
+            );
+        }
+        assert_eq!(
+            split(ArrayAt::Root, r#"[{"v":1},{"v":[2]}]"#, 3),
+            [r#"{"v":1}"#, r#"{"v":[2]}"#]
+        );
+        assert!(split(ArrayAt::Root, "[]", 1).is_empty());
+        let mut splitter = ArraySplitter::new(ArrayAt::Field("symbols"));
+        splitter.feed(br#"{"other":[1],"symbolsX":[2]}"#, |_| panic!("no match"));
+        assert!(!splitter.finished());
+    }
 
     #[derive(Deserialize)]
     struct Row<'a> {

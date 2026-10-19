@@ -5,11 +5,14 @@
 //   node --expose-gc sdk-rs/harness/replay.mjs --impl rust --tape <file>
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../safe-cex-wasm/js/wire.mjs';
+import { axiosClients, venueOf } from './venues.mjs';
 
 const { values } = parseArgs({
   options: {
     impl: { type: 'string' },
+    venue: { type: 'string', default: 'binance' },
     tape: { type: 'string' },
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
     out: { type: 'string' },
@@ -17,14 +20,17 @@ const { values } = parseArgs({
     'no-egress': { type: 'boolean', default: false },
   },
 });
-const records = readFileSync(values.tape, 'utf8')
+const venue = venueOf(values.venue);
+const tapeBytes = readFileSync(values.tape);
+const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
+  .toString('utf8')
   .split('\n')
   .filter(Boolean)
   .map((line) => JSON.parse(line));
 const bookSymbols = values.books.split(',').filter(Boolean);
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
-const isPrivate = records.some((r) => r.url?.includes('/private/ws'));
+const isPrivate = records.some((r) => r.url?.includes(venue.privateSocket));
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 
@@ -195,7 +201,7 @@ async function runRust() {
     clearTimeout: (handle) => clearTimeout(handle),
   };
   const options = isPrivate ? { key: KEY, secret: SECRET } : { publicDataOnly: true };
-  const host = new EngineHost(new WasmEngine('binance', JSON.stringify(options)), transport, {
+  const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
       const received = values['no-egress'] ? buffer : structuredClone(buffer, { transfer: [buffer] });
@@ -344,9 +350,8 @@ async function runTs() {
     }
   }
   globalThis.WebSocket = TapeWebSocket;
-  const root = '../../packages/safe-cex/src';
-  const { BinanceExchange } = await import(`${root}/exchanges/binance/binance.exchange.ts`);
-  const { DefaultStore } = await import(`${root}/store/store.base.ts`);
+  const { [venue.ts.className]: Exchange } = await import(venue.ts.module);
+  const { DefaultStore } = await import('../../packages/safe-cex/src/store/store.base.ts');
   const adapter = async (config) => {
     const base = config.baseURL ?? '';
     const url = new URL(config.url.startsWith('http') ? config.url : `${base}${config.url}`);
@@ -366,12 +371,10 @@ async function runTs() {
   };
   const store = new DefaultStore();
   const options = isPrivate ? { key: KEY, secret: SECRET } : { key: '', secret: '', publicDataOnly: true };
-  const exchange = new BinanceExchange('binance', options, store);
+  const exchange = new Exchange(venue.ts.name, options, store);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
-  for (const client of [exchange.xhr, exchange.publicXhr, exchange.unlimitedXHR, exchange._primaryXhr, exchange._secondaryXhr]) {
-    if (client?.defaults) client.defaults.adapter = adapter;
-  }
+  for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
   const finalBooks = {};
   const heapBefore = baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
@@ -384,8 +387,6 @@ async function runTs() {
   // Model the worker posting each subscribed book to main every 250 ms.
   let lastFlush = -Infinity;
   let posted = 0;
-  const depthHandlers = () =>
-    Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length;
   const frames = await tape.play(
     (t) => {
       if (t - lastFlush >= 250) {
@@ -396,7 +397,7 @@ async function runTs() {
       }
     },
     async () => {
-      while (depthHandlers() < bookSymbols.length) await new Promise((r) => setTimeout(r, 5));
+      while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
       const loaded = () => Object.values(store.loaded).every(Boolean);
       while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
     },

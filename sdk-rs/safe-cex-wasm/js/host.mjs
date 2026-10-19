@@ -5,10 +5,14 @@
 // transport = {
 //   now(): number,
 //   connect(url, { onOpen, onMessage, onClose }): { send(text), close() },
-//   request({ method, url, headers, body }): Promise<{ status, headers?: string, body: Uint8Array }>,
-//     (`headers` as `name: value` lines),
+//   request({ method, url, headers, body }):
+//     Promise<{ status, headers?: string, body: Uint8Array | AsyncIterable<Uint8Array> }>,
+//     (`headers` as `name: value` lines; a streamed body is fed to the engine
+//     chunk by chunk so large lists never sit whole in its memory),
 //   setTimeout(fn, ms), clearTimeout(handle),
 // }
+
+const CHUNK_BYTES = 64 * 1024;
 
 export class EngineHost {
   constructor(engine, transport, handlers = {}) {
@@ -55,6 +59,25 @@ export class EngineHost {
     this.timers.clear();
   }
 
+  /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
+  async receive(id, { status, headers = '', body }) {
+    const { engine, transport } = this;
+    this.run(engine.httpStart(id, status, headers, transport.now()));
+    try {
+      if (body instanceof Uint8Array) {
+        for (let at = 0; at < body.length; at += CHUNK_BYTES) {
+          this.run(engine.httpChunk(id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
+        }
+      } else {
+        for await (const chunk of body) this.run(engine.httpChunk(id, chunk, transport.now()));
+      }
+    } catch (error) {
+      this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));
+      return;
+    }
+    this.run(engine.httpEnd(id, transport.now()));
+  }
+
   run(actionsJson) {
     if (!actionsJson) return;
     for (const action of JSON.parse(actionsJson)) this.execute(action);
@@ -93,8 +116,7 @@ export class EngineHost {
             body: action.body,
           })
           .then(
-            ({ status, headers = '', body }) =>
-              this.run(engine.httpResponse(id, status, headers, body, transport.now())),
+            (response) => this.receive(id, response),
             (error) => this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now())),
           );
         break;
@@ -129,6 +151,17 @@ export class EngineHost {
   }
 }
 
+/** A fetch body's chunks; an empty body yields nothing. */
+async function* chunks(stream) {
+  if (!stream) return;
+  const reader = stream.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return;
+    yield value;
+  }
+}
+
 /** Transport over the runtime's own WebSocket, fetch and timers. */
 export const nativeTransport = () => ({
   now: () => Date.now(),
@@ -145,11 +178,7 @@ export const nativeTransport = () => ({
     const response = await fetch(url, { method, headers, body });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
-    return {
-      status: response.status,
-      headers: lines.join('\n'),
-      body: new Uint8Array(await response.arrayBuffer()),
-    };
+    return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };
   },
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (handle) => clearTimeout(handle),

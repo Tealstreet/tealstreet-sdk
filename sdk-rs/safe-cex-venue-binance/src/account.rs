@@ -9,6 +9,7 @@ use safe_cex_engine::model::{
 };
 use safe_cex_engine::store::MarketSetting;
 use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId, json, num};
+use std::collections::HashMap;
 
 /// Binance expires a listenKey 60 minutes after the last keepalive.
 const LISTEN_KEY_REFRESH_MS: f64 = 30.0 * 60_000.0;
@@ -27,15 +28,26 @@ const ORDERS_RETRY_MS: f64 = 15_000.0;
 const STABLECOINS: [&str; 7] = ["USDT", "USDC", "BUSD", "FDUSD", "BFUSD", "LDUSDT", "BNFCR"];
 
 pub enum Request {
-    LeverageBrackets,
+    /// Collected while streaming: max leverage by symbol.
+    LeverageBrackets(HashMap<String, f64>),
     ListenKey,
     Keepalive,
     PositionMode,
-    PositionRisk { generation: u32 },
-    SymbolConfig { generation: u32 },
+    PositionRisk {
+        generation: u32,
+        rows: Vec<Position>,
+    },
+    SymbolConfig {
+        generation: u32,
+        configs: Vec<(String, MarketSetting)>,
+    },
     Account,
-    OpenOrders { generation: u32 },
-    OpenAlgoOrders { generation: u32 },
+    OpenOrders {
+        generation: u32,
+    },
+    OpenAlgoOrders {
+        generation: u32,
+    },
 }
 
 struct PositionsJoin {
@@ -165,12 +177,11 @@ pub fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
 
 impl BinanceFutures {
     pub(crate) fn request_leverage_brackets(&self, cx: &mut Cx<'_, Pending>) {
-        self.signed(
+        self.signed_streamed(
             cx,
-            Method::Get,
             "/fapi/v1/leverageBracket",
             Query::new(),
-            Pending::Account(Request::LeverageBrackets),
+            Pending::Account(Request::LeverageBrackets(HashMap::new())),
         );
     }
 
@@ -238,19 +249,23 @@ impl BinanceFutures {
             failed: false,
         });
         self.account.pending_position_events = false;
-        self.signed(
+        self.signed_streamed(
             cx,
-            Method::Get,
             "/fapi/v3/positionRisk",
             Query::new(),
-            Pending::Account(Request::PositionRisk { generation }),
+            Pending::Account(Request::PositionRisk {
+                generation,
+                rows: Vec::new(),
+            }),
         );
-        self.signed(
+        self.signed_streamed(
             cx,
-            Method::Get,
             "/fapi/v1/symbolConfig",
             Query::new(),
-            Pending::Account(Request::SymbolConfig { generation }),
+            Pending::Account(Request::SymbolConfig {
+                generation,
+                configs: Vec::new(),
+            }),
         );
     }
 
@@ -429,7 +444,7 @@ impl BinanceFutures {
                 self.account.keepalive_failing = true;
                 self.account.keepalive_timer = Some(cx.set_timer(LISTEN_KEY_RETRY_MAX_MS));
             }
-            Request::PositionRisk { generation } | Request::SymbolConfig { generation } => {
+            Request::PositionRisk { generation, .. } | Request::SymbolConfig { generation, .. } => {
                 cx.log(LogLevel::Error, format!("Binance positions: {message}"));
                 if let Some(join) = &mut self.account.positions
                     && join.generation == generation
@@ -454,9 +469,76 @@ impl BinanceFutures {
                 }
                 self.finish_orders(cx);
             }
-            Request::LeverageBrackets | Request::PositionMode => {
+            Request::LeverageBrackets(_) | Request::PositionMode => {
                 cx.log(LogLevel::Error, format!("Binance: {message}"));
             }
+        }
+    }
+
+    /// One element of a streamed account list.
+    pub(crate) fn on_account_item(
+        &mut self,
+        _cx: &mut Cx<'_, Pending>,
+        request: &mut Request,
+        item: &str,
+    ) {
+        match request {
+            Request::LeverageBrackets(max_by_symbol) => {
+                if let Ok(b) = serde_json::from_str::<LeverageBracket>(item)
+                    && let Some(first) = b.brackets.first()
+                    && first.initial_leverage > 0.0
+                {
+                    max_by_symbol.insert(b.symbol.into_owned(), first.initial_leverage);
+                }
+            }
+            Request::PositionRisk { rows, .. } => {
+                let Ok(p) = serde_json::from_str::<PositionRisk>(item) else {
+                    return;
+                };
+                let signed = num::parse(&p.position_amt);
+                if signed == 0.0 {
+                    return;
+                }
+                let side = position_side(&p.position_side, signed);
+                let mode = if p.position_side == "BOTH" {
+                    PositionMode::Oneway
+                } else {
+                    PositionMode::Hedged
+                };
+                rows.push(Position {
+                    id: position_id(&p.symbol, side, mode),
+                    symbol: p.symbol.into_owned(),
+                    side,
+                    entry_price: num::parse(&p.entry_price),
+                    notional: num::parse(&p.notional).abs(),
+                    leverage: 0.0,
+                    margin_type: None,
+                    position_mode: Some(mode),
+                    unrealized_pnl: num::parse(&p.un_realized_profit),
+                    realized_pnl: None,
+                    contracts: signed.abs(),
+                    liquidation_price: num::parse(&p.liquidation_price),
+                    margin_size: Some(opt(&p.isolated_margin)),
+                    last_update: (p.update_time > 0.0).then_some(p.update_time),
+                });
+            }
+            Request::SymbolConfig { configs, .. } => {
+                if let Ok(c) = serde_json::from_str::<SymbolConfig>(item) {
+                    let margin_type = if c.margin_type == "ISOLATED" {
+                        MarginType::Isolated
+                    } else {
+                        MarginType::Cross
+                    };
+                    configs.push((
+                        c.symbol.into_owned(),
+                        MarketSetting {
+                            leverage: c.leverage,
+                            margin_type: Some(margin_type),
+                        },
+                    ));
+                }
+            }
+            _ => {}
         }
     }
 
@@ -472,15 +554,7 @@ impl BinanceFutures {
         }
         let body = response.body;
         match request {
-            Request::LeverageBrackets => {
-                let mut max_by_symbol = std::collections::HashMap::new();
-                let _ = json::each::<LeverageBracket>(body, |b| {
-                    if let Some(first) = b.brackets.first()
-                        && first.initial_leverage > 0.0
-                    {
-                        max_by_symbol.insert(b.symbol.into_owned(), first.initial_leverage);
-                    }
-                });
+            Request::LeverageBrackets(max_by_symbol) => {
                 cx.store.update_markets(|market| {
                     if let Some(max) = max_by_symbol.get(&market.symbol) {
                         market.limits.leverage.max = *max;
@@ -512,69 +586,22 @@ impl BinanceFutures {
                     cx.store.set_hedged(mode.dual_side_position);
                 }
             }
-            Request::PositionRisk { generation } => {
-                let mut rows = Vec::new();
-                let parsed = json::each::<PositionRisk>(body, |p| {
-                    let signed = num::parse(&p.position_amt);
-                    if signed == 0.0 {
-                        return;
-                    }
-                    let side = position_side(&p.position_side, signed);
-                    let mode = if p.position_side == "BOTH" {
-                        PositionMode::Oneway
-                    } else {
-                        PositionMode::Hedged
-                    };
-                    rows.push(Position {
-                        id: position_id(&p.symbol, side, mode),
-                        symbol: p.symbol.into_owned(),
-                        side,
-                        entry_price: num::parse(&p.entry_price),
-                        notional: num::parse(&p.notional).abs(),
-                        leverage: 0.0,
-                        margin_type: None,
-                        position_mode: Some(mode),
-                        unrealized_pnl: num::parse(&p.un_realized_profit),
-                        realized_pnl: None,
-                        contracts: signed.abs(),
-                        liquidation_price: num::parse(&p.liquidation_price),
-                        margin_size: Some(opt(&p.isolated_margin)),
-                        last_update: (p.update_time > 0.0).then_some(p.update_time),
-                    });
-                });
+            Request::PositionRisk { generation, rows } => {
                 if let Some(join) = &mut self.account.positions
                     && join.generation == generation
                 {
-                    match parsed {
-                        Ok(()) => join.rows = Some(rows),
-                        Err(_) => join.failed = true,
-                    }
+                    join.rows = Some(rows);
                 }
                 self.finish_positions(cx);
             }
-            Request::SymbolConfig { generation } => {
-                let mut configs = Vec::new();
-                let parsed = json::each::<SymbolConfig>(body, |c| {
-                    let margin_type = if c.margin_type == "ISOLATED" {
-                        MarginType::Isolated
-                    } else {
-                        MarginType::Cross
-                    };
-                    configs.push((
-                        c.symbol.into_owned(),
-                        MarketSetting {
-                            leverage: c.leverage,
-                            margin_type: Some(margin_type),
-                        },
-                    ));
-                });
+            Request::SymbolConfig {
+                generation,
+                configs,
+            } => {
                 if let Some(join) = &mut self.account.positions
                     && join.generation == generation
                 {
-                    match parsed {
-                        Ok(()) => join.configs = Some(configs),
-                        Err(_) => join.failed = true,
-                    }
+                    join.configs = Some(configs);
                 }
                 self.finish_positions(cx);
             }

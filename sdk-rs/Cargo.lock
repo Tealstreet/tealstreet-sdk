@@ -3107,6 +3107,7 @@ dependencies = [
 name = "safe-cex-wasm"
 version = "0.1.0"
 dependencies = [
+ "js-sys",
  "safe-cex-engine",
  "safe-cex-venue-binance",
  "serde",

@@ -18,8 +18,8 @@ sha2 = "0.10"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "=1.0.152", features = ["float_roundtrip"] }
-ts-rs = "12.0.1"
 wasm-bindgen = "0.2.129"
+js-sys = "0.3.106"
 
 # Internal
 safe-cex-crypto = { path = "safe-cex-crypto" }
@@ -32,11 +32,10 @@ goldilocks-crypto = "=0.1.2"
 # Browser entropy backend required by transitive rand users (signing APIs are explicit/deterministic).
 getrandom = { version = "=0.2.17", features = ["js"] }
 
-# P5a EIP-712/secp256k1 and JavaScript-compatible MessagePack.
+# EIP-712/secp256k1.
 alloy-dyn-abi = { version = "=1.7.3", features = ["eip712"] }
 alloy-signer = { version = "=2.5.0", features = ["eip712"] }
 alloy-signer-local = { version = "=2.5.0", default-features = false, features = ["eip712"] }
-rmp-serde = "=1.3.1"
 
 # P5a Ed25519 and Starknet/SNIP-12 primitives; no provider/client dependency.
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "zeroize"] }
