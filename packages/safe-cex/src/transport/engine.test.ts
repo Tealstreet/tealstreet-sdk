@@ -289,6 +289,7 @@ describe('engine HTTP routing at the raw transport boundary', () => {
   ] as const)(
     'HOW %s region=%s uses the resolved %s egress without parsing signed JSON',
     async (exchange, proxyRegion, region) => {
+      vi.useFakeTimers();
       const raw = makeRaw();
       const input = request(`https://${exchange}.example/order?signature=a%2Fb`);
       const response = await createEngineTransport(

@@ -175,3 +175,7 @@ thresholds, normalizations or size budgets changed for this transport work.
   decoding. Fixed both, with **16/16 native wire tests** and native all-target
   Clippy passing. A separate reviewer cleared the fixes and regressions; the
   independent JS/runtime review also found no actionable issues.
+- CI passed all 21 nine-venue replays. The companion repository job caught a
+  wall-clock-sensitive HOW assertion expecting exactly 20,000 ms after setup;
+  freeze that routing test's clock while keeping the real deadline regressions
+  and production request budget unchanged.
