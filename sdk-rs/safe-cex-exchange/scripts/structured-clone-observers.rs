@@ -63,7 +63,8 @@ pub fn observe(profile: &Value, clone: impl Fn(&Js) -> Result<Js, Thrown>) -> Va
             let Js::Set(entries) = &set else {
                 unreachable!()
             };
-            entries.borrow_mut().extend([child.clone(), root.clone()]);
+            entries.borrow_mut().push(child.clone());
+            entries.borrow_mut().push(root.clone());
             root.set("map", map.clone()).unwrap();
             root.set("set", set.clone()).unwrap();
             let c = clone(&root).unwrap();
