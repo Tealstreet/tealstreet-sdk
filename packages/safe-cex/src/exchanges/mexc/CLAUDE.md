@@ -112,3 +112,71 @@ Public REST contract detail, ticker, depth, and kline endpoints were probed succ
 ## Client order ID
 
 This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.
+
+## Rust engine
+
+`sdk-rs/venues/mexc` uses native placement volume and base-sized store rows.
+The frame applier reconstructs `remainingNative` and
+`filledInPlacementUnits` from the contract-size column for MEXC on both
+sides of the worker boundary. Optional buy/sell leverage columns in
+`SETTINGS` preserve different hedge rails even when flat.
+
+Regular cancel/replace reads `/api/v1/private/order/get/{orderId}` after
+cancel acceptance before replacing. An unconfirmed cancellation or failed
+read withholds the replacement; a definitive completed row updates local
+fills and stops replacement. This avoids replacing fills whose WS frames
+arrive after the cancellation response. Newer WS settings win over delayed
+mutation acknowledgements, with revisions tracked separately per hedge rail.
+
+Regular cumulative fills never regress across WS frames, independently of
+status. Terminal rows accept a delayed Open frame's larger cumulative fill
+while retaining their terminal status; Closed takes precedence. Older terminal
+frames and amend reads cannot regress quantity; a stale final read withholds replacement even when the
+caller supplied an explicit new amount. Stop replacements also abort if the
+original executes before cancellation is acknowledged.
+
+The Rust gate's `KNOWN_TS_FIXES.mexc` lists intentional corrections to the TS
+reference, including full-depth sequencing, closing leverage for sized stops,
+native attached brackets, and cancel-all across all three order surfaces.
+
+History queries in the Rust adapter use streamed pages of at most 100 rows.
+Executions use floor-seconds timestamps; order history, funding income and
+public trades retain milliseconds to match the engine's query result shapes.
+Only explicit `FUNDING_FEE` income is supported; an all-kind income request
+fails because the funding endpoint cannot supply a complete general ledger.
+This is additional Rust functionality: TS MEXC inherits the empty branded
+`BaseExchange.fetchIncomeHistory` / `fetchIncomeHistoryRange` fallbacks and
+does not implement an income ledger. Neither TS nor Rust implements opening
+conditional orders or trailing stops. Before the Rust port, Conditional fell
+through to a regular type-1 limit submit without trigger fields; rejecting it
+prevents an unintended immediate order. Private replay covers whole-batch
+preflight for both unsupported types alongside caller client IDs.
+The public deals feed exposes no execution ID, so its result keys include the
+response ordinal and preserve otherwise identical prints.
+
+Private execution IDs are deduplicated for five minutes. Cumulative regular
+fill volume is monotonic across WS updates, including updates arriving after
+a cancel acknowledgement; terminal status is retained without dropping fills.
+
+The TS reference applies the same cumulative-fill and terminal-status guards
+when committing full or symbol-scoped REST snapshots, private WS frames, and
+optimistic placement acknowledgements. Attached entry TP/SL prices and their independent
+`lossTrend` / `profitTrend` references survive normalization and cancel/replace.
+The definitive post-cancel read supplies updated bracket fields; omitted fields
+retain known metadata, while an explicit zero bracket price clears that leg.
+Standalone plan `trend` and position-stop `lossTrend` / `profitTrend` map to
+the corresponding public trigger references and survive price amendments.
+Full-position stop replacements retain the zero-size sentinel and native
+position-stop route after a WS row supplies the actual native position volume.
+
+Private regular and plan/stop frames share the snapshot metadata merge: omitted
+bracket prices or trigger references preserve known values, including optimistic
+placement sources, while an explicit zero bracket price clears its leg.
+
+When native WS precedes the placement acknowledgement, its explicit bracket
+prices and sources take precedence over the request; the optimistic row only
+supplies metadata omitted from the native snapshot.
+
+Carry native bracket field presence through sparse snapshots as well as public
+values: a clear followed by an omitted field still overrides a late placement
+acknowledgement, rather than restoring the requested bracket.

@@ -9,6 +9,7 @@ import {
   MarginType,
   OrderSide,
   OrderStatus,
+  OrderStopTriggerType,
   OrderTimeInForce,
   OrderType,
   PositionMode,
@@ -340,6 +341,15 @@ export const fakePositionsForMarket = (
   }));
 };
 
+const normalizeBracketTrend = (trend: unknown): OrderStopTriggerType | undefined => {
+  switch (toNumber(trend, Number.NaN)) {
+    case 1: return OrderStopTriggerType.LastPrice;
+    case 2: return OrderStopTriggerType.MarkPrice;
+    case 3: return OrderStopTriggerType.IndexPrice;
+    default: return undefined;
+  }
+};
+
 export const normalizeOrder = (raw: Record<string, any>, market?: Market): Order | null => {
   const id = toIntegerString(raw.orderId ?? raw.id);
   const symbol = fromMexcSymbol(raw.symbol ?? raw.contract);
@@ -368,6 +378,10 @@ export const normalizeOrder = (raw: Record<string, any>, market?: Market): Order
     remaining: Math.max(amount - filled, 0),
     reduceOnly: Boolean(raw.reduceOnly) || sideInfo.reduceOnly,
     timeInForce: ORDER_TIME_IN_FORCE[typeCode] || OrderTimeInForce.GoodTillCancel,
+    stopLoss: toNumber(raw.stopLossPrice) > 0 ? toNumber(raw.stopLossPrice) : undefined,
+    takeProfit: toNumber(raw.takeProfitPrice) > 0 ? toNumber(raw.takeProfitPrice) : undefined,
+    slTriggerType: normalizeBracketTrend(raw.lossTrend),
+    tpTriggerType: normalizeBracketTrend(raw.profitTrend),
     lastUpdate: normalizeTimestampToMs(raw.updateTime ?? raw.modifyTime ?? raw.createTime),
     info: raw,
     extra: {
@@ -438,12 +452,14 @@ export const normalizePlanOrder = (raw: Record<string, any>, market?: Market): O
   // just-canceled TP/SL back to Open until the next REST tick shook it out.
   const status = normalizeTriggerOrderStatus(raw);
   const triggerPrice = toNumber(raw.triggerPrice ?? raw.stopPrice ?? raw.price, 0);
+  const type = normalizePlanOrderType(raw, sideInfo.side);
+  const trigger = normalizeBracketTrend(raw.trend);
 
   return omitUndefined({
     id,
     status,
     symbol,
-    type: normalizePlanOrderType(raw, sideInfo.side),
+    type,
     side: sideInfo.side,
     price: triggerPrice,
     amount,
@@ -451,6 +467,9 @@ export const normalizePlanOrder = (raw: Record<string, any>, market?: Market): O
     remaining: amount,
     reduceOnly: Boolean(raw.reduceOnly) || sideInfo.reduceOnly,
     timeInForce: OrderTimeInForce.GoodTillCancel,
+    triggerType: trigger,
+    slTriggerType: type === OrderType.StopLoss ? trigger : undefined,
+    tpTriggerType: type === OrderType.TakeProfit ? trigger : undefined,
     lastUpdate: normalizeTimestampToMs(raw.updateTime ?? raw.createTime),
     info: {
       ...raw,
@@ -476,6 +495,8 @@ export const normalizeStopOrder = (raw: Record<string, any>, market?: Market): O
     type === OrderType.TakeProfit
       ? toNumber(raw.takeProfitPrice ?? raw.triggerPrice ?? raw.price, 0)
       : toNumber(raw.stopLossPrice ?? raw.triggerPrice ?? raw.price, 0);
+  const lossTrend = normalizeBracketTrend(raw.lossTrend) ?? normalizeBracketTrend(raw.trend);
+  const profitTrend = normalizeBracketTrend(raw.profitTrend) ?? normalizeBracketTrend(raw.trend);
 
   return omitUndefined({
     id,
@@ -489,6 +510,9 @@ export const normalizeStopOrder = (raw: Record<string, any>, market?: Market): O
     remaining: amount,
     reduceOnly: true,
     timeInForce: OrderTimeInForce.GoodTillCancel,
+    triggerType: type === OrderType.TakeProfit ? profitTrend : lossTrend,
+    slTriggerType: lossTrend,
+    tpTriggerType: profitTrend,
     lastUpdate: normalizeTimestampToMs(raw.updateTime ?? raw.createTime),
     info: {
       ...raw,

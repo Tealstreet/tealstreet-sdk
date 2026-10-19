@@ -11,6 +11,7 @@ use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
+use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 use serde::{Deserialize, Serialize};
@@ -244,6 +245,10 @@ enum CommandIn {
         command: u32,
         hedged: bool,
     },
+    FetchLeverage {
+        command: u32,
+        symbol: String,
+    },
     #[serde(rename_all = "camelCase")]
     FetchFills {
         command: u32,
@@ -340,6 +345,7 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
+            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
                 command,
                 symbol,
@@ -458,6 +464,11 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
             "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
