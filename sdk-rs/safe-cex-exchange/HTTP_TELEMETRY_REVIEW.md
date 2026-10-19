@@ -13,8 +13,8 @@ Getter/coercion failures before the source try block still reject; rendering and
 emitter failures are reported and caught. Canonical Js iteration, property access,
 addition and JSON serialization provide those operations.
 
-JS-composed owners register a weak reader of their actual receiver. Realm-backed
-Hyperliquid owners read their current realm instance. Typed constructors bind
+JS-composed owners register a weak reader of their actual receiver. Hyperliquid
+owners read their current canonical Js instance directly. Typed constructors bind
 their existing immutable source endpoint lists through the same capability.
 Neither adapter owns another exchange graph or retains an exchange cycle.
 

@@ -229,21 +229,18 @@ impl HyperliquidExchange {
                     "HTTP exchange owner released",
                 )
             })?;
-            let binding = owner.binding.borrow().clone().ok_or_else(|| {
-                safe_cex_exchange::js_runtime::value::Thrown::error(
-                    "Error",
-                    "HTTP exchange binding unavailable",
-                )
-            })?;
-            let mut realm = binding.realm;
-            let value = realm
-                .get(&binding.instance, &crate::realm::PropKey::str(name))
-                .map_err(|error| {
-                    safe_cex_exchange::js_runtime::value::Thrown::from(realm.exchange_error(&error))
+            let instance = owner
+                .binding
+                .borrow()
+                .as_ref()
+                .map(|binding| binding.instance.clone())
+                .ok_or_else(|| {
+                    safe_cex_exchange::js_runtime::value::Thrown::error(
+                        "Error",
+                        "HTTP exchange binding unavailable",
+                    )
                 })?;
-            realm.capture_typed_value(&value, 0).map_err(|error| {
-                safe_cex_exchange::js_runtime::value::Thrown::from(realm.exchange_error(&error))
-            })
+            instance.get(name)
         }));
         Ok(venue)
     }
