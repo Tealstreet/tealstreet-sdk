@@ -27,6 +27,7 @@ export class EngineHost {
   }
 
   start() {
+    if (this.disposed) return;
     this.run(this.engine.start(this.transport.now()));
   }
 
@@ -58,6 +59,7 @@ export class EngineHost {
    * fills go out, for flushing those at the venue's faster book cadence.
    */
   flush(marketOnly = false) {
+    if (this.disposed) return;
     const frame = this.engine.takeFrame(this.transport.now(), marketOnly);
     if (frame) this.handlers.onFrame?.(frame.buffer);
   }
@@ -65,6 +67,7 @@ export class EngineHost {
   /** The whole current state as one frame (an ArrayBuffer), for a consumer
    * that starts late or skipped frames; later flushes apply on top of it. */
   snapshot() {
+    if (this.disposed) throw new Error('engine disposed');
     return this.engine.snapshotFrame(this.transport.now()).buffer;
   }
 
@@ -88,19 +91,24 @@ export class EngineHost {
     try {
       if (body instanceof Uint8Array) {
         for (let at = 0; at < body.length; at += CHUNK_BYTES) {
+          if (this.disposed) return;
           this.run(engine.httpChunk(id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
         }
       } else {
         for await (const chunk of body) {
+          if (this.disposed) return;
           for (let at = 0; at < chunk.length; at += CHUNK_BYTES) {
+            if (this.disposed) return;
             this.run(engine.httpChunk(id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
           }
         }
       }
     } catch (error) {
+      if (this.disposed) return;
       this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));
       return;
     }
+    if (this.disposed) return;
     this.run(engine.httpEnd(id, transport.now()));
   }
 
@@ -117,7 +125,9 @@ export class EngineHost {
         const id = action.socket;
         if (action.headers?.length && !transport.webSocketHeaders) {
           this.handlers.onLog?.('warning', 'WebSocket upgrade headers unavailable; continuing REST reconciliation');
-          transport.setTimeout(() => this.run(engine.wsClose(id, 1006, transport.now())), 0);
+          transport.setTimeout(() => {
+            if (!this.disposed) this.run(engine.wsClose(id, 1006, transport.now()));
+          }, 0);
           break;
         }
         const socket = transport.connect(action.url, {
@@ -152,13 +162,16 @@ export class EngineHost {
           })
           .then(
             (response) => this.receive(id, response),
-            (error) => this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now())),
+            (error) => {
+              if (!this.disposed) this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));
+            },
           );
         break;
       }
       case 'setTimer': {
         const id = action.timer;
         const handle = transport.setTimeout(() => {
+          if (this.disposed) return;
           this.timers.delete(id);
           this.run(engine.timer(id, transport.now()));
         }, Math.max(0, action.at - transport.now()));
@@ -223,7 +236,7 @@ export const socketMessages = (onMessage, onError) => {
       : bytes[0] === 0x78 ? 'deflate' : undefined;
     if (!format) return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format));
-    return new Response(stream).text();
+    return new TextDecoder('utf-8', { fatal: true }).decode(await new Response(stream).arrayBuffer());
   };
   return (data) => {
     if (typeof data === 'string' && !pending) return onMessage(data);

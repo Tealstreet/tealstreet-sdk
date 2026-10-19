@@ -28,6 +28,7 @@ import { FrameApplier } from '../../store/frameApplier';
 import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
+import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import { isRegularClientOrderShape, patternClientOrderIdRule } from '../clientOrderId';
@@ -36,6 +37,7 @@ import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
+  backpack: 'backpack',
   binancepm: 'binancepm',
   blofin: 'blofin',
   mexc: 'mexc',
@@ -55,6 +57,11 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
 });
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  backpack: {
+    label: 'Backpack',
+    requirement: 'be a canonical decimal uint32 between 1 and 4294967295',
+    isValid: (id) => /^[1-9]\d{0,9}$/.test(id) && Number(id) <= 0xffff_ffff,
+  },
   blofin: patternClientOrderIdRule('BloFin', /^[A-Za-z0-9]{1,32}$/, {
     mint: () => `${BLOFIN_BROKER_ID}${uuid()}`.slice(0, 32),
   }),
@@ -145,13 +152,18 @@ export class RustEngineExchange extends BaseExchange {
         passphrase,
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
+        recvWindow: this.options.extra?.recvWindow,
         privateWsHeaders: Boolean(transport.webSocketHeaders),
       }),
     );
-    this.host = new EngineHost(engine, transport, {
-      onFrame: this.receiveFrame,
-      onLog: this.receiveLog,
-    });
+    this.host = new EngineHost(
+      engine,
+      this.name === 'backpack' ? { ...transport, now: virtualClock.getCurrentTimeMs } : transport,
+      {
+        onFrame: this.receiveFrame,
+        onLog: this.receiveLog,
+      },
+    );
     this.host.start();
     this.updateTickerSymbols();
     // Books, candles and fills go out at the venue's book cadence, the rest
@@ -241,7 +253,8 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (this.name === 'bybit' || this.name === 'bingx') this.assertCallerClientOrderIds(orders);
+    if (this.name === 'bybit' || this.name === 'backpack' || this.name === 'bingx')
+      this.assertCallerClientOrderIds(orders);
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 
