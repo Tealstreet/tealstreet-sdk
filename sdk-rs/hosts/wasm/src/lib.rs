@@ -5,6 +5,7 @@
 //! JSON array string, or an empty string when there are none.
 #[cfg(not(any(
     feature = "venue-binance",
+    feature = "venue-bingx",
     feature = "venue-bybit",
     feature = "venue-cryptocom",
     feature = "venue-okx",
@@ -18,6 +19,8 @@ use safe_cex_engine::{
 };
 #[cfg(feature = "venue-binance")]
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+#[cfg(feature = "venue-bingx")]
+use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 #[cfg(feature = "venue-bybit")]
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 #[cfg(feature = "venue-cryptocom")]
@@ -71,6 +74,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
 #[cfg(any(
     feature = "venue-binance",
+    feature = "venue-bingx",
     feature = "venue-bybit",
     feature = "venue-cryptocom",
     feature = "venue-okx",
@@ -524,6 +528,7 @@ impl WasmEngine {
     #[wasm_bindgen(constructor)]
     #[cfg(any(
         feature = "venue-binance",
+        feature = "venue-bingx",
         feature = "venue-bybit",
         feature = "venue-cryptocom",
         feature = "venue-okx",
@@ -546,6 +551,12 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
+            }))),
+            #[cfg(feature = "venue-bingx")]
+            "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
             }))),
             #[cfg(feature = "venue-weex")]
             "weex" => Box::new(Engine::new(WeexFutures::new(WeexOptions {

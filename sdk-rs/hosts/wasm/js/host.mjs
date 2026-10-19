@@ -12,7 +12,7 @@
 //   setTimeout(fn, ms), clearTimeout(handle),
 // }
 
-const CHUNK_BYTES = 64 * 1024;
+const CHUNK_BYTES = 16 * 1024;
 const BATCH_BYTES = 1024 * 1024;
 const BATCH_MESSAGES = 256;
 const RETAINED_SCRATCH_BYTES = 16 * 1024;
@@ -131,7 +131,11 @@ export class EngineHost {
           if (this.disposed) return;
           this.drainMessages();
           if (this.disposed) return;
-          this.run(engine.httpChunk(id, chunk, transport.now()));
+          for (let at = 0; at < chunk.length; at += CHUNK_BYTES) {
+            this.drainMessages();
+            if (this.disposed) return;
+            this.run(engine.httpChunk(id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
+          }
         }
       }
     } catch (error) {
@@ -325,6 +329,28 @@ async function* chunks(stream) {
   }
 }
 
+/** Decode binary feeds in arrival order while leaving text feeds synchronous. */
+export const socketMessages = (onMessage, onError) => {
+  let pending;
+  const decode = async (data) => {
+    if (typeof data === 'string') return data;
+    const bytes = data instanceof Blob ? new Uint8Array(await data.arrayBuffer())
+      : data instanceof ArrayBuffer ? new Uint8Array(data)
+      : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    const format = bytes[0] === 0x1f && bytes[1] === 0x8b ? 'gzip'
+      : bytes[0] === 0x78 ? 'deflate' : undefined;
+    if (!format) return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format));
+    return new Response(stream).text();
+  };
+  return (data) => {
+    if (typeof data === 'string' && !pending) return onMessage(data);
+    const next = (pending ?? Promise.resolve()).then(() => decode(data)).then(onMessage);
+    pending = next;
+    next.catch(onError).finally(() => { if (pending === next) pending = undefined; });
+  };
+};
+
 /** Transport over the runtime's own WebSocket, fetch and timers. */
 export const nativeTransport = () => {
   let Socket = globalThis.WebSocket;
@@ -346,9 +372,8 @@ export const nativeTransport = () => {
     const reportClose = (code) => { if (!closed) { closed = true; onClose(code); } };
     ws.addEventListener('error', () => reportClose(1006));
     ws.addEventListener('open', () => { if (!closed) onOpen(); });
-    ws.addEventListener('message', (event) => {
-      if (typeof event.data === 'string') onMessage(event.data);
-    });
+    const receive = socketMessages((text) => { if (!closed) onMessage(text); }, () => ws.close());
+    ws.addEventListener('message', (event) => receive(event.data));
     ws.addEventListener('close', (event) => reportClose(event.code));
     return { send: (text) => ws.send(text), close: () => ws.close() };
   },

@@ -9,6 +9,7 @@ const pending = new Map<VenueFamily, Promise<WasmEngineModule>>();
 const importEngine = (family: VenueFamily) => {
   switch (family) {
     case 'binance': return import('@tealstreet/safe-cex-wasm/web/binance');
+    case 'bingx': return import('@tealstreet/safe-cex-wasm/web/bingx');
     case 'bybit': return import('@tealstreet/safe-cex-wasm/web/bybit');
     case 'cryptocom': return import('@tealstreet/safe-cex-wasm/web/cryptocom');
     case 'okx': return import('@tealstreet/safe-cex-wasm/web/okx');

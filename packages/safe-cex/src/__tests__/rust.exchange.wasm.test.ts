@@ -243,6 +243,96 @@ const bybitTransport = () => {
   return { transport, sockets, writes };
 };
 
+/** BingX swap envelopes from the documented private tape, with no live I/O. */
+const bingxTransport = () => {
+  const sockets = new Map<string, (text: string) => void>();
+  const writes: Array<{ path: string; body?: string }> = [];
+  let nextOrderId = 4242;
+  const transport: Transport = {
+    now: () => Date.now(),
+    connect: (url, { onOpen, onMessage }) => {
+      sockets.set(new URL(url).pathname, onMessage);
+      setTimeout(onOpen, 0);
+      return { send: () => {}, close: () => {} };
+    },
+    request: async ({ method, url, body }) => {
+      const path = new URL(url).pathname;
+      // Listen-key POSTs are reads; keep trading-write assertions independent of startup.
+      if (method !== 'GET' && path !== '/openApi/user/auth/userDataStream') writes.push({ path, body });
+      let data: unknown;
+      switch (path) {
+        case '/openApi/swap/v2/quote/contracts':
+          data = [
+            {
+              symbol: 'BTC-USDT',
+              asset: 'BTC',
+              currency: 'USDT',
+              status: 1,
+              quantityPrecision: 3,
+              pricePrecision: 1,
+              tradeMinLimit: '0.001',
+              maxLongLeverage: 125,
+            },
+          ];
+          break;
+        case '/openApi/swap/v2/quote/ticker':
+          data = [
+            { symbol: 'BTC-USDT', lastPrice: '90000', priceChangePercent: '1', volume: '2', quoteVolume: '180000' },
+          ];
+          break;
+        case '/openApi/swap/v2/quote/premiumIndex':
+          data = [
+            {
+              symbol: 'BTC-USDT',
+              markPrice: '90000',
+              indexPrice: '89999',
+              lastFundingRate: '0.01',
+              nextFundingTime: 1760889600000,
+            },
+          ];
+          break;
+        case '/openApi/user/auth/userDataStream':
+          return { status: 200, body: new TextEncoder().encode('{"listenKey":"documented-test-key"}') };
+        case '/openApi/swap/v1/positionSide/dual':
+          data = { dualSidePosition: 'false' };
+          break;
+        case '/openApi/swap/v3/user/balance':
+          data = [{ asset: 'USDT', balance: '1000', availableMargin: '900', usedMargin: '100', unrealizedProfit: '0' }];
+          break;
+        case '/openApi/swap/v2/user/positions':
+          data = [];
+          break;
+        case '/openApi/swap/v2/trade/openOrders':
+          data = { orders: [] };
+          break;
+        case '/openApi/swap/v2/trade/order':
+          data = {
+            order: {
+              orderId: String(nextOrderId++),
+              symbol: 'BTC-USDT',
+              side: 'BUY',
+              type: 'LIMIT',
+              origQty: '0.012',
+              executedQty: '0',
+              price: '90000',
+              status: 'NEW',
+              positionSide: 'BOTH',
+              timeInForce: 'GTC',
+              reduceOnly: false,
+            },
+          };
+          break;
+        default:
+          throw new Error(`Unexpected BingX request: ${method} ${path}`);
+      }
+      return { status: 200, body: new TextEncoder().encode(JSON.stringify({ code: 0, msg: '', data })) };
+    },
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  };
+  return { transport, sockets, writes };
+};
+
 const until = async (check: () => boolean) => {
   for (let i = 0; i < 200 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 10));
   expect(check()).toBe(true);
@@ -494,6 +584,107 @@ describe('RustEngineExchange', () => {
     await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'invalid.id' }])).rejects.toThrow(
       'clientOrderId must match',
     );
+    await expect(
+      exchange.placeOrders([
+        { ...opts, clientOrderId: 'same' },
+        { ...opts, clientOrderId: 'same' },
+      ]),
+    ).rejects.toThrow('duplicated in one batch');
+    expect(tape.writes).toEqual([]);
+  });
+
+  it('honors BingX minted and caller IDs through inherited helpers and finds the private-stream ID', async () => {
+    const tape = bingxTransport();
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    const store = new DefaultStore();
+    exchange = new RustEngineExchange('bingx', { key: 'k', secret: 's' }, store);
+    await exchange.start();
+    const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.012, price: 90000 };
+    const minted = exchange.mintClientOrderId(opts);
+    expect(minted).toMatch(/^ts[a-z0-9]{0,21}$/);
+    expect(await exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: minted! })).toEqual({
+      orderIds: ['4242'],
+      clientOrderId: minted,
+    });
+    const clientOrderId = 'caller_bingx-01';
+    expect(await exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId })).toEqual({
+      orderIds: ['4243'],
+      clientOrderId,
+    });
+    expect(tape.writes).toHaveLength(2);
+    expect(tape.writes.map(({ path }) => path)).toEqual([
+      '/openApi/swap/v2/trade/order',
+      '/openApi/swap/v2/trade/order',
+    ]);
+    expect(JSON.parse(tape.writes[0].body!).clientOrderId).toBe(minted);
+    expect(JSON.parse(tape.writes[1].body!)).toMatchObject({ clientOrderId, symbol: 'BTC-USDT', quantity: 0.012 });
+    await until(() => store.orders.some((order) => order.id === '4243'));
+    expect(store.orders.find((order) => order.id === '4243')?.clientOrderId).toBeUndefined();
+    await until(() => tape.sockets.has('/swap-market'));
+    tape.sockets.get('/swap-market')!(
+      JSON.stringify({
+        e: 'ORDER_TRADE_UPDATE',
+        E: Date.now(),
+        o: {
+          s: 'BTC-USDT',
+          i: 4243,
+          c: clientOrderId,
+          S: 'BUY',
+          o: 'LIMIT',
+          X: 'NEW',
+          q: '0.012',
+          p: '90000',
+          z: '0',
+          l: '0',
+          L: '0',
+          ap: '0',
+          f: 'GTC',
+          ps: 'BOTH',
+          R: false,
+          wt: 'CONTRACT_PRICE',
+        },
+      }),
+    );
+    await until(() => store.orders.some((order) => order.clientOrderId === clientOrderId));
+    expect(await exchange.findOrderByClientOrderId('BTCUSDT', clientOrderId)).toMatchObject({
+      found: true,
+      order: { id: '4243', clientOrderId, status: OrderStatus.Open },
+    });
+    expect(await exchange.findOrderByClientOrderId('BTCUSDT', 'missing')).toEqual({ found: false, definitive: false });
+    await expect(exchange.updateOrder({
+      order: store.orders.find((order) => order.id === '4243')!,
+      update: { price: 90001, amount: 0.02 },
+    })).rejects.toThrow('exactly one');
+    expect(tape.writes).toHaveLength(2);
+  });
+
+  it('rejects invalid BingX caller IDs, brackets and mixed batches before trading writes', async () => {
+    const tape = bingxTransport();
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    exchange = new RustEngineExchange('bingx', { key: 'k', secret: 's' }, new DefaultStore());
+    await exchange.start();
+    const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.012, price: 90000 };
+    for (const clientOrderId of ['', 'UPPER', 'a'.repeat(41)]) {
+      await expect(exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId })).rejects.toThrow(
+        '1-40 characters with no uppercase letters',
+      );
+    }
+    await expect(
+      exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: 'bracket', stopLoss: 80000 }),
+    ).rejects.toThrow('order shape');
+    expect(exchange.mintClientOrderId({ ...opts, stopLoss: 80000 })).toBeUndefined();
+    expect(exchange.mintClientOrderId({ ...opts, close: true })).toBeUndefined();
+    await expect(
+      exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: 'close', close: true }),
+    ).rejects.toThrow('order shape');
+    await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'UPPER' }])).rejects.toThrow(
+      '1-40 characters with no uppercase letters',
+    );
+    await expect(
+      exchange.placeOrders([opts, { ...opts, clientOrderId: 'bracket', takeProfit: 100000 }]),
+    ).rejects.toThrow('order shape');
     await expect(
       exchange.placeOrders([
         { ...opts, clientOrderId: 'same' },

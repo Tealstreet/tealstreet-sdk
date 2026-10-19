@@ -2,6 +2,7 @@
 const families = Object.freeze({
   binance: 'binance',
   binancepm: 'binance',
+  bingx: 'bingx',
   bybit: 'bybit',
   cryptocom: 'cryptocom',
   okx: 'okx',

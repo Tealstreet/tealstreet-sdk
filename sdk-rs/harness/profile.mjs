@@ -40,6 +40,8 @@ const tape = resolve(values.tape ?? join(dir, 'fixtures', `${family}-public.json
 const defaultBooks = {
   binance: 'BTCUSDT,ETHUSDT,SOLUSDT',
   bybit: 'BTCUSDT,ETHUSDT',
+  bingx: 'BTCUSDT,ETHUSDT',
+  weex: 'BTCUSDT,ETHUSDT',
   okx: 'BTCUSDT,ETHUSDT',
   cryptocom: 'BTCUSD-PERP,ETHUSD-PERP',
 };

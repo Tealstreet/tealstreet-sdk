@@ -133,8 +133,6 @@ jobs:
         run: yarn workspace @tealstreet/safe-cex test-wasm
       - name: The Cloudflare Workers host
         run: yarn workspace @tealstreet/safe-cex-wasm test
-      - name: Harness oracle regressions
-        run: corepack yarn -s rust:test-harness
       - name: Check each venue family wasm size budget
         run: yarn workspace @tealstreet/safe-cex-wasm check-sizes
       - name: Lint each isolated venue family
@@ -155,8 +153,14 @@ jobs:
         run: |
           yarn rust:private-tape-bybit
           yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''
-      - name: Harness protocol regressions
+      - name: Replay request and subscription matching
         run: yarn rust:test-harness
+      - name: BingX public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue bingx --tape sdk-rs/harness/fixtures/bingx-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: BingX account and trading (correctness)
+        run: |
+          yarn rust:private-tape-bingx
+          yarn rust:gate --venue bingx --tape sdk-rs/harness/tapes/bingx-private.jsonl --runs 1 --books ''
       - name: Crypto.com public data (correctness, CPU and memory)
         run: yarn rust:gate --venue cryptocom --tape sdk-rs/harness/fixtures/cryptocom-public.jsonl.gz --books BTCUSD-PERP,ETHUSD-PERP
       - name: Crypto.com account and trading (correctness)

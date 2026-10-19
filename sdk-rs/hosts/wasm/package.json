@@ -57,6 +57,14 @@
     "./node/weex": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/node/weex/safe_cex_wasm.js"
+    },
+    "./web/bingx": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/bingx/safe_cex_wasm.js"
+    },
+    "./node/bingx": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/bingx/safe_cex_wasm.js"
     }
   },
   "scripts": {

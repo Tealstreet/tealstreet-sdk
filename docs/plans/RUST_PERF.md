@@ -206,3 +206,14 @@ five isolated wasm32 clippy checks, SDK typecheck and loader lint. Package bytes
 Binance 776253, Bybit 755810, Crypto.com 624732, OKX 718732, WEEX 858358;
 WEEX budget tightened to 884736. The next landing fetch includes BingX, so final
 comparison and registration expand to six families before reporting gates.
+
+Integrated BingX landing `022ab79de5`, retaining its boxed market keys, sorted
+ticker lookup, collision-safe string index, full streamed-envelope validation,
+compressed socket support and stricter request/subscription/private classification.
+Harness has 31 passing regressions; public thresholds remain unchanged. Both
+comparison sides now require 100 ms elapsed backing-buffer quiescence, with CPU
+measurement ending before collection. Added sixth isolated family registration.
+True six-family control rebuilt in its own target: all nine workspace crates
+compiled from pinned source, 116 source/manifest/config files audited, aggregate
+2576287 bytes, SHA256 309140b910d6905f1b33e662e89f57b791fc1d5039a50d35ed9c1bd2db2f2fa9.
+Eight private gates pass before this merge; final nine-gate rerun remains due.
