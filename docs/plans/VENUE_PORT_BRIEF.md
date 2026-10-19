@@ -66,8 +66,22 @@ Toolchain: `export PATH="$HOME/.rustup/toolchains/1.99.0-aarch64-apple-darwin/bi
 - Short comments, only for non-obvious decisions; match Binance's density.
 - `corepack yarn` only, never `npx`; never `node <script>` directly (use the
   yarn scripts). No load tests.
-- Commit on your lane branch with clear messages as you reach stable points.
-  Do not push, merge, rebase or force anything; the overseer merges into
-  `feat/rust-rewrite` after reviewing your gates.
+- Commit on your lane branch with clear messages at stable points. Never
+  rebase, force-push or touch `master`.
 
-Report when done: the crate, gate numbers, TS bugs fixed, anything unfinished.
+## Process
+
+1. **Plan-execute, full auto, no human.** Plan the port in phases (public
+   data, private data, trading, queries, harness gates). Do extra detailed
+   planning only where the venue needs it. At the end of each phase run a
+   sub-agent review of that phase and fix what it finds.
+2. **Checkpoints.** The overseer sends `/compact` at stopping points; keep
+   your plan and progress in commits so nothing is lost.
+3. **When every gate passes:** push your branch, open a PR **into
+   `feat/rust-rewrite`** (never `master`), run adversarial sub-agent reviews
+   locally against it and post the findings on the PR. Address them and
+   repeat until you judge it passing or the returns are diminishing. Then
+   merge the PR into `feat/rust-rewrite` and cut a fresh branch from it for
+   any follow-up.
+
+Report when done: the PR, gate numbers, TS bugs fixed, anything unfinished.

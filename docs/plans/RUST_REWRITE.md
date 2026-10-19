@@ -264,12 +264,20 @@ are ~450 KB/s for two 1,000-level books).
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
   and the generated private tape gated on identical account state.
 
-### 8. Remaining venues
+### 8. Remaining venues — in progress
 
-In parallel, one PR each into `feat/rust-rewrite`, copying the Binance
-pattern (borrowed wire structs, state machines, frame sections, tape, gate):
-Binance inverse, spot and portfolio margin first (shared code), then Bybit,
-OKX, Bitget, Hyperliquid, and the rest of `packages/safe-cex/src/exchanges`.
+One Codex lane per venue, each in its own aimux worktree on
+`feat/rust-<venue>`, working from `docs/plans/VENUE_PORT_BRIEF.md`: plan and
+execute in phases with sub-agent reviews, then a PR into `feat/rust-rewrite`
+reviewed adversarially until it passes, then merged. The overseer delegates,
+compacts lanes at checkpoints, watches gates and keeps this list current.
+
+| Venue | State |
+| --- | --- |
+| Binance USD-M, Binance PM | done |
+| Bybit linear | ported, gates pass; PR review pending |
+| OKX (+EU, demo), Bitget, Hyperliquid, BloFin, BingX, MEXC, WEEX, Bitunix, Crypto.com, Backpack | wave 1 lanes running |
+| WOO, KuCoin, Phemex, Lighter, Paradex, GRVT, AsterDEX, Orderly family, ApeX Omni, Kraken, Coinbase, Bitrue, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse, Bybit inverse/spot/demo | wave 2, as wave 1 lanes merge |
 
 ### 9. Delete TypeScript and merge
 
