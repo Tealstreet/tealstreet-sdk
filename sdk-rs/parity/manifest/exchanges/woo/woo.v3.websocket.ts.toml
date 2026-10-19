@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/woo/woo.v3.websocket.ts"
-rust_files = [ "safe-cex-venue-woo/src/v3_ws_quotes.rs" ]
+rust_files = []
 
 [[symbol]]
 ts = "WOO_V3_WS_CHANNELS"
@@ -421,18 +421,18 @@ note = "ACCEPT: no production TypeScript caller or constructed WOO registration.
 [[symbol]]
 ts = "WooV3WsBbo"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_ws_quotes.rs::WooV3WsBbo"
-status = "ported"
-note = "Map-only declaration for symbol, four decimal strings and numeric timestamp, with shared numeric capture before private Serde buffering. Distinct native ask/bid prices and quantities plus signed-zero timestamp are asserted; no socket/decoder registration is claimed. Native record assertions precede any wire projection. Focused tests v3_request_ticker.rs and actual-source v3-request-ticker-oracle.cjs cover the symbol; this is an inert declaration/operation, not runtime registration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Closed by caller-proven removal: neither the maintained constructed WOO exchange nor its runtime import graph reaches the inert V3 ticker/quote composer. Only the removed exclusive facade consumed the Rust BBO/Trade/ticker closure. The unused implementation, private serde/validation helpers and exclusive oracle/controls were retired together. Source declarations remain inventoried; shared public stats/market helpers and live legacy socket/ticker paths remain independent. See TICKER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3WsTrade"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_ws_quotes.rs::WooV3WsTrade"
-status = "divergent"
-note = "CHOSEN: map-only declaration decoder enforces BUY/SELL side and numeric 0/1 source, retaining literal negative zero and timestamp bits. Native side/source fields use String/f64 and can be mutated outside the source literal unions, rather than introducing per-field wrapper types; this keeps ordinary DTO composition and the native numeric observation graph, but deliberately widens the constructor API. Price/quantity/symbol/side/source/RPI/timestamp are asserted natively; no socket or message decoder registration is claimed. Native record assertions precede any wire projection. Focused tests v3_request_ticker.rs and actual-source v3-request-ticker-oracle.cjs cover the symbol; this is an inert declaration/operation, not runtime registration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Closed by caller-proven removal: neither the maintained constructed WOO exchange nor its runtime import graph reaches the inert V3 ticker/quote composer. Only the removed exclusive facade consumed the Rust BBO/Trade/ticker closure. The unused implementation, private serde/validation helpers and exclusive oracle/controls were retired together. Source declarations remain inventoried; shared public stats/market helpers and live legacy socket/ticker paths remain independent. See TICKER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3WsTicker"
