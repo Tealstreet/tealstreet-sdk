@@ -93,7 +93,7 @@ pub struct FrameWriter<'a> {
     sections: u16,
     open: Option<usize>,
     strings: Vec<&'a str>,
-    string_index: HashMap<u64, u32>,
+    string_index: HashMap<u32, u32>,
 }
 
 impl<'a> FrameWriter<'a> {
@@ -126,10 +126,10 @@ impl<'a> FrameWriter<'a> {
     pub fn string(&mut self, value: &'a str) -> u32 {
         let mut hasher = DefaultHasher::new();
         value.hash(&mut hasher);
-        self.intern(value, hasher.finish())
+        self.intern(value, hasher.finish() as u32)
     }
 
-    fn intern(&mut self, value: &'a str, mut hash: u64) -> u32 {
+    fn intern(&mut self, value: &'a str, mut hash: u32) -> u32 {
         loop {
             match self.string_index.get(&hash) {
                 Some(&index) if self.strings[index as usize] == value => return index,
@@ -283,6 +283,9 @@ mod tests {
         assert_eq!(w.intern("three", 8), 2);
         assert_eq!(w.intern("two", 7), 1);
         assert_eq!(w.intern("one", 7), 0);
+        assert_eq!(w.intern("wrap", u32::MAX), 3);
+        assert_eq!(w.intern("wrap-two", u32::MAX), 4);
+        assert_eq!(w.intern("wrap-two", u32::MAX), 4);
     }
 
     #[test]

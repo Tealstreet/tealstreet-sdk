@@ -138,3 +138,19 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
 - Reduced shared index key size and frame interner metadata. Interner retains
   full-string collision checks; forced-collision test passes (engine14 tests).
   Rebuild and all four public/private venue gates underway.
+
+### Gate allocation and recovery audit
+
+- Wasm32 frame interner now uses compact u32 hashes with full string equality
+  and wraparound collision probing; engine14 tests pass. String cache allocates
+  only on first decode. HTTP streaming bounds both transport body forms to16KiB.
+- Public prices/sizes decode through typed visitors, avoiding untagged-enum
+  intermediates; books sort native levels in place. Numeric placeholder tests
+  cover strict versus optional fields. BingX78 tests (4unit,18account,20history,
+  6public,2sign,28trading) and clippy pass. Host5 and harness6 tests pass.
+- Independent final-phase review found subscription parity missed reconnects.
+  Fixed by comparing native topic/operation per connection generation; repeat
+  review is clear, including interner collisions and decoder behavior.
+- Gates rerunning with final build. Latest pre-visitor public run passed memory
+  but missed steady CPU; no all-gates claim. Root test rerun still in progress,
+  with two unrelated5s Hyro dynamic-import timeouts under shared machine load.

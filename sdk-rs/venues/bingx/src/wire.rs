@@ -3,37 +3,45 @@ use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
 
-fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Number<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-        Null(()),
-    }
-    Ok(match Number::deserialize(d)? {
-        Number::Bare(n) => n.is_finite().then_some(n),
-        Number::Text(s) => s.parse::<f64>().ok().filter(|n| n.is_finite()),
-        Number::Null(()) => None,
-    })
+struct NumberVisitor {
+    optional: bool,
 }
-
+impl NumberVisitor {
+    fn finish<E: serde::de::Error>(&self, value: Option<f64>) -> Result<Option<f64>, E> {
+        match value.filter(|n| n.is_finite()) {
+            Some(n) => Ok(Some(n)),
+            None if self.optional => Ok(None),
+            None => Err(E::custom("invalid or non-finite number")),
+        }
+    }
+}
+impl<'de> serde::de::Visitor<'de> for NumberVisitor {
+    type Value = Option<f64>;
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a finite number or numeric string")
+    }
+    fn visit_f64<E: serde::de::Error>(self, n: f64) -> Result<Self::Value, E> {
+        self.finish(Some(n))
+    }
+    fn visit_i64<E: serde::de::Error>(self, n: i64) -> Result<Self::Value, E> {
+        self.finish(Some(n as f64))
+    }
+    fn visit_u64<E: serde::de::Error>(self, n: u64) -> Result<Self::Value, E> {
+        self.finish(Some(n as f64))
+    }
+    fn visit_str<E: serde::de::Error>(self, s: &str) -> Result<Self::Value, E> {
+        self.finish(s.parse().ok())
+    }
+    fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+        self.finish(None)
+    }
+}
+fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    d.deserialize_any(NumberVisitor { optional: true })
+}
 pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Number<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-    }
-    let n = match Number::deserialize(d)? {
-        Number::Bare(n) => n,
-        Number::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
+    d.deserialize_any(NumberVisitor { optional: false })?
+        .ok_or_else(|| serde::de::Error::custom("missing number"))
 }
 
 #[derive(Deserialize)]
@@ -166,4 +174,40 @@ pub struct Message<'a> {
     pub data: Option<&'a serde_json::value::RawValue>,
     pub ping: Option<serde::de::IgnoredAny>,
     pub pong: Option<serde::de::IgnoredAny>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[derive(Deserialize)]
+    struct Numbers {
+        #[serde(deserialize_with = "number")]
+        strict: f64,
+        #[serde(deserialize_with = "optional_number")]
+        optional: Option<f64>,
+    }
+    #[test]
+    fn numeric_wire_forms_and_placeholders() {
+        for value in ["12.5", "\"12.5\"", "12", "-12"] {
+            let row: Numbers =
+                serde_json::from_str(&format!(r#"{{"strict":{value},"optional":{value}}}"#))
+                    .unwrap();
+            assert_eq!(Some(row.strict), row.optional);
+        }
+        for value in ["null", "\"-\"", "\"NaN\"", "\"inf\""] {
+            let row: Numbers =
+                serde_json::from_str(&format!(r#"{{"strict":1,"optional":{value}}}"#)).unwrap();
+            assert_eq!(row.optional, None);
+            assert!(
+                serde_json::from_str::<Numbers>(&format!(r#"{{"strict":{value},"optional":0}}"#))
+                    .is_err()
+            );
+        }
+        for value in ["true", "[]", "{}"] {
+            assert!(
+                serde_json::from_str::<Numbers>(&format!(r#"{{"strict":1,"optional":{value}}}"#))
+                    .is_err()
+            );
+        }
+    }
 }

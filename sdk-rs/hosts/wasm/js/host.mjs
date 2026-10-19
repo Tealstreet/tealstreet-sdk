@@ -12,7 +12,7 @@
 //   setTimeout(fn, ms), clearTimeout(handle),
 // }
 
-const CHUNK_BYTES = 64 * 1024;
+const CHUNK_BYTES = 16 * 1024;
 
 export class EngineHost {
   constructor(engine, transport, handlers = {}) {
@@ -76,7 +76,11 @@ export class EngineHost {
           this.run(engine.httpChunk(id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
         }
       } else {
-        for await (const chunk of body) this.run(engine.httpChunk(id, chunk, transport.now()));
+        for await (const chunk of body) {
+          for (let at = 0; at < chunk.length; at += CHUNK_BYTES) {
+            this.run(engine.httpChunk(id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
+          }
+        }
       }
     } catch (error) {
       this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));

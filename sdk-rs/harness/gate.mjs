@@ -60,6 +60,7 @@ for (const impl of ['ts', 'rust']) {
   const unserved = results[impl][0].unserved;
   if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
 }
+if (JSON.stringify(ts.subscriptions) !== JSON.stringify(rust.subscriptions)) differences.push(`websocket subscriptions: ts=${JSON.stringify(ts.subscriptions)} rust=${JSON.stringify(rust.subscriptions)}`);
 const isPrivate = Boolean(ts.account);
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 // BingX additionally fixes write/read defects covered by native contract tests:

@@ -269,16 +269,20 @@ impl Bingx {
                 return;
             };
             let symbol = m.symbol.clone();
-            let Ok(Depth { bids, asks }) = serde_json::from_str::<Depth>(data.get()) else {
+            let Ok(Depth { mut bids, mut asks }) = serde_json::from_str::<Depth>(data.get()) else {
                 return;
             };
             if let Some(state) = self.books.get_mut(&symbol) {
-                let mut bids: Vec<_> = bids.into_iter().map(|l| (l.price, l.volume)).collect();
-                let mut asks: Vec<_> = asks.into_iter().map(|l| (l.price, l.volume)).collect();
-                bids.sort_unstable_by(|a, b| b.0.total_cmp(&a.0));
-                asks.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-                state.book.load_sorted(BookSide::Bids, bids);
-                state.book.load_sorted(BookSide::Asks, asks);
+                bids.sort_unstable_by(|a, b| b.price.total_cmp(&a.price));
+                asks.sort_unstable_by(|a, b| a.price.total_cmp(&b.price));
+                state.book.load_sorted(
+                    BookSide::Bids,
+                    bids.into_iter().map(|l| (l.price, l.volume)),
+                );
+                state.book.load_sorted(
+                    BookSide::Asks,
+                    asks.into_iter().map(|l| (l.price, l.volume)),
+                );
                 state.ready = true;
                 cx.book_changed(&symbol);
             }
@@ -388,7 +392,7 @@ impl Venue for Bingx {
             cx,
             paths::MARKETS,
             Pending::Markets {
-                rows: Vec::new(),
+                rows: Vec::with_capacity(2048),
                 valid: true,
             },
         );

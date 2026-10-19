@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { requestKey, takeResponse } from './requests.mjs';
+import { requestKey, takeResponse, subscriptionKeys } from './requests.mjs';
 const url = 'https://open-api.bingx.com/openApi/swap/v2/trade/order';
 
 test('write matching preserves numeric/body types and exact caller IDs', () => {
@@ -42,4 +42,15 @@ test('nested map order is ignored and unsafe numeric order IDs remain exact', ()
   assert.equal(requestKey('POST',url,{stop:{price:1,quantity:2}}),requestKey('POST',url,{stop:{quantity:2,price:1}}));
   assert.notEqual(requestKey('POST',url,'{"cancelOrderId":8389765519993909000}'),requestKey('POST',url,'{"cancelOrderId":8389765519993909001}'));
   assert.notEqual(requestKey('POST',url,'{"cancelOrderId":8389765519993909000}'),requestKey('POST',url,'{"cancelOrderId":"8389765519993909000"}'));
+});
+
+test('subscription matching ignores request IDs and batching, retaining native topics', () => {
+  const socket='wss://ws-market-swap.qq-os.com/ws';
+  assert.deepEqual(subscriptionKeys(socket,'{"id":"random","reqType":"sub","dataType":"market.contracts"}'),['wss://ws-market-swap.qq-os.com/ws subscribe market.contracts']);
+  assert.deepEqual(subscriptionKeys(socket,'Ping'),[]);
+  assert.deepEqual(subscriptionKeys(socket,'{"pong":1}'),[]);
+  assert.deepEqual(subscriptionKeys('wss://fstream.binance.com/public/ws','{"method":"SUBSCRIBE","params":["btcusdt@depth@100ms","ethusdt@depth@100ms"],"id":1}'),[
+    'wss://fstream.binance.com/public/ws subscribe btcusdt@depth@100ms',
+    'wss://fstream.binance.com/public/ws subscribe ethusdt@depth@100ms',
+  ]);
 });

@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
-import { requestKey as keyOf, takeResponse } from './requests.mjs';
+import { requestKey as keyOf, takeResponse, subscriptionKeys } from './requests.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -53,6 +53,12 @@ class Tape {
     this.waiters = [];
     this.unserved = 0;
     this.time = 0;
+    this.subscriptions = new Set();
+    this.generations = new Map();
+  }
+
+  send(socket,text) {
+    for (const key of subscriptionKeys(socket.url,text)) this.subscriptions.add(`${socket.generation} ${key}`);
   }
 
   respond(method, url, requestBody) {
@@ -66,7 +72,9 @@ class Tape {
   }
 
   connect(url, onOpen, onMessage, onClose) {
-    const socket = { url, onMessage, onClose, closed: false };
+    const generation = (this.generations.get(url) ?? 0) + 1;
+    this.generations.set(url, generation);
+    const socket = { url, generation, onMessage, onClose, closed: false };
     setImmediate(() => {
       if (socket.closed) return;
       this.open.set(url, socket);
@@ -195,7 +203,7 @@ async function runRust() {
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage, onClose }) => {
       const socket = tape.connect(url, onOpen, onMessage, onClose);
-      return { send: () => {}, close: () => (socket.closed = true) };
+      return { send: (text) => tape.send(socket,text), close: () => (socket.closed = true) };
     },
     request: async ({ method, url, body: requestBody }) => {
       const { status, body } = tape.respond(method, url, requestBody);
@@ -295,7 +303,7 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, unserved: tape.unserved, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return { frames, metrics, unserved: tape.unserved, subscriptions: [...tape.subscriptions].sort(), store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
 }
 
 const commandArgs = ({ t, type, ...args }) => args;
@@ -365,7 +373,7 @@ async function runTs() {
     removeEventListener(type, fn) {
       this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
     }
-    send() {}
+    send(text) { tape.send(this.socket,text); }
     close() {
       this.readyState = 3;
       this.socket.closed = true;
@@ -458,7 +466,7 @@ async function runTs() {
       }
     : undefined;
   exchange.dispose();
-  return { frames, metrics, unserved: tape.unserved, store: snapshot, books: bookCopies, account, commands: tape.results };
+  return { frames, metrics, unserved: tape.unserved, subscriptions: [...tape.subscriptions].sort(), store: snapshot, books: bookCopies, account, commands: tape.results };
 }
 
 /** The fields both implementations carry, in one shape. */
@@ -510,6 +518,7 @@ writeFileSync(
     impl: values.impl,
     frames: result.frames,
     unserved: result.unserved,
+    subscriptions: result.subscriptions,
     metrics: result.metrics,
     markets: result.store.markets.map(marketFields),
     tickers: result.store.tickers.map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, t[f]])])),

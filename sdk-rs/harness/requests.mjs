@@ -33,3 +33,15 @@ export const takeResponse = (queue, method, url, time = 0) => {
   }
   return queue.length > 1 || !repeat ? queue.shift() : queue[0];
 };
+
+/** Subscription IDs and batching vary; native channels and operations must match. */
+export const subscriptionKeys = (url, text) => {
+  let message;
+  try { message = JSON.parse(text); } catch { return []; }
+  const method = String(message.method ?? message.reqType ?? '').toUpperCase();
+  if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return [];
+  const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
+  const parsed = new URL(url);
+  const topics = message.params ?? (message.dataType ? [message.dataType] : []);
+  return topics.map((topic) => `${parsed.origin}${parsed.pathname} ${op} ${topic}`);
+};
