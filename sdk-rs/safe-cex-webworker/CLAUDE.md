@@ -731,3 +731,14 @@ continue closing. Session ingress/config/replay/perf/opaque dispatch use native
 Js directly. Decode shared models only at their actual consumers, and keep
 buffered message identity. Separate ordinary output/report DTO findings remain
 tracked in the worker FIX-audit ledger.
+
+## Native perf fixtures
+
+WorkerModule owns the real record/clone/cap/dump/metronome/replay service.
+The worker_context proxy records with the supplied service before forwarding
+outbound posts. Direct config/dump/start-status posts retain their source bypass.
+Replay init does not construct a venue. Dump headers are fresh; frames and replay
+messages retain their native referents. Module disposal cancels all pending timers
+and closes the service even when callers retain a session or service handle.
+The actual listener round trip and Node structuredClone graph probes cover the
+native implementation; perfFixture.ts remains the maintained behavioral source.

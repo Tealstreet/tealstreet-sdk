@@ -15,6 +15,7 @@ pub mod exchange_worker_start;
 pub mod handler;
 pub mod order_book_post;
 pub mod payload;
+pub mod perf_fixture;
 pub mod positions;
 pub mod postprocessor_context;
 pub mod postprocessor_registry;

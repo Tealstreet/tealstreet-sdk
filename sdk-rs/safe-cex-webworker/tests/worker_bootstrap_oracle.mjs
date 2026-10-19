@@ -24,14 +24,31 @@ function fixture(hosted=false,actualPerf=false){let now=0,next=0,events=[],posts
  const options={key:'',secret:'',hostedMode:hosted},settings={placeOrder:{tpTriggerType:'mark_price',slTriggerType:'last_price'}},metadata={supportedTPSLTriggerTypes:[],privateProxyIps:[]};worker=new c.WorkerClass(ctx,'a','bybit',options,settings,metadata,'s','i');
  return {c,ctx,worker,state,events,posts,stores,allPosts,timers,init:{op:'init',data:{accountName:'a',exchangeName:'bybit',options:{key:'',secret:''},settings,metadata,sessionKey:'s',store:{latency:7}}},async flush(){for(let iteration=0;iteration<32;iteration++)await Promise.resolve();},release(){startRelease();},releaseClock(){clockRelease();},releaseLoader(){loaderRelease();},fire(id,time){now=time;const timer=timers.get(id);assert.ok(timer);timers.delete(id);timer.fn();},setWorker(v){worker=v;}};
 }
+if(process.argv.includes('--perf-rules')) {
+ const f=fixture(false,true),p=f.c.perfService;f.setWorker(undefined);f.c.sessionStart(f.ctx,false);
+ const configure=async cfg=>f.ctx.listener({data:{op:'__workerConfig',data:{perfFixture:cfg}}});
+ await configure({mode:'record'});let reads=0;
+ p.recordOutboundFrame({get bad(){reads++;throw Error('uncloneable getter')}});
+ p.recordOutboundFrame({get n(){reads++;return 17}});
+ const first=p.takePerfFixture();assert.equal(first.frames.length,1);assert.equal(first.frames[0].msg.n,17);
+ const alias=first.frames===p.takePerfFixture().frames;first.frames.length=19999;first.frames[19998]={atMs:0,msg:null};p.recordOutboundFrame(null);assert.equal(first.frames.length,20000);
+ p.recordOutboundFrame({get capped(){throw Error('must not read')}});assert.equal(p.takePerfFixture().frames.length,20000);
+ await configure({mode:'off'});await configure({mode:'record'});p.recordOutboundFrame({n:1});const reset=p.takePerfFixture();
+ await configure({mode:'replay',fixture:{frames:[{atMs:900,msg:{id:1}},{atMs:-900,msg:{id:2}}]},intervalMs:0,loop:true});
+ await f.ctx.listener({data:{op:'init',data:{}}});let ids=[],delays=[];
+ for(let i=0;i<3;i++){const [id,timer]=f.timers.entries().next().value;delays.push(timer.delay);f.fire(id,100+i);ids.push(f.allPosts.at(-1).id);}
+ await configure({mode:'off'});assert.equal(f.timers.size,0);
+ console.log(JSON.stringify({reads,alias,cap:20000,reset:reset.frames.length,ids,delays}));process.exit(0);
+}
 if(process.argv.includes('--perf-service')) {
  const recording=fixture(false,true);recording.setWorker(undefined);recording.c.sessionStart(recording.ctx,false);
  await recording.ctx.listener({data:{op:'__workerConfig',data:{perfFixture:{mode:'record'}}}});
  await recording.ctx.listener({data:recording.init});
  const worker=recording.c.workerTable.a;
- const input={n:17};worker.exchange.emit('fill',input);input.n=42;
+ const shared={v:NaN},input={n:17,shared,again:shared,own:undefined,text:'\ud800X\udc00',nums:[Infinity,-Infinity,-0]};input.self=input;worker.exchange.emit('fill',input);input.n=42;
  await recording.ctx.listener({data:{op:'__perfFixtureDump'}});
  const captured=recording.posts.find(p=>p.op==='__perfFixtureDump').data;
+ const nativeFill=captured.frames.find(f=>f.msg.op==='fill').msg.data;assert.equal(nativeFill.self,nativeFill);assert.equal(nativeFill.shared,nativeFill.again);assert.ok(Number.isNaN(nativeFill.shared.v));assert.ok(Object.hasOwn(nativeFill,'own'));assert.equal(nativeFill.text,'\ud800X\udc00');assert.ok(Object.is(nativeFill.nums[2],-0));
  assert.ok(captured.frames.length>0);assert.equal(captured.frames.filter(f=>f.msg.op==='fill').length,1);assert.equal(captured.frames.find(f=>f.msg.op==='fill').msg.data.n,17);
  const replay=fixture(false,true);replay.setWorker(undefined);replay.c.sessionStart(replay.ctx,false);
  await replay.ctx.listener({data:{op:'__workerConfig',data:{perfFixture:{mode:'replay',fixture:captured,intervalMs:7,loop:false}}}});
@@ -45,20 +62,20 @@ if(process.argv.includes('--perf-service')) {
  process.stdout.write(JSON.stringify({frames:captured.frames.length,ops:captured.frames.map(f=>f.msg.op),fill:captured.frames.find(f=>f.msg.op==='fill').msg.data.n,delays,replayed:replay.allPosts.slice(base).map(m=>m.op),recordedAtMs:captured.recordedAtMs,durationMs:captured.durationMs}));process.exit(0);
 }
 if(process.argv.includes('--config-carriers')) {
- const f=fixture();f.setWorker(undefined);f.c.sessionStart(f.ctx,false);
+ const f=fixture(false,true);f.setWorker(undefined);f.c.sessionStart(f.ctx,false);
  const tokens=['-0','-0.0','0','1e400','-1e400','1e-400','-1e-400','1.25','1e3','-1e-4000'];
  const bits=[],bytes=new DataView(new ArrayBuffer(8));let configs=0,dumps=0,observed;f.c.registerConfig(cfg=>{observed=cfg;});
  for(const token of tokens){
   const value=JSON.parse(token),frame={atMs:value,msg:{value,own:undefined,text:'\ud800X\udc00'}},record={version:2,recordedAtMs:value,durationMs:value,frames:[frame]},config={mode:'external-mode',intervalMs:value,fixture:record,loop:null};
   const knobs={tickIntervalMultipliers:{bybit:value},perfFixture:config};observed=undefined;
   await f.ctx.listener({data:{op:'__workerConfig',data:knobs}});
-  assert.equal(observed,knobs);assert.equal(f.state.tickArg,knobs.tickIntervalMultipliers);assert.equal(f.state.perfArg,config);configs++;
-  f.state.fixtureDump=record;await f.ctx.listener({data:{op:'__perfFixtureDump'}});
-  assert.equal(f.posts.at(-1).data,record);assert.equal(f.posts.at(-1).data.frames[0],frame);assert.ok(Object.hasOwn(frame.msg,'own'));dumps++;
+  assert.equal(observed,knobs);assert.equal(f.state.tickArg,knobs.tickIntervalMultipliers);assert.equal(observed.perfFixture,config);configs++;
+  const frames=f.c.perfService.takePerfFixture().frames;frames.length=0;frames.push(frame);await f.ctx.listener({data:{op:'__perfFixtureDump'}});
+  assert.equal(f.posts.at(-1).data.frames,frames);assert.equal(f.posts.at(-1).data.frames[0],frame);assert.ok(Object.hasOwn(frame.msg,'own'));dumps++;
   bytes.setFloat64(0,value);bits.push(bytes.getBigUint64(0).toString(16).padStart(16,'0'));
  }
  for(const value of [null,true,'untyped',[],{mode:'off',fixture:null,intervalMs:null,loop:null}]){
-  await f.ctx.listener({data:{op:'__workerConfig',data:{perfFixture:value}}});assert.equal(f.state.perfArg,value);configs++;
+  await f.ctx.listener({data:{op:'__workerConfig',data:{perfFixture:value}}});assert.equal(observed.perfFixture,value);configs++;
  }
  process.stdout.write(JSON.stringify({configs,dumps,tokens,bits}));process.exit(0);
 }
@@ -80,16 +97,16 @@ if(process.argv.includes('--session-native')) {
  assert.equal(dispatch.state.handled.length,9);for(const item of dispatch.state.handled)assert.equal(item,message);
  const buffered=fixture();const bufferedMessage={op:'external-op',data:{value:Infinity,own:undefined}};buffered.worker.handlePayload(bufferedMessage);bufferedMessage.data.value=-Infinity;await buffered.worker.start();
  assert.equal(buffered.state.handled.length,9);for(const item of buffered.state.handled){assert.equal(item,bufferedMessage);assert.equal(item.data.value,-Infinity);}
- const replay=fixture();replay.setWorker(undefined);replay.state.replay=true;replay.c.sessionStart(replay.ctx,false);await replay.ctx.listener({data:{op:'init',data:{}}});
+ const replay=fixture(false,true);replay.setWorker(undefined);replay.c.perfService.configurePerfFixture({mode:'replay'});replay.c.sessionStart(replay.ctx,false);await replay.ctx.listener({data:{op:'init',data:{}}});
  assert.equal(replay.posts[0].op,'start-status');assert.equal(Object.keys(replay.c.workerTable).length,0);
- const configured=fixture();configured.setWorker(undefined);configured.c.sessionStart(configured.ctx,false);
+ const configured=fixture(false,true);configured.setWorker(undefined);configured.c.sessionStart(configured.ctx,false);
  const tick={bybit:Infinity},replacement={mode:'off',present:undefined},cause={marker:NaN};
  const knobs={tickIntervalMultipliers:tick,wsDiagnosticsEnabled:1,perfFixture:null};
  configured.c.registerConfig(value=>{assert.equal(value,knobs);value.perfFixture=replacement;configured.events.push('config:first');configured.c.registerConfig(()=>configured.events.push('config:second'));throw cause;});
  await configured.ctx.listener({data:{op:'__workerConfig',data:knobs}});
- assert.equal(configured.state.tickArg,tick);assert.equal(configured.state.perfArg,replacement);assert.equal(configured.state.consoleArgs[1],cause);
- const dump=fixture();dump.setWorker(undefined);dump.c.sessionStart(dump.ctx,false);dump.state.fixtureDump={version:1,frames:[{atMs:-0,msg:{nan:NaN,own:undefined}}]};
- await dump.ctx.listener({data:{op:'__perfFixtureDump'}});assert.equal(dump.posts[0].data,dump.state.fixtureDump);assert.ok(Object.is(dump.posts[0].data.frames[0].atMs,-0));assert.ok(Number.isNaN(dump.posts[0].data.frames[0].msg.nan));assert.ok(Object.hasOwn(dump.posts[0].data.frames[0].msg,'own'));
+ assert.equal(configured.state.tickArg,tick);assert.equal(configured.c.perfService.isRecordingPerfFixture(),false);assert.equal(configured.c.perfService.isReplayingPerfFixture(),false);assert.equal(configured.state.consoleArgs[1],cause);
+ const dump=fixture(false,true);dump.setWorker(undefined);dump.c.sessionStart(dump.ctx,false);const dumpFrames=dump.c.perfService.takePerfFixture().frames;dumpFrames.push({atMs:-0,msg:{nan:NaN,own:undefined}});
+ await dump.ctx.listener({data:{op:'__perfFixtureDump'}});assert.equal(dump.posts[0].data.frames,dumpFrames);assert.ok(Object.is(dump.posts[0].data.frames[0].atMs,-0));assert.ok(Number.isNaN(dump.posts[0].data.frames[0].msg.nan));assert.ok(Object.hasOwn(dump.posts[0].data.frames[0].msg,'own'));
  const normal=fixture();await normal.worker.start();normal.events.length=0;normal.state.failHandlerDispose=true;
  assert.throws(()=>normal.worker.dispose(),/handler dispose failed/);
  const normalDisposeThrow={disposed:normal.events.filter(value=>value.startsWith('dispose:')),handlers:normal.worker._handlers.length,processors:normal.worker._postprocessors.length,dependent:normal.worker._exchangeDependentPostprocessors.length};
@@ -129,5 +146,5 @@ const hosted=fixture(true);await hosted.worker.start();const hostedCtorEvents=ho
 const session=fixture();session.setWorker(undefined);session.state.expectedSeed=7;session.c.sessionStart(session.ctx,false);await session.ctx.listener({data:{op:'__worker_ping__'}});assert.equal(session.posts[0].op,'__worker_pong__');session.init.instanceId='i';await session.ctx.listener({data:session.init});const sessionWorker=session.c.workerTable.a;assert.equal(sessionWorker.store.latency,7);const seededLatency=sessionWorker.store.latency;let before=session.events.length;await session.ctx.listener({data:{op:'exec',instanceId:'stale'}});await session.ctx.listener({data:{op:'exec',instanceId:'stale'}});const mismatchWarnings=session.events.slice(before).filter(e=>e==='console:warn').length;assert.equal(mismatchWarnings,1);await session.ctx.listener({data:{op:'__worker_ping__',instanceId:'stale'}});assert.equal(session.posts.at(-1).op,'__worker_pong__');session.state.disposeCheck=()=>assert.equal(session.c.workerTable.a,undefined,'SESSION source map absent inside venue disposal');await session.ctx.listener({data:{op:'dispose'}});assert.equal(session.c.workerTable.a,undefined);assert.equal(sessionWorker.exchange.isDisposed,true);
 const anonymous=fixture();anonymous.setWorker(undefined);anonymous.state.expectedSeed=7;anonymous.c.sessionStart(anonymous.ctx,false);anonymous.init.data.accountName='';await anonymous.ctx.listener({data:anonymous.init});assert.ok(anonymous.c.anonTable.bybit);assert.equal(Object.keys(anonymous.c.workerTable).length,0);anonymous.state.disposeCheck=()=>assert.equal(anonymous.c.anonTable.bybit,undefined);await anonymous.ctx.listener({data:{op:'dispose'}});assert.equal(Object.keys(anonymous.c.anonTable).length,0);
 const shared=fixture();shared.setWorker(undefined);shared.c.sessionStart(shared.ctx,true);await shared.ctx.listener({data:shared.init});const reused=shared.c.workerTable.a;await shared.ctx.listener({data:shared.init});assert.equal(shared.c.workerTable.a,reused);assert.equal(shared.state.completed,1);assert.equal(shared.c.portTable['account:a'].length,1);const sharedStarts=shared.state.completed;
-const replay=fixture();replay.setWorker(undefined);replay.state.replay=true;replay.c.sessionStart(replay.ctx,false);await replay.ctx.listener({data:replay.init});assert.equal(Object.keys(replay.c.workerTable).length,0);assert.deepEqual(replay.events,['listen','post:start-status','replay']);
+const replay=fixture(false,true);replay.setWorker(undefined);replay.c.perfService.configurePerfFixture({mode:'replay'});replay.c.sessionStart(replay.ctx,false);await replay.ctx.listener({data:replay.init});assert.equal(Object.keys(replay.c.workerTable).length,0);assert.deepEqual(replay.events,['listen','post:start-status']);
 process.stdout.write(JSON.stringify({successEvents,timeoutPhase,unknownMessage,routingEvents,hostedCtorEvents,seededLatency,mismatchWarnings,sharedStarts,replayEvents:replay.events}));
