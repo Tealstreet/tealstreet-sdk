@@ -88,7 +88,11 @@ fn root_fill_table_native_values_keys_and_prototype_kind() {
     }
     for name in source["absent"].as_array().unwrap() {
         let name = name.as_str().unwrap();
-        assert_eq!(fill_event_units(name), TableHit::Missing, "ROOT miss {name}");
+        assert_eq!(
+            fill_event_units(name),
+            TableHit::Missing,
+            "ROOT miss {name}"
+        );
     }
     for venue in venues {
         let name = venue["name"].as_str().unwrap();
