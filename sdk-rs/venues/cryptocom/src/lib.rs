@@ -1,5 +1,6 @@
 //! Crypto.com Exchange v1 perpetual derivatives on the sans-I/O engine.
 mod account;
+mod history;
 pub mod sign;
 mod trading;
 mod wire;
@@ -24,6 +25,7 @@ pub struct Options {
 pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
+    History(history::Request),
     Markets {
         rows: Vec<Market>,
         indexes: HashMap<String, String>,
@@ -67,6 +69,7 @@ pub struct Cryptocom {
     credentials: Option<sign::Credentials>,
     account: account::Account,
     trading: trading::Trading,
+    history: history::History,
 }
 
 pub(crate) fn interval(value: &str) -> Result<&str, String> {
@@ -115,6 +118,7 @@ impl Cryptocom {
             credentials,
             account: Default::default(),
             trading: Default::default(),
+            history: Default::default(),
             rest: if options.testnet {
                 "https://uat-api.3ona.co/exchange/v1"
             } else {
@@ -387,6 +391,7 @@ impl Venue for Cryptocom {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::History(request) => self.history_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets {
@@ -450,12 +455,14 @@ impl Venue for Cryptocom {
         if let Some(error) = error {
             match pending {
                 Pending::Account(request) => self.account_failed(cx, request, &error, false),
+                Pending::History(request) => self.history_failed(cx, request, &error, false),
                 pending => self.on_request_failed(cx, pending, &error),
             }
             return;
         }
         match pending {
             Pending::Trade(_) => unreachable!(),
+            Pending::History(request) => self.history_response(cx, request),
             Pending::Account(request) => self.account_response(cx, request),
             Pending::Markets {
                 rows,
@@ -510,12 +517,17 @@ impl Venue for Cryptocom {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
+            Pending::History(request) => self.history_failed(cx, request, error, true),
             Pending::Account(request) => self.account_failed(cx, request, error, true),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             _ => cx.log(LogLevel::Error, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(request) = self.history.waiting.remove(&timer) {
+            self.history_request(cx, request);
+            return;
+        }
         if self.trading.timer == Some(timer) {
             self.trading.timer = None;
             self.drive_trading(cx);
@@ -629,6 +641,7 @@ impl Venue for Cryptocom {
                 }
                 Err(error) => cx.done(command, Err(error)),
             },
+            Command::Query { command, query } => self.query(cx, command, query),
             command => self.trade_command(cx, command),
         }
     }

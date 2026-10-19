@@ -90,3 +90,18 @@ success, post-only wire shape, missing-id cancel abortion and Unicode length
 mismatch; fixes and regressions added. Bans/clippy PASS; 25 venue tests PASS.
 
 Next: history queries, exact nanosecond pagination, then wasm/harness gates.
+
+### Queries phase
+
+Added streamed fills/order history/transaction ledger/public trade reads in
+Binance JSON shapes. Private paging uses exact u64 nanosecond boundaries,
+overlaps and deduplicates boundary rows, walks short pages, and rolls back
+partial pages before retrying. Ranged income walks the whole range without a
+100-row total cap. Missing exact cursors fail closed when another page is
+needed. Historical limit prices remain separate from trigger prices; absent
+requested/average prices are omitted. SESSION_SETTLE uses the documented
+realized_pnl field (official institutional get-transactions example).
+
+Sub-agent found the income total cap, dead cursor-precision guard, trigger vs
+limit history price and settlement-PnL mapping. Fixed all; regressions added.
+Bans/clippy PASS; 33 venue tests PASS. Next: registration, tapes, cleanup, gates.
