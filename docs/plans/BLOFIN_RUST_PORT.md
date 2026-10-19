@@ -411,3 +411,35 @@ and three-run public medians:
   review pass. Preserve the corrected exact stable memory baseline.
 - Landing budget is now2.25MiB (2,359,296bytes); this lane does not raise it.
   Six-venue build, root checks and final exact-artifact replays are running.
+
+### Final six-venue local gate proof
+
+Every brief gate and all shared-venue regressions PASS on the exact release
+artifact from `3aa26dc83a`, using Node22.23.3 and three public medians:
+
+| Public fixture | Frames | TS/Rust CPU ms | TS/Rust steady ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| BloFin | 2,764 | 113.410 /73.762 | 77.183 /42.699 | 2.716136 /1.496640 |
+| Binance | 871 | 166.376 /79.315 | 89.733 /27.468 | 4.097984 /2.235792 |
+| Bybit | 8,742 | 186.155 /142.025 | 116.815 /71.096 | 6.044384 /2.505752 |
+| Crypto.com | 2,177 | 74.899 /70.281 | 42.587 /28.184 | 1.680472 /1.184744 |
+| OKX | 8,902 | 561.891 /497.629 | 421.979 /366.506 | 3.947024 /2.427024 |
+| WEEX | 2,028 | 116.294 /75.956 | 56.596 /32.909 | 4.934416 /2.421168 |
+
+- All15 replays PASS: six public fixtures and nine private variants. Public
+  Store/book output matches exactly; private request/auth/subscription/account/
+  query/execution checks pass with no unmatched or unused writes. Private frame
+  counts: BloFin29, Binance14, Bybit18, Crypto.com21, WEEX20, and29 each for
+  OKX/OKX EU/demo/EU-demo. BloFin deltas retain prices100/130/170 exactly;
+  duplicates, regressions and terminal replays emit no additional executions.
+- Release wasm2,297,675bytes against inherited2,359,296-byte budget. Engine,
+  BloFin, OKX and serde_json retain O3; host/Binance/Bybit/Crypto.com size profiles
+  are measured by their passing public CPU/memory gates. No threshold changes.
+- Native348 tests (engine26/BloFin67/Binance29/Bybit43/Crypto.com42/OKX65/WEEX76),
+  SDK wasm18, JS host9, harness16 pass. Native/wasm clippy, fmt and bans pass;
+  root typecheck44 and lint28 tasks pass. Earlier full JS6490 and focused
+  BloFin37 passed; latest PR CI checks the complete integrated repository.
+- Final three independent reviews report no remaining concrete blockers in
+  streaming parser, semantic replay/memory accounting, or SDK/header/trading
+  boundaries. Detailed findings/fixes are posted to PR1300. Await green final
+  CI, then merge into feat/rust-rewrite and create a fresh follow-up branch.
