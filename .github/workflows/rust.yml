@@ -160,6 +160,12 @@ jobs:
           yarn rust:private-tape-bybit
           yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''
 
+      - name: Bitget public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue bitget --tape sdk-rs/harness/fixtures/bitget-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: Bitget account and trading (correctness)
+        run: |
+          yarn rust:private-tape-bitget
+          yarn rust:gate --venue bitget --tape sdk-rs/harness/tapes/bitget-private.jsonl --runs 1 --books ''
       - name: Backpack public data (correctness, CPU and memory)
         run: corepack yarn -s rust:gate --venue backpack --tape sdk-rs/harness/fixtures/backpack-public.jsonl.gz --books SOL_USDC_PERP,BTC_USDC_PERP
       - name: Backpack private account and trading

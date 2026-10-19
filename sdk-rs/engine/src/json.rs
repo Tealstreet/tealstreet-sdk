@@ -109,47 +109,13 @@ pub enum ArrayAt {
     EnvelopeField(&'static str),
     /// The array sits under these nested object fields (`result.list`).
     Path(&'static [&'static str]),
+    /// Stream the first matching path, retaining metadata from any native
+    /// response shape. An empty path selects a root array.
+    Envelope(&'static [&'static [&'static str]]),
     /// Either `field: []` or `field: { nested: [] }`.
     EnvelopeFieldOrNested(&'static str, &'static str),
     /// A direct array or one of several accepted nested array names.
     EnvelopeFieldOrNestedAny(&'static str, &'static [&'static str]),
-}
-
-impl ArrayAt {
-    fn matches_segment(self, index: usize, key: &[u8]) -> bool {
-        match self {
-            Self::Root => false,
-            Self::Field(name) | Self::EnvelopeField(name) => index == 0 && name.as_bytes() == key,
-            Self::Path(path) => path.get(index).is_some_and(|name| name.as_bytes() == key),
-            Self::EnvelopeFieldOrNested(field, nested) => match index {
-                0 => field.as_bytes() == key,
-                1 => nested.as_bytes() == key,
-                _ => false,
-            },
-            Self::EnvelopeFieldOrNestedAny(field, nested) => match index {
-                0 => field.as_bytes() == key,
-                1 => nested.iter().any(|name| name.as_bytes() == key),
-                _ => false,
-            },
-        }
-    }
-
-    fn can_end_at(self, index: usize) -> bool {
-        match self {
-            Self::Root => false,
-            Self::Field(_) | Self::EnvelopeField(_) => index == 0,
-            Self::Path(path) => index + 1 == path.len(),
-            Self::EnvelopeFieldOrNested(_, _) | Self::EnvelopeFieldOrNestedAny(_, _) => index <= 1,
-        }
-    }
-
-    fn can_descend_at(self, index: usize) -> bool {
-        match self {
-            Self::Path(path) => index + 1 < path.len(),
-            Self::EnvelopeFieldOrNested(_, _) | Self::EnvelopeFieldOrNestedAny(_, _) => index == 0,
-            _ => false,
-        }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -172,12 +138,11 @@ pub struct ArraySplitter {
     phase: Phase,
     depth: u32,
     array_depth: u32,
-    /// Path segments matched so far; the next is sought at depth `matched + 1`.
-    matched: u32,
     in_string: bool,
     escaped: bool,
     /// The most recent string at the seeking depth.
     key: Vec<u8>,
+    keys: Vec<Vec<u8>>,
     capturing_key: bool,
     /// The wanted key and its colon were just seen.
     armed: bool,
@@ -197,10 +162,10 @@ impl ArraySplitter {
             phase: Phase::Seeking,
             depth: 0,
             array_depth: 0,
-            matched: 0,
             in_string: false,
             escaped: false,
             key: Vec::new(),
+            keys: Vec::new(),
             capturing_key: false,
             armed: false,
             item: Vec::new(),
@@ -212,10 +177,16 @@ impl ArraySplitter {
 
     /// Whether the array was found and closed.
     pub fn finished(&self) -> bool {
-        self.phase == Phase::Done
-            && !self.invalid
-            && std::str::from_utf8(&self.envelope).is_ok()
-            && serde_json::from_slice::<IgnoredAny>(&self.envelope).is_ok()
+        self.phase == Phase::Done && self.validated_envelope().is_some()
+    }
+
+    pub(crate) fn validated_envelope(&self) -> Option<&str> {
+        if self.invalid {
+            return None;
+        }
+        let body = std::str::from_utf8(&self.envelope).ok()?;
+        serde_json::from_str::<IgnoredAny>(body).ok()?;
+        Some(body)
     }
 
     /// Response metadata with streamed rows replaced by null.
@@ -268,7 +239,6 @@ impl ArraySplitter {
             if self.phase == Phase::Done {
                 continue;
             }
-            let seek_depth = self.matched + 1;
             if self.in_string {
                 if self.phase == Phase::InArray {
                     self.item.push(byte);
@@ -284,6 +254,10 @@ impl ArraySplitter {
                     if self.capturing_key {
                         self.capturing_key = false;
                         self.key.pop();
+                        if let Some(key) = self.keys.get_mut(self.depth.saturating_sub(1) as usize)
+                        {
+                            key.clone_from(&self.key);
+                        }
                     }
                 }
                 continue;
@@ -292,41 +266,61 @@ impl ArraySplitter {
             match byte {
                 b'"' => {
                     self.in_string = true;
-                    if self.phase == Phase::Seeking && self.depth == seek_depth {
+                    if self.phase == Phase::Seeking && self.depth > 0 {
                         self.key.clear();
                         self.capturing_key = true;
                         self.armed = false;
                     }
                 }
-                b':' if self.phase == Phase::Seeking && self.depth == seek_depth => {
-                    self.armed = self.at.matches_segment(self.matched as usize, &self.key);
+                b':' if self.phase == Phase::Seeking => {
+                    let matches = |path: &[&str]| {
+                        path.len() == self.depth as usize
+                            && path
+                                .iter()
+                                .zip(&self.keys)
+                                .all(|(name, key)| name.as_bytes() == key)
+                    };
+                    self.armed = match self.at {
+                        ArrayAt::Root => false,
+                        ArrayAt::Field(name) | ArrayAt::EnvelopeField(name) => {
+                            self.depth == 1 && name.as_bytes() == self.key
+                        }
+                        ArrayAt::Path(path) => matches(path),
+                        ArrayAt::Envelope(paths) => paths.iter().any(|path| matches(path)),
+                        ArrayAt::EnvelopeFieldOrNested(field, nested) => {
+                            matches(&[field]) || matches(&[field, nested])
+                        }
+                        ArrayAt::EnvelopeFieldOrNestedAny(field, nested) => {
+                            matches(&[field]) || nested.iter().any(|name| matches(&[field, name]))
+                        }
+                    };
                     continue;
                 }
                 b'[' | b'{' => {
                     self.depth += 1;
+                    self.keys.resize_with(self.depth as usize, Vec::new);
                     if self.phase == Phase::Seeking {
-                        let matched = self.matched as usize;
                         let found = byte == b'['
                             && match self.at {
                                 ArrayAt::Root => self.depth == 1,
-                                _ => {
-                                    self.armed
-                                        && self.at.can_end_at(matched)
-                                        && self.depth == seek_depth + 1
+                                ArrayAt::Field(_) | ArrayAt::EnvelopeField(_) => {
+                                    self.armed && self.depth == 2
                                 }
+                                ArrayAt::Path(path) => {
+                                    self.armed || (path.is_empty() && self.depth == 1)
+                                }
+                                ArrayAt::Envelope(paths) => {
+                                    self.armed
+                                        || (self.depth == 1 && paths.iter().any(|p| p.is_empty()))
+                                }
+                                ArrayAt::EnvelopeFieldOrNested(..)
+                                | ArrayAt::EnvelopeFieldOrNestedAny(..) => self.armed,
                             };
-                        let descend = byte == b'{'
-                            && self.armed
-                            && self.at.can_descend_at(matched)
-                            && self.depth == seek_depth + 1;
                         self.armed = false;
                         if found {
                             self.phase = Phase::InArray;
                             self.array_depth = self.depth;
                             continue;
-                        }
-                        if descend {
-                            self.matched += 1;
                         }
                     }
                 }
@@ -339,9 +333,6 @@ impl ArraySplitter {
                         continue;
                     }
                     self.depth = self.depth.saturating_sub(1);
-                    if self.phase == Phase::Seeking && self.depth < self.matched + 1 {
-                        self.matched = self.depth.saturating_sub(1);
-                    }
                 }
                 b',' if at_array_level => {
                     self.emit(&mut on_item);
@@ -358,7 +349,7 @@ impl ArraySplitter {
                 }
                 b' ' | b'\n' | b'\r' | b'\t' if at_array_level && self.item.is_empty() => continue,
                 b' ' | b'\n' | b'\r' | b'\t' => {}
-                _ if self.phase == Phase::Seeking && self.depth == seek_depth => self.armed = false,
+                _ if self.phase == Phase::Seeking => self.armed = false,
                 _ => {}
             }
             if self.phase == Phase::InArray {
@@ -426,6 +417,7 @@ mod tests {
                 ArrayAt::EnvelopeFieldOrNested("data", "list"),
                 ArrayAt::EnvelopeFieldOrNestedAny("data", &["list", "items"]),
                 ArrayAt::Path(&["result", "data"]),
+                ArrayAt::Envelope(&[&["result", "data"]]),
             ] {
                 let mut body = match at {
                     ArrayAt::Root => Vec::new(),
@@ -435,7 +427,7 @@ mod tests {
                     | ArrayAt::EnvelopeFieldOrNestedAny(..) => {
                         r#"{"meta":"before\\雪","data":"#.as_bytes().to_vec()
                     }
-                    ArrayAt::Path(_) => {
+                    ArrayAt::Path(_) | ArrayAt::Envelope(_) => {
                         r#"{"meta":"before\\雪","result":{"data":"#.as_bytes().to_vec()
                     }
                 };
@@ -448,7 +440,7 @@ mod tests {
                     | ArrayAt::EnvelopeFieldOrNestedAny(..) => {
                         body.extend_from_slice(br#", "after":"tail\"text"}"#)
                     }
-                    ArrayAt::Path(_) => {
+                    ArrayAt::Path(_) | ArrayAt::Envelope(_) => {
                         body.extend_from_slice(br#", "after":"tail\"text"}, "code":0}"#)
                     }
                 }
@@ -839,6 +831,53 @@ mod tests {
 #[cfg(test)]
 mod envelope_tests {
     use super::*;
+    #[test]
+    fn alternative_paths_stream_native_shapes_and_keep_metadata() {
+        for body in [
+            r#"{"code":"00000","data":{"entrustedList":[{"id":"a"},{"id":"b"}],"endId":"b"},"msg":"ok"}"#,
+            r#"{"code":"00000","data":[{"id":"a"},{"id":"b"}],"msg":"ok"}"#,
+        ] {
+            for size in [1, 2, 9, 1024] {
+                let mut splitter =
+                    ArraySplitter::new(ArrayAt::Envelope(&[&["data", "entrustedList"], &["data"]]));
+                let mut items = vec![];
+                for chunk in body.as_bytes().chunks(size) {
+                    splitter.feed(chunk, |item| items.push(item.to_owned()));
+                }
+                assert!(splitter.finished());
+                assert_eq!(items, [r#"{"id":"a"}"#, r#"{"id":"b"}"#]);
+                assert_eq!(
+                    std::str::from_utf8(splitter.outside()).unwrap(),
+                    body.replace(r#"[{"id":"a"},{"id":"b"}]"#, "[]")
+                );
+                assert!(serde_json::from_str::<IgnoredAny>(splitter.envelope()).is_ok());
+            }
+        }
+        let mut root = ArraySplitter::new(ArrayAt::Envelope(&[&["data"], &[]]));
+        let mut items = Vec::new();
+        root.feed(b"[1,2]", |item| items.push(item.to_owned()));
+        assert!(root.finished());
+        assert_eq!(items, ["1", "2"]);
+        assert_eq!(root.outside(), b"[]");
+    }
+
+    #[test]
+    fn alternative_paths_require_complete_valid_documents_and_exact_paths() {
+        for body in [
+            r#"{"data":{"list":[]}"#,
+            r#"{"else":{"list":[]}}"#,
+            r#"{"data":{"list":[]}garbage}"#,
+            r#"{"data":{"list":[1,]}}"#,
+            r#"{"data":{"list":[1 2]}}"#,
+        ] {
+            let mut splitter = ArraySplitter::new(ArrayAt::Envelope(&[&["data", "list"]]));
+            for chunk in body.as_bytes().chunks(1) {
+                splitter.feed(chunk, |_| {});
+            }
+            assert!(!splitter.finished(), "{body}");
+        }
+    }
+
     #[test]
     fn preserves_metadata_with_every_chunk_boundary() {
         let body = br#"{"code":"0","data":[{"s":"a"},{"s":"b"}],"msg":"ok"}"#;

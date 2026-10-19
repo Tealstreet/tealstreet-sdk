@@ -4,6 +4,8 @@ const families = Object.freeze({
   binance: 'binance',
   binancepm: 'binance',
   bingx: 'bingx',
+  bitget: 'bitget',
+  bitgetusdc: 'bitget',
   blofin: 'blofin',
   bybit: 'bybit',
   cryptocom: 'cryptocom',

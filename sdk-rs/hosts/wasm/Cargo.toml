@@ -9,10 +9,11 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 profiling = []
-default = ["venue-backpack", "venue-binance", "venue-bingx", "venue-blofin", "venue-bybit", "venue-cryptocom", "venue-mexc", "venue-okx", "venue-weex"]
+default = ["venue-backpack", "venue-binance", "venue-bingx", "venue-bitget", "venue-blofin", "venue-bybit", "venue-cryptocom", "venue-mexc", "venue-okx", "venue-weex"]
 venue-backpack = ["dep:safe-cex-venue-backpack"]
 venue-binance = ["dep:safe-cex-venue-binance"]
 venue-bingx = ["dep:safe-cex-venue-bingx"]
+venue-bitget = ["dep:safe-cex-venue-bitget"]
 venue-blofin = ["dep:safe-cex-venue-blofin"]
 venue-bybit = ["dep:safe-cex-venue-bybit"]
 venue-cryptocom = ["dep:safe-cex-venue-cryptocom"]
@@ -25,6 +26,7 @@ safe-cex-engine.workspace = true
 safe-cex-venue-backpack = { path = "../../venues/backpack", optional = true }
 safe-cex-venue-binance = { workspace = true, optional = true }
 safe-cex-venue-bingx = { workspace = true, optional = true }
+safe-cex-venue-bitget = { path = "../../venues/bitget", optional = true }
 safe-cex-venue-blofin = { workspace = true, optional = true }
 safe-cex-venue-bybit = { workspace = true, optional = true }
 safe-cex-venue-cryptocom = { workspace = true, optional = true }

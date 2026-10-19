@@ -8,6 +8,7 @@ const aliases = {
   backpack: ['backpack'],
   binance: ['binance', 'binancepm'],
   bingx: ['bingx'],
+  bitget: ['bitget', 'bitgetusdc'],
   blofin: ['blofin'],
   bybit: ['bybit'],
   cryptocom: ['cryptocom'],

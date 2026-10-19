@@ -89,6 +89,14 @@
     "./node/backpack": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/node/backpack/safe_cex_wasm.js"
+    },
+    "./web/bitget": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/bitget/safe_cex_wasm.js"
+    },
+    "./node/bitget": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/bitget/safe_cex_wasm.js"
     }
   },
   "scripts": {

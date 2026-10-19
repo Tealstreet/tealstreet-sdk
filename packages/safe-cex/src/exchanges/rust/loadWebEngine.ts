@@ -11,6 +11,7 @@ const importEngine = (family: VenueFamily) => {
     case 'backpack': return import('@tealstreet/safe-cex-wasm/web/backpack');
     case 'binance': return import('@tealstreet/safe-cex-wasm/web/binance');
     case 'bingx': return import('@tealstreet/safe-cex-wasm/web/bingx');
+    case 'bitget': return import('@tealstreet/safe-cex-wasm/web/bitget');
     case 'blofin': return import('@tealstreet/safe-cex-wasm/web/blofin');
     case 'bybit': return import('@tealstreet/safe-cex-wasm/web/bybit');
     case 'cryptocom': return import('@tealstreet/safe-cex-wasm/web/cryptocom');

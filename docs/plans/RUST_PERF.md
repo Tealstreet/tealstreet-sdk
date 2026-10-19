@@ -6,9 +6,10 @@ Work is full auto under VENUE_PORT_BRIEF Process: phase reviews, commits,
 public/private replay gates, PR to feat/rust-rewrite, adversarial reviews,
 green CI, merge and fresh follow-up branch. No stash/rebase/force push.
 
-## Final local results (nine families)
+## Nine-family checkpoint (Bitget integration follows)
 
-All nine current public gates and all twelve private variants pass. The table
+These checkpoint results precede the Bitget/host-dispatch integration.
+All nine then-current public gates and all twelve private variants pass. The table
 uses TS/Rust **main-thread gate CPU** and retained-memory ratios (higher is
 better); eight families use three-run medians. MEXC uses the predeclared ten-pair
 crossover below. These are shared-host point estimates, not significance claims.
@@ -461,3 +462,17 @@ TS/Rust CPU, steady CPU and retained bytes on the same accepted cohort; retain
 per-pair/order spreads. Report the earlier valid regression alongside it and
 acknowledge remaining shared-host noise. Optimize code if this fixed experiment
 still shows regression; do not search for a favorable repetition.
+
+Final fetch brought Bitget and shared host-dispatch optimization at
+`3a7b46407dc7120dfd96846c9df26b6ca33d9c51`; expand to ten families and fourteen
+private variants before PR. Preserve inherited host3/engine3/venue-specific
+release profiles. Merge review found and fixed two real issues: incoming Tape
+parsed every legacy WS message for Bitget metadata (now Bitget-only), and capped
+malformed stream bodies could reach a business-error hook through a valid prefix.
+The new hook-count regression fails before the fix and passes afterward; a
+validated-envelope helper preserves the cap/UTF8/full-JSON checks. Engine56 tests
+and independent review pass; harness127 tests pass. All feature registrations
+and both Bitget aliases remain isolated. Existing size-budget breaches under
+the newly inherited host3 setting are being measured before any cap changes.
+Baseline10 exact158-file source audit/build passes: original aggregate3497553
+bytes, SHA2569ac0db7d5cf880624fd26f65356145b073ad8972f2984f5b25ef597e87944fe7.

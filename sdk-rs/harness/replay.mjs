@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
-import { Tape, withTimeout, replayStoreReady, ReplayClock, prepareTsReplaySockets } from './tape.mjs';
+import { createTape, withTimeout, replayStoreReady, ReplayClock, prepareTsReplaySockets } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { retainedMemory, settledMemory } from './memory.mjs';
 
@@ -126,7 +126,7 @@ async function runRust() {
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine(venue.rust);
-  const tape = new Tape(records, venue, isPrivate, 30000, 'rust', bookSymbols);
+  const tape = createTape(records, venue, isPrivate, { impl: 'rust', books: bookSymbols, credentials, cadence: values.cadence });
   tape.cadence = values.cadence;
   const clock = values.venue === 'mexc' && !isPrivate ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
   clock?.install();
@@ -287,12 +287,12 @@ async function runRust() {
     frames,
     metrics,
     unserved: tape.unserved,
-    missingWrites: tape.missingWrites,
-    unusedWrites: tape.missingWrites,
+    missingWrites: tape.unusedWrites,
+    unusedWrites: tape.unusedWrites,
     protocolErrors: tape.audit?.errors() ?? [],
     invalidSignatures: tape.invalidSignatures,
     wsRequests: [...tape.sentRequests].sort(),
-    subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : [...tape.protocolSubscriptions].sort(),
+    subscriptions: [...(venue.compareSubscriptions ? tape.normalizedSubscriptions : tape.subscriptions)].sort(),
     store: { markets: marketRows, tickers: tickerRows },
     books: bookRows,
     account,
@@ -351,7 +351,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 }
 
 async function runTs() {
-  const tape = new Tape(records, venue, isPrivate, 30000, 'ts', bookSymbols);
+  const tape = createTape(records, venue, isPrivate, { impl: 'ts', books: bookSymbols, credentials, cadence: values.cadence });
   tape.cadence = values.cadence;
   const clock = values.venue === 'mexc' && !isPrivate ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
   clock?.install();
@@ -554,12 +554,12 @@ async function runTs() {
     frames,
     metrics,
     unserved: tape.unserved,
-    missingWrites: tape.missingWrites,
-    unusedWrites: tape.missingWrites,
+    missingWrites: tape.unusedWrites,
+    unusedWrites: tape.unusedWrites,
     protocolErrors: tape.audit?.errors() ?? [],
     invalidSignatures: tape.invalidSignatures,
     wsRequests: [...tape.sentRequests].sort(),
-    subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : [...tape.protocolSubscriptions].sort(),
+    subscriptions: [...(venue.compareSubscriptions ? tape.normalizedSubscriptions : tape.subscriptions)].sort(),
     store: snapshot,
     books: bookCopies,
     account,

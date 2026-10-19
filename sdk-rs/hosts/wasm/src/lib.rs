@@ -7,6 +7,7 @@
     feature = "venue-backpack",
     feature = "venue-binance",
     feature = "venue-bingx",
+    feature = "venue-bitget",
     feature = "venue-blofin",
     feature = "venue-bybit",
     feature = "venue-cryptocom",
@@ -26,6 +27,8 @@ use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 #[cfg(feature = "venue-bingx")]
 use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
+#[cfg(feature = "venue-bitget")]
+use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
 #[cfg(feature = "venue-blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 #[cfg(feature = "venue-bybit")]
@@ -85,6 +88,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "venue-backpack",
     feature = "venue-binance",
     feature = "venue-bingx",
+    feature = "venue-bitget",
     feature = "venue-blofin",
     feature = "venue-bybit",
     feature = "venue-cryptocom",
@@ -97,6 +101,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
 struct EngineOptions {
     #[cfg(any(
         feature = "venue-binance",
+        feature = "venue-bitget",
         feature = "venue-blofin",
         feature = "venue-bybit",
         feature = "venue-cryptocom",
@@ -114,6 +119,7 @@ struct EngineOptions {
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
+        feature = "venue-bitget",
         feature = "venue-blofin",
         feature = "venue-okx",
         feature = "venue-weex"
@@ -555,6 +561,7 @@ impl WasmEngine {
         feature = "venue-backpack",
         feature = "venue-binance",
         feature = "venue-bingx",
+        feature = "venue-bitget",
         feature = "venue-blofin",
         feature = "venue-bybit",
         feature = "venue-cryptocom",
@@ -622,6 +629,28 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
             }))),
+            #[cfg(feature = "venue-bitget")]
+            "bitget" | "bitgetusdc" => {
+                if !options.public_data_only
+                    && options.key.as_ref().is_some_and(|s| !s.is_empty())
+                    && options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                    && options.passphrase.as_ref().is_none_or(|s| s.is_empty())
+                {
+                    return Err(JsError::new("Bitget requires a passphrase"));
+                }
+                Box::new(Engine::new(BitgetFutures::new(BitgetOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    passphrase: options.passphrase,
+                    product: if venue == "bitgetusdc" {
+                        Product::Usdc
+                    } else {
+                        Product::Usdt
+                    },
+                })))
+            }
             #[cfg(feature = "venue-cryptocom")]
             "cryptocom" => Box::new(Engine::new(Cryptocom::new(CryptocomOptions {
                 testnet: options.testnet,

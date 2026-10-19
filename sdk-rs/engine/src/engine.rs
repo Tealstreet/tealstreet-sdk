@@ -499,6 +499,23 @@ pub trait Venue {
         _item: &str,
     ) {
     }
+    /// A complete envelope arrived without its expected streamed list. Venues
+    /// may recognize business errors; successful missing lists still fail.
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        response: Response<'_>,
+    ) {
+        self.on_request_failed(
+            cx,
+            pending,
+            &format!(
+                "response did not contain the expected list: {}",
+                response.body
+            ),
+        );
+    }
     fn on_request_failed(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -653,6 +670,18 @@ impl<V: Venue> Engine<V> {
         if let Some(splitter) = &incoming.splitter {
             let outside = splitter.outside();
             if !splitter.finished() {
+                if let Some(body) = splitter.validated_envelope() {
+                    self.venue.on_stream_error(
+                        &mut cx,
+                        pending,
+                        Response {
+                            status: incoming.status,
+                            headers: &incoming.headers,
+                            body,
+                        },
+                    );
+                    return;
+                }
                 let preview = &outside[..outside.len().min(STREAM_PREVIEW_BYTES)];
                 let preview = String::from_utf8_lossy(preview);
                 let message = format!("response did not contain the expected list: {preview}");
@@ -820,6 +849,7 @@ mod streaming_tests {
         rows: Vec<String>,
         body: Option<String>,
         failure: Option<String>,
+        hook_calls: usize,
         books: Vec<(String, Book)>,
     }
 
@@ -854,6 +884,15 @@ mod streaming_tests {
         ) {
             pending.push(item.to_owned());
         }
+        fn on_stream_error(
+            &mut self,
+            cx: &mut Cx<'_, Self::Pending>,
+            pending: Self::Pending,
+            _response: Response<'_>,
+        ) {
+            self.hook_calls += 1;
+            self.on_request_failed(cx, pending, "complete business envelope");
+        }
         fn on_request_failed(
             &mut self,
             _cx: &mut Cx<'_, Self::Pending>,
@@ -885,6 +924,7 @@ mod streaming_tests {
             rows: Vec::new(),
             body: None,
             failure: None,
+            hook_calls: 0,
             books: Vec::new(),
         });
         engine.start(0.0);
@@ -925,6 +965,7 @@ mod streaming_tests {
                 rows: Vec::new(),
                 body: None,
                 failure: None,
+                hook_calls: 0,
                 books: vec![("A".into(), book.clone()), ("missing-market".into(), book)],
             });
             let market = Market {
@@ -1025,6 +1066,23 @@ mod streaming_tests {
             assert_eq!(venue.rows, ["1"]);
             let expected = body.replace("[1]", "[]");
             assert_eq!(venue.body.as_deref(), Some(expected.as_str()));
+        }
+    }
+
+    #[test]
+    fn complete_business_envelopes_never_accept_capped_or_malformed_responses() {
+        let valid = r#"{"code":"40774"}"#;
+        let at = ArrayAt::Envelope(&[&["data"]]);
+        assert_eq!(stream(at, valid.as_bytes()).hook_calls, 1);
+        let capped = format!("{valid}{}garbage", " ".repeat(1024 * 1024 - valid.len()));
+        for body in [
+            capped.as_bytes(),
+            br#"{"code":"40774""#,
+            b"{\"code\":\"\xff\"}",
+        ] {
+            let venue = stream(at, body);
+            assert_eq!(venue.hook_calls, 0);
+            assert!(venue.failure.is_some());
         }
     }
 
