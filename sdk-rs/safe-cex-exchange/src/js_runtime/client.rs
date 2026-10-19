@@ -1257,12 +1257,20 @@ impl JsHttpHost for RestHttpHost {
                         error.value.define("config", config)?;
                         return Err(error);
                     }
+                    let network_request = matches!(
+                        failure.transport_error.as_deref(),
+                        Some(safe_cex_transport::TransportError::Network(_))
+                    )
+                    .then(|| Js::host_object(Rc::new((*failure.request).clone())));
                     let config = if remote.is_some() {
                         effective_config(&config, *failure.request)?
                     } else {
                         config
                     };
                     let error = super::value::error_object("AxiosError", &failure.message);
+                    if let Some(request) = network_request {
+                        error.define("request", request)?;
+                    }
                     if let Some(code) = &failure.code {
                         error.define("code", Js::str(code))?;
                     }
