@@ -96,3 +96,14 @@ nested workspace.
   wasm tests pass. Routing tests cover proxy-token disposal/deadlines, abandoned
   streams, Workers upgrade headers and raw/compressed protocol messages. All six
   public replay gates pass; private replay verification is finishing.
+
+### Landing integration
+
+- All 15 six-venue replay gates passed before the landing merge. Merged
+  `origin/feat/rust-rewrite` through `bc2b61cc4a` as `fc7b493896`, preserving both
+  README sections and MEXC's model, streaming, host error and replay contracts.
+- Tagged MEXC's public/private sockets explicitly, including reconnects on their
+  shared URL. Its factory does not install HOW; retained that gate and its
+  separate proxy-authorization header. Updated the port brief so future venues
+  supply socket roles from their first implementation.
+- Re-running workspace, SDK, host and all seven-venue gates on the merged source.

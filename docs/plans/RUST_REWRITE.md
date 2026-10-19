@@ -216,6 +216,16 @@ memory.
 
 ### 4. Hosts
 
+Account-backed hosts reuse safe-cex's TS transport provider and routing resolver.
+Venues emit real URLs and explicit public/private/business socket roles. The JS
+host applies proxy prefixes and per-operation authorization, package HOW/relay,
+and sticky fallback selection. Workers provide a header-capable raw socket
+constructor to those same protocol clients. Native launchers consume the
+serialized TS `resolveEngineRoutingPlan` output through
+`NetworkTransport::with_routing`, with a context JWT callback; no native venue
+routing table or credentials are embedded in the policy. Disposal and deadlines
+cancel token acquisition before a stale write can be sent.
+
 - Browser worker: `hosts/wasm` + `host.mjs` — done.
 - Native: `hosts/native` (`safe-cex-native`), tokio + tokio-tungstenite + reqwest over a
   pluggable transport, driving the same engine — done (`examples/watch.rs`
