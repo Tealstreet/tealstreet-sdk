@@ -54,13 +54,19 @@ pub fn create(
         transport.base_url.as_deref().map_or(Js::Undefined, Js::str),
     )?;
     let client = super::create(host.clone(), defaults);
-    install_outcome_interceptor(&client, Rc::downgrade(owner), transport.proxied, true)?;
     let stats_runtime = host.runtime();
     let stats_exchange = serde_json::to_value(&exchange)
         .expect("exchange name")
         .as_str()
         .expect("exchange name string")
         .to_owned();
+    install_outcome_interceptor(
+        &client,
+        Rc::downgrade(owner),
+        stats_exchange.clone(),
+        transport.proxied,
+        true,
+    )?;
     let record_request = Js::function("recordRequestStats", move |_, args| {
         HTTP_STATS
             .lock()
@@ -129,7 +135,13 @@ pub fn create_no_proxy(host: Host, config: Js, owner: &Rc<BaseExchange>) -> Resu
         .expect("exchange name string")
         .to_owned();
     let client = super::create(host, defaults);
-    install_outcome_interceptor(&client, Rc::downgrade(owner), false, false)?;
+    install_outcome_interceptor(
+        &client,
+        Rc::downgrade(owner),
+        stats_exchange.clone(),
+        false,
+        false,
+    )?;
     let record_request = Js::function("recordRequestStats", move |_, args| {
         HTTP_STATS
             .lock()
@@ -156,14 +168,22 @@ pub fn create_no_proxy(host: Host, config: Js, owner: &Rc<BaseExchange>) -> Resu
 fn install_outcome_interceptor(
     client: &Js,
     owner: Weak<BaseExchange>,
+    exchange: String,
     proxied: bool,
     enhance_before_outcome: bool,
 ) -> Result<(), Thrown> {
     let fulfilled_owner = owner.clone();
+    let fulfilled_exchange = exchange.clone();
     let on_fulfilled = Js::function("recordResponseOutcome", move |_, args| {
         let response = arg(&args, 0);
         if let Some(owner) = fulfilled_owner.upgrade() {
-            record_outcome(&owner, &response, Some(&response), true);
+            record_outcome(
+                &owner,
+                &fulfilled_exchange,
+                &response,
+                Some(&response),
+                true,
+            );
             let observe = || -> Result<(), Thrown> {
                 let config = optional(&response, "config")?;
                 if optional(&config, "__tealstreetSigningCapture")?.truthy() {
@@ -216,11 +236,10 @@ fn install_outcome_interceptor(
     let on_rejected = Js::function("recordErrorOutcome", move |_, args| {
         let error = arg(&args, 0);
         let enhanced = if let Some(owner) = owner.upgrade() {
-            let name = serde_json::to_value(owner.name()).expect("exchange name");
             let enhance = || {
                 super::error_enhancer::enhance_axios_error(
                     &error,
-                    name.as_str().expect("exchange string"),
+                    &exchange,
                     owner.runtime.now_ms(),
                 )
             };
@@ -231,7 +250,7 @@ fn install_outcome_interceptor(
             };
             let response = optional(&error, "response")?;
             let response = response.truthy().then_some(response);
-            record_outcome(&owner, &error, response.as_ref(), false);
+            record_outcome(&owner, &exchange, &error, response.as_ref(), false);
             let enhanced = match enhanced {
                 Some(value) => value,
                 None => enhance()?,
@@ -268,7 +287,13 @@ fn status_of(response: &Js) -> Result<Option<f64>, Thrown> {
     })
 }
 
-fn record_outcome(owner: &BaseExchange, context: &Js, response: Option<&Js>, success: bool) {
+fn record_outcome(
+    owner: &BaseExchange,
+    exchange: &str,
+    context: &Js,
+    response: Option<&Js>,
+    success: bool,
+) {
     // TS deliberately ignores counter failures so telemetry cannot fail a request.
     let classify = || -> Result<Option<RequestOutcome>, Thrown> {
         let config = optional(context, "config")?;
@@ -409,8 +434,6 @@ fn record_outcome(owner: &BaseExchange, context: &Js, response: Option<&Js>, suc
                 })
             })
             .transpose()?;
-        let exchange = serde_json::to_value(owner.name()).expect("exchange name");
-        let exchange = exchange.as_str().expect("exchange name string");
         if success {
             diagnostic::note_rest_success(
                 exchange,
