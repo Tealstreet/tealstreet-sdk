@@ -43,3 +43,11 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 
 - Combined seven-venue artifact after BingX integration: 2,923,610 bytes. Aggregate static budget becomes 3MiB (3,145,728 bytes, 7.6% headroom); CPU/memory comparison remains strictly Rust<TS. Final Phemex gate medians so far: 219.0/73.0ms CPU, 141.7/20.5ms steady CPU, 5.7/2.8MB retained; private 14 frames PASS.
 - Full source workspace fmt/clippy/tests and wasm clippy in progress; root typecheck 44 tasks, lint 28 tasks and Phemex TS 39 tests pass. Source Rust suites: public6/private14/signing2/trading23/queries12 =57 tests.
+
+### Final local validation
+
+- Phase5 adversarial audit is clean at `78e6666862`; shared-URL close records now fail before ambiguous socket selection. Depth and authenticated-history negative controls pass; Phemex public-dispatch and full-depth/snapshot TS regressions pass.
+- Workspace bans/fmt/clippy/native tests and wasm32 clippy PASS. Phemex57 native tests PASS; engine36 tests PASS. Full SDK6,497 tests /454files PASS; Phemex39 TS tests PASS; wasm19, host10, harness34 PASS. Root typecheck44 tasks and lint28 tasks PASS.
+- Seven public gates PASS on the combined artifact (TS/Rust CPUms, retainedMB): Binance182.9/73.8,4.2/2.4; Bybit288.6/193.1,6.2/2.6; BingX111.5/72.9,3.6/2.1; Crypto.com65.3/58.2,1.9/1.6; OKX748.4/556.0,5.1/3.5; WEEX112.6/71.0,5.1/2.3; Phemex221.6/73.3,5.7/2.8. Phemex steady141.8/19.8ms. All ten private replays PASS: Binance, Bybit, BingX, Crypto.com, WEEX, Phemex and four OKX variants. Total17/17 gates PASS; no skipped gates.
+
+- Landing publication checkpoint: final source head `78e6666862` passed all17 local gates and required checks. PR into feat/rust-rewrite next, followed by adversarial reviews posted as comments; merge waits for green CI.
