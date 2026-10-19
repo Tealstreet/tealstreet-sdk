@@ -5,6 +5,7 @@ members = [
     "safe-cex-engine",
     "safe-cex-native",
     "safe-cex-venue-binance",
+    "safe-cex-venue-bitunix",
     "safe-cex-wasm",
 ]
 
@@ -26,6 +27,7 @@ js-sys = "0.3.106"
 safe-cex-crypto = { path = "safe-cex-crypto" }
 safe-cex-engine = { path = "safe-cex-engine" }
 safe-cex-venue-binance = { path = "safe-cex-venue-binance" }
+safe-cex-venue-bitunix = { path = "safe-cex-venue-bitunix" }
 safe-cex-native = { path = "safe-cex-native" }
 
 # P5a Goldilocks/Poseidon2 and ECgFp5 primitives, verified against Go WASM.

@@ -47,3 +47,16 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
 - Planning: repository/engine/venue contracts inspected; official signing docs
   checked. No implementation yet. User's revised process authorizes integration
   after all gates pass and overrides initial never-push/merge instruction.
+
+### Phase 1 review and verification
+
+- Implemented crate and wasm registration, streamed seeds, shard pacing,
+  snapshot books, candles and socket watchdogs; gzip frames decoded in hosts.
+- Reviewer `public_review` found and prompted fixes for early stream startup,
+  duplicate-socket retries, unchecked envelope codes, candle request options,
+  native binary support, JS close ordering, malformed streamed arrays and
+  gzip truncation. Added opt-in bounded `FieldEnvelope` streaming mode.
+- Verification: bans PASS; venue clippy all targets PASS; 7 public tests +
+  10 engine tests and doc tests PASS. Browser host ordering test added.
+- Environment: corepack is in Volta node 24.21.0 bin; prepend it to PATH.
+- Full venue gates remain pending phases 2–5. No gate numbers claimed yet.

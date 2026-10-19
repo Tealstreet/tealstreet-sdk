@@ -2,6 +2,7 @@
 use crate::{Events, HostEvent};
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::{HttpRequest, Method, SocketId};
+use std::io::Read;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -64,6 +65,17 @@ impl Transport for NetworkTransport {
                     message = ws.next() => match message {
                         Some(Ok(Message::Text(text))) => {
                             let _ = events.send(HostEvent::WsMessage(socket, text.to_string()));
+                        }
+                        Some(Ok(Message::Binary(bytes))) => {
+                            let text = if bytes.starts_with(&[0x1f,0x8b]) {
+                                let mut text = String::new();
+                                match flate2::read::GzDecoder::new(bytes.as_ref()).take(16 * 1024 * 1024 + 1).read_to_string(&mut text) {
+                                    Ok(_) if text.len() <= 16 * 1024 * 1024 => text,
+                                    Ok(_) => break 1009,
+                                    Err(_) => break 1007,
+                                }
+                            } else { match String::from_utf8(bytes.to_vec()) {Ok(text)=>text,Err(_)=>break 1007} };
+                            let _ = events.send(HostEvent::WsMessage(socket, text));
                         }
                         // Answering pings needs a flush on a quiet socket.
                         Some(Ok(Message::Ping(_))) => {

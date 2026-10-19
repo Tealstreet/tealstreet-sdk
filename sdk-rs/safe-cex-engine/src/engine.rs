@@ -252,6 +252,7 @@ struct Incoming {
     headers: String,
     /// Splits a streamed array out of a successful body.
     splitter: Option<ArraySplitter>,
+    envelope: bool,
     /// Everything not streamed: error bodies and unstreamed requests. A
     /// streamed body keeps only its start, to explain a missing array.
     body: Vec<u8>,
@@ -545,6 +546,7 @@ impl<V: Venue> Engine<V> {
                 status,
                 headers: headers.to_owned(),
                 splitter,
+                envelope: matches!(at, Some(ArrayAt::FieldEnvelope(_))),
                 body: Vec::new(),
             },
         );
@@ -601,10 +603,23 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_request_failed(&mut cx, pending, &message);
                 return;
             }
+            let body = if incoming.envelope {
+                let Some(body) = splitter.envelope() else {
+                    self.venue.on_request_failed(
+                        &mut cx,
+                        pending,
+                        "invalid streamed response envelope",
+                    );
+                    return;
+                };
+                body
+            } else {
+                ""
+            };
             let response = Response {
                 status: incoming.status,
                 headers: &incoming.headers,
-                body: "",
+                body,
             };
             self.venue.on_response(&mut cx, pending, response);
             return;

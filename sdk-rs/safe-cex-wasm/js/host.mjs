@@ -175,11 +175,36 @@ export const nativeTransport = () => ({
   connect(url, { onOpen, onMessage, onClose }) {
     const ws = new WebSocket(url);
     ws.addEventListener('open', () => onOpen());
+    let pending = Promise.resolve();
+    let disposed = false;
     ws.addEventListener('message', (event) => {
-      if (typeof event.data === 'string') onMessage(event.data);
+      // Chain binary decoding so a later snapshot cannot overtake an earlier one.
+      pending = pending.then(async () => {
+        if (disposed) return;
+        if (typeof event.data === 'string') return onMessage(event.data);
+        const blob = event.data instanceof Blob ? event.data : new Blob([event.data]);
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        const stream = bytes[0] === 0x1f && bytes[1] === 0x8b
+          ? blob.stream().pipeThrough(new DecompressionStream('gzip')) : blob.stream();
+        const reader = stream.getReader();
+        const decoder = new TextDecoder('utf-8', { fatal: true });
+        let size = 0;
+        let text = '';
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.byteLength;
+            if (size > 16 * 1024 * 1024) throw new Error('websocket message exceeds 16 MiB');
+            text += decoder.decode(value, { stream: true });
+          }
+          text += decoder.decode();
+        } finally { await reader.cancel(); }
+        if (!disposed) onMessage(text);
+      }).catch(() => { ws.close(); });
     });
-    ws.addEventListener('close', (event) => onClose(event.code));
-    return { send: (text) => ws.send(text), close: () => ws.close() };
+    ws.addEventListener('close', (event) => { pending = pending.then(() => { if (!disposed) onClose(event.code); }); });
+    return { send: (text) => ws.send(text), close: () => { disposed = true; ws.close(); } };
   },
   async request({ method, url, headers, body }) {
     const response = await fetch(url, { method, headers, body });
