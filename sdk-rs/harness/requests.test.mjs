@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { gunzipSync } from 'node:zlib';
 import test from 'node:test';
-import { callerIdsOf, requestKey, selectResponse, subscriptionKey, subscriptionKeys } from './requests.mjs';
+import { callerIdsOf, canonicalUrl, requestKey, selectResponse, subscriptionKey, subscriptionKeys } from './requests.mjs';
 
 const info = 'https://api.hyperliquid.xyz/info';
 const exchange = 'https://api.hyperliquid.xyz/exchange';
@@ -106,6 +106,25 @@ test('websocket identity ignores heartbeat and transport IDs but preserves subsc
     ...subscriptionKeys(socket, '{"method":"SUBSCRIBE","id":3,"params":["b"]}'),
   ]);
   assert.notEqual(subscriptionKey(socket, '{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}'), subscriptionKey(socket, '{"method":"subscribe","subscription":{"type":"bbo","coin":"BTC"}}'));
+});
+
+test('Bybit socket routing ignores cosmetic requestId while preserving other query fields', () => {
+  const base = 'wss://stream.bybit.com/v5/public/linear';
+  assert.equal(canonicalUrl(`${base}?requestId=recorded`), canonicalUrl(`${base}?requestId=live`));
+  assert.equal(canonicalUrl(base), canonicalUrl(`${base}?requestId=live`));
+  assert.notEqual(canonicalUrl(`${base}?max_active_time=1m`), canonicalUrl(`${base}?max_active_time=2m`));
+});
+
+test('Bybit auth expires/signatures normalize but the account and feed set stay exact', () => {
+  const url = 'wss://stream.bybit.com/v5/private';
+  const auth = (key, expires, signature) => ({ op: 'auth', args: [key, expires, signature] });
+  assert.equal(subscriptionKey(url, auth('key-a', '100', 'a')), subscriptionKey(`${url}?requestId=generated`, auth('key-a', '200', 'b')));
+  assert.notEqual(subscriptionKey(url, auth('key-a', '100', 'a')), subscriptionKey(url, auth('key-b', '100', 'a')));
+  assert.deepEqual(subscriptionKeys(url, { op: 'subscribe', args: ['order', 'position'], req_id: 'a' }), [
+    ...subscriptionKeys(url, { op: 'subscribe', args: ['order'], req_id: 'b' }),
+    ...subscriptionKeys(url, { op: 'subscribe', args: ['position'], req_id: 'c' }),
+  ]);
+  assert.notEqual(subscriptionKey(url, { op: 'subscribe', args: ['order'] }), subscriptionKey(url, { op: 'subscribe', args: ['wallet'] }));
 });
 
 test('trim keeps body-specific replies, caller cloids and untimed config', () => {

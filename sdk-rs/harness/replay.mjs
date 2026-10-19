@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
-import { callerIdsOf, requestKey, selectResponse, subscriptionKeys } from './requests.mjs';
+import { callerIdsOf, canonicalUrl, requestKey, selectResponse, subscriptionKeys } from './requests.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -66,11 +66,12 @@ class Tape {
   }
 
   connect(url, onOpen, onMessage) {
+    const key = canonicalUrl(url, callerIds);
     const socket = { url, onMessage, closed: false };
     setImmediate(() => {
       if (socket.closed) return;
-      if (!this.open.has(url)) this.open.set(url, new Set());
-      this.open.get(url).add(socket);
+      if (!this.open.has(key)) this.open.set(key, new Set());
+      this.open.get(key).add(socket);
       onOpen();
       this.waiters = this.waiters.filter((waiter) => !waiter());
     });
@@ -82,7 +83,8 @@ class Tape {
   }
 
   async socketFor(url) {
-    const active = () => [...(this.open.get(url) ?? [])].filter((socket) => !socket.closed);
+    const key = canonicalUrl(url, callerIds);
+    const active = () => [...(this.open.get(key) ?? [])].filter((socket) => !socket.closed);
     while (!active().length) {
       await new Promise((resolve) => this.waiters.push(() => (active().length ? (resolve(), true) : false)));
     }

@@ -8,13 +8,15 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["binance", "hyperliquid"]
+default = ["binance", "bybit", "hyperliquid"]
 binance = ["dep:safe-cex-venue-binance"]
+bybit = ["dep:safe-cex-venue-bybit"]
 hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
 
 [dependencies]
 safe-cex-engine.workspace = true
 safe-cex-venue-binance = { workspace = true, optional = true }
+safe-cex-venue-bybit = { workspace = true, optional = true }
 safe-cex-venue-hyperliquid = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true

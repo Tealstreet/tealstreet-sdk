@@ -6,6 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { subscriptionKeys } from './requests.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -85,9 +86,36 @@ const KNOWN_TS_FIXES = {
     if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
   }
   },
+  bybit(account, rustAccount, tsResult) {
+    // TS drops EC_PostOnlyWillTakeLiquidity; Rust reports PostOnly.
+    for (const order of account.orders) {
+      const fixed = rustAccount.orders.find((row) => row.id === order.id);
+      if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled') order.rejectReason = 'PostOnly';
+    }
+    for (const position of account.positions) {
+      const fixed = rustAccount.positions.find((row) => row.symbol === position.symbol && row.side === position.side);
+      if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+    }
+    // Rust subscribes execution/wallet for authoritative fills/balance; TS only
+    // requests order/position. Require these extra feeds rather than ignoring them.
+    const orderSuffix = ' {"args":["order"],"op":"subscribe"}';
+    const feeds = new Set(tsResult.subscriptions);
+    for (const key of tsResult.subscriptions) {
+      if (!key.endsWith(orderSuffix)) continue;
+      const url = key.slice(3, -orderSuffix.length);
+      if (new URL(url).pathname !== '/v5/private') continue;
+      for (const required of subscriptionKeys(url, { op: 'subscribe', args: ['execution', 'wallet'] })) feeds.add(required);
+    }
+    tsResult.subscriptions = [...feeds].sort();
+    // Other native regressions pin intentional Bybit fixes without rewrites:
+    // split quantities use maximum-size lots and the exact remainder;
+    // ambiguous failed batch writes never fall back to duplicate single creates;
+    // REST ticker seeds install before the initial socket snapshot;
+    // Partial-stop amend keeps its native ID when no mark price is available.
+  },
 };
 if (isPrivate) {
-  KNOWN_TS_FIXES[values.venue]?.(ts.account, rust.account);
+  KNOWN_TS_FIXES[values.venue]?.(ts.account, rust.account, ts);
   for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
     const left = JSON.stringify(ts.account[field]);
     const right = JSON.stringify(rust.account[field]);

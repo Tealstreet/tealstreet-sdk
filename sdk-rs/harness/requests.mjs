@@ -1,6 +1,7 @@
 // Stable request identity. Caller IDs remain exact; generated IDs and transport
 // signatures/clocks are nondeterministic. Economic action fields stay intact.
 const CLOCKS = new Set(['timestamp', 'recvWindow', 'signature']);
+const URL_VOLATILE = new Set([...CLOCKS, 'requestId']);
 const CLIENT_IDS = new Set(['newClientOrderId', 'clientAlgoId', 'clientOrderId', 'c']);
 
 // Timed replies describe recorded state; polling must not consume its transitions.
@@ -42,7 +43,7 @@ const normalize = (value, callerIds, root = true) => {
 };
 
 const canonicalParams = (params, callerIds) => new URLSearchParams([...params]
-  .filter(([key]) => !CLOCKS.has(key))
+  .filter(([key]) => !URL_VOLATILE.has(key))
   .filter(([key, value]) => !CLIENT_IDS.has(key) || callerIds.has(value))
   .map(([key, value]) => {
     if (CLIENT_IDS.has(key)) return [key, value];
@@ -79,8 +80,16 @@ export const subscriptionKey = (url, text, callerIds = new Set()) => {
   if (message && typeof message === 'object') {
     message = { ...message };
     delete message.id;
+    delete message.req_id;
+    // Bybit signs a fresh expiration per connection. Keep the API identity.
+    if (method === 'auth' && Array.isArray(message.args) && message.args.length === 3) {
+      message.args = [message.args[0], '<expires>', '<signature>'];
+    }
     if (['subscribe', 'unsubscribe'].includes(method) && Array.isArray(message.params)) {
       message.params = [...message.params].sort();
+    }
+    if (['subscribe', 'unsubscribe'].includes(method) && Array.isArray(message.args)) {
+      message.args = [...message.args].sort();
     }
   }
   return `WS ${canonicalUrl(url, callerIds)} ${JSON.stringify(normalize(message, callerIds))}`;
@@ -92,8 +101,9 @@ export const subscriptionKeys = (url, text, callerIds = new Set()) => {
   try { message = typeof text === 'string' ? parseJson(text) : text; }
   catch { return [subscriptionKey(url, text, callerIds)]; }
   const method = String(message?.method ?? message?.op ?? '').toLowerCase();
-  if (['subscribe', 'unsubscribe'].includes(method) && Array.isArray(message.params)) {
-    return message.params.map((param) => subscriptionKey(url, { ...message, params: [param] }, callerIds));
+  if (['subscribe', 'unsubscribe'].includes(method)) {
+    const field = Array.isArray(message.params) ? 'params' : Array.isArray(message.args) ? 'args' : undefined;
+    if (field) return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds));
   }
   const key = subscriptionKey(url, message, callerIds);
   return key === undefined ? [] : [key];

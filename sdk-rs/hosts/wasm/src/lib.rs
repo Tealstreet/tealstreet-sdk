@@ -3,8 +3,8 @@
 //! JavaScript owns sockets, fetch and timers; it forwards each event here and
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none.
-#[cfg(not(any(feature = "binance", feature = "hyperliquid")))]
-compile_error!("safe-cex-wasm requires at least one venue feature: binance or hyperliquid");
+#[cfg(not(any(feature = "binance", feature = "bybit", feature = "hyperliquid")))]
+compile_error!("safe-cex-wasm requires at least one venue feature: binance, bybit or hyperliquid");
 
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
@@ -12,6 +12,8 @@ use safe_cex_engine::{
 };
 #[cfg(feature = "binance")]
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+#[cfg(feature = "bybit")]
+use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 #[cfg(feature = "hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
 use serde::{Deserialize, Serialize};
@@ -51,7 +53,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
 }
 
-#[cfg(any(feature = "binance", feature = "hyperliquid"))]
+#[cfg(any(feature = "binance", feature = "bybit", feature = "hyperliquid"))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
@@ -449,7 +451,7 @@ pub struct WasmEngine {
 
 #[wasm_bindgen]
 impl WasmEngine {
-    #[cfg(any(feature = "binance", feature = "hyperliquid"))]
+    #[cfg(any(feature = "binance", feature = "bybit", feature = "hyperliquid"))]
     #[wasm_bindgen(constructor)]
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: EngineOptions = serde_json::from_str(options_json)?;
@@ -461,6 +463,13 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
+            }))),
+            #[cfg(feature = "bybit")]
+            "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
             }))),
             #[cfg(feature = "hyperliquid")]
             "hyperliquid" => {

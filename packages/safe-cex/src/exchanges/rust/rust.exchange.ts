@@ -18,7 +18,7 @@ import type {
   UpdateOrderOpts,
   ValidateAccountResult,
 } from '../../types';
-import type { ClientOrderLookup } from '../clientOrderId';
+import type { ClientOrderIdRule, ClientOrderLookup } from '../clientOrderId';
 
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
@@ -26,13 +26,14 @@ import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
 import { LogSeverity } from '../../types';
 import { BaseExchange } from '../base';
-import { withReplacementClientOrderId } from '../clientOrderId';
+import { patternClientOrderIdRule, withReplacementClientOrderId } from '../clientOrderId';
 import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   binancepm: 'binancepm',
+  bybit: 'bybit',
   hyperliquid: 'hyperliquid',
 };
 
@@ -68,7 +69,7 @@ const STORE_FLUSH_MS = 250;
  * reads the same store it always has. Trading methods are engine commands.
  */
 export class RustEngineExchange extends BaseExchange {
-  protected readonly clientOrderIdRule = this.name === 'hyperliquid' ? hyperliquidClientOrderIdRule : undefined;
+  protected readonly clientOrderIdRule: ClientOrderIdRule | undefined;
   private host?: EngineHostType;
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
@@ -84,6 +85,16 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
+    this.clientOrderIdRule =
+      exchangeName === 'hyperliquid'
+        ? hyperliquidClientOrderIdRule
+        : exchangeName === 'bybit'
+          ? patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/)
+          : undefined;
+    if (exchangeName === 'hyperliquid') {
+      this.findOrderByClientOrderId = (symbol: string, clientOrderId: string) =>
+        this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
+    }
     this.applier = new FrameApplier(store);
   }
 
@@ -195,19 +206,14 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (this.name === 'hyperliquid') this.assertCallerClientOrderIds(orders);
+    if (this.name === 'hyperliquid' || this.name === 'bybit') this.assertCallerClientOrderIds(orders);
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 
   placeOrder = async (opts: PlaceOrderOpts) => {
-    if (this.name === 'hyperliquid') this.resolveCallerClientOrderId(opts);
+    if (this.name === 'hyperliquid' || this.name === 'bybit') this.resolveCallerClientOrderId(opts);
     return this.placeOrders([opts]);
   };
-
-  findOrderByClientOrderId = (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> =>
-    this.name === 'hyperliquid'
-      ? this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId })
-      : Promise.resolve({ found: false, definitive: false });
 
   updateOrder = async ({ order, update }: UpdateOrderOpts) => {
     const result = await this.command<string[] | { orderIds: string[]; clientOrderId: string }>({

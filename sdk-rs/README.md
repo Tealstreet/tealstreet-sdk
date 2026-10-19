@@ -25,8 +25,8 @@ cargo build --locked --workspace --target wasm32-unknown-unknown
 CI runs all of these (`.github/workflows/rust.yml`).
 
 From the repository root, `corepack yarn rust:build-wasm` builds the combined
-host. Use `corepack yarn rust:build-wasm --venue hyperliquid` (or `binance`) to
+host. Use `corepack yarn rust:build-wasm --venue hyperliquid` (or `binance` / `bybit`) to
 build a single-venue browser/Workers bundle. Each build replaces the bindings
 under `hosts/wasm/pkg/`; its constructor accepts only the compiled venues.
-The default Cargo features retain both venues. CI replays each single-venue
+The default Cargo features retain all registered venues. CI replays each single-venue
 bundle and applies the existing 1.2 MB budget to each one separately.

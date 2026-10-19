@@ -106,12 +106,15 @@ jobs:
           - venue: binance
             books: BTCUSDT,ETHUSDT,SOLUSDT
             private_script: rust:private-tape
+          - venue: bybit
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-bybit
           - venue: hyperliquid
             books: BTC-PERP,ETH-PERP
             private_script: rust:private-tape-hyperliquid
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # The browser engine's size budget for one venue.
+      # Budget per single-venue browser bundle.
       WASM_BUDGET_BYTES: 1258291
     defaults:
       run:

@@ -27,6 +27,7 @@ safe-cex-crypto = { path = "crypto" }
 safe-cex-engine = { path = "engine" }
 safe-cex-venue-binance = { path = "venues/binance" }
 safe-cex-venue-hyperliquid = { path = "venues/hyperliquid" }
+safe-cex-venue-bybit = { path = "venues/bybit" }
 safe-cex-native = { path = "hosts/native" }
 
 # P5a Goldilocks/Poseidon2 and ECgFp5 primitives, verified against Go WASM.
