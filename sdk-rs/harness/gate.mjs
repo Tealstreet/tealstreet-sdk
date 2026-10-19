@@ -50,10 +50,13 @@ for (let run = 0; run < runs; run++) {
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
 
+for (let run = 0; run < runs; run++) {
+const ts = results.ts[run];
+const rust = results.rust[run];
 if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
 // Every request must match a taped one: an unserved request sent different parameters.
 for (const impl of ['ts', 'rust']) {
-  const unserved = results[impl][0].unserved;
+  const unserved = results[impl][run].unserved;
   if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
 }
 const isPrivate = Boolean(ts.account);
@@ -94,12 +97,17 @@ if (isPrivate) {
   const right = JSON.stringify(rust.commands);
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
 }
+for (const field of ['requests', 'subscriptions']) {
+  if (JSON.stringify(ts[field]) !== JSON.stringify(rust[field])) differences.push(`${field}: ts=${JSON.stringify(ts[field])} rust=${JSON.stringify(rust[field])}`);
+}
 compare('market', ts.markets, rust.markets);
 compare('ticker', ts.tickers, rust.tickers);
 for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
   if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
     differences.push(`book ${symbol} differs`);
   }
+}
+
 }
 
 const summary = (impl) => ({
@@ -123,7 +131,7 @@ if (ts.account) console.log('(private tape: paced in real time, so it gates corr
 
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.
-if (!isPrivate) {
+if (!ts.account) {
   if (!(r.cpuMs < t.cpuMs)) failures.push('Rust main-thread CPU is not below TS');
   if (!(r.steadyCpuMs < t.steadyCpuMs)) failures.push('Rust steady-state CPU is not below TS');
   if (!(r.retainedMB < t.retainedMB)) failures.push('Rust retained memory is not below TS');

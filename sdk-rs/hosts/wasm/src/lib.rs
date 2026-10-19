@@ -8,6 +8,7 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -56,6 +57,20 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
+    #[serde(default)]
+    application_id: Option<String>,
+    #[serde(default)]
+    vault: Option<String>,
+    #[serde(default)]
+    hyperliquid_builder: Option<HyperliquidBuilder>,
+    #[serde(default)]
+    enable_spot_markets: bool,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HyperliquidBuilder {
+    address: String,
+    fee_tenths_bps: u32,
 }
 
 #[derive(Serialize)]
@@ -434,6 +449,25 @@ impl WasmEngine {
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
             }))),
+            "hyperliquid" => {
+                if options.enable_spot_markets {
+                    return Err(JsError::new(
+                        "Rust Hyperliquid currently supports perpetual markets only",
+                    ));
+                }
+                Box::new(Engine::new(Hyperliquid::new(HyperliquidOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    vault: options.vault,
+                    builder: options.hyperliquid_builder.map(|b| Builder {
+                        b: b.address,
+                        f: b.fee_tenths_bps,
+                    }),
+                })))
+            }
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };
         Ok(Self { inner })

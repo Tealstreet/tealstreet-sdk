@@ -8,6 +8,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
+import { callerIdsOf, requestKey, subscriptionKeys } from './requests.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -30,27 +31,18 @@ const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes
 const bookSymbols = values.books.split(',').filter(Boolean);
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
-const isPrivate = records.some((r) => r.url?.includes(venue.privateSocket));
-const KEY = 'replay-key';
-const SECRET = 'replay-secret';
-
-/** Per-request values: clocks, signatures and generated client ids. */
-const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId']);
-const canonicalUrl = (url) => {
-  const parsed = new URL(url);
-  const query = [...parsed.searchParams]
-    .filter(([name]) => !VOLATILE.has(name))
-    .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"[^"]*",?/g, '')])
-    .sort(([a], [b]) => a.localeCompare(b));
-  return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
-};
+const config = records.find((r) => r.type === 'config') ?? {};
+const isPrivate = config.private ?? (Boolean(venue.privateSocket) && records.some((r) => r.url?.includes(venue.privateSocket)));
+const options = { ...(isPrivate ? { key: 'replay-key', secret: 'replay-secret' } : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }), ...config.options };
+const callerIds = callerIdsOf(records);
+const keyFor = (method, url, body) => requestKey(method, url, body, callerIds);
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
   constructor() {
     this.responses = new Map();
     for (const record of records.filter((r) => r.type === 'http')) {
-      const key = `${record.method} ${canonicalUrl(record.url)}`;
+      const key = keyFor(record.method, record.url, record.requestBody);
       if (!this.responses.has(key)) this.responses.set(key, []);
       this.responses.get(key).push(record);
     }
@@ -60,10 +52,13 @@ class Tape {
     this.unserved = 0;
   }
 
-  respond(method, url) {
-    const queue = this.responses.get(`${method} ${canonicalUrl(url)}`);
+  respond(method, url, body) {
+    const key = keyFor(method, url, body);
+    this.requests.add(key);
+    const queue = this.responses.get(key);
     if (!queue?.length) {
       this.unserved++;
+      console.error(`unserved: ${key}`);
       return { status: 599, body: '' };
     }
     const record = queue.length > 1 ? queue.shift() : queue[0];
@@ -74,18 +69,24 @@ class Tape {
     const socket = { url, onMessage, closed: false };
     setImmediate(() => {
       if (socket.closed) return;
-      this.open.set(url, socket);
+      if (!this.open.has(url)) this.open.set(url, new Set());
+      this.open.get(url).add(socket);
       onOpen();
       this.waiters = this.waiters.filter((waiter) => !waiter());
     });
     return socket;
   }
 
+  send(url, text) {
+    for (const key of subscriptionKeys(url, text, callerIds)) this.subscriptions.add(key);
+  }
+
   async socketFor(url) {
-    while (!this.open.get(url) || this.open.get(url).closed) {
-      await new Promise((resolve) => this.waiters.push(() => (this.open.get(url) ? (resolve(), true) : false)));
+    const active = () => [...(this.open.get(url) ?? [])].filter((socket) => !socket.closed);
+    while (!active().length) {
+      await new Promise((resolve) => this.waiters.push(() => (active().length ? (resolve(), true) : false)));
     }
-    return this.open.get(url);
+    return { onMessage: (text) => active().forEach((socket) => socket.onMessage(text)) };
   }
 
   /**
@@ -120,6 +121,8 @@ class Tape {
   }
 
   results = [];
+  requests = new Set();
+  subscriptions = new Set();
 }
 
 const settle = async () => {
@@ -191,16 +194,15 @@ async function runRust() {
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
       const socket = tape.connect(url, onOpen, onMessage);
-      return { send: () => {}, close: () => (socket.closed = true) };
+      return { send: (text) => tape.send(url, text), close: () => (socket.closed = true) };
     },
-    request: async ({ method, url }) => {
-      const { status, body } = tape.respond(method, url);
+    request: async ({ method, url, body: requestBody }) => {
+      const { status, body } = tape.respond(method, url, requestBody);
       return { status, headers: '', body: encoder.encode(body) };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
-  const options = isPrivate ? { key: KEY, secret: SECRET } : { publicDataOnly: true };
   const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
@@ -278,7 +280,7 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, unserved: tape.unserved, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return { frames, metrics, unserved: tape.unserved, requests: [...tape.requests].sort(), subscriptions: [...tape.subscriptions].sort(), store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
 }
 
 const commandArgs = ({ t, type, ...args }) => args;
@@ -343,13 +345,17 @@ async function runTs() {
     removeEventListener(type, fn) {
       this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
     }
-    send() {}
+    send(text) { tape.send(this.url, text); }
     close() {
       this.readyState = 3;
       this.socket.closed = true;
     }
   }
   globalThis.WebSocket = TapeWebSocket;
+  globalThis.fetch = async (input, init = {}) => {
+    const { status, body } = tape.respond(init.method ?? 'GET', String(input), init.body);
+    return new Response(body, { status });
+  };
   const { [venue.ts.className]: Exchange } = await import(venue.ts.module);
   const { DefaultStore } = await import('../../packages/safe-cex/src/store/store.base.ts');
   const adapter = async (config) => {
@@ -358,7 +364,7 @@ async function runTs() {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString());
+    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data);
     // The raw body: the client's own transformResponse parses it, big ids included.
     const response = { data: body, status, statusText: String(status), headers: {}, config, request: {} };
     if (status >= 400) {
@@ -370,7 +376,6 @@ async function runTs() {
     return response;
   };
   const store = new DefaultStore();
-  const options = isPrivate ? { key: KEY, secret: SECRET } : { key: '', secret: '', publicDataOnly: true };
   const exchange = new Exchange(venue.ts.name, options, store);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
@@ -403,6 +408,15 @@ async function runTs() {
     },
     async (record) => {
       if (record.op === 'placeOrders') return exchange.placeOrders(record.orders);
+      if (record.op === 'amendOrder') {
+        const order = store.orders.find((o) => o.id === record.id);
+        if (!order) throw new Error('order not found');
+        const result = await exchange.updateOrder({ order, update: record.price != null && record.amount != null ? { price: record.price, amount: record.amount } : record.price != null ? { price: record.price } : { amount: record.amount } });
+        return result.clientOrderId ? { orderIds: [...result], clientOrderId: result.clientOrderId } : result;
+      }
+      if (record.op === 'setLeverage') { await exchange.setLeverage(record.symbol, record.leverage); return []; }
+      if (record.op === 'setMarginType') { await exchange.changeMarginType(record.isolated, record.symbol); return []; }
+      if (record.op === 'setPositionMode') { await exchange.changePositionMode(record.hedged); return []; }
       if (record.op === 'cancelOrders') {
         await exchange.cancelOrders(store.orders.filter((order) => record.ids.includes(order.id)));
         return [];
@@ -432,11 +446,11 @@ async function runTs() {
         // Zero-size placeholders carry each market's leverage and margin type.
         positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
         settings: [...new Map(store.positions.filter((p) => p.leverage > 0).map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }])).values()],
-        fills: executions.map((f) => ({ id: f.id, symbol: f.symbol, side: f.side, amount: f.amount })),
+        fills: executions.map((f) => ({ id: f.orderId ?? f.id, symbol: f.symbol, side: f.side, amount: f.amount })),
       }
     : undefined;
   exchange.dispose();
-  return { frames, metrics, unserved: tape.unserved, store: snapshot, books: bookCopies, account, commands: tape.results };
+  return { frames, metrics, unserved: tape.unserved, requests: [...tape.requests].sort(), subscriptions: [...tape.subscriptions].sort(), store: snapshot, books: bookCopies, account, commands: tape.results };
 }
 
 /** The fields both implementations carry, in one shape. */
@@ -488,6 +502,8 @@ writeFileSync(
     impl: values.impl,
     frames: result.frames,
     unserved: result.unserved,
+    requests: result.requests,
+    subscriptions: result.subscriptions,
     metrics: result.metrics,
     markets: result.store.markets.map(marketFields),
     tickers: result.store.tickers.map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, t[f]])])),

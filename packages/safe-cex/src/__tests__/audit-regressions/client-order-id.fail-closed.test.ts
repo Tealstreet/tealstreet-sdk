@@ -35,6 +35,7 @@ import { OrderlyExchange } from '../../exchanges/orderly/orderly.exchange';
 import { ParadexExchange } from '../../exchanges/paradex/paradex.exchange';
 import { PhemexExchange } from '../../exchanges/phemex/phemex.exchange';
 import { PolymarketExchange } from '../../exchanges/polymarket/polymarket.exchange';
+import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { WeexExchange } from '../../exchanges/weex/weex.exchange';
 import { WOOXExchange } from '../../exchanges/woo/woo.exchange';
 import { DefaultStore } from '../../store/store.base';
@@ -88,6 +89,7 @@ const HONORING: Array<[string, ExchangeCtor]> = [
 // gets its own minted ID. So the shape-refusal cases above do not apply.
 const HONORING_EVERY_SHAPE: Array<[string, ExchangeCtor]> = [
   ['hyperliquid', HyperliquidExchange],
+  ['hyperliquid', RustEngineExchange],
   ['hyperliquidspot', HyperliquidSpotExchange],
 ];
 

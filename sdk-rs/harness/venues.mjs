@@ -3,6 +3,15 @@
 const root = '../../packages/safe-cex/src/exchanges';
 
 export const VENUES = {
+  hyperliquid: {
+    rust: 'hyperliquid',
+    ts: { module: `${root}/hyperliquid/hyperliquid.exchange.ts`, className: 'HyperliquidExchange', name: 'hyperliquid' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('l2Book.')).length >= count,
+    privateSocket: undefined,
+    publicOptions: { key: '' },
+    recordOptions: { publicDataOnly: true, key: '' },
+  },
   binance: {
     rust: 'binance',
     ts: { module: `${root}/binance/binance.exchange.ts`, className: 'BinanceExchange', name: 'binance' },

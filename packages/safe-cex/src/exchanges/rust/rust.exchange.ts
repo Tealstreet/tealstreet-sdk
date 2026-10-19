@@ -5,6 +5,7 @@ import type {
   ExchangeName,
   ExchangeOptions,
   Execution,
+  ExecutionsOptions,
   HistoricalOrder,
   IncomeHistoryOptions,
   IncomeRecord,
@@ -15,9 +16,9 @@ import type {
   PlaceOrderOpts,
   PublicTrade,
   UpdateOrderOpts,
-  ExecutionsOptions,
   ValidateAccountResult,
 } from '../../types';
+import type { ClientOrderLookup } from '../clientOrderId';
 
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
@@ -25,11 +26,14 @@ import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
 import { LogSeverity } from '../../types';
 import { BaseExchange } from '../base';
+import { withReplacementClientOrderId } from '../clientOrderId';
+import { hyperliquidClientOrderIdRule } from '../hyperliquid/hyperliquid.cloid';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   binancepm: 'binancepm',
+  hyperliquid: 'hyperliquid',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
@@ -64,6 +68,7 @@ const STORE_FLUSH_MS = 250;
  * reads the same store it always has. Trading methods are engine commands.
  */
 export class RustEngineExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = this.name === 'hyperliquid' ? hyperliquidClientOrderIdRule : undefined;
   private host?: EngineHostType;
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
@@ -83,13 +88,26 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   start = async () => {
+    if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
+      throw new Error('Rust Hyperliquid currently supports perpetual markets only');
+    }
     if (!loadWasmEngine) throw new Error('No wasm engine loader registered (setWasmEngineLoader)');
     const { WasmEngine } = await loadWasmEngine();
     if (this.isDisposed) return;
-    const { key, secret, testnet, publicDataOnly } = this.options;
+    const { key, secret, testnet, publicDataOnly, applicationId, vault, hyperliquidBuilder, enableSpotMarkets } =
+      this.options;
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
-      JSON.stringify({ key, secret, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly) }),
+      JSON.stringify({
+        key,
+        secret,
+        testnet: Boolean(testnet),
+        publicDataOnly: Boolean(publicDataOnly),
+        applicationId,
+        vault,
+        hyperliquidBuilder,
+        enableSpotMarkets: Boolean(enableSpotMarkets),
+      }),
     );
     this.host = new EngineHost(engine, engineTransport(), {
       onFrame: this.receiveFrame,
@@ -176,16 +194,30 @@ export class RustEngineExchange extends BaseExchange {
     return this.host.command(command) as Promise<T>;
   };
 
-  placeOrders = (orders: PlaceOrderOpts[]) => this.command<string[]>({ op: 'placeOrders', orders });
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (this.name === 'hyperliquid') this.assertCallerClientOrderIds(orders);
+    return this.command<string[]>({ op: 'placeOrders', orders });
+  };
 
-  placeOrder = (opts: PlaceOrderOpts) => this.placeOrders([opts]);
+  placeOrder = async (opts: PlaceOrderOpts) => {
+    if (this.name === 'hyperliquid') this.resolveCallerClientOrderId(opts);
+    return this.placeOrders([opts]);
+  };
 
-  updateOrder = ({ order, update }: UpdateOrderOpts) =>
-    this.command<string[]>({
+  findOrderByClientOrderId = (symbol: string, clientOrderId: string): Promise<ClientOrderLookup> =>
+    this.name === 'hyperliquid'
+      ? this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId })
+      : Promise.resolve({ found: false, definitive: false });
+
+  updateOrder = async ({ order, update }: UpdateOrderOpts) => {
+    const result = await this.command<string[] | { orderIds: string[]; clientOrderId: string }>({
       op: 'amendOrder',
       id: order.id,
-      ...('price' in update ? { price: update.price } : { amount: update.amount }),
+      ...('price' in update ? { price: update.price } : {}),
+      ...('amount' in update ? { amount: update.amount } : {}),
     });
+    return Array.isArray(result) ? result : withReplacementClientOrderId(result.orderIds, result.clientOrderId);
+  };
 
   cancelOrders = async (orders: Order[]) => {
     await this.command({ op: 'cancelOrders', ids: orders.map((order) => order.id) });
@@ -223,8 +255,7 @@ export class RustEngineExchange extends BaseExchange {
       to: opts.to,
     });
 
-  fetchHistoricalFills = (opts: ExecutionsOptions) =>
-    this.command<Execution[]>({ op: 'fetchFills', ...opts });
+  fetchHistoricalFills = (opts: ExecutionsOptions) => this.command<Execution[]>({ op: 'fetchFills', ...opts });
 
   fetchHistoricalOrders = (opts?: OrderHistoryOptions) =>
     this.command<HistoricalOrder[]>({

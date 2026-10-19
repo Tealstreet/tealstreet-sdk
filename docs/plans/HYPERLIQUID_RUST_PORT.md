@@ -86,7 +86,16 @@ sub-agent implementation review and fixes before every phase commit.
   Deliberate TS fixes in gate.mjs: execution tid identity and signed rebates,
   vault/range/all-symbol fills, fail-closed history errors and saturation,
   correct newest-fill limits, and exact income-kind filtering.
-- Phase 5: pending.
+- Phase 5 checkpoint: wasm/TS venue registration, forwarded wallet/vault/builder
+  options, perps-only validation, replacement cloid and lookup wrapper are in
+  place. `review_private` fixed promise rejection semantics; 269 targeted TS
+  checks pass. `review_public` audited body-sensitive replay, caller-ID
+  preservation, same-URL socket fanout and normalized outbound capture; seven
+  harness regressions pass. `review_trading` generated and replayed the
+  deterministic private tape against TS with zero unmatched requests. All 41
+  Rust tests, native/wasm lint, bans and fmt pass; repository lint passes.
+  Release wasm build, replay parity/performance and repository checks remain
+  in progress. No gate numbers claimed yet.
 
 Standing overseer authorization (2026-10-20): resolve future landing-branch
 merge conflicts while keeping its layout; never stash, use WIP commits.
