@@ -88,10 +88,18 @@ fn socket_health_retains_undefined_through_typed_notifications_and_payloads() {
     }
     assert_eq!(delivered.borrow().last(), Some(health));
     assert_eq!(
-        sanitize_for_post_message(&snapshot, false, false)
-            .socket_health
-            .as_ref(),
-        Some(health)
+        safe_cex_exchange::js_runtime::value::to_typed_preserving_undefined::<Native>(
+            &sanitize_for_post_message(
+                &safe_cex_exchange::js_runtime::value::from_typed(&snapshot).unwrap(),
+                false,
+                false
+            )
+            .unwrap()
+            .get("socketHealth")
+            .unwrap()
+        )
+        .unwrap(),
+        *health
     );
     assert_eq!(
         serde_json::to_value(health).unwrap(),

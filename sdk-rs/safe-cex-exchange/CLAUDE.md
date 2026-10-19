@@ -1935,6 +1935,8 @@ one-argument precision-count helper. The installed native/source tests cover
 123 scalar cases, UTF16 results, original value/throw identity, repeated property
 reads and precision operand coercion. The separate Realm implementation is
 removed only with the atomic Hyperliquid family consolidation.
+The nine native-input owner classifications and their actual installed/direct
+probes are reviewed individually in CCXT_NATIVE_INPUT_REVIEW.md.
 
 Operator numeric/default-hint conversion of ordinary objects and functions uses
 `Js::ordinary_to_primitive`, the same live hook traversal as direct value coercion.
@@ -2138,6 +2140,16 @@ engine-dependent. Array sort compacts defined values before TimSort, then writes
 undefined values and deletes remaining holes; four native/Node profiles pin the
 comparator schedule as well as sparse output.
 
+Store payload preparation consumes the canonical `Js` graph. Its shallow root
+spread preserves construction order, including dynamically appended fields, and
+keeps model rows intact instead of round-tripping them through shared DTOs.
+Only updateIds, loaded and socketHealth are cloned before returning; truthy info
+is stripped with object rest in source order. The scalar ticker baseline reads
+only the packed protocol's eleven fields; that protocol order is independent of
+a ticker object's own-key order. Native post capture owns the resulting graph
+without JSON projection. Typed worker processors convert their existing frame
+once at the preparer's input; there is no second payload algorithm.
+
 Direct calls of the canonical Object.prototype.toString referent use the same
 intrinsic object-tag implementation as ordinary coercion. The actual Aster
 private fill witness compares an object ID against its maintained TS constructor;
@@ -2163,3 +2175,8 @@ The 906-frame Phemex binding probe compares all 19 maintained-source callbacks.
 Private authentication recovery reports the supplied ExchangeError through the
 runtime exception sink before warning/reconnect, preserving its retained cause.
 See `PRIVATE_OPEN_REVIEW.md` for the bounded disposal/recovery differences.
+
+Native sockets with a separate callback owner use `install_native_handler_stats`
+to bind selected-key live counts into Base's record/pong/cleanup/reconciliation
+algorithm. They never copy callbacks into Base's registry or bypass the shared
+statistics writes. See [the owner census](NATIVE_HANDLER_STATS_REVIEW.md).

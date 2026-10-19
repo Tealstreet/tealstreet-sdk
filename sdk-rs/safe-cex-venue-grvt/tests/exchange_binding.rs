@@ -1219,7 +1219,26 @@ fn socket_candles_keep_source_aliases_time_units_and_cleanup() {
         assert_eq!(seen.borrow().len(), 1, "socket candle callback {name}");
         assert_eq!(case["candles"].as_array().unwrap().len(), 1);
         assert_candle_fields(&seen.borrow()[0], &case["candles"][0], name);
+        let core = h
+            .venue()
+            .base()
+            .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public)
+            .unwrap();
+        let key = "kline.CI_1_M.BTC_USDT_Perp";
+        assert_eq!(
+            core.message_handlers_stats.borrow()[key].had_handlers,
+            Some(true),
+            "actual {name} candle registry owns its statistics"
+        );
+        assert!(matches!(
+            core.message_handlers_stats.borrow()[key].last_callbacks_count,
+            safe_cex_num::PrototypeScalar::Number(1.0)
+        ));
         cleanup().unwrap();
+        assert!(
+            !core.message_handlers_stats.borrow().contains_key(key),
+            "native cleanup removes statistics"
+        );
         socket.events.borrow_mut().push_back(message(frame));
         h.runtime.pump();
         assert_eq!(
