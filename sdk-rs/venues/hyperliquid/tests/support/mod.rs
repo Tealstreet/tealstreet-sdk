@@ -34,11 +34,21 @@ pub fn ready_custom(
     builder: Option<safe_cex_venue_hyperliquid::Builder>,
     approval: &str,
 ) -> (Engine<Hyperliquid>, SocketId) {
+    ready_identity(mode, hip, builder, approval, None)
+}
+pub fn ready_identity(
+    mode: &str,
+    hip: bool,
+    builder: Option<safe_cex_venue_hyperliquid::Builder>,
+    approval: &str,
+    vault: Option<String>,
+) -> (Engine<Hyperliquid>, SocketId) {
     let mut e = Engine::new(Hyperliquid::new(Options {
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         builder,
+        vault,
         ..Options::default()
     }));
     e.start(1000.0);

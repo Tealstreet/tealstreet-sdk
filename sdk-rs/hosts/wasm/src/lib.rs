@@ -242,6 +242,12 @@ enum CommandIn {
         #[serde(default)]
         limit: Option<u32>,
     },
+    #[serde(rename_all = "camelCase")]
+    FindOrderByClientOrderId {
+        command: u32,
+        symbol: String,
+        client_order_id: String,
+    },
     FetchPublicTrades {
         command: u32,
         symbol: String,
@@ -265,6 +271,17 @@ enum CommandIn {
 impl From<CommandIn> for Command {
     fn from(command: CommandIn) -> Self {
         match command {
+            CommandIn::FindOrderByClientOrderId {
+                command,
+                symbol,
+                client_order_id,
+            } => Self::Query {
+                command,
+                query: Query::OrderByClientId {
+                    symbol,
+                    client_order_id,
+                },
+            },
             CommandIn::SubscribeOrderBook { symbol } => Self::SubscribeOrderBook { symbol },
             CommandIn::UnsubscribeOrderBook { symbol } => Self::UnsubscribeOrderBook { symbol },
             CommandIn::SubscribeCandles { symbol, interval } => {

@@ -70,6 +70,10 @@ const KNOWN_TS_FIXES = {
     // - Resolve queued leverage/margin settings when the step executes.
     // - Keep each HIP-3 bracket leg's own metadata in pending/optimistic state;
     //   TS assigns entry metadata to every returned oid in placeLimitOrder.
+    // - History keeps distinct tid executions and signed rebates, uses vault
+    //   identity and caller ranges, and rejects failed or saturated reads.
+    // - Execution limits sort raw milliseconds before serializing seconds.
+    // - Income honors the requested kind; fills support all-symbol queries.
     // The tape compares converged state: no account values are rewritten here.
   },
   binance(account, rustAccount) {

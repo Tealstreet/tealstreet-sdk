@@ -147,7 +147,7 @@ fn posted_candle_read_preserves_body_and_streams() {
     assert_eq!(
         req.body.as_deref(),
         Some(
-            r#"{"type":"candleSnapshot","req":{"coin":"BTC","interval":"1m","startTime":0.0,"endTime":60000.0}}"#
+            r#"{"type":"candleSnapshot","req":{"coin":"BTC","interval":"1m","startTime":0,"endTime":60000}}"#
         )
     );
     response(
@@ -238,7 +238,7 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
             }
         })
         .unwrap();
-    assert!(r.body.as_deref().unwrap().contains("\"startTime\":0.0"));
+    assert!(r.body.as_deref().unwrap().contains("\"startTime\":0"));
     response(
         &mut e,
         r.id,

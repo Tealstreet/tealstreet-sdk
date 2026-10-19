@@ -1,5 +1,6 @@
 //! Hyperliquid perpetuals: typed, deterministic state machines without I/O.
 mod account;
+mod history;
 pub mod sign;
 mod trading;
 mod wire;
@@ -34,6 +35,7 @@ pub struct Builder {
 pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
+    History(Box<history::Request>),
     Meta {
         dex: String,
         offset: u32,
@@ -555,6 +557,7 @@ impl Venue for Hyperliquid {
                 }
             }
             Pending::Trade(request) => self.trade_response(cx, request, Ok(response)),
+            Pending::History(request) => self.history_response(cx, *request, response),
             Pending::Meta {
                 dex,
                 offset,
@@ -639,6 +642,7 @@ impl Venue for Hyperliquid {
         match pending {
             Pending::Account(request) => self.account_item(_cx, request, item),
             Pending::Trade(_) => {}
+            Pending::History(request) => self.history_item(request, item),
             Pending::Meta {
                 dex,
                 instruments,
@@ -687,6 +691,7 @@ impl Venue for Hyperliquid {
                 }
             }
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
+            Pending::History(request) => self.history_failed(cx, *request, error),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Dexs { .. } => self.next_dex(cx),
             Pending::Meta {
@@ -792,26 +797,36 @@ impl Venue for Hyperliquid {
                 struct Req<'a> {
                     coin: &'a str,
                     interval: &'a str,
-                    start_time: f64,
-                    end_time: f64,
+                    start_time: u64,
+                    end_time: u64,
                 }
                 #[derive(Serialize)]
                 struct Read<'a> {
                     r#type: &'static str,
                     req: Req<'a>,
                 }
-                let end = to_ms.unwrap_or(cx.now);
+                let end = to_ms.unwrap_or(cx.now).floor();
                 let start = match (limit, from_ms) {
                     (None, Some(from)) => from,
                     _ => end - interval_ms(&interval) * f64::from(limit.unwrap_or(500).min(1500)),
                 };
+                if !start.is_finite()
+                    || !end.is_finite()
+                    || start > end
+                    || end > 9_007_199_254_740_991.0
+                    || end < 0.0
+                    || from_ms.is_some_and(|t| t < 0.0)
+                {
+                    cx.done(command, Err("Invalid candle time range".into()));
+                    return;
+                }
                 let body = serde_json::to_string(&Read {
                     r#type: "candleSnapshot",
                     req: Req {
                         coin,
                         interval: &interval,
-                        start_time: start,
-                        end_time: end,
+                        start_time: start.max(0.0).floor() as u64,
+                        end_time: end as u64,
                     },
                 })
                 .unwrap();
@@ -826,6 +841,7 @@ impl Venue for Hyperliquid {
                     },
                 );
             }
+            Command::Query { command, query } => self.start_query(cx, command, query),
             trade => self.trade_command(cx, trade),
         }
     }

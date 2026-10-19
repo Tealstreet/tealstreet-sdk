@@ -76,7 +76,16 @@ sub-agent implementation review and fixes before every phase commit.
   Deliberate TS fixes recorded in `gate.mjs`: malformed cancel acknowledgements
   fail closed, queued setting changes compose, and HIP-3 bracket pending rows
   retain each leg's metadata instead of assigning entry metadata to every oid.
-- Phase 4: pending.
+- Phase 4: implemented and reviewed by `review_public`; ten history regressions
+  pass (41 native tests total). Streamed reads return Binance JSON shapes;
+  cloid lookup is store-pure and never reports a definitive miss. Phase 5
+  enables its TS wrapper with venue registration. Review fixes include integer
+  wire times (live 422/200 control), whitespace numeric strings, inclusive-page
+  saturation errors, raw-millisecond fill ordering, and reserving response
+  weight before concurrent heavy reads. Queries share the typed read budget.
+  Deliberate TS fixes in gate.mjs: execution tid identity and signed rebates,
+  vault/range/all-symbol fills, fail-closed history errors and saturation,
+  correct newest-fill limits, and exact income-kind filtering.
 - Phase 5: pending.
 
 Standing overseer authorization (2026-10-20): resolve future landing-branch

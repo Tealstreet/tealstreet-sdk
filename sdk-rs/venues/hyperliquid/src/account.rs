@@ -27,9 +27,21 @@ pub enum Request {
     Builder,
     Fees,
 }
+enum ReadContinuation {
+    Account(Request),
+    History(Box<crate::history::Request>),
+}
+impl ReadContinuation {
+    fn pending(self) -> Pending {
+        match self {
+            Self::Account(r) => Pending::Account(r),
+            Self::History(r) => Pending::History(r),
+        }
+    }
+}
 struct QueuedRead {
     body: String,
-    request: Request,
+    request: ReadContinuation,
     streamed: bool,
     weight: u32,
 }
@@ -112,7 +124,11 @@ impl Hyperliquid {
         }
         let body = serde_json::to_string(&Read {
             r#type: kind,
-            user: self.user().unwrap_or_default(),
+            user: if kind == "userFees" {
+                self.options.key.as_deref().unwrap_or_default()
+            } else {
+                self.user().unwrap_or_default()
+            },
             dex,
         })
         .unwrap();
@@ -135,10 +151,37 @@ impl Hyperliquid {
         };
         self.account.reads.push_back(QueuedRead {
             body,
-            request,
+            request: ReadContinuation::Account(request),
             streamed,
             weight,
         });
+        self.pump_reads(cx);
+    }
+    pub(crate) fn history_read(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        body: String,
+        request: crate::history::Request,
+    ) {
+        let streamed = request.streamed();
+        let weight = if streamed { 120 } else { 2 };
+        self.account.reads.push_back(QueuedRead {
+            body,
+            request: ReadContinuation::History(Box::new(request)),
+            streamed,
+            weight,
+        });
+        self.pump_reads(cx);
+    }
+    pub(crate) fn history_weight(&mut self, cx: &mut Cx<'_, Pending>, rows: u32, reserved: bool) {
+        if cx.now - self.account.read_window >= 60_000.0 {
+            self.account.read_window = cx.now;
+            self.account.read_weight = 0;
+        }
+        if reserved {
+            self.account.read_weight = self.account.read_weight.saturating_sub(100);
+        }
+        self.account.read_weight = self.account.read_weight.saturating_add(rows.div_ceil(20));
         self.pump_reads(cx);
     }
     fn pump_reads(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -159,14 +202,14 @@ impl Hyperliquid {
             let read = self.account.reads.pop_front().unwrap();
             self.account.read_weight += read.weight;
             if read.streamed {
-                self.info(cx, read.body, ArrayAt::Root, Pending::Account(read.request));
+                self.info(cx, read.body, ArrayAt::Root, read.request.pending());
             } else {
                 cx.request(
                     Method::Post,
                     format!("{}/info", self.rest()),
                     vec![("Content-Type", "application/json".into())],
                     Some(read.body),
-                    Pending::Account(read.request),
+                    read.request.pending(),
                 );
             }
         }
@@ -210,6 +253,7 @@ impl Hyperliquid {
             })
             .collect::<Vec<_>>();
         cx.store.set_settings(settings);
+        self.account_read(cx, "userFees", None, Request::Fees, false);
         if self.options.public_data_only {
             return;
         }
@@ -239,7 +283,6 @@ impl Hyperliquid {
         self.account_read(cx, "userAbstraction", None, Request::Mode, false);
         self.account.mode_timer = Some(cx.set_timer(6000.0));
         self.check_builder(cx);
-        self.account_read(cx, "userFees", None, Request::Fees, false);
         self.refresh_account(cx);
         if !self.dex_names.is_empty() {
             self.account.sync_timer = Some(cx.set_timer(120_000.0));

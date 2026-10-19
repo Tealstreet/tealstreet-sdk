@@ -11,7 +11,7 @@ pub fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     }
     let n = match N::deserialize(d)? {
         N::Number(n) => Ok(n),
-        N::Text(s) => s.parse().map_err(serde::de::Error::custom),
+        N::Text(s) => s.trim().parse().map_err(serde::de::Error::custom),
     }?;
     if n.is_finite() {
         Ok(n)
@@ -268,6 +268,8 @@ pub struct OrderRow<'a> {
     pub tif: Cow<'a, str>,
     #[serde(default)]
     pub is_trigger: bool,
+    #[serde(default)]
+    pub timestamp: f64,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -276,6 +278,8 @@ pub struct OrderUpdate<'a> {
     pub order: OrderRow<'a>,
     #[serde(borrow)]
     pub status: Cow<'a, str>,
+    #[serde(default)]
+    pub status_timestamp: f64,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -299,6 +303,12 @@ pub struct FillRow<'a> {
     pub closed_pnl: f64,
     #[serde(default, deserialize_with = "number")]
     pub fee: f64,
+    #[serde(default, borrow)]
+    pub fee_token: Cow<'a, str>,
+    #[serde(default)]
+    pub crossed: bool,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub builder_fee: Option<f64>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
