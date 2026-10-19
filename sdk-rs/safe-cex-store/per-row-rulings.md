@@ -61,5 +61,136 @@ Three separately compiled corruptions must fail the named native comparison:
 count capture-only requests, skip counter writes, or notify Store subscribers
 while recording. Byte-exact restoration must pass after each control.
 
-Nine of the 27 Store rows are reconciled here. The other 18 Store rows and the
+## Request-start and socket auth diagnostics
+
+| Census row | Verdict | Production observation and reason |
+| --- | --- | --- |
+| 455 `markRestRequestStart` | FIX | Both native Axios factories omitted the source request-start property before terminal dispatch. They now stamp the original native config after request accounting, using integer Date.now milliseconds. A read-only timestamp keeps its prior value and does not fail the request, matching the source telemetry catch. The typed diagnostic adapter is not used to project the live config. |
+| 451 `isAuthOperationObject` | ACCEPT | The actual socket diagnostic send/receive paths parse a wire string into own JSON data before testing the four operation fields. With the stock object prototype none of those four keys is inherited, and wire JSON cannot encode getters or custom prototypes. All source auth decisions survive; the core redactor now calls the existing shared predicate instead of maintaining a duplicate condition. This does not authorize arbitrary-object projection elsewhere. |
+
+The native `js_runtime::audit_request_start_stamp_reaches_adapter_and_preserves_best_effort_writes`
+witness compares both real factory paths with maintained TS and installed Axios
+across 32 profiles: four epochs and fresh, writable, read-only and own-undefined
+read-only properties. It observes the timestamp before dispatch and on the
+original interceptor config, exact binary64 bits, one send and interceptor order.
+The compiled baseline fails on the absent property before the production repair.
+The source adapter receives Axios's flattened config; the test does not claim
+adapter/config identity or arbitrary accessor traversal equivalence.
+
+`websocket::tests::audit_auth_operation_own_data_reaches_real_socket_diagnostics`
+compares 44 maintained-source profiles through both actual BaseWebSocket emitters.
+All four operation keys cover auth/non-auth strings, absent-string shapes and
+nested argument redaction. The 88 emitted channel/message pairs preserve the
+public sibling and source auth scope. The baseline already passes, supporting
+ACCEPT rather than claiming a repaired predicate decision.
+
+Four separately compiled controls remove the routed timestamp, remove the direct
+timestamp, propagate a read-only telemetry error, or disable the shared auth
+predicate. Each fails its named binding assertion, and byte-exact restoration of
+the production file passes before the next control.
+
+
+
+## Compressed Blob input
+
+| Census row | Verdict | Production observation and reason |
+| --- | --- | --- |
+| 445 `readBlob` | ACCEPT | The real Bitrue binary socket path invokes the shared inflater through the native Blob/arrayBuffer binding, then executes its ordinary parser and ping handler. Maintained TS widens every inflated byte to a single U+0000..U+00FF code unit; Rust does the same. UTF-8 multibyte text therefore produces the same byte-widened text on both sides, rather than a Rust-only decoding loss. JSON surrogate escapes are still interpreted by the subsequent parser. The typed byte-future capability does not change the observed socket replies. |
+
+The existing Bitrue `exchange_binding` target includes
+`audit_compressed_blob_bytes_reach_real_socket_pongs_without_utf8_decoding`.
+It starts the actual exchange with its canonical Store and production public
+socket. Its 28 profiles compare terminal pong UTF-16 units against the maintained
+TS `onMessage`, `handlePingEvent` and `readBlob` bodies with installed pako and
+Node Blob. Seven payloads cover ASCII, multibyte UTF-8, every high byte, escaped
+lone surrogates, escaped controls, negative zero and an unsafe integer. Each runs
+as gzip, zlib, concatenated gzip members and zero-padded gzip. All replies are
+observed after the actual async Blob continuation; no inflater is injected.
+
+The baseline already passes, so this is an ACCEPT verdict. Separate compiled
+controls replace byte widening with UTF-8 decoding or paired-byte reinterpretation.
+Each must fail this actual socket assertion; byte-exact restoration must pass.
+This verdict covers the compressed binary input boundary, not arbitrary Blob
+subclasses, malformed-stream error wording or other socket handler policies.
+
+## Proxy and signing config markers
+
+| Census row | Verdict | Production observation and reason |
+| --- | --- | --- |
+| 453 `markRestProxyHeader` | FIX | The actual native Tealstreet host discarded the proxy marker before returning its authorized config. It now retains `present`/`empty` as a config extension, separate from HTTP headers. Applying that telemetry extension to a read-only native property is best-effort, so a refused diagnostic write cannot reject HTTP. |
+| 456 `markRestSigned` | FIX | Remote signing retained an internal duration but omitted the source's returned config properties. Both signing profiles now publish duration and signed-at milliseconds after the signed-header merge, and publish signature age only for a finite positive venue timestamp. Skipped or refused signing never fabricates these properties. |
+| 457 `stampSigned` | FIX | The same native signing path preserves an existing age property when the merged timestamp is absent, invalid, zero or infinite; a valid future timestamp produces a negative age. Stamps reach the selected terminal adapter and survive both successful response and network-rejection configs. The lower typed helper's existing per-field sealed-write/partial-write tests remain unchanged. |
+
+The existing `safe-cex-exchange/tests/js_runtime.rs` target runs
+`audit_native_proxy_marker_survives_authorization_and_header_replacement`
+and `audit_native_remote_signing_stamps_terminal_and_rejected_configs`.
+They execute the real native transport/factory, canonical Store, native Promise
+queue and remote signing adapter. Only token/signing/terminal hosts are injected;
+no requests leave the process. The maintained TS transport and signing adapter
+run with installed Axios in `js_http_factory_source.cjs`.
+
+The 36 proxy profiles cover OKX/GRVT/MEXC, empty/present tokens, replacement of
+all outgoing headers, and ordinary/read-only/read-only-undefined marker slots.
+Observations inspect exact marker presence and binary64 bits before JSON, actual
+authorization headers, one terminal call and absence of marker headers. The 48
+signing profiles cover six timestamp values, zero/17ms signer latency, ordinary
+success, skipped signing, network rejection and signer refusal. They inspect
+terminal and returned config presence/bits, preserved negative zero, signer-call
+counts and original success/failure settlement.
+
+Both named native tests first compiled RED on the omitted properties. The
+read-only proxy profile separately compiled RED because its diagnostic write
+rejected HTTP; the repaired path preserves source settlement. The final source
+comparison passes after the production repairs. Compiled controls separately
+remove proxy stamping, propagate read-only marker failures, and omit signing
+stamps; each must fail its named binding assertion and pass after exact restore.
+
+This batch does not classify the separate `readConfigNumber` and `proxyHeaderOf`
+rows or claim arbitrary executable config properties can cross the owned REST
+transport boundary. The public lower typed diagnostics API keeps its explicit
+admission profile; live request config markers are not projected through it.
+
+Fifteen of the 27 Store rows are reconciled here. The other 12 Store rows and the
 separate num row remain assigned for later batches.
+
+
+## REST diagnostic consumers
+
+| Census row | Verdict | Production observation and reason |
+| --- | --- | --- |
+| 452 `readConfigNumber` | FIX | Both actual native Axios factories omitted the call into the shared REST diagnostic state. Native request config now supplies only actual numeric values to the existing helper, retaining NaN, infinities and negative zero without coercing text, booleans or null. Installed Axios materializes interceptor accessors before dispatch; the native path now does the same, so a throwing accessor prevents the terminal request. |
+| 454 `proxyHeaderOf` | FIX | Failed native requests never produced a shared diagnostic sample, so the final proxy-header classification was absent. The same outcome bridge now retains native header accessors and passes the marker plus actual outgoing headers to the existing classifier. It distinguishes bearer, malformed, absent and unmarked requests without placing credentials in samples. |
+
+`safe-cex-exchange/tests/js_runtime.rs::audit_native_http_consumers_publish_config_numbers_and_proxy_classification`
+executes both production factories with NativeRuntime, their canonical Store,
+and the Rust REST host/terminal adapter. The maintained factory, diagnostics and
+error enhancer execute with installed Axios in `js_http_factory_source.cjs`.
+The 240 profiles cross success/failure, both factories, four authorization shapes
+and 15 numeric/property profiles. They include own/hidden/inherited accessors,
+an inherited null-prototype boundary, mutable data, nonextensible config,
+throwing accessors, non-number values, non-finite numbers and signed zero.
+
+Observations compare request/ok/failure counts, latency bits, final failure
+samples, getter effects, actual sends and settlement. Sample checks include
+proxy classification, sign bits, path/endpoint, response status/body kind,
+allowlisted response headers and error name/message. Unread response fields
+retain non-finite/undefined values without a whole-response JSON projection.
+The direct factory records the original error before enhancement; the routed
+factory records it after enhancement, matching their distinct maintained bodies.
+
+The original compiled test fails because the real request never populates the
+shared diagnostic cache. The expanded sample comparison separately fails on
+the direct factory's premature enhancement. Independent compiled controls remove
+diagnostic publication, coerce numeric text, bypass final-header lookup, or skip
+Axios config materialization; exact source restoration must pass after each.
+
+The lower crate remains the sole owner of diagnostic state and algorithms.
+This verdict covers actual terminal HTTP configs and headers; it does not claim
+arbitrary post-adapter accessor mutation or remove the separately documented
+UTF-8 diagnostic-output and slicing residuals. Safe config materialization follows
+the installed Axios 1.20.0 dependency, including its excluded unsafe keys and
+shared/terminal prototype boundary; only the runtime's supported Symbol.iterator
+slot is modeled.
+
+Seventeen of the 27 Store rows are now reconciled. Ten Store rows and the
+separate num row remain assigned.

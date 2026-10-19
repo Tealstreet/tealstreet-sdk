@@ -21,6 +21,7 @@ export async function streamRelay({
   mode,
   tape,
   records,
+  capturedSockets = [],
   openUpstream = (url) => new WebSocket(url, { handshakeTimeout: 15000, perMessageDeflate: false, autoPong: false }),
 }) {
   const certificateFor = certificateCache(directory, ca);
@@ -28,7 +29,8 @@ export async function streamRelay({
     sockets = new Set(),
     upstreams = new Set(),
     peers = new Map();
-  const occurrences = new Map();
+  const occurrences = new Map(),
+    boundReplayConnections = new Set();
   let frozen = false,
     cancelled = false;
   const misses = [];
@@ -71,12 +73,14 @@ export async function streamRelay({
       const key = streamKey(url),
         occurrence = occurrences.get(key) ?? 0;
       occurrences.set(key, occurrence + 1);
-      const connection =
+      let connection =
         mode === 'capture'
           ? { id: tape.connections.length, key, occurrence, url: url.href, openedAtMs: elapsed() }
           : tape.connections.find((c) => c.key === key && c.occurrence === occurrence);
+      const duplicateReplay = mode === 'replay' && tape.connections.filter((c) => c.key === key).length > 1;
+      if (duplicateReplay) connection = undefined;
       if (mode === 'capture') tape.connections.push(connection);
-      const record = { mode, key, occurrence, sent: [], delivered: 0, dropped: 0 };
+      const record = { mode, key, occurrence, networkOccurrence: occurrence, sent: [], delivered: 0, dropped: 0 };
       records.push(record);
       // Replay must never synthesize an extra parser-facing pong. In capture,
       // protocol ping/pong travels end-to-end and is recorded on the way back.
@@ -85,16 +89,41 @@ export async function streamRelay({
         peer.on('error', (error) => {
           if (!cancelled) record.failure = error.message;
         });
-        if (!connection) {
+        if (!connection && !duplicateReplay) {
           record.failure = 'No matching captured socket';
           peer.close();
           return;
         }
-        peers.set(connection.id, peer);
-        peer.on('close', () => peers.delete(connection.id));
-        peer.on('message', (data, binary) =>
-          record.sent.push({ base64: data.toString('base64'), binary, atMs: elapsed() }),
-        );
+        const bindPeer = () => {
+          peers.set(connection.id, peer);
+          record.occurrence = connection.occurrence;
+          if (mode === 'replay') boundReplayConnections.add(connection.id);
+        };
+        if (connection) bindPeer();
+        peer.on('close', () => {
+          if (connection) peers.delete(connection.id);
+        });
+        peer.on('message', (data, binary) => {
+          const base64 = data.toString('base64');
+          record.sent.push({ base64, binary, atMs: elapsed() });
+          if (!connection && duplicateReplay) {
+            // Accept order is not logical identity when a venue opens several
+            // sockets at one URL. Match exact captured subscription bytes.
+            const matches = tape.connections.filter((candidate) => {
+              if (candidate.key !== key || boundReplayConnections.has(candidate.id)) return false;
+              const sent = capturedSockets.find((r) => r.key === key && r.occurrence === candidate.occurrence)
+                ?.sent?.[0];
+              return sent?.base64 === base64 && sent.binary === binary;
+            });
+            if (matches.length !== 1) {
+              record.failure = `Duplicate public dial has ${matches.length} exact initial-send matches`;
+              peer.close();
+              return;
+            }
+            connection = matches[0];
+            bindPeer();
+          }
+        });
         if (mode !== 'capture') {
           record.status = 101;
           return;
@@ -182,7 +211,8 @@ export async function streamRelay({
     async ready(timeoutMs = 10000) {
       const until = Date.now() + timeoutMs;
       while (true) {
-        const first = tape.connections.filter((c) => c.occurrence === 0);
+        const duplicateUrls = new Set(tape.connections.map((c) => c.key)).size !== tape.connections.length;
+        const first = duplicateUrls ? tape.connections : tape.connections.filter((c) => c.occurrence === 0);
         if (first.length && first.every((c) => peers.get(c.id)?.readyState === WebSocket.OPEN)) return true;
         if (Date.now() >= until) return false;
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -249,6 +279,17 @@ export async function streamRelay({
         tape.connections.map((c) => [`${c.key}#${c.occurrence}`, { message: 0, ping: 0, pong: 0, close: 0 }]),
       );
       const sent = [];
+      const duplicateUrls = new Set(tape.connections.map((c) => c.key)).size !== tape.connections.length;
+      const parserBindings = new Map(),
+        transportBindings = new Map();
+      const applicationDrained = (value, closeCounts) =>
+        duplicateUrls
+          ? verifyMappedDrain(tape, expected, value, closeCounts, parserBindings)
+          : verifyDrain(tape, expected, value, closeCounts);
+      const transportDrained = (value, counts) =>
+        duplicateUrls
+          ? verifyMappedTransportDrain(tape, value, counts, transportBindings)
+          : verifyTransportDrain(tape, value, counts);
       let lastReceipt;
       for (const [index, frame] of tape.frames.entries()) {
         progress.frameIndex = index;
@@ -273,8 +314,8 @@ export async function streamRelay({
           lastReceipt = await receipt();
           progress.receipt = lastReceipt;
           if (
-            verifyDrain(tape, expected, lastReceipt, closes) &&
-            (!lastReceipt.transport || verifyTransportDrain(tape, lastReceipt, transportExpected))
+            applicationDrained(lastReceipt, closes) &&
+            (!lastReceipt.transport || transportDrained(lastReceipt, transportExpected))
           )
             break;
           if (Date.now() >= deadline) throw new Error(`Native/TS processing drain timeout at frame ${index}`);
@@ -284,8 +325,8 @@ export async function streamRelay({
       }
       await advance(tape.durationMs + 350);
       lastReceipt = await receipt();
-      const verified = verifyDrain(tape, expected, lastReceipt);
-      const nativeTransportVerified = verifyTransportDrain(tape, lastReceipt);
+      const verified = applicationDrained(lastReceipt, closeCounts(tape));
+      const nativeTransportVerified = transportDrained(lastReceipt, transportCounts(tape));
       return {
         delivered: sent.length,
         dropped: 0,
@@ -293,6 +334,14 @@ export async function streamRelay({
         expectedInputHash: hash(JSON.stringify(tape.frames)),
         processed: lastReceipt,
         applicationDrainVerified: verified,
+        ...(duplicateUrls
+          ? {
+              dialBindings: {
+                parser: Object.fromEntries(parserBindings),
+                transport: Object.fromEntries(transportBindings),
+              },
+            }
+          : {}),
         nativeTransportVerified,
         // Ping/pong control bytes are delivered over TLS but terminate below the
         // venue parser. They are deliberately excluded from application counts.
@@ -377,4 +426,84 @@ function closeCounts(tape) {
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return counts;
+}
+
+function bindExactCounters(tape, rows, wantedCounters, bindings) {
+  if (rows.length !== tape.connections.length) return false;
+  const candidate = new Map(bindings),
+    used = new Set();
+  const identity = (connection) => `${connection.key}#${connection.occurrence}`;
+  const same = (a, b) => a.length === b.length && a.every((n, i) => Number.isSafeInteger(n) && n >= 0 && n === b[i]);
+  for (const [key, bound] of candidate) {
+    const row = rows[bound.index],
+      connection = tape.connections.find((c) => identity(c) === key);
+    if (
+      !row ||
+      !connection ||
+      row.key !== connection.key ||
+      row.generation !== bound.generation ||
+      !same(row.counts, wantedCounters.get(key))
+    )
+      return false;
+    if (used.has(bound.index)) return false;
+    used.add(bound.index);
+  }
+  for (const connection of tape.connections) {
+    const key = identity(connection),
+      wanted = wantedCounters.get(key);
+    if (candidate.has(key) || wanted.every((n) => n === 0)) continue;
+    const matches = rows.flatMap((row, index) =>
+      !used.has(index) && row.key === connection.key && same(row.counts, wanted) ? [index] : [],
+    );
+    if (matches.length !== 1) return false;
+    const index = matches[0];
+    candidate.set(key, { index, generation: rows[index].generation });
+    used.add(index);
+  }
+  // An unbound zero vector carries no identity claim. Extra work on any such
+  // socket fails, rather than being attributed by summing across the URL.
+  if (rows.some((row, index) => !used.has(index) && row.counts.some((n) => n !== 0))) return false;
+  if (rows.some((row) => !tape.connections.some((c) => c.key === row.key))) return false;
+  bindings.clear();
+  for (const [key, value] of candidate) bindings.set(key, value);
+  return true;
+}
+
+export function verifyMappedDrain(tape, expected, receipt, expectedCloses, bindings) {
+  if (!receipt?.sockets || receipt.pendingJobs !== 0) return false;
+  if (receipt.transport && !verifyRawTaskDrain(receipt.rawTasks)) return false;
+  if (
+    receipt.sockets.some(
+      (s) => s.consumed !== s.processed || s.errors !== 0 || (s.closeConsumed ?? 0) !== (s.closeProcessed ?? 0),
+    )
+  )
+    return false;
+  const wanted = new Map(
+    tape.connections.map((c) => {
+      const key = `${c.key}#${c.occurrence}`;
+      return [key, [expected.get(key) ?? 0, expectedCloses.get(key) ?? 0]];
+    }),
+  );
+  return bindExactCounters(
+    tape,
+    receipt.sockets.map((s) => ({
+      key: streamKey(s.url),
+      generation: s.generation,
+      counts: [s.processed, s.closeProcessed ?? 0],
+    })),
+    wanted,
+    bindings,
+  );
+}
+
+export function verifyMappedTransportDrain(tape, receipt, expected, bindings) {
+  if (!receipt?.transport) return false;
+  const fields = ['message', 'ping', 'pong', 'close'];
+  const wanted = new Map([...expected].map(([key, counts]) => [key, fields.map((kind) => counts[kind])]));
+  return bindExactCounters(
+    tape,
+    receipt.transport.map((s) => ({ key: streamKey(s.url), counts: fields.map((kind) => s.counts[kind]) })),
+    wanted,
+    bindings,
+  );
 }

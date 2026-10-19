@@ -26,7 +26,7 @@ it introduces no persistent re-entry latch and a later start can proceed.
 Cancellation of the waiter does not promise cancellation at the remote server:
 the host must release its REST future when the owned task is cancelled.
 
-`WsProtocol` supplies venue ping, connect/subscribe, open, and message callbacks, plus recovery/watchdog/resync overrides. Asynchronous open callbacks run independently of the event consumer, so messages can resolve an awaited authentication acknowledgement. Private open handlers can use `authenticate_and_subscribe(auth_future, subscribe_callback)` to await successful authentication, stop after disposal, and refuse subscription on failure. The authentication future itself must honor disposal around its awaits and sends. Its `Ok(())` must mean the venue's required authentication stage completed.
+`WsProtocol` supplies venue ping, connect/subscribe, open, and message callbacks, plus recovery/watchdog/resync overrides. Asynchronous open callbacks run independently of the event consumer, so messages can resolve an awaited authentication acknowledgement. The private helper reports the original authentication error through the runtime exception sink before its existing warning/reconnect recovery; it does not replace the cause. The exact Bybit disposal and Paradex/Orderly recovery ACCEPTs are recorded in PRIVATE_OPEN_REVIEW.md. Private open handlers can use `authenticate_and_subscribe(auth_future, subscribe_callback)` to await successful authentication, stop after disposal, and refuse subscription on failure. The authentication future itself must honor disposal around its awaits and sends. Its `Ok(())` must mean the venue's required authentication stage completed.
 
 `WsRuntime` extends the existing local `ExchangeRuntime`, whose required monotonic clock also serves generic exchange timers, with a resolved transport provider, the actual `TunnelHost`, and ordinary/header-capable socket dialing. Its two minimum reconnect delays are separate stable configured values, rather than newly sampled jitter on each getter call: `min_reconnection_delay_ms` represents SDK tuning (1000 + random * 2000), and `library_min_reconnection_delay_ms` represents RWS defaults (1000 + random * 4000). The supplied provider must represent the account's selected transport. Host futures may retain browser handles and need not be `Send`.
 
@@ -133,6 +133,15 @@ and wakes its shared driver for cleanup. See the Bitget EAGER_DIAL_AUDIT.md for
 real Bitget/Backpack prefix probes and independent production controls. A native
 held handshake still needs a CONNECTING handle; that separate finding remains
 open and is not implied fixed by eager startup.
+
+MessageHandler borrows the canonical native `Js` carrier. A venue restores its
+retained parser input once for each delivered frame and shares that same graph
+across its existing handler lists. Earlier callbacks can mutate properties seen
+by later callbacks; own undefined, UTF-16 keys/strings, signed zero and nonfinite
+numbers do not pass through a JSON projection. There is one handler ABI and one
+registry. Typed projection occurs only at a reached output field. Binance retains
+its callback identity bridges, with original callback failures carried through
+the existing opaque error origin only on the error path.
 
 The native plain socket returns its stable host handle in CONNECTING before the
 HTTP upgrade settles. Constructor admission (URL, protocol/header parsing and TLS

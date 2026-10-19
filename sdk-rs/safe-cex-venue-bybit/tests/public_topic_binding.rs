@@ -364,41 +364,123 @@ fn production_public_callbacks_match_twenty_four_actual_source_compositions() {
 
 #[test]
 fn disposal_drops_pending_public_subscription_tails_and_weak_venue_references() {
-    for phase in ["open", "markets"] {
-        let (h, socket) = setup(ExchangeName::Bybitspot, "spot");
+    for (name, category) in [
+        (ExchangeName::Bybitspot, "spot"),
+        (ExchangeName::Bybitinverse, "inverse"),
+    ] {
+        for phase in ["open", "markets"] {
+            let (h, socket) = setup(name.clone(), category);
+            if category == "inverse" {
+                let inverse_markets: Vec<_> = (0..14)
+                    .map(|i| market(&format!("I{i}USD"), "USD", false))
+                    .collect();
+                configure(&h, &inverse_markets);
+            }
+            socket.connect_and_subscribe(false).unwrap();
+            h.runtime.pump();
+            if phase == "markets" {
+                h.advance(100.);
+                let added: Vec<_> = (0..23)
+                    .map(|i| market(&format!("C{i}"), "USDT", false))
+                    .collect();
+                h.venue()
+                    .base()
+                    .emit(
+                        "markets:changed",
+                        safe_cex_exchange::js_runtime::value::from_json(
+                            &json!({"added":added,"removed":[]}),
+                        ),
+                    )
+                    .unwrap();
+                assert_eq!(subscriptions(&h).last().unwrap().len(), 10);
+            } else {
+                assert_eq!(subscriptions(&h).len(), 1);
+                assert_eq!(subscriptions(&h)[0].len(), 10);
+                assert_eq!(wire_frames(&h)[1], json!({"op":"ping"}));
+            }
+            let before = wire_frames(&h);
+            socket.dispose();
+            h.advance(200.);
+            assert_eq!(wire_frames(&h), before, "{phase} pending tail cancelled");
+            assert!(h.runtime.reports.borrow().is_empty());
+            let venue = std::rc::Rc::downgrade(&h.exchange);
+            drop(h);
+            assert!(
+                venue.upgrade().is_none(),
+                "{phase} listener/tail retains no venue"
+            );
+            drop(socket);
+        }
+    }
+}
+
+#[test]
+fn market_additions_wait_five_ms_between_real_socket_chunks() {
+    let source = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/public-market-delay-fixtures.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let profiles: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        profiles.len(),
+        2,
+        "both maintained Spot/Inverse methods execute"
+    );
+    for (name, category) in [
+        (ExchangeName::Bybitspot, "spot"),
+        (ExchangeName::Bybitinverse, "inverse"),
+    ] {
+        let (h, socket) = setup(name.clone(), category);
         socket.connect_and_subscribe(false).unwrap();
         h.runtime.pump();
-        if phase == "markets" {
-            h.advance(100.);
-            let added: Vec<_> = (0..23)
-                .map(|i| market(&format!("C{i}"), "USDT", false))
-                .collect();
-            h.venue()
-                .base()
-                .emit(
-                    "markets:changed",
-                    safe_cex_exchange::js_runtime::value::from_json(
-                        &json!({"added":added,"removed":[]}),
-                    ),
-                )
-                .unwrap();
-            assert_eq!(subscriptions(&h).last().unwrap().len(), 10);
-        } else {
-            assert_eq!(subscriptions(&h).len(), 1);
-            assert_eq!(subscriptions(&h)[0].len(), 10);
-            assert_eq!(wire_frames(&h)[1], json!({"op":"ping"}));
+        h.advance(100.);
+        h.advance(100.);
+        let initial = subscriptions(&h).len();
+        let added: Vec<_> = (0..23)
+            .map(|i| market(&format!("DELAY{i}"), "USD", false))
+            .collect();
+        h.venue()
+            .base()
+            .emit(
+                "markets:changed",
+                safe_cex_exchange::js_runtime::value::from_json(
+                    &json!({"added":added,"removed":[]}),
+                ),
+            )
+            .unwrap();
+        let chunks = |count: usize| {
+            let actual = subscriptions(&h);
+            assert_eq!(
+                actual.len(),
+                initial + count,
+                "five-ms market boundary: {name:?}/{count}"
+            );
+            let expected: Vec<_> = (0..23).map(|i| format!("tickers.DELAY{i}")).collect();
+            for (actual, expected) in actual[initial..].iter().zip(expected.chunks(10)) {
+                assert_eq!(actual, expected, "original ordered topic chunks: {name:?}");
+            }
+        };
+        chunks(1); // The first send is the source's synchronous prefix.
+        h.runtime.pump();
+        chunks(1); // Polling the continuation must not advance the clock.
+        for expected in [2, 3] {
+            h.runtime.now.set(h.runtime.now.get() + 4.);
+            h.runtime.pump();
+            chunks(expected - 1);
+            h.runtime.now.set(h.runtime.now.get() + 1.);
+            h.runtime.pump();
+            chunks(expected);
         }
-        let before = wire_frames(&h);
-        socket.dispose();
-        h.advance(200.);
-        assert_eq!(wire_frames(&h), before, "{phase} pending tail cancelled");
         assert!(h.runtime.reports.borrow().is_empty());
-        let venue = std::rc::Rc::downgrade(&h.exchange);
-        drop(h);
-        assert!(
-            venue.upgrade().is_none(),
-            "{phase} listener/tail retains no venue"
-        );
-        drop(socket);
+        socket.dispose();
+        h.venue().base().dispose().unwrap();
     }
 }

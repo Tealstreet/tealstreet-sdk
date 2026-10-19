@@ -9,6 +9,7 @@ use crate::{
     signing::{sign_l1_action, truthy},
     types::BASE_URLS,
 };
+use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_transport::{
     RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse, TransportError,
     TransportFuture,
@@ -16,7 +17,7 @@ use safe_cex_transport::{
 };
 use safe_cex_types::ExchangeOptions;
 use serde_json::Value;
-use std::{rc::Rc, sync::Arc};
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 const RELAY_SIGNABLE_ACTION_TYPES: &[&str] = &[
     "order",
@@ -252,11 +253,12 @@ impl ApiClient {
         );
         Ok(request)
     }
-    pub fn prepare_request(
-        &self,
+    pub fn prepare_request<'a>(
+        &'a self,
         mut request: RestRequest,
         capture: bool,
-    ) -> TransportFuture<'_, RestRequest> {
+        emit: &'a dyn Fn(&str) -> Result<(), TransportError>,
+    ) -> TransportFuture<'a, RestRequest> {
         Box::pin(async move {
             let data = request_data(&request)?.unwrap_or(Value::Null);
             // Axios executes request interceptors in reverse registration order.
@@ -301,9 +303,9 @@ impl ApiClient {
                 .map_err(TransportError::JavaScript)?
                 .unwrap_or_default();
             if !RELAY_SIGNABLE_ACTION_TYPES.contains(&action_type.as_str()) {
-                (self.emit)(&format!(
+                emit(&format!(
                     "Refusing to sign unexpected Hyperliquid action \"{action_type}\""
-                ));
+                ))?;
                 return Ok(request);
             }
             // Source evaluates createWalletFromPrivateKey before signL1Action.
@@ -407,11 +409,40 @@ impl ApiClient {
         }
         Ok(response)
     }
-    pub fn execute(&self, request: RestRequest, capture: bool) -> RestFuture<'_, RestResponse> {
+    pub(crate) async fn execute_with_signing_emitter(
+        &self,
+        request: RestRequest,
+        capture: bool,
+        emit: &dyn Fn(&str) -> Result<(), ExchangeError>,
+    ) -> Result<RestResponse, ExchangeError> {
+        let callback_failure = RefCell::new(None);
+        let result = self
+            .execute(request, capture, &|message| {
+                emit(message).map_err(|error| {
+                    let marker = TransportError::Host(error.message.clone());
+                    *callback_failure.borrow_mut() = Some(error);
+                    marker
+                })
+            })
+            .await;
+        // Transport errors require Send + Sync; the original native cause is local.
+        // Keep it within this execution, then return it before projecting failures.
+        match callback_failure.into_inner() {
+            Some(error) => Err(error),
+            None => result.map_err(ExchangeError::from),
+        }
+    }
+    pub fn execute<'a>(
+        &'a self,
+        request: RestRequest,
+        capture: bool,
+        emit: &'a dyn Fn(&str) -> Result<(), TransportError>,
+    ) -> RestFuture<'a, RestResponse> {
         Box::pin(async move {
             let adapter = Attempt {
                 client: self,
                 capture,
+                emit,
             };
             // ts-bug: isHyperliquidRead compares only the relative path before ?, so absolute /exchange URLs retry.
             match ReadClassification::Hyperliquid.classify(request) {
@@ -433,6 +464,7 @@ impl ApiClient {
 struct Attempt<'a> {
     client: &'a ApiClient,
     capture: bool,
+    emit: &'a dyn Fn(&str) -> Result<(), TransportError>,
 }
 impl RestAdapter for Attempt<'_> {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
@@ -450,7 +482,7 @@ impl RestAdapter for Attempt<'_> {
             let original = request.clone();
             let request = self
                 .client
-                .prepare_request(request, self.capture)
+                .prepare_request(request, self.capture, self.emit)
                 .await
                 .map_err(|error| RestFailure::from_transport(error, original))?;
             let execution = self

@@ -398,6 +398,24 @@ fn signature_refusal_replays_serialized_write_once() {
         done(&h);
     }
 }
+fn enhanced_http_messages() -> &'static Value {
+    static SOURCE: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    SOURCE.get_or_init(|| {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../safe-cex-exchange/tests/http-error-source.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    })
+}
 #[test]
 fn second_signature_refusal_is_not_replayed() {
     let h = fixture();
@@ -417,7 +435,10 @@ fn second_signature_refusal_is_not_replayed() {
     assert_eq!(h.http.calls(ORDER).len(), 2);
     assert_eq!(
         h.runtime.reports.borrow().as_slice(),
-        &["Failed to switch margin type: Request failed with status code 400"]
+        &[format!(
+            "Failed to switch margin type: {}",
+            enhanced_http_messages()["bingx"][0].as_str().unwrap()
+        )]
     );
     h.runtime.reports.borrow_mut().clear();
     done(&h);
@@ -441,7 +462,10 @@ fn ambiguous_write_failure_is_not_replayed() {
     assert_eq!(h.http.calls(ORDER).len(), 1);
     assert_eq!(
         h.runtime.reports.borrow().as_slice(),
-        &["Failed to switch margin type: Request failed with status code 503"]
+        &[format!(
+            "Failed to switch margin type: {}",
+            enhanced_http_messages()["bingx"][1].as_str().unwrap()
+        )]
     );
     h.runtime.reports.borrow_mut().clear();
     done(&h);

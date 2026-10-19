@@ -312,7 +312,7 @@ fn listen(rt: &Rt, name: &str, a: Vec<Js>) -> Result<Js, Thrown> {
                         vec![Js::object(vec![
                             (
                                 "timestamp",
-                                candle.timestamp.as_ref().map_or(Js::Undefined, from_json),
+                                candle.timestamp.clone().unwrap_or(Js::Undefined),
                             ),
                             ("open", Js::Number(candle.open)),
                             ("high", Js::Number(candle.high)),

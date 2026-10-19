@@ -56,7 +56,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = [ "safe-cex-store/src/venue_rest_diagnostics.rs::read_config_number", "safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticConfig" ]
 status = "divergent"
-note = "CHOSEN: typed numeric config rationale and property costs: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Native f64 ingress is retained. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::read_config_number` mirrors readConfigNumber. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticConfig` mirrors readConfigNumber. Split targets retain the adapter and its concrete behavior."
+note = "FIX non-UTF-8 audit row 452: actual native Axios outcomes now populate the one shared diagnostic state through read_config_number. Both real factory/Rust terminal paths match maintained TS with installed Axios across 240 numeric, accessor, authorization and settlement profiles. See safe-cex-store/per-row-rulings.md. Remaining typed/output boundary: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Native f64 ingress is retained. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::read_config_number` mirrors readConfigNumber. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticConfig` mirrors readConfigNumber. Split targets retain the adapter and its concrete behavior."
 
 [[symbol]]
 ts = "pathOf"
@@ -136,7 +136,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_proxy_header"
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Repaired existing sealed proxy-field overwrites; missing sealed fields remain absent. Native identity/presence assertions and actual-source cases are recorded in DIAGNOSTICS_CHOICE_GATE_EXITS.md. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_proxy_header` mirrors markRestProxyHeader."
+note = "FIX-audit row 453: actual native Tealstreet authorization now retains the config-only proxy marker, and the native factory isolates read-only marker write failures. The maintained transport/Axios binding comparison covers 36 token/header/descriptor profiles; see safe-cex-store/per-row-rulings.md. The lower typed adapter retains its admitted field domain and existing sealed-property tests. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_proxy_header` mirrors markRestProxyHeader."
 
 [[symbol]]
 ts = "proxyHeaderOf"
@@ -144,7 +144,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-store/src/venue_rest_diagnostics.rs::proxy_header_of"
 status = "divergent"
-note = "CHOSEN: config/header capability rationale and observable costs: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. The supplied bound callback is retained; production proxy assembly is not established. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::proxy_header_of` mirrors proxyHeaderOf."
+note = "FIX non-UTF-8 audit row 454: actual native HTTP outcomes now publish samples through the shared classifier with final marker/header capabilities, distinguishing bearer, malformed, absent and unmarked requests. The real binding/source matrix covers both factories and success/failure; see safe-cex-store/per-row-rulings.md. Typed output boundaries remain in sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::proxy_header_of` mirrors proxyHeaderOf."
 
 [[symbol]]
 ts = "markRestRequestStart"
@@ -152,7 +152,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_request_start"
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Repaired existing sealed request-stamp overwrites, including zero and NaN presence; missing sealed fields remain absent. Evidence: DIAGNOSTICS_CHOICE_GATE_EXITS.md. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_request_start` mirrors markRestRequestStart."
+note = "FIX-audit row 455: both real native Axios factory request interceptors now stamp the native config before dispatch, after request accounting, with source best-effort read-only write isolation. The actual NativeRuntime factory/source witness covers 32 timestamp/presence/descriptor profiles and exact numeric bits; see safe-cex-store/per-row-rulings.md. The separate typed adapter retains its admitted field domain under MANIFEST-SPEC.md#diagnostic-adapter-choice; existing sealed overwrite/absence tests remain. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_request_start` mirrors markRestRequestStart."
 
 [[symbol]]
 ts = "markRestSigned"
@@ -160,7 +160,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_signed"
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Repaired existing sealed writes and retained ordered partial writes when the wrapper catches a later assignment failure. Same-config identity is asserted. Evidence: DIAGNOSTICS_CHOICE_GATE_EXITS.md. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_signed` mirrors markRestSigned."
+note = "FIX-audit row 456: the actual remote signing adapter now publishes duration/signed-at/conditional age properties on terminal and returned configs in both signing profiles. Native/source comparison covers 48 timestamp/latency/settlement profiles, including skipped and refused signing; see safe-cex-store/per-row-rulings.md. The lower typed best-effort wrapper and sealed-write tests remain. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_signed` mirrors markRestSigned."
 
 [[symbol]]
 ts = "stampSigned"
@@ -168,7 +168,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-store/src/venue_rest_diagnostics.rs::stamp_signed"
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Repaired per-field sealed checks; direct errors retain prior writes and header-error precedence. Conditional age writes preserve old age when skipped. Evidence: DIAGNOSTICS_CHOICE_GATE_EXITS.md. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::stamp_signed` mirrors stampSigned."
+note = "FIX-audit row 457: the native terminal signing path stamps after merging venue headers, retains old age when the timestamp is invalid, and preserves negative age for future timestamps. Actual native response/network-rejection config observations and compiled controls are recorded in safe-cex-store/per-row-rulings.md. The lower typed direct helper retains ordered partial writes and header-error precedence under its existing admission profile. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::stamp_signed` mirrors stampSigned."
 
 [[symbol]]
 ts = "noteRestSuccess"

@@ -63,13 +63,14 @@ fn parse_cookie(response: &Js, decode: impl Fn(Js) -> Result<Js, Thrown>) -> Res
         for part in parts {
             let (key, value) = part.split_once('=').unwrap_or((part, ""));
             if safe_cex_num::js_trim(key).eq_ignore_ascii_case("expires") {
-                expires = Some(
-                    safe_cex_num::js_date_parse(safe_cex_num::js_trim(value), |ms| ms) / 1000.0,
-                );
+                let parsed = safe_cex_num::js_date_parse(safe_cex_num::js_trim(value), |ms| ms);
+                if !parsed.is_nan() {
+                    expires = Some(parsed / 1000.0);
+                }
             }
         }
         // Failed URI decoding leaves the parser's original value, including
-        // quote characters. Missing expiry and Invalid Date stay distinct.
+        // quote characters. Invalid Expires attributes leave a prior valid date.
         let gravity = decode(Js::str(raw_value)).unwrap_or_else(|_| Js::str(raw_value));
         selected = expires.map(|expires| (gravity, expires));
         break;
@@ -324,7 +325,7 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         let rows: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(rows.len(), 18);
+        assert_eq!(rows.len(), 19);
         let globals = Js::object(vec![]);
         safe_cex_exchange::js_runtime::library::install_library(
             &globals,

@@ -25,6 +25,7 @@ use std::{
     sync::Arc,
     task::{Context, Waker},
 };
+type SendHook = Rc<dyn Fn(&str)>;
 type Work = Pin<Box<dyn Future<Output = ()>>>;
 struct Task(Rc<RefCell<Option<Work>>>);
 impl ExchangeTask for Task {
@@ -38,6 +39,7 @@ struct Runtime {
     sleeps: RefCell<Vec<u64>>,
     timers: RefCell<Vec<(u64, Rc<Cell<bool>>)>>,
     sent: Rc<RefCell<Vec<String>>>,
+    send_hook: Rc<RefCell<Option<SendHook>>>,
     sequence: Cell<u64>,
     elapsed: Cell<f64>,
     errors: RefCell<Vec<String>>,
@@ -78,12 +80,8 @@ impl ExchangeRuntime for Runtime {
             }
         }))
     }
-    fn spawn_local(&self, mut work: Work) -> Box<dyn ExchangeTask> {
-        let pending = work
-            .as_mut()
-            .poll(&mut Context::from_waker(Waker::noop()))
-            .is_pending();
-        let task = Rc::new(RefCell::new(pending.then_some(work)));
+    fn spawn_local(&self, work: Work) -> Box<dyn ExchangeTask> {
+        let task = Rc::new(RefCell::new(Some(work)));
         self.tasks.borrow_mut().push(task.clone());
         Box::new(Task(task))
     }
@@ -121,6 +119,7 @@ struct Socket {
     events: RefCell<VecDeque<WsEvent>>,
     sent: Rc<RefCell<Vec<String>>>,
     closed: Cell<bool>,
+    send_hook: Rc<RefCell<Option<SendHook>>>,
 }
 impl WsSocket for Socket {
     fn ready_state(&self) -> u8 {
@@ -134,6 +133,10 @@ impl WsSocket for Socket {
     }
     fn send(&self, message: &str) -> Result<(), ExchangeError> {
         self.sent.borrow_mut().push(message.into());
+        let hook = self.send_hook.borrow().clone();
+        if let Some(hook) = hook {
+            hook(message);
+        }
         Ok(())
     }
     fn close(&self) {
@@ -165,6 +168,7 @@ impl WsRuntime for Runtime {
             events: RefCell::new(VecDeque::from([WsEvent::Open])),
             sent: self.sent.clone(),
             closed: Cell::new(false),
+            send_hook: self.send_hook.clone(),
         });
         Box::pin(async move { Ok(socket) })
     }
@@ -322,7 +326,9 @@ fn registered_public_open_starts_8000ms_heartbeat_and_reconciles_tickers() {
     let venue = venue(runtime.clone(), Rc::default());
     let public = venue.base().get_socket(SocketSlot::Public).unwrap();
     public.connect_and_subscribe(false).unwrap();
-    runtime.turn();
+    for _ in 0..8 {
+        runtime.turn();
+    }
     let frames = runtime.sent.borrow().clone();
     assert_eq!(
         frames.len(),
@@ -452,6 +458,9 @@ fn registered_candle_subscription_routes_native_fields_and_cleanup_unsubscribes(
     let venue = venue(runtime.clone(), Rc::default());
     let public = venue.base().get_socket(SocketSlot::Public).unwrap();
     public.connect_and_subscribe(false).unwrap();
+    for _ in 0..8 {
+        runtime.turn();
+    }
     let candles = Rc::new(RefCell::new(Vec::new()));
     let sink = candles.clone();
     let cleanup = Exchange::listen_ohlcv(
@@ -507,6 +516,9 @@ fn registered_book_subscription_retains_snapshot_reaction_and_depth_callback() {
     let venue = venue(runtime.clone(), Rc::default());
     let public = venue.base().get_socket(SocketSlot::Public).unwrap();
     public.connect_and_subscribe(false).unwrap();
+    for _ in 0..8 {
+        runtime.turn();
+    }
     let books = Rc::new(RefCell::new(Vec::new()));
     let sink = books.clone();
     let cleanup = Exchange::listen_order_book(
@@ -520,7 +532,9 @@ fn registered_book_subscription_retains_snapshot_reaction_and_depth_callback() {
         0,
         "MEXC snapshot Ready reaction does not run inline"
     );
-    runtime.turn();
+    for _ in 0..8 {
+        runtime.turn();
+    }
     assert_eq!(
         books.borrow().len(),
         1,
@@ -585,6 +599,7 @@ fn registered_private_open_suspends_ready_login_until_after_reconnected() {
     );
     let private = venue.base().get_socket(SocketSlot::Private).unwrap();
     private.connect_and_subscribe(false).unwrap();
+    runtime.turn();
     assert_eq!(
         reconnected.get(),
         1,
@@ -600,7 +615,9 @@ fn registered_private_open_suspends_ready_login_until_after_reconnected() {
         r#"{"method":"ping"}"#,
         "MEXC private open native ping"
     );
-    runtime.turn();
+    for _ in 0..8 {
+        runtime.turn();
+    }
     assert_eq!(
         runtime.sent.borrow().len(),
         2,
@@ -672,7 +689,9 @@ fn registered_private_asset_refresh_swallows_balance_fetch_failure() {
         ))
         .unwrap();
     assert_eq!(calls.get(), 0, "refresh waits for its source timeout");
-    runtime.turn();
+    for _ in 0..8 {
+        runtime.turn();
+    }
     assert!(
         runtime
             .timers
@@ -687,7 +706,7 @@ fn registered_private_asset_refresh_swallows_balance_fetch_failure() {
             fired.set(true);
         }
     }
-    for _ in 0..4 {
+    for _ in 0..8 {
         runtime.turn();
     }
     assert_eq!(
@@ -714,4 +733,293 @@ fn observed_error_code(
             .expect("defined code fixture");
         serde_json::from_str(&text).expect("JSON code observation")
     })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod native_book_entry {
+    use futures::channel::oneshot;
+    use safe_cex_exchange::{
+        exchange::{BaseExchange, Exchange, ExchangeSettings},
+        native::native_runtime,
+        native_store::DefaultStore,
+        runtime::ExchangeRuntime,
+    };
+    use safe_cex_store::{Store, StoreUpdate};
+    use safe_cex_transport::{
+        RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    use safe_cex_types::{ExchangeName, ExchangeOptions};
+    use safe_cex_venue_mexc::{
+        exchange::MexcExchange, sockets::MexcSocketDependencies, utils::normalize_market,
+    };
+    use serde_json::json;
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+        time::Duration,
+    };
+
+    struct Snapshot {
+        requests: RefCell<Vec<RestRequest>>,
+        response: RefCell<Option<oneshot::Receiver<Result<RestResponse, RestFailure>>>>,
+        settled: Rc<Cell<bool>>,
+    }
+    impl RestAdapter for Snapshot {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.requests.borrow_mut().push(request);
+            let response = self
+                .response
+                .borrow_mut()
+                .take()
+                .expect("one snapshot request");
+            let settled = self.settled.clone();
+            Box::pin(async move {
+                let response = response
+                    .await
+                    .expect("snapshot response sender remains owned");
+                settled.set(true);
+                response
+            })
+        }
+    }
+
+    #[test]
+    fn registered_book_entry_starts_before_native_listener_returns() {
+        let executor = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let local = tokio::task::LocalSet::new();
+        local.block_on(&executor, async {
+            for mode in ["held", "cleanup-before-response", "dispose-before-response", "drop-owner"] {
+                let runtime = native_runtime();
+                let store = Rc::new(DefaultStore::new());
+                let market = normalize_market(&json!({"symbol":"BTC_USDT","contractSize":0.5,"maxLeverage":20}).into()).unwrap();
+                store.update(StoreUpdate { markets: Some(vec![market]), ..Default::default() }, false).unwrap();
+                let (release, response) = oneshot::channel();
+                let settled = Rc::new(Cell::new(false));
+                let http = Rc::new(Snapshot { requests: RefCell::default(), response: RefCell::new(Some(response)), settled: settled.clone() });
+                let base = BaseExchange::new(ExchangeName::Mexc,
+                    serde_json::from_value::<ExchangeOptions>(json!({"key":"fixture","secret":"secret"})).unwrap(),
+                    store, runtime.clone(), ExchangeSettings::default());
+                let clock = runtime.clone();
+                let venue = MexcExchange::new(base, http.clone(), Rc::new(|n| n), MexcSocketDependencies {
+                    runtime: runtime.clone(), current_time_ms: Rc::new(move || clock.now_ms()), remote_account_name: None,
+                    emit_fill: Rc::new(|_| Ok(())),
+                }, Rc::new(|_, _| panic!("no external public data configured"))).unwrap();
+                let books = Rc::new(RefCell::new(Vec::new()));
+                let sink = books.clone();
+                let cleanup = Exchange::listen_order_book(venue.as_ref(), "BTCUSDT".into(), Rc::new(move |book| sink.borrow_mut().push(book))).unwrap();
+                assert_eq!(http.requests.borrow().len(), 1, "MEXC BOOK ENTRY starts the actual snapshot before returning its listener: {mode}");
+                assert_eq!(books.borrow().len(), 0, "source snapshot reaction remains deferred: {mode}");
+                {
+                    let requests = http.requests.borrow();
+                    assert!(requests[0].url.ends_with("/depth/BTC_USDT"), "original snapshot symbol: {}", requests[0].url);
+                    assert_eq!(requests[0].params.as_ref().unwrap()["limit"].as_f64(), Some(100.0));
+                }
+                let mut cleanup = Some(cleanup);
+                let mut venue = Some(venue);
+                if mode == "cleanup-before-response" { cleanup.take().unwrap()().unwrap(); }
+                if mode == "dispose-before-response" { venue.as_ref().unwrap().dispose().unwrap(); }
+                if mode == "drop-owner" { drop(venue.take()); }
+                assert!(release.send(Ok(RestResponse {
+                    status: 200, reason: None, headers: Default::default(),
+                    body: RestResponseBody::Encoded(br#"{"data":{"bids":[[29,6]],"asks":[[31,4]],"version":9}}"#.to_vec()),
+                })).is_ok(), "source request remains owned until completion: {mode}");
+                tokio::time::timeout(Duration::from_secs(3), async {
+                    while !settled.get() || (mode != "dispose-before-response" && books.borrow().is_empty()) {
+                        tokio::task::yield_now().await;
+                    }
+                    for _ in 0..16 { tokio::task::yield_now().await; }
+                }).await.expect("native snapshot continuation settles");
+                let expected = usize::from(mode != "dispose-before-response");
+                assert_eq!(books.borrow().len(), expected, "native callback follows source completion/cleanup/disposal: {mode}");
+                if expected == 1 {
+                    let books = books.borrow();
+                    assert_eq!(books[0].bids.len(), 1);
+                    assert_eq!(books[0].asks.len(), 1);
+                    assert_eq!(books[0].bids[0].price.to_bits(), 29.0_f64.to_bits());
+                    assert_eq!(books[0].bids[0].amount.to_bits(), 3.0_f64.to_bits());
+                }
+                if let Some(cleanup) = cleanup { cleanup().unwrap(); }
+                if let Some(venue) = venue { venue.dispose().unwrap(); }
+            }
+        });
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "support/native_socket_audit.rs"]
+mod native_socket_audit;
+
+fn candle_options(interval: safe_cex_types::Timeframe) -> safe_cex_types::OHLCVOptions {
+    safe_cex_types::OHLCVOptions {
+        symbol: "BTCUSDT".into(),
+        interval: safe_cex_types::AnyTimeframe::Variant1(interval),
+        from: None,
+        to: None,
+        limit: None,
+    }
+}
+#[test]
+fn registered_public_handlers_capture_arrays_during_add_and_remove() {
+    let runtime = Rc::new(Runtime::default());
+    let venue = venue(runtime.clone(), Rc::default());
+    let public = venue.base().get_socket(SocketSlot::Public).unwrap();
+    let trace = Rc::new(RefCell::new(Vec::new()));
+    let later: Rc<RefCell<Option<ListenerCleanup>>> = Rc::default();
+    let trace_a = trace.clone();
+    let later_a = later.clone();
+    let weak = Rc::downgrade(&venue);
+    let turn = Rc::new(Cell::new(0));
+    let cleanup = Exchange::listen_ohlcv(
+        venue.as_ref(),
+        candle_options(safe_cex_types::Timeframe::M1),
+        Rc::new(move |_| {
+            trace_a.borrow_mut().push("A");
+            let n = turn.get();
+            turn.set(n + 1);
+            if n == 0 {
+                let sink = trace_a.clone();
+                *later_a.borrow_mut() = Some(
+                    Exchange::listen_ohlcv(
+                        weak.upgrade().unwrap().as_ref(),
+                        candle_options(safe_cex_types::Timeframe::M1),
+                        Rc::new(move |_| sink.borrow_mut().push("B")),
+                    )
+                    .unwrap(),
+                );
+            } else if n == 1 {
+                let cleanup = later_a.borrow_mut().take().unwrap();
+                cleanup().unwrap();
+            }
+        }),
+    )
+    .unwrap();
+    let frame=SocketFrame::Text(json!({"channel":"push.kline","symbol":"BTC_USDT","data":{"interval":"Min1","time":1700000000,"open":11,"high":13,"low":7,"close":12,"vol":5}}).to_string());
+    for _ in 0..3 {
+        public.on_message(&frame).unwrap();
+    }
+    assert_eq!(
+        *trace.borrow(),
+        ["A", "A", "B", "A"],
+        "MEXC constructed route keeps captured handler arrays during add/remove"
+    );
+    cleanup().unwrap();
+    public.on_message(&frame).unwrap();
+    assert_eq!(
+        trace.borrow().len(),
+        4,
+        "MEXC constructed cleanup removes final handler"
+    );
+    venue.dispose().unwrap();
+}
+#[test]
+fn registered_public_resubscribe_visits_send_time_insertions() {
+    let runtime = Rc::new(Runtime::default());
+    let venue = venue(runtime.clone(), Rc::default());
+    let first = Exchange::listen_ohlcv(
+        venue.as_ref(),
+        candle_options(safe_cex_types::Timeframe::M1),
+        Rc::new(|_| {}),
+    )
+    .unwrap();
+    let added: Rc<RefCell<Option<ListenerCleanup>>> = Rc::default();
+    let slot = added.clone();
+    let weak = Rc::downgrade(&venue);
+    *runtime.send_hook.borrow_mut() = Some(Rc::new(move |frame| {
+        let frame: Value = serde_json::from_str(frame).unwrap();
+        if frame["method"] == "sub.kline"
+            && frame["param"]["interval"] == "Min1"
+            && slot.borrow().is_none()
+        {
+            let second = Exchange::listen_ohlcv(
+                weak.upgrade().unwrap().as_ref(),
+                candle_options(safe_cex_types::Timeframe::M5),
+                Rc::new(|_| {}),
+            )
+            .unwrap();
+            *slot.borrow_mut() = Some(second);
+        }
+    }));
+    let public = venue.base().get_socket(SocketSlot::Public).unwrap();
+    public.connect_and_subscribe(false).unwrap();
+    for _ in 0..8 {
+        runtime.turn();
+    }
+    let frames: Vec<Value> = runtime
+        .sent
+        .borrow()
+        .iter()
+        .map(|frame| serde_json::from_str(frame).unwrap())
+        .collect();
+    let methods: Vec<String> = frames
+        .iter()
+        .map(|v| {
+            format!(
+                "{}:{}",
+                v["method"].as_str().unwrap(),
+                v["param"]["interval"].as_str().unwrap_or("")
+            )
+        })
+        .collect();
+    assert_eq!(
+        methods,
+        [
+            "ping:",
+            "sub.ticker:",
+            "sub.kline:Min1",
+            "sub.kline:Min5",
+            "sub.kline:Min5",
+            "sub.ticker:"
+        ],
+        "MEXC constructed resubscribe traverses live registry after send-time insertion"
+    );
+    first().unwrap();
+    added.borrow_mut().take().unwrap()().unwrap();
+    let before = runtime.sent.borrow().len();
+    venue
+        .base()
+        .set_active_ticker_symbols(&["missing".into()])
+        .unwrap();
+    let sent = runtime.sent.borrow();
+    let last: Value = serde_json::from_str(&sent[before]).unwrap();
+    assert_eq!(
+        last,
+        json!({"method":"unsub.ticker","param":{"symbol":"BTC_USDT"}}),
+        "MEXC constructor binds active ticker reconciliation"
+    );
+    drop(sent);
+    public.dispose();
+    let before = runtime.sent.borrow().len();
+    venue.base().set_active_ticker_symbols(&[]).unwrap();
+    assert_eq!(
+        runtime.sent.borrow().len(),
+        before,
+        "MEXC constructor listener detached on disposal"
+    );
+    venue.dispose().unwrap();
+}
+#[test]
+fn non_utf8_audit_executes_maintained_source_profiles() {
+    for script in [
+        "book-entry-source.mjs",
+        "socket-audit-source.mjs",
+        "public-binding-audit-source.mjs",
+    ] {
+        let output = std::process::Command::new("node")
+            .arg(format!("{}/scripts/{script}", env!("CARGO_MANIFEST_DIR")))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "MEXC actual source {script}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let observed: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            observed.is_object(),
+            "MEXC actual source profile receipt {script}"
+        );
+    }
 }

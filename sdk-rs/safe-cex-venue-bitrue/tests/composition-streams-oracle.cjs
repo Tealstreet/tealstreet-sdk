@@ -70,4 +70,33 @@ async function unhandledBookPair() {
  assert.equal(rejection?.name,'TypeError');assert.match(rejection.message,/iterable/);assert.equal(callbacks,0);
  return {hashes,rejection,callbacks};
 }
-(async()=>{if(process.argv.includes('--unhandled-book-pair')){process.stdout.write(JSON.stringify(await unhandledBookPair()));return;}const rows={};for(const[g,cs]of Object.entries(process.argv.includes('--book-pairs')?{book:[{id:'object-pair',frame:true,depth:{buys:[{0:2,1:3}],asks:[]}},{id:'number-pair',frame:true,depth:{buys:[2],asks:[]}},{id:'valid-pair',frame:true,depth:{buys:[[2,3]],asks:[[4,5]]}}]}:cases)){rows[g]=[];for(const c of cs)rows[g].push(await run(g,c));}process.stdout.write(JSON.stringify({hashes,rows}));})().catch(e=>{console.error(e);process.exitCode=1;});
+async function blobAudit() {
+ const {inflate}=require('pako'),{gzipSync,deflateSync}=require('node:zlib');
+ const readBlob=constant(source('utils/readBlob.ts'),'readBlob',{inflate,Uint8Array,Uint16Array,String});
+ const inputs=[
+  ['ascii',Buffer.from(JSON.stringify({ping:'ordinary'}))],
+  ['utf8',Buffer.from(JSON.stringify({ping:'é € 💡'}))],
+  ['high-bytes',Buffer.concat([Buffer.from('{"ping":"'),Buffer.from(Array.from({length:128},(_,i)=>128+i)),Buffer.from('"}')])],
+  ['escaped-surrogates',Buffer.from('{"ping":"\\ud800/\\udfff"}')],
+  ['escaped-controls',Buffer.from(JSON.stringify({ping:'\u0000\n\r\t"\\'}))],
+  ['negative-zero',Buffer.from('{"ping":-0}')],
+  ['large-number',Buffer.from('{"ping":9007199254740993}')],
+ ];
+ const rows=[];
+ for(const [id,plain] of inputs)for(const encoding of ['gzip','zlib','gzip-members','gzip-padding']) {
+  const split=Math.floor(plain.length/2),first=gzipSync(plain.subarray(0,split));
+  const bytes=encoding==='zlib'?deflateSync(plain):encoding==='gzip-members'?Buffer.concat([first,gzipSync(plain.subarray(split))]):encoding==='gzip-padding'?Buffer.concat([gzipSync(plain),Buffer.alloc(8)]):gzipSync(plain);
+  const widened=Array.from(plain,b=>String.fromCharCode(b)).join('');
+  assert.equal(await readBlob(new Blob([bytes])),widened);
+  const sent=[],r={isDisposed:false,trackLastReceived(){},handlePongEvent(){},send(value){sent.push(value);}};
+  const bindings={Blob,readBlob,jsonParse,JSON,performance:{now:()=>1234}};
+  r.handlePingEvent=body('handlePingEvent',bindings,r);
+  await body('onMessage',bindings,r)({data:new Blob([bytes])});
+  assert.deepEqual(sent,['pong',JSON.stringify({pong:JSON.parse(widened).ping})]);
+  rows.push({id,encoding,bytes:[...bytes],sent:sent.map(s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i)))});
+ }
+ assert.equal(rows.length,28);
+ assert.notDeepEqual(rows.find(r=>r.id==='utf8').sent, ['pong',JSON.stringify({pong:'é € 💡'})].map(s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i))));
+ return {hashes,rows};
+}
+(async()=>{if(process.argv.includes('--blob-audit')){process.stdout.write(JSON.stringify(await blobAudit()));return;}if(process.argv.includes('--unhandled-book-pair')){process.stdout.write(JSON.stringify(await unhandledBookPair()));return;}const rows={};for(const[g,cs]of Object.entries(process.argv.includes('--book-pairs')?{book:[{id:'object-pair',frame:true,depth:{buys:[{0:2,1:3}],asks:[]}},{id:'number-pair',frame:true,depth:{buys:[2],asks:[]}},{id:'valid-pair',frame:true,depth:{buys:[[2,3]],asks:[[4,5]]}}]}:cases)){rows[g]=[];for(const c of cs)rows[g].push(await run(g,c));}process.stdout.write(JSON.stringify({hashes,rows}));})().catch(e=>{console.error(e);process.exitCode=1;});

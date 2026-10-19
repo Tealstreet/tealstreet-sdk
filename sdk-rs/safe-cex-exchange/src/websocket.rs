@@ -171,7 +171,7 @@ type Formatter = Rc<dyn Fn(&Value) -> Option<String>>;
 type Redactor = Rc<dyn Fn(&str) -> Option<String>>;
 type ChannelFilter = Rc<dyn Fn(&Value) -> Result<bool, ExchangeError>>;
 type SendFormatter = Rc<dyn Fn(&str) -> Option<String>>;
-pub type MessageHandler = Rc<dyn Fn(&Value) -> Result<(), ExchangeError>>;
+pub type MessageHandler = Rc<dyn Fn(&crate::js_runtime::value::Js) -> Result<(), ExchangeError>>;
 pub type HandlerList = Rc<RefCell<Vec<MessageHandler>>>;
 /// Source topic statistics using the existing native statistics record.
 pub type MessageHandlersStats = indexmap::IndexMap<String, MessageHandlerStat>;
@@ -2494,7 +2494,11 @@ impl BaseWebSocket {
         if self.is_disposed() {
             return Ok(());
         }
-        if result.is_err() {
+        if let Err(error) = result {
+            self.runtime.report_exception(
+                &error,
+                &serde_json::json!({"operation":"websocket authentication"}).into(),
+            );
             self.direct_fallback.borrow_mut().disregard_silence();
             self.parent.log(
                 "Private WebSocket signing could not complete; reconnecting",
@@ -2518,7 +2522,11 @@ impl BaseWebSocket {
             reconnect_count: s.reconnect_count,
         }
     }
-    pub fn dispatch_message(&self, key: &str, message: &Value) -> Result<(), ExchangeError> {
+    pub fn dispatch_message(
+        &self,
+        key: &str,
+        message: &crate::js_runtime::value::Js,
+    ) -> Result<(), ExchangeError> {
         let Some(callbacks) = self.message_handlers.borrow().get(key).cloned() else {
             return Ok(());
         };
@@ -2940,15 +2948,8 @@ fn redact_json(value: &mut Value, depth: usize, redact_strings: bool) {
         Value::Object(map) => {
             // Source rebuilds {}, whose local prototype setter creates no own key.
             map.remove("__proto__");
-            let auth = redact_strings
-                || ["op", "method", "type", "event"].iter().any(|key| {
-                    map.get(*key).and_then(Value::as_str).is_some_and(|text| {
-                        let lower = text.to_ascii_lowercase();
-                        ["auth", "login", "signature", "jwt"]
-                            .iter()
-                            .any(|part| lower.contains(part))
-                    })
-                });
+            let auth =
+                redact_strings || safe_cex_store::ws_diagnostics::is_auth_operation_object(map);
             for (key, value) in map {
                 let normalized: String = key
                     .chars()
@@ -4792,19 +4793,31 @@ mod tests {
     }
     #[test]
     fn auth_failure_sends_nothing_disregards_silence_and_never_auth_invalid_phrase() {
-        let (s, p, _, _) = fixture();
+        let (s, p, runtime, _) = fixture();
         let io = Rc::new(Socket::default());
         io.ready.set(1);
         s.state.borrow_mut().native = Some(io.clone());
         let called = Cell::new(false);
-        run(s.authenticate_and_subscribe(
-            Box::pin(async { Err(ExchangeError::new("remote signer unavailable")) }),
-            |_| {
+        let original =
+            crate::js_runtime::value::error_object("SignerError", "remote signer unavailable");
+        let cause = crate::js_runtime::value::Thrown::new(original.clone()).to_exchange_error();
+        run(
+            s.authenticate_and_subscribe(Box::pin(async move { Err(cause) }), |_| {
                 called.set(true);
                 Ok(())
-            },
-        ))
+            }),
+        )
         .unwrap();
+        let reports = runtime.exceptions.borrow();
+        assert_eq!(reports.len(), 1, "signing cause reported exactly once");
+        let thrown = crate::js_runtime::value::Thrown::from(reports[0].clone());
+        assert!(
+            thrown.value.same_reference(&original),
+            "original signing cause identity"
+        );
+        assert_eq!(reports[0].name, "SignerError");
+        assert_eq!(reports[0].message, "remote signer unavailable");
+        drop(reports);
         assert!(!called.get());
         assert_eq!(io.closed.get(), 1);
         assert!(io.sent.borrow().is_empty());
@@ -4903,6 +4916,51 @@ mod tests {
         assert!(events[201].1.ends_with("...truncated (6000 chars)"));
     }
     #[test]
+    fn audit_auth_operation_own_data_reaches_real_socket_diagnostics() {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../safe-cex-store/tests/diagnostics_oracle.cjs"
+            ))
+            .arg("auth")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let profiles: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            profiles.len(),
+            44,
+            "AUTH_DIAGNOSTIC complete source profiles"
+        );
+        for profile in profiles {
+            let (socket, parent, runtime, _) = fixture();
+            runtime.diagnostics.set(true);
+            let input = profile["input"].as_str().unwrap();
+            let expected = profile["expected"].as_str().unwrap();
+            socket
+                .emit_ws_diagnostic_send(input, &WsDiagnosticSendOptions::default())
+                .unwrap();
+            socket
+                .emit_ws_diagnostic_receive(
+                    &Value::String(input.into()),
+                    &WsDiagnosticReceiveOptions::default(),
+                )
+                .unwrap();
+            assert_eq!(
+                *parent.events.borrow(),
+                vec![
+                    ("grafana-pws-sub".into(), expected.into()),
+                    ("grafana-pws".into(), expected.into()),
+                ],
+                "AUTH_DIAGNOSTIC actual send/receive emitters retain source auth scope: {input}"
+            );
+        }
+    }
+    #[test]
     fn diagnostics_format_order_and_custom_null_redaction_match_ts() {
         let (s, p, r, _) = fixture();
         r.diagnostics.set(true);
@@ -4995,9 +5053,11 @@ mod tests {
                 c.set(c.get() + 1);
                 Ok(())
             }));
-        s.dispatch_message("book.ETH", &Value::Null).unwrap();
+        s.dispatch_message("book.ETH", &crate::js_runtime::value::Js::Null)
+            .unwrap();
         assert_eq!(calls.get(), 0);
-        s.dispatch_message("book.BTC", &Value::Null).unwrap();
+        s.dispatch_message("book.BTC", &crate::js_runtime::value::Js::Null)
+            .unwrap();
         assert_eq!(calls.get(), 2);
         assert_eq!(
             s.message_handlers_stats.borrow()["book.BTC"].had_handlers,
@@ -5089,10 +5149,16 @@ mod tests {
             .message_handlers
             .borrow_mut()
             .insert("empty".into(), Rc::new(RefCell::new(vec![])));
-        assert_eq!(socket.dispatch_message("absent", &Value::Null), Ok(()));
-        assert_eq!(socket.dispatch_message("empty", &Value::Null), Ok(()));
+        assert_eq!(
+            socket.dispatch_message("absent", &crate::js_runtime::value::Js::Null),
+            Ok(())
+        );
+        assert_eq!(
+            socket.dispatch_message("empty", &crate::js_runtime::value::Js::Null),
+            Ok(())
+        );
         assert!(socket.message_handlers_stats.borrow().is_empty());
-        let result = socket.dispatch_message("ticker", &Value::Null);
+        let result = socket.dispatch_message("ticker", &crate::js_runtime::value::Js::Null);
         assert_eq!(
             later_calls.get(),
             0,
@@ -5157,7 +5223,7 @@ mod tests {
             .borrow_mut()
             .insert("__proto__".into(), Rc::new(RefCell::new(vec![handler])));
         let error = socket
-            .dispatch_message("__proto__", &Value::Null)
+            .dispatch_message("__proto__", &crate::js_runtime::value::Js::Null)
             .unwrap_err();
         assert_eq!(
             error.name, "TypeError",
@@ -5230,7 +5296,7 @@ mod tests {
 
             if let Some(count) = case["ownHandlers"].as_u64() {
                 let handlers: Vec<MessageHandler> = (0..count)
-                    .map(|_| Rc::new(|_: &Value| Ok(())) as MessageHandler)
+                    .map(|_| Rc::new(|_: &crate::js_runtime::value::Js| Ok(())) as MessageHandler)
                     .collect();
                 socket
                     .message_handlers

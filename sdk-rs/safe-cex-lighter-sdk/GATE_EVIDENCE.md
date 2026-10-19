@@ -1,3 +1,11 @@
+# Current shipped signer scope
+
+The standalone TransactionSigner/SignerError implementation and its exclusive
+key-management/hash adapters were removed after a shipped-caller census. The
+historical receipts below do not describe a currently assembled native signer.
+The real Lighter venue uses TransactionClient with its canonical crypto binding.
+See `SIGNER_RETIREMENT_REVIEW.md` for the exact caller/dependency boundary.
+
 # Lighter SDK signing records and key runtime
 
 Fresh branch `feat/rust-lighter-sdk-key-runtime` starts at integration
@@ -15,7 +23,7 @@ describing different crates. New ports therefore live in the isolated
 in place. This change edits neither the venue crate nor `exchanges/lighter`
 manifests relative to the integrated parent. Incoming venue changes are retained.
 
-## Row evidence and buckets
+## Historical row evidence and buckets
 
 Targets below are qualified within `safe-cex-lighter-sdk/src`.
 
@@ -732,3 +740,15 @@ restricted implementations or change those rows' classifications.
 Per the corrected workflow, the implementation is merged and pushed before
 scoped gates. Source/native cases, discriminating controls and named fresh exits
 will be recorded after that implementation push. No gate success is claimed here.
+
+## Shipped Lighter API error constructor follow-up
+
+The historical DTO-only error rows above do not describe the shipped venue
+constructor after its runtime repair. The production binding now delegates to
+the installed Error constructor/prototype and executes the optional capture hook.
+Non-enumerable message, inherited toString, field order, raw UTF16 diagnostics,
+callback receiver/constructor/details identity and abrupt capture outcomes have
+actual NativeRuntime/production-Realm regressions. The metadata DTO remains a
+field carrier; it does not itself run JS construction. Shared engine stack
+generation remains OPEN, without fabricated traces. See
+`../safe-cex-venue-lighter/ERROR_CONSTRUCTOR_REVIEW.md`.

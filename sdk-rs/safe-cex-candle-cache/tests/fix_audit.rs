@@ -251,3 +251,93 @@ fn pre_epoch_typed_slots_survive_real_kv_persist_and_reload() {
         fields(loaded[&-1][99].as_ref().unwrap(), -60000.);
     }));
 }
+
+#[test]
+fn clean_candles_and_real_fetch_keep_source_nan_permutations_and_first_rows() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fix_audit_source.cjs"
+        ))
+        .arg("--clean-candles")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "CLEAN-CANDLES source {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let profiles: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        profiles.len(),
+        133,
+        "CLEAN-CANDLES independent source floor"
+    );
+    fn decode(rows: &Value) -> Vec<Candle> {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .map(|row| {
+                let values: Vec<_> = row
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| f64::from_bits(u64::from_str_radix(v.as_str().unwrap(), 16).unwrap()))
+                    .collect();
+                assert_eq!(values.len(), 6);
+                Candle {
+                    timestamp: values[0],
+                    open: values[1],
+                    high: values[2],
+                    low: values[3],
+                    close: values[4],
+                    volume: values[5],
+                    last_side: None,
+                }
+            })
+            .collect()
+    }
+    fn observed(rows: &[Candle]) -> Vec<[u64; 6]> {
+        rows.iter()
+            .map(|r| [r.timestamp, r.open, r.high, r.low, r.close, r.volume].map(f64::to_bits))
+            .collect()
+    }
+    runtime().block_on(tokio::task::LocalSet::new().run_until(async {
+        for profile in profiles {
+            let input = decode(&profile["input"]);
+            let expected = decode(&profile["expected"]);
+            let cleaned = safe_cex_candle_cache::clean_candles(input.clone());
+            let fetched = Rc::new(input);
+            let fetcher: Fetcher = Rc::new(move |_| {
+                let input = fetched.clone();
+                Box::pin(async move { Ok(input.as_ref().clone()) })
+            });
+            let cache = CandleCache::new(CandleCacheOptions::default(), local_runtime());
+            let result = cache
+                .fetch(CandleCacheFetchRequest {
+                    cache_key: "sort".into(),
+                    interval: serde_json::from_value(json!("1m")).unwrap(),
+                    from_ms: 1699999980000.,
+                    to_ms: 1699999980000.,
+                    limit: 1.,
+                    now_ms: Some(1700000040000.),
+                    fetcher,
+                    use_persistent_backend: Some(false),
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                observed(&result),
+                observed(&expected),
+                "CLEAN-CANDLES real fetch source permutation {}",
+                profile["id"]
+            );
+            assert_eq!(
+                observed(&cleaned),
+                observed(&expected),
+                "CLEAN-CANDLES native source permutation {}",
+                profile["id"]
+            );
+        }
+    }));
+}
