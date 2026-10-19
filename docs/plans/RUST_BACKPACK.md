@@ -241,3 +241,21 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   All 22 harness tests pass, including integrated POST-read/write/signature and
   exact-integer regressions. Backpack 49 and engine 17 native tests, workspace
   native clippy, bans and format pass. Five-venue build/gates are pending.
+- Actual replay caught a missing `stable` helper import left by conflict
+  resolution. Exported the existing helper and imported it in the gate;
+  subsequent no-undef review of gate/replay/tape is clean. No gate logic changed.
+- All thirteen five-venue gates PASS (32c26cbabf + a70bf1f219): public medians
+  of three runs, TS/Rust CPU, steady CPU, retained memory:
+  Backpack 191.8/110.5 ms (1.74x), 102.1/54.5 ms (1.87x), 3.0/1.9 MB (1.58x);
+  Binance 242.1/104.7 ms (2.31x), 137.2/42.3 ms (3.24x), 4.3/2.5 MB (1.75x);
+  Bybit 502.7/343.5 ms (1.46x), 345.0/205.9 ms (1.68x), 6.0/2.7 MB (2.25x);
+  OKX 1554.8/1236.9 ms (1.26x), 1254.3/952.4 ms (1.32x), 4.1/2.7 MB (1.55x);
+  Crypto.com 185.7/132.3 ms (1.40x), 106.0/67.3 ms (1.57x), 1.8/1.4 MB (1.27x).
+  Private correctness: Backpack 21, Binance 14, Bybit 18, Crypto.com 21, and
+  each of four OKX variants 29 frames, all PASS. New memory numbers include
+  retained backing buffers and TS worker egress, per landing's revised method.
+- Five-venue WASM 2,034,746 bytes, within a measured 2 MiB CI budget. All 17
+  SDK WASM tests, four host tests, 22 harness tests, Backpack 49/engine 17 native
+  tests, workspace native/WASM clippy, bans/fmt and root typecheck/lint pass.
+  All merge reviews are clear. Pushing the final five-venue head and waiting
+  for its green CI before merging PR #1299 and cutting the follow-up branch.
