@@ -267,3 +267,26 @@ merge that PR, and create a fresh follow-up branch. No rebase or force push.
   37,455 bytes. Optimizing only wasm dispatch/serialization glue for size (`z`)
   reduces it to1,461,186 bytes, below1,468,006. Engine and venues remain O3.
   The budget is unchanged. Final SDK/replay checks run on this exact artifact.
+
+### Final local gates on the three-venue artifact
+
+All required brief gates pass after landing integration on `487fd434f5`:
+
+| Public fixture | Frames | TS/Rust CPU ms | TS/Rust steady ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| BloFin | 2,764 | 140.791 /132.057 | 93.100 /74.126 | 1.649 /1.595 |
+| Binance | 871 | 209.026 /87.669 | 114.226 /38.241 | 2.314 /2.037 |
+| Bybit | 8,742 | 388.614 /310.030 | 263.612 /188.444 | 3.082 /2.220 |
+
+- All public outputs match exactly; medians use three runs. Private gates PASS:
+  BloFin29 frames (52 records), Binance14, Bybit18; no unmatched/unused writes.
+- BloFin executions remain exactly0.0001@100,0.0002@130,0.0002@170; duplicated,
+  regressive and terminal replays emit no extra execution.
+- Native154 tests pass (engine15, BloFin67, Binance29, Bybit43); SDK wasm7 pass;
+  JS host/wire4 pass. Venue and wasm clippy, all fmt and bans pass.
+- Root typecheck44 tasks and lint28 tasks pass after merge. The full JS suite
+  passed6,490 tests with30-second import allowance;37 focused BloFin regressions
+  pass after the paired TS change. Existing default timeout failures are unrelated.
+- Release wasm1,461,186 bytes below unchanged landing budget1,468,006. Final
+  cross-review found no remaining material blockers; both review rounds and fixes
+  are posted on PR1300. Waiting for green CI, then merging and cutting follow-up.
