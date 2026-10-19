@@ -1041,3 +1041,9 @@ The demo reconciliation witness compares the maintained source's interleaved
 five-RPS timeline, including two complete twenty-page reads and exact warning
 arguments. Retry sleeps stay pending until explicit virtual-clock advancement.
 See RATE_WINDOW_FIXTURE_REVIEW.md and scripts/reconciliation-timeline-source.cjs.
+
+The unknown-send guard in primary/demo submitCreateOrders and the shared global
+uses the live rejection with the single lower decision algorithm. No whole-error
+JSON projection precedes recovery. `audit_unknown_outcome_preserves_native_submission_rejection`
+compares 56 submission/property profiles with actual TS, preserving the signing
+veto, response precedence, original rejection and exactly one send.

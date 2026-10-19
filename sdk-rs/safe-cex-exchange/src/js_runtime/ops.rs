@@ -47,6 +47,14 @@ pub fn to_numeric(value: &Js) -> Result<Js, Thrown> {
     }
 }
 
+/// Number(value) converts ToNumeric's BigInt result to binary64.
+pub fn number(value: &Js) -> Result<f64, Thrown> {
+    match to_numeric(value)? {
+        Js::BigInt(n) => Ok(n.to_string().parse().unwrap_or(f64::NAN)),
+        numeric => numeric.to_number(),
+    }
+}
+
 fn mixed() -> Thrown {
     Thrown::type_error("Cannot mix BigInt and other types, use explicit conversions")
 }

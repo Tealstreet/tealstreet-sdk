@@ -206,6 +206,10 @@ HTTP and Futures websocket challenges. Both retain the hosted account name with
 empty local secrets. The native witness verifies signed HTTP bytes and challenge
 subscription fields; the account metadata comes from live injected options.
 
+Native `fetchOHLCV` captures `fetch_ohlcv_native` with `NativeValue::from_js`.
+KuCoin/Bitrue receiver overrides and every remaining family's default proof are
+recorded in [REST_RETURN_ORDER_REVIEW.md](REST_RETURN_ORDER_REVIEW.md).
+
 ApexOmni now has its own Rust table entry and native host factory. It uses the
 shared js_runtime binding and safe-cex-crypto's real seed-only zkLink signer.
 `tests/native_host_apexomni.rs` covers signed startup, placement, private WS order
