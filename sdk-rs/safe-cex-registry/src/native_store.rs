@@ -162,3 +162,43 @@ impl NativeStoreDelivery {
         self.throttle.cancel();
     }
 }
+
+#[cfg(test)]
+mod construction_order_tests {
+    use super::*;
+    use crate::{native_host::{native_venue_host,hyperliquid_rate_limiter},rust_venues::rust_constructor};
+    use safe_cex_exchange::{js_runtime::store, native_store::DefaultStore};
+    use safe_cex_types::ExchangeName;
+
+    #[test]
+    fn actual_native_delivery_preserves_all_model_construction_orders() {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(
+            tokio::task::LocalSet::new().run_until(async {
+                let output=std::process::Command::new("node")
+                    .arg(concat!(env!("CARGO_MANIFEST_DIR"),"/tests/native_store_order_source.mjs"))
+                    .output().unwrap();
+                assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
+                let source: serde_json::Value=serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(source["cases"].as_array().unwrap().len(),6);
+                for (index,case) in source["cases"].as_array().unwrap().iter().enumerate() {
+                    let store: Rc<dyn Store>=Rc::new(DefaultStore::new());
+                    let host=native_venue_host(hyperliquid_rate_limiter());
+                    let exchange=rust_constructor(&ExchangeName::Binance,host).unwrap().construct(
+                        ExchangeName::Binance,serde_json::from_value(json!({"key":"","secret":"","hostedMode":true})).unwrap(),store.clone()).unwrap();
+                    let posts=Rc::new(RefCell::new(Vec::new()));
+                    let captured=posts.clone();
+                    let delivery=NativeStoreDelivery::new(&exchange,&store,Rc::new(move|value|captured.borrow_mut().push(value)));
+                    let callback=delivery.clone();
+                    let unsubscribe=store.subscribe_native(Box::new(move|data,_| callback.update(data).map_err(Into::into)));
+                    let facade=store::facade(store.clone()).unwrap();
+                    facade.call_method("update",vec![NativeValue::from(case["input"].clone()).to_js()]).unwrap();
+                    let actual=posts.borrow();
+                    assert_eq!(actual.len(),1,"MODEL-CONSTRUCTION-ORDER leading delivery {index}");
+                    let expected=NativeValue::from(case["expected"].clone());
+                    assert_eq!(actual[0],expected,"MODEL-CONSTRUCTION-ORDER actual native constructor/Store/worker payload {index}");
+                    drop(actual);unsubscribe();delivery.cancel();exchange.dispose().unwrap();
+                }
+            })
+        );
+    }
+}
