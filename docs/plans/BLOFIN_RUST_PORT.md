@@ -298,3 +298,19 @@ All required brief gates pass after landing integration on `487fd434f5`:
 - CI-runtime compatibility checks PASS on Node22: BloFin public225.888/162.239ms
   CPU,158.040/95.482ms steady,1.520/1.384MB retained (TS/Rust, three medians).
   Private29-frame correctness passes too. The earlier public table uses Node24.
+
+### OKX landing integration
+
+- Merged landing `693ad4f139` after OKX's PR1302 landed. Preserved all four
+  registrations, OKX region/demo aliases and client-ID rules, boxed wasm dispatch,
+  typed metadata modes, strict BloFin/Bybit validation, and generic replay staging,
+  auth/subscriptions, timeouts and body matching. CI retains all venue gates.
+- The merged engine passes222 native tests: engine19/BloFin67/Binance29/
+  Bybit43/OKX64. SDK wasm17 tests, root typecheck44 tasks and lint28 tasks pass.
+- Four-venue release initially exceeded budget. Size optimization on venue crates
+  and serde_json, retaining O3 for shared engine/crypto/dependencies, reduces the
+  release to1,446,776 bytes against unchanged1,468,006. Public CPU/memory gates
+  verify the chosen release profile; no budget or correctness gate is weakened.
+- Integration replay caught a lost BloFin-specific instruments cache-bust filter;
+  restored only that known empty random query on its configured path. Retained
+  all meaningful query values and caller IDs. Final four-venue gates are running.

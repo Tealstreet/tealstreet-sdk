@@ -102,7 +102,7 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Binance + Bybit + BloFin: measured 1,461,186 bytes; retain 1.4 MiB.
+      # The browser engine's aggregate size budget (1.4 MiB).
       WASM_BUDGET_BYTES: 1468006
     defaults:
       run:
@@ -158,3 +158,11 @@ jobs:
         run: |
           yarn rust:private-tape:blofin
           yarn rust:gate --venue blofin --tape sdk-rs/harness/tapes/blofin-private.jsonl --runs 1 --books ''
+      - name: OKX public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue okx --tape sdk-rs/harness/fixtures/okx-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: OKX account and trading variants (correctness)
+        run: |
+          for venue in okx okxeu okxdemo okxeudemo; do
+            yarn rust:private-tape-okx --venue "$venue"
+            yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
+          done

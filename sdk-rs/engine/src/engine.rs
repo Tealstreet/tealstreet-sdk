@@ -348,7 +348,8 @@ impl<P> Cx<'_, P> {
 
     /// Issue a request whose successful body holds a large array: each element
     /// goes to [`Venue::on_item`] as it arrives, then [`Venue::on_response`]
-    /// runs with the envelope, its array emptied. Error bodies arrive whole.
+    /// runs with the envelope for `EnvelopeField` or `Path` (array emptied),
+    /// or an empty body for legacy `Root`/`Field`. Error bodies arrive whole.
     pub fn request_streamed(
         &mut self,
         method: Method,
@@ -607,16 +608,19 @@ impl<V: Venue> Engine<V> {
             let response = Response {
                 status: incoming.status,
                 headers: &incoming.headers,
-                body: match std::str::from_utf8(outside) {
-                    Ok(body) => body,
-                    Err(_) => {
-                        self.venue.on_request_failed(
-                            &mut cx,
-                            pending,
-                            "response envelope is not UTF-8",
-                        );
-                        return;
-                    }
+                body: match splitter.envelope() {
+                    Some(bytes) => match std::str::from_utf8(bytes) {
+                        Ok(body) => body,
+                        Err(_) => {
+                            self.venue.on_request_failed(
+                                &mut cx,
+                                pending,
+                                "response envelope is not UTF-8",
+                            );
+                            return;
+                        }
+                    },
+                    None => "",
                 },
             };
             self.venue.on_response(&mut cx, pending, response);

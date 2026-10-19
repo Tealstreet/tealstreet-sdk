@@ -28,6 +28,7 @@ safe-cex-engine = { path = "engine" }
 safe-cex-venue-binance = { path = "venues/binance" }
 safe-cex-venue-blofin = { path = "venues/blofin" }
 safe-cex-venue-bybit = { path = "venues/bybit" }
+safe-cex-venue-okx = { path = "venues/okx" }
 safe-cex-native = { path = "hosts/native" }
 
 # P5a Goldilocks/Poseidon2 and ECgFp5 primitives, verified against Go WASM.
@@ -74,6 +75,21 @@ lto = "fat"
 codegen-units = 1
 opt-level = 3
 
-# Keep dispatch/serialization glue small; venue and engine hot paths stay at O3.
+# Keep dispatch/serialization glue compact. The shared engine stays at O3.
 [profile.release.package.safe-cex-wasm]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-binance]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-bybit]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-okx]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-blofin]
+opt-level = "z"
+
+[profile.release.package.serde_json]
 opt-level = "z"
