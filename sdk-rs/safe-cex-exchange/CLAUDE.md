@@ -2148,3 +2148,9 @@ NaN payloads canonicalize as Node structuredClone does.
 Uncloneable values and unmodeled object kinds produce visible DataCloneError.
 The worker recorder intentionally drops clone failures as perfFixture.ts does;
 other callers receive the error. Node's real structuredClone supplies the oracle.
+
+
+Array.prototype.constructor is its own nonenumerable writable/configurable data
+property and retains the installed Array facade. ARRAY_STORAGE_REVIEW.md records
+the Node identity/mutation proof and the approved single-pair-per-realm Rc cycle
+limit; repeated operations and installations do not grow that retained graph.
