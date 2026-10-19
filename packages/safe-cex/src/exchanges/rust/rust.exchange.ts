@@ -24,6 +24,7 @@ import type { ClientOrderIdRule } from '../clientOrderId';
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
+import { wooOrdersToPositionRecords } from '../../journal/woo.position-adapter';
 import { FrameApplier } from '../../store/frameApplier';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
@@ -44,6 +45,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   okxdemo: 'okxdemo',
   okxeudemo: 'okxeudemo',
   weex: 'weex',
+  woo: 'woo',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
@@ -52,6 +54,12 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
   mint: () => `${BROKER_ID}${uuid()}`.slice(0, 32),
 });
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  woo: {
+    label: 'WOO',
+    mint: () => String(100_000_000_000_000 + Math.floor(Math.random() * 900_000_000_000_000)),
+    requirement: 'be a canonical positive decimal integer within the JavaScript safe-integer range',
+    isValid: (id) => /^[1-9]\d*$/.test(id) && Number.isSafeInteger(Number(id)),
+  },
   bingx: {
     label: 'BingX',
     isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
@@ -114,6 +122,20 @@ export class RustEngineExchange extends BaseExchange {
     super(exchangeName, options, store);
     this.applier = new FrameApplier(store, this.name === 'mexc');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
+    if (this.name === 'woo') {
+      this.cancelAllOrders = async () => {
+        await this.command({ op: 'cancelSymbolOrders', symbol: '' });
+      };
+      this.fetchHistoricalPositions = async (opts) => {
+        const to = opts.to ?? Date.now();
+        const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
+        const orders = await this.fetchHistoricalOrders({ from, to });
+        return wooOrdersToPositionRecords(orders, {
+          account: opts.account, from,
+          resolveSettleCurrency: (symbol) => this.store.marketsBySymbol[symbol]?.quote || 'USDT',
+        });
+      };
+    }
   }
 
   private updateTickerSymbols = () => {
@@ -127,12 +149,12 @@ export class RustEngineExchange extends BaseExchange {
     if (!loadWasmEngine) throw new Error('No wasm engine loader registered (setWasmEngineLoader)');
     const { WasmEngine } = await loadWasmEngine();
     if (this.isDisposed) return;
-    const { key, secret, passphrase, testnet } = this.options;
+    const { key, secret, passphrase, testnet, applicationId } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
     const transport = engineTransport();
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
-      JSON.stringify({ key, secret, passphrase, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly), privateWsHeaders: Boolean(transport.webSocketHeaders) }),
+      JSON.stringify({ key, secret, passphrase, applicationId, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly), privateWsHeaders: Boolean(transport.webSocketHeaders) }),
     );
     this.host = new EngineHost(engine, transport, {
       onFrame: this.receiveFrame,
@@ -155,7 +177,7 @@ export class RustEngineExchange extends BaseExchange {
   snapshotFrame = () => this.host?.snapshot();
 
   updateSymbolMetadata = async (symbol: string) => {
-    if (this.name !== 'mexc' || this.options.publicDataOnly) return;
+    if (!['mexc', 'woo'].includes(this.name) || this.options.publicDataOnly) return;
     const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
     this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: rails } });
   };
@@ -227,7 +249,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (this.name === 'bybit' || this.name === 'bingx') this.assertCallerClientOrderIds(orders);
+    if (this.name === 'bybit' || this.name === 'bingx' || this.name === 'woo') this.assertCallerClientOrderIds(orders);
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 

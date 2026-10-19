@@ -116,6 +116,16 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
+  // WOO repairs live in the TS reference itself; no result normalization:
+  // exact integer IDs; camel-case aliases; monotonic cumulative/terminal state;
+  // execution-ID dedup and per-execution fills; atomic failed-page snapshots;
+  // STOP direction/source and buy-trailing inference; exact tick splitting;
+  // sized protections, full-position trailing and sibling preservation;
+  // mandatory rounded amendment quantities; both-family cancellation;
+  // unsupported Conditional preflight; authoritative account hedge mode;
+  // paced, complete V1 income with signed fees and account aggregate scope.
+  // Rust additionally walks V3 fill time windows (TS still reads one page).
+  woo: [],
   bingx: (account, rustAccount) => {
   if (values.venue === 'bingx') {
     // BingX TS emits a terminal cumulative fill, ignores partial executions,

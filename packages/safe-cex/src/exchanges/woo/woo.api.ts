@@ -5,6 +5,7 @@ import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
 import createHmac from 'create-hmac';
 import qs from 'qs';
+import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 
 import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { getTransport } from '../../transport/registry';
@@ -96,6 +97,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     {
       baseURL: BASE_URL[options.testnet ? 'testnet' : 'livenet'],
       timeout: options?.extra?.recvWindow ?? RECV_WINDOW,
+      transformResponse: bigIntAsStringJsonParse,
       paramsSerializer: {
         serialize: (params) => qs.stringify(params, { sort: (a, b) => a.localeCompare(b) }),
       },
