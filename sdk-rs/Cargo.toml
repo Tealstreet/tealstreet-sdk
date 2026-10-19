@@ -77,3 +77,11 @@ debug = "line-tables-only"
 lto = "fat"
 codegen-units = 1
 opt-level = 3
+
+# Bitget's streamed ticker decoder is CPU-bound; keep its hot loops optimized
+# for throughput while the aggregate WASM build optimizes other crates for size.
+[profile.release.package.safe-cex-venue-bitget]
+opt-level = 3
+
+[profile.release.package.safe-cex-engine]
+opt-level = 3

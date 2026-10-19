@@ -193,6 +193,14 @@ orderEvent(3200, {
   fillPrice: '90',
   priceAvg: '90',
 });
+// Allow the 3-RPS TS client's queued reconciliation reads to complete.
+// Terminal rows are ephemeral; finish with consistent live REST/WS state.
+const finalOrder = { ...normal, orderId: '1004', clientOid: 'external-live', size: '0.004', price: '93' };
+http('GET', '/api/v2/mix/order/orders-pending', 'productType=usdt-futures&limit=200', {
+  entrustedList: [finalOrder], endId: '',
+});
+records.at(-1).availableAfter = 10_000;
+orderEvent(10_000, finalOrder);
 mkdirSync(dirname(values.out), { recursive: true });
 writeFileSync(values.out, `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
-console.log(JSON.stringify({ out: values.out, records: records.length, seconds: 3.2 }));
+console.log(JSON.stringify({ out: values.out, records: records.length, seconds: 10 }));

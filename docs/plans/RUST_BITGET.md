@@ -420,3 +420,31 @@ all focused tests pass. Final rebuild, replay and repeat audit in progress.
   lifecycle/clock tests are preserved with the shared factory.
 - Independent replay/gate and registration reviews clear. Eight-venue rebuild,
   native verification, replay reruns and current-head CI are required next.
+
+## Reconciliation horizon and compiler-worker accounting
+
+- Eight-venue WASM with incoming size optimization measures 2,821,624 bytes,
+  below the unchanged 3.25 MiB budget. Workspace native tests/clippy, WASM
+  clippy, repository typecheck/lint, WASM adapter and Worker tests pass.
+- CI exposed a timing-only private mismatch: native amend tombstones its old
+  ID immediately; TS retains it until its 3-RPS REST queue catches up. Both
+  full snapshots remove absent terminal rows. Extended the private fixture to
+  allow queued reconciliation, then establish an external live order through
+  matching REST/WS state. Terminal behavior remains covered by native tests.
+- TSX/esbuild sync transforms allocate 8-byte shared buffers in their compiler
+  worker. Main-thread GC cannot establish that worker has released them. Gate
+  subprocesses now set supported ESBUILD_WORKER_THREADS=0 for both engines
+  before imports. Compilation remains outside measurement; no negative clamp,
+  sample selection or public threshold relaxation. Independent review clear.
+- Local public steady CPU margin narrowed under the incoming global WASM
+  size optimization. Keep that aggregate build choice and optimize only the
+  Bitget crate's streamed decoder and shared engine at level 3; measure the new artifact next.
+
+- Targeted build measures 2,916,235 bytes, below unchanged 3,407,872 bytes.
+  Fresh three-run Bitget public PASS: 36,634 frames (including three recorded
+  socket opens), 846 markets/tickers and two books; TS/Rust CPU617.9/576.5ms,
+  steady411.0/395.8ms, retained5.9/2.4MB. BingX, Binance and MEXC public PASS;
+  remaining public regressions running on frozen source/artifact.
+- All private variants PASS, including the final matching REST/WS live-order
+  checkpoint for Bitget. Harness62, WASM adapter23 and Worker13 tests PASS.
+  Final sub-agent reviews clear. Current pushed head must pass CI before merge.
