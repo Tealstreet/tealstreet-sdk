@@ -84,6 +84,10 @@ const KNOWN_TS_FIXES = {
       'Include UTA totalFundingFee in realized PnL.',
       'Use cumulative executed size for orders and deduplicate executions.',
       'Do not emit an execution for an algo trigger acknowledgement.',
+      'Split normal orders at floored max lots without losing requested volume.',
+      'Send native crossed marginMode for Classic batches rather than cross.',
+      'Resolve native modify identity using the fresh newClientOid.',
+      'Never cancel-replace an amendment after an ambiguous transport/server result.',
     ],
   },
 };

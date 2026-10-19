@@ -58,9 +58,11 @@ struct WsPosition {
 #[derive(Default)]
 pub struct Account {
     pub generation: u64,
+    pub config_at: Option<f64>,
     pub uta: bool,
     pub detected: bool,
     pub authenticated: bool,
+    pub fallback: bool,
     poll: Option<TimerId>,
     tick: u32,
     positions_in_flight: bool,
@@ -81,6 +83,8 @@ pub struct Account {
     filled: HashMap<String, (f64, f64)>,
     rest_paused_until: f64,
     last_payload: f64,
+    write_check: Option<(TimerId, f64)>,
+    degraded: bool,
 }
 
 impl BitgetFutures {
@@ -685,7 +689,7 @@ impl BitgetFutures {
         }
     }
 
-    fn apply_settings(&self, cx: &mut Cx<'_, Pending>, settings: &UtaSettings<'_>) {
+    pub(crate) fn apply_settings(&self, cx: &mut Cx<'_, Pending>, settings: &UtaSettings<'_>) {
         cx.store.set_hedged(is_hedged(&settings.hold_mode));
         for row in &settings.symbol_config_list {
             if !row.category.is_empty() && !row.category.eq_ignore_ascii_case(self.product()) {
@@ -732,7 +736,18 @@ impl BitgetFutures {
             .is_some_and(|at| started - at <= 5_000.0);
         let mut rows: Vec<_> = rows
             .into_iter()
-            .filter_map(|p| {
+            .filter_map(|mut p| {
+                if self.account.config_at.is_some_and(|at| started <= at) {
+                    if let Some(settings) = cx.store.setting(&p.symbol) {
+                        p.leverage = settings.leverage;
+                        p.margin_type = settings.margin_type;
+                    }
+                    p.position_mode = Some(if cx.store.hedged() {
+                        PositionMode::Hedged
+                    } else {
+                        PositionMode::Oneway
+                    });
+                }
                 if full_fresh && !self.account.full_position_ids.contains(&p.id) {
                     return None;
                 }
@@ -782,7 +797,7 @@ impl BitgetFutures {
                 .account
                 .opened
                 .get(&row.id)
-                .is_some_and(|until| *until > started + 5_000.0)
+                .is_some_and(|until| *until >= started + 5_000.0)
                 && let Some(current) = cx.store.order(&row.id)
             {
                 *row = current.clone();
@@ -939,6 +954,7 @@ impl BitgetFutures {
                     }
                 }
                 self.account.last_payload = cx.now;
+                self.account.degraded = false;
                 if self.account.positions_timer.is_none() {
                     self.account.positions_timer = Some(cx.set_timer(500.0));
                 }
@@ -1022,6 +1038,7 @@ impl BitgetFutures {
                     }
                 }
                 self.account.last_payload = cx.now;
+                self.account.degraded = false;
                 if self.account.orders_timer.is_none() {
                     self.account.orders_timer = Some(cx.set_timer(500.0));
                 }
@@ -1059,6 +1076,7 @@ impl BitgetFutures {
                     }
                 }
                 self.account.last_payload = cx.now;
+                self.account.degraded = false;
                 if self.account.balance_timer.is_none() {
                     self.account.balance_timer = Some(cx.set_timer(300.0));
                 }
@@ -1091,6 +1109,7 @@ impl BitgetFutures {
                     }
                 }
                 self.account.last_payload = cx.now;
+                self.account.degraded = false;
             }
             _ => {}
         }
@@ -1169,9 +1188,57 @@ impl BitgetFutures {
         true
     }
 
+    pub(crate) fn mark_opened(&mut self, now: f64, id: &str) {
+        self.account.opened.insert(id.to_owned(), now + 5_000.0);
+    }
+
+    pub(crate) fn order_terminal(&self, id: &str) -> bool {
+        self.account.terminal.contains_key(id)
+    }
+
+    pub(crate) fn positions_in_flight(&self) -> bool {
+        self.account.positions_in_flight
+    }
+
+    pub(crate) fn mark_canceled(&mut self, cx: &mut Cx<'_, Pending>, id: &str) {
+        self.account
+            .terminal
+            .insert(id.to_owned(), cx.now + 10_000.0);
+        self.account.opened.remove(id);
+        cx.store.update_order(id, |order| {
+            if !matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
+                order.status = OrderStatus::Canceled;
+            }
+        });
+    }
+
+    pub(crate) fn note_write(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.account.write_check.is_none() {
+            self.account.write_check = Some((cx.set_timer(5_000.0), cx.now));
+        }
+    }
+
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account.write_check.is_some_and(|(t, _)| t == timer) {
+            let (_, since) = self.account.write_check.take().expect("write check");
+            if self.account.last_payload <= since {
+                self.account.degraded = true;
+                if !self.account.uta {
+                    self.account.fallback = true;
+                }
+                cx.log(LogLevel::Warning, "Bitget private stream has no authenticated payload after a write; reconciling and reconnecting");
+                self.refresh_positions(cx);
+                self.refresh_balance(cx);
+                self.refresh_orders(cx, false);
+                self.connect(cx, 3);
+            }
+        }
         if self.account.poll == Some(timer) {
             self.account.poll = None;
+            if self.account.degraded {
+                self.refresh_balance(cx);
+                self.refresh_orders(cx, false);
+            }
             self.refresh_positions(cx);
             self.account.tick += 1;
             if self.account.tick.is_multiple_of(2) {

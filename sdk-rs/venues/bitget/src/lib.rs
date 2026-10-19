@@ -3,6 +3,7 @@ mod account;
 mod book;
 mod paths;
 mod sign;
+mod trading;
 mod wire;
 
 use book::BookState;
@@ -34,6 +35,7 @@ pub struct Options {
 }
 
 pub enum Pending {
+    Trade(Box<trading::Request>),
     Account {
         generation: u64,
         request: account::Request,
@@ -67,6 +69,7 @@ struct Connection {
 pub struct BitgetFutures {
     options: Options,
     account: account::Account,
+    trading: trading::Trading,
     sockets: [Connection; 4],
     books: HashMap<String, BookState>,
     candles: HashMap<(String, String), usize>,
@@ -77,6 +80,7 @@ impl BitgetFutures {
         Self {
             options,
             account: account::Account::default(),
+            trading: trading::Trading::default(),
             sockets: Default::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -115,6 +119,8 @@ impl BitgetFutures {
         let url = if index == 3 {
             if self.account.uta {
                 paths::UTA_PRIVATE
+            } else if self.account.fallback {
+                paths::PRIVATE_FALLBACK
             } else {
                 paths::PRIVATE
             }
@@ -458,6 +464,7 @@ impl Venue for BitgetFutures {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Trade(_) => {}
             Pending::Account {
                 generation,
                 request,
@@ -512,6 +519,10 @@ impl Venue for BitgetFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Trade(request) = pending {
+            self.trade_response(cx, *request, Ok(response));
+            return;
+        }
         if let Pending::Account {
             generation,
             request,
@@ -519,6 +530,7 @@ impl Venue for BitgetFutures {
         {
             if generation == self.account.generation {
                 self.account_response(cx, request, response);
+                self.resume_trading(cx);
             }
             return;
         }
@@ -591,6 +603,7 @@ impl Venue for BitgetFutures {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Trade(request) => self.trade_response(cx, *request, Err(error)),
             Pending::Candles { command, .. } => cx.done(command, Err(error.to_owned())),
             Pending::Account {
                 generation,
@@ -598,6 +611,7 @@ impl Venue for BitgetFutures {
             } => {
                 if generation == self.account.generation {
                     self.account_transport_failed(cx, request, error);
+                    self.resume_trading(cx);
                 }
             }
             _ => cx.log(LogLevel::Error, error),
@@ -605,6 +619,7 @@ impl Venue for BitgetFutures {
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.account_timer(cx, timer);
+        self.trade_timer(cx, timer);
         for index in 0..self.sockets.len() {
             if self.sockets[index].reconnect == Some(timer) {
                 self.sockets[index].reconnect = None;
@@ -723,7 +738,7 @@ impl Venue for BitgetFutures {
                     },
                 );
             }
-            _ => {}
+            trade => self.trade_command(cx, trade),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {

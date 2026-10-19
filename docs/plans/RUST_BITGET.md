@@ -91,3 +91,37 @@ merge PR, create fresh follow-up branch. Never touch master or force/rebase.
 - Bans/fmt/clippy pass; engine 12 tests, Bitget public 11 + private 15 tests pass.
 - TS fixes are explicit in `harness/gate.mjs`'s KNOWN_TS_FIXES registry; normal
   Bitget tapes receive no mismatch normalization. Next: trading commands.
+
+## Trading phase checkpoint
+
+- Sequenced Classic/UTA write jobs: preflight caller IDs across the entire
+  batch, native bracket and stop payloads, max-lot splitting, batch limits,
+  immutable plan types, sibling-aware cancel, leverage/margin/mode settings.
+- Native modify uses fresh newClientOid and both size/price. Resolve asynchronous
+  identity through the new client ID, respecting terminal detail and fresh WS.
+  Failed batch cancellations block replacement; acknowledged partial successes
+  remain terminal. Only explicit known rejection permits cancel-and-replace.
+- Unknown transport/server write outcomes are never retried or rolled back.
+  Reads retry boundedly; signature rejection is re-signed once. UTA strategy
+  replacement preserves both legs and rolls back only a known failed placement.
+- Post-write private grace triggers Classic fallback and full REST polling;
+  literal pongs do not count as authenticated payloads. Old settings snapshots
+  cannot overwrite acknowledged leverage/margin/mode changes.
+- Sub-agent review found and fixed partial-cancel handling, async modify identity,
+  terminal/snapshot races, sibling cancellation, UTA client-only identity and
+  full-position amend, lot-induced caller-ID splits, and partial-write health.
+- Bans/fmt/clippy pass; public 11, private 15, trading 23 tests pass. TS defects
+  recorded in KNOWN_TS_FIXES: lot splitting lost quantity, Classic cross wire
+  spelling, stale modify identity, unsafe fallback after unknown write outcomes.
+
+## Query phase plan
+
+Stream typed fills/history/bills/trades lists into rare JSON results. Follow
+native cursors even on short pages, dedupe identities, split accepted time
+windows, bound page/window counts, and fail loudly on incomplete/error reads.
+Classic hedge fills derive execution direction from position side + tradeSide;
+UTA uses execution direction and the documented positive charged-fee convention.
+Bill rows emit gross PnL and signed commission separately with distinct IDs.
+UTA bills remain explicitly unsupported rather than calling incompatible v2.
+Verify documented samples, huge IDs, fee signs, hedge closes, cursor cycles,
+range boundaries, malformed pages and retry failure; sub-agent review afterward.
