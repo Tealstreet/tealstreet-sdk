@@ -7,8 +7,10 @@ cd "$(dirname "$0")/.."
 if [[ $(uname) == Darwin ]]; then
   export DYLD_LIBRARY_PATH="$(rustc --print sysroot)/lib"
 fi
-# Keep the aggregate browser module within budget; native release stays at level 3.
-CARGO_PROFILE_RELEASE_OPT_LEVEL=z cargo build --locked --release -p safe-cex-wasm --target wasm32-unknown-unknown
+# Wasm-only size profiles fit the aggregate budget; the engine stays at O3.
+CARGO_PROFILE_RELEASE_OPT_LEVEL=z cargo build --locked --release -p safe-cex-wasm --target wasm32-unknown-unknown \
+  --config 'profile.release.package.safe-cex-wasm.opt-level="s"' \
+  --config 'profile.release.package.safe-cex-venue-woo.opt-level="s"'
 for target in web nodejs; do
   wasm-bindgen --remove-name-section --remove-producers-section --target "$target" --out-dir "hosts/wasm/pkg/${target/nodejs/node}" \
     target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm

@@ -51,32 +51,17 @@ pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D
 }
 
 pub fn id<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    struct Id;
-    impl<'de> serde::de::Visitor<'de> for Id {
-        type Value = String;
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("a string, unsigned integer or null ID")
-        }
-        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<String, E> {
-            Ok(value.into())
-        }
-        fn visit_string<E: serde::de::Error>(self, value: String) -> Result<String, E> {
-            Ok(value)
-        }
-        fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<String, E> {
-            Ok(value.to_string())
-        }
-        fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<String, E> {
-            self.visit_u64(value.try_into().map_err(E::custom)?)
-        }
-        fn visit_unit<E: serde::de::Error>(self) -> Result<String, E> {
-            Ok(String::new())
-        }
-        fn visit_none<E: serde::de::Error>(self) -> Result<String, E> {
-            self.visit_unit()
-        }
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Id {
+        Text(String),
+        Integer(u64),
     }
-    d.deserialize_any(Id)
+    Ok(match Option::<Id>::deserialize(d)? {
+        Some(Id::Text(s)) => s,
+        Some(Id::Integer(n)) => n.to_string(),
+        None => String::new(),
+    })
 }
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
@@ -118,6 +103,20 @@ pub struct Message<'a> {
     #[serde(borrow)]
     pub data: Option<&'a RawValue>,
     pub success: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct TickerMessage<'a> {
+    #[serde(borrow, default)]
+    pub event: Str<'a>,
+    #[serde(borrow, default)]
+    pub topic: Str<'a>,
+    #[serde(default, rename = "ts", deserialize_with = "number")]
+    _ts: f64,
+    #[serde(rename = "success")]
+    _success: Option<bool>,
+    #[serde(borrow)]
+    pub data: Vec<Tick<'a>>,
 }
 
 #[derive(Deserialize)]
@@ -187,37 +186,6 @@ pub struct Tick<'a> {
     pub price: Option<f64>,
 }
 
-pub fn ticks(text: &str, capacity: usize) -> Result<Vec<Tick<'_>>, serde_json::Error> {
-    use serde::de::{DeserializeSeed, SeqAccess, Visitor};
-    struct Batch(usize);
-    impl<'de> Visitor<'de> for Batch {
-        type Value = Vec<Tick<'de>>;
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("a WOO ticker batch")
-        }
-        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-            let Some(first) = seq.next_element()? else {
-                return Ok(Vec::new());
-            };
-            let mut rows = Vec::with_capacity(self.0.clamp(1, 4096));
-            rows.push(first);
-            while let Some(row) = seq.next_element()? {
-                rows.push(row);
-            }
-            Ok(rows)
-        }
-    }
-    impl<'de> DeserializeSeed<'de> for Batch {
-        type Value = Vec<Tick<'de>>;
-        fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
-            d.deserialize_seq(self)
-        }
-    }
-    let mut d = serde_json::Deserializer::from_str(text);
-    let rows = Batch(capacity).deserialize(&mut d)?;
-    d.end()?;
-    Ok(rows)
-}
 #[derive(Deserialize)]
 pub struct Level {
     #[serde(deserialize_with = "number")]

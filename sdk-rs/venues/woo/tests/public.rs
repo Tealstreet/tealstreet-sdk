@@ -40,6 +40,62 @@ fn seed_uses_native_perpetual_units_and_skips_irrelevant_rows() {
 }
 
 #[test]
+fn repeated_ticker_fields_and_fields_for_other_topics_emit_no_frame() {
+    let (mut e, s) = started();
+    assert!(e.take_frame(35.0).is_some());
+    for (i, payload) in [
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT","close":60000,"volume":4,"amount":240000,"price":1,"bid":1}]}"#,
+        r#"{"topic":"bbos","data":[{"symbol":"PERP_BTC_USDT","bid":60000,"ask":60000,"close":1,"price":1}]}"#,
+        r#"{"topic":"markprices","data":[{"symbol":"PERP_BTC_USDT","price":60001,"close":1,"bid":1}]}"#,
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT","close":null,"volume":null,"amount":null}]}"#,
+    ]
+    .iter()
+    .enumerate()
+    {
+        let now = 40.0 + i as f64;
+        ws(&mut e, s, now, payload);
+        assert!(e.take_frame(now).is_none(), "{payload}");
+    }
+}
+
+#[test]
+fn ticker_signed_zero_changes_emit_frames_and_repeated_bits_do_not() {
+    let (mut e, s) = started();
+    e.take_frame(35.0);
+    for (topic, field) in [
+        ("tickers", "close"),
+        ("tickers", "volume"),
+        ("tickers", "amount"),
+        ("bbos", "bid"),
+        ("bbos", "ask"),
+        ("markprices", "price"),
+    ] {
+        for (value, emits) in [
+            ("-0.0", true),
+            ("-0.0", false),
+            ("0.0", true),
+            ("0.0", false),
+        ] {
+            let payload = format!(
+                r#"{{"topic":"{topic}","data":[{{"symbol":"PERP_BTC_USDT","{field}":{value}}}]}}"#
+            );
+            ws(&mut e, s, 40.0, &payload);
+            assert_eq!(e.take_frame(40.0).is_some(), emits, "{payload}");
+            let t = e.store().ticker("BTCUSDT").unwrap();
+            let actual = match field {
+                "close" => t.last,
+                "volume" => t.volume,
+                "amount" => t.quote_volume,
+                "bid" => t.bid,
+                "ask" => t.ask,
+                _ => t.mark,
+            };
+            assert_eq!(actual.to_bits(), value.parse::<f64>().unwrap().to_bits());
+        }
+    }
+}
+
+#[test]
 fn nullable_index_keeps_missing_value_without_rejecting_the_seed() {
     let mut e = Engine::new(Woo::new(Options {
         public_data_only: true,
@@ -144,6 +200,73 @@ fn ticker_batch_capacity_is_a_hint_and_never_limits_delivered_rows() {
         &format!(r#"{{"topic":"tickers","data":[{rows}]}}"#),
     );
     assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 1000.0);
+}
+
+#[test]
+fn ticker_envelope_accepts_data_before_topic_and_numeric_strings() {
+    let (mut e, s) = started();
+    ws(
+        &mut e,
+        s,
+        40.0,
+        r#"{"data":[{"symbol":"PERP_BTC_USDT","close":"60004","volume":"7","amount":420028}],"success":true,"ts":"1000","topic":"tickers"}"#,
+    );
+    let ticker = e.store().ticker("BTCUSDT").unwrap();
+    assert_eq!(
+        (ticker.last, ticker.volume, ticker.quote_volume),
+        (60004.0, 7.0, 420028.0)
+    );
+}
+
+#[test]
+fn control_event_wins_over_valid_or_malformed_ticker_data() {
+    let (mut e, s) = started();
+    e.drain_actions().for_each(drop);
+    for data in [
+        r#"[{"symbol":"PERP_BTC_USDT","close":1}]"#,
+        r#"[{"symbol":"PERP_BTC_USDT","close":"bad"}]"#,
+        r#"{"close":1}"#,
+    ] {
+        ws(
+            &mut e,
+            s,
+            40.0,
+            &format!(r#"{{"data":{data},"topic":"tickers","event":"ping"}}"#),
+        );
+        assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 60000.0);
+        assert!(
+            e.drain_actions()
+                .any(|a| matches!(a,Action::WsSend{text,..}if text==r#"{"event":"pong"}"#))
+        );
+    }
+}
+
+#[test]
+fn malformed_or_duplicate_ticker_envelope_fields_cannot_commit_rows() {
+    let (mut e, s) = started();
+    for fields in [
+        r#""topic":"tickers","topic":"markprices""#,
+        r#""topic":"tickers","ts":"bad""#,
+        r#""topic":"tickers","ts":null"#,
+        r#""topic":"tickers","success":1"#,
+        r#""topic":"tickers","success":true,"success":true"#,
+    ] {
+        ws(
+            &mut e,
+            s,
+            40.0,
+            &format!(r#"{{{fields},"data":[{{"symbol":"PERP_BTC_USDT","close":1,"price":2}}]}}"#),
+        );
+        let ticker = e.store().ticker("BTCUSDT").unwrap();
+        assert_eq!((ticker.last, ticker.mark), (60000.0, 60001.0));
+    }
+    ws(
+        &mut e,
+        s,
+        50.0,
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT","close":1}],"data":[]}"#,
+    );
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 60000.0);
 }
 #[test]
 fn pre_seed_book_subscription_survives_until_socket_open() {

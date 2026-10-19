@@ -239,6 +239,73 @@ impl Woo {
             pending,
         );
     }
+    fn apply_ticks(&self, cx: &mut Cx<'_, Pending>, topic: &str, rows: Vec<Tick<'_>>) {
+        #[derive(Clone, Copy)]
+        enum Kind {
+            Tickers,
+            Bbos,
+            Marks,
+        }
+        let kind = match topic {
+            "tickers" => Kind::Tickers,
+            "bbos" => Kind::Bbos,
+            _ => Kind::Marks,
+        };
+        for row in rows {
+            if !row.symbol.starts_with("PERP_") {
+                continue;
+            }
+            let Some(&index) = self.ticker_indexes.get(row.symbol.as_ref()) else {
+                continue;
+            };
+            let Some(t) = cx.store.tickers().get(index as usize) else {
+                continue;
+            };
+            // Most WOO batches repeat existing values. Avoid the store's full-field
+            // dirty-mask scan unless this topic changes a supplied field. Compare
+            // bits to retain its signed-zero change semantics.
+            let changed =
+                |value: Option<f64>, old: f64| value.is_some_and(|v| v.to_bits() != old.to_bits());
+            let dirty = match kind {
+                Kind::Tickers => {
+                    changed(row.close, t.last)
+                        || changed(row.volume, t.volume)
+                        || changed(row.amount, t.quote_volume)
+                }
+                Kind::Bbos => changed(row.bid, t.bid) || changed(row.ask, t.ask),
+                Kind::Marks => changed(row.price, t.mark),
+            };
+            if !dirty {
+                continue;
+            }
+            cx.store.update_ticker_at(index, |t| match kind {
+                Kind::Tickers => {
+                    if let Some(v) = row.close {
+                        t.last = v;
+                    }
+                    if let Some(v) = row.volume {
+                        t.volume = v;
+                    }
+                    if let Some(v) = row.amount {
+                        t.quote_volume = v;
+                    }
+                }
+                Kind::Bbos => {
+                    if let Some(v) = row.bid {
+                        t.bid = v;
+                    }
+                    if let Some(v) = row.ask {
+                        t.ask = v;
+                    }
+                }
+                Kind::Marks => {
+                    if let Some(v) = row.price {
+                        t.mark = v;
+                    }
+                }
+            });
+        }
+    }
     fn funding_read(&self, cx: &mut Cx<'_, Pending>) {
         cx.request_streamed(
             Method::Get,
@@ -558,8 +625,6 @@ impl Venue for Woo {
             }
         }
     }
-    // Keep public decoding in the host's speed-optimized dispatch.
-    #[inline(always)]
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.account_message(cx, socket, text) {
             return;
@@ -568,6 +633,13 @@ impl Venue for Woo {
             return;
         }
         self.public.received = cx.now;
+        if let Ok(msg) = serde_json::from_str::<TickerMessage<'_>>(text)
+            && msg.event.is_empty()
+            && matches!(msg.topic.as_ref(), "tickers" | "bbos" | "markprices")
+        {
+            self.apply_ticks(cx, msg.topic.as_ref(), msg.data);
+            return;
+        }
         let Ok(msg) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
@@ -588,46 +660,7 @@ impl Venue for Woo {
             return;
         };
         match msg.topic.as_ref() {
-            "tickers" | "bbos" | "markprices" => {
-                let Ok(rows) = ticks(data.get(), self.ticker_indexes.len()) else {
-                    return;
-                };
-                for row in rows {
-                    if !row.symbol.starts_with("PERP_") {
-                        continue;
-                    }
-                    let Some(&index) = self.ticker_indexes.get(row.symbol.as_ref()) else {
-                        continue;
-                    };
-                    cx.store
-                        .update_ticker_at(index, |t| match msg.topic.as_ref() {
-                            "tickers" => {
-                                if let Some(v) = row.close {
-                                    t.last = v;
-                                }
-                                if let Some(v) = row.volume {
-                                    t.volume = v;
-                                }
-                                if let Some(v) = row.amount {
-                                    t.quote_volume = v;
-                                }
-                            }
-                            "bbos" => {
-                                if let Some(v) = row.bid {
-                                    t.bid = v;
-                                }
-                                if let Some(v) = row.ask {
-                                    t.ask = v;
-                                }
-                            }
-                            _ => {
-                                if let Some(v) = row.price {
-                                    t.mark = v;
-                                }
-                            }
-                        });
-                }
-            }
+            "tickers" | "bbos" | "markprices" => (),
             topic => {
                 let Some((symbol, kind)) = topic.split_once('@') else {
                     return;

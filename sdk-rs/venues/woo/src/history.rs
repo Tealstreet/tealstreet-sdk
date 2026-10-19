@@ -149,40 +149,20 @@ fn optional_id<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Err
     Ok((!value.is_empty()).then_some(value))
 }
 fn maker<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
-    struct Maker;
-    impl<'de> serde::de::Visitor<'de> for Maker {
-        type Value = Option<bool>;
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("a boolean, 0, 1 or null maker flag")
-        }
-        fn visit_bool<E: serde::de::Error>(self, value: bool) -> Result<Self::Value, E> {
-            Ok(Some(value))
-        }
-        fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Self::Value, E> {
-            match value {
-                0 => Ok(Some(false)),
-                1 => Ok(Some(true)),
-                _ => Err(E::custom("invalid maker flag")),
-            }
-        }
-        fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Self::Value, E> {
-            self.visit_u64(value.try_into().map_err(E::custom)?)
-        }
-        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
-            match value {
-                "0" => Ok(Some(false)),
-                "1" => Ok(Some(true)),
-                _ => Err(E::custom("invalid maker flag")),
-            }
-        }
-        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-            self.visit_unit()
-        }
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Flag {
+        Bool(bool),
+        Number(u8),
+        Text(String),
     }
-    d.deserialize_any(Maker)
+    match Option::<Flag>::deserialize(d)? {
+        None => Ok(None),
+        Some(Flag::Bool(v)) => Ok(Some(v)),
+        Some(Flag::Number(v @ 0..=1)) => Ok(Some(v == 1)),
+        Some(Flag::Text(s)) if s == "0" || s == "1" => Ok(Some(s == "1")),
+        _ => Err(serde::de::Error::custom("invalid maker flag")),
+    }
 }
 #[derive(Deserialize)]
 struct FillRow<'a> {

@@ -82,7 +82,7 @@ opt-level = 3
 
 # Optimize final dispatch for throughput; venue crates retain size profiles.
 [profile.release.package.safe-cex-wasm]
-opt-level = "z"
+opt-level = 3
 
 [profile.release.package.safe-cex-venue-binance]
 opt-level = "z"
@@ -102,8 +102,4 @@ opt-level = "z"
 opt-level = 3
 
 [profile.release.package.safe-cex-engine]
-opt-level = 3
-
-# Preserve WOO public decoding throughput inside the compact aggregate.
-[profile.release.package.safe-cex-venue-woo]
 opt-level = 3
