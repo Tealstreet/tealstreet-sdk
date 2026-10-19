@@ -117,6 +117,9 @@ const KNOWN_TS_FIXES = {
   // Cancel native identities and protective defaults now match metadata. Rust
   // also conserves split quantities, rejects unknown settings, and verifies
   // final cancellation/protection provenance before placing replacements.
+  // Fill history no longer borrows counterparty IDs or invents an order ID;
+  // filtered full pages fail INCOMPLETE and rejected reads propagate errors.
+  // Conditional REST children retain exact IDs/parents and trigger references.
   bitrue() {},
   blofin: (ts) => {
     const account = ts.account;

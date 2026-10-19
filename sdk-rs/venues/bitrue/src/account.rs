@@ -189,7 +189,7 @@ struct OrderRow<'a> {
     #[serde(default)]
     condition_order: bool,
     #[serde(borrow, default)]
-    child_orders: Vec<OrderRow<'a>>,
+    child_orders: Option<Vec<OrderRow<'a>>>,
 }
 #[derive(Deserialize)]
 struct PrivateMessage<'a> {
@@ -605,12 +605,22 @@ impl Bitrue {
         if id.is_empty() {
             return;
         }
-        let Some(side) = side(&row.side) else {
+        let existing = cx.store.orders().iter().find(|o| o.id == id).cloned();
+        let Some(mut side) = side(&row.side) else {
             return;
         };
-        let Some(kind) = order_type(&row.o) else {
+        let Some(mut kind) = order_type(&row.o) else {
             return;
         };
+        if let Some(previous) = existing
+            .as_ref()
+            .filter(|o| matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit))
+        {
+            kind = previous.kind;
+            if previous.parent_id.is_some() {
+                side = previous.side;
+            }
+        }
         let Some(status) = order_status(&row.status)
             .or_else(|| (row.x == "CANCEL").then_some(OrderStatus::Canceled))
         else {
@@ -626,7 +636,6 @@ impl Bitrue {
         if amount < 0.0 || filled < 0.0 || !amount.is_finite() || !filled.is_finite() {
             return;
         }
-        let existing = cx.store.orders().iter().find(|o| o.id == id).cloned();
         let previous = self
             .filled_native(&id)
             .max(existing.as_ref().map_or(0.0, |o| o.filled));
@@ -697,7 +706,7 @@ impl Bitrue {
         };
         cx.store.upsert_order(Order {
             id: id.clone(),
-            parent_id: None,
+            parent_id: existing.as_ref().and_then(|o| o.parent_id.clone()),
             status,
             symbol: market.symbol.clone(),
             kind,
@@ -706,12 +715,20 @@ impl Bitrue {
             amount,
             filled,
             remaining: (amount - filled).max(0.0),
-            reduce_only: row.reduce.unwrap_or(row.open == "CLOSE"),
+            reduce_only: existing.as_ref().is_some_and(|o| o.parent_id.is_some())
+                || row.reduce.unwrap_or_else(|| {
+                    if row.open.is_empty() {
+                        existing.as_ref().is_some_and(|o| o.reduce_only)
+                    } else {
+                        row.open == "CLOSE"
+                    }
+                }),
             close: None,
             client_order_id: [row.c.as_ref(), row.client_order_id.as_ref()]
                 .into_iter()
                 .find(|s| !s.is_empty())
-                .map(str::to_owned),
+                .map(str::to_owned)
+                .or_else(|| existing.as_ref().and_then(|o| o.client_order_id.clone())),
             time_in_force: match &*row.o {
                 "IOC" => Some(TimeInForce::ImmediateOrCancel),
                 "FOK" => Some(TimeInForce::FillOrKill),
@@ -719,7 +736,8 @@ impl Bitrue {
                 _ => None,
             },
             last_update: time.max(row.time.0),
-            trigger_type: trigger(row.trigger_price_type.0),
+            trigger_type: trigger(row.trigger_price_type.0)
+                .or_else(|| existing.as_ref().and_then(|o| o.trigger_type)),
             take_profit: existing.as_ref().and_then(|o| o.take_profit),
             stop_loss: existing.as_ref().and_then(|o| o.stop_loss),
             extra: Some(OrderExtra {
@@ -930,17 +948,23 @@ impl Bitrue {
             }
         }
         let mut children = Vec::new();
-        for child in &row.child_orders {
+        if row.child_orders.is_some() {
+            order.stop_loss = None;
+            order.take_profit = None;
+        }
+        for child in row.child_orders.iter().flatten() {
             let child_rows = self.map_order_tree(cx, symbol, child, Some(&order))?;
             for mapped in child_rows {
                 if mapped.id == order.id || children.iter().any(|o: &Order| o.id == mapped.id) {
                     return Err(());
                 }
-                if mapped.kind == OrderType::StopLoss {
-                    order.stop_loss = Some(mapped.price);
-                }
-                if mapped.kind == OrderType::TakeProfit {
-                    order.take_profit = Some(mapped.price);
+                if !terminal(mapped.status) {
+                    if mapped.kind == OrderType::StopLoss {
+                        order.stop_loss = Some(mapped.price);
+                    }
+                    if mapped.kind == OrderType::TakeProfit {
+                        order.take_profit = Some(mapped.price);
+                    }
                 }
                 children.push(mapped);
             }

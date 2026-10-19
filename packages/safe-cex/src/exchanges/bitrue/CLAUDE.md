@@ -230,7 +230,7 @@ Both WebSockets use the `BaseWebSocket.onClose()` handler:
 | `positionType`     | 1 = cross, 2 = isolated                          |
 | `futureModel`      | Always `normal`                                  |
 | `conditionOrder`   | `true` for standalone stop/TP orders             |
-| `clientOrderId`    | UUID for standalone conditional orders            |
+| `clientOrderId`    | UUID for standalone conditional orders           |
 | `triggerType`      | 1 = stop loss, 2 = take profit                   |
 | `triggerPriceType` | 1 = last price, 2 = mark price                   |
 

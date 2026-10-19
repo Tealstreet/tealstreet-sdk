@@ -58,9 +58,11 @@ command({ op: 'placeOrders', orders: [{ symbol: 'E-BTC-USDT', type: 'limit', sid
 // A confirmed signature rejection permits exactly one newly signed resend.
 http('POST', '/fapi/v2/order', { code: '-1022', msg: 'Signature for this request is not valid.' }, payload({ clientOrderId: 'caller-bitrue-1' }));
 http('POST', '/fapi/v2/order', ok({ orderId: '300' }), payload({ clientOrderId: 'caller-bitrue-1' }));
+http('GET', '/fapi/v2/openOrders?contractName=E-BTC-USDT', ok([normal('100'), normal('300', { clientOrderId: 'caller-bitrue-1' })]), undefined, 1);
 orderEvent('300', 0, 59000, 'NEW', { q: '0.004', p: '59000', c: 'caller-bitrue-1', x: 'NEW' });
 command({ op: 'cancelOrders', ids: ['300'] });
 http('POST', '/fapi/v2/cancel', ok({ orderId: '300' }), { orderId: '300', contractName: 'E-BTC-USDT', conditionOrder: false });
+http('GET', '/fapi/v2/openOrders?contractName=E-BTC-USDT', ok([normal('100')]), undefined, 2);
 orderEvent('300', 0, 59000, 'CANCELED', { q: '0.004', p: '59000', c: 'caller-bitrue-1', x: 'CANCEL' });
 command({ op: 'placeOrders', orders: [{ symbol: 'E-BTC-USDT', type: 'limit', side: 'buy', amount: 0.004, price: 59000, stopLoss: 55000, takeProfit: 65000 }] });
 http('POST', '/fapi/v2/order', ok({ orderId: '301' }), payload({ triggerOrderCreateParams: [

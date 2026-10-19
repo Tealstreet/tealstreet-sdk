@@ -56,3 +56,29 @@ create a clean follow-up branch. Never stash, rebase, force-push or touch master
 - TS correction discovered from official payload units: apply contract size to
   public depth/ticker/candle volumes and retain contractSize metadata. Private
   units, lifecycle and cancellation corrections are being validated separately.
+
+### Private, trading and query checkpoints
+
+- Independent private review PASS: exact large IDs; stable native-contract fill
+  conversion with individual L prices and cumulative-average fallback; bounded
+  high-water/terminal guards; real futures listen key, 30-minute renewal and
+  watchdog; atomic account/settings and paced per-symbol order snapshots.
+- Independent trading review PASS after fixing protection erasure through an
+  empty childOrders list. Batch preflight, quantity conservation, quote-market
+  sizing, atomic brackets, safe cancel/detail/replace, caller-ID isolation and
+  no uncertain write retry have direct native tests. Protective commands return
+  the TS refresh result; the actual native state comes from reconciliation.
+- Independent query review PASS after fixing side-specific fill ownership and
+  rejecting incomplete filtered full pages. Official v2 has a forward fromId
+  cursor with a most-recent default, no documented backward cursor, complete
+  order-history list or complete PnL/funding ledger. These cases fail explicitly.
+- Paired TS fixes also cover conditional/attached REST children, exact native
+  cancellation identity, SL Mark / TP Last defaults, and malformed execution
+  IDs / failed query propagation. KNOWN_TS_FIXES documents every divergence.
+- Native venue tests pass (52); SDK WASM boundary test passes, proving real
+  registration, worker/main frame identities/units, actual read-only leverage,
+  recvWindow forwarding and exactly one newly signed -1022 resend.
+- Harness adversarial fixes preserve create-ID field presence and caller IDs,
+  require exact cancellation identity and signed private requests. 77 harness
+  tests pass. Crypto exports remain used by this and existing venue crates;
+  no further first-port leftover became unused.

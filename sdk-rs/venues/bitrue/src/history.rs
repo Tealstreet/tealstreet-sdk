@@ -231,11 +231,15 @@ impl Bitrue {
             request.failed = true;
             return;
         };
-        let Some(order_id) = (if side == "buy" { row.bid_id.as_ref() } else { row.ask_id.as_ref() })
-            .filter(|id| valid_id(id)) else {
-                request.failed = true;
-                return;
-            };
+        let Some(order_id) = (if side == "buy" {
+            row.bid_id.as_ref()
+        } else {
+            row.ask_id.as_ref()
+        })
+        .filter(|id| valid_id(id)) else {
+            request.failed = true;
+            return;
+        };
         let order_id = order_id.to_string();
         let time = time_ms(row.ctime.0);
         let qty = fill_qty(

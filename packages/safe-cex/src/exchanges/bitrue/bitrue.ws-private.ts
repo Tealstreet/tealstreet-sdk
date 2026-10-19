@@ -140,8 +140,8 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
     if (!market) return;
     const multiplier = Number(market.contractSize || market.info?.multiplier || market.precision.amount || 1);
 
-    const side = this.parseOrderSide(update.S);
-    const type =
+    let side = this.parseOrderSide(update.S);
+    let type =
       update.conditionOrder && Number(update.triggerType) === 1
         ? OrderType.StopLoss
         : update.conditionOrder && Number(update.triggerType) === 2
@@ -164,6 +164,10 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
 
     const id = String(orderId);
     const existing = this.store.orders.find((order) => order.id === id);
+    if (existing && [OrderType.StopLoss, OrderType.TakeProfit].includes(existing.type)) {
+      type = existing.type;
+      if (existing.parentId) side = existing.side;
+    }
     const watermark = this.orderWatermarks.get(id);
     const previous = Math.max(watermark?.filled || 0, existing?.filled || 0);
     const previousTerminal =
@@ -180,8 +184,8 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
       const price =
         Number(update.L) > 0
           ? Number(update.L)
-          : (previous === 0 || this.cumulativeValues.has(id)) && execution.value && execution.qty > 0
-            ? execution.value / execution.qty
+          : (previous === 0 || this.cumulativeValues.has(id)) && cumulativeValue !== undefined && execution.qty > 0
+            ? (cumulativeValue - (this.cumulativeValues.get(id) || 0)) / execution.qty
             : 0;
       if (execution.qty > 0 && price > 0)
         this.emitter.emit('fill', {
@@ -225,7 +229,15 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
       amount: total,
       filled: Math.max(previous, filled),
       remaining: Math.max(total - Math.max(previous, filled), 0),
-      reduceOnly: Boolean(update.R ?? update.open === 'CLOSE'),
+      reduceOnly:
+        Boolean(existing?.parentId) ||
+        Boolean(update.R ?? (update.open === undefined ? existing?.reduceOnly : update.open === 'CLOSE')),
+      ...(existing?.parentId && { parentId: existing.parentId }),
+      ...(existing?.clientOrderId && { clientOrderId: existing.clientOrderId }),
+      ...(existing?.tpTriggerType && { tpTriggerType: existing.tpTriggerType }),
+      ...(existing?.slTriggerType && { slTriggerType: existing.slTriggerType }),
+      ...(existing?.takeProfit !== undefined && { takeProfit: existing.takeProfit }),
+      ...(existing?.stopLoss !== undefined && { stopLoss: existing.stopLoss }),
       lastUpdate: time,
       info: update,
     };

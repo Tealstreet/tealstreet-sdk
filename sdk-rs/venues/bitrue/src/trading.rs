@@ -23,6 +23,7 @@ struct Plan {
     creating: Vec<Order>,
     affected: Vec<String>,
     guard: Option<Target>,
+    refresh_result: bool,
 }
 struct Step {
     method: Method,
@@ -265,6 +266,7 @@ impl Plan {
             creating: vec![],
             affected: vec![],
             guard: None,
+            refresh_result: false,
         }
     }
     fn symbol(&mut self, symbol: &str) {
@@ -274,6 +276,8 @@ impl Plan {
     }
     fn placements(&mut self, rows: Vec<(Placement, Order)>) {
         for (payload, order) in rows {
+            self.refresh_result |= payload.condition_order.unwrap_or(false)
+                || !payload.trigger_order_create_params.is_empty();
             self.symbol(&order.symbol);
             self.creating.push(order);
             self.steps.push_back(Step {
@@ -823,7 +827,13 @@ impl Bitrue {
         cx.done(
             plan.command,
             error.map_or_else(
-                || Ok(serde_json::to_string(&plan.ids).expect("order ids")),
+                || {
+                    Ok(if plan.refresh_result {
+                        "[]".to_owned()
+                    } else {
+                        serde_json::to_string(&plan.ids).expect("order ids")
+                    })
+                },
                 Err,
             ),
         );

@@ -38,6 +38,7 @@ const wireValue = (value, callerIds, options, key, query = false) => {
 
 export const requestKey = (method, url, body, callerIds = new Set(), options = {}) => {
   const parsed = new URL(url);
+  if (options.requestOptions) options = { ...options, ...options.requestOptions(method, parsed) };
   const query = [...parsed.searchParams]
     .filter(
       ([name, value]) =>

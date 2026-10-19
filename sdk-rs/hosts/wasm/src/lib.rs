@@ -71,8 +71,6 @@ struct EngineOptions {
     passphrase: Option<String>,
     #[serde(default)]
     private_ws_headers: bool,
-    #[serde(default)]
-    recv_window: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -470,7 +468,7 @@ impl WasmEngine {
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
-                recv_window: options.recv_window.unwrap_or(20_000),
+                recv_window: options.recv_window.unwrap_or(20_000.0).clamp(1.0, 60_000.0) as u32,
             }))),
             "backpack" => Box::new(Engine::new(Backpack::new(BackpackOptions {
                 public_data_only: options.public_data_only,

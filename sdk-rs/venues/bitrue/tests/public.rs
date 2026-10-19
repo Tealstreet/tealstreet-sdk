@@ -11,7 +11,6 @@ fn boot() -> (Engine<Bitrue>, SocketId) {
     e.start(0.0);
     let request = e
         .drain_actions()
-        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -33,7 +32,6 @@ fn boot() -> (Engine<Bitrue>, SocketId) {
     );
     let socket = e
         .drain_actions()
-        .into_iter()
         .find_map(|a| {
             if let Action::WsConnect { socket, .. } = a {
                 Some(socket)
@@ -135,7 +133,6 @@ fn fallback_only_after_no_primary_and_full_unsubscribe() {
     );
     let timer = e
         .drain_actions()
-        .into_iter()
         .find_map(|a| {
             if let Action::SetTimer { timer, at_ms } = a {
                 (at_ms == 3002.0).then_some(timer)
@@ -156,7 +153,6 @@ fn fallback_only_after_no_primary_and_full_unsubscribe() {
     );
     let sends = e
         .drain_actions()
-        .into_iter()
         .filter(|a| matches!(a,Action::WsSend{text,..}if text.contains("unsub")))
         .count();
     assert_eq!(sends, 2);
@@ -173,7 +169,6 @@ fn public_ping_echoes_numeric_token() {
     message(&mut e, socket, r#"{"ping":1721131206}"#);
     let sends: Vec<_> = e
         .drain_actions()
-        .into_iter()
         .filter_map(|a| {
             if let Action::WsSend { text, .. } = a {
                 Some(text)
@@ -205,7 +200,6 @@ fn candle_history_uses_singapore_time_and_filters_requested_window() {
     );
     let result = e
         .drain_actions()
-        .into_iter()
         .find_map(|a| {
             if let Action::Notice(Notice::CommandDone { result, .. }) = a {
                 Some(result.unwrap())
@@ -239,7 +233,6 @@ fn subscriptions_before_markets_are_retained() {
     );
     let request = e
         .drain_actions()
-        .into_iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -261,7 +254,6 @@ fn subscriptions_before_markets_are_retained() {
     );
     let socket = e
         .drain_actions()
-        .into_iter()
         .find_map(|a| {
             if let Action::WsConnect { socket, .. } = a {
                 Some(socket)

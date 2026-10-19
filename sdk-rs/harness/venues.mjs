@@ -110,8 +110,15 @@ export const VENUES = {
     ts: { module: `${root}/bitrue/bitrue.exchange.ts`, className: 'BitrueExchange', name: 'bitrue' },
     privateSocket: '/stream?listenKey=',
     compareFillPrices: true,
+    requestBodies: true,
     volatileBodyFields: true,
-    generatedBodyId: (key) => key === 'clientOrderId',
+    // Creation mints IDs; cancellation must retain the exact native target.
+    generatedId: () => false,
+    requestOptions: (method, url) => ({
+      generatedBodyId: method === 'POST' && url.pathname === '/fapi/v2/order'
+        ? (key) => key === 'clientOrderId'
+        : undefined,
+    }),
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.includes('/listenKey'),
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('_simple_depth_step0')).length >= count,
@@ -120,7 +127,7 @@ export const VENUES = {
       if (!['fapi.bitrue.com', 'fapiws-auth.bitrue.com'].includes(parsed.hostname))
         throw new Error('Bitrue must emit a real upstream URL');
       const fields = Object.fromEntries(Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), String(value)]));
-      if (!fields['x-ch-apikey']) return;
+      if (!fields['x-ch-apikey'] && method === 'GET' && parsed.hostname === 'fapi.bitrue.com' && parsed.pathname === '/fapi/v1/contracts') return;
       if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
       const timestamp = fields['x-ch-ts'];
       const payload = timestamp + method + parsed.pathname + parsed.search + (body ?? '');

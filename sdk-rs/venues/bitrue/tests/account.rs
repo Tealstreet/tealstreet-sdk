@@ -308,3 +308,26 @@ fn cumulative_average_fallback_recovers_execution_price_without_replaying() {
     }
     assert_eq!(h.fills(), vec![(100.0, 10.0), (130.0, 20.0)]);
 }
+
+#[test]
+fn private_deltas_preserve_authoritative_child_parent_direction_and_reference() {
+    let mut h = Harness::new();
+    h.reply("/account", EMPTY);
+    h.reply("/openOrders", r#"{"code":"0","data":[{"orderId":"parent","type":"LIMIT","side":"BUY","status":"NEW","action":"OPEN","price":100,"origQty":100,"executedQty":0,"childOrders":[{"orderId":"child","type":"MARKET","conditionOrder":true,"triggerType":1,"triggerPrice":90,"triggerPriceType":1,"side":"BUY","status":"NEW","action":"OPEN","origQty":100,"executedQty":0}]}]}"#);
+    h.ws(r#"{"e":"ORDER_TRADE_UPDATE","o":{"s":"E_BTCUSDT","i":"child","S":"BUY","o":"MARKET","x":"NEW","X":"NEW","q":"100","z":"0","p":"0"}}"#);
+    let child =
+        h.e.store()
+            .orders()
+            .iter()
+            .find(|o| o.id == "child")
+            .unwrap();
+    assert_eq!(child.parent_id.as_deref(), Some("parent"));
+    assert_eq!(child.kind, OrderType::StopLoss);
+    assert_eq!(child.side, OrderSide::Sell);
+    assert_eq!(child.price, 90.0);
+    assert!(child.reduce_only);
+    assert_eq!(
+        child.trigger_type,
+        Some(safe_cex_engine::model::StopTriggerType::LastPrice)
+    );
+}

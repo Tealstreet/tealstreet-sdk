@@ -305,3 +305,39 @@ fn interrupted_stream_read_retries_without_carrying_partial_executions() {
     response(&mut e, next, r#"{"code":"0","data":[]}"#);
     assert_eq!(result(&mut e).unwrap(), "[]");
 }
+
+#[test]
+fn missing_own_order_id_never_uses_counterparty_or_execution_identity() {
+    for row in [
+        ROW.replace("\"bidId\":1558124009467904993,", ""),
+        ROW.replace("1558124009467904993", "0"),
+        ROW.replace("1558124009467904993", "-1"),
+        ROW.replace("1558124009467904993", "{}"),
+        ROW.replace("1558124009467904993", "true"),
+        ROW.replace("1558124009467904992", "0"),
+        ROW.replace("1558124009467904992", "1.5"),
+    ] {
+        let mut e = engine();
+        query(&mut e, fills());
+        let r = request(&mut e);
+        response(&mut e, r, &format!(r#"{{"code":"0","data":[{row}]}}"#));
+        assert!(result(&mut e).is_err(), "{row}");
+    }
+}
+#[test]
+fn a_full_filtered_native_page_reports_incomplete_instead_of_false_absence() {
+    let mut e = engine();
+    query(
+        &mut e,
+        Query::Fills {
+            symbol: Some(SYMBOL.into()),
+            order_id: Some("999".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(1),
+        },
+    );
+    let r = request(&mut e);
+    response(&mut e, r, &format!(r#"{{"code":"0","data":[{ROW}]}}"#));
+    assert!(result(&mut e).unwrap_err().starts_with("INCOMPLETE:"));
+}
