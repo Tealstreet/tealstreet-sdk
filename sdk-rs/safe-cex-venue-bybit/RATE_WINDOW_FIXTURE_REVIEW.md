@@ -54,3 +54,20 @@ already pending; the ordering fault was in this fixture's pump. Its old retry
 clock is made pending too, without changing any production scheduler. The
 constructor fixture in src/ws_public/tests/exchange_composition.rs already has
 pending sleeps and an explicitly advanced reset scheduler; it remains intact.
+
+The history source corpus includes2812 requests for a from=1 fallback. At five
+requests per second, fixed50ms ticks exhausted the fixture's2000-iteration bound.
+Drive now polls the caller again after draining jobs, then steps to the next live
+virtual timer deadline. The iteration bound stays2000. Canceled sleepers do not
+supply deadlines. All45 source cases keep their complete request/query/result
+and diagnostic comparisons; the long history is exercised without a time limit
+increase or a shortened request corpus.
+
+Hyro session fixtures explicitly establish their leverage10 REST baseline after
+Open with the real fetchAndSetPrivateSnapshot API. The source oracle also runs
+Hyro's actual resetSession, reconcilePrivateState and snapshot entrypoints: Open
+invalidates a pending startup snapshot, while an explicit snapshot at the new
+revision publishes the original position array. No seeded Store write bypasses
+those production readers. Acknowledged sessions and held POST witnesses progress
+through registered virtual deadlines before observing their original assertions;
+a held REST response still proves incomplete recovery and atomic publication.

@@ -174,7 +174,84 @@ async function run(routed) {
   }
   return { routed, checkpoints };
 }
-(async () => console.log(JSON.stringify([await run(false), await run(true)])))().catch((error) => {
+async function verifyHyroSnapshotSetup() {
+  function members(file, className, names) {
+    const source = ts.createSourceFile(
+      file,
+      fs.readFileSync(path.join(root, file), 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const cls = source.statements.find((node) => ts.isClassDeclaration(node) && node.name.text === className);
+    return names
+      .map((name) => {
+        const selected = cls.members.filter((node) => node.name?.getText(source) === name);
+        assert.equal(selected.length, 1, name);
+        return selected[0].getText(source);
+      })
+      .join('\n');
+  }
+  const exchange = members('packages/safe-cex/src/exchanges/bybit/hyrotrader.exchange.ts', 'HyrotraderExchange', [
+    'reconcilePrivateState',
+    'fetchAndSetPrivateSnapshot',
+    'fetchOrdersPositionsAndBalance',
+  ]);
+  const socket = members('packages/safe-cex/src/exchanges/bybit/hyrotrader.ws-private.ts', 'HyroPrivateWebsocket', [
+    'resetSession',
+  ]);
+  const context = vm.createContext({ clearTimeout });
+  vm.runInContext(
+    ts.transpileModule(
+      `class Exchange { ${exchange} } class Socket { ${socket} } globalThis.owner = new Exchange(); globalThis.socket = new Socket();`,
+      { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
+    ).outputText,
+    context,
+  );
+  const owner = context.owner,
+    ws = context.socket;
+  Object.assign(ws, { generation: 0, stateRevision: 1, pendingAcks: new Map(), parent: {} });
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const positions = [{ leverage: 10, unrealizedPnl: 5 }];
+  Object.assign(owner, {
+    snapshotVersion: 0,
+    ordersSnapshotVersion: 0,
+    isDisposed: false,
+    privateWebsocket: ws,
+    store: {
+      positions: [],
+      loaded: {},
+      update(value) {
+        Object.assign(this, value);
+      },
+    },
+    fetchOrders: async () => [],
+    fetchPositions: async () => {
+      await held;
+      return positions;
+    },
+    fetchRawBalance: async () => ({}),
+    formatBalance: () => ({ total: 95, upnl: 5 }),
+    emitAndLogError(error) {
+      throw error;
+    },
+  });
+  const startup = owner.fetchOrdersPositionsAndBalance();
+  ws.resetSession();
+  release();
+  await startup;
+  assert.equal(owner.store.positions.length, 0, 'Open invalidates the pending startup snapshot');
+  await owner.fetchAndSetPrivateSnapshot();
+  assert.strictEqual(owner.store.positions, positions, 'explicit snapshot establishes the retained baseline');
+  assert.equal(owner.store.positions[0].leverage, 10);
+  assert.equal(owner.store.balance.total, 95);
+}
+(async () => {
+  await verifyHyroSnapshotSetup();
+  console.log(JSON.stringify([await run(false), await run(true)]));
+})().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

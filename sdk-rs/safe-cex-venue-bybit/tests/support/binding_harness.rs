@@ -589,7 +589,16 @@ impl Harness {
                 return v;
             }
             self.runtime.pump();
-            self.runtime.now.set(self.runtime.now.get() + 50.0);
+            if let Poll::Ready(value) = future
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+            {
+                return value;
+            }
+            let now = self.runtime.now.get();
+            if let Some(deadline) = self.runtime.sleep_wakers.next_deadline(now) {
+                self.runtime.now.set(deadline);
+            }
         }
         panic!("venue future did not settle")
     }
@@ -611,6 +620,8 @@ fn retry_sleep_keeps_time_fixed_until_explicit_deadline() {
     let runtime = Rc::new(Runtime::default());
     let clock = Clock(Rc::downgrade(&runtime));
     let mut sleep = clock.sleep_ms(10);
+    drop(runtime.sleep(5));
+    assert_eq!(runtime.sleep_wakers.next_deadline(0.0), Some(10.0));
     assert_eq!(
         runtime.now.get(),
         0.0,
