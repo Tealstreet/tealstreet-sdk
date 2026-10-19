@@ -998,14 +998,22 @@ source slice(-1) symbols. Native stable sort does not claim V8 comparator schedu
 for non-transitive mixed-ID ties. No journal grading or venue fetch composition
 is implied. The scoped live test is `--test journal -- --include-ignored`.
 
-build_records ports the standalone journal reader over a callable FoldableExchange
-projection. Income failures are fatal when their symbols drive scoped fills reads;
+build_records ports the standalone journal reader over an owned FoldableExchange
+projection. The caller supplies its runtime and owned read/settlement callbacks;
+canonical start_eager starts the first read during invocation and retains the
+fold after its waiter drops. Each read crosses the canonical Promise await fence,
+including immediately-ready leaves. BuildRecordsError stays native throughout.
+Income failures are fatal when their symbols drive scoped fills reads;
 account-wide reads continue with unavailable funding. Errors retain a wrapped
-native cause and source name. Typed shared read rows/errors exclude malformed
-optional income rows and raw falsy JS rejections; native futures are lazy.
+native cause and source name. Settlement callback failures propagate their
+original native error and stop record construction. Typed shared read rows retain
+their separate model boundary; arbitrary malformed income objects are not claimed.
 Read symbols in first-seen order, request the 14-day straddle lookback, fold
-account-wide fills per symbol, then omit pre-window/open intervals. The existing
-JournalFolder host seam is not automatically bound to this implementation.
+account-wide fills per symbol, then omit pre-window/open intervals. The native
+Binance, Bitget, Hyperliquid and Paradex consumers pass their actual runtimes
+and read receivers. JournalFolder settlement callbacks own the captured
+Store so eager work can outlive its observer; arbitrary external host composition
+remains explicit.
 
 
 Venue callbacks that test `this.ws` must use BaseWebSocket::has_websocket, not
@@ -2106,3 +2114,14 @@ The differential rejects other Node versions: inconsistent comparator ordering i
 engine-dependent. Array sort compacts defined values before TimSort, then writes
 undefined values and deletes remaining holes; four native/Node profiles pin the
 comparator schedule as well as sparse output.
+
+## Worker structured clone
+
+js_runtime::structured_clone implements the recorder's platform clone operation
+for native primitives, ordinary objects, sparse arrays, Map/Set and intrinsic
+Errors. It preserves cycles/aliases, non-NaN binary64 bits and UTF16, invokes own
+enumerable getters in source order, and retains original getter failures.
+NaN payloads canonicalize as Node structuredClone does.
+Uncloneable values and unmodeled object kinds produce visible DataCloneError.
+The worker recorder intentionally drops clone failures as perfFixture.ts does;
+other callers receive the error. Node's real structuredClone supplies the oracle.

@@ -1010,3 +1010,9 @@ through actual private onOpen and the real native clock. Reconnect clears the
 old offset before adding the fixed10000ms window; no account expiry option is
 read. Keep the original finite numeric payload and source signing text. Broken
 clock nonfinite fixtures remain separate from this production reachability proof.
+
+The constructor's rate-window fixture keeps sleeps pending until explicit virtual
+time advancement. Registering or polling a timer must not advance the clock.
+Its five/sixth-request witness matches the real axios-rate-limit dependency with
+the maintained constructor's options, including frozen wall time. Preserve the
+unlimited/secondary routing checks and all 36 existing constructor profiles.
