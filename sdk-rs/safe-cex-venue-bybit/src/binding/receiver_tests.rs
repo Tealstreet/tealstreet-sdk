@@ -1809,3 +1809,46 @@ fn retained_audit_startup_preserves_family_request_order() {
         }
     });
 }
+
+#[test]
+fn audit_unknown_outcome_preserves_native_submission_rejection() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/primary-batch-binding-oracle.cjs"))
+        .arg("--unknown-outcome").output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let source: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(source.len(), 12);
+    run(async {
+        for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+            for (profile, expected) in source.iter().enumerate() {
+                let exchange = venue(name.clone());
+                let rt = exchange.js.get().unwrap();
+                let reason = Js::object(vec![("message", Js::str("timeout"))]);
+                match profile {
+                    0 => reason.define("opaque", Js::object(vec![("text", Js::utf16(&[0xd800])), ("number", Js::Number(f64::NAN)), ("missing", Js::Undefined)])).unwrap(),
+                    1 => rt.global("Object").unwrap().call_method("defineProperty", vec![reason.clone(), Js::str("message"), Js::object(vec![("value", Js::str("timeout")), ("enumerable", Js::Bool(false))])]).map(|_| ()).unwrap(),
+                    2 => { reason.set("message", Js::str("rejected")).unwrap();rt.global("Object").unwrap().call_method("setPrototypeOf", vec![reason.clone(), Js::object(vec![("code", Js::str("ECONNRESET"))])]).unwrap(); },
+                    3 => reason.define("response", Js::object(vec![("status", Js::Number(f64::INFINITY))])).unwrap(),
+                    4 => { reason.set("message", Js::str("Remote signer unavailable")).unwrap();reason.define("response", Js::object(vec![("status", Js::Number(503.))])).unwrap(); },
+                    5 => reason.define("response", Js::object(vec![("status", Js::Number(400.))])).unwrap(),
+                    6 => { reason.set("message", Js::str("rejected")).unwrap();reason.define("response", Js::object(vec![("status", Js::Number(400.)), ("data", Js::object(vec![("code", Js::Number(-1007.))]))])).unwrap(); },
+                    7 => { reason.set("message", Js::str("rejected")).unwrap();reason.define("name", Js::str("TradeTunnel")).unwrap(); },
+                    8 => reason.define_accessor("unused", Some(Rc::new(|_| Err(Thrown::error("Error", "unread getter")))), None).unwrap(),
+                    9 => {reason.set("message", Js::str("rejected")).unwrap();reason.define("name", Js::utf16(&[84,114,97,100,101,84,117,110,110,101,108,0xd800])).unwrap();},
+                    10 => {let response=Js::object(vec![("status", Js::Number(503.))]); response.define_accessor("unused", Some(Rc::new(|_| Err(Thrown::error("Error", "unread response field")))), None).unwrap();reason.define("response", response).unwrap();},
+                    11 => {},
+                    _ => unreachable!(),
+                }
+                let sends=Rc::new(Cell::new(0));let count=sends.clone();let rejected=reason.clone();
+                rt.this.get("xhr").unwrap().define("post", Js::function("post", move |_, _| {count.set(count.get()+1);Err(Thrown::new(rejected.clone()))})).unwrap();
+                let reports=Rc::new(Cell::new(0));let count=reports.clone();
+                rt.this.define("emitAndLogError", Js::function("report", move |_, _| {count.set(count.get()+1);Ok(Js::Undefined)})).unwrap();
+                let result=rt.this.call_method("submitCreateOrders", vec![Js::array(vec![Js::object(vec![])]), Js::object(vec![("clientOrderId", if profile==11 {Js::Undefined} else {Js::str("caller")})])]).unwrap();
+                let result=await_js(&exchange.base.runtime, result).await;
+                let observed=serde_json::json!({"rejected":result.is_err(), "original":result.as_ref().err().is_some_and(|e| e.value.same_reference(&reason)), "sends":sends.get(), "reports":reports.get()});
+                assert_eq!(&observed, expected, "UNKNOWN_OUTCOME_BINDING {name:?} profile {profile}: {result:?}");
+                exchange.base.dispose().unwrap();
+            }
+        }
+    });
+}
