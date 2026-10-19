@@ -696,7 +696,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::wait_for_remote_signer"
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice. Eager availability checks, disconnected emission and callback installation are repaired; native invocation/drop and actual source prefix witnesses are in EXCHANGES_DIVERGENCE_RESOLUTION.md. Callback failure reporting and caller-owned cancellation remain priced there; connected-listener throw preserves the source settled-before-emit/unresolved-after-throw quirk (ts-bug). Targets: safe-cex-exchange/src/exchange.rs::BaseExchange::wait_for_remote_signer"
+note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice. Availability checks, disconnected emission and callback installation run at invocation. The pending continuation delegates to canonical eager::start_eager, so dropping its waiter preserves the subscription until availability/disposal; completion unsubscribes once. Status-listener prefix rejections use the same driver, so discarded failures reach the host unhandled-rejection channel with their original cause. The maintained source method and actual native host prove both terminal paths, independent waits and capture release. A connected-listener throw from the installed availability callback retains the source settled-before-emit/unresolved-after-throw quirk (ts-bug), with the original failure visibly reported through the host. Targets: safe-cex-exchange/src/exchange.rs::BaseExchange::wait_for_remote_signer"
 
 [[symbol]]
 ts = "BaseExchange.dispose"

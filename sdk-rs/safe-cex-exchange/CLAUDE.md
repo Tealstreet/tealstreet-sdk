@@ -11,6 +11,10 @@ ExchangeError-to-Thrown conversion and attaches the effective request config.
 Both JS factory request interceptors stamp the live config with integer
 request-start time after accounting. Read-only telemetry fields do not fail HTTP;
 the maintained-source comparison observes both prepared and terminal configs.
+Native proxy authorization carries its marker in config extensions, never headers;
+read-only diagnostic slots cannot reject the request. Remote signing publishes
+its timing stamps after the signed-header merge and preserves them in returned
+success/failure configs. Skipped or refused signing does not fabricate stamps.
 Socket diagnostics reuse the shared auth-operation predicate after JSON parsing.
 The Bitget owned-transport regression pins retry eligibility after that boundary.
 Native network rejections retain the actual RestRequest as an opaque request
@@ -148,6 +152,9 @@ The shared JS Date.now facade rounds down an injected wall clock, while
 performance.now keeps the host's fractional precision.
 Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
+The pending signer wait delegates to `eager::start_eager`: discarding its waiter
+keeps the availability callback registered until availability or exchange disposal.
+Either terminal path unregisters exactly once and releases the listener captures.
 
 See the [socket host contract](WS_CONTRACT.md) for host scheduling and relay options.
 Opt-in replay hosts register the canonical per-dial parser counters when a

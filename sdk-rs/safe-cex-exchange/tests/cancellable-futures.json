@@ -875,12 +875,14 @@
         "await",
         "poll-fn"
       ],
-      "producer_sha256": "06152e3ea0e4cc18b95a54e63c45c1bbdfa24c51ee485af4255efbc3baf567db",
+      "producer_sha256": "2d069fe388361d83f6aa953ee4128da2b652565b00bb8f0616f9b6ec16dc2b77",
       "classification": "guarded",
-      "reason": "Invocation registers eagerly; the pre-pin SignerWaitGuard owns subscription and waker cleanup even for unpolled Drop. Callback throw retains the source settled-but-unresolved state. Caller cancellation remains an explicit owned-continuation choice. Reviewed Js status payloads only; availability registration, guard construction, completion and Drop cleanup retain their prior sequencing and boundaries. Reporter-context Input cutover reviewed: diagnostic capture/formatting changed; task boundaries, guards and cancellation ownership are unchanged.",
+      "reason": "Availability checks, status emission and subscription registration stay eager and source-ordered. The pending body now delegates to canonical eager::start_eager, whose runtime owns SignerWaitGuard independently of the returned waiter. Availability/disposal unsubscribe once; runtime shutdown still drops the guard. The lifecycle guard/finish/Drop bodies are byte-unchanged. Actual source, NativeRuntime and deterministic multi-waiter tests prove retained subscription, completion, capture release and the original connected-listener throw profile. Both status-listener prefix rejection branches also delegate to the same driver; discarded failures reach the host unhandled-rejection checkpoint with their original error referent, while observed failures remain handled.",
       "witnesses": [
-        "tests/core_lifecycle.rs::cancelled_signer_waits_release_subscription_and_ignore_late_callbacks",
-        "tests/core_lifecycle.rs::signer_wait_starts_before_first_poll_and_unpolled_drop_cleans_up"
+        "tests/core_lifecycle.rs::discarded_signer_waiter_keeps_source_subscription_until_completion",
+        "tests/core_lifecycle.rs::discarded_signer_waits_remain_independent_and_release_on_disposal",
+        "tests/core_lifecycle.rs::signer_wait_starts_before_first_poll_and_unpolled_drop_keeps_subscription",
+        "tests/core_lifecycle.rs::discarded_signer_status_rejection_reaches_host_with_original_cause"
       ],
       "source_dependencies": [
         {
@@ -911,7 +913,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "f2bfff1934ca4484087b6407f4b6c1100519cc204d55bd4a67832bfbee7ac12d"
+          "sha256": "ec6c47dd07c350492f3671bdf24134de1278f3a25715cb17b472bc9014c3a541"
         }
       ],
       "guards": [
@@ -2318,7 +2320,7 @@
       ],
       "producer_sha256": "f9002285b942ff83985f8de0d235d4d2ff7450fca9ad2630dd38bd81727ff145",
       "classification": "guarded",
-      "reason": "Per-future Waiters::Registration is created before boxing and releases the exact event waker on waiter drop without cancelling the socket-owned handshake. State reads release their borrow before registration replacement can reenter close. Completion, close and terminate wake registrations after state mutation. Termination suppresses queued or pending events; a receiving future drops its receive/native handle when woken after termination. The existing failed-network Error/Close1006 path has no Open and remains terminal after Close. Reviewed raw-task integration: only an actually pending NativeSocket receive marks SocketReader waiting; CONNECTING remains blocking. No extra task, waiter or cancellation ownership is introduced.",
+      "reason": "Per-future Waiters::Registration is created before boxing and releases the exact event waker on waiter drop without cancelling the socket-owned handshake. State reads release their borrow before registration replacement can reenter close. Completion, close and terminate wake registrations after state mutation. Termination suppresses queued or pending events; a receiving future drops its receive/native handle when woken after termination. The existing failed-network Error/Close1006 path has no Open and remains terminal after Close. Reviewed raw-task integration: only an actually pending NativeSocket receive marks SocketReader waiting; CONNECTING remains blocking. No extra task, waiter or cancellation ownership is introduced. Reviewed proxy-diagnostic marker retention only: NativeTealstreetHost writes a data-only config extension; socket ownership and cancellation bodies are unchanged.",
       "guards": [
         {
           "file": "src/waiters.rs",
@@ -2332,7 +2334,7 @@
       "source_dependencies": [
         {
           "file": "src/native.rs",
-          "sha256": "b26b24eb820c4a2d5055c6f3449c7d7f55d5be9a3998823c72abcd14fa578a2a"
+          "sha256": "5e4cf5e68e230853aadd1efbaa1db2c4717b52b83ead27230a24cb9d8dd75c8c"
         },
         {
           "file": "src/waiters.rs",
@@ -2443,7 +2445,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "f2bfff1934ca4484087b6407f4b6c1100519cc204d55bd4a67832bfbee7ac12d"
+          "sha256": "ec6c47dd07c350492f3671bdf24134de1278f3a25715cb17b472bc9014c3a541"
         }
       ],
       "guards": [
@@ -3188,7 +3190,7 @@
       ],
       "producer_sha256": "2342a113514189c08327faef04a85bf150a844d0b3ce30613ca423c9f6c3a0c5",
       "classification": "guarded",
-      "reason": "The native CONNECTING socket owns an OwnedTasks registry before canonical eager start. The registry owns the actual prepared handshake future; its completion holds only Weak state and never the socket/registry. NativeWsSocket Drop/terminate cancels the registry and suppresses queued failure events, while close during CONNECTING cancels I/O and wakes the existing Error/Close1006 path. OwnedTasks Drop is the independent fallback for I/O cancellation. Dropping only an event waiter leaves the handshake alive.",
+      "reason": "The native CONNECTING socket owns an OwnedTasks registry before canonical eager start. The registry owns the actual prepared handshake future; its completion holds only Weak state and never the socket/registry. NativeWsSocket Drop/terminate cancels the registry and suppresses queued failure events, while close during CONNECTING cancels I/O and wakes the existing Error/Close1006 path. OwnedTasks Drop is the independent fallback for I/O cancellation. Dropping only an event waiter leaves the handshake alive. Reviewed proxy-diagnostic marker retention only: NativeTealstreetHost writes a data-only config extension; socket ownership and cancellation bodies are unchanged.",
       "guards": [
         {
           "file": "src/native.rs",
@@ -3206,7 +3208,7 @@
       "source_dependencies": [
         {
           "file": "src/native.rs",
-          "sha256": "b26b24eb820c4a2d5055c6f3449c7d7f55d5be9a3998823c72abcd14fa578a2a"
+          "sha256": "5e4cf5e68e230853aadd1efbaa1db2c4717b52b83ead27230a24cb9d8dd75c8c"
         },
         {
           "file": "src/owned_tasks.rs",

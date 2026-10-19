@@ -19,7 +19,7 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 | 19 | splitWorkerLogExtra | OPEN | Retained carrier across callers; no isolated JSON shim. |
 | 20 | start | FIX | Native Js ingress/config/dispatch, module-owned listeners and deterministic context teardown below. |
 | 21 | ChaserOrderState | OPEN | Native state and output boundary. |
-| 22 | defaultChaserState | OPEN | Native default ownership and caller mutation. |
+| 22 | defaultChaserState | FIX | Shared shallow-frozen native template; actual constructor snapshots and compiled old-constructor refusal below. |
 | 23 | ChaserOrderManager | ACCEPT | Explicit required host composition; actual singleton/engine/Store binding below. |
 | 24 | ChaserTerminate | OPEN | Live termination admission. |
 | 25 | ChaserCompleteEvent | OPEN | Native event payload. |
@@ -344,3 +344,28 @@ The transferred cohort now has 11 FIX, 4 ACCEPT and 12 OPEN rows.
 A compiled missing-NaN-normalization control fails the actual Node clone-bit
 comparison; exact restoration passes. The real listener additionally records a
 negative NaN with a non-default payload and checks Node's canonical output bits.
+
+## Mutable default template: row 22
+
+The source exports a shallow-frozen default, so edits to its nested ID array
+seed later instances without changing earlier constructor snapshots. The native
+constant always supplied a new empty array. One thread-local native Js template
+now models the worker module realm and uses the existing Object.freeze builtin.
+The constructor snapshots it at the existing shared typed state leaf before
+reading options/positions; no JSON carrier or second default path is retained.
+
+The compiled original constructor body on master 2a9ed2be9a, with the new template
+access seam available, fails constructors_snapshot_the_live_shallow_frozen_default:
+its first and second arrays lack the source seed/later IDs. The actual TS module
+and native constructor compare empty, seeded and later snapshots, independent
+instance mutations, retained template identity, outer freeze and mutable nested
+arrays. A second native realm starts empty. The exact original constructor state
+initialization is independently restored as a compiled control, then the fixed
+bytes are restored for positive replay. Existing 648 source transition scenarios
+and owned-instance-array mutation witnesses remain intact.
+
+This closes the mutable default finding only. Rows 21/24/25/75-79 concern distinct
+model/dispatcher consumers, so sharing task_types.rs does not make their raw
+admission, output or depth questions evidence for acceptance. They remain OPEN.
+With merged perf rows 72-74 in #1238, the transferred cohort now has 12 FIX,
+4 ACCEPT and 11 OPEN rows.
