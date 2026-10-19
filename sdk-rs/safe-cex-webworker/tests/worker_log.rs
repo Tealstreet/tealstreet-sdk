@@ -1,5 +1,17 @@
+use safe_cex_exchange::{
+    js_runtime::value::{Js, from_json, to_json},
+    runtime::ExchangeError,
+};
 use safe_cex_webworker::worker_logging::{WorkerLogLevel, forward_log};
 use serde_json::{Value, json};
+fn numbers(value: Value) -> Value {
+    match value {
+        Value::Number(n) => json!(n.as_f64().unwrap()),
+        Value::Array(a) => Value::Array(a.into_iter().map(numbers).collect()),
+        Value::Object(o) => Value::Object(o.into_iter().map(|(k, v)| (k, numbers(v))).collect()),
+        other => other,
+    }
+}
 fn run(row: &Value) -> Value {
     let mut sent = Vec::new();
     let result = forward_log(
@@ -11,12 +23,16 @@ fn run(row: &Value) -> Value {
             "error" => WorkerLogLevel::Error,
             other => panic!("unexpected source log level {other}"),
         },
-        row["message"].as_str().unwrap(),
-        row.get("extra").and_then(Value::as_object),
+        &from_json(&row["message"]),
+        row.get("extra").map(from_json).as_ref(),
         |payload| {
-            sent.push(serde_json::to_value(payload).unwrap());
+            sent.push(json!({"op":"log","data":to_json(&payload.data).unwrap()}));
             if row["fail"] == true {
-                Err(json!({"name":"TypeError","message":"post failed"}))
+                Err({
+                    let mut error = ExchangeError::new("post failed");
+                    error.name = "TypeError".into();
+                    error
+                })
             } else {
                 Ok(())
             }
@@ -28,7 +44,7 @@ fn run(row: &Value) -> Value {
         .keys()
         .cloned()
         .collect();
-    json!({"sent":sent,"error":result.err(),"keys":keys})
+    json!({"sent":sent,"error":result.err().map(|e|json!({"name":e.name,"message":e.message})),"keys":keys})
 }
 #[test]
 fn forwarding_matches_live_worker_log_and_propagates_post_failure() {
@@ -59,15 +75,15 @@ fn forwarding_matches_live_worker_log_and_propagates_post_failure() {
     assert_eq!(rows.len(), 810);
     for (index, row) in rows.iter().enumerate() {
         assert_eq!(
-            run(row),
-            json!({"sent":row["sent"],"error":row["error"],"keys":row["keys"]}),
+            numbers(run(row)),
+            numbers(json!({"sent":row["sent"],"error":row["error"],"keys":row["keys"]})),
             "WORKER-LOG {index}"
         );
     }
     let row = &source["inherited"];
     assert_eq!(
-        run(row),
-        json!({"sent":row["sent"],"error":row["error"],"keys":row["keys"]}),
+        numbers(run(row)),
+        numbers(json!({"sent":row["sent"],"error":row["error"],"keys":row["keys"]})),
         "spread ignores inherited properties"
     );
     let omitted = &source["ownUndefined"];
@@ -78,50 +94,95 @@ fn forwarding_matches_live_worker_log_and_propagates_post_failure() {
             .get("account")
             .is_none()
     );
-    let ours = run(omitted);
-    assert_eq!(
-        ours["sent"][0]["data"]["context"]["account"], "a",
-        "CHOSEN JSON input loses own undefined overriding the default"
-    );
-    assert!(ours["sent"][0]["data"]["context"].get("detail").is_none());
-    assert!(
-        serde_json::from_str::<Value>(source["lone"].as_str().unwrap()).is_err(),
-        "shared UTF-8 refusal"
-    );
-    let native = source["nativeNonfinite"].as_array().unwrap();
-    assert_eq!(
-        native.iter().map(|r| r["name"].clone()).collect::<Vec<_>>(),
-        vec![json!("NaN"), json!("Infinity"), json!("-Infinity")]
-    );
-    for row in native {
-        assert_eq!(row["sourceType"], "number");
-        assert_eq!(
-            row["sourceKind"], row["name"],
-            "native source number survives structured clone"
-        );
+    let retained = Js::object(vec![("account", Js::Undefined), ("detail", Js::Undefined)]);
+    let sent = std::cell::RefCell::new(None);
+    forward_log(
+        safe_cex_types::ExchangeName::Bybit,
+        "a",
+        WorkerLogLevel::Info,
+        &Js::str("m"),
+        Some(&retained),
+        |p| {
+            *sent.borrow_mut() = Some(p.data);
+            Ok::<_, ExchangeError>(())
+        },
+    )
+    .unwrap();
+    let context = sent.borrow().as_ref().unwrap().get("context").unwrap();
+    for key in ["account", "detail"] {
+        assert!(context.has_own(key));
+        assert!(context.get(key).unwrap().is_undefined());
+    }
+    assert_eq!(source["nativeNonfinite"].as_array().unwrap().len(), 3);
+    for row in source["nativeNonfinite"].as_array().unwrap() {
         let number = match row["name"].as_str().unwrap() {
             "NaN" => f64::NAN,
             "Infinity" => f64::INFINITY,
             "-Infinity" => f64::NEG_INFINITY,
             _ => unreachable!(),
         };
-        let mut input = row["row"].clone();
-        input["extra"] = json!({"value":number});
-        assert!(
-            input["extra"]["value"].is_null(),
-            "CHOSEN native JSON input boundary"
-        );
-        assert!(
-            run(&input)["sent"][0]["data"]["context"]["value"].is_null(),
-            "CHOSEN native nonfinite is already lost before forwarding"
+        let context = Js::object(vec![("value", Js::Number(number))]);
+        let sent = std::cell::RefCell::new(None);
+        forward_log(
+            safe_cex_types::ExchangeName::Bybit,
+            "a",
+            WorkerLogLevel::Info,
+            &Js::str("m"),
+            Some(&context),
+            |p| {
+                *sent.borrow_mut() = Some(p.data);
+                Ok::<_, ExchangeError>(())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            sent.borrow()
+                .as_ref()
+                .unwrap()
+                .get("context")
+                .unwrap()
+                .get("value")
+                .unwrap()
+                .to_number()
+                .unwrap()
+                .to_bits(),
+            number.to_bits()
         );
     }
+    let lone = Js::utf16(&[0xd800]);
+    let sent = std::cell::RefCell::new(None);
+    forward_log(
+        safe_cex_types::ExchangeName::Bybit,
+        "a",
+        WorkerLogLevel::Info,
+        &lone,
+        None,
+        |p| {
+            *sent.borrow_mut() = Some(p.data);
+            Ok::<_, ExchangeError>(())
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        sent.borrow()
+            .as_ref()
+            .unwrap()
+            .get("message")
+            .unwrap()
+            .to_js_string()
+            .unwrap()
+            .as_ref(),
+        &[0xd800]
+    );
     let nested = &source["nested"];
     let mut nested_row = nested["row"].clone();
     nested_row["extra"] = serde_json::from_str(nested["inputJson"].as_str().unwrap()).unwrap();
     assert_eq!(
-        serde_json::to_string(&run(&nested_row)["sent"][0]).unwrap(),
-        nested["wire"].as_str().unwrap(),
+        serde_json::to_string(&numbers(run(&nested_row)["sent"][0].clone())).unwrap(),
+        serde_json::to_string(&numbers(
+            serde_json::from_str(nested["wire"].as_str().unwrap()).unwrap()
+        ))
+        .unwrap(),
         "WORKER-LOG nested enumeration"
     );
     let number_rows = source["numbers"].as_array().unwrap();
@@ -135,20 +196,17 @@ fn forwarding_matches_live_worker_log_and_propagates_post_failure() {
             safe_cex_types::ExchangeName::Bybit,
             "a",
             WorkerLogLevel::Info,
-            "m",
-            extra.as_object(),
+            &Js::str("m"),
+            Some(&from_json(&extra)),
             |payload| {
-                value = payload.data;
-                Ok::<_, ()>(())
+                value = Some(payload.data);
+                Ok::<_, ExchangeError>(())
             },
         )
         .unwrap();
         let value = value.unwrap();
-        let numeric = &value["context"]["value"];
-        assert!(numeric.is_number(), "WORKER-LOG retained numeric lexeme");
-        let number = numeric
-            .as_f64()
-            .unwrap_or_else(|| safe_cex_num::number_from_string(&numeric.to_string()));
+        let numeric = value.get("context").unwrap().get("value").unwrap();
+        let number = numeric.to_number().unwrap();
         assert_eq!(
             format!("{:016x}", number.to_bits()),
             row["bits"].as_str().unwrap(),

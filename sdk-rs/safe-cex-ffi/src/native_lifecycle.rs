@@ -6,13 +6,12 @@ use safe_cex_registry::{
     native_value::NativeValue,
 };
 use safe_cex_webworker::{
-    payload::{StoreWorkerOp, StoreWorkerPayload},
+    data_post::WorkerDataPayload,
+    payload::StoreWorkerOp,
     worker_logging::{self, WorkerLogLevel},
 };
-use serde_json::{Value, json};
 use std::{
     cell::RefCell,
-    collections::HashMap,
     future::{Future, poll_fn},
     pin::pin,
     rc::Rc,
@@ -26,7 +25,7 @@ pub(crate) struct NativeStartup {
     name: String,
     account: Option<String>,
     on_event: Rc<Notify>,
-    cooldowns: RefCell<HashMap<String, (f64, f64)>>,
+    cooldowns: Js,
 }
 impl NativeStartup {
     pub(crate) fn new(name: &str, account: Option<String>, on_event: Rc<Notify>) -> Self {
@@ -35,7 +34,7 @@ impl NativeStartup {
             name: name.into(),
             account,
             on_event,
-            cooldowns: RefCell::default(),
+            cooldowns: Js::new_map(),
         }
     }
     pub(crate) fn cancel(&self, account: &NativeAccount) {
@@ -43,38 +42,19 @@ impl NativeStartup {
         self.generation
             .send_modify(|value| *value = value.wrapping_add(1));
     }
-    fn post(
-        &self,
-        payload: StoreWorkerPayload,
-        original: Option<(&NativeValue, &[u16])>,
-    ) -> Result<(), ExchangeError> {
+    fn post(&self, payload: WorkerDataPayload) -> Result<(), ExchangeError> {
         let op = payload.op;
-        let data = NativeValue::from(payload.data.unwrap_or(Value::Null)).to_js();
+        let data = payload.data;
         let account = self.account.as_deref().map_or(Js::Undefined, Js::str);
-        let prepare = || {
-            match op {
-                StoreWorkerOp::Error => {
-                    let args = data.array_values()?.expect("worker error args");
-                    let sentry = args[1].get("sentryData")?;
-                    sentry.get("tags")?.define("account", account)?;
-                    if let Some((error, message)) = original {
-                        data.set("0", Js::utf16(message))?;
-                        let fields = Js::object(vec![]);
-                        for key in ["name", "message", "stack"] {
-                            fields.define(
-                                key,
-                                error.get(key).map_or(Js::Undefined, NativeValue::to_js),
-                            )?;
-                        }
-                        sentry.define("error", fields)?;
-                    }
-                }
-                StoreWorkerOp::Log => data.get("context")?.define("account", account)?,
-                _ => unreachable!("native startup posts only worker logs"),
-            }
-            Ok::<_, safe_cex::js_runtime::value::Thrown>(())
-        };
-        prepare().map_err(|error| error.to_exchange_error())?;
+        match op {
+            StoreWorkerOp::Error => data
+                .get("1")?
+                .get("sentryData")?
+                .get("tags")?
+                .define("account", account)?,
+            StoreWorkerOp::Log => data.get("context")?.define("account", account)?,
+            _ => unreachable!("native startup posts only worker logs"),
+        }
         let event = match op {
             StoreWorkerOp::Error => "error",
             StoreWorkerOp::Log => "log",
@@ -108,18 +88,23 @@ impl NativeStartup {
             message.extend(": ".encode_utf16());
             message.extend(detail);
         }
-        let console_message = String::from_utf16_lossy(&message);
-        // Native error envelopes carry name/message/code, without worker controls.
-        // Keep their text outside the JSON logger scaffold, including UTF-16 units.
+        let raw = error.to_js();
+        let fields = Js::object(vec![]);
+        for key in ["message", "name", "stack"] {
+            fields.define(key, raw.get(key)?)?;
+        }
         worker_logging::forward_error(
             &self.cooldowns,
             (
                 account.exchange_name(),
                 self.account.as_deref().unwrap_or(""),
             ),
-            &console_message,
-            &Value::Null,
-            Some(&json!({"sentryTags":{"worker_error_phase":"startup"}})),
+            &Js::utf16(&message),
+            &raw,
+            Some(&Js::object(vec![(
+                "sentryTags",
+                Js::object(vec![("worker_error_phase", Js::str("startup"))]),
+            )])),
             true,
             (
                 || {
@@ -128,10 +113,10 @@ impl NativeStartup {
                         Err(error) => -error.duration().as_secs_f64() * 1000.0,
                     })
                 },
-                || Ok(Value::Null),
-                |payload| self.post(payload, Some((error, &message))),
+                || Ok(fields),
+                |payload| self.post(payload),
                 |prefix, message, error, cause| {
-                    eprintln!("{prefix} {message} {error} {cause}");
+                    eprintln!("{prefix} {message:?} {error:?} {cause}");
                     Ok(())
                 },
             ),
@@ -148,9 +133,9 @@ impl NativeStartup {
                 account.exchange_name(),
                 self.account.as_deref().unwrap_or(""),
                 WorkerLogLevel::Info,
-                &format!("Starting exchange in webworker: {}", self.name),
+                &Js::str(&format!("Starting exchange in webworker: {}", self.name)),
                 None,
-                |payload| self.post(payload, None),
+                |payload| self.post(payload),
             )
             .map_err(|error| {
                 NativeValue::object([

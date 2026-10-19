@@ -1,67 +1,96 @@
-use serde_json::{Map, Value, json};
+use crate::{data_post::WorkerDataPayload, payload::StoreWorkerOp};
+use safe_cex_exchange::js_runtime::{
+    ops,
+    value::{Js, Thrown, from_typed},
+};
 
-// ts: ExchangeWorker.isRecord; the host materializes objects at the JSON boundary.
-pub fn is_record(value: &Value) -> bool {
-    value.is_object()
+pub fn is_record(value: &Js) -> bool {
+    value.is_object() && !value.is_callable() && !value.is_array()
 }
 
-pub fn get_worker_sentry_control(error: &Value) -> Value {
-    let mut result = Map::new();
+pub fn get_worker_sentry_control(error: &Js) -> Result<Js, Thrown> {
     if !is_record(error) {
-        return Value::Object(result);
+        return Ok(Js::object(vec![]));
     }
-    if let Some(key) = error["safeCexSentryReportKey"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-    {
-        result.insert("reportKey".into(), json!(key));
+    let key = error.get("safeCexSentryReportKey")?;
+    let key = if key.is_string() && error.get("safeCexSentryReportKey")?.truthy() {
+        error.get("safeCexSentryReportKey")?
+    } else {
+        Js::Undefined
+    };
+    let ms = error.get("safeCexSentryReportCooldownMs")?;
+    let ms = if matches!(ms, Js::Number(_))
+        && matches!(error.get("safeCexSentryReportCooldownMs")?, Js::Number(n) if n.is_finite())
+        && ops::greater_than(
+            &error.get("safeCexSentryReportCooldownMs")?,
+            &Js::Number(0.0),
+        )? {
+        error.get("safeCexSentryReportCooldownMs")?
+    } else {
+        Js::Undefined
+    };
+    let tags = error.get("safeCexSentryTags")?;
+    let tags = if is_record(&tags) {
+        error.get("safeCexSentryTags")?
+    } else {
+        Js::Undefined
+    };
+    let extra = error.get("safeCexSentryExtra")?;
+    let extra = if is_record(&extra) {
+        error.get("safeCexSentryExtra")?
+    } else {
+        Js::Undefined
+    };
+    Ok(Js::object(vec![
+        ("reportKey", key),
+        ("reportCooldownMs", ms),
+        ("tags", tags),
+        ("extra", extra),
+    ]))
+}
+
+pub fn split_worker_log_extra(extra: Option<&Js>) -> Result<Js, Thrown> {
+    let empty = Js::Undefined;
+    let extra = extra.unwrap_or(&empty);
+    if !is_record(extra) {
+        return Ok(Js::object(vec![
+            ("extra", Js::object(vec![])),
+            ("sentryTags", Js::object(vec![])),
+            ("sentryExtra", Js::object(vec![])),
+            ("suppressConsoleLog", Js::Bool(false)),
+        ]));
     }
-    if let Some(ms) = error["safeCexSentryReportCooldownMs"]
-        .as_f64()
-        .filter(|n| n.is_finite() && *n > 0.0)
-    {
-        result.insert("reportCooldownMs".into(), json!(ms));
-    }
-    for (source, target) in [
-        ("safeCexSentryTags", "tags"),
-        ("safeCexSentryExtra", "extra"),
-    ] {
-        if is_record(&error[source]) {
-            result.insert(target.into(), error[source].clone());
+    let tags = extra.get("sentryTags")?;
+    let tags = if is_record(&tags) {
+        extra.get("sentryTags")?
+    } else {
+        Js::object(vec![])
+    };
+    let sentry_extra = extra.get("sentryExtra")?;
+    let sentry_extra = if is_record(&sentry_extra) {
+        extra.get("sentryExtra")?
+    } else {
+        Js::object(vec![])
+    };
+    let suppress = extra.get("suppressConsoleLog")?.truthy();
+    let plain = Js::object(vec![]);
+    // Object.entries evaluates every enumerable getter before filtering the keys.
+    for (key, value) in extra.own_entries()? {
+        if !["sentryTags", "sentryExtra", "suppressConsoleLog"]
+            .iter()
+            .any(|name| key.as_ref() == name.encode_utf16().collect::<Vec<_>>().as_slice())
+        {
+            plain.define_key(&key, value)?;
         }
     }
-    Value::Object(result)
+    Ok(Js::object(vec![
+        ("extra", plain),
+        ("sentryTags", tags),
+        ("sentryExtra", sentry_extra),
+        ("suppressConsoleLog", Js::Bool(suppress)),
+    ]))
 }
 
-pub fn split_worker_log_extra(extra: Option<&Value>) -> Value {
-    let Some(Value::Object(extra)) = extra else {
-        return json!({"extra":{},"sentryTags":{},"sentryExtra":{},"suppressConsoleLog":false});
-    };
-    let tags = extra
-        .get("sentryTags")
-        .filter(|v| is_record(v))
-        .cloned()
-        .unwrap_or(json!({}));
-    let sentry_extra = extra
-        .get("sentryExtra")
-        .filter(|v| is_record(v))
-        .cloned()
-        .unwrap_or(json!({}));
-    let suppress = safe_cex_num::js_truthy(extra.get("suppressConsoleLog"));
-    let plain: Map<String, Value> = extra
-        .iter()
-        .filter(|(key, _)| {
-            !matches!(
-                key.as_str(),
-                "sentryTags" | "sentryExtra" | "suppressConsoleLog"
-            )
-        })
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
-    json!({"extra":plain,"sentryTags":tags,"sentryExtra":sentry_extra,"suppressConsoleLog":suppress})
-}
-
-// Named form of ExchangeWorker.log's inline literal union; no Deserialize path.
 #[derive(Clone, Copy, Debug, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkerLogLevel {
@@ -70,115 +99,140 @@ pub enum WorkerLogLevel {
     Error,
 }
 
-// ts: ExchangeWorker.log. The host owns the actual structured-clone/post boundary.
-pub fn forward_log<E>(
+fn spread_into(target: &Js, value: &Js) -> Result<(), Thrown> {
+    if !value.is_nullish() {
+        for (key, value) in value.own_entries()? {
+            target.define_key(&key, value)?;
+        }
+    }
+    Ok(())
+}
+
+pub fn forward_log<E: From<Thrown>>(
     exchange_name: safe_cex_types::ExchangeName,
     account_name: &str,
     level: WorkerLogLevel,
-    message: &str,
-    context: Option<&Map<String, Value>>,
-    post: impl FnOnce(crate::payload::StoreWorkerPayload) -> Result<(), E>,
+    message: &Js,
+    context: Option<&Js>,
+    post: impl FnOnce(WorkerDataPayload) -> Result<(), E>,
 ) -> Result<(), E> {
-    let mut fields = Map::new();
-    fields.insert("exchange".into(), json!(exchange_name));
-    fields.insert("account".into(), json!(account_name));
+    let fields = Js::object(vec![
+        ("exchange", from_typed(&exchange_name)?),
+        ("account", Js::str(account_name)),
+    ]);
     if let Some(context) = context {
-        fields.extend(context.clone());
+        spread_into(&fields, context)?;
     }
-    // JS objects enumerate integer keys first, including objects nested in context.
-    let mut context = Value::Object(fields);
-    safe_cex_num::normalize_json_order(&mut context);
-    post(crate::payload::StoreWorkerPayload {
-        op: crate::payload::StoreWorkerOp::Log,
-        instance_id: None,
-        data: Some(json!({"level":level,"message":message,"context":context})),
+    post(WorkerDataPayload {
+        op: StoreWorkerOp::Log,
+        data: Js::object(vec![
+            ("level", from_typed(&level)?),
+            ("message", message.clone()),
+            ("context", fields),
+        ]),
     })
 }
 
-/// Runs ExchangeWorker.logError's cooldown and delivery sequence. The host
-/// materializes its Error/unknown value before delivery; that operation may fail.
-/// The callback tuple is (clock, error materialization, post, console fallback).
-// ts: ExchangeWorker.logError
-pub fn forward_error<E>(
-    cooldowns: &std::cell::RefCell<std::collections::HashMap<String, (f64, f64)>>,
+pub fn forward_error<E: From<Thrown>>(
+    cooldowns: &Js,
     identity: (safe_cex_types::ExchangeName, &str),
-    message: &str,
-    error: &Value,
-    extra: Option<&Value>,
+    message: &Js,
+    error: &Js,
+    extra: Option<&Js>,
     send_to_sentry: bool,
     callbacks: (
         impl FnOnce() -> Result<f64, E>,
-        impl FnOnce() -> Result<Value, E>,
-        impl FnOnce(crate::payload::StoreWorkerPayload) -> Result<(), E>,
-        impl FnOnce(&str, &str, &Value, E) -> Result<(), E>,
+        impl FnOnce() -> Result<Js, E>,
+        impl FnOnce(WorkerDataPayload) -> Result<(), E>,
+        impl FnOnce(&str, &Js, &Js, E) -> Result<(), E>,
     ),
 ) -> Result<(), E> {
     let (clock, materialize_error, post, fallback) = callbacks;
-    let control = get_worker_sentry_control(error);
-    let split = split_worker_log_extra(extra);
+    let control = get_worker_sentry_control(error)?;
+    let split = split_worker_log_extra(extra)?;
     let mut effective_send = send_to_sentry;
-    let mut suppress_console = split["suppressConsoleLog"].as_bool().unwrap_or(false);
-    let mut suppressed_reports = 0.0;
-    if send_to_sentry
-        && let (Some(key), Some(cooldown)) = (
-            control["reportKey"].as_str(),
-            control["reportCooldownMs"].as_f64(),
-        )
-    {
-        // The clock can re-enter; do not borrow the cooldown map across it.
+    let mut suppress_console = split.get("suppressConsoleLog")?.truthy();
+    let mut suppressed_reports = Js::Number(0.0);
+    let key = control.get("reportKey")?;
+    let cooldown = control.get("reportCooldownMs")?;
+    if send_to_sentry && key.truthy() && cooldown.truthy() {
         let now = clock()?;
-        let previous = cooldowns.borrow().get(key).copied();
-        let should_report = previous.is_none_or(|(last, _)| now - last >= cooldown);
+        let previous = cooldowns.call_method("get", vec![key.clone()])?;
+        let should_report = previous.is_undefined()
+            || ops::greater_equal(
+                &ops::subtract(&Js::Number(now), &previous.get("lastReportedAt")?)?,
+                &cooldown,
+            )?;
         let next = if should_report {
-            suppressed_reports = previous.map_or(0.0, |(_, count)| count);
-            (now, 0.0)
+            if !previous.is_undefined() {
+                let count = previous.get("suppressedCount")?;
+                if !count.is_nullish() {
+                    suppressed_reports = count;
+                }
+            }
+            (Js::Number(now), Js::Number(0.0))
         } else {
             effective_send = false;
             suppress_console = true;
-            let (last, count) = previous.unwrap_or((now, 0.0));
-            (last, count + 1.0)
+            (
+                previous.get("lastReportedAt")?,
+                ops::add(&previous.get("suppressedCount")?, &Js::Number(1.0))?,
+            )
         };
-        cooldowns.borrow_mut().insert(key.to_owned(), next);
+        cooldowns.call_method(
+            "set",
+            vec![
+                key,
+                Js::object(vec![
+                    ("lastReportedAt", next.0),
+                    ("suppressedCount", next.1),
+                ]),
+            ],
+        )?;
     }
-
-    // In the source this is outside try: a coercion/getter failure propagates
-    // after the cooldown mutation, without posting or invoking console fallback.
     let serializable_error = materialize_error()?;
-    let mut tags = Map::from_iter([
-        ("source".into(), json!("webworker")),
-        ("module".into(), json!("ExchangeWorker")),
-        ("exchange".into(), json!(identity.0)),
-        ("account".into(), json!(identity.1)),
-    ]);
-    for value in [&split["sentryTags"], &control["tags"]] {
-        if let Some(object) = value.as_object() {
-            tags.extend(object.clone());
+    // These spreads are inside the source try, after error materialization.
+    let deliver = || -> Result<(), E> {
+        let tags = Js::object(vec![
+            ("source", Js::str("webworker")),
+            ("module", Js::str("ExchangeWorker")),
+            ("exchange", from_typed(&identity.0)?),
+            ("account", Js::str(identity.1)),
+        ]);
+        for value in [split.get("sentryTags")?, control.get("tags")?] {
+            spread_into(&tags, &value)?;
         }
-    }
-    let mut extra = Map::new();
-    for value in [&split["extra"], &split["sentryExtra"], &control["extra"]] {
-        if let Some(object) = value.as_object() {
-            extra.extend(object.clone());
+        let extra = Js::object(vec![]);
+        for value in [
+            split.get("extra")?,
+            split.get("sentryExtra")?,
+            control.get("extra")?,
+        ] {
+            spread_into(&extra, &value)?;
         }
-    }
-    if suppressed_reports > 0.0 {
-        extra.insert(
-            "suppressedRepeatedReports".into(),
-            json!(suppressed_reports),
-        );
-    }
-    let mut data = json!([message, {
-        "sendToSentry": effective_send,
-        "suppressConsoleLog": suppress_console,
-        "sentryData": {"error": serializable_error, "tags": tags, "extra": extra}
-    }]);
-    safe_cex_num::normalize_json_order(&mut data);
-    let payload = crate::payload::StoreWorkerPayload {
-        op: crate::payload::StoreWorkerOp::Error,
-        instance_id: None,
-        data: Some(data),
+        if ops::greater_than(&suppressed_reports, &Js::Number(0.0))? {
+            extra.define("suppressedRepeatedReports", suppressed_reports)?;
+        }
+        post(WorkerDataPayload {
+            op: StoreWorkerOp::Error,
+            data: Js::array(vec![
+                message.clone(),
+                Js::object(vec![
+                    ("sendToSentry", Js::Bool(effective_send)),
+                    ("suppressConsoleLog", Js::Bool(suppress_console)),
+                    (
+                        "sentryData",
+                        Js::object(vec![
+                            ("error", serializable_error),
+                            ("tags", tags),
+                            ("extra", extra),
+                        ]),
+                    ),
+                ]),
+            ]),
+        })
     };
-    match post(payload) {
+    match deliver() {
         Ok(()) => Ok(()),
         Err(cause) => fallback(
             "[ExchangeWorker] Failed to send error to main thread:",
