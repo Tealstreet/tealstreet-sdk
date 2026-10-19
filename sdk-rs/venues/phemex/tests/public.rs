@@ -191,3 +191,94 @@ fn invalid_supported_product_rejects_the_entire_seed() {
     assert!(!e.store().loaded().markets);
     assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
 }
+
+#[test]
+fn malformed_full_ws_snapshot_heals_without_publishing_an_empty_book() {
+    let (mut e, socket) = started();
+    e.handle(
+        0.,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        1.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"symbol":"BTCUSDT","sequence":2,"orderbook_p":{"bids":[],"asks":[]}}"#,
+        },
+    );
+    let id = request(&mut e, "fullbook");
+    respond(
+        &mut e,
+        id,
+        r#"{"result":{"sequence":1,"orderbook_p":{"bids":[["10","2"]],"asks":[["11","3"]]}}}"#,
+    );
+    assert_eq!(e.venue().book("BTCUSDT").unwrap().best_bid(), Some(10.));
+    e.drain_actions().for_each(drop);
+    e.handle(
+        3.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"symbol":"BTCUSDT","sequence":3,"type":"snapshot","orderbook_p":{}}"#,
+        },
+    );
+    assert!(e.venue().book("BTCUSDT").is_none());
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1003., Event::TimerFired { timer });
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a,Action::Http(r) if r.url.contains("fullbook")))
+    );
+}
+
+#[test]
+fn startup_retry_waits_for_the_complete_rate_limit_pause() {
+    let mut e = Engine::new(PhemexPerpetuals::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(0.);
+    let id = request(&mut e, "products");
+    e.handle(
+        0.,
+        Event::HttpResponse {
+            request: id,
+            response: Response {
+                status: 429,
+                headers: "x-ratelimit-retry-after-contract: 60",
+                body: "{}",
+            },
+        },
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(2000., Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let (timer, at) = actions
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(at, 60000.);
+    e.handle(at, Event::TimerFired { timer });
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/public/products")))
+    );
+}

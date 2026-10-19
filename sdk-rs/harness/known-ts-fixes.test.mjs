@@ -52,3 +52,11 @@ test('Phemex oracle derives unique fills, cumulative exposure and flat settings 
   assert.deepEqual(account.settings,[{symbol:'ETHUSDC',leverage:20,marginType:'cross'}]);
   assert.notEqual(account.fills[1].amount,0.1);
 });
+
+test('Phemex flat settings use the latest row and reject stale row time behind a newer envelope', () => {
+  const account={orders:[],fills:[],settings:[]};
+  const row=(leverage,time)=>({symbol:'ETHUSDC',posSide:'Long',size:'0',leverageRr:leverage,transactTimeNs:time});
+  const records=[{t:0,type:'http',status:200,url:'https://api.phemex.com/g-accounts/accountPositions',body:JSON.stringify({data:{positions:[row('-10','10')]}})}, {t:1,type:'ws',text:JSON.stringify({timestamp:'20',positions_p:[row('20','20')]})}, {t:2,type:'ws',text:JSON.stringify({timestamp:'30',positions_p:[row('-10','10')]})}];
+  fixPhemexAccount(account,records);
+  assert.deepEqual(account.settings,[{symbol:'ETHUSDC',leverage:20,marginType:'isolated'}]);
+});

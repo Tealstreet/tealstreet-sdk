@@ -51,3 +51,9 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 - Seven public gates PASS on the combined artifact (TS/Rust CPUms, retainedMB): Binance182.9/73.8,4.2/2.4; Bybit288.6/193.1,6.2/2.6; BingX111.5/72.9,3.6/2.1; Crypto.com65.3/58.2,1.9/1.6; OKX748.4/556.0,5.1/3.5; WEEX112.6/71.0,5.1/2.3; Phemex221.6/73.3,5.7/2.8. Phemex steady141.8/19.8ms. All ten private replays PASS: Binance, Bybit, BingX, Crypto.com, WEEX, Phemex and four OKX variants. Total17/17 gates PASS; no skipped gates.
 
 - Landing publication checkpoint: final source head `78e6666862` passed all17 local gates and required checks. PR into feat/rust-rewrite next, followed by adversarial reviews posted as comments; merge waits for green CI.
+
+### PR1310 adversarial review, round1
+
+- Posted independent reviewer findings on PR1310. Two public P2s fixed: required full WS snapshot sides and startup admission during active429 pause; both focused native controls pass. Shared oracle now follows latest exact row time for flat leverage/margin changes; stale row/new envelope regression passes. Harness35 tests pass. Phemex public/private gates rerun PASS after public fixes.
+- CI secret scan identified only the synthetic HMAC signature in original tests/sign.rs:52, independently generated from key `key`/secret `secret`; exact historical fingerprint added to .gitleaksignore and local history scan PASS. No broad exclusion.
+- Three private defects are being addressed before another review: envelope time promoting stale rows, snapshot absence fencing, and semantic-invalid snapshots advancing sequence/loaded state. Merge remains gated on final green CI.

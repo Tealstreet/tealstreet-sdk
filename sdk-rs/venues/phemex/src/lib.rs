@@ -303,6 +303,10 @@ fn apply(book: &mut Book, d: Depth) {
 impl Venue for PhemexPerpetuals {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if cx.now < self.paused_until {
+            self.startup_retry = Some(cx.set_timer(self.paused_until - cx.now));
+            return;
+        }
         self.request(
             cx,
             Method::Get,
@@ -405,6 +409,12 @@ impl Venue for PhemexPerpetuals {
             }
         } else if e.orderbook_p.is_some() {
             if let Ok(r) = serde_json::from_str::<DepthEvent<'_>>(text) {
+                if r.kind == "snapshot"
+                    && !e.orderbook_p.is_some_and(|raw| snapshot_sides(raw.get()))
+                {
+                    self.book_failed(cx, &e.symbol.to_ascii_uppercase());
+                    return;
+                }
                 self.depth(cx, r)
             } else {
                 self.book_failed(cx, &e.symbol.to_ascii_uppercase());

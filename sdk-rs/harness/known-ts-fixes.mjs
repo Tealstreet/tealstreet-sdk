@@ -85,19 +85,33 @@ export function fixPhemexAccount(account, tapeRecords) {
     // replaces periodic full snapshots.
 
   const settings = new Map(account.settings.map((row) => [row.symbol, row]));
-  const observe = (row) => {
+  const observed = new Map();
+  const observe = (row, fallback) => {
     const leverage = Math.abs(Number(row.leverageRr));
     if (!leverage || !Number.isFinite(leverage) || !row.symbol) return;
-    const symbol = row.symbol.toUpperCase();
-    if (!settings.has(symbol)) settings.set(symbol, { symbol, leverage, marginType: Number(row.leverageRr) < 0 || row.crossMargin ? 'cross' : 'isolated' });
+    const symbol = row.symbol.toUpperCase(), side = row.posSide ?? 'Merged';
+    const raw = row.transactTimeNs ?? fallback ?? 0;
+    const version = /^\d+$/.test(String(raw)) ? BigInt(raw) : 0n;
+    const key = symbol + ':' + side;
+    if ((observed.get(key)?.version ?? -1n) > version) return;
+    observed.set(key, { symbol, side, version, leverage, marginType: Number(row.leverageRr) < 0 || row.crossMargin ? 'cross' : 'isolated' });
   };
-  // TS drops zero-sized rows; Rust keeps their known per-market settings.
-  for (const record of tapeRecords) {
+  // TS drops zero-sized rows. Use the latest authoritative row per side,
+  // preferring long/merged leverage as the single market setting does.
+  for (const record of [...tapeRecords].sort((a,b) => (a.effectiveAt ?? a.availableAfter ?? a.t ?? 0) - (b.effectiveAt ?? b.availableAfter ?? b.t ?? 0))) {
     if (record.type === 'http' && record.status === 200 && new URL(record.url).pathname === '/g-accounts/accountPositions') {
-      for (const row of JSON.parse(record.body).data?.positions ?? []) observe(row);
+      for (const row of parse(record.body).data?.positions ?? []) observe(row);
     } else if (record.type === 'ws') {
-      for (const row of JSON.parse(record.text).positions_p ?? []) observe(row);
+      const message = parse(record.text);
+      for (const row of message.positions_p ?? []) observe(row, message.timestamp);
     }
   }
+  const missing = new Map();
+  for (const row of observed.values()) {
+    if (settings.has(row.symbol)) continue;
+    const previous = missing.get(row.symbol);
+    if (!previous || previous.side === 'Short' || row.side !== 'Short') missing.set(row.symbol, row);
+  }
+  for (const {symbol,leverage,marginType} of missing.values()) settings.set(symbol,{symbol,leverage,marginType});
   account.settings = [...settings.values()].sort((a,b) => a.symbol.localeCompare(b.symbol));
 }

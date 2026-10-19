@@ -2,3 +2,6 @@
 # original rewrite history (before the nested workspace move):
 # https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/general-info
 879fdc74610ec6b2504c9faf8a8d8ffbaff576c7:sdk-rs/safe-cex-venue-binance/src/sign.rs:generic-api-key:103
+# Synthetic Phemex websocket HMAC vector, independently generated from literal
+# test key "key" and secret "secret"; the flagged hex string is a signature.
+8b9da50d11d154e7ff999a0cf2823f4b7b49879f:sdk-rs/venues/phemex/tests/sign.rs:generic-api-key:52

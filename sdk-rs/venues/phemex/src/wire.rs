@@ -284,3 +284,14 @@ pub fn url_encode(text: &str) -> String {
     }
     out
 }
+
+pub fn snapshot_sides(text: &str) -> bool {
+    #[derive(Deserialize)]
+    struct Sides<'a> {
+        #[serde(rename = "bids", borrow)]
+        _bids: &'a serde_json::value::RawValue,
+        #[serde(rename = "asks", borrow)]
+        _asks: &'a serde_json::value::RawValue,
+    }
+    serde_json::from_str::<Sides<'_>>(text).is_ok()
+}
