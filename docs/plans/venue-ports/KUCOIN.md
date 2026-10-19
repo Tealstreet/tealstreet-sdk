@@ -264,3 +264,20 @@ lint and all 6,563 tests pass after the bridge change, as do wasm 20 and harness
 52. Landing advanced through BloFin (#1300) and MEXC parity (#1311); integrate
 that next, preserving typed mutation matching, signed headers, welcome bootstrap,
 queued read draining and native extras, then rebuild/rerun integrated gates.
+
+### BloFin/MEXC parity integration checkpoint
+
+Merged landing d9db55921c, keeping all nine venue registrations, KuCoin broker
+and native-unit bridge, typed mutation matching, signed-header argument order,
+welcome bootstrap, queued-read settling and query-only independent oracles.
+Accepted incoming websocket request accounting/getter, typed matcher tests,
+settled-memory helper/regressions, settings side-leverage NaN fallback, and the
+BloFin/MEXC parity cases. Independent shared merge review PASS; harness 57 and
+wire 2 tests, workspace cargo check and diff checks PASS. Budget remains 3 MiB;
+measure the rebuilt artifact before final gates.
+
+Independent private/trading and public/bridge follow-up reviews pass. Round-2
+query review found R11 P2: per-window ns filtering leaves sub-ms fill gaps at
+integer-ms window transitions. Preserve original caller bounds for fill filters
+across every page; regression/repair is in progress, posted on PR #1312 along
+with R10. Rebuild and run integrated gates once that final patch is ready.
