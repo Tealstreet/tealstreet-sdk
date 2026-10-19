@@ -260,7 +260,7 @@ are ~450 KB/s for two 1,000-level books).
 
 - Bans, fmt, clippy, native tests, wasm32 build and clippy.
 - Replay gate (`rust.yml`, job "replay gate"): release wasm with the pinned
-  wasm-bindgen, a 2 MiB combined Binance/Bybit/OKX/WEEX size budget, the committed public fixtures
+  wasm-bindgen, a 2 MiB combined Binance/Bybit/Crypto.com/OKX/WEEX size budget, the committed public fixtures
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
   and the generated private tape gated on identical account state.
 
@@ -276,7 +276,9 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | --- | --- |
 | Binance USD-M, Binance PM | done |
 | Bybit linear | done ([#1298](https://github.com/Tealstreet/tealstreet-sdk/pull/1298)) |
-| OKX (+EU, demo), Bitget, Hyperliquid, BloFin, BingX, MEXC, WEEX, Bitunix, Crypto.com, Backpack | wave 1 lanes running |
+| OKX (+EU, demo) | done (#1302) |
+| Bitget, Hyperliquid, BloFin, BingX, MEXC, WEEX, Bitunix, Crypto.com, Backpack | wave 1 lanes running |
+| Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | WOO, KuCoin, Phemex, Lighter, Paradex, GRVT, AsterDEX, Orderly family, ApeX Omni, Kraken, Coinbase, Bitrue, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse, Bybit inverse/spot/demo | wave 2, as wave 1 lanes merge |
 
 ### 9. Delete TypeScript and merge

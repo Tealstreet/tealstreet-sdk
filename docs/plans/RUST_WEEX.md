@@ -178,3 +178,23 @@ Rebuilt wasm is1,912,416 bytes. The isolated OKX replay passed with one fewer
 64KiB linear-memory page and111,880 bytes less retained memory than TS. The
 complete eleven-gate replay matrix and final-head CI are the remaining landing
 checks; final numbers will be recorded on PR#1301.
+
+## Landing update: Crypto.com
+
+The landing branch advanced to `c63c3e5670` and conflicted before PR merge.
+Merged its Crypto.com crate, registration, exact protocol audits and stricter
+memory measurement. Preserve WEEX headers, independent conditional oracle,
+caller IDs, time-aware staged reads and mandatory write consumption; a separate
+late TS hook handles Crypto.com subscriptions. Preserve strict streamed JSON
+validation and both metadata APIs; engine21/21 and harness14/14 pass. Incoming
+provably unused Ethereum/zkLink convenience-code removal is retained.
+
+Measurement now counts JS backing buffers and samples CPU before forced GC,
+using stable collection across event-loop turns. Independent review found that
+a negative heap delta could be masked by WASM memory; reject nonfinite/negative
+heap, buffer, total and WASM components instead of clamping. Seven adversarial
+invalid-component probes reject correctly. Private TS WEEX/Crypto.com smokes
+have zero unmatched requests, unused writes or protocol errors. Harness/merge
+reviews are clean. Five-venue combined build, thirteen replays and final-head CI
+remain the landing checks; all earlier performance numbers are historical and
+will be superseded by the final measurement model on PR#1301.

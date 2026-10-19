@@ -18,7 +18,7 @@ hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "=1.0.152", features = ["float_roundtrip"] }
+serde_json = { version = "=1.0.152", features = ["float_roundtrip", "raw_value"] }
 wasm-bindgen = "0.2.129"
 js-sys = "0.3.106"
 
@@ -27,6 +27,7 @@ safe-cex-crypto = { path = "crypto" }
 safe-cex-engine = { path = "engine" }
 safe-cex-venue-binance = { path = "venues/binance" }
 safe-cex-venue-bybit = { path = "venues/bybit" }
+safe-cex-venue-cryptocom = { path = "venues/cryptocom" }
 safe-cex-venue-okx = { path = "venues/okx" }
 safe-cex-venue-weex = { path = "venues/weex" }
 safe-cex-native = { path = "hosts/native" }
