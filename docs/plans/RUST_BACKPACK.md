@@ -179,3 +179,11 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   Eight harness tests and engine/Backpack native suites pass after resolution.
   Rebuilding the combined three-venue wasm and rerunning all six venue gates,
   including Bybit, before waiting for green CI and merging PR #1299.
+- Combined integration first failed Backpack memory by ~2% with three venues.
+  Kept the gate unchanged and removed a real temporary depth allocation:
+  decode sorted level vectors directly into their final representation and move
+  them into Book. A pointer-identity/zero-level regression verifies ownership.
+  Review is clear; Backpack public now PASS (3 runs): CPU 183.3/102.7 ms
+  (1.79x), steady 101.3/56.6 ms (1.79x), memory 1.8/1.7 MB (1.04x).
+  Added Backpack CI public/private gates and measured combined wasm 1,747,356
+  bytes with an explicit 1.8 MiB budget. Other post-merge gates are running.

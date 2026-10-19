@@ -103,8 +103,31 @@ pub struct Mark<'a> {
 pub struct Depth {
     #[serde(deserialize_with = "sequence")]
     pub last_update_id: u64,
-    pub bids: Vec<Level>,
-    pub asks: Vec<Level>,
+    #[serde(deserialize_with = "levels")]
+    pub bids: Vec<(f64, f64)>,
+    #[serde(deserialize_with = "levels")]
+    pub asks: Vec<(f64, f64)>,
+}
+
+fn levels<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<(f64, f64)>, D::Error> {
+    struct Levels;
+    impl<'de> serde::de::Visitor<'de> for Levels {
+        type Value = Vec<(f64, f64)>;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("price/quantity levels")
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut levels = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+            while let Some(Level(p, q)) = seq.next_element()? {
+                levels.push((p, q));
+            }
+            Ok(levels)
+        }
+    }
+    d.deserialize_seq(Levels)
 }
 
 #[derive(Deserialize)]

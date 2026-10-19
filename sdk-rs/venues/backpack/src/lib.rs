@@ -725,14 +725,8 @@ impl Venue for Backpack {
                 ) else {
                     unreachable!()
                 };
-                state.book.load_sorted(
-                    BookSide::Bids,
-                    depth.bids.into_iter().map(|Level(p, q)| (p, q)),
-                );
-                state.book.load_sorted(
-                    BookSide::Asks,
-                    depth.asks.into_iter().map(|Level(p, q)| (p, q)),
-                );
+                state.book.load_sorted_owned(BookSide::Bids, depth.bids);
+                state.book.load_sorted_owned(BookSide::Asks, depth.asks);
                 let mut iter = buffer.into_iter();
                 let mut gap = None;
                 while let Some(d) = iter.next() {
