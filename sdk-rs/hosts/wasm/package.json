@@ -73,6 +73,14 @@
     "./node/mexc": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/node/mexc/safe_cex_wasm.js"
+    },
+    "./web/blofin": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/blofin/safe_cex_wasm.js"
+    },
+    "./node/blofin": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/blofin/safe_cex_wasm.js"
     }
   },
   "scripts": {

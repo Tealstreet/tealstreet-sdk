@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const init = vi.hoisted(() => ({
   binance: vi.fn(async () => undefined),
   bingx: vi.fn(async () => undefined),
+  blofin: vi.fn(async () => undefined),
   bybit: vi.fn(async () => undefined),
   cryptocom: vi.fn(async () => undefined),
   mexc: vi.fn(async () => undefined),
@@ -12,6 +13,7 @@ const init = vi.hoisted(() => ({
 
 vi.mock('@tealstreet/safe-cex-wasm/web/binance', () => ({ default: init.binance, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/bingx', () => ({ default: init.bingx, WasmEngine: class {} }));
+vi.mock('@tealstreet/safe-cex-wasm/web/blofin', () => ({ default: init.blofin, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/bybit', () => ({ default: init.bybit, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/cryptocom', () => ({ default: init.cryptocom, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/mexc', () => ({ default: init.mexc, WasmEngine: class {} }));
@@ -35,13 +37,14 @@ describe.runIf(process.env.SAFE_CEX_WASM_TESTS)('browser Rust engine selection',
     expect(init.weex).not.toHaveBeenCalled();
     expect(init.binance).not.toHaveBeenCalled();
     expect(init.bingx).not.toHaveBeenCalled();
+    expect(init.blofin).not.toHaveBeenCalled();
   });
 
   it('initializes each requested family separately', async () => {
     const { loadWebEngine } = await import('../exchanges/rust/loadWebEngine');
-    const [binance, pm, bingx, bybit, cryptocom, mexc, okx, weex] = await Promise.all(['binance', 'binancepm', 'bingx', 'bybit', 'cryptocom', 'mexc', 'okx', 'weex'].map(loadWebEngine));
+    const [binance, pm, bingx, blofin, bybit, cryptocom, mexc, okx, weex] = await Promise.all(['binance', 'binancepm', 'bingx', 'blofin', 'bybit', 'cryptocom', 'mexc', 'okx', 'weex'].map(loadWebEngine));
     expect(binance).toBe(pm);
-    expect(new Set([binance, bingx, bybit, cryptocom, mexc, okx, weex]).size).toBe(7);
+    expect(new Set([binance, bingx, blofin, bybit, cryptocom, mexc, okx, weex]).size).toBe(8);
     for (const initialize of Object.values(init)) expect(initialize).toHaveBeenCalledTimes(1);
   });
 

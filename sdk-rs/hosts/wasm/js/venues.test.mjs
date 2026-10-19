@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url);
 const aliases = {
   binance: ['binance', 'binancepm'],
   bingx: ['bingx'],
+  blofin: ['blofin'],
   bybit: ['bybit'],
   cryptocom: ['cryptocom'],
   mexc: ['mexc'],

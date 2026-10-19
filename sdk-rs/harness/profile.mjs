@@ -44,6 +44,7 @@ const defaultBooks = {
   bingx: 'BTCUSDT,ETHUSDT',
   weex: 'BTCUSDT,ETHUSDT',
   mexc: 'BTCUSDT,ETHUSDT',
+  blofin: 'BTCUSDT,ETHUSDT',
   okx: 'BTCUSDT,ETHUSDT',
   cryptocom: 'BTCUSD-PERP,ETHUSD-PERP',
 };

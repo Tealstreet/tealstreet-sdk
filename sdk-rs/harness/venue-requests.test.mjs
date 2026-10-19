@@ -7,7 +7,7 @@ import { venueOf } from './venues.mjs';
 test('existing venues retain strict wire types and caller IDs after MEXC integration', () => {
   const url = 'https://fixture.test/order';
   const callerIds = new Set(['caller']);
-  for (const name of ['binance', 'bybit', 'okx', 'okxeu', 'okxdemo', 'okxeudemo', 'weex', 'cryptocom', 'bingx']) {
+  for (const name of ['binance', 'bybit', 'okx', 'okxeu', 'okxdemo', 'okxeudemo', 'weex', 'cryptocom', 'bingx', 'blofin']) {
     const venue = venueOf(name);
     const key = (body) => venueRequestKey('POST', url, body, callerIds, venue);
     assert.equal(key({ quantity: 1 }), requestKey('POST', url, { quantity: 1 }, callerIds, venue));

@@ -14,7 +14,7 @@ import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'nod
 import { subscriptionKeys, isRead } from './requests.mjs';
 import { venueRequestKey } from './venue-requests.mjs';
 import { parseRequestJson } from './request-json.mjs';
-import { retainedMemory } from './memory.mjs';
+import { retainedMemory, settledMemory } from './memory.mjs';
 import { Responses } from './responses.mjs';
 import { SocketSubscriptions } from './subscriptions.mjs';
 
@@ -64,17 +64,33 @@ class ReplayTimeout extends Error {}
 const within = async (promise, ms, label) => {
   let timer;
   try {
-    return await Promise.race([promise, new Promise((_, reject) => {
-      timer = realTimeout(() => reject(new ReplayTimeout(`${label} exceeded ${ms} ms`)), ms);
-    })]);
-  } finally { realClearTimeout(timer); }
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = realTimeout(() => reject(new ReplayTimeout(`${label} exceeded ${ms} ms`)), ms);
+      }),
+    ]);
+  } finally {
+    realClearTimeout(timer);
+  }
 };
-const isPrivate = metadata?.private ?? records.some((r) =>
-  venue.isPrivateRecord ? venue.isPrivateRecord(r) : Boolean(venue.privateSocket && r.url?.includes(venue.privateSocket)));
+const isPrivate =
+  metadata?.private ??
+  records.some((r) =>
+    venue.isPrivateRecord
+      ? venue.isPrivateRecord(r)
+      : Boolean(venue.privateSocket && r.url?.includes(venue.privateSocket)),
+  );
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 const PASSPHRASE = 'replay-passphrase';
-const callerIds = new Set(records.flatMap((r) => r.type === 'command' ? (r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean) : []));
+const callerIds = new Set();
+const collectCallerIds = (value) => {
+  if (!value || typeof value !== 'object') return;
+  if (typeof value.clientOrderId === 'string') callerIds.add(value.clientOrderId);
+  for (const nested of Object.values(value)) collectCallerIds(nested);
+};
+for (const record of records) if (record.type === 'command') collectCallerIds(record);
 
 const requestKey = (method, url, body) => venueRequestKey(method, url, body, callerIds, venue);
 // Connection IDs vary; native listen keys remain significant.
@@ -91,7 +107,11 @@ const isWriteRequest = (method, url) => venue.isWrite?.(method, url) ?? !isRead(
 class Tape extends SharedTape {
   constructor(impl) {
     super(records, { isPrivate });
-    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records) });
+    this.audit = venue.createSocketAudit?.(impl, {
+      isPrivate,
+      books: bookSymbols,
+      tickers: venue.publicTickers?.(records),
+    });
     this.responses = new Responses(records, requestKey, venue.checkRequest, isWriteRequest);
     Object.defineProperty(this, 'unserved', { get: () => this.responses.unserved });
     // Legacy tapes did not count open bookkeeping as a delivered frame.
@@ -101,7 +121,9 @@ class Tape extends SharedTape {
     this.subscriptions = new Set();
     // Retain expected keys/backing storage across both memory samples: deleting
     // startup-only harness state would subtract it from workload retained memory.
-    this.startupSubscriptions = new Map(Array.from(venue.startupSubscriptions?.(records, bookSymbols) ?? [], (key) => [key, false]));
+    this.startupSubscriptions = new Map(
+      Array.from(venue.startupSubscriptions?.(records, bookSymbols) ?? [], (key) => [key, false]),
+    );
     this.pendingStartupSubscriptions = this.startupSubscriptions.size;
     this.generations = new Map();
   }
@@ -122,16 +144,21 @@ class Tape extends SharedTape {
   }
   connect(url, onOpen, onMessage, onClose) {
     let socket;
-    socket = super.connect(url, onOpen, (text) => {
-      this.audit?.received(url, text);
-      if ((venue.validateLogin || venue.validateSubscriptions) && text.trimStart().startsWith('{')) {
-        const message = JSON.parse(text);
-        if (venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified)
-          throw new Error(`Taped login success preceded a valid login on ${url}`);
-        this.assertSubscribed(socket, message);
-      }
-      onMessage(text);
-    }, onClose);
+    socket = super.connect(
+      url,
+      onOpen,
+      (text) => {
+        this.audit?.received(url, text);
+        if ((venue.validateLogin || venue.validateSubscriptions) && text.trimStart().startsWith('{')) {
+          const message = JSON.parse(text);
+          if (venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified)
+            throw new Error(`Taped login success preceded a valid login on ${url}`);
+          this.assertSubscribed(socket, message);
+        }
+        onMessage(text);
+      },
+      onClose,
+    );
     const key = canonicalUrl(url);
     socket.generation = (this.generations.get(key) ?? 0) + 1;
     this.generations.set(key, socket.generation);
@@ -140,6 +167,7 @@ class Tape extends SharedTape {
     return socket;
   }
   send(socket, text) {
+    this.sent(socket.url, text);
     for (const key of subscriptionKeys(socket.url, text)) {
       this.subscriptions.add(`${socket.generation} ${key}`);
       if (this.startupSubscriptions.get(key) === false) {
@@ -149,7 +177,9 @@ class Tape extends SharedTape {
     }
     this.audit?.sent(socket.url, text);
     if (venue.respondToPing && text === 'ping') {
-      setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
+      setImmediate(() => {
+        if (!socket.closed) socket.onMessage('pong');
+      });
       return;
     }
     // OKX's opt-in auth validation also uses its v5 subscription argument model.
@@ -159,7 +189,8 @@ class Tape extends SharedTape {
     if (validateTopics && ['subscribe', 'unsubscribe'].includes(message.op)) {
       if (!Array.isArray(message.args)) throw new Error(`Invalid subscription on ${socket.url}`);
       for (const topic of message.args) {
-        if (!topic || typeof topic.channel !== 'string' || !topic.channel) throw new Error(`Invalid subscription topic on ${socket.url}`);
+        if (!topic || typeof topic.channel !== 'string' || !topic.channel)
+          throw new Error(`Invalid subscription topic on ${socket.url}`);
         const key = JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
         if (message.op === 'subscribe') socket.topics.set(key, topic);
         else socket.topics.delete(key);
@@ -170,8 +201,13 @@ class Tape extends SharedTape {
     if (message.op !== 'login') return;
     const arg = message.args?.length === 1 ? message.args[0] : undefined;
     const timestamp = String(arg?.timestamp ?? '');
-    if (arg?.apiKey !== KEY || arg?.passphrase !== PASSPHRASE || !/^\d+$/.test(timestamp)
-      || !Number.isSafeInteger(Number(timestamp)) || Math.abs(Number(timestamp) - Date.now() / 1000) > 30) {
+    if (
+      arg?.apiKey !== KEY ||
+      arg?.passphrase !== PASSPHRASE ||
+      !/^\d+$/.test(timestamp) ||
+      !Number.isSafeInteger(Number(timestamp)) ||
+      Math.abs(Number(timestamp) - Date.now() / 1000) > 30
+    ) {
       throw new Error(`Invalid OKX login credentials/timestamp on ${socket.url}`);
     }
     const expected = createHmac('sha256', SECRET).update(`${timestamp}GET/users/self/verify`).digest('base64');
@@ -194,10 +230,14 @@ class Tape extends SharedTape {
   }
 
   async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
-    await within((async () => {
-      await ready();
-      while (this.pendingStartupSubscriptions) await new Promise((resolve) => setTimeout(resolve, 1));
-    })(), 15_000, 'Replay startup');
+    await within(
+      (async () => {
+        await ready();
+        while (this.pendingStartupSubscriptions) await new Promise((resolve) => setTimeout(resolve, 1));
+      })(),
+      15_000,
+      'Replay startup',
+    );
     begin();
     clock?.start();
     this.replayClock = clock;
@@ -214,13 +254,15 @@ class Tape extends SharedTape {
       if (clock && (values.cadence === 'frame' || index === 0 || this.frames[index - 1].t !== frame.t)) await clock.advance(frame.t);
       if (frame.type === 'command') {
         this.commandIndex++;
-        this.results.push(await within(runCommand(frame), 15_000, `Command ${frame.op}`).then(
-          (ids) => ({ ok: ids }),
-          (error) => {
-            if (error instanceof ReplayTimeout) throw error;
-            return { error: String(error?.message ?? error) };
-          },
-        ));
+        this.results.push(
+          await within(runCommand(frame), 15_000, `Command ${frame.op}`).then(
+            (ids) => ({ ok: ids }),
+            (error) => {
+              if (error instanceof ReplayTimeout) throw error;
+              return { error: String(error?.message ?? error) };
+            },
+          ),
+        );
       } else {
         const socket = await this.socketFor(frame.url, frame.socket);
         if (frame.type === 'close') this.close(socket, frame.code);
@@ -234,7 +276,28 @@ class Tape extends SharedTape {
     }
     return delivered;
   }
-  unusedWrites() { return this.responses.unusedWrites(); }
+
+  get unusedWrites() {
+    return this.responses.unusedWrites();
+  }
+
+  results = [];
+  sentRequests = new Set();
+  sent(url, text) {
+    if (!venue.requestBodies || text === 'ping' || text === 'pong') return;
+    let message;
+    try {
+      message = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (message.op === 'subscribe' || message.op === 'unsubscribe') {
+      for (const topic of message.args ?? []) this.sentRequests.add(JSON.stringify({ url, op: message.op, topic }));
+    } else if (message.op === 'login') {
+      const args = message.args.map(({ timestamp, nonce, sign, ...credentials }) => credentials);
+      this.sentRequests.add(JSON.stringify({ url, op: 'login', args }));
+    }
+  }
 }
 
 const settle = async () => {
@@ -275,31 +338,26 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
 };
 
 /** Loaded code is excluded; collect before I/O and after replay state settles. */
-const baseline = async () => {
-  const deadline = performance.now() + 10_000;
-  let previous;
-  let stableSince;
-  while (performance.now() < deadline) {
-    globalThis.gc?.();
-    // Loader/native cleanup can outlive several immediate turns. Require real
-    // elapsed quiescence so imported transient buffers cannot inflate baseline.
-    await new Promise((resolve) => realTimeout(resolve, 10));
-    const memory = process.memoryUsage();
-    const now = performance.now();
-    if (now >= deadline) break;
-    if (memory.arrayBuffers !== previous) stableSince = now;
-    if (now - stableSince >= 100) return memory;
-    previous = memory.arrayBuffers;
-  }
-  throw new Error('Backing-buffer memory did not settle');
-};
+const baseline = () => settledMemory({ timeoutMs: 10_000, pause: () => new Promise((resolve) => realTimeout(resolve, 10)) });
 
 const sortBook = (book) => ({
   bids: book.bids.map(({ price, amount }) => [price, amount]),
   asks: book.asks.map(({ price, amount }) => [price, amount]),
 });
 
-const tickerFields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'openInterest', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume'];
+const tickerFields = [
+  'bid',
+  'ask',
+  'last',
+  'mark',
+  'index',
+  'percentage',
+  'openInterest',
+  'fundingRate',
+  'fundingTime',
+  'volume',
+  'quoteVolume',
+];
 const marketFields = (m) => ({
   id: m.id,
   symbol: m.symbol,
@@ -353,7 +411,10 @@ async function runRust() {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
-  const options = { ...venue.options, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }) };
+  const options = {
+    ...venue.options,
+    ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }),
+  };
   const engine = new WasmEngine(venue.rust, JSON.stringify(options));
   if (process.env.RUST_MEMORY_TRACE) {
     let last = wasmMemoryBytes();
@@ -384,7 +445,13 @@ async function runRust() {
       status = frame.status() ?? status;
       const executed = frame.fills();
       for (let i = 0; i < (executed?.count ?? 0); i++) {
-        fills.push({ market: executed.market[i], side: executed.side[i], amount: executed.rows[i * 2 + 1], price: executed.rows[i * 2], id: executed.orderId(i) });
+        fills.push({
+          market: executed.market[i],
+          side: executed.side[i],
+          amount: executed.rows[i * 2 + 1],
+          price: executed.rows[i * 2],
+          id: executed.orderId(i),
+        });
       }
     },
   }, { batchMessages: values.delivery === 'batch' });
@@ -457,7 +524,19 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, unserved: tape.unserved, subscriptions: [...tape.subscriptions].sort(), unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return {
+    frames,
+    metrics,
+    unserved: tape.unserved,
+    subscriptions: [...tape.subscriptions].sort(),
+    unusedWrites: tape.unusedWrites,
+    protocolErrors: tape.audit?.errors() ?? [],
+    wsRequests: [...tape.sentRequests].sort(),
+    store: { markets: marketRows, tickers: tickerRows },
+    books: bookRows,
+    account,
+    commands: tape.results,
+  };
 }
 
 const commandArgs = ({ t, type, ...args }) => args;
@@ -475,7 +554,7 @@ async function tsCommand(exchange, store, record) {
       return [];
     case 'amendOrder': {
       const order = store.orders.find((o) => o.id === args.id);
-      if (!order) throw new Error(`Order ${args.id} not found`);
+      if (!order) throw new Error(values.venue === 'mexc' ? `Order ${args.id} not found` : `unknown order ${args.id}`);
       const update = Object.fromEntries(
         ['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]),
       );
@@ -531,6 +610,8 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   }
   const settingRows = [];
   for (let i = 0; i < (settings?.count ?? 0); i++) {
+    // TS has no margin-only placeholder; frames retain it for actual consumers.
+    if (values.venue === 'blofin' && !(settings.leverage[i] > 0)) continue;
     settingRows.push({
       symbol: symbol(settings.market[i]),
       marginType: settings.marginType(i),
@@ -545,7 +626,13 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
     orders: orderRows,
     positions: positionRows,
     settings: settingRows,
-    fills: fills.map((f) => ({ id: f.id, symbol: symbol(f.market), side: f.side === 0 ? 'buy' : 'sell', amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
+    fills: fills.map((f) => ({
+      id: f.id,
+      symbol: symbol(f.market),
+      side: f.side === 0 ? 'buy' : 'sell',
+      amount: f.amount,
+      ...(venue.compareFillPrices ? { price: f.price } : {}),
+    })),
   };
 }
 
@@ -588,7 +675,9 @@ async function runTs() {
     removeEventListener(type, fn) {
       this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
     }
-    send(text) { tape.send(this.socket, text); }
+    send(text) {
+      tape.send(this.socket, text);
+    }
     close() {
       this.readyState = 3;
       tape.close(this.socket);
@@ -608,9 +697,33 @@ async function runTs() {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const { status, body, headers: responseHeaders } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data, config.headers?.toJSON?.() ?? config.headers);
+    const {
+      status,
+      body,
+      headers: responseHeaders,
+    } = tape.respond(
+      (config.method ?? 'get').toUpperCase(),
+      url.toString(),
+      config.data,
+      config.headers?.toJSON?.() ?? config.headers,
+    );
     // The raw body: the client's own transformResponse parses it, big ids included.
-    const response = { data: body, status, statusText: String(status), headers: Object.fromEntries((responseHeaders ?? '').split('\n').filter(Boolean).map((line) => { const colon = line.indexOf(':'); return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()]; })), config, request: {} };
+    const response = {
+      data: body,
+      status,
+      statusText: String(status),
+      headers: Object.fromEntries(
+        (responseHeaders ?? '')
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => {
+            const colon = line.indexOf(':');
+            return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()];
+          }),
+      ),
+      config,
+      request: {},
+    };
     if (status >= 400) {
       const error = new Error(`Request failed with status code ${status}`);
       error.response = response;
@@ -627,11 +740,18 @@ async function runTs() {
   const worker = new ExchangeWorker({}, 'replay', venue.ts.name, {}, {}, {}, 'replay');
   worker._store = store;
   let state;
-  store.subscribe((data) => { state = data; });
+  store.subscribe((data) => {
+    state = data;
+  });
   const postStore = () => {
     if (!values['no-egress'] && state) mainStore.update(structuredClone(worker._prepareStorePayload(state)), true);
   };
-  const options = { ...venue.options, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { key: '', secret: '', publicDataOnly: true }) };
+  const options = {
+    ...venue.options,
+    ...(isPrivate
+      ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE }
+      : { key: '', secret: '', publicDataOnly: true }),
+  };
   const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
   venue.configureTs?.(exchange);
   venue.prepareTs?.(exchange, TapeWebSocket);
@@ -677,14 +797,18 @@ async function runTs() {
   await settle();
   tape.assertWritesConsumed();
   postStore();
-  if (!values['no-egress']) for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
+  if (!values['no-egress'])
+    for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
   const metrics = await measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark);
   const snapshot = {
     markets: (values['no-egress'] ? store : mainStore).markets.map((m) => ({ ...m })),
     tickers: (values['no-egress'] ? store : mainStore).tickers.map((t) => ({ ...t })),
   };
   const bookCopies = Object.fromEntries(
-    Object.entries(values['no-egress'] ? finalBooks : mainBooks).map(([symbol, book]) => [symbol, JSON.parse(JSON.stringify(book))]),
+    Object.entries(values['no-egress'] ? finalBooks : mainBooks).map(([symbol, book]) => [
+      symbol,
+      JSON.parse(JSON.stringify(book)),
+    ]),
   );
   const account = isPrivate
     ? {
@@ -705,12 +829,30 @@ async function runTs() {
               .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
           ).values(),
         ],
-        fills: executions.map((f) => ({ id: f.orderId ?? f.id, symbol: f.symbol, side: f.side, amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
+        fills: executions.map((f) => ({
+          id: f.orderId ?? f.id,
+          symbol: f.symbol,
+          side: f.side,
+          amount: f.amount,
+          ...(venue.compareFillPrices ? { price: f.price } : {}),
+        })),
       }
     : undefined;
   exchange.dispose();
   clock?.restore();
-  return { frames, metrics, unserved: tape.unserved, subscriptions: [...tape.subscriptions].sort(), unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], store: snapshot, books: bookCopies, account, commands: tape.results };
+  return {
+    frames,
+    metrics,
+    unserved: tape.unserved,
+    subscriptions: [...tape.subscriptions].sort(),
+    unusedWrites: tape.unusedWrites,
+    protocolErrors: tape.audit?.errors() ?? [],
+    wsRequests: [...tape.sentRequests].sort(),
+    store: snapshot,
+    books: bookCopies,
+    account,
+    commands: tape.results,
+  };
 }
 
 /** The fields both implementations carry, in one shape. */
@@ -773,13 +915,19 @@ writeFileSync(
     subscriptions: result.subscriptions,
     unusedWrites: result.unusedWrites,
     protocolErrors: result.protocolErrors,
+    wsRequests: result.wsRequests,
     metrics: result.metrics,
     markets: result.store.markets.map(marketFields),
-    tickers: result.store.tickers.map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, f === 'openInterest' ? (t[f] ?? 0) : t[f]])])),
+    tickers: result.store.tickers.map((t) =>
+      Object.fromEntries([
+        ['symbol', t.symbol],
+        ...tickerFields.map((f) => [f, f === 'openInterest' ? (t[f] ?? 0) : t[f]]),
+      ]),
+    ),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
     commands: result.commands,
   }),
 );
-clearTimeout(replayDeadline);
+realClearTimeout(replayDeadline);
 process.exit(0);

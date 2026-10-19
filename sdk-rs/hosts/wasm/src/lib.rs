@@ -6,6 +6,7 @@
 #[cfg(not(any(
     feature = "venue-binance",
     feature = "venue-bingx",
+    feature = "venue-blofin",
     feature = "venue-bybit",
     feature = "venue-cryptocom",
     feature = "venue-mexc",
@@ -22,6 +23,8 @@ use safe_cex_engine::{
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 #[cfg(feature = "venue-bingx")]
 use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
+#[cfg(feature = "venue-blofin")]
+use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 #[cfg(feature = "venue-bybit")]
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 #[cfg(feature = "venue-cryptocom")]
@@ -78,6 +81,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
 #[cfg(any(
     feature = "venue-binance",
     feature = "venue-bingx",
+    feature = "venue-blofin",
     feature = "venue-bybit",
     feature = "venue-cryptocom",
     feature = "venue-mexc",
@@ -89,6 +93,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
 struct EngineOptions {
     #[cfg(any(
         feature = "venue-binance",
+        feature = "venue-blofin",
         feature = "venue-bybit",
         feature = "venue-cryptocom",
         feature = "venue-okx"
@@ -101,7 +106,7 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
-    #[cfg(any(feature = "venue-okx", feature = "venue-weex"))]
+    #[cfg(any(feature = "venue-blofin", feature = "venue-okx", feature = "venue-weex"))]
     #[serde(default)]
     passphrase: Option<String>,
     #[cfg(feature = "venue-weex")]
@@ -325,10 +330,6 @@ enum CommandIn {
         command: u32,
         hedged: bool,
     },
-    FetchLeverage {
-        command: u32,
-        symbol: String,
-    },
     #[serde(rename_all = "camelCase")]
     FetchFills {
         command: u32,
@@ -367,6 +368,10 @@ enum CommandIn {
         to: Option<f64>,
         #[serde(default)]
         limit: Option<u32>,
+    },
+    FetchLeverage {
+        command: u32,
+        symbol: String,
     },
     FetchPublicTrades {
         command: u32,
@@ -425,7 +430,6 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
-            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
                 command,
                 symbol,
@@ -475,6 +479,7 @@ impl From<CommandIn> for Command {
                     limit,
                 },
             },
+            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchPublicTrades {
                 command,
                 symbol,
@@ -538,6 +543,7 @@ impl WasmEngine {
     #[cfg(any(
         feature = "venue-binance",
         feature = "venue-bingx",
+    feature = "venue-blofin",
         feature = "venue-bybit",
         feature = "venue-cryptocom",
         feature = "venue-mexc",
@@ -567,6 +573,14 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
+            }))),
+            #[cfg(feature = "venue-blofin")]
+            "blofin" => Box::new(Engine::new(Blofin::new(BlofinOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
             }))),
             #[cfg(feature = "venue-bingx")]
             "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {

@@ -304,3 +304,15 @@ BingX wasm allocation saving is at least38195 bytes before allocator overhead;
 actual pages and O(log n) mixed-ID lookup CPU remain gated after rebuilding.
 BloFin plus MEXC parity just landed at origin `a4d9e2ec84`; integration expands to
 eight families before the next single release rebuild. No final gate claim yet.
+
+Integrated eight-venue landing `a4d9e2ec84` (BloFin and MEXC parity follow-up).
+Engine51 tests/fmt/clippy and independent Store invariant review pass. Harness56
+tests pass: adopted recursive caller IDs and typed per-venue generated/default
+query matching; BloFin egress oracles; latest MEXC post-cancel reconciliation.
+Crypto live-open/complete subscription readiness and MEXC-only grouped virtual
+clock remain. Extracted memory collector now requires at least two equal
+comparisons plus100ms quiet, with10s deadline and real timers; CPU still ends
+before collection. Deterministic delayed-cleanup tests protect the bounds.
+Eight-family current and isolated baseline release builds run with two Cargo
+jobs; baseline exact130-file source audit matches a4d9e2ec84, opt-levels unchanged.
+Final public comparisons and gross CPU profiles await these artifacts.

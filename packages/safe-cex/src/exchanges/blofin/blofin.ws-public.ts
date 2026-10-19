@@ -621,47 +621,18 @@ export class BlofinPublicWebsocket extends BaseWebSocket<BlofinExchange> {
       const snapshot = parseBookSnapshot(data);
       if (!snapshot) return;
 
-      // Build the top-N replacement levels with a linear push, then mutate
-      // the existing orderBook arrays in place by overwriting their head.
-      // Prior code used .reduce with `[...acc, x]` (quadratic) PLUS a final
-      // `[...newTopLevels, ...orderBook[side].slice(newTopLevels.length)]`
-      // that allocated two more arrays per side per frame.
-      const sBids = snapshot.bids;
-      let bidWriteIdx = 0;
-      for (let i = 0; i < sBids.length; i++) {
-        const [price, amount] = sBids[i];
-        const amt = parseFloat(amount);
-        if (amt === 0) continue;
-        const level = {
-          price: parseFloat(price),
-          amount: amt,
-          total: 0,
-        };
-        if (bidWriteIdx < orderBook.bids.length) {
-          orderBook.bids[bidWriteIdx] = level;
-        } else {
-          orderBook.bids.push(level);
-        }
-        bidWriteIdx++;
-      }
-
-      const sAsks = snapshot.asks;
-      let askWriteIdx = 0;
-      for (let i = 0; i < sAsks.length; i++) {
-        const [price, amount] = sAsks[i];
-        const amt = parseFloat(amount);
-        if (amt === 0) continue;
-        const level = {
-          price: parseFloat(price),
-          amount: amt,
-          total: 0,
-        };
-        if (askWriteIdx < orderBook.asks.length) {
-          orderBook.asks[askWriteIdx] = level;
-        } else {
-          orderBook.asks.push(level);
-        }
-        askWriteIdx++;
+      // Replace prices covered by the snapshot, preserving only deeper levels.
+      // Replacing by array index can duplicate prices when the top of book moves.
+      for (const side of ['bids', 'asks'] as const) {
+        const levels = snapshot[side]
+          .map(([price, amount]) => ({ price: parseFloat(price), amount: parseFloat(amount), total: 0 }))
+          .filter((level) => level.amount !== 0);
+        const boundary = levels[levels.length - 1]?.price;
+        const deeper =
+          levels.length < 5 || boundary === undefined
+            ? []
+            : orderBook[side].filter((level) => (side === 'bids' ? level.price < boundary : level.price > boundary));
+        orderBook[side] = [...levels, ...deeper];
       }
 
       calcOrderBookTotal(orderBook);
