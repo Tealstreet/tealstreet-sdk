@@ -53,3 +53,17 @@ test('KuCoin readiness requires active bid/ask and mark/index topics for each bo
   send('/contract/instrument:XBTUSDTM');
   assert.equal(audit.ready(), true);
 });
+
+test('KuCoin public replay waits for reads queued before the rate limiter', async () => {
+  let release;
+  const exchange = { xhr: { get: () => new Promise((resolve) => { release = resolve; }) }, cancelSymbolOrders: async () => {} };
+  kucoin.configureTs(exchange);
+  const read = exchange.xhr.get('/api/v1/level2/snapshot');
+  let settled = false;
+  const settling = kucoin.settleTs(exchange, { isPrivate: false }).then(() => { settled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(settled, false);
+  release({ data: { code: '200000' } });
+  await Promise.all([read, settling]);
+  assert.equal(settled, true);
+});

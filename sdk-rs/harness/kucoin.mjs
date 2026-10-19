@@ -1,18 +1,39 @@
 import { createHmac } from 'node:crypto';
 const hmac = (text) => createHmac('sha256', 'replay-secret').update(text).digest('base64');
 const privateTopics = ['/contractMarket/tradeOrders', '/contractMarket/advancedOrders', '/contract/positionAll', '/contractAccount/wallet', '/contract/marginMode', '/contract/crossLeverage'];
+const pendingReads = new WeakMap();
 export const kucoin = {
   rust: 'kucoin',
   ts: { module: '../../packages/safe-cex/src/exchanges/kucoin/kucoin.exchange.ts', className: 'KucoinExchange', name: 'kucoin' },
   // KNOWN_TS_FIXES: cancelSymbolOrders omits the stop book. Exercise the
   // existing signed transport for that missing half as cancelAllOrders does.
   configureTs(exchange) {
+    // Track before the 3 RPS queue: accelerated frames can finish while cached
+    // depth recovery reads are still waiting to be issued.
+    const pending = new Set();
+    pendingReads.set(exchange, pending);
+    const get = exchange.xhr.get.bind(exchange.xhr);
+    exchange.xhr.get = (...args) => {
+      const promise = get(...args);
+      pending.add(promise);
+      promise.then(() => pending.delete(promise), () => pending.delete(promise));
+      return promise;
+    };
     const cancel = exchange.cancelSymbolOrders;
     exchange.cancelSymbolOrders = async (symbol) => {
       await cancel(symbol);
       const { data } = await exchange.unlimitedXHR.delete('/api/v1/stopOrders', { params: { symbol: exchange.toApiSymbol(symbol) } });
       if (data.code !== '200000') throw new Error(data.msg || data.code);
     };
+  },
+  async settleTs(exchange, { isPrivate }) {
+    if (isPrivate) return;
+    const pending = pendingReads.get(exchange);
+    let stable = 0;
+    while (stable < 3) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      stable = pending.size ? 0 : stable + 1;
+    }
   },
   volatileQueryFields: ['connectId'],
   matchRequestBody: true,

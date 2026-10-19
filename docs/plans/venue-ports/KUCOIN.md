@@ -132,3 +132,22 @@ remaining TS startup/book race after the landing harness change; investigation i
 active and that gate is not counted passing at this checkpoint. The landing
 branch has since advanced through BingX and a startup-subscription harness fix;
 merge that next, then rerun the complete gate set before PR publication.
+
+### BingX landing integration checkpoint
+
+Integrated landing 9ddec5d0a4, including the stronger typed request matcher,
+subscription generations/readiness, and timed response visibility. Both response
+time (argument 5) and signature-audit headers (argument 6) are preserved and
+independently regression-tested. KuCoin topics normalize individual symbols
+across its batched colon topics. Independent merge/harness review passes (34
+harness tests). Seven-venue wasm: 2,882,955 bytes; budget 3 MiB.
+
+The remaining TS book mismatch was harness completion timing: accelerated frames
+could finish while KuCoin's 3-RPS queue still held recovery snapshot reads.
+A bounded generic settle hook now waits for tracked public read promises before
+final copy/metrics. No traffic or comparison is omitted. The queued-read oracle
+regresses this directly. Three-run public gate PASS: 16,154 frames, 692 markets,
+CPU TS/Rust 1115.8/791.8 ms, steady 782.3/561.3 ms, retained 6.5/2.8 MB, full
+books identical. Private gate PASS: 32 frames, 17 commands, all five history
+command paths including funding independently validated, zero unserved/unused
+mutations or protocol failures. Run the full seven-venue gate set next.
