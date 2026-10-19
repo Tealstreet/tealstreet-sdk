@@ -5,6 +5,10 @@
 #[path = "../tests/support/cloid_audit.rs"]
 mod cloid_audit;
 
+#[cfg(test)]
+#[path = "../tests/support/signing_audit.rs"]
+mod signing_audit;
+
 use crate::{
     cloid::hyperliquid_client_order_id_rule,
     core_exchange_class,
