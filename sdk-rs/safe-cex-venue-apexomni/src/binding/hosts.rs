@@ -14,7 +14,7 @@ use safe_cex_exchange::{
         sockets,
         value::{Js, Thrown},
     },
-    runtime::{ExchangeError, ExchangeFuture, ExchangeTask},
+    runtime::{ExchangeError, ExchangeFuture},
     websocket::BaseWebSocket,
 };
 use safe_cex_store::Store;
@@ -63,7 +63,7 @@ pub(super) struct Host {
     pub private_body: RefCell<Option<Rc<ApexOmniPrivateWebsocket>>>,
     pub clients: RefCell<Vec<Rc<ApiBridge>>>,
     pub next: Cell<u64>,
-    pub tasks: Rc<RefCell<Vec<(u64, Box<dyn ExchangeTask>)>>>,
+    pub tasks: Rc<RefCell<Vec<(u64, Js)>>>,
     sdk: NativeSigner,
     initialization: SdkInitialization,
 }
@@ -140,32 +140,37 @@ impl Host {
     pub fn schedule(&self, delay: f64, future: ExchangeFuture<'static, ()>) -> u64 {
         let id = self.next.get() + 1;
         self.next.set(id);
-        let sleep = self
-            .scope
-            .runtime
-            .sleep(if delay.is_finite() && delay > 0. {
-                delay as u64
-            } else {
-                0
-            });
-        let runtime = self.scope.runtime.clone();
+        let runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> =
+            self.scope.runtime.clone();
         let tasks = Rc::downgrade(&self.tasks);
-        let task = self.scope.runtime.spawn_local(Box::pin(async move {
-            let result = async {
-                sleep.await?;
-                future.await
-            }
-            .await;
-            if let Some(tasks) = tasks.upgrade() {
-                tasks.borrow_mut().retain(|(key, _)| *key != id);
-            }
-            if let Err(error) = result {
-                runtime.report_exception(
-                    &error,
-                    &serde_json::json!({"operation":"ApexOmni callback"}).into(),
-                );
-            }
-        }));
+        let future = RefCell::new(Some(future));
+        let scope = safe_cex_exchange::js_runtime::scope::Scope {
+            shared: self.scope.clone(),
+            this: Js::Undefined,
+        };
+        let task = scope.set_timeout(
+            Rc::new(move || {
+                if let Some(tasks) = tasks.upgrade() {
+                    tasks.borrow_mut().retain(|(key, _)| *key != id);
+                }
+                let future = future.borrow_mut().take().expect("one-shot callback");
+                let reporter = runtime.clone();
+                drop(safe_cex_exchange::eager::start_eager(
+                    &runtime,
+                    async move {
+                        if let Err(error) = future.await {
+                            reporter.report_exception(
+                                &error,
+                                &serde_json::json!({"operation":"ApexOmni callback"}).into(),
+                            );
+                        }
+                        Ok(())
+                    },
+                ));
+                Ok(())
+            }),
+            delay,
+        );
         self.tasks.borrow_mut().push((id, task));
         id
     }
@@ -173,12 +178,20 @@ impl Host {
         let index = { self.tasks.borrow().iter().position(|(key, _)| *key == id) };
         if let Some(index) = index {
             let (_, task) = self.tasks.borrow_mut().remove(index);
-            task.cancel();
+            safe_cex_exchange::js_runtime::scope::Scope {
+                shared: self.scope.clone(),
+                this: Js::Undefined,
+            }
+            .clear_timeout(&task);
         }
     }
     pub fn dispose_tasks(&self) {
         for (_, task) in self.tasks.borrow_mut().drain(..) {
-            task.cancel();
+            safe_cex_exchange::js_runtime::scope::Scope {
+                shared: self.scope.clone(),
+                this: Js::Undefined,
+            }
+            .clear_timeout(&task);
         }
     }
 }

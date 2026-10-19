@@ -23,7 +23,7 @@ These additions grant no measurement permission and use the same exact-owner gat
 The #901 response-carrier cutover (`84b06aec6f`) also introduced the native
 `safe_cex_venue_apexomni::api_runtime::ApexApi` response input, discovered by
 #1193 and first reached by #848 run 39216880873. Its exact pending row is owned
-by codex-0w5ohi. The current total is 154 (146 core, six AsterDEX, two ApexOmni);
+by codex-0w5ohi. That integration total is 154 (146 core, six AsterDEX, two ApexOmni);
 the original 149-owner cohort remains separate. An ordinary contract and native
 binding receipt are still required; the row grants no measurement permission.
 
@@ -31,3 +31,12 @@ The complete Apex inventory also exposes `binding::http::carry_config`, unchange
 since master commit `251d9906dea` before #901. Its separate pending row is owned
 by codex-0w5ohi, with the same ordinary-contract and native-receipt obligations.
 The census found no other unlisted Apex native-input owners.
+
+The #1248 Store graph cutover (`94c1cdc90d`) introduced three core native-input
+owners in `store_payload`: `sanitize_for_post_message`, `StorePayloadPreparer`
+(`prepare`), and `TickerBaseline` (`copy_from`, `pack_deltas`). Complete core
+compiler inventories independently identify exactly these three unlisted owners.
+Their separate pending rows belong to codex-4ri6pb; the original149 cohort is
+unchanged. The total is157 (149 core, six AsterDEX, two ApexOmni). These rows
+record outstanding classification and native-binding receipts, not ACCEPT rulings;
+normal measurement still requires their contracts. No inventory guard is relaxed.
