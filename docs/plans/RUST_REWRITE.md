@@ -240,26 +240,17 @@ memory.
   sections at 250 ms. Without it, accounts on the engine post objects through
   the existing handlers.
 
-### 6. Client adoption (tealstreet-next) — blocked on two decisions
+### 6. Client adoption (tealstreet-next) — after the master merge
 
-The app change is small because the store stays the seam: register
-`loadWebEngine` in `StoreWorkerEntry.ts`, push `acceptsFrames` and set
-`engine: 'rust'` behind a flag, and add `case 'frame':
+tealstreet-next receives the SDK only through Copybara once master takes this
+branch, so the app change happens then. It is small because the store stays
+the seam: register `loadWebEngine` in `StoreWorkerEntry.ts`, push
+`acceptsFrames` and set `engine: 'rust'` behind a flag, and add `case 'frame':
 exchange.applyWorkerFrame(data)` to `exchangeAccountController`'s worker
 listener. Readers of `exchange.store` and the `listenOrderBook` consumers stay
 as they are; zero-copy book consumers (`Float64Array` rows into the order
-book, DOM and depth chart) are the next step after that.
-
-Decisions needed:
-
-1. **How SDK changes reach tealstreet-next before the final merge.** Copybara
-   mirrors master only, and the app cannot use the engine until
-   `packages/safe-cex` and `sdk-rs/safe-cex-wasm` arrive there. Either master
-   takes the landing branch once Binance is ready (rather than once at the
-   very end), or Copybara gains a branch lane.
-2. **How the web build gets the wasm.** `pkg/web` is built from Rust:
-   tealstreet-next's build installs the pinned toolchain and wasm-bindgen, or
-   the SDK publishes the built package.
+book, DOM and depth chart) come after that. How the web build obtains the
+compiled wasm is decided then.
 
 Then: exchange-server moves to the native host and streams the same frames
 (with `BOOK_DELTA` sections for networked clients — full books every flush
