@@ -108,7 +108,7 @@ only; per-market leverage and margin type live in `SETTINGS`, replacing the
 zero-size placeholder positions TS kept for every market. An order's packed
 enum word carries its reject reason (flags bits 4-5). Enum codes and flag bits are
 defined once in `safe-cex-engine/src/wire.rs` and mirrored by the decoder in
-`safe-cex-wasm/js/wire.mjs`.
+`hosts/wasm/js/wire.mjs`.
 
 ### Crossing rules
 
@@ -211,8 +211,8 @@ memory.
 
 ### 4. Hosts
 
-- Browser worker: `safe-cex-wasm` + `host.mjs` — done.
-- Native: `safe-cex-native`, tokio + tokio-tungstenite + reqwest over a
+- Browser worker: `hosts/wasm` + `host.mjs` — done.
+- Native: `hosts/native` (`safe-cex-native`), tokio + tokio-tungstenite + reqwest over a
   pluggable transport, driving the same engine — done (`examples/watch.rs`
   runs it live; `tests/host.rs` drives the loop from a tape).
 - Cloudflare: the same wasm build and `host.mjs` inside a Durable Object —
@@ -264,12 +264,20 @@ are ~450 KB/s for two 1,000-level books).
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
   and the generated private tape gated on identical account state.
 
-### 8. Remaining venues
+### 8. Remaining venues — in progress
 
-In parallel, one PR each into `feat/rust-rewrite`, copying the Binance
-pattern (borrowed wire structs, state machines, frame sections, tape, gate):
-Binance inverse, spot and portfolio margin first (shared code), then Bybit,
-OKX, Bitget, Hyperliquid, and the rest of `packages/safe-cex/src/exchanges`.
+One Codex lane per venue, each in its own aimux worktree on
+`feat/rust-<venue>`, working from `docs/plans/VENUE_PORT_BRIEF.md`: plan and
+execute in phases with sub-agent reviews, then a PR into `feat/rust-rewrite`
+reviewed adversarially until it passes, then merged. The overseer delegates,
+compacts lanes at checkpoints, watches gates and keeps this list current.
+
+| Venue | State |
+| --- | --- |
+| Binance USD-M, Binance PM | done |
+| Bybit linear | ported, gates pass; PR review pending |
+| OKX (+EU, demo), Bitget, Hyperliquid, BloFin, BingX, MEXC, WEEX, Bitunix, Crypto.com, Backpack | wave 1 lanes running |
+| WOO, KuCoin, Phemex, Lighter, Paradex, GRVT, AsterDEX, Orderly family, ApeX Omni, Kraken, Coinbase, Bitrue, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse, Bybit inverse/spot/demo | wave 2, as wave 1 lanes merge |
 
 ### 9. Delete TypeScript and merge
 
@@ -282,6 +290,26 @@ OKX, Bitget, Hyperliquid, and the rest of `packages/safe-cex/src/exchanges`.
 
 - Binance testnet (or live test-account) API keys for the live private tape.
   The documented-payload tape does not need them.
+
+## Repository layout
+
+```
+sdk-rs/                   Rust workspace
+  engine/                 safe-cex-engine: the sans-I/O core, store, frame
+  crypto/                 safe-cex-crypto: signing primitives
+  hosts/wasm/             safe-cex-wasm + js/ (host, frame reader, Workers
+                          host); the @tealstreet/safe-cex-wasm package
+  hosts/native/           safe-cex-native: tokio host
+  venues/<venue>/         safe-cex-venue-<venue>, one crate per venue
+  harness/  scripts/
+packages/                 TypeScript
+```
+
+TypeScript lives on beside it: `packages/safe-cex` keeps the shell (worker,
+store, chasers, TWAP, CLI, types) and reaches Rust only through
+`@tealstreet/safe-cex-wasm`. Each venue under
+`packages/safe-cex/src/exchanges/` is deleted once its Rust port ships, and
+the shell shrinks as its pieces move into the engine.
 
 ## Branching
 
