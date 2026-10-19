@@ -187,8 +187,10 @@ fn streamed_candles_keep_open_and_monotonic_time() {
         .unwrap();
     assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 1);
     let values: Vec<_> = payload[16..]
-        .chunks_exact(8)
-        .map(|v| f64::from_le_bytes(v.try_into().unwrap()))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|v| f64::from_le_bytes(*v))
         .collect();
     assert_eq!(values, vec![1700000000.0, 10.0, 12.0, 9.0, 11.0, 3.0]);
 }
