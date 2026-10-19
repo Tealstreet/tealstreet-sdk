@@ -2,6 +2,26 @@
 // signatures/clocks are nondeterministic. Economic action fields stay intact.
 const CLOCKS = new Set(['timestamp', 'recvWindow', 'signature']);
 const CLIENT_IDS = new Set(['newClientOrderId', 'clientAlgoId', 'clientOrderId', 'c']);
+
+// Timed replies describe recorded state; polling must not consume its transitions.
+// Unstamped replies in a timed queue represent the state available at startup.
+export const selectResponse = (queue, elapsed) => {
+  if (!queue?.length) return undefined;
+  if (!queue.some((record) => record.availableAt !== undefined)) {
+    return queue.length > 1 ? queue.shift() : queue[0];
+  }
+  let selected;
+  let latest = -Infinity;
+  for (const record of queue) {
+    const available = record.availableAt ?? 0;
+    if (available <= elapsed && available >= latest) {
+      selected = record;
+      latest = available;
+    }
+  }
+  return selected;
+};
+
 const parseJson = (text) => JSON.parse(text, (_key, value, context) =>
   typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)
     ? JSON.rawJSON(context.source) : value);

@@ -22,6 +22,16 @@ const http = (path, requestBody, body, status = 200) => records.push({
   requestBody: JSON.stringify(requestBody), status, body: JSON.stringify(body),
 });
 const info = (type, body, extra = {}) => http('/info', { type, ...extra }, body);
+// Reconciliation reads see the state at their request time, including the
+// interval between placement and cancellation. A permanent [] would erase a
+// live order before its queued cancel command can find it.
+const frontendOrders = (rows, dex = '', availableAt = clock) => {
+  info('frontendOpenOrders', rows.map((row) => ({
+    children: [], isPositionTpsl: row.isTrigger && row.origSz === '0',
+    triggerCondition: 'N/A', triggerPx: '0', ...row,
+  })), { user: USER, ...(dex ? { dex } : {}) });
+  records.at(-1).availableAt = availableAt;
+};
 const ws = (channel, data) => records.push({ t: at(), type: 'ws', url: SOCKET, text: JSON.stringify({ channel, data }) });
 const command = (body) => records.push({ t: at(), type: 'command', ...body });
 const reply = (action, statuses) => http('/exchange', {
@@ -60,8 +70,8 @@ const core = state([position('BTC', 2, 100)], 20);
 const hip3 = state([position('xyz:FOO', 4, 50)], 20);
 info('clearinghouseState', core, { user: USER });
 info('clearinghouseState', hip3, { user: USER, dex: 'xyz' });
-info('frontendOpenOrders', [], { user: USER });
-info('frontendOpenOrders', [], { user: USER, dex: 'xyz' });
+frontendOrders([], '', 0);
+frontendOrders([], 'xyz', 0);
 info('spotClearinghouseState', { balances: [] }, { user: USER });
 
 ws('allMids', { mids: { BTC: '100', ETH: '200', 'xyz:FOO': '50' } });
@@ -98,18 +108,23 @@ reply({ type: 'order', orders: [
   trigger(0, false, '90', '0.25', true, '80', 'sl', cloid(201)),
   trigger(0, false, '90', '0.25', true, '120', 'tp', cloid(202)),
 ], grouping: 'normalTpsl', builder: BUILDER }, [{ resting: { oid: 3001 } }, 'waitingForFill', 'waitingForFill']);
-update(order('BTC', 3001, 'B', 90, 0.25, { cloid: cloid(1) }), 'open');
+const bracketEntry = order('BTC', 3001, 'B', 90, 0.25, { cloid: cloid(1) });
+frontendOrders([bracketEntry]);
+update(bracketEntry, 'open');
 command({ op: 'cancelOrders', ids: ['3001'] });
 reply({ type: 'cancel', cancels: [{ a: 0, o: 3001 }] }, ['success']);
-update(order('BTC', 3001, 'B', 90, 0.25, { cloid: cloid(1) }), 'canceled');
+frontendOrders([]);
+update(bracketEntry, 'canceled');
 
 // An explicit full-position stop returns a deferred status without an oid.
 command({ op: 'placeOrders', orders: [{ symbol: 'BTC-PERP', type: 'stop_market', side: 'sell', amount: 0, price: 80, reduceOnly: true, clientOrderId: cloid(2) }] });
 reply({ type: 'order', orders: [trigger(0, false, '95', '0', true, '80', 'sl', cloid(2))], grouping: 'positionTpsl', builder: BUILDER }, ['waitingForTrigger']);
 const stop = order('BTC', 3002, 'A', 95, 0, { cloid: cloid(2), reduceOnly: true, isTrigger: true, triggerPx: '80', orderType: 'Stop Market', tif: '' });
 update(stop, 'open');
+frontendOrders([stop]);
 command({ op: 'cancelOrders', ids: ['3002'] });
 reply({ type: 'cancel', cancels: [{ a: 0, o: 3002 }] }, ['success']);
+frontendOrders([]);
 update(stop, 'canceled');
 
 // HIP-3 asset index is 110000 for the first deployed DEX. Caller IDs also
@@ -118,8 +133,10 @@ command({ op: 'placeOrders', orders: [{ symbol: 'XYZ|FOO-PERP', type: 'take_prof
 reply({ type: 'order', orders: [trigger(110000, false, '47.5', '1', true, '60', 'tp', cloid(3))], grouping: 'na', builder: BUILDER }, [{ resting: { oid: 3003 } }]);
 const hipStop = order('xyz:FOO', 3003, 'A', 47.5, 1, { cloid: cloid(3), reduceOnly: true, isTrigger: true, triggerPx: '60', orderType: 'Take Profit Market', tif: '' });
 update(hipStop, 'open');
+frontendOrders([hipStop], 'xyz');
 command({ op: 'cancelOrders', ids: ['3003'] });
 reply({ type: 'cancel', cancels: [{ a: 110000, o: 3003 }] }, ['success']);
+frontendOrders([], 'xyz');
 update(hipStop, 'canceled');
 command({ op: 'placeOrders', orders: [{ symbol: 'ETH-PERP', type: 'market', side: 'buy', amount: 0.1, clientOrderId: cloid(4) }] });
 reply({ type: 'order', orders: [limit(1, true, '210', '0.1', false, cloid(4))], grouping: 'na', builder: BUILDER }, [{ filled: { oid: 3004, totalSz: '0.1', avgPx: '200' } }]);

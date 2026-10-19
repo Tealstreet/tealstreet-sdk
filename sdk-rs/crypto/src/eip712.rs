@@ -1,8 +1,20 @@
-//! Dynamic EIP-712 hashing and deterministic secp256k1 signing, without transport.
+//! EIP-712 hashing and deterministic secp256k1 signing, without transport.
 
 use alloy_dyn_abi::TypedData;
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
+
+/// Build an EIP-712 signing digest from an already hashed domain and message.
+/// Callers with a fixed schema can encode its words directly without loading
+/// the dynamic typed-data parser. Both arguments are keccak-256 hashes, not
+/// ABI data; this is the message form, not domain-only signing.
+pub fn hash_prehashed(domain_separator: [u8; 32], struct_hash: [u8; 32]) -> [u8; 32] {
+    let mut bytes = [0u8; 66];
+    bytes[..2].copy_from_slice(&[0x19, 0x01]);
+    bytes[2..34].copy_from_slice(&domain_separator);
+    bytes[34..].copy_from_slice(&struct_hash);
+    crate::ethereum::keccak256(&bytes)
+}
 
 fn validate_addresses(
     types: &serde_json::Value,
@@ -113,7 +125,7 @@ pub fn sign_typed_data(raw: &str, private_key: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{hash_typed_data, sign_typed_data};
+    use super::{hash_prehashed, hash_typed_data, sign_typed_data, typed_data};
     use serde::Deserialize;
 
     #[derive(Deserialize)]
@@ -157,6 +169,35 @@ mod tests {
                 sign_typed_data(&case.typed_data, &case.private_key).unwrap(),
                 case.signature,
                 "secp256k1 signature: {}",
+                case.name
+            );
+        }
+    }
+
+    #[test]
+    fn prehashed_digest_matches_dynamic_hash_and_ethers_signature_corpus() {
+        for case in corpus() {
+            let data = typed_data(&case.typed_data).unwrap();
+            let digest = hash_prehashed(
+                data.domain.separator().into(),
+                data.hash_struct().unwrap().into(),
+            );
+            assert_eq!(
+                format!("0x{}", crate::hex(&digest)),
+                hash_typed_data(&case.typed_data).unwrap(),
+                "dynamic EIP-712 equivalence: {}",
+                case.name
+            );
+            assert_eq!(
+                format!("0x{}", crate::hex(&digest)),
+                case.hash,
+                "ethers digest: {}",
+                case.name
+            );
+            assert_eq!(
+                crate::ethereum::sign_digest(&digest, &case.private_key).unwrap(),
+                case.signature,
+                "ethers signature through prehashed digest: {}",
                 case.name
             );
         }

@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
-import { callerIdsOf, requestKey, subscriptionKeys } from './requests.mjs';
+import { callerIdsOf, requestKey, selectResponse, subscriptionKeys } from './requests.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -55,13 +55,14 @@ class Tape {
   respond(method, url, body) {
     const key = keyFor(method, url, body);
     this.requests.add(key);
-    const queue = this.responses.get(key);
-    if (!queue?.length) {
+    // Startup reads see time zero; availability advances only once playback starts.
+    const elapsed = this.playStartedAt === undefined ? 0 : performance.now() - this.playStartedAt;
+    const record = selectResponse(this.responses.get(key), elapsed);
+    if (!record) {
       this.unserved++;
       console.error(`unserved: ${key}`);
       return { status: 599, body: '' };
     }
-    const record = queue.length > 1 ? queue.shift() : queue[0];
     return { status: record.status, body: record.body };
   }
 
@@ -98,7 +99,8 @@ class Tape {
     const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
     for (const url of urls) await this.socketFor(url);
     await ready();
-    const start = performance.now();
+    this.playStartedAt = performance.now();
+    const start = this.playStartedAt;
     let delivered = 0;
     const warm = Math.floor(this.frames.length / 4);
     for (const frame of this.frames) {
@@ -353,8 +355,11 @@ async function runTs() {
   }
   globalThis.WebSocket = TapeWebSocket;
   globalThis.fetch = async (input, init = {}) => {
-    const { status, body } = tape.respond(init.method ?? 'GET', String(input), init.body);
-    return new Response(body, { status });
+    const request = input instanceof Request ? input : undefined;
+    const method = init.method ?? request?.method ?? 'GET';
+    const requestBody = init.body ?? (request && !['GET', 'HEAD'].includes(method.toUpperCase()) ? await request.clone().text() : undefined);
+    const { status, body } = tape.respond(method, request?.url ?? String(input), requestBody);
+    return new Response([204, 205, 304].includes(status) ? null : body, { status });
   };
   const { [venue.ts.className]: Exchange } = await import(venue.ts.module);
   const { DefaultStore } = await import('../../packages/safe-cex/src/store/store.base.ts');

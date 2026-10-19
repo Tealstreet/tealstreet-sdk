@@ -95,7 +95,20 @@ sub-agent implementation review and fixes before every phase commit.
   deterministic private tape against TS with zero unmatched requests. All 41
   Rust tests, native/wasm lint, bans and fmt pass; repository lint passes.
   Release wasm build, replay parity/performance and repository checks remain
-  in progress. No gate numbers claimed yet.
+  in progress.
+- Phase 5 replay checkpoint: Hyperliquid private and 20-second/two-book public
+  replays pass account, market, ticker, book, command and normalized outbound
+  request/subscription comparisons. Binance public/private also pass. The
+  recorded fixture is committed. Fixed the recorder to tap streamed responses;
+  timed private snapshots preserve live orders between placement and cancel.
+  Added shared prehashed EIP-712 hashing and fixed-schema Agent encoding;
+  official signatures and dynamic-parser equivalence pass (43 venue tests,
+  five crypto EIP-712 tests). Public HIP-3 subscriptions now follow TS's account
+  identity requirement. Wasm wrapper 4/4 and Workers host 2/2 checks pass.
+  Repository typecheck (44 tasks), lint (28 tasks), tests (27 tasks) pass.
+  Combined wasm remains over the 1.2 MB size budget; a size-optimized release
+  build and final replay repetition are in progress. These are preliminary
+  replay passes, not a claim that every gate is complete.
 
 Standing overseer authorization (2026-10-20): resolve future landing-branch
 merge conflicts while keeping its layout; never stash, use WIP commits.

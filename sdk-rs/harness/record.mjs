@@ -45,17 +45,29 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const body = new TextDecoder().decode(response.body);
-    write({ type: 'http', method: request.method, url: request.url, requestBody: request.body, status: response.status, body });
-    return response;
+    const record = (body) => write({ type: 'http', method: request.method, url: request.url, requestBody: request.body, status: response.status, body });
+    if (response.body instanceof Uint8Array) {
+      record(new TextDecoder().decode(response.body));
+      return response;
+    }
+    // Tap the transport stream without changing the engine's chunk delivery.
+    const body = async function* () {
+      const decoder = new TextDecoder();
+      let text = '';
+      for await (const chunk of response.body) {
+        text += decoder.decode(chunk, { stream: true });
+        yield chunk;
+      }
+      record(text + decoder.decode());
+    };
+    return { ...response, body: body() };
   },
 };
 
 const { WasmEngine } = await loadEngine();
 let frames = 0;
-let updates = 0;
 const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: false, ...venueOf(values.venue).recordOptions })), recording, {
-  onStoreUpdate: () => updates++,
+  onFrame: () => frames++,
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });
 host.start();
@@ -68,7 +80,7 @@ setTimeout(() => {
   host.flush();
   host.dispose();
   tape.end(() => {
-    console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames }));
+    console.log(JSON.stringify({ out, seconds: Number(values.seconds), frames }));
     process.exit(0);
   });
 }, Number(values.seconds) * 1000);

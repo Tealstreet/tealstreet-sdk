@@ -59,6 +59,52 @@ fn message(e: &mut Engine<Hyperliquid>, socket: SocketId, text: &str) {
     e.handle(2000.0, Event::WsMessage { socket, text });
 }
 #[test]
+fn dex_mids_subscription_matches_ts_account_session_requirement() {
+    for (public_data_only, identity, expected) in [
+        (true, false, false),
+        (true, true, false),
+        (false, false, false),
+        (false, true, true),
+    ] {
+        let mut e = Engine::new(Hyperliquid::new(Options {
+            public_data_only,
+            application_id: identity.then(|| "0x0000000000000000000000000000000000000001".into()),
+            ..Options::default()
+        }));
+        e.start(1000.0);
+        let id = request(&mut e);
+        response(&mut e, id, r#"[{"universe":[]},[]]"#);
+        let id = request(&mut e);
+        response(&mut e, id, r#"[null,{"name":"xyz"}]"#);
+        let id = request(&mut e);
+        response(
+            &mut e,
+            id,
+            r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10}]},[{"midPx":"50"}]]"#,
+        );
+        let socket = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(1000.0, Event::WsOpened { socket });
+        let dex_mids = e.drain_actions().any(|action| match action {
+            Action::WsSend { text, .. } => {
+                let message: serde_json::Value = serde_json::from_str(&text).unwrap();
+                message["subscription"]["type"] == "allMids"
+                    && message["subscription"]["dex"] == "xyz"
+            }
+            _ => false,
+        });
+        assert_eq!(
+            dex_mids, expected,
+            "public={public_data_only}, identity={identity}"
+        );
+    }
+}
+#[test]
 fn markets_units_and_compressed_partial_fields() {
     let (mut e, s) = start();
     assert_eq!(e.store().markets().len(), 2);

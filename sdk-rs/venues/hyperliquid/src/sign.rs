@@ -35,68 +35,8 @@ pub fn sign(
     mainnet: bool,
     secret: &str,
 ) -> Result<Signature, String> {
-    #[derive(Serialize)]
-    struct Field {
-        name: &'static str,
-        r#type: &'static str,
-    }
-    #[derive(Serialize)]
-    struct Types {
-        #[serde(rename = "Agent")]
-        agent: [Field; 2],
-    }
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Domain {
-        name: &'static str,
-        version: &'static str,
-        chain_id: u32,
-        verifying_contract: &'static str,
-    }
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Agent {
-        source: &'static str,
-        connection_id: String,
-    }
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Typed {
-        domain: Domain,
-        types: Types,
-        primary_type: &'static str,
-        message: Agent,
-    }
-    let hash = action_hash(action, vault, nonce)?;
-    let typed = Typed {
-        domain: Domain {
-            name: "Exchange",
-            version: "1",
-            chain_id: 1337,
-            verifying_contract: "0x0000000000000000000000000000000000000000",
-        },
-        types: Types {
-            agent: [
-                Field {
-                    name: "source",
-                    r#type: "string",
-                },
-                Field {
-                    name: "connectionId",
-                    r#type: "bytes32",
-                },
-            ],
-        },
-        primary_type: "Agent",
-        message: Agent {
-            source: if mainnet { "a" } else { "b" },
-            connection_id: format!("0x{}", hex(&hash)),
-        },
-    };
-    let signature = eip712::sign_typed_data(
-        &serde_json::to_string(&typed).map_err(|e| e.to_string())?,
-        secret,
-    )?;
+    let connection_id = action_hash(action, vault, nonce)?;
+    let signature = ethereum::sign_digest(&agent_digest(connection_id, mainnet), secret)?;
     let signature = signature.strip_prefix("0x").unwrap_or(&signature);
     if signature.len() != 130 {
         return Err("Invalid Ethereum signature length".into());
@@ -107,13 +47,54 @@ pub fn sign(
         v: u8::from_str_radix(&signature[128..], 16).map_err(|e| e.to_string())?,
     })
 }
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+
+// The phantom agent has a fixed EIP-712 schema. Encode its ABI words here so
+// the venue does not pull the general JSON typed-data parser into the host.
+fn agent_digest(connection_id: [u8; 32], mainnet: bool) -> [u8; 32] {
+    let mut domain = [0u8; 160];
+    domain[..32].copy_from_slice(&ethereum::keccak256(
+        b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
+    ));
+    domain[32..64].copy_from_slice(&ethereum::keccak256(b"Exchange"));
+    domain[64..96].copy_from_slice(&ethereum::keccak256(b"1"));
+    domain[120..128].copy_from_slice(&1337u64.to_be_bytes());
+    // The fifth word is the zero verifying contract.
+    let mut agent = [0u8; 96];
+    agent[..32].copy_from_slice(&ethereum::keccak256(
+        b"Agent(string source,bytes32 connectionId)",
+    ));
+    agent[32..64].copy_from_slice(&ethereum::keccak256(if mainnet { b"a" } else { b"b" }));
+    agent[64..].copy_from_slice(&connection_id);
+    eip712::hash_prehashed(ethereum::keccak256(&domain), ethereum::keccak256(&agent))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fixed_agent_words_match_dynamic_eip712_for_both_networks() {
+        for connection_id in [[0u8; 32], [0xff; 32], core::array::from_fn(|i| i as u8)] {
+            for mainnet in [false, true] {
+                let typed = serde_json::json!({
+                    "domain": { "name": "Exchange", "version": "1", "chainId": 1337,
+                        "verifyingContract": "0x0000000000000000000000000000000000000000" },
+                    "types": { "Agent": [ { "name": "source", "type": "string" },
+                        { "name": "connectionId", "type": "bytes32" } ] },
+                    "primaryType": "Agent",
+                    "message": { "source": if mainnet { "a" } else { "b" },
+                        "connectionId": format!("0x{}", safe_cex_crypto::hex(&connection_id)) },
+                });
+                assert_eq!(
+                    format!(
+                        "0x{}",
+                        safe_cex_crypto::hex(&agent_digest(connection_id, mainnet))
+                    ),
+                    eip712::hash_typed_data(&typed.to_string()).unwrap()
+                );
+            }
+        }
+    }
+
     // Official SDK signing vectors, including vault domain separation.
     // https://github.com/hyperliquid-dex/hyperliquid-python-sdk/blob/master/tests/signing_test.py
     #[test]

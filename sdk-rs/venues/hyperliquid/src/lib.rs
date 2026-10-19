@@ -491,8 +491,11 @@ impl Venue for Hyperliquid {
         }
         self.subscription(cx, "subscribe", "allMids", None, None, None);
         self.subscription(cx, "subscribe", "fastAssetCtxs", None, None, None);
-        for dex in &self.dex_names {
-            self.subscription(cx, "subscribe", "allMids", None, None, Some(dex));
+        // TS owns dex mids on its account socket, which public-only sessions skip.
+        if !self.options.public_data_only && self.user().is_some() {
+            for dex in &self.dex_names {
+                self.subscription(cx, "subscribe", "allMids", None, None, Some(dex));
+            }
         }
         for ladder in self.books.values_mut() {
             ladder.depth_time = None;

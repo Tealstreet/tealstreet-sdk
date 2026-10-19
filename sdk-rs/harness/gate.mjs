@@ -98,7 +98,9 @@ if (isPrivate) {
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
 }
 for (const field of ['requests', 'subscriptions']) {
-  if (JSON.stringify(ts[field]) !== JSON.stringify(rust[field])) differences.push(`${field}: ts=${JSON.stringify(ts[field])} rust=${JSON.stringify(rust[field])}`);
+  const missing = ts[field].filter((key) => !rust[field].includes(key));
+  const extra = rust[field].filter((key) => !ts[field].includes(key));
+  if (missing.length || extra.length) differences.push(`${field} run ${run + 1}: missing in Rust=${JSON.stringify(missing)}, extra in Rust=${JSON.stringify(extra)}`);
 }
 compare('market', ts.markets, rust.markets);
 compare('ticker', ts.tickers, rust.tickers);

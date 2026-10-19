@@ -5,12 +5,50 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { gunzipSync } from 'node:zlib';
 import test from 'node:test';
-import { callerIdsOf, requestKey, subscriptionKey, subscriptionKeys } from './requests.mjs';
+import { callerIdsOf, requestKey, selectResponse, subscriptionKey, subscriptionKeys } from './requests.mjs';
 
 const info = 'https://api.hyperliquid.xyz/info';
 const exchange = 'https://api.hyperliquid.xyz/exchange';
 const cloid = (n) => `0x${String(n).padStart(32, '0')}`;
 const callerIds = new Set([cloid(1), cloid(2), 'caller-a', 'caller-b']);
+
+test('untimed HTTP replies retain consume-until-last queue semantics', () => {
+  const queue = [{ body: 'first' }, { body: 'last' }];
+  assert.equal(selectResponse(queue, 0).body, 'first');
+  assert.equal(selectResponse(queue, 1000).body, 'last');
+  assert.equal(selectResponse(queue, 2000).body, 'last');
+  assert.equal(queue.length, 1);
+  assert.equal(selectResponse([], 0), undefined);
+  assert.equal(selectResponse(undefined, 0), undefined);
+});
+
+test('timed HTTP replies follow recorded state rather than polling frequency', () => {
+  const startup = { availableAt: 0, body: '[]' };
+  const placed = { availableAt: 500, body: '[{"oid":42}]' };
+  const cancelled = { availableAt: 1500, body: '[]' };
+  // Selection follows availability, even when records are not time-sorted.
+  const queue = [startup, cancelled, placed];
+  assert.equal(selectResponse(queue, 0), startup);
+  for (let i = 0; i < 20; i++) assert.equal(selectResponse(queue, 499), startup);
+  assert.equal(selectResponse(queue, 500), placed);
+  for (let i = 0; i < 20; i++) assert.equal(selectResponse(queue, 1000), placed);
+  assert.equal(selectResponse(queue, 1499), placed);
+  assert.equal(selectResponse(queue, 1500), cancelled);
+  assert.equal(selectResponse(queue, 9000), cancelled);
+  assert.deepEqual(queue, [startup, cancelled, placed]);
+});
+
+test('timed HTTP replies never expose future state and treat unstamped startup state as time zero', () => {
+  const future = { availableAt: 1000, body: 'later' };
+  assert.equal(selectResponse([future], 0), undefined);
+  const startup = { body: 'initial' };
+  const first = { availableAt: 1000, body: 'first at threshold' };
+  const queue = [startup, first, future];
+  assert.equal(selectResponse(queue, 0), startup);
+  assert.equal(selectResponse(queue, 999), startup);
+  assert.equal(selectResponse(queue, 1000), future);
+  assert.equal(queue.length, 3);
+});
 
 test('POST info identity includes every query field and ignores JSON key order', () => {
   const key = (body) => requestKey('post', info, body);
