@@ -12,7 +12,7 @@ use safe_cex_exchange::{
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
-    TransportError, TransportErrorOrigin,
+    TransportError, provider::TransportErrorOrigin,
 };
 use safe_cex_types::{
     Balance, ExchangeName, Market, Order, Position, StoreDataLoaded, StoreSubscriberError, Ticker,
