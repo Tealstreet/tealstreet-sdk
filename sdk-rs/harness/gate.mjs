@@ -21,7 +21,11 @@ const { values } = parseArgs({
   },
 });
 const tapeBytes = readFileSync(values.tape);
-const tapeRecords = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes).toString('utf8').trim().split('\n').map(JSON.parse);
+const tapeRecords = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
+  .toString('utf8')
+  .trim()
+  .split('\n')
+  .map(JSON.parse);
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 const records = tapeRecords;
@@ -44,7 +48,8 @@ const replay = (impl, run) => {
   );
   if (values['no-egress']) args.push('--no-egress');
   const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125_000 });
-  if (result.status !== 0) throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
+  if (result.status !== 0)
+    throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
 };
 
@@ -54,7 +59,11 @@ const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 const stable = (value) => {
   if (Array.isArray(value)) return value.map(stable);
   if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, stable(value[key])]),
+  );
 };
 const differences = [];
 const compare = (label, a, b) => {
@@ -75,9 +84,13 @@ for (let run = 0; run < runs; run++) {
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
 const venue = venueOf(values.venue);
-const isPrivate = tapeRecords.find((record) => record.type === 'meta')?.private ?? tapeRecords.some((record) =>
-  venue.isPrivateRecord ? venue.isPrivateRecord(record) : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
-);
+const isPrivate =
+  tapeRecords.find((record) => record.type === 'meta')?.private ??
+  tapeRecords.some((record) =>
+    venue.isPrivateRecord
+      ? venue.isPrivateRecord(record)
+      : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
+  );
 
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 // BingX additionally fixes write/read defects covered by native contract tests:
@@ -116,37 +129,73 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
+  blofin(account, rustAccount) {
+    binanceFixes(account, rustAccount);
+    if (account.positions.length === 0) {
+      account.balance.used = 0;
+      account.balance.upnl = 0;
+    }
+  },
   bingx: (account, rustAccount) => {
-  if (values.venue === 'bingx') {
-    // BingX TS emits a terminal cumulative fill, ignores partial executions,
-    // and drops its terminal watermark so TRADE_UPDATE can repeat that fill.
-    // Use the taped per-execution oracle; Rust is still compared against it.
-    const watermark = new Map();
-    const fills = [];
-    for (const record of records) {
-      if (record.type !== 'ws' || !record.url?.includes('?listenKey=')) continue;
-      let event;
-      try { event = JSON.parse(record.text, (_key, value, context) => typeof value === 'number' && !Number.isSafeInteger(value) && context?.source && /^-?\d+$/.test(context.source) ? context.source : value); } catch { continue; }
-      if (!['ORDER_TRADE_UPDATE', 'TRADE_UPDATE'].includes(event.e)) continue;
-      const o = event.o;
-      if (!['PARTIALLY_FILLED', 'FILLED'].includes(o.X)) continue;
-      const id = String(o.i);
-      const cumulative = Number(o.z);
-      const previous = watermark.get(id) ?? 0;
-      const amount = Math.max(0, cumulative - previous);
-      watermark.set(id, Math.max(previous, cumulative));
-      if (amount > 0) fills.push({ id, symbol: o.s.replaceAll('-', ''), side: o.S === 'BUY' ? 'buy' : 'sell', amount: Number(o.l) > 0 ? Math.min(amount, Number(o.l)) : amount });
+    if (values.venue === 'bingx') {
+      // BingX TS emits a terminal cumulative fill, ignores partial executions,
+      // and drops its terminal watermark so TRADE_UPDATE can repeat that fill.
+      // Use the taped per-execution oracle; Rust is still compared against it.
+      const watermark = new Map();
+      const fills = [];
+      for (const record of records) {
+        if (record.type !== 'ws' || !record.url?.includes('?listenKey=')) continue;
+        let event;
+        try {
+          event = JSON.parse(record.text, (_key, value, context) =>
+            typeof value === 'number' &&
+            !Number.isSafeInteger(value) &&
+            context?.source &&
+            /^-?\d+$/.test(context.source)
+              ? context.source
+              : value,
+          );
+        } catch {
+          continue;
+        }
+        if (!['ORDER_TRADE_UPDATE', 'TRADE_UPDATE'].includes(event.e)) continue;
+        const o = event.o;
+        if (!['PARTIALLY_FILLED', 'FILLED'].includes(o.X)) continue;
+        const id = String(o.i);
+        const cumulative = Number(o.z);
+        const previous = watermark.get(id) ?? 0;
+        const amount = Math.max(0, cumulative - previous);
+        watermark.set(id, Math.max(previous, cumulative));
+        if (amount > 0)
+          fills.push({
+            id,
+            symbol: o.s.replaceAll('-', ''),
+            side: o.S === 'BUY' ? 'buy' : 'sell',
+            amount: Number(o.l) > 0 ? Math.min(amount, Number(o.l)) : amount,
+          });
+      }
+      account.fills = fills;
+      // TS's private mapper reads closePosition but misses the native cp alias.
+      for (const record of records) {
+        if (record.type !== 'ws') continue;
+        let event;
+        try {
+          event = JSON.parse(record.text, (_key, value, context) =>
+            typeof value === 'number' &&
+            !Number.isSafeInteger(value) &&
+            context?.source &&
+            /^-?\d+$/.test(context.source)
+              ? context.source
+              : value,
+          );
+        } catch {
+          continue;
+        }
+        const row = account.orders.find((o) => o.id === String(event.o?.i));
+        if (row && event.o.cp !== undefined) row.close = event.o.cp === true || event.o.cp === 'true';
+      }
+      return;
     }
-    account.fills = fills;
-    // TS's private mapper reads closePosition but misses the native cp alias.
-    for (const record of records) {
-      if (record.type !== 'ws') continue;
-      let event; try { event = JSON.parse(record.text, (_key, value, context) => typeof value === 'number' && !Number.isSafeInteger(value) && context?.source && /^-?\d+$/.test(context.source) ? context.source : value); } catch { continue; }
-      const row = account.orders.find((o) => o.id === String(event.o?.i));
-      if (row && event.o.cp !== undefined) row.close = event.o.cp === true || event.o.cp === 'true';
-    }
-    return;
-  }
   },
   account: binanceFixes,
   cryptocom: fixCryptocomAccount,
@@ -155,7 +204,10 @@ const KNOWN_TS_FIXES = {
     // the execution price as their trigger, corrupting conditional size amends.
     const bytes = readFileSync(values.tape);
     const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
-      .toString('utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+      .toString('utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
     fixWeexConditionals(account, records);
     // Additional deliberate fixes, covered by native regressions: failed
     // normal/algo reads retain the complete last snapshot; stale depth/private
@@ -191,7 +243,8 @@ const KNOWN_TS_FIXES = {
   // ticker seeding before connecting, and native Partial-stop amendment.
   bybit: (account, rustAccount, output) => {
     binanceFixes(account, rustAccount);
-    const required = output.subscriptions.filter((key) => key.endsWith('/v5/private subscribe order'))
+    const required = output.subscriptions
+      .filter((key) => key.endsWith('/v5/private subscribe order'))
       .flatMap((key) => ['execution', 'wallet'].map((topic) => key.replace(/order$/, topic)));
     output.subscriptions = [...new Set([...output.subscriptions, ...required])].sort();
   },
@@ -212,73 +265,82 @@ const KNOWN_TS_FIXES = {
 };
 
 const normalizeBingxPublic = (ts) => {
-// KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
-// integer step 1. Correct that precision and its synthetic ticker touch only.
-if (values.venue === 'bingx') {
-  const contracts = new Map();
-  for (const record of records) {
-    if (record.type !== 'http' || new URL(record.url).pathname !== '/openApi/swap/v2/quote/contracts') continue;
-    const response = JSON.parse(record.body);
-    if (response.code !== 0 || !Array.isArray(response.data)) continue;
-    for (const contract of response.data) contracts.set(contract.symbol, contract);
-  }
-  const zeroPrecision = (value) => (typeof value === 'number' || typeof value === 'string' && value.trim() !== '') && Number(value) === 0;
-  const prices = new Set();
-  for (const market of ts.markets) {
-    const source = contracts.get(market.id);
-    for (const [field, nativeField] of [['amount', 'quantityPrecision'], ['price', 'pricePrecision']]) {
-      if (market.precision[field] === 0.1 && zeroPrecision(source?.[nativeField])) {
-        market.precision[field] = 1;
-        if (field === 'price') prices.add(market.symbol);
+  // KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
+  // integer step 1. Correct that precision and its synthetic ticker touch only.
+  if (values.venue === 'bingx') {
+    const contracts = new Map();
+    for (const record of records) {
+      if (record.type !== 'http' || new URL(record.url).pathname !== '/openApi/swap/v2/quote/contracts') continue;
+      const response = JSON.parse(record.body);
+      if (response.code !== 0 || !Array.isArray(response.data)) continue;
+      for (const contract of response.data) contracts.set(contract.symbol, contract);
+    }
+    const zeroPrecision = (value) =>
+      (typeof value === 'number' || (typeof value === 'string' && value.trim() !== '')) && Number(value) === 0;
+    const prices = new Set();
+    for (const market of ts.markets) {
+      const source = contracts.get(market.id);
+      for (const [field, nativeField] of [
+        ['amount', 'quantityPrecision'],
+        ['price', 'pricePrecision'],
+      ]) {
+        if (market.precision[field] === 0.1 && zeroPrecision(source?.[nativeField])) {
+          market.precision[field] = 1;
+          if (field === 'price') prices.add(market.symbol);
+        }
       }
     }
+    // TS parses non-trading '-' placeholders into NaN; Rust stores finite zeros.
+    for (const ticker of ts.tickers) {
+      for (const field of ['percentage', 'volume', 'quoteVolume']) if (ticker[field] === null) ticker[field] = 0;
+      if (!prices.has(ticker.symbol)) continue;
+      ticker.bid = Math.max(ticker.last - 1, 0);
+      ticker.ask = ticker.last + 1;
+    }
   }
-  // TS parses non-trading '-' placeholders into NaN; Rust stores finite zeros.
-  for (const ticker of ts.tickers) {
-    for (const field of ['percentage', 'volume', 'quoteVolume']) if (ticker[field] === null) ticker[field] = 0;
-    if (!prices.has(ticker.symbol)) continue;
-    ticker.bid = Math.max(ticker.last - 1, 0);
-    ticker.ask = ticker.last + 1;
+  // KNOWN_TS_FIXES: BingX's internal feed sends asks descending; TS forwards
+  // that order. Consumers require best ask first, so Rust sorts full snapshots.
+  if (values.venue === 'bingx') {
+    for (const book of Object.values(ts.books)) {
+      book.bids.sort((a, b) => b[0] - a[0]);
+      book.asks.sort((a, b) => a[0] - b[0]);
+    }
   }
-}
-// KNOWN_TS_FIXES: BingX's internal feed sends asks descending; TS forwards
-// that order. Consumers require best ask first, so Rust sorts full snapshots.
-if (values.venue === 'bingx') {
-  for (const book of Object.values(ts.books)) {
-    book.bids.sort((a,b) => b[0]-a[0]);
-    book.asks.sort((a,b) => a[0]-b[0]);
-  }
-}
 };
 
 function fixCryptocomAccount(account) {
-    // TS never sets the hedged store flag despite mapping positions as hedged.
-    account.hedged = true;
-    // TS omits user.trade entirely. Derive the execution oracle from documented
-    // taped trade rows, independently of Rust's account output.
-    const tape = tapeRecords;
-    const seen = new Set();
-    account.fills = [];
-    for (const record of tape) {
-      if (record.type !== 'ws' || !record.url.includes('/exchange/v1/user')) continue;
-      const result = parseRequestJson(record.text).result;
-      if (result?.channel !== 'user.trade') continue;
-      for (const row of result.data) {
-        const id = String(row.trade_id);
-        if (seen.has(id)) continue;
-        seen.add(id);
-        account.fills.push({ id: String(row.order_id), symbol: row.instrument_name, side: row.side.toLowerCase(), amount: Number(row.traded_quantity) });
-      }
+  // TS never sets the hedged store flag despite mapping positions as hedged.
+  account.hedged = true;
+  // TS omits user.trade entirely. Derive the execution oracle from documented
+  // taped trade rows, independently of Rust's account output.
+  const tape = tapeRecords;
+  const seen = new Set();
+  account.fills = [];
+  for (const record of tape) {
+    if (record.type !== 'ws' || !record.url.includes('/exchange/v1/user')) continue;
+    const result = parseRequestJson(record.text).result;
+    if (result?.channel !== 'user.trade') continue;
+    for (const row of result.data) {
+      const id = String(row.trade_id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      account.fills.push({
+        id: String(row.order_id),
+        symbol: row.instrument_name,
+        side: row.side.toLowerCase(),
+        amount: Number(row.traded_quantity),
+      });
     }
-    // Further deliberate fixes are exercised by Rust regressions: failed reads
-    // retain state; client_oid survives mapping; terminal/stale frames cannot
-    // reopen orders/positions; REST retains live position enrichment; post-only
-    // uses exec_inst; account-wide leverage uses account_id + integer leverage;
-    // ignored brackets/opening triggers reject before writes; caller ids use a
-    // conservative 36-byte ceiling without JS string emulation.
-    // Public throttle and public-only subscription corrections are the
-    // afterTsFrame and prepareTs hooks in venues.mjs.
-};
+  }
+  // Further deliberate fixes are exercised by Rust regressions: failed reads
+  // retain state; client_oid survives mapping; terminal/stale frames cannot
+  // reopen orders/positions; REST retains live position enrichment; post-only
+  // uses exec_inst; account-wide leverage uses account_id + integer leverage;
+  // ignored brackets/opening triggers reject before writes; caller ids use a
+  // conservative 36-byte ceiling without JS string emulation.
+  // Public throttle and public-only subscription corrections are the
+  // afterTsFrame and prepareTsReady hooks in venues.mjs.
+}
 for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
@@ -287,11 +349,14 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) {
     const output = impl === 'ts' ? ts : rust;
     const unserved = output.unserved;
-    if (Boolean(output.account) !== isPrivate) differences.push(impl + ': account presence differs from tape classification');
+    if (Boolean(output.account) !== isPrivate)
+      differences.push(impl + ': account presence differs from tape classification');
     // Paced private tapes gate correctness; their unscored heap can shed loaded code.
-    if (!isPrivate) for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
-      if (!Number.isFinite(output.metrics[field]) || output.metrics[field] < 0) differences.push(`${impl}: invalid ${field} (${output.metrics[field]}); baseline is invalid`);
-    }
+    if (!isPrivate)
+      for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
+        if (!Number.isFinite(output.metrics[field]) || output.metrics[field] < 0)
+          differences.push(`${impl}: invalid ${field} (${output.metrics[field]}); baseline is invalid`);
+      }
     if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
     for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
     for (const symbol of values.books.split(',').filter(Boolean)) {
@@ -300,12 +365,13 @@ for (let run = 0; run < runs; run++) {
     if (!output.markets.length || !output.tickers.length) differences.push(`${impl}: empty public seed`);
     if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
   }
+  if (JSON.stringify(ts.wsRequests) !== JSON.stringify(rust.wsRequests))
+    differences.push(
+      `websocket requests differ: ts=${JSON.stringify(ts.wsRequests)} rust=${JSON.stringify(rust.wsRequests)}`,
+    );
   if (isPrivate && ts.account && rust.account) {
-    if (values.venue === 'bingx') KNOWN_TS_FIXES.bingx(ts.account, rust.account);
-    if (values.venue === 'weex') KNOWN_TS_FIXES.weex(ts.account);
-    if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
-    if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
-    if (values.venue === 'bybit') KNOWN_TS_FIXES.bybit(ts.account, rust.account, ts);
+    const fix = KNOWN_TS_FIXES[values.venue];
+    if (typeof fix === 'function') fix(ts.account, rust.account, ts);
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
       const left = JSON.stringify(ts.account[field]);
       const right = JSON.stringify(rust.account[field]);
@@ -317,15 +383,24 @@ for (let run = 0; run < runs; run++) {
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
   normalizeBingxPublic(ts);
   // OKX validates each native argument/wildcard against every delivered frame.
-  if (!values.venue.startsWith('okx') && values.venue !== 'cryptocom' && (!Array.isArray(ts.subscriptions) || !Array.isArray(rust.subscriptions) || JSON.stringify(ts.subscriptions) !== JSON.stringify(rust.subscriptions))) {
-    differences.push(`websocket subscriptions: ts=${JSON.stringify(ts.subscriptions)} rust=${JSON.stringify(rust.subscriptions)}`);
+  if (
+    !values.venue.startsWith('okx') &&
+    values.venue !== 'cryptocom' &&
+    (!Array.isArray(ts.subscriptions) ||
+      !Array.isArray(rust.subscriptions) ||
+      JSON.stringify(ts.subscriptions) !== JSON.stringify(rust.subscriptions))
+  ) {
+    differences.push(
+      `websocket subscriptions: ts=${JSON.stringify(ts.subscriptions)} rust=${JSON.stringify(rust.subscriptions)}`,
+    );
   }
   // KNOWN_TS_FIXES: unavailable Crypto.com quotes produce NaN in TS.
-  if (values.venue === 'cryptocom') for (const ticker of ts.tickers) {
-    for (const field of ['bid', 'ask', 'last', 'percentage', 'volume', 'quoteVolume', 'openInterest']) {
-      if (ticker[field] === null) ticker[field] = 0;
+  if (values.venue === 'cryptocom')
+    for (const ticker of ts.tickers) {
+      for (const field of ['bid', 'ask', 'last', 'percentage', 'volume', 'quoteVolume', 'openInterest']) {
+        if (ticker[field] === null) ticker[field] = 0;
+      }
     }
-  }
   compare('market', ts.markets, rust.markets);
   compare('ticker', ts.tickers, rust.tickers);
   for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
@@ -357,7 +432,10 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
-if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
+if (values.venue.startsWith('okx'))
+  console.log(
+    `(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`,
+  );
 
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.
