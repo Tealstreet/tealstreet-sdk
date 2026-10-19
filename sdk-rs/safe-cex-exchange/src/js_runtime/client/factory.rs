@@ -54,7 +54,7 @@ pub fn create(
         transport.base_url.as_deref().map_or(Js::Undefined, Js::str),
     )?;
     let client = super::create(host.clone(), defaults);
-    install_outcome_interceptor(&client, Rc::downgrade(owner), transport.proxied)?;
+    install_outcome_interceptor(&client, Rc::downgrade(owner), transport.proxied, true)?;
     let stats_runtime = host.runtime();
     let stats_exchange = serde_json::to_value(&exchange)
         .expect("exchange name")
@@ -129,7 +129,7 @@ pub fn create_no_proxy(host: Host, config: Js, owner: &Rc<BaseExchange>) -> Resu
         .expect("exchange name string")
         .to_owned();
     let client = super::create(host, defaults);
-    install_outcome_interceptor(&client, Rc::downgrade(owner), false)?;
+    install_outcome_interceptor(&client, Rc::downgrade(owner), false, false)?;
     let record_request = Js::function("recordRequestStats", move |_, args| {
         HTTP_STATS
             .lock()
@@ -157,12 +157,13 @@ fn install_outcome_interceptor(
     client: &Js,
     owner: Weak<BaseExchange>,
     proxied: bool,
+    enhance_before_outcome: bool,
 ) -> Result<(), Thrown> {
     let fulfilled_owner = owner.clone();
     let on_fulfilled = Js::function("recordResponseOutcome", move |_, args| {
         let response = arg(&args, 0);
         if let Some(owner) = fulfilled_owner.upgrade() {
-            record_outcome(&owner, &response, Some(&response));
+            record_outcome(&owner, &response, Some(&response), true);
             let observe = || -> Result<(), Thrown> {
                 let config = optional(&response, "config")?;
                 if optional(&config, "__tealstreetSigningCapture")?.truthy() {
@@ -216,14 +217,25 @@ fn install_outcome_interceptor(
         let error = arg(&args, 0);
         let enhanced = if let Some(owner) = owner.upgrade() {
             let name = serde_json::to_value(owner.name()).expect("exchange name");
-            let enhanced = super::error_enhancer::enhance_axios_error(
-                &error,
-                name.as_str().expect("exchange string"),
-                owner.runtime.now_ms(),
-            )?;
+            let enhance = || {
+                super::error_enhancer::enhance_axios_error(
+                    &error,
+                    name.as_str().expect("exchange string"),
+                    owner.runtime.now_ms(),
+                )
+            };
+            let enhanced = if enhance_before_outcome {
+                Some(enhance()?)
+            } else {
+                None
+            };
             let response = optional(&error, "response")?;
             let response = response.truthy().then_some(response);
-            record_outcome(&owner, &error, response.as_ref());
+            record_outcome(&owner, &error, response.as_ref(), false);
+            let enhanced = match enhanced {
+                Some(value) => value,
+                None => enhance()?,
+            };
             if proxied && let Some(response) = &response {
                 report_proxy_failure(&owner, response)?;
             }
@@ -256,7 +268,7 @@ fn status_of(response: &Js) -> Result<Option<f64>, Thrown> {
     })
 }
 
-fn record_outcome(owner: &BaseExchange, context: &Js, response: Option<&Js>) {
+fn record_outcome(owner: &BaseExchange, context: &Js, response: Option<&Js>, success: bool) {
     // TS deliberately ignores counter failures so telemetry cannot fail a request.
     let classify = || -> Result<Option<RequestOutcome>, Thrown> {
         let config = optional(context, "config")?;
@@ -278,6 +290,150 @@ fn record_outcome(owner: &BaseExchange, context: &Js, response: Option<&Js>) {
         // The source try/catch includes the Store write, not only classification.
         let _ = owner.store.record_request_outcome(outcome);
     }
+    let diagnostics = || -> Result<(), Thrown> {
+        use safe_cex_store::venue_rest_diagnostics as diagnostic;
+        let config = optional(context, "config")?;
+        if optional(&config, "__tealstreetSigningCapture")?.truthy() {
+            return Ok(());
+        }
+        let text = |value: Js| -> Result<Option<String>, Thrown> {
+            match value {
+                Js::String(units) => String::from_utf16(&units).map(Some).map_err(|_| {
+                    Thrown::type_error("lone UTF-16 surrogate at a typed diagnostic boundary")
+                }),
+                _ => Ok(None),
+            }
+        };
+        let headers = |source: Js| -> Result<diagnostic::DiagnosticHeaders, Thrown> {
+            if source.type_of() != "object" || source.is_nullish() {
+                return Ok(diagnostic::DiagnosticHeaders::default());
+            }
+            let mut lower = Vec::new();
+            for (key, value) in source.own_entries()? {
+                let key = Js::utf16(&key)
+                    .call_method("toLowerCase", vec![])?
+                    .to_js_string()?;
+                lower.push((key, value));
+            }
+            Ok(diagnostic::DiagnosticHeaders {
+                values: Default::default(),
+                get: Some(Rc::new(move |name| {
+                    let read = || -> Result<Option<Value>, Thrown> {
+                        let getter = source.get("get")?;
+                        let candidate = if getter.is_callable() {
+                            source.call_method("get", vec![Js::str(name)])?
+                        } else {
+                            Js::Undefined
+                        };
+                        let candidate = if candidate.is_nullish() {
+                            lower
+                                .iter()
+                                .rev()
+                                .find(|(key, _)| key.iter().copied().eq(name.encode_utf16()))
+                                .map_or(Js::Undefined, |(_, value)| value.clone())
+                        } else {
+                            candidate
+                        };
+                        if candidate.is_nullish() {
+                            return Ok(None);
+                        }
+                        let units = candidate.to_js_string()?;
+                        let value = String::from_utf16(&units).map_err(|_| {
+                            Thrown::type_error(
+                                "lone UTF-16 surrogate at a typed diagnostic boundary",
+                            )
+                        })?;
+                        Ok(Some(Value::String(value)))
+                    };
+                    read().map_err(|error| error.message())
+                })),
+            })
+        };
+        let config = if config.is_object() {
+            let proxy_header = text(optional(&config, "safeCexRestDiagProxyHeader")?)?;
+            let mut numbers = indexmap::IndexMap::new();
+            for key in [
+                "safeCexRestDiagStartedAt",
+                "safeCexRestDiagSignMs",
+                "safeCexRestDiagSignatureAgeMs",
+            ] {
+                if let Js::Number(value) = config.get(key)? {
+                    numbers.insert(key.into(), value);
+                }
+            }
+            Some(diagnostic::RestDiagnosticConfig {
+                url: text(config.get("url")?)?,
+                base_url: text(config.get("baseURL")?)?,
+                headers: if matches!(proxy_header.as_deref(), Some("present" | "empty")) {
+                    headers(config.get("headers")?)?
+                } else {
+                    Default::default()
+                },
+                numbers,
+                proxy_header,
+                ..Default::default()
+            })
+        } else {
+            None
+        };
+        let response = response
+            .map(|source| -> Result<_, Thrown> {
+                let data = source.get("data")?;
+                let data = if data.is_nullish() {
+                    None
+                } else if data.type_of() == "object" {
+                    let mut keys = serde_json::Map::new();
+                    for key in ["retCode", "retMsg", "code"] {
+                        if super::super::library::in_operator(&data, key)? {
+                            keys.insert(key.into(), Value::Null);
+                        }
+                    }
+                    Some(Value::Object(keys))
+                } else {
+                    Some(Value::String(
+                        String::from_utf16(&data.to_js_string()?).map_err(|_| {
+                            Thrown::type_error(
+                                "lone UTF-16 surrogate at a typed diagnostic boundary",
+                            )
+                        })?,
+                    ))
+                };
+                Ok(diagnostic::RestDiagnosticResponse {
+                    config: config.clone(),
+                    status: match source.get("status")? {
+                        Js::Number(value) => Some(value),
+                        _ => None,
+                    },
+                    headers: headers(source.get("headers")?)?,
+                    data,
+                })
+            })
+            .transpose()?;
+        let exchange = serde_json::to_value(owner.name()).expect("exchange name");
+        let exchange = exchange.as_str().expect("exchange name string");
+        if success {
+            diagnostic::note_rest_success(
+                exchange,
+                response.as_ref(),
+                owner.runtime.now_ms().floor(),
+            );
+        } else {
+            diagnostic::note_rest_failure(
+                exchange,
+                Some(&diagnostic::RestDiagnosticError {
+                    config,
+                    response,
+                    code: text(optional(context, "code")?)?,
+                    message: text(optional(context, "message")?)?,
+                    name: text(optional(context, "name")?)?,
+                }),
+                owner.runtime.now_ms().floor(),
+            );
+        }
+        Ok(())
+    };
+    // The maintained diagnostics catch telemetry failures without changing HTTP.
+    drop(diagnostics());
 }
 
 fn report_proxy_failure(owner: &BaseExchange, response: &Js) -> Result<(), Thrown> {

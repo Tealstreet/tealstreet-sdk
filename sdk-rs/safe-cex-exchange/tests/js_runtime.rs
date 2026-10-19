@@ -4921,46 +4921,192 @@ fn audit_native_remote_signing_stamps_terminal_and_rejected_configs() {
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 #[allow(clippy::arc_with_non_send_sync)]
 fn audit_native_http_consumers_publish_config_numbers_and_proxy_classification() {
-    use safe_cex_exchange::{js_runtime::{client::factory, globals}, native::native_replay_runtime};
+    use safe_cex_exchange::{
+        js_runtime::{client::factory, globals},
+        native::native_replay_runtime,
+    };
     use safe_cex_store::venue_rest_diagnostics as diagnostics;
     use safe_cex_transport::{RestAdapter, RestRequest, RestResponse, RestResponseBody};
-    struct Terminal { calls:Rc<std::cell::Cell<usize>>, status:u16 }
+    use safe_cex_types::retained_json::RetainedJsonInput as Input;
+
+    struct Terminal {
+        calls: Rc<std::cell::Cell<usize>>,
+        status: u16,
+    }
     impl RestAdapter for Terminal {
-        fn execute(&self,_:RestRequest)->safe_cex_transport::RestFuture<'_,RestResponse>{
-            self.calls.set(self.calls.get()+1);
-            Box::pin(async move{Ok(RestResponse{status:self.status,reason:None,headers:Default::default(),body:RestResponseBody::Untransformed(safe_cex_types::retained_json::RetainedJsonInput::Object(vec![]))})})
+        fn execute(&self, _: RestRequest) -> safe_cex_transport::RestFuture<'_, RestResponse> {
+            self.calls.set(self.calls.get() + 1);
+            Box::pin(async move {
+                Ok(RestResponse {
+                    status: self.status,
+                    reason: None,
+                    headers: std::collections::BTreeMap::from([
+                        ("server".into(), "audit-edge".into()),
+                        ("x-bapi-limit-status".into(), "12".into()),
+                        ("retry-after".into(), "3".into()),
+                    ]),
+                    body: RestResponseBody::Untransformed(Input::Object(vec![
+                        (
+                            "opaque".encode_utf16().collect(),
+                            Input::Array(vec![
+                                Input::Float(f64::NAN),
+                                Input::Float(f64::INFINITY),
+                                Input::Float(-0.0),
+                                Input::Undefined,
+                            ]),
+                        ),
+                        ("retCode".encode_utf16().collect(), Input::Float(0.0)),
+                    ])),
+                })
+            })
         }
     }
-    fn bits(value:Option<f64>)->Option<String>{value.map(|n|format!("{:016x}",n.to_bits()))}
-    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
-        .block_on(tokio::task::LocalSet::new().run_until(async {
-            for profile in diagnostic_audit_profiles("consumer-diagnostics",80) {
-                diagnostics::reset_venue_rest_diagnostics();
-                let runtime:Rc<dyn ExchangeRuntime>=native_replay_runtime(1000.0);
-                let owner=factory_owner(runtime.clone());
-                let calls=Rc::new(std::cell::Cell::new(0));let events=Rc::new(RefCell::new(Vec::<String>::new()));
-                let host=client::rest_http_host(runtime.clone(),std::sync::Arc::new(Terminal{calls:calls.clone(),status:if profile["outcome"]=="success" {200} else {503}}));
-                let xhr=if profile["factory"]=="direct" {factory::create_no_proxy(host,Js::object(vec![("baseURL",Js::str("https://venue"))]),&owner).unwrap()}
-                    else {factory::create(host,&safe_cex_transport::DirectTransport,Js::object(vec![("baseURL",Js::str("https://venue"))]),&safe_cex_exchange::js_runtime::value::from_json(&json!({"key":"","secret":""})),&owner).unwrap()};
-                let sign=profile["sign"].as_str().unwrap().to_owned();let authorization=profile["authorization"].as_str().unwrap().to_owned();let trace=events.clone();
-                let builtins=Js::object(vec![]);globals::install_builtins::<()>(&builtins,std::rc::Weak::new());let object=builtins.get("Object").unwrap();
-                xhr.get("interceptors").unwrap().get("request").unwrap().call_method("use",vec![Js::function("prepareConsumer",move |_,args|{
-                    let config=arg(&args,0);let sign=sign.clone();let trace=trace.clone();
-                    object.call_method("defineProperty",vec![config.clone(),Js::str("safeCexRestDiagSignMs"),Js::object(vec![("enumerable",Js::Bool(true)),("configurable",Js::Bool(true)),("get",Js::function("signGetter",move |_,_|{
+    fn bits(value: Option<f64>) -> Option<String> {
+        value.map(|n| format!("{:016x}", n.to_bits()))
+    }
+    let run = async {
+        for profile in diagnostic_audit_profiles("consumer-diagnostics", 240) {
+            diagnostics::reset_venue_rest_diagnostics();
+            let runtime: Rc<dyn ExchangeRuntime> = native_replay_runtime(1000.0);
+            let owner = factory_owner(runtime.clone());
+            let calls = Rc::new(std::cell::Cell::new(0));
+            let events = Rc::new(RefCell::new(Vec::<String>::new()));
+            let host = client::rest_http_host(
+                runtime.clone(),
+                std::sync::Arc::new(Terminal {
+                    calls: calls.clone(),
+                    status: if profile["outcome"] == "success" {
+                        200
+                    } else {
+                        503
+                    },
+                }),
+            );
+            let defaults = Js::object(vec![("baseURL", Js::str("https://venue"))]);
+            let xhr = if profile["factory"] == "direct" {
+                factory::create_no_proxy(host, defaults, &owner).unwrap()
+            } else {
+                factory::create(
+                    host,
+                    &safe_cex_transport::DirectTransport,
+                    defaults,
+                    &safe_cex_exchange::js_runtime::value::from_json(
+                        &json!({"key":"","secret":""}),
+                    ),
+                    &owner,
+                )
+                .unwrap()
+            };
+            let sign = profile["sign"].as_str().unwrap().to_owned();
+            let authorization = profile["authorization"].as_str().unwrap().to_owned();
+            let trace = events.clone();
+            let builtins = Js::object(vec![]);
+            globals::install_builtins::<()>(&builtins, std::rc::Weak::new());
+            let object = builtins.get("Object").unwrap();
+            let prepare = Js::function("prepareConsumer", move |_, args| {
+                let config = arg(&args, 0);
+                let sign = sign.clone();
+                let trace = trace.clone();
+                let target = if sign == "inherited-number" || sign == "terminal-number" {
+                    let prototype = Js::object(vec![]);
+                    if sign == "terminal-number" {
+                        object.call_method("setPrototypeOf", vec![prototype.clone(), Js::Null])?;
+                    }
+                    object
+                        .call_method("setPrototypeOf", vec![config.clone(), prototype.clone()])?;
+                    prototype
+                } else {
+                    config.clone()
+                };
+                let hidden = sign == "hidden-number";
+                let sealed = sign == "sealed-number";
+                if sign == "mutable-number" {
+                    config.set("safeCexRestDiagSignMs", Js::Number(7.0))?;
+                } else {
+                    let getter = Js::function("signGetter", move |_, _| {
                         trace.borrow_mut().push("sign".into());
-                        Ok(match sign.as_str(){"number"=>Js::Number(7.0),"zero"=>Js::Number(-0.0),"nan"=>Js::Number(f64::NAN),"text"=>Js::str("7"),"throw"=>return Err(Thrown::error("Error","audit getter")),_=>unreachable!()})
-                    }))])])?;
-                    if authorization!="unmarked" {config.set("safeCexRestDiagProxyHeader",Js::str("present"))?;}
-                    if authorization=="bearer"||authorization=="malformed" {config.get("headers")?.call_method("set",vec![Js::str("Authorization"),Js::str(if authorization=="bearer" {"Bearer audit-token"} else {"Basic audit-token"})])?;}
-                    Ok(config)
-                })]).unwrap();
-                let result=await_js(&runtime,xhr.call_method("get",vec![Js::str("/diagnostic-consumer")]).unwrap()).await;
-                let stats=diagnostics::get_venue_rest_stats(1000.0);
-                let stats=stats.get("polymarket").unwrap_or_else(||panic!("DIAGNOSTIC_CONSUMER actual HTTP never populated shared stats: {profile}"));
-                let samples=diagnostics::drain_venue_rest_failure_samples();
-                let observation=json!({"factory":profile["factory"],"outcome":profile["outcome"],"sign":profile["sign"],"authorization":profile["authorization"],"success":result.is_ok(),"sends":calls.get(),"events":*events.borrow(),"stats":{"requests":bits(Some(stats.requests)),"ok":bits(Some(stats.ok)),"failures":bits(Some(stats.failures)),"total":bits(stats.total_p50_ms),"sign":bits(stats.sign_p50_ms)},"samples":samples.iter().map(|s|json!({"proxy":s.rest_proxy_header_sent,"sign":bits(s.sign_ms)})).collect::<Vec<_>>()});
-                assert_eq!(observation,profile,"DIAGNOSTIC_CONSUMER public stats/samples retain native config behavior");
-            }
-            safe_cex_store::virtual_clock::set_thread_host_time(None);
-        }));
+                        Ok(match sign.as_str() {
+                            "number" | "hidden-number" | "inherited-number" | "terminal-number"
+                            | "sealed-number" => Js::Number(7.0),
+                            "zero" => Js::Number(-0.0),
+                            "nan" => Js::Number(f64::NAN),
+                            "text" => Js::str("7"),
+                            "undefined" => Js::Undefined,
+                            "null" => Js::Null,
+                            "boolean" => Js::Bool(true),
+                            "infinity" => Js::Number(f64::INFINITY),
+                            "negative-infinity" => Js::Number(f64::NEG_INFINITY),
+                            "throw" => return Err(Thrown::error("Error", "audit getter")),
+                            _ => unreachable!(),
+                        })
+                    });
+                    object.call_method(
+                        "defineProperty",
+                        vec![
+                            target,
+                            Js::str("safeCexRestDiagSignMs"),
+                            Js::object(vec![
+                                ("enumerable", Js::Bool(!hidden)),
+                                ("configurable", Js::Bool(true)),
+                                ("get", getter),
+                            ]),
+                        ],
+                    )?;
+                }
+                if authorization != "unmarked" {
+                    config.set("safeCexRestDiagProxyHeader", Js::str("present"))?;
+                }
+                if authorization == "bearer" || authorization == "malformed" {
+                    config.get("headers")?.call_method(
+                        "set",
+                        vec![
+                            Js::str("Authorization"),
+                            Js::str(if authorization == "bearer" {
+                                "Bearer audit-token"
+                            } else {
+                                "Basic audit-token"
+                            }),
+                        ],
+                    )?;
+                }
+                if sealed {
+                    object.call_method("preventExtensions", vec![config.clone()])?;
+                }
+                Ok(config)
+            });
+            xhr.get("interceptors")
+                .unwrap()
+                .get("request")
+                .unwrap()
+                .call_method("use", vec![prepare])
+                .unwrap();
+            let result = await_js(
+                &runtime,
+                xhr.call_method("get", vec![Js::str("/diagnostic-consumer")])
+                    .unwrap(),
+            )
+            .await;
+            let stats = diagnostics::get_venue_rest_stats(1000.0);
+            let stats = stats.get("polymarket").unwrap_or_else(|| {
+                panic!("DIAGNOSTIC_CONSUMER actual HTTP never populated shared stats: {profile}")
+            });
+            let samples = diagnostics::drain_venue_rest_failure_samples();
+            let observation = json!({
+                "factory": profile["factory"], "outcome": profile["outcome"], "sign": profile["sign"], "authorization": profile["authorization"],
+                "success": result.is_ok(), "sends": calls.get(), "events": *events.borrow(),
+                "stats": {"requests":bits(Some(stats.requests)),"ok":bits(Some(stats.ok)),"failures":bits(Some(stats.failures)),"total":bits(stats.total_p50_ms),"sign":bits(stats.sign_p50_ms)},
+                "samples": samples.iter().map(|s|json!({"proxy":s.rest_proxy_header_sent,"sign":bits(s.sign_ms),"name":s.error_name,"message":s.error_message,"path":s.path,"endpoint":s.endpoint,"bodyKind":s.body_kind,"headers":s.headers,"status":bits(s.status)})).collect::<Vec<_>>()
+            });
+            assert_eq!(
+                observation, profile,
+                "DIAGNOSTIC_CONSUMER public stats/samples retain native config behavior"
+            );
+        }
+        safe_cex_store::virtual_clock::set_thread_host_time(None);
+    };
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(tokio::task::LocalSet::new().run_until(run));
 }
