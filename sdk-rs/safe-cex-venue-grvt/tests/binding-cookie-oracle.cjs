@@ -9,13 +9,17 @@ const expires='; Expires=Wed, 15 Nov 2023 00:00:00 GMT';
 const cases=[
  ['plain','gravity=token'+expires],['uri','gravity=a%2Fb%20c'+expires],['quotes','gravity="quoted"'+expires],['bad-uri','gravity=%E2'+expires],['empty','gravity='+expires],['upper','Gravity=x'+expires],['combined','other=x, gravity=token'+expires],['expires-comma','gravity=x'+expires+', other=y; Max-Age=42'],['attribute','other=x; gravity=wrong'+expires],['first-array',['other=x'+expires,'gravity=second'+expires]],['array',['gravity=first'+expires,'gravity=second'+expires]],['missing-date','gravity=x'],['invalid-date','gravity=x; Expires=bad'],['last-date','gravity=x; Expires=bad'+expires],['missing-header',null],['non-200','gravity=x'+expires,201],['upper-header','gravity=upper'+expires,200,true],['account-case','gravity=account'+expires,200,false,true]
 ];
+assert.equal(cases.length,18,'original cookie corpus');
+cases.push(['valid-then-invalid','gravity=x'+expires+'; Expires=bad']);
 (async()=>{
  const rows=[];
  for(const [name,raw,status=200,upper=false,accountUpper=false]of cases){
   const response={status,headers:{[upper?'Set-Cookie':'set-cookie']:raw,[accountUpper?'X-Grvt-Account-Id':'x-grvt-account-id']:'account-42'}};
   const output=await context.exports.getCookieWithExpiration('/login','key',{async post(){return response}});
+  if(name==='invalid-date')assert.equal(output,null,'parser ignores invalid expiry');
+  if(name==='valid-then-invalid')assert.equal(output.expires,Date.parse('Wed, 15 Nov 2023 00:00:00 GMT')/1000,'invalid attribute preserves prior valid expiry');
   if(output&&Number.isNaN(output.expires))output.expires={$number:'NaN'};
   rows.push({name,response,output});
  }
- assert.equal(rows.length,18);process.stdout.write(JSON.stringify(rows));
+ assert.equal(rows.length,19);process.stdout.write(JSON.stringify(rows));
 })().catch(e=>{process.stderr.write(String(e.stack));process.exitCode=1;});
