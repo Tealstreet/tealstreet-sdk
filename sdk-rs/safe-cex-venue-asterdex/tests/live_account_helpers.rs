@@ -14,12 +14,15 @@ fn number(n: f64) -> Value {
     }
 }
 fn outcome<T>(
-    value: Result<T, safe_cex_num::JsCoercionError>,
+    value: Result<T, safe_cex_exchange::js_runtime::value::Thrown>,
     render: impl FnOnce(T) -> Value,
 ) -> Value {
     match value {
         Ok(v) => json!({"value":render(v)}),
-        Err(e) => json!({"error":{"name":e.name,"message":e.message}}),
+        Err(e) => {
+            let e = e.to_exchange_error();
+            json!({"error":{"name":e.name,"message":e.message}})
+        }
     }
 }
 fn same(a: &Value, b: &Value, context: &str) {
@@ -62,7 +65,7 @@ fn account_helpers_match_typescript() {
     let data: Value = serde_json::from_slice(&output.stdout).unwrap();
     for c in data["finite"].as_array().unwrap() {
         same(
-            &json!({"value":parse_finite_number(c.get("input")).map(number)}),
+            &json!({"value":parse_finite_number(&(c.get("input")).map(safe_cex_exchange::js_runtime::value::from_json).unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined)).map(number)}),
             &c["output"],
             &format!("parseFiniteNumber {c}"),
         );
@@ -70,10 +73,13 @@ fn account_helpers_match_typescript() {
     for c in data["times"].as_array().unwrap() {
         let mut calls = 0;
         let actual = outcome(
-            get_order_update_time(&c["input"], || {
-                calls += 1;
-                1234.0
-            }),
+            get_order_update_time(
+                &safe_cex_exchange::js_runtime::value::from_json(&c["input"]),
+                || {
+                    calls += 1;
+                    1234.0
+                },
+            ),
             number,
         );
         same(&actual, &c["output"], &format!("getOrderUpdateTime {c}"));
@@ -85,7 +91,7 @@ fn account_helpers_match_typescript() {
     }
     for c in data["balances"].as_array().unwrap() {
         let fields = &c["fields"];
-        let actual=parse_asset_balance_updates(c.get("input"),fields["total"].as_str(),fields["free"].as_str().unwrap(),fields["used"].as_str()).map(|updates|updates.into_iter().map(|u|json!({"asset":u.asset,"total":number(u.total),"free":number(u.free),"used":number(u.used)})).collect::<Vec<_>>());
+        let actual=parse_asset_balance_updates(&(c.get("input")).map(safe_cex_exchange::js_runtime::value::from_json).unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined),fields["total"].as_str(),fields["free"].as_str().unwrap(),fields["used"].as_str()).unwrap().map(|updates|updates.into_iter().map(|u|json!({"asset":u.asset,"total":number(u.total),"free":number(u.free),"used":number(u.used)})).collect::<Vec<_>>());
         same(
             &json!({"value":actual}),
             &c["output"],
@@ -149,7 +155,13 @@ fn account_helpers_match_typescript() {
     for c in data["sides"].as_array().unwrap() {
         let amount = c["amount"].as_f64().unwrap_or(f64::NAN);
         same(
-            &outcome(get_position_side(&c["input"], amount), |v| json!(v)),
+            &outcome(
+                get_position_side(
+                    &safe_cex_exchange::js_runtime::value::from_json(&c["input"]),
+                    amount,
+                ),
+                |v| json!(v),
+            ),
             &c["output"],
             &format!("getPositionSide {c}"),
         );
@@ -171,7 +183,15 @@ fn account_helpers_match_typescript() {
                 position
             })
             .collect();
-        let actual = get_account_update_upnl_deltas(c.get("input"), &previous, &keys).map(|v| {
+        let actual = get_account_update_upnl_deltas(
+            &(c.get("input"))
+                .map(safe_cex_exchange::js_runtime::value::from_json)
+                .unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined),
+            &previous,
+            &keys,
+        )
+        .unwrap()
+        .map(|v| {
             v.into_iter()
                 .map(|(k, v)| json!([k, number(v)]))
                 .collect::<Vec<_>>()
@@ -227,10 +247,11 @@ fn production_store_currency_order_selects_first_margin_asset() {
             keys.sort();
         }
         let actual = get_account_update_upnl_deltas(
-            Some(&case["input"]),
+            &safe_cex_exchange::js_runtime::value::from_json(&case["input"]),
             &Store::positions(&store).unwrap(),
             &keys,
         )
+        .unwrap()
         .unwrap();
         let expected: Vec<(String, f64)> =
             serde_json::from_value(case["output"]["value"].clone()).unwrap();
@@ -249,8 +270,13 @@ fn production_store_currency_order_selects_first_margin_asset() {
             let legacy: std::collections::BTreeMap<String, safe_cex_types::Balance> =
                 serde_json::from_value(raw["currencies"].clone()).unwrap();
             let old_keys: Vec<_> = legacy.keys().cloned().collect();
-            let wrong =
-                get_account_update_upnl_deltas(Some(&case["input"]), &[], &old_keys).unwrap();
+            let wrong = get_account_update_upnl_deltas(
+                &safe_cex_exchange::js_runtime::value::from_json(&case["input"]),
+                &[],
+                &old_keys,
+            )
+            .unwrap()
+            .unwrap();
             assert_eq!(
                 wrong,
                 vec![("DT".into(), 10.0)],
@@ -312,10 +338,13 @@ fn mirror_cumulative_order_fill_matches_typescript() {
     );
     for case in data["fills"].as_array().unwrap() {
         let mut clock_calls = 0;
-        let result = mirror_cumulative_order_fill(&case["input"], || {
-            clock_calls += 1;
-            1234.0
-        });
+        let result = mirror_cumulative_order_fill(
+            &safe_cex_exchange::js_runtime::value::from_json(&case["input"]),
+            || {
+                clock_calls += 1;
+                1234.0
+            },
+        );
         let (actual, writes) = match result {
             Ok(fill) => {
                 let writes = fill
@@ -337,10 +366,13 @@ fn mirror_cumulative_order_fill_matches_typescript() {
                     .collect::<Vec<_>>();
                 (json!({"value": null}), writes)
             }
-            Err(error) => (
-                json!({"error":{"name":error.name,"message":error.message}}),
-                Vec::new(),
-            ),
+            Err(error) => {
+                let error = error.to_exchange_error();
+                (
+                    json!({"error":{"name":error.name,"message":error.message}}),
+                    Vec::new(),
+                )
+            }
         };
         same(
             &actual,

@@ -1,7 +1,7 @@
 use super::streams::Topics;
 use safe_cex_exchange::{
     exchange::SubscribedCandle,
-    js_runtime::value::{Js, Thrown, from_json},
+    js_runtime::value::{Js, Thrown},
     runtime::ExchangeError,
     websocket::{BaseWebSocket, MessageHandler},
 };
@@ -38,8 +38,7 @@ pub(super) fn first_candle(data: &Js) -> Result<Js, Thrown> {
     Err(Thrown::type_error(&message))
 }
 
-fn map_bulk(frame: &Value) -> Result<SubscribedCandle, Thrown> {
-    let frame = from_json(frame);
+fn map_bulk(frame: &Js) -> Result<SubscribedCandle, Thrown> {
     let raw = first_candle(&frame.get("data")?)?;
     let topic = frame.get("topic")?;
     let second_dot = topic.call_method("indexOf", vec![Js::str("."), Js::Number(6.)])?;
@@ -149,7 +148,11 @@ mod tests {
         assert_eq!(cases.len(), 36);
         for (index, case) in cases.iter().enumerate() {
             if !case["error"].is_null() {
-                let error = map_bulk(&case["frame"]).unwrap_err().to_exchange_error();
+                let error = map_bulk(&safe_cex_exchange::js_runtime::value::from_json(
+                    &case["frame"],
+                ))
+                .unwrap_err()
+                .to_exchange_error();
                 assert_eq!(
                     json!({"name":error.name,"message":error.message}),
                     case["error"],
@@ -157,7 +160,10 @@ mod tests {
                 );
                 continue;
             }
-            let candle = map_bulk(&case["frame"]).unwrap();
+            let candle = map_bulk(&safe_cex_exchange::js_runtime::value::from_json(
+                &case["frame"],
+            ))
+            .unwrap();
             let mut actual = serde_json::to_value(&candle).unwrap();
             if candle.interval.is_undefined() {
                 actual["interval"] = json!("$undefined");

@@ -237,3 +237,68 @@ test('compiled retained input consumers and producers remain decoder inventory o
   assert.equal(found.types.find(row => row.name.endsWith('js_capture_output')).decodedOutput, true,
     'canonical retained output remains an admitted decoder output');
 });
+
+test('canonical Js raw input discovery uses compiler identity through aliases and rejects shadows', () => {
+  const make = () => {
+    const doc = fixture();
+    doc.index[0].inner.module.items.push(40);
+    doc.index[40] = { id: 40, crate_id: 0, name: 'read_native', span: doc.index[1].span,
+      inner: { function: { sig: { inputs: [['frame', { borrowed_ref: { type: { resolved_path: { id: 90, path: 'Js' } } } }]],
+        output: { primitive: 'f64' } }, generics: { params: [] } } } };
+    doc.paths[90] = { crate_id: 9, path: ['safe_cex_exchange', 'js_runtime', 'value', 'Js'], kind: 'enum' };
+    return doc;
+  };
+  const names = doc => inventory(doc).types.map(owner => owner.name);
+  assert(names(make()).includes('production::read_native'), 'canonical native input decoder must be inventoried');
+  assert.equal(inventory(make()).types.find(owner => owner.name === 'production::read_native').nativeInputDiscovered, true, 'new native discovery retains its ledger provenance');
+  const alreadyRaw = make();
+  alreadyRaw.index[40].inner.function.sig.inputs.push(['text',{primitive:'str'}]);
+  assert.equal(inventory(alreadyRaw).types.find(owner => owner.name === 'production::read_native').nativeInputDiscovered, undefined, 'previously visible raw-input owner does not become pending debt');
+  const aliased = make();
+  aliased.index[0].inner.module.items.push(91);
+  aliased.index[91] = { id: 91, crate_id: 0, name: 'Frame', visibility: 'default',
+    inner: { type_alias: { generics: { params: [] }, type: { resolved_path: { id: 90, path: 'Js' } } } } };
+  aliased.index[40].inner.function.sig.inputs[0][1].borrowed_ref.type = { resolved_path: { id: 91, path: 'Frame' } };
+  assert(names(aliased).includes('production::read_native'), 'actual canonical alias target must remain inventoried');
+  for (const canonical of [ ['other', 'Js'], ['safe_cex_exchange', 'js_runtime', 'value', 'JsShadow'] ]) {
+    const shadow = make(); shadow.paths[90].path = canonical;
+    shadow.index[40].inner.function.sig.inputs[0][1].borrowed_ref.type.resolved_path.path = 'safe_cex_exchange::js_runtime::value::Js';
+    assert(!names(shadow).includes('production::read_native'), 'source spelling cannot impersonate compiler native identity');
+  }
+  const fakeAlias = structuredClone(aliased);
+  fakeAlias.index[91].name = 'Js';
+  fakeAlias.index[91].inner.type_alias.type = { primitive: 'u16' };
+  fakeAlias.index[40].inner.function.sig.inputs[0][1].borrowed_ref.type.resolved_path.path = 'safe_cex_exchange::js_runtime::value::Js';
+  assert(!names(fakeAlias).includes('production::read_native'), 'an alias named Js must not hide a different actual target');
+  const unresolved = make(); delete unresolved.paths[90];
+  unresolved.index[40].inner.function.sig.inputs[0][1].borrowed_ref.type.resolved_path.path = 'safe_cex_exchange::js_runtime::value::Js';
+  assert(!names(unresolved).includes('production::read_native'), 'unresolved canonical spelling is not compiler identity');
+});
+
+test('native input pending ledger is exact and never filters compiler owners', async () => {
+  const {requirePendingNativeInputs} = await import('./accepted-pending-native-inputs.mjs');
+  const owner = {name:'production::read_native',nativeInputDiscovered:true};
+  const row = {package:'production',name:owner.name,state:'pending'};
+  const ledger = {version:1,owners:[row]};
+  const owners = [owner];
+  assert.deepEqual(requirePendingNativeInputs('production',owners,{},ledger),{package:'production',pending:1});
+  assert.deepEqual(owners,[owner], 'pending ledger cannot remove or rewrite discovered owners');
+  assert.throws(() => requirePendingNativeInputs('production',[...owners,{name:'production::new_native',nativeInputDiscovered:true}],{},ledger), /unlisted native input owner production::new_native/);
+  assert.throws(() => requirePendingNativeInputs('production',[],{},ledger), /listed owner disappeared without removal ruling/);
+  assert.throws(() => requirePendingNativeInputs('production',owners,{}, {version:1,owners:[row,row]}), /duplicate owner/);
+  assert.throws(() => requirePendingNativeInputs('production',owners,{[owner.name]:{category:'decoder'}},ledger), /classification state\/ruling differs/);
+  assert.throws(() => requirePendingNativeInputs('production',[],{}, {version:1,owners:[{...row,state:'removed'}]}), /recorded ruling required/);
+  assert.deepEqual(requirePendingNativeInputs('production',[],{}, {version:1,owners:[{...row,state:'removed',ruling:'Reviewed deletion in fixture ruling'}]}), {package:'production',pending:0});
+  assert.deepEqual(requirePendingNativeInputs('production',owners,{[owner.name]:{category:'decoder'}}, {version:1,owners:[{...row,state:'classified',ruling:'Reviewed native observation in fixture ruling'}]}), {package:'production',pending:0});
+  assert.throws(() => requirePendingNativeInputs('production',owners,{}, {version:1,owners:[{...row,name:'production::read_*'}]}), /exact compiler name required/);
+});
+
+
+test('canonical driver validates native pending owners before applying measurement selectors', async () => {
+  const fs = await import('node:fs');
+  const source = fs.readFileSync(new URL('accepted-set.mjs',import.meta.url),'utf8');
+  const check = source.indexOf('requirePendingNativeInputs(pkg.name, result.types, allContracts, nativePending)');
+  assert(check > 0, 'full compiler inventory must reach the pending ledger gate');
+  assert(check < source.indexOf('const measured = scopedMeasurements('), 'pending ledger cannot be applied after owner filtering');
+  assert.match(source,/root === canonicalWorkspace/, 'explicit --workspace cannot bypass the real production ledger');
+});

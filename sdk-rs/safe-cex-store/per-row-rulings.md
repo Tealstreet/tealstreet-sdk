@@ -152,3 +152,45 @@ admission profile; live request config markers are not projected through it.
 
 Fifteen of the 27 Store rows are reconciled here. The other 12 Store rows and the
 separate num row remain assigned for later batches.
+
+
+## REST diagnostic consumers
+
+| Census row | Verdict | Production observation and reason |
+| --- | --- | --- |
+| 452 `readConfigNumber` | FIX | Both actual native Axios factories omitted the call into the shared REST diagnostic state. Native request config now supplies only actual numeric values to the existing helper, retaining NaN, infinities and negative zero without coercing text, booleans or null. Installed Axios materializes interceptor accessors before dispatch; the native path now does the same, so a throwing accessor prevents the terminal request. |
+| 454 `proxyHeaderOf` | FIX | Failed native requests never produced a shared diagnostic sample, so the final proxy-header classification was absent. The same outcome bridge now retains native header accessors and passes the marker plus actual outgoing headers to the existing classifier. It distinguishes bearer, malformed, absent and unmarked requests without placing credentials in samples. |
+
+`safe-cex-exchange/tests/js_runtime.rs::audit_native_http_consumers_publish_config_numbers_and_proxy_classification`
+executes both production factories with NativeRuntime, their canonical Store,
+and the Rust REST host/terminal adapter. The maintained factory, diagnostics and
+error enhancer execute with installed Axios in `js_http_factory_source.cjs`.
+The 240 profiles cross success/failure, both factories, four authorization shapes
+and 15 numeric/property profiles. They include own/hidden/inherited accessors,
+an inherited null-prototype boundary, mutable data, nonextensible config,
+throwing accessors, non-number values, non-finite numbers and signed zero.
+
+Observations compare request/ok/failure counts, latency bits, final failure
+samples, getter effects, actual sends and settlement. Sample checks include
+proxy classification, sign bits, path/endpoint, response status/body kind,
+allowlisted response headers and error name/message. Unread response fields
+retain non-finite/undefined values without a whole-response JSON projection.
+The direct factory records the original error before enhancement; the routed
+factory records it after enhancement, matching their distinct maintained bodies.
+
+The original compiled test fails because the real request never populates the
+shared diagnostic cache. The expanded sample comparison separately fails on
+the direct factory's premature enhancement. Independent compiled controls remove
+diagnostic publication, coerce numeric text, bypass final-header lookup, or skip
+Axios config materialization; exact source restoration must pass after each.
+
+The lower crate remains the sole owner of diagnostic state and algorithms.
+This verdict covers actual terminal HTTP configs and headers; it does not claim
+arbitrary post-adapter accessor mutation or remove the separately documented
+UTF-8 diagnostic-output and slicing residuals. Safe config materialization follows
+the installed Axios 1.20.0 dependency, including its excluded unsafe keys and
+shared/terminal prototype boundary; only the runtime's supported Symbol.iterator
+slot is modeled.
+
+Seventeen of the 27 Store rows are now reconciled. Ten Store rows and the
+separate num row remain assigned.
