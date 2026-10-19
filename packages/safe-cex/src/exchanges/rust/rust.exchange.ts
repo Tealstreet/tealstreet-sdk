@@ -24,7 +24,7 @@ import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
-import { createEngineTransport } from '../../transport/engine';
+import { assertEngineAccountRouting, createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
@@ -120,9 +120,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   start = async () => {
-    if (this.options.secondary_key || this.options.secondary_secret) {
-      throw new Error('Rust engine secondary signing keys are unsupported; use a primary-key account');
-    }
+    assertEngineAccountRouting(this.options);
     if (!this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }

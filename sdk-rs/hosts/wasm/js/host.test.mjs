@@ -76,3 +76,16 @@ test('disposing a host cannot schedule a reconnect through close callbacks', () 
   assert.equal(closedEvents, 0);
   assert.equal(host.sockets.size, 0);
 });
+
+test('disposing an engine releases account-owned transport resources', () => {
+  const order = [];
+  const host = new EngineHost({}, {
+    now: () => 0,
+    connect: () => ({ send() {}, close: () => order.push('socket') }),
+    dispose: () => order.push('transport'),
+  });
+  host.execute({ op: 'wsConnect', socket: 1, url: 'wss://venue.test/stream' });
+  host.dispose();
+  host.dispose();
+  assert.deepEqual(order, ['socket', 'transport']);
+});

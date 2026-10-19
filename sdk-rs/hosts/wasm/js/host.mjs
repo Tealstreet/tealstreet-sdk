@@ -62,6 +62,7 @@ export class EngineHost {
   }
 
   dispose() {
+    if (this.disposed) return;
     this.disposed = true;
     for (const pending of this.commands.values()) pending.reject(new Error('engine disposed'));
     this.commands.clear();
@@ -69,6 +70,7 @@ export class EngineHost {
     for (const handle of this.timers.values()) this.transport.clearTimeout(handle);
     this.sockets.clear();
     this.timers.clear();
+    this.transport.dispose?.();
   }
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
@@ -236,8 +238,9 @@ export const nativeTransport = () => {
     ws.addEventListener('close', (event) => reportClose(event.code));
     return { send: (text) => ws.send(text), close: () => ws.close() };
   },
-  async request({ method, url, headers, body }) {
-    const response = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(20_000) });
+  async request({ method, url, headers, body, signal }) {
+    const deadline = AbortSignal.timeout(20_000);
+    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
     return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };

@@ -63,7 +63,7 @@ export const getProxyForAxios = (
 export const tealstreetTransport: TransportProvider = {
   name: 'tealstreet',
 
-  rest: ({ exchange, options, config, routing }) => {
+  rest: ({ exchange, options, config, routing, serverHeaders }) => {
     // GRVT and blofin cannot use the tunnel, so a tunnel request for them means the proxy.
     const effectiveOptions =
       (exchange === 'grvt' || exchange === 'blofin') && options.tealstreetTunnel
@@ -104,7 +104,7 @@ export const tealstreetTransport: TransportProvider = {
 
         // Add browser-like headers for CLI requests to proxy
         // Cloudflare Worker requires these headers for CORS validation
-        if (isNodeOrBunRuntime()) {
+        if (serverHeaders || isNodeOrBunRuntime()) {
           Object.assign(request.headers, TEALSTREET_REST_HEADERS);
         }
       },
@@ -116,6 +116,7 @@ export const tealstreetTransport: TransportProvider = {
     if (variant === 'bigInt') return bigIntAxiosHttpOverWebsocketAdapter;
     return createAxiosHttpOverWebsocketAdapter({
       region: variant.region,
+      ...(variant.WebSocket ? { WebSocket: variant.WebSocket } : {}),
       ...(variant.raw ? { customParser: (body) => body } : {}),
     });
   },

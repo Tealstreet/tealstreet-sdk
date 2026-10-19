@@ -10,38 +10,135 @@
 // Credentials arrive with 'start' and live only in the object's memory.
 import { EngineHost, socketMessages } from './host.mjs';
 
+/** Header-capable WebSocket constructor for HOW/relay in Workers. */
+export class WorkersWebSocket extends EventTarget {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSING = 2;
+  static CLOSED = 3;
+  CONNECTING = 0;
+  OPEN = 1;
+  CLOSING = 2;
+  CLOSED = 3;
+  readyState = 0;
+  onopen = null;
+  onmessage = null;
+  onclose = null;
+  onerror = null;
+  socket = undefined;
+  binary = 'arraybuffer';
+  abort = new AbortController();
+
+  constructor(url, protocols = [], options = {}) {
+    super();
+    this.url = url;
+    const headers = { ...options.headers, Upgrade: 'websocket' };
+    const selectedProtocols = typeof protocols === 'string' ? protocols : protocols.join(', ');
+    if (selectedProtocols) headers['Sec-WebSocket-Protocol'] = selectedProtocols;
+    fetch(url.replace(/^ws/, 'http'), { headers, signal: this.abort.signal }).then(
+      (response) => {
+        const socket = response.webSocket;
+        if (!socket) return this.fail();
+        this.socket = socket;
+        if (this.readyState !== this.CONNECTING) {
+          try { socket.close(); } catch { /* already closed */ }
+          return;
+        }
+        socket.binaryType = this.binary;
+        socket.addEventListener('message', (event) => {
+          if (this.readyState === this.OPEN) this.emit(new MessageEvent('message', { data: event.data }));
+        });
+        socket.addEventListener('close', (event) => this.finish(event.code ?? 1006, event.reason ?? '', event.wasClean ?? false));
+        socket.addEventListener('error', () => this.fail());
+        socket.accept();
+        this.readyState = this.OPEN;
+        this.emit(new Event('open'));
+      },
+      () => { if (this.readyState !== this.CLOSED) this.fail(); },
+    ).catch(() => { if (this.readyState !== this.CLOSED) this.fail(); });
+  }
+
+  get binaryType() { return this.binary; }
+  set binaryType(value) {
+    this.binary = value;
+    if (this.socket) this.socket.binaryType = value;
+  }
+  get bufferedAmount() { return this.socket?.bufferedAmount ?? 0; }
+  get extensions() { return this.socket?.extensions ?? ''; }
+  get protocol() { return this.socket?.protocol ?? ''; }
+
+  emit(event) {
+    this[`on${event.type}`]?.(event);
+    this.dispatchEvent(event);
+  }
+
+  finish(code, reason, wasClean) {
+    if (this.readyState === this.CLOSED) return;
+    this.readyState = this.CLOSED;
+    const event = new Event('close');
+    Object.assign(event, { code, reason, wasClean });
+    this.emit(event);
+  }
+
+  fail() {
+    if (this.readyState === this.CLOSED) return;
+    this.emit(new Event('error'));
+    this.finish(1006, 'WebSocket transport failed', false);
+    try { this.socket?.close(); } catch { /* transport already failed */ }
+  }
+
+  send(data) {
+    if (this.readyState !== this.OPEN) throw new Error('WebSocket is not open');
+    this.socket.send(data);
+  }
+
+  close(code = 1000, reason = '') {
+    if (this.readyState === this.CLOSED || this.readyState === this.CLOSING) return;
+    const connecting = this.readyState === this.CONNECTING;
+    this.readyState = this.CLOSING;
+    this.abort.abort();
+    try { this.socket?.close(code, reason); } catch { /* make close observable below */ }
+    if (connecting || !this.socket) this.finish(code, reason, true);
+  }
+
+  terminate() {
+    this.close();
+    this.finish(1000, '', true);
+  }
+}
+
 /** Outbound sockets and requests from a Worker or Durable Object. */
 export const workersTransport = () => ({
   webSocketHeaders: true,
+  serverHeaders: true,
+  WebSocket: WorkersWebSocket,
   now: () => Date.now(),
   connect(url, { headers = {}, onOpen, onMessage, onClose }) {
-    let socket;
+    const socket = new WorkersWebSocket(url, [], { headers });
     let closed = false;
-    // Workers open client WebSockets with an upgrade request over https.
-    fetch(url.replace(/^ws/, 'http'), { headers: { ...headers, Upgrade: 'websocket' } }).then(
-      (response) => {
-        socket = response.webSocket;
-        if (!socket) return onClose(1006);
-        socket.accept();
-        const receive = socketMessages(onMessage, () => socket.close());
-        socket.addEventListener('message', (event) => receive(event.data));
-        socket.addEventListener('close', (event) => onClose(event.code));
-        socket.addEventListener('error', () => onClose(1006));
-        if (closed) socket.close();
-        else onOpen();
-      },
-      () => onClose(1006),
+    const finish = (code) => {
+      if (closed) return;
+      closed = true;
+      onClose(code);
+    };
+    const receive = socketMessages(
+      (text) => { if (!closed) onMessage(text); },
+      () => { if (!closed) { finish(1007); socket.close(); } },
     );
+    socket.onopen = () => { if (!closed) onOpen(); };
+    socket.onmessage = (event) => { if (!closed) receive(event.data); };
+    socket.onclose = (event) => finish(event.code);
     return {
-      send: (text) => socket?.send(text),
+      send: (text) => { if (!closed) socket.send(text); },
       close: () => {
         closed = true;
-        socket?.close();
+        socket.close();
       },
     };
   },
-  async request({ method, url, headers, body }) {
-    const response = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(20_000) });
+  async request({ method, url, headers, body, signal }) {
+    const deadline = AbortSignal.timeout(20_000);
+    const response = await fetch(url, { method, headers, body, signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
     return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };

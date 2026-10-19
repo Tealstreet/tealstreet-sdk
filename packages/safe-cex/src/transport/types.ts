@@ -29,6 +29,8 @@ export interface RestTransportContext {
   config: CreateAxiosDefaults;
   /** A host may resolve the account once and reuse it across requests. */
   routing?: ResolvedRouting;
+  /** Server fetch runtimes must supply the browser headers expected by the proxy. */
+  serverHeaders?: boolean;
 }
 
 export interface RestTransport {
@@ -41,7 +43,8 @@ export interface RestTransport {
 }
 
 /** Which flavour of request adapter a factory asks for; `bigInt` keeps 64-bit ids as strings. */
-export type RestAdapterVariant = 'default' | 'bigInt' | { region?: 'JA' | 'SG'; raw?: boolean };
+export type RestAdapterVariant =
+  'default' | 'bigInt' | { region?: 'JA' | 'SG'; raw?: boolean; WebSocket?: typeof WebSocket };
 
 export interface RestAdapterContext {
   exchange: ExchangeName;

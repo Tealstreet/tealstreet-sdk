@@ -99,14 +99,17 @@ export class RelayWebSocket extends EventTarget {
   private closeDispatched = false;
   private handshakeTimer: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(url: string, protocols?: string | string[], nodeOptions?: unknown) {
+  constructor(url: string, protocols?: string | string[], nodeOptions?: unknown, WebSocketCtor?: typeof WebSocket) {
     super();
     const { tunnelUrl, upstream } = parseRelayUrl(url);
     this.url = url;
     this.tunnelUrl = tunnelUrl;
     this.upstream = upstream;
 
-    this.inner = NodeWebSocket ? new NodeWebSocket(tunnelUrl, protocols ?? [], nodeOptions) : new WebSocket(tunnelUrl);
+    const Socket = WebSocketCtor ?? NodeWebSocket;
+    this.inner = Socket
+      ? new (Socket as new (url: string, protocols?: string | string[], options?: unknown) => WebSocket)(tunnelUrl, protocols ?? [], nodeOptions)
+      : new WebSocket(tunnelUrl);
     this.inner.addEventListener('open', this.onInnerOpen);
     this.inner.addEventListener('message', this.onInnerMessage);
     this.inner.addEventListener('close', this.onInnerClose as EventListener);

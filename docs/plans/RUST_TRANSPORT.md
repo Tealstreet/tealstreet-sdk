@@ -78,3 +78,21 @@ nested workspace.
   the browser/Node global clients retain their existing behavior.
 - Landing advanced with MEXC while validation ran; merge it after this host
   correction and include its regression gates before opening the PR.
+
+### Workers and cancellation correction
+
+- Workers now expose a header-capable raw WebSocket constructor used by the
+  existing HOW and relay clients; injected HOW clients belong to the account
+  adapter and close on disposal. Server fetch authorization adds the required
+  proxy headers without relying on Node globals. Added typed Workers exports.
+- Independent reviews fixed pending-JWT writes after host disposal in JS and
+  native, included authorization/streaming in the JS request deadline, and made
+  the HOW adapter honor per-request cancellation. Shared refresh waiters recover
+  when a different request/adapter is canceled; accepted writes are never retried.
+- Resolve provider base URLs without signed query data, then append the original
+  request suffix verbatim, so a query containing a venue name cannot select a
+  different proxy pool. Secondary-key rejection covers all host entry points.
+- Verification: 46 HOW tests, 22 native tests, 17 JS host tests and 21 real SDK /
+  wasm tests pass. Routing tests cover proxy-token disposal/deadlines, abandoned
+  streams, Workers upgrade headers and raw/compressed protocol messages. All six
+  public replay gates pass; private replay verification is finishing.

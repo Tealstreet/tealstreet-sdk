@@ -741,3 +741,90 @@ async fn how_rejects_a_parsed_response_instead_of_rounding_native_ids() {
     );
     server.await.unwrap();
 }
+
+fn delayed_tokens() -> (
+    ProxyTokenProvider,
+    mpsc::UnboundedReceiver<()>,
+    oneshot::Sender<String>,
+) {
+    let (started, started_rx) = mpsc::unbounded_channel();
+    let (released, released_rx) = oneshot::channel();
+    let receiver = std::sync::Mutex::new(Some(released_rx));
+    let provider: ProxyTokenProvider = Arc::new(move || {
+        let receiver = receiver.lock().unwrap().take().unwrap();
+        let started = started.clone();
+        Box::pin(async move {
+            let _ = started.send(());
+            receiver.await.map_err(|error| error.to_string())
+        })
+    });
+    (provider, started_rx, released)
+}
+
+#[tokio::test]
+async fn dropping_the_host_cancels_proxy_authorization_before_any_write() {
+    for mode in [HttpRouteMode::Direct, HttpRouteMode::How] {
+        let (listener, origin) = listener().await;
+        let (provider, mut started, mut token) = delayed_tokens();
+        let plan = RoutingPlan {
+            http: HttpRoute {
+                mode,
+                prefix: origin.clone(),
+                authorize: true,
+                tunnel_url: Some(origin.replacen("http:", "ws:", 1) + "/tunnel"),
+                ..HttpRoute::default()
+            },
+            ..RoutingPlan::default()
+        };
+        let (send, events) = mpsc::unbounded_channel();
+        NetworkTransport::with_routing(plan, provider)
+            .request(http_request(60, "https://venue.invalid/order".into()), send);
+        started.recv().await.unwrap();
+        drop(events);
+        tokio::time::timeout(Duration::from_secs(2), token.closed())
+            .await
+            .expect("host disposal must drop pending token acquisition");
+        assert!(token.send("token-after-disposal".into()).is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), listener.accept())
+                .await
+                .is_err(),
+            "a disposed host must not connect to the proxy or HOW tunnel"
+        );
+    }
+}
+
+#[tokio::test]
+async fn dropping_the_host_cancels_how_authentication_without_sending_a_write() {
+    let (listener, origin) = listener().await;
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+        ws.send(Message::text(
+            r#"{"type":"serverTime","serverTime":1700000000000}"#,
+        ))
+        .await
+        .unwrap();
+        assert!(
+            !matches!(ws.next().await, Some(Ok(Message::Text(_)))),
+            "a disposed host must not send proxy credentials or an HTTP write"
+        );
+    });
+    let (provider, mut started, mut token) = delayed_tokens();
+    let mut plan = RoutingPlan::default();
+    plan.http.mode = HttpRouteMode::How;
+    plan.http.tunnel_url = Some(origin.replacen("http:", "ws:", 1) + "/tunnel");
+    let (send, events) = mpsc::unbounded_channel();
+    NetworkTransport::with_routing(plan, provider)
+        .request(http_request(61, "https://venue.invalid/order".into()), send);
+    started.recv().await.unwrap();
+    drop(events);
+    tokio::time::timeout(Duration::from_secs(2), token.closed())
+        .await
+        .expect("host disposal must drop pending tunnel token acquisition");
+    assert!(token.send("token-after-disposal".into()).is_err());
+    tokio::time::timeout(Duration::from_secs(2), server)
+        .await
+        .expect("host disposal must close the pending tunnel")
+        .unwrap();
+}

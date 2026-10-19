@@ -47,6 +47,12 @@ export interface EngineRoutingPlan {
 
 type Request = Parameters<Transport['request']>[0];
 
+export const assertEngineAccountRouting = (options: ExchangeOptions): void => {
+  if (options.secondary_key || options.secondary_secret) {
+    throw new Error('Rust engine secondary signing keys are unsupported; use a primary-key account');
+  }
+};
+
 const venueHeaders = (exchange: ExchangeName, options: ExchangeOptions): Record<string, string> =>
   isBybitSiteIdExchange(exchange) ? getBybitSiteHeaders(options) : {};
 
@@ -80,6 +86,7 @@ export const resolveEngineRoutingPlan = (
   options: ExchangeOptions,
   baseURL: string,
 ): EngineRoutingPlan => {
+  assertEngineAccountRouting(options);
   const provider = getTransport(options);
   if (provider !== directTransport && provider !== tealstreetTransport) {
     throw new Error('Custom transports must supply their own native host routing plan');
@@ -125,12 +132,11 @@ const hasHeader = (headers: Record<string, string>, name: string): boolean =>
 const publicBinanceRequest = (exchange: ExchangeName, request: Request): boolean =>
   exchange.startsWith('binance') && !hasHeader(request.headers, 'X-MBX-APIKEY');
 
+// Factory adapter gates are distinct from saved-account metadata defaults.
 const usesTunnel = (exchange: ExchangeName, options: ExchangeOptions): boolean =>
   exchange === 'bingx'
     ? !options.publicDataOnly && options.tealstreetTunnel !== false
-    : exchange === 'weex' || exchange === 'grvt' || exchange === 'blofin'
-      ? false
-      : Boolean(options.tealstreetTunnel);
+    : !['weex', 'grvt', 'blofin', 'mexc'].includes(exchange) && Boolean(options.tealstreetTunnel);
 
 const restRoute = (
   provider: TransportProvider,
@@ -138,14 +144,21 @@ const restRoute = (
   options: ExchangeOptions,
   routing: ResolvedRouting,
   request: Request,
+  serverHeaders = false,
 ): RestTransport => {
   if (publicBinanceRequest(exchange, request)) return { baseURL: request.url, proxied: false };
-  return provider.rest({
+  // Factories resolve a base URL, never a signed query. Keep request data out
+  // of host selection and append its exact bytes after the provider rewrites it.
+  const baseURL = request.url.match(/^https?:\/\/[^/?#]+/i)?.[0];
+  if (!baseURL) throw new Error('Engine HTTP requires an absolute venue URL');
+  const route = provider.rest({
     exchange,
     options,
     routing,
-    config: { baseURL: request.url, headers: request.headers },
+    serverHeaders,
+    config: { baseURL, headers: request.headers },
   });
+  return { ...route, baseURL: `${route.baseURL ?? baseURL}${request.url.slice(baseURL.length)}` };
 };
 
 const responseHeaders = (headers: unknown): string => {
@@ -155,47 +168,129 @@ const responseHeaders = (headers: unknown): string => {
     .join('\n');
 };
 
+const untilAborted = <T>(promise: Promise<T>, signal: AbortSignal): Promise<T> =>
+  new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      void promise.catch(() => undefined);
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+
 const httpTransport = (
   exchange: ExchangeName,
   options: ExchangeOptions,
   transport: Transport,
   provider: TransportProvider,
   routing: ResolvedRouting,
-): Transport['request'] => {
+): { request: Transport['request']; dispose(): void } => {
   const tunnel = usesTunnel(exchange, options);
   const adapter = tunnel
     ? provider.restAdapter({
         exchange,
         options,
-        variant: { region: routing.howEgress === 'jp' ? 'JA' : 'SG', raw: true },
+        variant: { region: routing.howEgress === 'jp' ? 'JA' : 'SG', raw: true, WebSocket: transport.WebSocket },
       })
     : undefined;
-  return async (request): Promise<HttpResponse> => {
-    const route = restRoute(provider, exchange, options, routing, request);
-    const config = {
-      method: request.method,
-      url: route.baseURL ?? request.url,
-      baseURL: request.url,
-      headers: AxiosHeaders.from({ ...request.headers, ...venueHeaders(exchange, options) }),
-      data: request.body,
-      timeout: 20_000,
-    } as InternalAxiosRequestConfig;
-    if (route.proxied) await route.authorize?.(config);
-    if (adapter) {
-      const response = await adapter(config);
-      // A raw tunnel response keeps native IDs and signed decimal lexemes intact.
-      if (typeof response.data !== 'string') throw new Error('Engine tunnel requires a raw response body');
+  let disposed = false;
+  const pending = new Set<AbortController>();
+  const request: Transport['request'] = async (request): Promise<HttpResponse> => {
+    if (disposed) throw new Error('Engine transport disposed');
+    const controller = new AbortController();
+    pending.add(controller);
+    const signal = request.signal ? AbortSignal.any([request.signal, controller.signal]) : controller.signal;
+    const started = Date.now();
+    const cleanup = () => {
+      clearTimeout(timer);
+      pending.delete(controller);
+      signal.removeEventListener('abort', cleanup);
+    };
+    const timer = setTimeout(() => {
+      controller.abort(new Error('Engine transport request timed out'));
+      pending.delete(controller);
+    }, 20_000);
+    signal.addEventListener('abort', cleanup, { once: true });
+    try {
+      signal.throwIfAborted();
+      const route = restRoute(provider, exchange, options, routing, request, transport.serverHeaders);
+      const config = {
+        method: request.method,
+        url: route.baseURL ?? request.url,
+        baseURL: request.url,
+        headers: AxiosHeaders.from({ ...request.headers, ...venueHeaders(exchange, options) }),
+        data: request.body,
+        timeout: 20_000,
+        signal,
+      } as InternalAxiosRequestConfig;
+      if (route.proxied && route.authorize) await untilAborted(route.authorize(config), signal);
+      signal.throwIfAborted();
+      config.timeout = Math.max(1, 20_000 - (Date.now() - started));
+      if (adapter) {
+        const response = await untilAborted(adapter(config), signal);
+        // A raw tunnel response keeps native IDs and signed decimal lexemes intact.
+        if (typeof response.data !== 'string') throw new Error('Engine tunnel requires a raw response body');
+        cleanup();
+        return {
+          status: response.status,
+          headers: responseHeaders(response.headers),
+          body: new TextEncoder().encode(response.data),
+        };
+      }
+      const response = await untilAborted(
+        transport.request({
+          ...request,
+          url: config.url!,
+          headers: config.headers.toJSON() as Record<string, string>,
+          signal,
+        }),
+        signal,
+      );
+      if (response.body instanceof Uint8Array) {
+        cleanup();
+        return response;
+      }
+      const body = response.body;
       return {
-        status: response.status,
-        headers: responseHeaders(response.headers),
-        body: new TextEncoder().encode(response.data),
+        ...response,
+        body: (async function* () {
+          const iterator = body[Symbol.asyncIterator]();
+          try {
+            for (;;) {
+              const next = await untilAborted(iterator.next(), signal);
+              if (next.done) return;
+              yield next.value;
+            }
+          } finally {
+            cleanup();
+            void iterator.return?.().catch(() => undefined);
+          }
+        })(),
       };
+    } catch (error) {
+      cleanup();
+      throw error;
     }
-    return transport.request({
-      ...request,
-      url: config.url!,
-      headers: config.headers.toJSON() as Record<string, string>,
-    });
+  };
+  return {
+    request,
+    dispose: () => {
+      disposed = true;
+      for (const controller of pending) controller.abort(new Error('Engine transport disposed'));
+      pending.clear();
+      (adapter as { dispose?(): void } | undefined)?.dispose?.();
+    },
   };
 };
 
@@ -205,6 +300,7 @@ export const createEngineTransport = (
   options: ExchangeOptions,
   transport: Transport,
 ): Transport => {
+  assertEngineAccountRouting(options);
   const provider = getTransport(options);
   const { routing, restRouting } = resolved(exchange, options, provider);
   const routes = {
@@ -213,12 +309,17 @@ export const createEngineTransport = (
     business: wsRoute(routing.wsBusiness),
   };
   const fallbacks = new Map<string, WsDirectFallback>();
+  const http = httpTransport(exchange, options, transport, provider, restRouting);
   return {
     webSocketHeaders: transport.webSocketHeaders,
     now: () => transport.now(),
     setTimeout: (fn, ms) => transport.setTimeout(fn, ms),
     clearTimeout: (handle) => transport.clearTimeout(handle),
-    request: httpTransport(exchange, options, transport, provider, restRouting),
+    request: http.request,
+    dispose: () => {
+      http.dispose();
+      transport.dispose?.();
+    },
     connect: (url, handlers) => {
       const channel =
         handlers.channel ?? socketChannels.find((rule) => url.includes(rule.contains))?.channel ?? 'public';
@@ -249,10 +350,13 @@ export const createEngineTransport = (
       void import('@tealstreet/http-over-websocket/src/RelayWebSocket')
         .then(({ RelayWebSocket }) => {
           if (closed) return;
-          const relay = new RelayWebSocket(target, [], {
+          const relayOptions = {
             headers: { ...connection.headers, ...headers },
             ALPNProtocols: ['http/1.1'],
-          });
+          };
+          const relay = transport.WebSocket
+            ? new RelayWebSocket(target, [], relayOptions, transport.WebSocket)
+            : new RelayWebSocket(target, [], relayOptions);
           socket = relay;
           relay.addEventListener('open', () => {
             if (!closed) {
@@ -270,7 +374,8 @@ export const createEngineTransport = (
               if (!closed) {
                 closed = true;
                 pending.length = 0;
-                relay.close(1007);
+                // Browser close() forbids protocol error codes.
+                relay.close();
                 handlers.onClose(1007);
               }
             },

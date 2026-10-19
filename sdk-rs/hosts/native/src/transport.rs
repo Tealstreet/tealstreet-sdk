@@ -321,7 +321,12 @@ impl Transport for NetworkTransport {
                 let _ = events.send(HostEvent::HttpEnd(id));
                 Ok::<_, String>(())
             };
-            let failure = match tokio::time::timeout(Duration::from_secs(20), operation).await {
+            let result = tokio::select! {
+                biased;
+                _ = events.closed() => return,
+                result = tokio::time::timeout(Duration::from_secs(20), operation) => result,
+            };
+            let failure = match result {
                 Ok(Ok(())) => None,
                 Ok(Err(error)) => Some(error),
                 Err(_) => Some("transport request timed out".into()),

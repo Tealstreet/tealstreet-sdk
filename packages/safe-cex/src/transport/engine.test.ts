@@ -22,11 +22,12 @@ const mocks = vi.hoisted(() => ({
   adapter: vi.fn(),
   createAdapter: vi.fn(),
   relay: vi.fn(),
+  nodeRuntime: vi.fn(() => true),
 }));
 
 vi.mock('../accessToken', () => ({ getProxyToken: mocks.token }));
 vi.mock('../index', () => ({ createExchange: vi.fn() }));
-vi.mock('../utils/runtime', () => ({ isNodeOrBunRuntime: () => true }));
+vi.mock('../utils/runtime', () => ({ isNodeOrBunRuntime: mocks.nodeRuntime }));
 // Avoid global HOW socket/token configuration. The real provider still selects
 // and configures the adapter; its returned adapter captures the final request.
 vi.mock('../httpOverWebsocket/axiosHttpOverWebsocketAdapter', () => ({
@@ -72,6 +73,7 @@ const browserHeaders = {
 };
 
 beforeEach(() => {
+  mocks.nodeRuntime.mockReturnValue(true);
   mocks.token.mockResolvedValue('proxy-jwt');
   mocks.adapter.mockImplementation(async (config: InternalAxiosRequestConfig) => ({
     status: 200,
@@ -84,18 +86,108 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   setDefaultTransport(directTransport);
   setWsRelayEnabled(false);
   vi.unstubAllGlobals();
 });
 
 describe('engine HTTP routing at the raw transport boundary', () => {
+  it('never sends a proxy write after disposal while its token was pending', async () => {
+    let token!: (value: string) => void;
+    mocks.token.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          token = resolve;
+        }),
+    );
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw);
+    const pending = routed.request(request());
+    const rejected = expect(pending).rejects.toThrow('disposed');
+    routed.dispose!();
+    await rejected;
+    token('late-jwt');
+    await Promise.resolve();
+    expect(raw.request).not.toHaveBeenCalled();
+  });
+
+  it('includes proxy token acquisition in the request deadline and never sends a stale write', async () => {
+    vi.useFakeTimers();
+    let token!: (value: string) => void;
+    mocks.token.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          token = resolve;
+        }),
+    );
+    const raw = makeRaw();
+    const routed = createEngineTransport('bybit', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw);
+    const rejected = expect(routed.request(request())).rejects.toThrow('timed out');
+    await vi.advanceTimersByTimeAsync(20_000);
+    await rejected;
+    token('late-jwt');
+    await Promise.resolve();
+    expect(raw.request).not.toHaveBeenCalled();
+    routed.dispose!();
+  });
+
+  it('releases the deadline when disposed before a response stream is consumed', async () => {
+    vi.useFakeTimers();
+    const raw = makeRaw();
+    raw.request.mockResolvedValue({
+      status: 200,
+      body: (async function* () {
+        yield new Uint8Array([1]);
+      })(),
+    });
+    const routed = createEngineTransport('bybit', options({ transport: directTransport }), raw);
+    await routed.request(request());
+    expect(vi.getTimerCount()).toBe(1);
+    routed.dispose!();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(raw.request.mock.lastCall![0].signal?.aborted).toBe(true);
+  });
+  it('does not let signed query values select a different proxy pool', async () => {
+    const raw = makeRaw();
+    const input = request('https://api.bybit.com/v5/order/create?clientId=binance&a=1&a=2&signature=a%2Fb');
+    await createEngineTransport('bybit', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw).request(
+      input,
+    );
+    expect(raw.request.mock.lastCall![0].url).toBe(`${PRIVATE_PROXY_ASIA}/${input.url}`);
+    expect(raw.request.mock.lastCall![0].body).toBe(input.body);
+  });
+  it('supplies proxy fetch headers in a server runtime without Node globals', async () => {
+    mocks.nodeRuntime.mockReturnValue(false);
+    const raw = { ...makeRaw(), serverHeaders: true };
+    await createEngineTransport('okx', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw).request(
+      request(),
+    );
+    expect(raw.request.mock.lastCall![0].headers).toMatchObject({
+      ...browserHeaders,
+      Authorization: 'Bearer proxy-jwt',
+    });
+  });
+
+  it('passes the host raw socket constructor to HOW and disposes its adapter', async () => {
+    const WebSocket = class {} as unknown as typeof globalThis.WebSocket;
+    const dispose = vi.fn();
+    const adapter = Object.assign(async (config: InternalAxiosRequestConfig) => mocks.adapter(config), { dispose });
+    mocks.createAdapter.mockReturnValue(adapter);
+    const raw = { ...makeRaw(), WebSocket, dispose: vi.fn() };
+    const routed = createEngineTransport('bybit', options({ tealstreetTunnel: true }), raw);
+    await routed.request(request());
+    expect(mocks.createAdapter).toHaveBeenCalledWith({ region: 'SG', customParser: expect.any(Function), WebSocket });
+    routed.dispose!();
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(raw.dispose).toHaveBeenCalledOnce();
+  });
   it('keeps direct URLs, signed bodies and venue credentials intact', async () => {
     const raw = makeRaw();
     const input = request();
     const routed = createEngineTransport('bybit', options({ transport: directTransport }), raw);
     await routed.request(input);
-    expect(raw.request).toHaveBeenCalledExactlyOnceWith(input);
+    expect(raw.request).toHaveBeenCalledExactlyOnceWith({ ...input, signal: expect.any(AbortSignal) });
     expect(mocks.token).not.toHaveBeenCalled();
     expect(mocks.createAdapter).not.toHaveBeenCalled();
     expect(routed.now()).toBe(42);
@@ -110,7 +202,7 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     expect(raw.request.mock.calls[0][0].url).toBe(`https://custom.invalid/${request().url}`);
     expect(wsRouting).toHaveBeenCalledTimes(1);
     await createEngineTransport('bybit', options({ transport: directTransport }), raw).request(request());
-    expect(raw.request.mock.calls[1][0]).toEqual(request());
+    expect(raw.request.mock.calls[1][0]).toEqual({ ...request(), signal: expect.any(AbortSignal) });
     expect(rest).toHaveBeenCalledTimes(1);
   });
 
@@ -132,6 +224,7 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     ).request(input);
     expect(raw.request).toHaveBeenCalledExactlyOnceWith({
       ...input,
+      signal: expect.any(AbortSignal),
       url: `${prefix}/${input.url}`,
       headers: {
         ...input.headers,
@@ -178,9 +271,10 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     };
     await routed.request(publicRequest);
     await routed.request(listenKey);
-    expect(raw.request.mock.calls[0][0]).toEqual(publicRequest);
+    expect(raw.request.mock.calls[0][0]).toEqual({ ...publicRequest, signal: expect.any(AbortSignal) });
     expect(raw.request.mock.calls[1][0]).toEqual({
       ...listenKey,
+      signal: expect.any(AbortSignal),
       url: `${PRIVATE_PROXY_JP}/${listenKey.url}`,
       headers: { ...listenKey.headers, ...browserHeaders, Authorization: 'Bearer proxy-jwt' },
     });
@@ -257,13 +351,25 @@ describe('engine HTTP routing at the raw transport boundary', () => {
     },
   );
 
-  it('WEEX never installs HOW, matching its TS API factory', async () => {
+  it.each(['weex', 'mexc'] as const)('%s never installs HOW, matching its TS API factory', async (exchange) => {
     const raw = makeRaw();
-    await createEngineTransport('weex', options({ tealstreetTunnel: true }), raw).request(
-      request('https://api-contract.weex.com/capi/v2/account/assets'),
+    await createEngineTransport(exchange, options({ tealstreetTunnel: true }), raw).request(
+      request(exchange === 'weex' ? 'https://api-contract.weex.com/capi/v2/account/assets' : 'https://api.mexc.com/api/v1/private/account/assets'),
     );
     expect(raw.request).toHaveBeenCalledTimes(1);
     expect(mocks.createAdapter).not.toHaveBeenCalled();
+  });
+
+  it('keeps MEXC venue Authorization separate from the private proxy credential', async () => {
+    const raw = makeRaw();
+    await createEngineTransport('mexc', options({ tealstreetProxy: true, tealstreetTunnel: false }), raw).request({
+      ...request('https://api.mexc.com/api/v1/private/order/list/open_orders'),
+      headers: { Authorization: 'venue-session' },
+    });
+    expect(raw.request.mock.lastCall![0]).toMatchObject({
+      url: `${PRIVATE_PROXY_JP}/https://api.mexc.com/api/v1/private/order/list/open_orders`,
+      headers: { Authorization: 'venue-session', 'Tealstreet-Authorization': 'Bearer proxy-jwt' },
+    });
   });
 
   it('fails closed if a tunnel adapter returns parsed JSON', async () => {
@@ -305,7 +411,7 @@ describe('engine HTTP routing at the raw transport boundary', () => {
             const how =
               exchange === 'bingx'
                 ? resolved.tealstreetTunnel !== false
-                : !['grvt', 'blofin', 'weex'].includes(exchange) && Boolean(resolved.tealstreetTunnel);
+                : !['grvt', 'blofin', 'weex', 'mexc'].includes(exchange) && Boolean(resolved.tealstreetTunnel);
             const label = `${exchange} proxy=${tealstreetProxy} tunnel=${tealstreetTunnel} region=${proxyRegion}`;
             expect(mocks.adapter.mock.calls.length, label).toBe(how ? 1 : 0);
             if (how) {
@@ -489,6 +595,14 @@ describe('engine socket routing at the raw transport boundary', () => {
 });
 
 describe('native host policy uses the same resolved routes', () => {
+  it('rejects secondary-key egress before producing a native plan or a routed transport', () => {
+    const opts = options({ secondary_key: 'read-key', secondary_secret: 'read-secret' });
+    expect(() => resolveEngineRoutingPlan('binance', opts, 'https://fapi.binance.com')).toThrow(
+      'secondary signing keys',
+    );
+    expect(() => createEngineTransport('binance', opts, makeRaw())).toThrow('secondary signing keys');
+    expect(mocks.token).not.toHaveBeenCalled();
+  });
   it('is serializable, token-free, and matches the actual CORS/WS destinations', async () => {
     const opts = options({ tealstreetProxy: true, tealstreetTunnel: false, proxyRegion: 'JA' });
     const input = request('https://www.okx.com/api/v5/account/balance');
@@ -621,7 +735,7 @@ describe('relay binary frames obey the native transport text contract', () => {
     emit(new Uint8Array([0x1f, 0x8b, 0]));
     emit('after-malformed-frame');
     emit(new Uint8Array([0x78, 0xff, 0]));
-    await vi.waitFor(() => expect(relay.close).toHaveBeenCalledExactlyOnceWith(1007));
+    await vi.waitFor(() => expect(relay.close).toHaveBeenCalledExactlyOnceWith());
     listeners.get('close')!({ code: 1007 });
     expect(handler.onClose).toHaveBeenCalledExactlyOnceWith(1007);
     expect(relay.close).toHaveBeenCalledOnce();
