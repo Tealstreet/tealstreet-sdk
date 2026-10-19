@@ -34,5 +34,11 @@ which resolve to their shared native strategy ID.
 - [UTA order channel](https://www.bitget.com/legacy-docs/uta/websocket/private/Order-Channel)
 - [UTA strategy orders](https://www.bitget.com/legacy-docs/uta/websocket/private/Strategy-Order-Channel)
 
-Trading and queries follow in the committed phase plan at
-`docs/plans/RUST_BITGET.md`.
+Trading uses sequenced jobs for orders, brackets, conditional stops and account
+settings. Native amendments send a fresh `newClientOid`; cancellation retains
+the original native `loss_plan` or `pos_loss` identity. Ambiguous writes are
+never retried. History reads page executions, orders, income and public trades
+into the engine query shapes and reject incomplete financial results.
+
+Inverse sizing and UTA bills/trailing remain outside the verified scope.
+Phase verification and review results live in `docs/plans/RUST_BITGET.md`.
