@@ -8,7 +8,10 @@ use crate::{
     legacy_data_reads::{self as body, Binding, Transport},
     legacy_metadata::Task,
 };
-use std::{cell::RefCell, rc::{Rc, Weak}};
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
 
 /// A callee resolved when the source expression evaluates it, with its receiver.
 pub(crate) struct Callee {
@@ -108,7 +111,16 @@ pub(crate) fn schedule(
     let runtime = rt.shared.runtime.clone();
     let source = if repeat { "setInterval" } else { "setTimeout" };
     let invoke = Rc::new(move || {
-        let task = callback()?;
+        let task = match callback() {
+            Ok(task) => task,
+            Err(error) => {
+                runtime.report_exception(
+                    &error.to_exchange_error(),
+                    &serde_json::json!({"source":source}).into(),
+                );
+                return Ok(());
+            }
+        };
         let reporter = runtime.clone();
         let exchange_runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = runtime.clone();
         Promise::spawn(
