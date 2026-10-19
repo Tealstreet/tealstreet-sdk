@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
 use safe_cex_venue_bitunix::{BitunixFutures, Options};
 pub type TestEngine = Engine<BitunixFutures>;

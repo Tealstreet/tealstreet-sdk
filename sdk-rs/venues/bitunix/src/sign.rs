@@ -19,6 +19,23 @@ impl Params {
         self.0.push((k.into(), v.into()));
         self
     }
+    pub fn num(self, k: &str, v: f64) -> Self {
+        self.str(k, &num::format(v))
+    }
+    pub fn opt_str(self, k: &str, v: Option<&str>) -> Self {
+        if let Some(v) = v {
+            self.str(k, v)
+        } else {
+            self
+        }
+    }
+    pub fn opt_num(self, k: &str, v: Option<f64>) -> Self {
+        if let Some(v) = v {
+            self.num(k, v)
+        } else {
+            self
+        }
+    }
     pub fn query(&self) -> String {
         let mut rows = self.0.clone();
         rows.sort_by(|a, b| a.0.cmp(&b.0));

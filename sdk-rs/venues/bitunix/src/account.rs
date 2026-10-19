@@ -166,13 +166,17 @@ impl BitunixFutures {
             if query.is_empty() { "" } else { "?" },
             query
         );
-        if matches!(&pending,Pending::Private(r) if r.axis!=Axis::Balance) {
+        if matches!(&pending,Pending::Private(r) if r.axis!=Axis::Balance)
+            || matches!(&pending, Pending::History(_))
+        {
             cx.request_streamed(
                 method,
                 url,
                 headers,
                 json::ArrayAt::AnyFieldEnvelope(&[
                     "data",
+                    "tradeList",
+                    "userTrades",
                     "positionList",
                     "positions",
                     "orderList",
@@ -233,6 +237,7 @@ impl BitunixFutures {
         match pending {
             Pending::Candles { command } => cx.done(command, Err(error.into())),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::History(read) => self.history_failed(cx, read, error),
             Pending::Private(read) => {
                 if let Some(command) = read.after {
                     self.prepared(cx, command, false);
@@ -569,7 +574,7 @@ impl BitunixFutures {
         let reduce = o
             .reduce_only
             .as_ref()
-            .map(Supported::allowed)
+            .and_then(Supported::boolean)
             .unwrap_or_else(|| {
                 self.account
                     .reduces

@@ -42,6 +42,15 @@ pub enum Supported<'a> {
     Text(#[serde(borrow)] Str<'a>),
 }
 impl Supported<'_> {
+    pub fn boolean(&self) -> Option<bool> {
+        match self {
+            Self::Bool(v) => Some(*v),
+            Self::Text(v) if v.eq_ignore_ascii_case("true") => Some(true),
+            Self::Text(v) if v.eq_ignore_ascii_case("false") => Some(false),
+            _ => None,
+        }
+    }
+
     pub fn allowed(&self) -> bool {
         match self {
             Self::Bool(v) => *v,
@@ -324,7 +333,7 @@ impl PositionRow<'_> {
     }
 }
 
-fn text<'de, D: Deserializer<'de>>(d: D) -> Result<Str<'de>, D::Error> {
+pub(crate) fn text<'de, D: Deserializer<'de>>(d: D) -> Result<Str<'de>, D::Error> {
     struct Text;
     impl<'de> Visitor<'de> for Text {
         type Value = Str<'de>;

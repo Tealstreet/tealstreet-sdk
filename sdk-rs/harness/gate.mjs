@@ -66,7 +66,8 @@ const isPrivate = Boolean(ts.account);
 const KNOWN_TS_FIXES = (account, rustAccount) => {
   if (values.venue === 'bitunix') {
     // Bitunix fixes: failed reconciliation preserves state; live cumulative fills
-    // emit once; split orders use distinct generated client IDs; cancel replies
+    // emit once; history dedupes by tradeId rather than collapsing equal fills;
+    // split orders use distinct generated client IDs; cancel replies
     // require per-order success; replacements reconcile final remaining quantity.
     // Scenario oracles are added with the Bitunix private tape in the gate phase.
     return;

@@ -118,3 +118,19 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   final-fill recovery and preserving job-owned optimistic rows during reads.
   All review blockers addressed; known TS corrections listed in gate.mjs and
   commit message. Tape-derived normalization remains a phase-5 task.
+
+### Phase 4 checkpoint
+
+- Added streamed fills, historical-order and income queries in engine JSON
+  shapes. Orders page on overlapping oldest ctime (skip is ignored by venue);
+  income pages with skip. Raw IDs drive progress; failed pages are discarded,
+  preserving only validated prior income pages. TS public trades are unsupported.
+- `public_review` found unvalidated-page leakage, timestamp/fee/wrapper aliases,
+  symbol canonicalization and empty-ID paging progress; fixes and regressions
+  added. History execution IDs now preserve distinct identical fills, correcting
+  TS composite-key dedupe; listed in KNOWN_TS_FIXES and phase commit message.
+
+- Phase-4 final: reviewer found no remaining blockers. Plain clippy PASS;
+  all 38 venue tests PASS (including 7 history tests). Remaining work is
+  harness integration, live public recording, replay/performance gates,
+  repository checks, and the authorized PR/review/merge process.

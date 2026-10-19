@@ -1,5 +1,6 @@
 //! Bitunix USDT futures: sans-I/O public and account state machines.
 mod account;
+mod history;
 mod sign;
 mod trading;
 mod wire;
@@ -32,6 +33,7 @@ pub struct Options {
 pub enum Pending {
     Private(account::Read),
     Trade(trading::Request),
+    History(history::Request),
     Markets { rows: Vec<Market>, invalid: bool },
     Tickers { rows: Vec<Ticker>, invalid: bool },
     Candles { command: u32 },
@@ -353,6 +355,7 @@ impl Venue for BitunixFutures {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Private(read) => self.account_item(cx, read, item),
+            Pending::History(read) => self.history_item(cx, read, item),
             Pending::Markets { rows, invalid } => match serde_json::from_str::<Pair<'_>>(item) {
                 Ok(m) => {
                     if m.symbol_status == "OPEN"
@@ -423,6 +426,10 @@ impl Venue for BitunixFutures {
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         let pending = match pending {
+            Pending::History(read) => {
+                self.history_response(cx, read, response);
+                return;
+            }
             Pending::Private(read) => {
                 let after = read.after;
                 let success = (200..300).contains(&response.status)
@@ -514,6 +521,7 @@ impl Venue for BitunixFutures {
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::History(read) => self.history_failed(cx, read, error),
             Pending::Private(read) => {
                 if let Some(command) = read.after {
                     self.prepared(cx, command, false);
@@ -666,6 +674,7 @@ impl Venue for BitunixFutures {
                 };
                 cx.request(Method::Get,format!("{REST}{KLINE}?symbol={symbol}&interval={interval}&startTime={start}&endTime={end}{limit_query}"),self.headers(),None,Pending::Candles {command});
             }
+            Command::Query { command, query } => self.query(cx, command, query),
             other => self.trading_command(cx, other),
         }
     }
