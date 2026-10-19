@@ -363,3 +363,8 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   compact interner and indexed ticker API. Engine33+BingX92+WEEX76tests pass,
   as do workspace clippy and refreshed SDK typecheck. Full rebuilt six-venue
   gates/aggregate size and final-head CI remain required before landing.
+
+- Six-venue release artifact measures2,576,287bytes under the2.5MiB allowance.
+  Full workspace409tests, native/wasm clippy, bans and fmt pass; rebuilt SDK19,
+  host10 and harness23tests pass. Refreshed package typecheck/lint pass.
+  Combined public/private replays now run on this artifact before landing.
