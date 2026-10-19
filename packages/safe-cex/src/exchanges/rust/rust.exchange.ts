@@ -25,8 +25,9 @@ import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
 import { LogSeverity } from '../../types';
+import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
-import { patternClientOrderIdRule } from '../clientOrderId';
+import { isRegularClientOrderShape, patternClientOrderIdRule } from '../clientOrderId';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
@@ -85,7 +86,18 @@ export class RustEngineExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
     this.clientOrderIdRule =
-      exchangeName === 'bybit' ? patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/) : undefined;
+      exchangeName === 'bingx'
+        ? {
+            label: 'BingX',
+            isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
+            mint: () => `ts${uuid()}`.toLowerCase().slice(0, 40),
+            requirement: 'be 1-40 characters with no uppercase letters',
+            isValid: (clientOrderId) =>
+              clientOrderId.length >= 1 && clientOrderId.length <= 40 && clientOrderId === clientOrderId.toLowerCase(),
+          }
+        : exchangeName === 'bybit'
+          ? patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/)
+          : undefined;
     this.applier = new FrameApplier(store);
   }
 
@@ -184,7 +196,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (this.name === 'bybit') this.assertCallerClientOrderIds(orders);
+    if (this.name === 'bybit' || this.name === 'bingx') this.assertCallerClientOrderIds(orders);
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 

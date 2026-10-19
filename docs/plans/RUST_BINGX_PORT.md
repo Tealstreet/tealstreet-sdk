@@ -221,3 +221,16 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   Yarn fixes its target. Final API audit also found inherited BingX client-ID
   helpers lacked the native rule. Adding the rule and real-wasm contract tests
   before opening the PR; native trading semantics and replay remain green.
+
+### SDK bridge gate green
+
+- Registered BingX's lowercase client-ID rule and attributed minting in the
+  Rust SDK bridge; inherited helpers and whole-batch validation now work.
+  Honorable shapes also exclude close:true, matching native preflight.
+- Independent review found that inherited close mint mismatch; fixed and
+  re-reviewed clear. Real wasm tests8/8 PASS on Node22, covering exact wire IDs,
+  streamed lookup and no-write rejection for invalid/bracket/close/mixed batches.
+  Package typecheck and production-file ESLint pass. Stale local Yarn links were
+  refreshed with frozen-lockfile install; no dependency manifest/lock changes.
+- All five implementation phases and gates complete. Opening the PR into
+  feat/rust-rewrite, then adversarial local reviews and green CI before merge.
