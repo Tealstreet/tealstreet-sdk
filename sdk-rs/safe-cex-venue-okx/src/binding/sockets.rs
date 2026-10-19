@@ -28,8 +28,7 @@ use safe_cex_store::config::ENABLE_RECONNECTING_WEBSOCKET;
 use safe_cex_transport::RoutingOptions;
 use serde_json::Value;
 use std::{
-    cell::{Cell, RefCell},
-    collections::{HashMap, HashSet},
+    cell::Cell,
     rc::{Rc, Weak},
 };
 
@@ -658,128 +657,79 @@ fn new_business(s: &OkxScope) -> Result<(), Thrown> {
     Ok(())
 }
 
-/// Public order-book state lives in the JS fields; the typed bodies borrow a copy.
-struct BookState {
-    sequences: RefCell<HashMap<String, String>>,
-    recovering: RefCell<HashSet<String>>,
-    topics: RefCell<HashMap<String, Vec<(String, String)>>>,
+fn sequence_value(s: &OkxScope, update: &Js, key: &str) -> Result<Js, Thrown> {
+    if optional(update, key)?.is_nullish() {
+        Ok(Js::str(""))
+    } else {
+        let string = s.global("String")?;
+        string.call(Js::Undefined, vec![update.get(key)?])
+    }
 }
 
-fn load_state(this: &Js) -> Result<BookState, Thrown> {
-    let mut sequences = HashMap::new();
-    if let Js::Map(map) = this.get("orderBookSequenceByHandler")? {
-        for (k, v) in map.borrow().iter() {
-            sequences.insert(text(k)?, text(v)?);
-        }
+fn accept_sequence(s: &OkxScope, handler: Js, data: Js) -> Result<bool, Thrown> {
+    let update = optional(&data.get("data")?, "0")?;
+    let sequence = sequence_value(s, &update, "seqId")?;
+    if data.get("action")?.strict_equals(&Js::str("snapshot")) && sequence.truthy() {
+        s.this
+            .get("orderBookSequenceByHandler")?
+            .call_method("set", vec![handler.clone(), sequence])?;
+        s.this
+            .get("recoveringOrderBooks")?
+            .call_method("delete", vec![handler])?;
+        return Ok(true);
     }
-    let mut recovering = HashSet::new();
-    if let Js::Set(set) = this.get("recoveringOrderBooks")? {
-        for v in set.borrow().iter() {
-            recovering.insert(text(v)?);
-        }
+    if s.this
+        .get("recoveringOrderBooks")?
+        .call_method("has", vec![handler.clone()])?
+        .truthy()
+    {
+        return Ok(false);
     }
-    let mut topics = HashMap::new();
-    let js_topics = this.get("topics")?;
-    if !js_topics.is_nullish() {
-        for (k, list) in js_topics.own_entries()? {
-            let mut pairs = vec![];
-            for t in list.array_values()?.unwrap_or_default() {
-                pairs.push((text(&t.get("channel")?)?, text(&t.get("instId")?)?));
-            }
-            topics.insert(String::from_utf16_lossy(&k), pairs);
-        }
+    let previous = sequence_value(s, &update, "prevSeqId")?;
+    let expected = s
+        .this
+        .get("orderBookSequenceByHandler")?
+        .call_method("get", vec![handler.clone()])?;
+    if !sequence.truthy()
+        || !previous.truthy()
+        || !expected.truthy()
+        || !previous.strict_equals(&expected)
+    {
+        s.this.call_method("recoverOrderBook", vec![handler])?;
+        return Ok(false);
     }
-    Ok(BookState {
-        sequences: RefCell::new(sequences),
-        recovering: RefCell::new(recovering),
-        topics: RefCell::new(topics),
-    })
+    s.this
+        .get("orderBookSequenceByHandler")?
+        .call_method("set", vec![handler, sequence])?;
+    Ok(true)
 }
 
-/// Write the typed copy back, keeping surviving entries in their JS order.
-fn store_state(this: &Js, state: &BookState) -> Result<(), Thrown> {
-    if let Js::Map(map) = this.get("orderBookSequenceByHandler")? {
-        let typed = state.sequences.borrow();
-        let mut next: Vec<(Js, Js)> = vec![];
-        let mut seen = HashSet::new();
-        for (k, _) in map.borrow().iter() {
-            let key = text(k)?;
-            if let Some(v) = typed.get(&key) {
-                next.push((k.clone(), Js::str(v)));
-                seen.insert(key);
-            }
-        }
-        for (k, v) in typed.iter().filter(|(k, _)| !seen.contains(*k)) {
-            next.push((Js::str(k), Js::str(v)));
-        }
-        let mut slots = map.borrow_mut();
-        slots.retain(|(key, _)| next.iter().any(|(next, _)| next.same_value_zero(key)));
-        for (key, value) in next {
-            if let Some(slot) = slots
-                .iter_mut()
-                .find(|(existing, _)| existing.same_value_zero(&key))
-            {
-                slot.1 = value;
-            } else {
-                slots.push((key, value));
-            }
-        }
+fn recover_selected(s: &OkxScope, handler: Js) -> Result<(), Thrown> {
+    s.this
+        .get("orderBookSequenceByHandler")?
+        .call_method("delete", vec![handler.clone()])?;
+    s.this
+        .get("recoveringOrderBooks")?
+        .call_method("add", vec![handler.clone()])?;
+    let topics = s.this.get("topics")?;
+    let topic = optional(&topics.get_property(&handler)?, "0")?;
+    if !topic.truthy() || !s.this.get("isConnected")?.truthy() || s.this.get("isDisposed")?.truthy()
+    {
+        return Ok(());
     }
-    if let Js::Set(set) = this.get("recoveringOrderBooks")? {
-        let typed = state.recovering.borrow();
-        let mut next: Vec<Js> = vec![];
-        let mut seen = HashSet::new();
-        for v in set.borrow().iter() {
-            let key = text(v)?;
-            if typed.contains(&key) {
-                next.push(v.clone());
-                seen.insert(key);
-            }
-        }
-        next.extend(
-            typed
-                .iter()
-                .filter(|k| !seen.contains(*k))
-                .map(|k| Js::str(k)),
-        );
-        let mut slots = set.borrow_mut();
-        slots.retain(|key| next.iter().any(|next| next.same_value_zero(key)));
-        for value in next {
-            if !slots
-                .iter()
-                .any(|existing| existing.same_value_zero(&value))
-            {
-                slots.push(value);
-            }
-        }
+    for operation in ["unsubscribe", "subscribe"] {
+        let send = s.this.get("send")?;
+        let stringify = s.global("JSON.stringify")?;
+        let wire = stringify.call(
+            Js::Undefined,
+            vec![Js::object(vec![
+                ("op", Js::str(operation)),
+                ("args", Js::array(vec![topic.clone()])),
+            ])],
+        )?;
+        send.call(s.this.clone(), vec![wire])?;
     }
     Ok(())
-}
-
-/// Run a typed order-book body over the loaded state, then write the state back.
-fn with_book<T>(
-    s: &OkxScope,
-    body: impl FnOnce(&Rc<BaseWebSocket>, &BookState) -> Result<T, ExchangeError>,
-) -> Result<T, Thrown> {
-    let socket = core(s)?;
-    let state = load_state(&s.this)?;
-    let result = body(&socket, &state);
-    store_state(&s.this, &state)?;
-    result.map_err(Thrown::from)
-}
-
-fn recover(
-    socket: &Rc<BaseWebSocket>,
-    state: &BookState,
-    handler: &str,
-) -> Result<(), ExchangeError> {
-    public_socket::recover_order_book(
-        socket,
-        handler,
-        &state.sequences,
-        &state.recovering,
-        &state.topics,
-    )
 }
 
 fn public_connect(s: &OkxScope) -> Result<(), Thrown> {
@@ -1022,24 +972,10 @@ fn new_public(s: &OkxScope) -> Result<(), Thrown> {
         Ok(Js::Undefined)
     });
     sync_member(s, "acceptOrderBookSequence", |s, a| {
-        let handler = text(&arg(&a, 0))?;
-        let json = arg(&a, 1);
-        let accepted = with_book(s, |socket, st| {
-            let recover = |h: &str| recover(socket, st, h);
-            public_socket::accept_order_book_sequence(
-                &handler,
-                &json,
-                &st.sequences,
-                &st.recovering,
-                &recover,
-            )
-        })?;
-        Ok(Js::Bool(accepted))
+        accept_sequence(s, arg(&a, 0), arg(&a, 1)).map(Js::Bool)
     });
     sync_member(s, "recoverOrderBook", |s, a| {
-        let handler = text(&arg(&a, 0))?;
-        with_book(s, |socket, st| recover(socket, st, &handler))?;
-        Ok(Js::Undefined)
+        recover_selected(s, arg(&a, 0)).map(|_| Js::Undefined)
     });
     ticker_members(s);
     sync_member(s, "listenOrderBook", |s, a| {
