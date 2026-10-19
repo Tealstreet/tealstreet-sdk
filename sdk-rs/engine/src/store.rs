@@ -11,7 +11,8 @@ pub struct Store {
     market_by_symbol: HashMap<String, u32>,
     market_by_id: HashMap<String, u32>,
     tickers: Vec<Ticker>,
-    ticker_by_symbol: HashMap<String, u32>,
+    ticker_by_market: Vec<u32>,
+    tickers_without_market: HashMap<String, u32>,
     orders: Vec<Order>,
     positions: Vec<Position>,
     balance: Balance,
@@ -118,6 +119,7 @@ impl Store {
             .map(|(index, market)| (market.id.clone(), index as u32))
             .collect();
         self.markets = markets;
+        self.rebuild_ticker_index();
         self.changes.markets = true;
         self.set_loaded(|loaded| loaded.markets = true);
     }
@@ -127,27 +129,46 @@ impl Store {
     }
 
     pub fn ticker(&self, symbol: &str) -> Option<&Ticker> {
-        self.ticker_by_symbol
-            .get(symbol)
-            .map(|&index| &self.tickers[index as usize])
+        self.ticker_index(symbol)
+            .map(|index| &self.tickers[index as usize])
     }
 
     pub fn set_tickers(&mut self, tickers: Vec<Ticker>) {
-        self.ticker_by_symbol = tickers
-            .iter()
-            .enumerate()
-            .map(|(index, ticker)| (ticker.symbol.clone(), index as u32))
-            .collect();
         self.tickers = tickers;
+        self.rebuild_ticker_index();
         self.changes.tickers_replaced = true;
         self.ticker_masks = vec![0; self.tickers.len()];
         self.dirty_tickers.clear();
         self.set_loaded(|loaded| loaded.tickers = true);
     }
 
+    fn ticker_index(&self, symbol: &str) -> Option<u32> {
+        match self.market_index(symbol) {
+            Some(market) => self
+                .ticker_by_market
+                .get(market as usize)
+                .copied()
+                .filter(|&index| index != wire::NONE),
+            None => self.tickers_without_market.get(symbol).copied(),
+        }
+    }
+
+    fn rebuild_ticker_index(&mut self) {
+        self.ticker_by_market = vec![wire::NONE; self.markets.len()];
+        self.tickers_without_market = HashMap::new();
+        for (index, ticker) in self.tickers.iter().enumerate() {
+            if let Some(&market) = self.market_by_symbol.get(&ticker.symbol) {
+                self.ticker_by_market[market as usize] = index as u32;
+            } else {
+                self.tickers_without_market
+                    .insert(ticker.symbol.clone(), index as u32);
+            }
+        }
+    }
+
     /// Mutate one ticker in place; changed fields go out with the next deltas.
     pub fn update_ticker(&mut self, symbol: &str, update: impl FnOnce(&mut Ticker)) {
-        let Some(&index) = self.ticker_by_symbol.get(symbol) else {
+        let Some(index) = self.ticker_index(symbol) else {
             return;
         };
         let ticker = &mut self.tickers[index as usize];
@@ -371,6 +392,9 @@ impl Store {
     /// Write the drained changes as frame sections.
     pub fn write<'a>(&'a self, pending: &Pending, w: &mut FrameWriter<'a>) {
         let changes = &pending.changes;
+        if changes.markets || changes.tickers_replaced {
+            self.reserve_tables(pending, w);
+        }
         if changes.markets {
             self.write_markets(w);
         }
@@ -432,15 +456,95 @@ impl Store {
         self.market_index(symbol).unwrap_or(wire::NONE)
     }
 
+    fn reserve_tables(&self, pending: &Pending, w: &mut FrameWriter<'_>) {
+        fn table(rows: usize, words: usize, floats: usize) -> usize {
+            8 + (4 + rows * words * 4).next_multiple_of(8) + rows * floats * 8
+        }
+        let changes = &pending.changes;
+        let mut bytes = 0;
+        let mut strings = 0;
+        let mut indexed_strings = 0;
+        let mut string_refs = 0;
+        let mut string_bytes = 0;
+        if changes.markets {
+            bytes += table(self.markets.len(), 5, 10);
+            // Most market tables share one quote. Other quotes can grow normally.
+            strings += self.markets.len() * 3 + usize::from(!self.markets.is_empty());
+            indexed_strings += usize::from(!self.markets.is_empty());
+            string_refs += self.markets.len() * 3;
+            string_bytes += self
+                .markets
+                .iter()
+                .map(|m| m.id.len() + m.symbol.len() + m.base.len())
+                .sum::<usize>();
+            if let Some(first) = self.markets.first() {
+                string_refs += 1;
+                string_bytes += first.quote.len();
+                for market in self
+                    .markets
+                    .iter()
+                    .skip(1)
+                    .filter(|m| m.quote != first.quote)
+                {
+                    string_refs += 1;
+                    string_bytes += market.quote.len();
+                }
+            }
+        }
+        if changes.tickers_replaced {
+            bytes += table(self.tickers.len(), 1, wire::TICKER_COLUMNS);
+        } else if !pending.ticker_deltas.is_empty() {
+            bytes += 8 + pending
+                .ticker_deltas
+                .iter()
+                .map(|(_, mask)| (2 + mask.count_ones() as usize) * 8)
+                .sum::<usize>();
+        }
+        if changes.orders {
+            bytes += table(self.orders.len(), 5, 7);
+            for order in &self.orders {
+                for value in [
+                    Some(order.id.as_str()),
+                    order.client_order_id.as_deref(),
+                    order.parent_id.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    strings += 1;
+                    indexed_strings += 1;
+                    string_refs += 1;
+                    string_bytes += value.len();
+                }
+            }
+        }
+        if changes.positions {
+            bytes += table(self.positions.len(), 2, 9);
+        }
+        if changes.settings {
+            bytes += table(self.settings.len(), 2, 1);
+        }
+        if changes.balance {
+            bytes += 40;
+        }
+        if changes.status {
+            bytes += 24;
+        }
+        if string_refs > 0 {
+            bytes += (8 + 4 + (string_refs + 1) * 4 + string_bytes).next_multiple_of(8);
+        }
+        w.reserve(bytes, strings, indexed_strings);
+    }
+
     fn write_markets<'a>(&'a self, w: &mut FrameWriter<'a>) {
         let markets = &self.markets;
         w.begin(section::MARKETS);
         w.u32(markets.len() as u32);
         for m in markets {
             let refs = [
-                w.string(&m.id),
-                w.string(&m.symbol),
-                w.string(&m.base),
+                w.unshared_string(&m.id),
+                w.unshared_string(&m.symbol),
+                w.unshared_string(&m.base),
                 w.string(&m.quote),
             ];
             w.u32s(refs);
@@ -584,6 +688,110 @@ mod tests {
             symbol: symbol.into(),
             ..Ticker::default()
         }
+    }
+
+    fn market(symbol: &str) -> Market {
+        use crate::model::{Limits, MinMax, Precision};
+        Market {
+            id: symbol.into(),
+            symbol: symbol.into(),
+            pretty_symbol: None,
+            base: symbol.into(),
+            quote: "USDT".into(),
+            active: true,
+            precision: Precision {
+                amount: 0.001,
+                price: 0.01,
+            },
+            limits: Limits {
+                amount: MinMax { min: 0.0, max: 1.0 },
+                leverage: MinMax {
+                    min: 1.0,
+                    max: 100.0,
+                },
+                price: None,
+            },
+            contract_size: None,
+            is_expiring: None,
+            is_inverse: None,
+            is_spot: None,
+            is_perpetual: None,
+            is_read_only: None,
+            taker_fee: None,
+            maker_fee: None,
+        }
+    }
+
+    #[test]
+    fn ticker_lookups_allow_symbols_without_markets() {
+        let mut store = Store::default();
+        store.set_markets(vec![market("A"), market("B")]);
+        store.set_tickers(vec![ticker("UNKNOWN"), ticker("B")]);
+        store.take_pending();
+
+        assert!(store.ticker("A").is_none());
+        assert!(store.ticker("ABSENT").is_none());
+        store.update_ticker("ABSENT", |_| panic!("missing ticker updated"));
+        store.update_ticker("UNKNOWN", |t| t.last = 3.0);
+        store.update_ticker("B", |t| t.last = 7.0);
+        assert_eq!(store.ticker("UNKNOWN").unwrap().last, 3.0);
+        assert_eq!(store.ticker("B").unwrap().last, 7.0);
+        assert_eq!(
+            store.take_pending().ticker_deltas,
+            [(0, 1 << 2), (1, 1 << 2)]
+        );
+    }
+
+    #[test]
+    fn ticker_duplicates_use_the_last_row_with_or_without_markets() {
+        let mut store = Store::default();
+        store.set_markets(vec![market("A")]);
+        store.set_tickers(vec![ticker("A"), ticker("A"), ticker("X"), ticker("X")]);
+        store.take_pending();
+        store.update_ticker("A", |t| t.last = 4.0);
+        store.update_ticker("X", |t| t.last = 8.0);
+
+        assert_eq!(store.ticker("A").unwrap().last, 4.0);
+        assert_eq!(store.ticker("X").unwrap().last, 8.0);
+        assert_eq!(store.tickers()[0].last, 0.0);
+        assert_eq!(store.tickers()[2].last, 0.0);
+        assert_eq!(
+            store.take_pending().ticker_deltas,
+            [(1, 1 << 2), (3, 1 << 2)]
+        );
+        store.set_tickers(vec![ticker("X")]);
+        assert!(store.ticker("A").is_none());
+        assert!(store.ticker("X").is_some());
+        store.set_tickers(vec![]);
+        assert!(store.ticker("X").is_none());
+    }
+
+    #[test]
+    fn market_replacement_preserves_existing_ticker_lookups_and_deltas() {
+        let mut store = Store::default();
+        store.set_tickers(vec![ticker("A"), ticker("B"), ticker("X")]);
+        store.set_markets(vec![market("A"), market("B")]);
+        store.take_pending();
+
+        store.update_ticker("A", |t| t.last = 1.0);
+        store.set_markets(vec![market("X"), market("B"), market("NEW")]);
+        store.update_ticker("B", |t| t.last = 2.0);
+        store.update_ticker("X", |t| t.last = 3.0);
+        assert_eq!(store.ticker("A").unwrap().last, 1.0);
+        assert_eq!(store.ticker("B").unwrap().last, 2.0);
+        assert_eq!(store.ticker("X").unwrap().last, 3.0);
+        assert!(store.ticker("NEW").is_none());
+        assert_eq!(
+            store.take_pending().ticker_deltas,
+            [(0, 1 << 2), (1, 1 << 2), (2, 1 << 2)]
+        );
+
+        store.set_markets(vec![]);
+        store.update_ticker("X", |t| t.last = 4.0);
+        store.set_markets(vec![market("B"), market("X"), market("A")]);
+        assert_eq!(store.ticker("A").unwrap().last, 1.0);
+        assert_eq!(store.ticker("B").unwrap().last, 2.0);
+        assert_eq!(store.ticker("X").unwrap().last, 4.0);
     }
 
     #[test]

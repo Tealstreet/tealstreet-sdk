@@ -115,12 +115,25 @@ impl<'a> FrameWriter<'a> {
         self.sections == 0
     }
 
+    /// Reserve known table sizes before writing, avoiding overlapping growth allocations.
+    pub fn reserve(&mut self, bytes: usize, strings: usize, indexed_strings: usize) {
+        self.buf.reserve_exact(bytes);
+        self.strings.reserve_exact(strings);
+        self.string_index.reserve(indexed_strings);
+    }
+
+    /// Append identities directly; deduplication is only useful for shared labels.
+    pub fn unshared_string(&mut self, value: &'a str) -> u32 {
+        let index = self.strings.len() as u32;
+        self.strings.push(value);
+        index
+    }
+
     pub fn string(&mut self, value: &'a str) -> u32 {
         if let Some(&index) = self.string_index.get(value) {
             return index;
         }
-        let index = self.strings.len() as u32;
-        self.strings.push(value);
+        let index = self.unshared_string(value);
         self.string_index.insert(value, index);
         index
     }
@@ -254,6 +267,129 @@ mod tests {
 
     fn u32_at(buf: &[u8], at: usize) -> u32 {
         u32::from_le_bytes(buf[at..at + 4].try_into().unwrap())
+    }
+
+    #[test]
+    fn reservation_preserves_bytes_and_reuses_the_output_buffer() {
+        fn write(mut writer: FrameWriter<'_>) -> Vec<u8> {
+            writer.begin(section::MARKETS);
+            let first = writer.string("BTCUSDT");
+            let second = writer.string("USDT");
+            writer.u32s([first, second, first]);
+            writer.f64(96000.0);
+            writer.end();
+            writer.finish()
+        }
+        let expected = write(FrameWriter::new(Vec::new(), 1.0));
+        let mut writer = FrameWriter::new(Vec::new(), 1.0);
+        writer.reserve(expected.len() - 16, 2, 2);
+        let pointer = writer.buf.as_ptr();
+        let actual = write(writer);
+        assert_eq!(actual, expected);
+        assert_eq!(actual.as_ptr(), pointer);
+        let mut writer = FrameWriter::new(actual, 1.0);
+        writer.reserve(expected.len() - 16, 2, 2);
+        assert_eq!(writer.buf.as_ptr(), pointer);
+        assert_eq!(write(writer), expected);
+    }
+
+    #[test]
+    fn unshared_repeated_labels_decode_with_the_same_string_values() {
+        let mut writer = FrameWriter::new(Vec::new(), 1.0);
+        writer.begin(section::MARKETS);
+        let first_base = writer.unshared_string("BTC");
+        let first_quote = writer.string("USDT");
+        let second_base = writer.unshared_string("BTC");
+        let second_quote = writer.string("USDT");
+        assert_ne!(first_base, second_base);
+        assert_eq!(first_quote, second_quote);
+        assert_eq!(writer.string_index.len(), 1);
+        writer.u32s([first_base, first_quote, second_base, second_quote]);
+        writer.end();
+        let frame = writer.finish();
+        let strings = sections(&frame)
+            .find(|(kind, _)| *kind == section::STRINGS)
+            .unwrap()
+            .1;
+        let data = 4 + (u32_at(strings, 0) as usize + 1) * 4;
+        let read = |index: u32| {
+            let from = u32_at(strings, (index as usize + 1) * 4) as usize;
+            let to = u32_at(strings, (index as usize + 2) * 4) as usize;
+            std::str::from_utf8(&strings[data + from..data + to]).unwrap()
+        };
+        assert_eq!(read(first_base), "BTC");
+        assert_eq!(read(second_base), "BTC");
+        assert_eq!(read(first_quote), "USDT");
+        assert_eq!(read(second_quote), "USDT");
+    }
+
+    #[test]
+    fn large_market_tables_reserve_the_initial_frame_without_geometric_slack() {
+        let mut store = Store::default();
+        let markets: Vec<_> = (0..697)
+            .map(|index| Market {
+                id: format!("TOKEN{index}/USDT"),
+                symbol: format!("TOKEN{index}USDT"),
+                pretty_symbol: None,
+                base: format!("TOKEN{index}"),
+                quote: "USDT".into(),
+                active: true,
+                precision: Precision {
+                    amount: 0.001,
+                    price: 0.1,
+                },
+                limits: Limits {
+                    amount: MinMax {
+                        min: 0.0,
+                        max: 100.0,
+                    },
+                    leverage: MinMax {
+                        min: 1.0,
+                        max: 100.0,
+                    },
+                    price: None,
+                },
+                contract_size: None,
+                is_expiring: None,
+                is_inverse: None,
+                is_spot: None,
+                is_perpetual: None,
+                is_read_only: None,
+                taker_fee: None,
+                maker_fee: None,
+            })
+            .collect();
+        store.set_tickers(
+            markets
+                .iter()
+                .map(|market| Ticker {
+                    id: market.id.clone(),
+                    symbol: market.symbol.clone(),
+                    ..Ticker::default()
+                })
+                .collect(),
+        );
+        store.set_markets(markets);
+        let pending = store.everything();
+        let mut writer = FrameWriter::new(Vec::new(), 1.0);
+        store.write(&pending, &mut writer);
+        assert_eq!(writer.strings.len(), 3 * 697 + 1);
+        assert_eq!(writer.strings.capacity(), 3 * 697 + 1);
+        assert_eq!(writer.string_index.len(), 1);
+        assert!(writer.string_index.capacity() < 8);
+        let pointer = writer.buf.as_ptr();
+        let capacity = writer.buf.capacity();
+        let frame = writer.finish();
+        assert_eq!(frame.as_ptr(), pointer, "the strings trailer must fit");
+        assert!(
+            capacity < frame.len() + 16,
+            "bounded estimate, not geometric slack"
+        );
+        let mut writer = FrameWriter::new(frame, 1.0);
+        store.write(&pending, &mut writer);
+        assert_eq!(writer.buf.capacity(), capacity);
+        let frame = writer.finish();
+        assert_eq!(frame.as_ptr(), pointer);
     }
 
     #[test]

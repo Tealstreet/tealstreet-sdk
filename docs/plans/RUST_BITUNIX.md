@@ -155,3 +155,30 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
 - Public replay found tick precision powf rounding noise, corrected by integer
   decimal scaling. Public CPU and retained/peak memory still require a final
   passing run before integration. No all-gates-passed claim yet.
+
+- Private tape now exercises remote close/reconnect/login and distinct identical
+  historical fills; 42 delivered lifecycle/message/command records PASS. Venue
+  suite now 46 tests PASS; bans/fmt/venue+native+wasm clippy PASS. Root tests rerun:
+  all 27 tasks PASS. Binance public PASS; expanded Binance private metadata
+  comparison needs precise large-ID normalization before its final rerun.
+- Corrected startup measurement by yielding before the baseline GC, so transient
+  wasm-loader buffers cannot subtract from retained memory. This exposed a real
+  public memory loss (Rust 2.7 MB vs TS 2.0 MB); investigating first-frame buffer
+  growth, not declaring the performance gate satisfied. Preallocating table and
+  string capacity and moving immutable routing metadata outside timed playback.
+
+- Engine reductions: exact full-table frame reservation; market identity strings
+  bypass the dedup index (quotes still share); ticker lookup uses market-indexed
+  slots, retaining a fallback only for unknown markets. Engine 16 tests PASS,
+  including duplicate/reordered markets and decoded repeated strings. Public
+  socket shards hold market index ranges, not three copies of symbol strings.
+- Review corrected constructor-baseline asymmetry and retained TS consumer books.
+  A three-run public replay passed (CPU 785.7/760.7 ms TS/Rust, retained 2.3/2.0 MB,
+  sampled peak 30.0/29.5 MB), but lifecycle/bootstrap review then required removing
+  readiness before playback. That fairer timing exposes another small CPU loss;
+  removing a redundant public JSON data scan is the next concrete optimization.
+- Recorder excludes shutdown disposal and distinguishes per-URL startup cohorts;
+  playback drives recorded opens/closes inline, waits only for the current
+  subscribed topic and checks active subscriptions at completion. No V8 tiering
+  flags were added. GC/ArrayBuffer deallocation must settle before retained
+  measurement, as startup buffers can otherwise appear retained spuriously.
