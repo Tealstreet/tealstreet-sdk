@@ -574,6 +574,14 @@ impl WasmEngine {
         self.flush()
     }
 
+    /// Like `wsMessage`, returning `undefined` when there are no host actions.
+    /// Hosts can avoid decoding an empty UTF-8 string on market-data messages.
+    #[wasm_bindgen(js_name = wsMessageActions)]
+    pub fn ws_message_actions(&mut self, socket: u32, text: &str, now: f64) -> Option<String> {
+        let actions = self.ws_message(socket, text, now);
+        (!actions.is_empty()).then_some(actions)
+    }
+
     #[wasm_bindgen(js_name = wsClose)]
     pub fn ws_close(&mut self, socket: u32, code: u16, now: f64) -> String {
         let socket = SocketId(socket);
@@ -648,5 +656,62 @@ impl WasmEngine {
         self.inner
             .frame(now, market_only)
             .map(js_sys::Uint8Array::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct Messages {
+        actions: Vec<Action>,
+    }
+
+    impl AnyEngine for Messages {
+        fn start(&mut self, _now: f64) {}
+        fn handle(&mut self, _now: f64, event: Event<'_>) {
+            if let Event::WsMessage { socket, text } = event
+                && text != "quiet"
+            {
+                for prefix in ["first", "second"] {
+                    self.actions.push(Action::WsSend {
+                        socket,
+                        text: format!("{prefix}:{text}"),
+                    });
+                }
+            }
+        }
+        fn drain(&mut self) -> Vec<Action> {
+            std::mem::take(&mut self.actions)
+        }
+        fn frame(&mut self, _now: f64, _market_only: bool) -> Option<&[u8]> {
+            None
+        }
+        fn snapshot(&mut self, _now: f64) -> &[u8] {
+            &[]
+        }
+    }
+
+    #[test]
+    fn optional_websocket_actions_preserve_legacy_output_order_and_drain_once() {
+        let engine = || WasmEngine {
+            inner: Box::<Messages>::default(),
+        };
+        let mut legacy = engine();
+        let mut optional = engine();
+        assert_eq!(legacy.ws_message(7, "quiet", 1.), "");
+        assert_eq!(optional.ws_message_actions(7, "quiet", 1.), None);
+        let expected = legacy.ws_message(7, "payload", 2.);
+        assert_eq!(
+            expected,
+            r#"[{"op":"wsSend","socket":7,"text":"first:payload"},{"op":"wsSend","socket":7,"text":"second:payload"}]"#
+        );
+        assert_eq!(
+            optional.ws_message_actions(7, "payload", 2.),
+            Some(expected)
+        );
+        assert_eq!(legacy.ws_message(7, "quiet", 3.), "");
+        assert_eq!(optional.ws_message_actions(7, "quiet", 3.), None);
     }
 }

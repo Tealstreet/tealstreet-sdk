@@ -121,6 +121,7 @@ export class EngineHost {
     switch (action.op) {
       case 'wsConnect': {
         const id = action.socket;
+        const wsMessage = typeof engine.wsMessageActions === 'function' ? engine.wsMessageActions : engine.wsMessage;
         if (action.headers?.length && !transport.webSocketHeaders) {
           this.handlers.onLog?.('warning', 'WebSocket upgrade headers unavailable; continuing REST reconciliation');
           transport.setTimeout(() => {
@@ -131,7 +132,7 @@ export class EngineHost {
         const socket = transport.connect(action.url, {
           headers: action.headers && Object.fromEntries(action.headers),
           onOpen: () => { if (!this.disposed) this.run(engine.wsOpen(id, transport.now())); },
-          onMessage: (text) => { if (!this.disposed) this.run(engine.wsMessage(id, text, transport.now())); },
+          onMessage: (text) => { if (!this.disposed) this.run(wsMessage.call(engine, id, text, transport.now())); },
           onClose: (code) => {
             if (this.disposed) return;
             this.sockets.delete(id);

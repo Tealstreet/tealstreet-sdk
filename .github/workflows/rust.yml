@@ -102,7 +102,7 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Eleven venues: measured 3,775,242 bytes; fixed 4 MiB aggregate budget.
+      # Eleven venues: measured 3,776,342 bytes; fixed 4 MiB aggregate budget.
       WASM_BUDGET_BYTES: 4194304
     defaults:
       run:

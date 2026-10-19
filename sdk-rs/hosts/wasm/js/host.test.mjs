@@ -3,6 +3,50 @@ import test from 'node:test';
 import { createServer } from 'node:net';
 import { EngineHost, nativeTransport, socketMessages } from './host.mjs';
 
+for (const fast of [false, true]) {
+  test(`WebSocket actions preserve ordering and empty results with ${fast ? 'the optional entry' : 'legacy fallback'}`, () => {
+    const calls = [];
+    const effects = [];
+    const engine = {
+      wsMessage(socket, text, now) {
+        assert.equal(this, engine);
+        calls.push(['legacy', socket, text, now]);
+        return text === 'quiet' ? '' : actions;
+      },
+    };
+    const actions = JSON.stringify([
+      { op: 'wsSend', socket: 7, text: 'first' },
+      { op: 'log', level: 'info', message: 'between' },
+      { op: 'wsSend', socket: 7, text: 'second' },
+    ]);
+    if (fast) engine.wsMessageActions = function (socket, text, now) {
+      assert.equal(this, engine);
+      calls.push(['fast', socket, text, now]);
+      return text === 'quiet' ? undefined : actions;
+    };
+    let receive;
+    const host = new EngineHost(engine, {
+      now: () => 123,
+      connect: (_url, handlers) => {
+        receive = handlers.onMessage;
+        return { send: (text) => effects.push(text), close() {} };
+      },
+    }, { onLog: (_level, message) => effects.push(message) });
+    host.execute({ op: 'wsConnect', socket: 7, url: 'wss://example.test' });
+    receive('quiet');
+    assert.deepEqual(effects, []);
+    receive('payload');
+    assert.deepEqual(effects, ['first', 'between', 'second']);
+    assert.deepEqual(calls, [
+      [fast ? 'fast' : 'legacy', 7, 'quiet', 123],
+      [fast ? 'fast' : 'legacy', 7, 'payload', 123],
+    ]);
+    host.dispose();
+    receive('late');
+    assert.equal(calls.length, 2);
+  });
+}
+
 test('command failures preserve partial placement metadata', async () => {
   const details = { message: 'second order rejected', partialOrderIds: ['accepted'], partialOrderCount: 1, totalOrderCount: 2, failedOrderIndex: 1 };
   const engine = {
