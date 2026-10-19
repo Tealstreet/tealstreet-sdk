@@ -1031,3 +1031,7 @@ time advancement. Registering or polling a timer must not advance the clock.
 Its five/sixth-request witness matches the real axios-rate-limit dependency with
 the maintained constructor's options, including frozen wall time. Preserve the
 unlimited/secondary routing checks and all 36 existing constructor profiles.
+
+The private onOpen specific-claims review records bounded disposal/recovery
+differences separately from the shared original-cause diagnostic correction.
+See `../safe-cex-exchange/PRIVATE_OPEN_REVIEW.md`; no Wasm-only row is closed.

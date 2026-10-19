@@ -2154,3 +2154,7 @@ Array.prototype.constructor is its own nonenumerable writable/configurable data
 property and retains the installed Array facade. ARRAY_STORAGE_REVIEW.md records
 the Node identity/mutation proof and the approved single-pair-per-realm Rc cycle
 limit; repeated operations and installations do not grow that retained graph.
+
+Private authentication recovery reports the supplied ExchangeError through the
+runtime exception sink before warning/reconnect, preserving its retained cause.
+See `PRIVATE_OPEN_REVIEW.md` for the bounded disposal/recovery differences.

@@ -265,3 +265,7 @@ report until good siblings finish, and leaves the whole row unchanged. Numeric
 patches call the original Store method directly; later source and subscriber
 failures retain precedence and prethrow writes. The real exchange_trait cases
 check native graph slots before typed projection across all six families.
+
+The private onOpen specific-claims review records bounded disposal/recovery
+differences separately from the shared original-cause diagnostic correction.
+See `../safe-cex-exchange/PRIVATE_OPEN_REVIEW.md`; no Wasm-only row is closed.
