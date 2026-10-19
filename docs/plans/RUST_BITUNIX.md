@@ -428,3 +428,16 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   pass all 6,562 tests. This resolves load-induced HyroTrader import timeouts
   without changing test deadlines or product code. Public/private final gates
   and corrected-head CI remain tracked on PR #1309 before merge.
+
+### Recorded HTTP completion correction
+
+- Combined public run passed all seven prior venues, then exposed MEXC's
+  deterministic intermediate depth mismatch. Requests and selected snapshot
+  versions matched; replay completed an in-flight HTTP snapshot before its
+  recorded completion, skipping intervening depth messages.
+- Both adapters now await the shared recorded completion only during active
+  public replay. Request eligibility/consumption remains at request time;
+  private/startup timing stays real. No venue changes or weaker comparison.
+- MEXC complete single-run gate PASS including all 144 bookEvents, helper suite
+  53 PASS. Eight public medians are being repeated; private variants continue.
+  Independent review and final CI/results are tracked on PR #1309.

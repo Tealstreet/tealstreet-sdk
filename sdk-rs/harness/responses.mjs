@@ -46,7 +46,8 @@ export class Responses {
       responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId)"/g,
         (_, field) => JSON.stringify(sent[field] ?? null));
     }
-    return { status: record.status, headers: record.headers ?? '', body: responseBody };
+    return { status: record.status, headers: record.headers ?? '', body: responseBody,
+      ...(Number.isFinite(record.t) ? { recordedAt: record.t } : {}) };
   }
   unusedWrites() {
     return [...this.queues.values()].flat().filter((r) => (this.isWrite?.(r.method, r.url) ?? r.method !== 'GET')).length;

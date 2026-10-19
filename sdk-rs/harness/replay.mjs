@@ -479,7 +479,7 @@ async function runRust() {
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket, 1000, true) };
     },
     request: async ({ method, url, body: requestBody, headers }) => {
-      const { status, headers: responseHeaders = '', body } = tape.respond(method, url, requestBody, headers);
+      const { status, headers: responseHeaders = '', body } = await tape.waitForResponse(tape.respond(method, url, requestBody, headers));
       const chunks = async function* () {
         const bytes = encoder.encode(body);
         for (let offset = 0; offset < bytes.length; offset += 16 * 1024) yield bytes.subarray(offset, offset + 16 * 1024);
@@ -676,7 +676,7 @@ async function runTs() {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const { status, body, headers: responseHeaders } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data, config.headers?.toJSON?.() ?? config.headers);
+    const { status, body, headers: responseHeaders } = await tape.waitForResponse(tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data, config.headers?.toJSON?.() ?? config.headers));
     // The raw body: the client's own transformResponse parses it, big ids included.
     const response = { data: body, status, statusText: String(status), headers: Object.fromEntries((responseHeaders ?? '').split('\n').filter(Boolean).map((line) => { const colon = line.indexOf(':'); return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()]; })), config, request: {} };
     if (status >= 400) {

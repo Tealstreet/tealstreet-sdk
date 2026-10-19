@@ -320,3 +320,32 @@ test('recorded startup opens can finish asynchronous socket and subscription boo
     assert.deepEqual(seen, ['subscribed', 1700000000802]);
   } finally { clock.restore(); }
 });
+
+test('active public HTTP completion follows its recorded time while consumption stays at request time', async () => {
+  const response = { type: 'http', t: 3000, method: 'POST', url: 'https://example.test/change', status: 200, body: 'done' };
+  const responses = new Responses([response], (method, url) => method + url);
+  const tape = new Tape([], { responses });
+  const clock = new ReplayClock(1700000000000);
+  tape.replayClock = clock;
+  const seen = [];
+  clock.install();
+  try {
+    clock.start();
+    setTimeout(() => {
+      const reply = tape.respond('POST', response.url);
+      assert.equal(responses.unusedWrites(), 0);
+      assert.equal(tape.respond('POST', response.url).status, 599);
+      tape.waitForResponse(reply).then(() => seen.push(Date.now()));
+    }, 1000);
+    await clock.advance(2000);
+    assert.deepEqual(seen, []);
+    await clock.advance(3000);
+    assert.deepEqual(seen, [1700000003000]);
+  } finally { clock.restore(); }
+  const startup = new Tape([]);
+  const privateTape = new Tape([], { isPrivate: true });
+  privateTape.replayClock = { active: true, epoch: 0, time: 0 };
+  const reply = { recordedAt: 3000 };
+  assert.equal(await startup.waitForResponse(reply), reply);
+  assert.equal(await privateTape.waitForResponse(reply), reply);
+});

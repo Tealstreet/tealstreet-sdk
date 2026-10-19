@@ -222,6 +222,15 @@ export class Tape {
     return { status: record.status, headers: record.headers ?? '', body: record.body };
   }
 
+  async waitForResponse(response) {
+    // A recorded completion follows any depth frames received while its request
+    // was in flight. Startup and private replay keep their existing real timing.
+    if (!this.isPrivate && this.replayClock?.active && response.recordedAt > this.responseTime) {
+      await new Promise((resolve) => setTimeout(resolve, response.recordedAt - this.responseTime));
+    }
+    return response;
+  }
+
   connect(url, onOpen, onMessage, onClose) {
     const rawUrl = url;
     url = this.canonicalize(url);
