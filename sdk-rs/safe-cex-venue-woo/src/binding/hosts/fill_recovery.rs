@@ -387,7 +387,7 @@ impl body::Host for Frame {
         delay: f64,
         callback: Rc<dyn Fn() -> Result<Task<Js, Thrown>, Thrown>>,
     ) -> Result<Js, Thrown> {
-        Ok(schedule(self.rt()?, delay, false, callback))
+        schedule(self.rt()?, delay, false, callback)
     }
     fn error_field(&mut self, e: &Thrown, p: &[&str]) -> Result<Js, Thrown> {
         error_path(e, p)

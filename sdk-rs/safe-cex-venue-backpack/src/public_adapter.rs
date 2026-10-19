@@ -27,7 +27,7 @@ pub struct Throttle {
     pub depth: bool,
     pub last: Cell<Option<f64>>,
     pub pending: RefCell<Option<Value>>,
-    pub task: RefCell<Option<Box<dyn ExchangeTask>>>,
+    pub task: RefCell<Option<safe_cex_exchange::OwnedOperation>>,
 }
 impl Throttle {
     // Source windows: throttle(handleTickerUpdate, 1000) and throttle(updateTickerFromDepth, 100).
@@ -66,29 +66,16 @@ impl Throttle {
             if self.task.borrow().is_none() {
                 let weak = Rc::downgrade(self);
                 let delay = (self.window_ms() - (now - self.last.get().unwrap())).max(0.0) as u64;
-                let runtime = owner.runtime.clone();
-                let sleep = runtime.sleep(delay);
-                let report = runtime.clone();
-                let task = runtime.spawn_local(Box::pin(async move {
-                    let result = async {
-                        sleep.await?;
-                        if let Some(throttle) = weak.upgrade() {
-                            throttle.task.borrow_mut().take();
-                            let pending = throttle.pending.borrow_mut().take();
-                            if let Some(data) = pending {
-                                return throttle.call(data);
-                            }
+                let task = owner.base.start_timeout(delay.max(1), move || {
+                    if let Some(throttle) = weak.upgrade() {
+                        throttle.task.borrow_mut().take();
+                        let pending = throttle.pending.borrow_mut().take();
+                        if let Some(data) = pending {
+                            return throttle.call(data);
                         }
-                        Ok(())
                     }
-                    .await;
-                    if let Err(e) = result {
-                        report.report_exception(
-                            &e,
-                            &serde_json::json!({"operation":"Backpack ticker throttle"}).into(),
-                        );
-                    }
-                }));
+                    Ok(())
+                })?;
                 *self.task.borrow_mut() = Some(task);
             }
             Ok(())
@@ -425,12 +412,9 @@ impl listeners::Host for PublicFrame {
         callback: listeners::Action<ExchangeError>,
         delay: f64,
     ) -> Result<(), ExchangeError> {
-        let runtime = self.owner.runtime.clone();
-        let sleep = runtime.sleep(delay as u64);
-        self.owner.spawn(Box::pin(async move {
-            sleep.await?;
-            callback()
-        }));
+        self.owner
+            .base
+            .start_timeout((delay as u64).max(1), move || callback())?;
         Ok(())
     }
     fn subscribe_kline(&mut self, id: JsString, interval: JsString) -> Result<(), ExchangeError> {

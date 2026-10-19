@@ -217,14 +217,15 @@ impl BackpackPrivateWebSocket {
                 let canceled = Rc::new(Cell::new(false));
                 let flag = canceled.clone();
                 let cb = cb.clone();
-                let sleep = timer.runtime.sleep(delay as u64);
-                timer.spawn(Box::pin(async move {
-                    sleep.await?;
-                    if !flag.get() {
-                        cb().await?;
+                let owner = Rc::downgrade(&timer);
+                timer.base.start_timeout((delay as u64).max(1), move || {
+                    if !flag.get()
+                        && let Some(owner) = owner.upgrade()
+                    {
+                        owner.spawn(cb());
                     }
                     Ok(())
-                }));
+                })?;
                 Ok(canceled)
             },
         )
@@ -615,11 +616,12 @@ impl events::FetchHost for PrivateFrame {
         cb: events::TimeoutCallback<ExchangeError>,
         delay: f64,
     ) -> Result<(), ExchangeError> {
-        let sleep = self.owner.runtime.sleep(delay as u64);
-        self.owner.spawn(Box::pin(async move {
-            sleep.await?;
-            cb()
-        }));
+        let mut callback = Some(cb);
+        self.owner
+            .base
+            .start_timeout((delay as u64).max(1), move || {
+                callback.take().expect("one-shot callback")()
+            })?;
         Ok(())
     }
     fn fetch(&mut self, k: events::FetchKind) -> Result<Self::FetchFuture, ExchangeError> {
