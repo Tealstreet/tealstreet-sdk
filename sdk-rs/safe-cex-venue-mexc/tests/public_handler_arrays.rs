@@ -413,3 +413,79 @@ fn observed_error_code(
         serde_json::from_str(&text).expect("JSON code observation")
     })
 }
+
+#[test]
+fn retained_handler_frames_cross_the_production_core_registry() {
+    let protocol = Rc::new(MexcPublicProtocol::new(Rc::new(|v| v)));
+    let socket = BaseWebSocket::new(
+        1,
+        Rc::new(Parent(Rc::new(DefaultStore::new()))),
+        Rc::new(Runtime {
+            clocks: Cell::new(0),
+        }),
+        protocol.clone(),
+    );
+    let calls = Rc::new(Cell::new(0));
+    let seen = calls.clone();
+    let callback: MessageHandler = Rc::new(move |_| {
+        seen.set(seen.get() + 1);
+        Ok(())
+    });
+    protocol
+        .add_handler(&socket, "trade.BTCUSDT", callback)
+        .unwrap();
+    for marker in [r"\ud800", r"\udfff", r"\ud83e\udd80"] {
+        let frame = format!(
+            r#"{{"channel":"push.deal","symbol":"BTC_USDT","unused":{{"{marker}":["{marker}"]}},"overflow":1e400,"zero":-0}}"#
+        );
+        on_message(&protocol, &socket, &SocketFrame::Text(frame)).unwrap();
+    }
+    on_message(
+        &protocol,
+        &socket,
+        &SocketFrame::Text(r#"{"channel":"push.deal","symbol":"BTC_USDT","neighbor":true}"#.into()),
+    )
+    .unwrap();
+    assert_eq!(
+        calls.get(),
+        4,
+        "source-valid native graphs reach MEXC callbacks"
+    );
+    socket.dispose();
+}
+
+#[cfg(test)]
+mod retained_handler_support {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../safe-cex-exchange/tests/support/retained_handlers.rs"
+    ));
+}
+#[test]
+fn shared_core_handlers_retain_the_source_graph_and_native_fields() {
+    let protocol = Rc::new(MexcPublicProtocol::new(Rc::new(|v| v)));
+    let socket = BaseWebSocket::new(
+        1,
+        Rc::new(Parent(Rc::new(DefaultStore::new()))),
+        Rc::new(Runtime {
+            clocks: Cell::new(0),
+        }),
+        protocol.clone(),
+    );
+    let cases = retained_handler_support::source_frames("mexc", "publicWebsocket");
+    let (handlers, calls) = retained_handler_support::pair(&cases, false);
+    socket
+        .message_handlers
+        .borrow_mut()
+        .insert("trade.BTCUSDT".into(), handlers);
+    for case in cases {
+        on_message(
+            &protocol,
+            &socket,
+            &SocketFrame::Text(case["frame"].as_str().unwrap().into()),
+        )
+        .unwrap();
+    }
+    assert_eq!(calls.get(), 8);
+    socket.dispose();
+}

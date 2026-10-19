@@ -152,30 +152,33 @@ impl PrivateProtocol {
             parent.base().name,
             ExchangeName::Bybitspot | ExchangeName::Bybitinverse
         );
-        let Some(rows) = rows.array_values()? else {
+        if !rows.is_array() {
             return if dedicated {
                 Err(Thrown::type_error("data.forEach is not a function"))
             } else {
                 Ok(vec![])
             };
-        };
+        }
         if dedicated {
-            return Ok(rows);
+            return Ok(rows.array_values()?.unwrap_or_default());
         }
-        let this = &rt(parent)?.this;
-        let mut accepted = vec![];
-        for row in rows {
-            let symbol = optional(&row, "symbol")?;
-            let symbol = if symbol.is_nullish() {
-                Js::str("")
-            } else {
-                Js::String(symbol.to_js_string()?)
-            };
-            if this.call_method("tradesCategoryOf", vec![symbol])?.truthy() {
-                accepted.push(row);
-            }
-        }
-        Ok(accepted)
+        let this = rt(parent)?.this.clone();
+        // Array.filter captures length once, then reads each still-present index
+        // after the preceding selector has run. Keep that live array boundary.
+        let accepted = rows.call_method(
+            "filter",
+            vec![Js::function("rowsThisConnectionTrades", move |_, args| {
+                let row = crate::binding::value::arg(&args, 0);
+                let symbol = optional(&row, "symbol")?;
+                let symbol = if symbol.is_nullish() {
+                    Js::str("")
+                } else {
+                    Js::String(symbol.to_js_string()?)
+                };
+                this.call_method("tradesCategoryOf", vec![symbol])
+            })],
+        )?;
+        Ok(accepted.array_values()?.unwrap_or_default())
     }
 
     /// The three source variants share this order/fill body and use their own mapOrder.

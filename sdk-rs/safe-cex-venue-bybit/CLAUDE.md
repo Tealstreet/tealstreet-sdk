@@ -970,10 +970,16 @@ embedding the class name in its message. The 242-case maintained-source test
 checks both the constructed native receiver and the typed helper; primitive
 diagnostics are compared directly rather than normalized to a custom string.
 
+Shared WebSocket message handlers now borrow the canonical `Js` frame graph.
+Restore retained ingress once per frame, preserve it across all callbacks, and
+project only reached typed output fields; see exchange/WS_CONTRACT.md and the
+actual-source/native retained-handler witnesses. Do not reintroduce Value frame
+projections or a second callback registry.
+
 The SDK invoke/invoke_unit and get_account wrappers call their installed member
 before returning a waiter and await the same canonical Promise. Preserve this
 boundary when changing the typed facade; do not add a second Promise driver.
-DIVERGENCE_FIX_AUDIT.md records 27 reconciled rows and ten remaining delegated rows.
+DIVERGENCE_FIX_AUDIT.md records 29 reconciled rows and eight remaining delegated rows.
 
 Delegated history audit rows 6/16: keep the order-history mapper synchronous and
 raw/source-equal. At the final live historical-fills result, shared strict-output
@@ -1005,6 +1011,20 @@ metadata plus primary/Spot ticker parsing without a whole-input JSON projection.
 `retained_audit_*` observes held startup, original cache/lookup identity, UTF-16,
 nonfinite bits and visible cache rejection. Placement extension refusal stays
 strictly input-only; malformed market strings remain row-only decision3 refusals.
+
+
+Private trade gating uses the retained array's original `filter` member before
+projecting the completed selection for event delivery. Do not snapshot input rows
+before `tradesCategoryOf`: it is a live callback and can replace, delete or truncate
+later indices. The dedicated socket audit runs seven maintained-source profiles
+and fourteen actual primary/demo frame profiles with original row identity.
+
+
+The delegated inverse-auth audit captures the original hosted signer request
+through actual private onOpen and the real native clock. Reconnect clears the
+old offset before adding the fixed10000ms window; no account expiry option is
+read. Keep the original finite numeric payload and source signing text. Broken
+clock nonfinite fixtures remain separate from this production reachability proof.
 
 The constructor's rate-window fixture keeps sleeps pending until explicit virtual
 time advancement. Registering or polling a timer must not advance the clock.

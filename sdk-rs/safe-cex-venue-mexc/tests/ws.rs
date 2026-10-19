@@ -181,7 +181,14 @@ fn mexc_public_ticker_handler_patches_only_source_fields() {
         "symbol":"BTC_USDT",
         "data":{"lastPrice":"12","bid1":"11","ask1":"13","fairPrice":"12.5","indexPrice":"12.25","riseFallRate":"0.1","holdVol":"2","fundingRate":"0.001","fundingTime":1700000000000_i64,"volume24":"3","amount24":"36"}
     });
-    assert!(handle_ticker_frame(&store, &frame, &local_to_utc).unwrap());
+    assert!(
+        handle_ticker_frame(
+            &store,
+            &safe_cex_exchange::js_runtime::value::from_json(&frame),
+            &local_to_utc
+        )
+        .unwrap()
+    );
     let tickers = store.tickers_by_symbol().unwrap();
     let ticker = &tickers["BTCUSDT"];
     assert_eq!(ticker.last, 12.0);
@@ -198,7 +205,9 @@ fn mexc_public_ticker_handler_patches_only_source_fields() {
     assert!(
         !handle_ticker_frame(
             &store,
-            &json!({"symbol":"NO_MARKET","data":{}}),
+            &safe_cex_exchange::js_runtime::value::from_json(
+                &json!({"symbol":"NO_MARKET","data":{}})
+            ),
             &local_to_utc
         )
         .unwrap()
@@ -291,28 +300,31 @@ fn mexc_public_depth_handler_matches_live_typescript() {
     .unwrap();
 
     for case in cases {
-        let actual = handle_depth_frame(&store, &case["frame"]).unwrap().map(
-            |(symbol, handler_key, book)| {
-                let encode_side = |side: &[safe_cex_types::OrderBookOrders]| {
-                    Value::Array(
-                        side.iter()
-                            .map(|level| {
-                                json!([
-                                    format!("{:016x}", level.price.to_bits()),
-                                    format!("{:016x}", level.amount.to_bits()),
-                                    format!("{:016x}", level.total.to_bits())
-                                ])
-                            })
-                            .collect(),
-                    )
-                };
-                json!({
-                    "symbol":symbol,
-                    "route":handler_key,
-                    "book":{"bids":encode_side(&book.bids),"asks":encode_side(&book.asks)}
-                })
-            },
-        );
+        let actual = handle_depth_frame(
+            &store,
+            &safe_cex_exchange::js_runtime::value::from_json(&case["frame"]),
+        )
+        .unwrap()
+        .map(|(symbol, handler_key, book)| {
+            let encode_side = |side: &[safe_cex_types::OrderBookOrders]| {
+                Value::Array(
+                    side.iter()
+                        .map(|level| {
+                            json!([
+                                format!("{:016x}", level.price.to_bits()),
+                                format!("{:016x}", level.amount.to_bits()),
+                                format!("{:016x}", level.total.to_bits())
+                            ])
+                        })
+                        .collect(),
+                )
+            };
+            json!({
+                "symbol":symbol,
+                "route":handler_key,
+                "book":{"bids":encode_side(&book.bids),"asks":encode_side(&book.asks)}
+            })
+        });
         assert_eq!(
             actual.unwrap_or(Value::Null),
             case["output"],
@@ -363,7 +375,10 @@ fn mexc_public_kline_handler_key_matches_live_typescript() {
     assert_eq!(cases.len(), 6, "public kline handler corpus census");
     for case in cases {
         assert_eq!(
-            kline_handler_key(&case["frame"]).unwrap(),
+            kline_handler_key(&safe_cex_exchange::js_runtime::value::from_json(
+                &case["frame"]
+            ))
+            .unwrap(),
             case["key"].as_str().unwrap(),
             "kline frame {}",
             case["frame"]
@@ -817,7 +832,9 @@ fn mexc_websocket_store_notifications_propagate_after_commit() {
     );
     let error = handle_ticker_frame(
         &store,
-        &json!({"symbol":"BTC_USDT","data":{"lastPrice":"12","bid1":"11","ask1":"13"}}),
+        &safe_cex_exchange::js_runtime::value::from_json(
+            &json!({"symbol":"BTC_USDT","data":{"lastPrice":"12","bid1":"11","ask1":"13"}}),
+        ),
         &|value| value,
     )
     .unwrap_err();

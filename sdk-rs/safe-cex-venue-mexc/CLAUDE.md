@@ -436,3 +436,9 @@ startup before reconnected. The order-row reader starts its terminal HTTP eagerl
 and awaits its canonical Promise waiter before mapping/Store continuations; even ready HTTP cannot
 commit loaded.orders inline. The native reconnect probe and maintained Base/MEXC
 snapshot bodies pin both sides of this boundary.
+
+Shared WebSocket message handlers now borrow the canonical `Js` frame graph.
+Restore retained ingress once per frame, preserve it across all callbacks, and
+project only reached typed output fields; see exchange/WS_CONTRACT.md and the
+actual-source/native retained-handler witnesses. Do not reintroduce Value frame
+projections or a second callback registry.

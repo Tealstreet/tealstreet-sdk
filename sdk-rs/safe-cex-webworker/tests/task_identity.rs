@@ -83,7 +83,6 @@ fn probe<T: DeserializeOwned>(name: &str, schema: &Value, read: impl Fn(&T) -> V
     let (case_count, leaf_count, collection) = match name {
         "ChaserTerminate" => (5, 3, None),
         "ChaserOrderOptions" => (19, 12, None),
-        "ChaserCompleteEvent" => (10, 8, None),
         "ChaserOrderState" => (5, 4, Some("/currentOrdersIds")),
         "TwapOptions" => (59, 43, None),
         "TwapState" => (56, 41, Some("/ordersSizes")),
@@ -177,8 +176,42 @@ fn task_native_field_identity_survives_outer_decode() {
     );
     probe("ChaserTerminate", &r["ChaserTerminate"], terminate);
     probe("ChaserOrderOptions", &r["ChaserOrderOptions"], chaser);
-    probe("ChaserCompleteEvent", &r["ChaserCompleteEvent"], complete);
+    complete_output(&r["ChaserCompleteEvent"]);
     probe("ChaserOrderState", &r["ChaserOrderState"], state);
     probe("TwapOptions", &r["TwapOptions"], twap);
     probe("TwapState", &r["TwapState"], twap_state);
+}
+
+fn complete_output(schema: &Value) {
+    use safe_cex_exchange::js_runtime::value::{from_typed, to_json};
+    let cases = schema["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 10);
+    assert_eq!(schema["leaves"].as_array().unwrap().len(), 8);
+    for case in cases {
+        let input = &case["input"];
+        let event = ChaserCompleteEvent {
+            id: input["id"].as_str().unwrap().into(),
+            client_id: input["clientId"].as_str().map(str::to_owned),
+            symbol: input["symbol"].as_str().unwrap().into(),
+            side: match input["side"].as_str().unwrap() {
+                "buy" => safe_cex_types::OrderSide::Buy,
+                "sell" => safe_cex_types::OrderSide::Sell,
+                _ => panic!("source side"),
+            },
+            reduce_only: input["reduceOnly"].as_bool().unwrap(),
+            size: input["size"].as_f64().unwrap(),
+            filled: input["filled"].as_f64().unwrap(),
+            stop_reason: input["stopReason"].as_str().unwrap().into(),
+        };
+        assert_eq!(
+            complete(&event),
+            *input,
+            "COMPLETION original field identity case"
+        );
+        assert_eq!(
+            to_json(&from_typed(&event).unwrap()).unwrap(),
+            *input,
+            "COMPLETION native output preserves all original field identities"
+        );
+    }
 }

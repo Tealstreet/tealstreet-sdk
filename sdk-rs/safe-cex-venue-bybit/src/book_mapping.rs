@@ -1,14 +1,10 @@
-//! Shared book snapshot/delta state used by the public socket subscriptions.
-use crate::{
-    api::truthy,
-    exchange_state::{number, parse_float},
-};
+//! Shared book snapshot/delta state over the single retained handler graph.
+use safe_cex_exchange::js_runtime::{ops, value::Js};
 use safe_cex_types::{OrderBook, OrderBookOrders};
-use serde_json::{Value, json};
 
 pub(crate) struct BookState {
     pub book: OrderBook,
-    pub last_update: Value,
+    pub last_update: Js,
     pub resyncing: bool,
 }
 #[derive(Debug, PartialEq)]
@@ -24,136 +20,110 @@ impl BookState {
                 bids: vec![],
                 asks: vec![],
             },
-            last_update: json!(0),
+            last_update: Js::Number(0.),
             resyncing: false,
         }
     }
-    pub(crate) fn apply(&mut self, frame: &Value) -> Result<Outcome, String> {
-        if frame.is_null() {
-            return Err("Cannot read properties of null (reading 'data')".into());
-        }
-        let data = &frame["data"];
-        let snapshot = frame["type"] == "snapshot";
-        let delta = frame["type"] == "delta";
-        if snapshot {
+    pub(crate) fn apply(&mut self, frame: &Js) -> Result<Outcome, String> {
+        let data = frame.get("data").map_err(fault)?;
+        if frame
+            .get("type")
+            .map_err(fault)?
+            .strict_equals(&Js::str("snapshot"))
+        {
             self.book.bids.clear();
             self.book.asks.clear();
-            self.last_update = update_id(data);
+            self.last_update = update_id(&data)?;
+            self.apply_sides(&data, true)?;
         }
-        if delta {
-            let update = update_id(data);
-            if greater(&self.last_update, &json!(0))? && exceeds_next(&update, &self.last_update)? {
+        if frame
+            .get("type")
+            .map_err(fault)?
+            .strict_equals(&Js::str("delta"))
+        {
+            let update = update_id(&data)?;
+            if ops::greater_than(&self.last_update, &Js::Number(0.)).map_err(fault)?
+                && exceeds_next(&update, &self.last_update)?
+            {
                 if self.resyncing {
                     return Ok(Outcome::Suppress);
                 }
                 self.resyncing = true;
-                self.last_update = json!(0);
+                self.last_update = Js::Number(0.);
                 self.book.bids.clear();
                 self.book.asks.clear();
                 return Ok(Outcome::Resync);
             }
             self.last_update = update;
+            self.apply_sides(&data, false)?;
         }
-        if snapshot || delta {
-            for (key, bids) in [("a", false), ("b", true)] {
-                let rows = &data[key];
-                if !truthy(rows) {
-                    continue;
-                }
-                let length = match rows {
-                    Value::Array(values) => values.len() as f64,
-                    Value::String(value) => value.encode_utf16().count() as f64,
-                    _ => number(rows.get("length"))?,
-                };
-                let mut index = 0;
-                while (index as f64) < length {
-                    let row = indexed(rows, index).ok_or_else(|| {
-                        "Cannot read properties of undefined (reading '0')".to_owned()
-                    })?;
-                    index += 1;
-                    if row.is_null() {
-                        return Err("Cannot read properties of null (reading '0')".into());
-                    }
-                    let price = parse_float(indexed(&row, 0).as_ref())?;
-                    let amount = parse_float(indexed(&row, 1).as_ref())?;
-                    if snapshot {
-                        let levels = if bids {
-                            &mut self.book.bids
-                        } else {
-                            &mut self.book.asks
-                        };
-                        levels.push(OrderBookOrders {
-                            price,
-                            amount,
-                            total: 0.,
-                        });
-                    } else {
-                        safe_cex_store::update_order_book::update_order_book_by_price(
-                            &mut self.book,
-                            bids,
-                            price,
-                            amount,
-                            true,
-                        );
-                    }
-                }
-            }
-        }
-        // No sorting here: source trusts snapshot order and delta binary search.
         safe_cex_store::orderbook::calc_order_book_total(&mut self.book);
         Ok(Outcome::Publish)
     }
-}
-// JS property indexing on a level is distinct from array indexing. A string
-// contributes UTF-16 code units. An isolated surrogate is necessarily NaN under
-// parseFloat; the replacement scalar preserves that numeric observation only.
-fn indexed(value: &Value, index: usize) -> Option<Value> {
-    match value {
-        Value::Array(values) => values.get(index).cloned(),
-        Value::Object(values) => values.get(&index.to_string()).cloned(),
-        Value::String(value) => value.encode_utf16().nth(index).map(|unit| {
-            Value::String(
-                char::from_u32(u32::from(unit))
-                    .unwrap_or(char::REPLACEMENT_CHARACTER)
-                    .to_string(),
+    fn apply_sides(&mut self, data: &Js, snapshot: bool) -> Result<(), String> {
+        for (key, bids) in [("a", false), ("b", true)] {
+            let rows = optional(data, key).map_err(fault)?;
+            if !rows.truthy() {
+                continue;
+            }
+            let mut index = 0;
+            while ops::less_than(
+                &Js::Number(index as f64),
+                &rows.get("length").map_err(fault)?,
             )
-        }),
-        _ => None,
+            .map_err(fault)?
+            {
+                let row = rows.get(&index.to_string()).map_err(fault)?;
+                index += 1;
+                let price = row.get("0").map_err(fault)?.parse_float().map_err(fault)?;
+                let amount = row.get("1").map_err(fault)?.parse_float().map_err(fault)?;
+                if snapshot {
+                    let levels = if bids {
+                        &mut self.book.bids
+                    } else {
+                        &mut self.book.asks
+                    };
+                    levels.push(OrderBookOrders {
+                        price,
+                        amount,
+                        total: 0.,
+                    });
+                } else {
+                    safe_cex_store::update_order_book::update_order_book_by_price(
+                        &mut self.book,
+                        bids,
+                        price,
+                        amount,
+                        true,
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 }
-fn update_id(data: &Value) -> Value {
-    let value = &data["u"];
-    if truthy(value) {
-        value.clone()
+fn fault(error: safe_cex_exchange::js_runtime::value::Thrown) -> String {
+    error.to_exchange_error().message
+}
+fn optional(value: &Js, key: &str) -> Result<Js, safe_cex_exchange::js_runtime::value::Thrown> {
+    if value.is_nullish() {
+        Ok(Js::Undefined)
     } else {
-        json!(0)
+        value.get(key)
     }
 }
-fn primitive(value: &Value) -> Result<Value, String> {
-    if value.is_object() || value.is_array() {
-        Ok(Value::String(
-            safe_cex_num::js_string(Some(value)).map_err(|e| e.message.to_owned())?,
-        ))
+fn update_id(data: &Js) -> Result<Js, String> {
+    let value = optional(data, "u").map_err(fault)?;
+    Ok(if value.truthy() {
+        value
     } else {
-        Ok(value.clone())
-    }
+        Js::Number(0.)
+    })
 }
-fn greater(a: &Value, b: &Value) -> Result<bool, String> {
-    let a = primitive(a)?;
-    let b = primitive(b)?;
-    if let (Some(a), Some(b)) = (a.as_str(), b.as_str()) {
-        return Ok(a.encode_utf16().cmp(b.encode_utf16()).is_gt());
-    }
-    Ok(number(Some(&a))? > number(Some(&b))?)
-}
-fn exceeds_next(update: &Value, last: &Value) -> Result<bool, String> {
-    let last = primitive(last)?;
-    if let Some(last) = last.as_str() {
-        greater(update, &Value::String(format!("{last}1")))
-    } else {
-        // Compare numerically directly so infinity never takes a JSON detour.
-        Ok(number(Some(&primitive(update)?))? > number(Some(&last))? + 1.)
-    }
+fn exceeds_next(update: &Js, last: &Js) -> Result<bool, String> {
+    let last = ops::to_primitive(last).map_err(fault)?;
+    let next = ops::add(&last, &Js::Number(1.)).map_err(fault)?;
+    ops::greater_than(update, &next).map_err(fault)
 }
 #[cfg(test)]
 mod tests;

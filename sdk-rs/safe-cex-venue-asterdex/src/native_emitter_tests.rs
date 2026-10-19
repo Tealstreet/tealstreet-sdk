@@ -55,6 +55,37 @@ fn frame(venue: &AsterDEXExchange, value: Value) {
         ))
         .unwrap();
 }
+
+#[test]
+fn constructed_private_handlers_keep_surrogate_frames_and_their_neighbors() {
+    run(|venue, _| {
+        let socket = venue
+            .base()
+            .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Private)
+            .unwrap();
+        let calls = Rc::new(RefCell::new(0));
+        let seen = calls.clone();
+        socket.message_handlers.borrow_mut().insert(
+            "retainedProbe".into(),
+            Rc::new(RefCell::new(vec![Rc::new(move |_| {
+                *seen.borrow_mut() += 1;
+                Ok(())
+            })])),
+        );
+        for marker in [r"\ud800", r"\udfff", r"\ud83e\udd80"] {
+            let frame = format!(r#"{{"e":"retainedProbe","unused":{{"{marker}":["{marker}"]}}}}"#);
+            socket
+                .on_message(&safe_cex_transport::socket::SocketFrame::Text(frame))
+                .unwrap();
+        }
+        frame(&venue, json!({"e":"retainedProbe","neighbor":true}));
+        assert_eq!(
+            *calls.borrow(),
+            4,
+            "all source-valid surrogate frames and the ordinary neighbor reach the constructed handler"
+        );
+    });
+}
 #[test]
 fn native_facade_preserves_zero_single_array_and_multiple_arguments() {
     run(|venue, _| {
@@ -138,6 +169,53 @@ fn native_shared_facade_fill_is_the_first_event_argument() {
     });
 }
 #[test]
+fn private_fill_object_id_calls_the_inherited_object_intrinsic() {
+    let source = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args(["--import", "tsx", "-e", r#"
+const assert = require('node:assert/strict');
+const {AsterDEXExchange} = require('./packages/safe-cex/src/exchanges/asterdex/asterdex.exchange.ts');
+const {DefaultStore} = require('./packages/safe-cex/src/store/store.base.ts');
+const exchange = new AsterDEXExchange('asterdex', {publicDataOnly:true,tuning:{consoleLogging:false}}, new DefaultStore());
+const fills=[]; exchange.on('fill', value=>fills.push(value));
+for (const id of [{}, {toString:null}]) {
+  exchange.privateWebsocket.onMessage({data:JSON.stringify({e:'ORDER_TRADE_UPDATE',o:{i:id,s:'BTCUSDT',X:'PARTIALLY_FILLED',S:'BUY',l:'2',L:'3',ap:'3'}})});
+}
+assert.equal(fills.length,1); assert.equal(fills[0].orderId,'[object Object]');
+const bits = value => {const bytes=Buffer.alloc(8);bytes.writeDoubleBE(value);return bytes.toString('hex');};
+exchange.dispose(); process.stdout.write(JSON.stringify(fills.map(fill=>({...fill,price:bits(fill.price),amount:bits(fill.amount)}))),()=>process.exit(0));
+"#])
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    run(|venue, _| {
+        let fills = watch(&venue, "fill");
+        for id in [json!({}), json!({"toString":null})] {
+            frame(
+                &venue,
+                json!({"e":"ORDER_TRADE_UPDATE","o":{"i":id,"s":"BTCUSDT","X":"PARTIALLY_FILLED","S":"BUY","l":"2","L":"3","ap":"3"}}),
+            );
+        }
+        assert_eq!(
+            fills.borrow().len(),
+            1,
+            "inherited Object.toString must emit the first fill; own noncallable shadow still refuses"
+        );
+        let mut observed = serde_json::to_value(&*fills.borrow()).unwrap();
+        for fill in observed.as_array_mut().unwrap() {
+            for field in ["price", "amount"] {
+                fill[field] = json!(format!("{:016x}", fill[field].as_f64().unwrap().to_bits()));
+            }
+        }
+        assert_eq!(observed, expected);
+    });
+}
+#[test]
 fn native_private_balance_frame_commits_store_and_emits_account() {
     run(|venue, store| {
         let account = watch(&venue, "account");
@@ -165,5 +243,44 @@ fn native_private_position_frame_commits_store_and_emits_one_positions_array() {
             *positions.borrow(),
             vec![serde_json::to_value(store.positions().unwrap().to_vec()).unwrap()]
         );
+    });
+}
+
+#[cfg(test)]
+mod retained_handler_support {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../safe-cex-exchange/tests/support/retained_handlers.rs"
+    ));
+}
+#[test]
+fn shared_core_handlers_retain_the_source_graph_and_native_fields() {
+    run(|venue, _| {
+        for (slot, source_slot) in [
+            (
+                safe_cex_exchange::socket_lifecycle::SocketSlot::Public,
+                "publicWebsocket",
+            ),
+            (
+                safe_cex_exchange::socket_lifecycle::SocketSlot::Private,
+                "privateWebsocket",
+            ),
+        ] {
+            let socket = venue.base().get_socket(slot).unwrap();
+            let cases = retained_handler_support::source_frames("asterdex", source_slot);
+            let (handlers, calls) = retained_handler_support::pair(&cases, false);
+            socket
+                .message_handlers
+                .borrow_mut()
+                .insert("retainedProbe".into(), handlers);
+            for case in cases {
+                socket
+                    .on_message(&safe_cex_transport::socket::SocketFrame::Text(
+                        case["frame"].as_str().unwrap().into(),
+                    ))
+                    .unwrap();
+            }
+            assert_eq!(calls.get(), 8, "{source_slot} native callback observations");
+        }
     });
 }

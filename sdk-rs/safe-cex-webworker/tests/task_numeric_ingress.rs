@@ -4,7 +4,7 @@ use depth_corpus::DepthCorpus;
 use safe_cex_num::numeric_ingress::{
     JsNumberOutput, js_from_str, js_from_value, js_from_value_ref,
 };
-use safe_cex_webworker::task_types::{ChaserCompleteEvent, ChaserOrderState, ChaserTerminate};
+use safe_cex_webworker::task_types::{ChaserOrderState, ChaserTerminate};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
@@ -17,16 +17,6 @@ fn terminate_owned_integer_zero_is_preserved() {
         output.value.to_bits(),
         (-0.0_f64).to_bits(),
         "TERMINATE OWNED INTEGER ZERO"
-    );
-}
-#[test]
-fn complete_owned_integer_zero_is_preserved() {
-    let input: Value = serde_json::from_str(r#"{"id":"c","symbol":"BTC","side":"buy","reduceOnly":false,"size":-0,"filled":0,"stopReason":"done"}"#).unwrap();
-    let output: ChaserCompleteEvent = serde_json::from_value(input).unwrap();
-    assert_eq!(
-        output.size.to_bits(),
-        (-0.0_f64).to_bits(),
-        "COMPLETE OWNED INTEGER ZERO"
     );
 }
 #[test]
@@ -110,25 +100,13 @@ process.stdout.write(JSON.stringify(Object.fromEntries(['-0','-0.0','0','1e400',
         "anchorPrice",
         |v| v.anchor_price,
     );
-    n += check_numeric::<ChaserCompleteEvent>(
-        &source,
-        r#"{"id":"c","symbol":"BTC","side":"buy","reduceOnly":false,"size":-0,"filled":0,"stopReason":"done"}"#,
-        "size",
-        |v| v.size,
-    );
-    n += check_numeric::<ChaserCompleteEvent>(
-        &source,
-        r#"{"id":"c","symbol":"BTC","side":"sell","reduceOnly":true,"size":0,"filled":-0,"stopReason":"done"}"#,
-        "filled",
-        |v| v.filled,
-    );
     n += check_numeric::<ChaserOrderState>(
         &source,
         r#"{"attempts":-0,"isStopped":false,"stopReason":"","currentOrdersIds":[]}"#,
         "attempts",
         |v| v.attempts,
     );
-    assert_eq!(n, 450, "TASK-NUMERIC field/path inventory");
+    assert_eq!(n, 270, "TASK-NUMERIC field/path inventory");
 }
 #[test]
 fn primitive_task_shared_depth_boundary() {
@@ -177,11 +155,6 @@ fn primitive_task_shared_depth_boundary() {
     for depth in [140, 20] {
         check::<ChaserTerminate>(
             json!({"type":"price","value":0,"anchorPrice":0}),
-            depth,
-            &mut corpus,
-        );
-        check::<ChaserCompleteEvent>(
-            json!({"id":"c","symbol":"BTC","side":"buy","reduceOnly":false,"size":0,"filled":0,"stopReason":""}),
             depth,
             &mut corpus,
         );

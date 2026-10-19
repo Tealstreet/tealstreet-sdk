@@ -236,7 +236,10 @@ impl Exchange for AsterDEXExchange {
             let timestamp = c
                 .timestamp
                 .as_ref()
-                .and_then(serde_json::Value::as_f64)
+                .and_then(|value| match value {
+                    Js::Number(value) => Some(*value),
+                    _ => None,
+                })
                 .ok_or_else(|| {
                     ExchangeError::new(
                         "AsterDEX candle timestamp is outside the numeric Candle model",

@@ -130,7 +130,7 @@ pub fn handler(input: &Value, get: fn(&Handlers, &str) -> Handler) -> Value {
             "kind":"list","length":list.borrow().len(),"sameOwn":Rc::ptr_eq(&list,&own),
             "samePrototype":Rc::ptr_eq(&list,&prototype),"keys":handlers.keys(),
         }),
-        Handler::CoreList(_, _) => panic!("no core handler was registered in this lookup case"),
+        Handler::CoreList(_) => panic!("no core handler was registered in this lookup case"),
         Handler::Value(value) => json!({
             "kind":value.type_of(),"callable":value.is_callable(),"truthy":value.truthy(),
             "length":if value.is_callable() {match value.get("length").unwrap() {EventValue::Number(v)=>Some(bits(v)),_=>None}}else{None},
