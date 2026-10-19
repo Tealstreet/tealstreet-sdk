@@ -346,3 +346,37 @@ and timeouts remain unchanged. Final-head CI must be green before merge.
 Adversarial findings R1–R11 repaired and independently cross-reviewed; no new
 P1/P2 after final query fix and shared merge review. Publish this checkpoint so
 the full ten-venue CI matrix runs while the local import failure is diagnosed.
+
+### Bitget landing integration
+
+Landing advanced through Bitget (#1308), commit 4e468ed2e5, while final-head CI
+was running. The ten-venue head's required brief gates and native/Wasm CI pass;
+its root CI has also passed, confirming the local import timeouts are not a
+reproduced functional failure. Local serial SDK suite passed all6,565 tests;
+the duplicate suite retained one five-second Hyro import flake, while original
+Hyro targeted tests passed10/10 unchanged. No source, assertion or timeout
+changes were made for the diagnostic; temporary files were removed.
+
+Integrate Bitget's strict indexed replay transport, envelope streaming hook and
+throughput profiles while preserving KuCoin signatures, welcomes, query oracles,
+queued reads and native quantities. Host/TS/shared parser audit PASS. Shared
+harness and gate reviews, eleven-venue rebuild/size measurement and required
+KuCoin/Binance plus incoming-venue compatibility gates precede the next push.
+The incoming ten-venue build was3,497,553 bytes against3.5MiB; size the fixed
+eleven-venue aggregate budget from the actual combined artifact. Final CI must
+be green at the next head before merging.
+
+Bitget integration review checkpoint: all shared harness, gate/CI, host/TS
+bridge and engine/parser independent reviews PASS, no new P1/P2. Restored
+5300f4960f's ESBUILD_WORKER_THREADS=0 for both replay implementations (lost in
+an incoming earlier merge); measured public runtime and memory assertions stay
+strict. Shared factory handles both legacy and callback response signatures,
+preserving signed headers, stage/time eligibility and rejection rollback.
+
+Workspace 763 native tests (KuCoin96), fmt/bans and all-workspace native+wasm
+clippy PASS. Harness129, wire4, actual wasm26, host25 PASS. Root typecheck44
+and lint28 tasks PASS. Eleven-venue wasm3,775,268 bytes, fixed4MiB budget.
+Previous head e5c9b0e38a's FULL CI is green (including both root suites and all
+ten-venue replays); that closes the unchanged local import-latency diagnostic
+without weakening assertions/timeouts. Current integrated KuCoin/Binance private
+PASS; remaining public/incoming compatibility gates run before the next push.

@@ -10,6 +10,7 @@ use safe_cex_engine::{
 use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
+use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
@@ -511,6 +512,27 @@ impl WasmEngine {
                 secret: options.secret,
                 passphrase: options.passphrase,
             }))),
+            "bitget" | "bitgetusdc" => {
+                if !options.public_data_only
+                    && options.key.as_ref().is_some_and(|s| !s.is_empty())
+                    && options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                    && options.passphrase.as_ref().is_none_or(|s| s.is_empty())
+                {
+                    return Err(JsError::new("Bitget requires a passphrase"));
+                }
+                Box::new(Engine::new(BitgetFutures::new(BitgetOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    passphrase: options.passphrase,
+                    product: if venue == "bitgetusdc" {
+                        Product::Usdc
+                    } else {
+                        Product::Usdt
+                    },
+                })))
+            }
             "cryptocom" => Box::new(Engine::new(Cryptocom::new(CryptocomOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,

@@ -47,7 +47,12 @@ const replay = (impl, run) => {
     out,
   );
   if (values['no-egress']) args.push('--no-egress');
-  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125000 });
+  // Keep compiler-worker buffers outside runtime retained-memory measurements.
+  const result = spawnSync(process.execPath, args, {
+    encoding: 'utf8',
+    timeout: 125000,
+    env: { ...process.env, ESBUILD_WORKER_THREADS: '0' },
+  });
   if (result.status !== 0)
     throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
@@ -128,6 +133,26 @@ const KNOWN_TS_FIXES = {
     'immediate bracket replacement retains submitted protections before reconciliation',
     'cached book snapshot gaps retain the entire contiguous buffered suffix (TS reference fixed with a regression)',
   ],
+  bitget: {
+    // Each correction is covered by documented-payload Rust tests. Normal
+    // tapes still compare unchanged; these notes do not rewrite mismatches.
+    notes: [
+      'Reject book sequence gaps and legacy checksum failures.',
+      'Preserve account state on failed business-error reads.',
+      'Filter all-product UTA streams to this futures product.',
+      'Use UTA execution IDs, quantities and prices from the fill topic.',
+      'Keep both TP/SL legs of status-less UTA strategy rows.',
+      'Include UTA totalFundingFee in realized PnL.',
+      'Use cumulative executed size for orders and deduplicate executions.',
+      'Do not emit an execution for an algo trigger acknowledgement.',
+      'Split normal orders at floored max lots without losing requested volume.',
+      'Send native crossed marginMode for Classic batches rather than cross.',
+      'Resolve native modify identity using the fresh newClientOid.',
+      'Never cancel-replace an amendment after an ambiguous transport/server result.',
+      'Report incomplete or malformed financial history as a failed read.',
+    ],
+  },
+
   blofin: (ts) => {
     const account = ts.account;
     if (!account) return;

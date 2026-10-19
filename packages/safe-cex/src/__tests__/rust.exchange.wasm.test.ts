@@ -415,6 +415,33 @@ describe('RustEngineExchange', () => {
     expect(tape.requests).toEqual([]);
   });
 
+  it.each(['bitget', 'bitgetusdc'] as const)('rejects private %s without a nonempty passphrase', async (venue) => {
+    const { WasmEngine } = await loadNodeEngine();
+    for (const passphrase of [undefined, '']) {
+      expect(() => new WasmEngine(venue, JSON.stringify({ key: 'k', secret: 's', passphrase }))).toThrow(
+        'Bitget requires a passphrase',
+      );
+    }
+  });
+
+  it.each(['bitget', 'bitgetusdc'] as const)(
+    'accepts %s with its passphrase or public-only credentials',
+    async (venue) => {
+      const { WasmEngine } = await loadNodeEngine();
+      const options: Partial<ExchangeOptions>[] = [
+        { key: 'k', secret: 's', passphrase: 'p' },
+        { key: 'k', secret: 's', publicDataOnly: true },
+        { key: 'k', secret: 's', passphrase: '', publicDataOnly: true },
+        {},
+        { key: 'k' },
+        { secret: 's' },
+      ];
+      for (const value of options) {
+        expect(() => new WasmEngine(venue, JSON.stringify(value))).not.toThrow();
+      }
+    },
+  );
+
   it('rejects payload-only private signing before transport starts', async () => {
     const tape = recordedTransport();
     setWasmEngineLoader(loadNodeEngine);

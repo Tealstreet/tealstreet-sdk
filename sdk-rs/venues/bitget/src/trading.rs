@@ -1,0 +1,1829 @@
+use crate::account::{clean, first, is_algo, is_hedged, margin, plan_type};
+use crate::wire::{Envelope, Identifier, Number, SymbolConfig, UtaSettings};
+use crate::{BitgetFutures, Pending, paths};
+use safe_cex_engine::model::*;
+use safe_cex_engine::{Command, CommandId, Cx, Method, Response, TimerId, num};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashSet, VecDeque};
+
+#[derive(Default)]
+pub struct Trading {
+    queue: VecDeque<Command>,
+    active: Option<Job>,
+    metadata_at: std::collections::HashMap<String, f64>,
+    retry: Option<(TimerId, Request)>,
+    detect_wait: Option<TimerId>,
+}
+
+struct Job {
+    id: CommandId,
+    intent: Command,
+    original: Option<Order>,
+    metadata: VecDeque<String>,
+    waiting_positions: bool,
+    positions_checked: bool,
+    planned: bool,
+    outstanding: bool,
+    calls: VecDeque<Planned>,
+    fallback: Option<VecDeque<Planned>>,
+    rollback: Option<Planned>,
+    error: Option<String>,
+    ids: Vec<String>,
+}
+
+pub struct Request {
+    command: CommandId,
+    call: Planned,
+    started: f64,
+    signature_retry: bool,
+    read_retries: u8,
+}
+
+struct Planned {
+    path: &'static str,
+    payload: Payload,
+    effect: Effect,
+}
+
+enum Effect {
+    Metadata(String),
+    ResolveAmend {
+        id: String,
+        price: f64,
+        amount: f64,
+        client: String,
+    },
+    Place {
+        expected: usize,
+    },
+    Cancel {
+        orders: Vec<Order>,
+        idempotent_missing: bool,
+    },
+    Amend {
+        id: String,
+        price: f64,
+        amount: f64,
+        client: String,
+    },
+    Leverage {
+        symbol: String,
+        leverage: f64,
+        side: Option<PositionSide>,
+    },
+    Margin {
+        symbol: String,
+        margin: MarginType,
+    },
+    Mode(bool),
+}
+
+#[derive(Clone, Serialize)]
+#[serde(untagged)]
+enum Leverage {
+    Number(f64),
+    Text(String),
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CancelId {
+    order_id: String,
+}
+
+// Native request fields; variants are selected by the planned endpoint.
+#[derive(Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Payload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    symbol: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    product_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    margin_coin: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    coin: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    margin_mode: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_oid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_client_oid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    order_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    qty: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    new_size: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    side: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trade_side: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hold_side: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pos_side: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    order_type: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    force: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    time_in_force: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reduce_only: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plan_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trigger_price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trigger_type: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    callback_ratio: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tpsl_mode: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    take_profit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop_loss: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tp_trigger_by: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sl_trigger_by: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tp_order_type: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sl_order_type: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    preset_stop_surplus_price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    preset_stop_loss_price: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    leverage: Option<Leverage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pos_mode: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hold_mode: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    order_list: Option<Vec<Payload>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    order_id_list: Option<Vec<CancelId>>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "type")]
+    kind: Option<&'static str>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ReplyData<'a> {
+    #[serde(default, borrow)]
+    order_id: Identifier<'a>,
+    #[serde(default, borrow)]
+    client_oid: Identifier<'a>,
+    #[serde(default, borrow)]
+    success_list: Vec<ReplyItem<'a>>,
+    #[serde(default)]
+    failure_list: Vec<Failure>,
+    #[serde(default, alias = "state", alias = "orderStatus")]
+    status: String,
+    #[serde(default, alias = "filledQty", alias = "cumExecQty")]
+    base_volume: Number,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplyItem<'a> {
+    #[serde(borrow)]
+    order_id: Identifier<'a>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Failure {
+    #[serde(default)]
+    error_msg: String,
+}
+#[derive(Deserialize)]
+struct Reply<'a> {
+    code: Number,
+    #[serde(default)]
+    msg: String,
+    #[serde(borrow)]
+    data: Option<ReplyData<'a>>,
+}
+
+impl BitgetFutures {
+    pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let Some(id) = command_id(&command) else {
+            return;
+        };
+        let validation = if !self.private_enabled() {
+            Err("Bitget credentials are required".to_owned())
+        } else if !self.account.detected {
+            Err("Bitget account is not ready".to_owned())
+        } else {
+            self.preflight(cx, &command)
+        };
+        if let Err(error) = validation {
+            cx.done(id, Err(error));
+            return;
+        }
+        self.trading.queue.push_back(command);
+        self.resume_trading(cx);
+    }
+
+    fn preflight(&self, cx: &Cx<'_, Pending>, command: &Command) -> Result<(), String> {
+        if let Command::PlaceOrders { orders, .. } = command {
+            let mut ids = HashSet::new();
+            for o in orders {
+                let market = cx
+                    .store
+                    .market(&o.symbol)
+                    .ok_or_else(|| format!("Market {} not found", o.symbol))?;
+                if o.kind == OrderType::Conditional || o.trigger_price.is_some() {
+                    return Err("Bitget opening conditional orders are unsupported".into());
+                }
+                if self.account.uta && o.kind == OrderType::TrailingStopLoss {
+                    return Err("Bitget UTA trailing-stop orders are not supported yet".into());
+                }
+                if !o.amount.is_finite()
+                    || o.amount < 0.0
+                    || (!is_algo(o.kind) && num::adjust(o.amount, market.precision.amount) <= 0.0)
+                {
+                    return Err("invalid Bitget order amount".into());
+                }
+                if o.kind != OrderType::Market
+                    && !o.price.is_some_and(|v| {
+                        v.is_finite()
+                            && num::adjust(v, market.precision.price).is_finite()
+                            && num::adjust(v, market.precision.price) > 0.0
+                    })
+                {
+                    return Err("Bitget order requires a positive price".into());
+                }
+                for value in [o.stop_loss, o.take_profit].into_iter().flatten() {
+                    if !value.is_finite() || value <= 0.0 {
+                        return Err("invalid Bitget bracket price".into());
+                    }
+                }
+                if let Some(id) = &o.client_order_id
+                    && (id.is_empty()
+                        || id.len() > 32
+                        || !id
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b".:/_-".contains(&b))
+                        || !ids.insert(id)
+                        || is_algo(o.kind)
+                        || o.take_profit.is_some()
+                        || o.stop_loss.is_some()
+                        || (market.limits.amount.max > 0.0
+                            && (o.amount > market.limits.amount.max
+                                || num::adjust(o.amount, market.precision.amount)
+                                    > floor_lot(
+                                        market.limits.amount.max,
+                                        market.precision.amount,
+                                    ))))
+                {
+                    return Err(
+                        "Bitget clientOrderId cannot be honored verbatim on one native order"
+                            .into(),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn resume_trading(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self
+            .trading
+            .active
+            .as_ref()
+            .is_some_and(|job| job.outstanding)
+        {
+            return;
+        }
+        let mut job = if let Some(job) = self.trading.active.take() {
+            job
+        } else if let Some(intent) = self.trading.queue.pop_front() {
+            let metadata = symbols(cx, &intent)
+                .into_iter()
+                .filter(|symbol| {
+                    cx.store.setting(symbol).is_none()
+                        || (!cx
+                            .store
+                            .positions()
+                            .iter()
+                            .any(|p| &p.symbol == symbol && p.contracts > 0.0)
+                            && !self
+                                .trading
+                                .metadata_at
+                                .get(symbol)
+                                .is_some_and(|at| cx.now - *at < 5_000.0))
+                })
+                .collect();
+            Job {
+                id: command_id(&intent).expect("trade command"),
+                original: if let Command::AmendOrder { id, .. } = &intent {
+                    cx.store.order(id).cloned()
+                } else {
+                    None
+                },
+                intent,
+                metadata,
+                waiting_positions: false,
+                positions_checked: false,
+                planned: false,
+                outstanding: false,
+                calls: VecDeque::new(),
+                fallback: None,
+                rollback: None,
+                error: None,
+                ids: vec![],
+            }
+        } else {
+            return;
+        };
+        if !self.account.detected {
+            if self.trading.detect_wait.is_none() {
+                self.trading.detect_wait = Some(cx.set_timer(10_000.0));
+            }
+            self.trading.active = Some(job);
+            return;
+        }
+        if let Some(timer) = self.trading.detect_wait.take() {
+            cx.clear_timer(timer);
+        }
+        if job.waiting_positions {
+            if self.positions_in_flight() {
+                self.trading.active = Some(job);
+                return;
+            }
+            job.waiting_positions = false;
+            job.positions_checked = true;
+        }
+        if let Some(symbol) = job.metadata.pop_front() {
+            if cx.store.market(&symbol).is_none() {
+                cx.done(job.id, Err(format!("Market {symbol} not found")));
+                self.resume_trading(cx);
+                return;
+            }
+            let call = Planned {
+                path: paths::ACCOUNT,
+                payload: Payload {
+                    symbol: Some(symbol.clone()),
+                    ..Payload::default()
+                },
+                effect: Effect::Metadata(symbol),
+            };
+            self.issue_trade(cx, job, call, false, 0);
+            return;
+        }
+        if !job.planned {
+            if !job.positions_checked && needs_position_read(cx, &job.intent, self.account.uta) {
+                self.refresh_positions(cx);
+                if self.positions_in_flight() {
+                    job.waiting_positions = true;
+                    self.trading.active = Some(job);
+                    return;
+                }
+                job.positions_checked = true;
+            }
+            if let Err(error) = self.plan_job(cx, &mut job) {
+                cx.done(job.id, Err(error));
+                self.resume_trading(cx);
+                return;
+            }
+            job.planned = true;
+        }
+        if let Some(call) = job.calls.pop_front() {
+            self.issue_trade(cx, job, call, false, 0);
+        } else {
+            let result = match job.error {
+                Some(error) => Err(error),
+                None => Ok(serde_json::to_string(&job.ids).expect("order ids")),
+            };
+            cx.done(job.id, result);
+            self.resume_trading(cx);
+        }
+    }
+
+    fn issue_trade(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut job: Job,
+        call: Planned,
+        signature_retry: bool,
+        read_retries: u8,
+    ) {
+        let read = matches!(
+            call.effect,
+            Effect::Metadata(_) | Effect::ResolveAmend { .. }
+        );
+        let method = if read { Method::Get } else { Method::Post };
+        let path = match &call.effect {
+            Effect::Metadata(symbol) => {
+                if self.account.uta {
+                    paths::SETTINGS.to_owned()
+                } else {
+                    format!(
+                        "{}?symbol={symbol}&productType={}&marginCoin={}",
+                        paths::ACCOUNT,
+                        self.product(),
+                        self.coin()
+                    )
+                }
+            }
+            Effect::ResolveAmend { client, .. } => format!(
+                "{}?symbol={}&productType={}&clientOid={}",
+                paths::ORDER_DETAIL,
+                call.payload.symbol.as_deref().unwrap_or_default(),
+                self.product(),
+                crate::sign::encode(client)
+            ),
+            _ => call.path.to_owned(),
+        };
+        let body = (!read).then(|| serde_json::to_string(&call.payload).expect("Bitget payload"));
+        let headers =
+            match self.signed_headers(cx.now, method, &path, body.as_deref().unwrap_or("")) {
+                Ok(headers) => headers,
+                Err(error) => {
+                    cx.done(job.id, Err(error));
+                    self.resume_trading(cx);
+                    return;
+                }
+            };
+        if let Effect::Cancel { orders, .. } = &call.effect {
+            for order in orders {
+                cx.store.set_order_status(&order.id, OrderStatus::Canceling);
+            }
+        }
+        job.outstanding = true;
+        let command = job.id;
+        self.trading.active = Some(job);
+        cx.request(
+            method,
+            format!("{}{path}", paths::REST),
+            headers,
+            body,
+            Pending::Trade(Box::new(Request {
+                command,
+                call,
+                started: cx.now,
+                signature_retry,
+                read_retries,
+            })),
+        );
+    }
+
+    fn plan_job(&self, cx: &Cx<'_, Pending>, job: &mut Job) -> Result<(), String> {
+        match &job.intent {
+            Command::PlaceOrders { orders, .. } => job.calls = self.place_calls(cx, orders)?.into(),
+            Command::CancelOrders { ids, .. } => {
+                let native: HashSet<_> = ids
+                    .iter()
+                    .filter_map(|id| cx.store.order(id).map(native_id))
+                    .collect();
+                let orders: Vec<_> = cx
+                    .store
+                    .orders()
+                    .iter()
+                    .filter(|o| native.contains(&native_id(o)))
+                    .cloned()
+                    .collect();
+                job.calls = self.cancel_calls(&orders, true).into();
+            }
+            Command::CancelSymbolOrders { symbol, .. } => {
+                let orders: Vec<_> = cx
+                    .store
+                    .orders()
+                    .iter()
+                    .filter(|o| o.symbol == *symbol)
+                    .cloned()
+                    .collect();
+                job.calls = self.cancel_calls(&orders, true).into();
+            }
+            Command::AmendOrder {
+                id, price, amount, ..
+            } => {
+                let (id, price, amount) = (id.clone(), *price, *amount);
+                self.plan_amend(cx, job, &id, price, amount)?;
+            }
+            Command::SetLeverage {
+                symbol, leverage, ..
+            } => {
+                let m = cx.store.market(symbol).ok_or("unknown market")?;
+                if !leverage.is_finite() || *leverage <= 0.0 {
+                    return Err("invalid leverage".into());
+                }
+                let leverage = leverage.clamp(m.limits.leverage.min, m.limits.leverage.max);
+                let isolated_hedge = cx.store.hedged()
+                    && cx
+                        .store
+                        .setting(symbol)
+                        .is_some_and(|s| s.margin_type == Some(MarginType::Isolated));
+                let mut p = self.classic(symbol);
+                p.leverage = Some(Leverage::Number(leverage));
+                let path = if self.account.uta && isolated_hedge {
+                    p = Payload {
+                        category: Some(self.product().to_uppercase()),
+                        symbol: Some(symbol.clone()),
+                        coin: Some(self.coin().into()),
+                        leverage: Some(Leverage::Text(num::format(leverage))),
+                        pos_side: Some("long"),
+                        ..Payload::default()
+                    };
+                    paths::UTA_SET_LEVERAGE
+                } else {
+                    if isolated_hedge {
+                        p.hold_side = Some("long");
+                    }
+                    paths::SET_LEVERAGE
+                };
+                job.calls.push_back(Planned {
+                    path,
+                    payload: p,
+                    effect: Effect::Leverage {
+                        symbol: symbol.clone(),
+                        leverage,
+                        side: isolated_hedge.then_some(PositionSide::Long),
+                    },
+                });
+            }
+            Command::SetMarginType {
+                symbol, isolated, ..
+            } => {
+                let margin = if *isolated {
+                    MarginType::Isolated
+                } else {
+                    MarginType::Cross
+                };
+                let mut p = self.classic(symbol);
+                p.margin_mode = Some(margin_text(margin));
+                let path = if self.account.uta {
+                    p = Payload {
+                        category: Some(self.product().to_uppercase()),
+                        symbol: Some(symbol.clone()),
+                        margin_mode: Some(margin_text(margin)),
+                        leverage: Some(Leverage::Text(num::format(
+                            cx.store.setting(symbol).map_or(1.0, |s| s.leverage),
+                        ))),
+                        ..Payload::default()
+                    };
+                    paths::UTA_SET_LEVERAGE
+                } else {
+                    paths::SET_MARGIN
+                };
+                job.calls.push_back(Planned {
+                    path,
+                    payload: p,
+                    effect: Effect::Margin {
+                        symbol: symbol.clone(),
+                        margin,
+                    },
+                });
+            }
+            Command::SetPositionMode { hedged, .. } => {
+                let mode = if *hedged {
+                    "hedge_mode"
+                } else {
+                    "one_way_mode"
+                };
+                let payload = if self.account.uta {
+                    Payload {
+                        hold_mode: Some(mode),
+                        ..Payload::default()
+                    }
+                } else {
+                    Payload {
+                        product_type: Some(self.product().into()),
+                        pos_mode: Some(mode),
+                        ..Payload::default()
+                    }
+                };
+                job.calls.push_back(Planned {
+                    path: if self.account.uta {
+                        paths::UTA_SET_MODE
+                    } else {
+                        paths::SET_MODE
+                    },
+                    payload,
+                    effect: Effect::Mode(*hedged),
+                });
+            }
+            _ => return Err("unsupported Bitget trading command".into()),
+        }
+        Ok(())
+    }
+
+    fn classic(&self, symbol: &str) -> Payload {
+        Payload {
+            symbol: Some(symbol.into()),
+            product_type: Some(self.product().into()),
+            margin_coin: Some(self.coin().into()),
+            ..Payload::default()
+        }
+    }
+
+    fn place_calls(
+        &self,
+        cx: &Cx<'_, Pending>,
+        orders: &[PlaceOrderOpts],
+    ) -> Result<Vec<Planned>, String> {
+        let mut calls = vec![];
+        let mut groups: Vec<(String, Vec<Payload>)> = vec![];
+        for o in orders.iter().filter(|o| !is_algo(o.kind)) {
+            let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
+            let total = num::adjust(o.amount, m.precision.amount);
+            let max = if m.limits.amount.max > 0.0 && m.limits.amount.max.is_finite() {
+                floor_lot(m.limits.amount.max, m.precision.amount)
+            } else {
+                total
+            };
+            if max <= 0.0 {
+                return Err("Bitget maximum size is smaller than one lot".into());
+            }
+            let mut left = total;
+            let count = (total / max).ceil() as usize;
+            if o.client_order_id.is_some() && count > 1 {
+                return Err("Bitget caller clientOrderId would split across native orders".into());
+            }
+            if count > 10_000 {
+                return Err("Bitget order exceeds the split bound".into());
+            }
+            while left > 0.0 {
+                let size = left.min(max);
+                left = clean(left - size);
+                let payload = self.normal_payload(cx, o, size)?;
+                if self.account.uta {
+                    calls.push(Planned {
+                        path: paths::UTA_PLACE,
+                        payload,
+                        effect: Effect::Place { expected: 1 },
+                    });
+                } else if let Some((_, group)) =
+                    groups.iter_mut().find(|(symbol, _)| symbol == &o.symbol)
+                {
+                    group.push(payload);
+                } else {
+                    groups.push((o.symbol.clone(), vec![payload]));
+                }
+            }
+        }
+        for (symbol, orders) in groups {
+            for chunk in orders.chunks(50) {
+                let mut payload = self.classic(&symbol);
+                payload.margin_mode = Some(margin_text(
+                    cx.store
+                        .setting(&symbol)
+                        .and_then(|s| s.margin_type)
+                        .unwrap_or(MarginType::Cross),
+                ));
+                payload.order_list = Some(chunk.to_vec());
+                calls.push(Planned {
+                    path: paths::BATCH_PLACE,
+                    payload,
+                    effect: Effect::Place {
+                        expected: chunk.len(),
+                    },
+                });
+            }
+        }
+        for o in orders.iter().filter(|o| is_algo(o.kind)) {
+            let (path, payload) = if self.account.uta {
+                (paths::UTA_STRATEGY, self.strategy_payload(cx, o)?)
+            } else {
+                (
+                    if o.kind == OrderType::TrailingStopLoss {
+                        paths::PLACE_TRAILING
+                    } else {
+                        paths::PLACE_TPSL
+                    },
+                    self.algo_payload(cx, o)?,
+                )
+            };
+            calls.push(Planned {
+                path,
+                payload,
+                effect: Effect::Place { expected: 1 },
+            });
+        }
+        Ok(calls)
+    }
+
+    fn normal_payload(
+        &self,
+        cx: &Cx<'_, Pending>,
+        o: &PlaceOrderOpts,
+        amount: f64,
+    ) -> Result<Payload, String> {
+        let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
+        let reduce = o.reduce_only.unwrap_or(false);
+        let hedge = cx.store.hedged();
+        let mut p = Payload {
+            client_oid: Some(o.client_order_id.clone().map_or_else(mint, Ok)?),
+            price: o
+                .price
+                .filter(|_| o.kind != OrderType::Market)
+                .map(|v| number(v, m.precision.price)),
+            side: Some(side_text(if hedge && reduce && !self.account.uta {
+                o.side.opposite()
+            } else {
+                o.side
+            })),
+            order_type: Some(if o.kind == OrderType::Limit {
+                "limit"
+            } else {
+                "market"
+            }),
+            ..Payload::default()
+        };
+        if self.account.uta {
+            p.category = Some(self.product().to_uppercase());
+            p.symbol = Some(o.symbol.clone());
+            p.qty = Some(num::format(amount));
+            p.pos_side = hedge.then_some(if reduce {
+                protected_side(o.side)
+            } else {
+                opening_side(o.side)
+            });
+            p.margin_mode = Some(margin_text(
+                cx.store
+                    .setting(&o.symbol)
+                    .and_then(|s| s.margin_type)
+                    .unwrap_or(MarginType::Cross),
+            ));
+            p.reduce_only = (!hedge).then_some(if reduce { "yes" } else { "no" });
+            p.time_in_force = (o.kind == OrderType::Limit).then_some(tif(o.time_in_force));
+            p.take_profit = o.take_profit.map(|v| number(v, m.precision.price));
+            p.stop_loss = o.stop_loss.map(|v| number(v, m.precision.price));
+            p.tp_trigger_by = o.take_profit.map(|_| uta_trigger(o.tp_trigger_type));
+            p.sl_trigger_by = o.stop_loss.map(|_| uta_trigger(o.sl_trigger_type));
+            p.tp_order_type = o.take_profit.map(|_| "market");
+            p.sl_order_type = o.stop_loss.map(|_| "market");
+        } else {
+            p.size = Some(num::format(amount));
+            p.trade_side = hedge.then_some(if reduce { "close" } else { "open" });
+            p.force = (o.kind == OrderType::Limit).then_some(tif(o.time_in_force));
+            p.reduce_only = (!hedge).then_some(if reduce { "YES" } else { "NO" });
+            p.preset_stop_surplus_price = o.take_profit.map(|v| number(v, m.precision.price));
+            p.preset_stop_loss_price = o.stop_loss.map(|v| number(v, m.precision.price));
+        }
+        Ok(p)
+    }
+
+    fn plan_size(&self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<(String, f64), String> {
+        let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
+        let is_tp = o.kind == OrderType::TakeProfit;
+        let position = cx.store.positions().iter().find(|p| {
+            p.symbol == o.symbol && p.side == protected_position(o.side) && p.contracts > 0.0
+        });
+        let capacity = position.map_or(0.0, |p| floor_lot(p.contracts, m.precision.amount));
+        let requested = num::adjust(o.amount, m.precision.amount);
+        let size = if o.amount == 0.0 || capacity < m.precision.amount {
+            0.0
+        } else {
+            requested.min(capacity)
+        };
+        Ok((
+            if size > 0.0 {
+                if is_tp { "profit_plan" } else { "loss_plan" }
+            } else if is_tp {
+                "pos_profit"
+            } else {
+                "pos_loss"
+            }
+            .into(),
+            size,
+        ))
+    }
+
+    fn algo_payload(&self, cx: &Cx<'_, Pending>, o: &PlaceOrderOpts) -> Result<Payload, String> {
+        let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
+        let (plan, size) = self.plan_size(cx, o)?;
+        let mut p = self.classic(&o.symbol);
+        p.client_oid = Some(mint()?);
+        p.reduce_only = (!cx.store.hedged()).then_some("YES");
+        p.trigger_price = o.price.map(|v| number(v, m.precision.price));
+        p.trigger_type = Some(trigger(if o.kind == OrderType::TakeProfit {
+            o.tp_trigger_type.or(o.trigger_type)
+        } else {
+            o.sl_trigger_type.or(o.trigger_type)
+        }));
+        if o.kind == OrderType::TrailingStopLoss {
+            let ticker = cx
+                .store
+                .ticker(&o.symbol)
+                .filter(|t| t.last > 0.0)
+                .ok_or("Bitget trailing stop requires a ticker")?;
+            let stop = o.price.ok_or("trailing trigger price is required")?;
+            if o.amount <= 0.0 {
+                return Err("Bitget trailing stop requires an explicit size".into());
+            }
+            p.size = Some(number(o.amount, m.precision.amount));
+            p.plan_type = Some("track_plan".into());
+            p.side = Some(side_text(o.side));
+            p.trade_side = cx.store.hedged().then_some("close");
+            p.order_type = Some("market");
+            p.margin_mode = Some(margin_text(
+                cx.store
+                    .setting(&o.symbol)
+                    .and_then(|s| s.margin_type)
+                    .unwrap_or(MarginType::Cross),
+            ));
+            let distance = num::adjust((ticker.last - stop).abs(), m.precision.price);
+            p.callback_ratio = Some(num::format(num::adjust(
+                distance * 100.0 / ticker.last,
+                0.1,
+            )));
+        } else {
+            p.plan_type = Some(plan);
+            p.size = (size > 0.0).then(|| num::format(size));
+            p.hold_side = Some(if cx.store.hedged() {
+                protected_side(o.side)
+            } else if o.side == OrderSide::Sell {
+                "buy"
+            } else {
+                "sell"
+            });
+        }
+        Ok(p)
+    }
+
+    fn strategy_payload(
+        &self,
+        cx: &Cx<'_, Pending>,
+        o: &PlaceOrderOpts,
+    ) -> Result<Payload, String> {
+        if !matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit) {
+            return Err("unsupported Bitget UTA strategy type".into());
+        }
+        let m = cx.store.market(&o.symbol).ok_or("unknown market")?;
+        let (_, mut size) = self.plan_size(cx, o)?;
+        if size == 0.0 {
+            size = cx
+                .store
+                .positions()
+                .iter()
+                .find(|p| {
+                    p.symbol == o.symbol
+                        && (!cx.store.hedged() || p.side == protected_position(o.side))
+                        && p.contracts > 0.0
+                })
+                .map_or(0.0, |p| num::adjust(p.contracts, m.precision.amount));
+        }
+        let mut p = Payload {
+            category: Some(self.product().to_uppercase()),
+            symbol: Some(o.symbol.clone()),
+            kind: Some("tpsl"),
+            side: Some(side_text(o.side)),
+            pos_side: cx.store.hedged().then_some(protected_side(o.side)),
+            tpsl_mode: Some(if size > 0.0 { "partial" } else { "full" }),
+            qty: (size > 0.0).then(|| num::format(size)),
+            reduce_only: Some("yes"),
+            client_oid: Some(mint()?),
+            ..Payload::default()
+        };
+        if o.kind == OrderType::TakeProfit {
+            p.take_profit = o.price.map(|v| number(v, m.precision.price));
+            p.tp_trigger_by = Some(uta_trigger(o.tp_trigger_type.or(o.trigger_type)));
+            p.tp_order_type = Some("market");
+        } else {
+            p.stop_loss = o.price.map(|v| number(v, m.precision.price));
+            p.sl_trigger_by = Some(uta_trigger(o.sl_trigger_type.or(o.trigger_type)));
+            p.sl_order_type = Some("market");
+        }
+        Ok(p)
+    }
+
+    fn cancel_calls(&self, orders: &[Order], idempotent_missing: bool) -> Vec<Planned> {
+        let mut calls = vec![];
+        let mut normal: Vec<(String, Vec<Order>)> = vec![];
+        let mut seen = HashSet::new();
+        for order in orders {
+            let id = native_id(order);
+            let strategy = is_algo(order.kind)
+                && (order.parent_id.is_none()
+                    || self
+                        .account
+                        .plans
+                        .get(&order.id)
+                        .is_some_and(|p| p == "uta_tpsl"));
+            if !seen.insert((strategy, id.clone())) {
+                continue;
+            }
+            if self.account.uta {
+                let payload = Payload {
+                    category: (!strategy).then(|| self.product().to_uppercase()),
+                    order_id: (!order
+                        .client_order_id
+                        .as_ref()
+                        .is_some_and(|client| client == &id))
+                    .then_some(id),
+                    client_oid: order.client_order_id.clone(),
+                    ..Payload::default()
+                };
+                calls.push(Planned {
+                    path: if strategy {
+                        paths::UTA_CANCEL_STRATEGY
+                    } else {
+                        paths::UTA_CANCEL
+                    },
+                    payload,
+                    effect: Effect::Cancel {
+                        orders: related(orders, order),
+                        idempotent_missing: strategy && idempotent_missing,
+                    },
+                });
+            } else if strategy {
+                let mut payload = self.classic(&order.symbol);
+                payload.order_id = Some(id);
+                payload.plan_type = Some(
+                    self.account
+                        .plans
+                        .get(&order.id)
+                        .and_then(|v| plan_type(v))
+                        .unwrap_or_else(|| fallback_plan(order))
+                        .into(),
+                );
+                calls.push(Planned {
+                    path: paths::CANCEL_PLAN,
+                    payload,
+                    effect: Effect::Cancel {
+                        orders: vec![order.clone()],
+                        idempotent_missing: false,
+                    },
+                });
+            } else if let Some((_, rows)) = normal.iter_mut().find(|(s, _)| s == &order.symbol) {
+                rows.push(order.clone());
+            } else {
+                normal.push((order.symbol.clone(), vec![order.clone()]));
+            }
+        }
+        let mut normal_calls = vec![];
+        for (symbol, rows) in normal {
+            for chunk in rows.chunks(50) {
+                let mut p = self.classic(&symbol);
+                p.order_id_list = Some(
+                    chunk
+                        .iter()
+                        .map(|o| CancelId {
+                            order_id: native_id(o),
+                        })
+                        .collect(),
+                );
+                normal_calls.push(Planned {
+                    path: paths::BATCH_CANCEL,
+                    payload: p,
+                    effect: Effect::Cancel {
+                        orders: chunk.iter().flat_map(|o| related(orders, o)).collect(),
+                        idempotent_missing: false,
+                    },
+                });
+            }
+        }
+        normal_calls.extend(calls);
+        normal_calls
+    }
+
+    fn plan_amend(
+        &self,
+        cx: &Cx<'_, Pending>,
+        job: &mut Job,
+        id: &str,
+        price: Option<f64>,
+        amount: Option<f64>,
+    ) -> Result<(), String> {
+        let order = cx
+            .store
+            .order(id)
+            .cloned()
+            .ok_or("Bitget order not found")?;
+        if matches!(
+            order.status,
+            OrderStatus::Closed | OrderStatus::Canceled | OrderStatus::Canceling
+        ) {
+            return Err("Bitget order is terminal or canceling; refresh before amending".into());
+        }
+        let m = cx.store.market(&order.symbol).ok_or("unknown market")?;
+        let next_price = num::adjust(price.unwrap_or(order.price), m.precision.price);
+        let next_amount = num::adjust(amount.unwrap_or(order.amount), m.precision.amount);
+        if !next_price.is_finite()
+            || next_price <= 0.0
+            || !next_amount.is_finite()
+            || next_amount < 0.0
+        {
+            return Err("invalid Bitget amendment".into());
+        }
+        let linked: Vec<_> = cx
+            .store
+            .orders()
+            .iter()
+            .filter(|o| native_id(o) == native_id(&order))
+            .cloned()
+            .collect();
+        let standalone = is_algo(order.kind)
+            && (order.parent_id.is_none()
+                || self
+                    .account
+                    .plans
+                    .get(&order.id)
+                    .is_some_and(|p| p == "uta_tpsl"));
+        if standalone && !self.account.uta {
+            let mut p = self.classic(&order.symbol);
+            p.order_id = Some(native_id(&order));
+            p.trigger_price = price.map(|_| num::format(next_price));
+            p.size = Some(if amount.is_some_and(|a| a > 0.0) {
+                num::format(next_amount)
+            } else if order.amount > 0.0 {
+                number(order.amount, m.precision.amount)
+            } else {
+                String::new()
+            });
+            job.calls.push_back(Planned {
+                path: paths::MODIFY_TPSL,
+                payload: p,
+                effect: Effect::Place { expected: 1 },
+            });
+            return Ok(());
+        }
+        let mut opts = place_opts(&order);
+        opts.client_order_id = None;
+        let attached = linked.iter().find(|o| o.kind == OrderType::Limit);
+        if let Some(parent) = attached {
+            opts = place_opts(parent);
+            opts.client_order_id = None;
+            opts.stop_loss = linked
+                .iter()
+                .find(|o| o.kind == OrderType::StopLoss)
+                .map(|o| if o.id == id { next_price } else { o.price });
+            opts.take_profit = linked
+                .iter()
+                .find(|o| o.kind == OrderType::TakeProfit)
+                .map(|o| if o.id == id { next_price } else { o.price });
+            opts.price = Some(if parent.id == id {
+                next_price
+            } else {
+                parent.price
+            });
+            opts.amount = amount.unwrap_or(parent.amount);
+        } else {
+            opts.price = Some(next_price);
+            opts.amount = next_amount;
+        }
+        let mut replacement = self.place_calls(cx, &[opts.clone()])?;
+        if standalone && self.account.uta {
+            let mut original = self.strategy_payload(cx, &place_opts(&order))?;
+            let mut next = self.strategy_payload(cx, &opts)?;
+            if linked.len() > 1 {
+                for related in &linked {
+                    let original_price = number(related.price, m.precision.price);
+                    let changed = if related.id == id {
+                        number(next_price, m.precision.price)
+                    } else {
+                        original_price.clone()
+                    };
+                    if related.kind == OrderType::StopLoss {
+                        original.stop_loss = Some(original_price);
+                        next.stop_loss = Some(changed);
+                        original.sl_order_type = Some("market");
+                        next.sl_order_type = Some("market");
+                        original.sl_trigger_by = Some(uta_trigger(related.trigger_type));
+                        next.sl_trigger_by = Some(uta_trigger(related.trigger_type));
+                    } else if related.kind == OrderType::TakeProfit {
+                        original.take_profit = Some(original_price);
+                        next.take_profit = Some(changed);
+                        original.tp_order_type = Some("market");
+                        next.tp_order_type = Some("market");
+                        original.tp_trigger_by = Some(uta_trigger(related.trigger_type));
+                        next.tp_trigger_by = Some(uta_trigger(related.trigger_type));
+                    }
+                }
+            }
+            replacement = vec![Planned {
+                path: paths::UTA_STRATEGY,
+                payload: next,
+                effect: Effect::Place { expected: 1 },
+            }];
+            job.rollback = Some(Planned {
+                path: paths::UTA_STRATEGY,
+                payload: original,
+                effect: Effect::Place { expected: 1 },
+            });
+        }
+        let mut fallback: VecDeque<_> = self.cancel_calls(&linked, false).into();
+        fallback.extend(replacement);
+        if !standalone
+            && order.kind == OrderType::Limit
+            && attached.is_some_and(|_| linked.len() == 1)
+            && !self.account.uta
+        {
+            if next_amount <= 0.0 {
+                return Err("Bitget amended size must be positive".into());
+            }
+            let client = mint()?;
+            let payload = Payload {
+                symbol: Some(order.symbol.clone()),
+                product_type: Some(self.product().into()),
+                order_id: Some(order.id.clone()),
+                new_client_oid: Some(client.clone()),
+                new_price: Some(num::format(next_price)),
+                new_size: Some(num::format(next_amount)),
+                ..Payload::default()
+            };
+            job.calls.push_back(Planned {
+                path: paths::MODIFY_ORDER,
+                payload,
+                effect: Effect::Amend {
+                    id: order.id,
+                    price: next_price,
+                    amount: next_amount,
+                    client,
+                },
+            });
+            job.fallback = Some(fallback);
+        } else {
+            job.calls = fallback;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn trade_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Result<Response<'_>, &str>,
+    ) {
+        let Some(mut job) = self.trading.active.take() else {
+            return;
+        };
+        if job.id != request.command {
+            self.trading.active = Some(job);
+            return;
+        }
+        job.outstanding = false;
+        if response
+            .as_ref()
+            .ok()
+            .and_then(|r| serde_json::from_str::<Envelope<serde::de::IgnoredAny>>(r.body).ok())
+            .is_some_and(|r| r.code.0 == Some(40085.0))
+            && self.promote_uta(cx)
+        {
+            if let Effect::Cancel { orders, .. } = &request.call.effect {
+                for o in orders {
+                    cx.store.update_order(&o.id, |row| {
+                        if row.status == OrderStatus::Canceling {
+                            row.status = o.status;
+                        }
+                    });
+                }
+            }
+            if job.ids.is_empty() {
+                job.calls.clear();
+                job.planned = false;
+                job.positions_checked = false;
+                job.waiting_positions = false;
+                job.metadata = symbols(cx, &job.intent).into();
+                job.fallback = None;
+                job.rollback = None;
+                self.trading.metadata_at.clear();
+                self.trading.active = Some(job);
+                self.resume_trading(cx);
+            } else {
+                cx.done(
+                    job.id,
+                    Err(format!(
+                        "Bitget switched to UTA after partial success; acknowledged IDs {:?}",
+                        job.ids
+                    )),
+                );
+            }
+            return;
+        }
+        if matches!(
+            request.call.effect,
+            Effect::Metadata(_) | Effect::ResolveAmend { .. }
+        ) && response.is_err()
+            && request.read_retries < 3
+        {
+            self.retry_read(cx, job, request);
+            return;
+        }
+        if let Effect::Metadata(symbol) = &request.call.effect {
+            if self.account.uta {
+                let parsed = response.map_err(str::to_owned).and_then(|r| {
+                    if r.status != 200 {
+                        return Err(format!("Bitget metadata HTTP {}", r.status));
+                    }
+                    serde_json::from_str::<Envelope<UtaSettings>>(r.body)
+                        .map_err(|e| e.to_string())
+                        .and_then(Envelope::checked)
+                });
+                match parsed {
+                    Ok(settings) if !settings.hold_mode.is_empty() => {
+                        self.apply_settings(cx, &settings);
+                        if cx.store.setting(symbol).is_none() {
+                            cx.store.update_setting(symbol, |s| {
+                                s.leverage = 1.0;
+                                s.margin_type = Some(MarginType::Cross);
+                            });
+                        }
+                        self.trading.metadata_at.insert(symbol.clone(), cx.now);
+                        self.trading.active = Some(job);
+                        self.resume_trading(cx);
+                    }
+                    _ => {
+                        cx.done(
+                            job.id,
+                            Err("Bitget UTA metadata could not be resolved".into()),
+                        );
+                        self.resume_trading(cx);
+                    }
+                }
+                return;
+            }
+            let parsed = response.map_err(str::to_owned).and_then(|r| {
+                if r.status != 200 {
+                    return Err(format!("Bitget metadata HTTP {}", r.status));
+                }
+                serde_json::from_str::<Envelope<SymbolConfig>>(r.body)
+                    .map_err(|e| e.to_string())
+                    .and_then(Envelope::checked)
+            });
+            match parsed {
+                Ok(row) if !row.pos_mode.is_empty() && !row.margin_mode.is_empty() => {
+                    cx.store.set_hedged(is_hedged(&row.pos_mode));
+                    let kind = margin(&row.margin_mode);
+                    let leverage = if kind == MarginType::Cross {
+                        row.crossed_margin_leverage.or(1.0)
+                    } else {
+                        first(&[row.isolated_long_lever, row.isolated_short_lever]).unwrap_or(1.0)
+                    };
+                    cx.store.update_setting(symbol, |s| {
+                        s.leverage = leverage;
+                        s.margin_type = Some(kind);
+                    });
+                    self.trading.metadata_at.insert(symbol.clone(), cx.now);
+                    self.trading.active = Some(job);
+                    self.resume_trading(cx);
+                }
+                _ => {
+                    cx.done(
+                        job.id,
+                        Err("Bitget position mode or margin type could not be resolved".into()),
+                    );
+                    self.resume_trading(cx);
+                }
+            }
+            return;
+        }
+        let parsed = response.map_err(str::to_owned).and_then(|r| {
+            serde_json::from_str::<Reply>(r.body)
+                .map(|reply| (r.status, reply))
+                .map_err(|e| e.to_string())
+        });
+        if let Effect::ResolveAmend { id, .. } = &request.call.effect {
+            let ready = parsed.as_ref().is_ok_and(|(status, reply)| {
+                *status == 200
+                    && reply.code.0 == Some(0.0)
+                    && reply.data.as_ref().is_some_and(|d| {
+                        !d.order_id.text().is_empty() && d.order_id.text().as_ref() != id
+                    })
+            });
+            if !ready && request.read_retries < 3 {
+                self.retry_read(cx, job, request);
+                return;
+            }
+        }
+        let explicit_rejection = parsed.as_ref().is_ok_and(|(status, reply)| {
+            *status < 500
+                && *status != 408
+                && !reply
+                    .code
+                    .0
+                    .is_some_and(|code| [40010.0, 40725.0, 45001.0].contains(&code))
+                && (*status >= 400 || reply.code.0.is_some_and(|code| code != 0.0))
+        });
+        if parsed
+            .as_ref()
+            .is_ok_and(|(_, reply)| reply.code.0 == Some(40009.0))
+            && !request.signature_retry
+        {
+            self.issue_trade(cx, job, request.call, true, request.read_retries);
+            return;
+        }
+        let mut error = match &parsed {
+            Ok((200, reply)) if reply.code.0 == Some(0.0) => None,
+            Ok((status, reply)) => Some(format!(
+                "Bitget {}: {} (HTTP {status})",
+                reply.code.get(),
+                reply.msg
+            )),
+            Err(error) => Some(error.clone()),
+        };
+        if let Effect::Cancel { idempotent_missing: true, .. } = &request.call.effect
+            && parsed.as_ref().is_ok_and(|(_, reply)| reply.msg == "Failed to stop the strategy because the corresponding strategy ID could not be found") { error = None; }
+        if error.is_some()
+            && matches!(request.call.effect, Effect::Amend { .. })
+            && explicit_rejection
+            && let Some(fallback) = job.fallback.take()
+        {
+            job.calls = fallback;
+            self.trading.active = Some(job);
+            self.resume_trading(cx);
+            return;
+        }
+        if error.is_none()
+            && let Effect::Cancel { orders, .. } = &request.call.effect
+        {
+            let data = parsed.as_ref().ok().and_then(|(_, r)| r.data.as_ref());
+            let accepted: HashSet<_> = data.map_or_else(HashSet::new, |d| {
+                d.success_list
+                    .iter()
+                    .map(|i| i.order_id.text().into_owned())
+                    .collect()
+            });
+            for order in orders {
+                if accepted.contains(&native_id(order)) {
+                    self.mark_canceled(cx, &order.id);
+                    self.note_write(cx);
+                }
+            }
+            if data.is_some_and(|d| !d.failure_list.is_empty()) {
+                error = Some(format!(
+                    "Bitget cancel failure: {}",
+                    data.expect("data")
+                        .failure_list
+                        .iter()
+                        .map(|e| e.error_msg.as_str())
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ));
+            } else if request.call.path == paths::BATCH_CANCEL
+                && orders.iter().any(|o| !accepted.contains(&native_id(o)))
+            {
+                error = Some("Bitget batch cancel did not acknowledge every order".into());
+            }
+        }
+        if error.is_none() {
+            let data = parsed.as_ref().ok().and_then(|(_, r)| r.data.as_ref());
+            if let Effect::Place { expected } = request.call.effect {
+                let mut ids: Vec<_> = data.map_or_else(Vec::new, |d| {
+                    d.success_list
+                        .iter()
+                        .map(|i| i.order_id.text().into_owned())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                });
+                if ids.is_empty()
+                    && let Some(d) = data
+                {
+                    let native = d.order_id.text();
+                    let client = d.client_oid.text();
+                    let id = if !native.is_empty() { native } else { client };
+                    if !id.is_empty() {
+                        ids.push(id.into_owned());
+                    }
+                }
+                if let Some(d) = data
+                    && !d.failure_list.is_empty()
+                {
+                    error = Some(format!(
+                        "Bitget batch failure after ids {ids:?}: {}",
+                        d.failure_list
+                            .iter()
+                            .map(|e| e.error_msg.as_str())
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    ));
+                } else if ids.len() != expected {
+                    error = Some(format!(
+                        "Bitget acknowledged {} of {expected} orders; ids {ids:?}",
+                        ids.len()
+                    ));
+                }
+                if !ids.is_empty() {
+                    self.note_write(cx);
+                }
+                job.ids.extend(ids);
+            }
+        }
+        if let Some(error) = error {
+            if let Effect::Cancel { orders, .. } = &request.call.effect {
+                for order in orders {
+                    cx.store.update_order(&order.id, |current| {
+                        if current.status == OrderStatus::Canceling {
+                            current.status = order.status;
+                        }
+                    });
+                }
+            }
+            if explicit_rejection
+                && matches!(request.call.effect, Effect::Place { .. })
+                && job.error.is_none()
+                && let Some(rollback) = job.rollback.take()
+            {
+                job.error = Some(error);
+                job.calls.clear();
+                job.calls.push_back(rollback);
+                self.trading.active = Some(job);
+                self.resume_trading(cx);
+                return;
+            }
+            let error = job.error.map_or(error.clone(), |original| {
+                format!("{original}; protection rollback failed: {error}")
+            });
+            cx.done(job.id, Err(error));
+            self.refresh_orders(cx, false);
+            self.resume_trading(cx);
+            return;
+        }
+        match request.call.effect {
+            Effect::Cancel { orders, .. } => {
+                for order in orders {
+                    self.mark_canceled(cx, &order.id);
+                }
+            }
+            Effect::Amend {
+                id,
+                price,
+                amount,
+                client,
+            } => {
+                let next = parsed
+                    .as_ref()
+                    .ok()
+                    .and_then(|(_, reply)| reply.data.as_ref())
+                    .map(|d| d.order_id.text().into_owned())
+                    .filter(|s| !s.is_empty() && s != &id);
+                if let Some(next) = next {
+                    self.commit_amend(
+                        cx,
+                        &id,
+                        &next,
+                        (price, amount, job.original.clone()),
+                        &client,
+                        request.started,
+                    );
+                    job.ids.push(next);
+                } else {
+                    let symbol = request.call.payload.symbol.clone();
+                    job.calls.push_front(Planned {
+                        path: paths::ORDER_DETAIL,
+                        payload: Payload {
+                            symbol,
+                            ..Payload::default()
+                        },
+                        effect: Effect::ResolveAmend {
+                            id,
+                            price,
+                            amount,
+                            client,
+                        },
+                    });
+                }
+            }
+            Effect::ResolveAmend {
+                id,
+                price,
+                amount,
+                client,
+            } => {
+                let next = parsed
+                    .as_ref()
+                    .ok()
+                    .and_then(|(_, reply)| reply.data.as_ref())
+                    .map(|d| d.order_id.text().into_owned())
+                    .filter(|s| !s.is_empty() && s != &id);
+                if let Some(next) = next {
+                    self.commit_amend(
+                        cx,
+                        &id,
+                        &next,
+                        (price, amount, job.original.clone()),
+                        &client,
+                        request.started,
+                    );
+                    if !self.order_terminal(&next)
+                        && let Some(data) = parsed.as_ref().ok().and_then(|(_, r)| r.data.as_ref())
+                    {
+                        cx.store.update_order(&next, |o| {
+                            if !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
+                                && o.last_update <= request.started
+                            {
+                                if let Some(filled) = data.base_volume.0 {
+                                    o.filled = filled;
+                                    o.remaining = clean((o.amount - filled).max(0.0));
+                                }
+                                if let Some(status) = crate::account::order_status(&data.status) {
+                                    o.status = status;
+                                }
+                            }
+                        });
+                        if crate::account::order_status(&data.status).is_some_and(|s| {
+                            matches!(s, OrderStatus::Closed | OrderStatus::Canceled)
+                        }) {
+                            self.mark_canceled(cx, &next);
+                        }
+                    }
+                    job.ids.push(next);
+                } else {
+                    cx.done(job.id, Err("Bitget amendment identity is not available; refresh before further edits".into()));
+                    self.refresh_orders(cx, false);
+                    self.resume_trading(cx);
+                    return;
+                }
+            }
+            Effect::Leverage {
+                symbol,
+                leverage,
+                side,
+            } => {
+                self.account.config_at = Some(cx.now);
+                cx.store.update_setting(&symbol, |s| s.leverage = leverage);
+                cx.store.update_positions(|p| {
+                    if p.symbol == symbol && side.is_none_or(|side| p.side == side) {
+                        p.leverage = leverage;
+                    }
+                });
+            }
+            Effect::Margin { symbol, margin } => {
+                self.account.config_at = Some(cx.now);
+                cx.store
+                    .update_setting(&symbol, |s| s.margin_type = Some(margin));
+                cx.store.update_positions(|p| {
+                    if p.symbol == symbol {
+                        p.margin_type = Some(margin);
+                    }
+                });
+            }
+            Effect::Mode(hedged) => {
+                self.account.config_at = Some(cx.now);
+                cx.store.set_hedged(hedged);
+                cx.store.update_positions(|p| {
+                    p.position_mode = Some(if hedged {
+                        PositionMode::Hedged
+                    } else {
+                        PositionMode::Oneway
+                    })
+                });
+            }
+            _ => {}
+        }
+        self.note_write(cx);
+        self.trading.active = Some(job);
+        self.resume_trading(cx);
+    }
+
+    fn commit_amend(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        old: &str,
+        next: &str,
+        values: (f64, f64, Option<Order>),
+        client: &str,
+        started: f64,
+    ) {
+        let (price, amount, fallback) = values;
+        let original = cx.store.order(old).cloned().or(fallback);
+        if self.order_terminal(next)
+            || (old == next
+                && original.as_ref().is_some_and(|o| {
+                    matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
+                }))
+        {
+            return;
+        }
+        if old != next {
+            self.mark_canceled(cx, old);
+        }
+        if let Some(mut order) = original {
+            if old != next && cx.store.order(next).is_some() {
+                return;
+            }
+            if order.last_update <= started {
+                order.price = price;
+                order.amount = amount;
+                order.remaining = clean((amount - order.filled).max(0.0));
+            }
+            order.id = next.to_owned();
+            order.client_order_id = Some(client.to_owned());
+            order.status = OrderStatus::Open;
+            self.mark_opened(cx.now, next);
+            cx.store.upsert_order(order);
+        }
+    }
+
+    fn retry_read(&mut self, cx: &mut Cx<'_, Pending>, mut job: Job, mut request: Request) {
+        request.read_retries += 1;
+        job.outstanding = true;
+        self.trading.active = Some(job);
+        self.trading.retry = Some((
+            cx.set_timer(250.0 * f64::from(request.read_retries)),
+            request,
+        ));
+    }
+
+    pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.trading.detect_wait == Some(timer) {
+            self.trading.detect_wait = None;
+            if let Some(job) = self.trading.active.take() {
+                cx.done(
+                    job.id,
+                    Err("Bitget account detection did not complete".into()),
+                );
+            }
+            while let Some(command) = self.trading.queue.pop_front() {
+                if let Some(id) = command_id(&command) {
+                    cx.done(id, Err("Bitget account detection did not complete".into()));
+                }
+            }
+            return;
+        }
+        if self
+            .trading
+            .retry
+            .as_ref()
+            .is_some_and(|(t, _)| *t == timer)
+        {
+            let (_, request) = self.trading.retry.take().expect("retry");
+            if let Some(mut job) = self.trading.active.take() {
+                job.outstanding = false;
+                self.issue_trade(
+                    cx,
+                    job,
+                    request.call,
+                    request.signature_retry,
+                    request.read_retries,
+                );
+            }
+        }
+    }
+}
+
+fn command_id(command: &Command) -> Option<u32> {
+    match command {
+        Command::PlaceOrders { command, .. }
+        | Command::CancelOrders { command, .. }
+        | Command::CancelSymbolOrders { command, .. }
+        | Command::AmendOrder { command, .. }
+        | Command::SetLeverage { command, .. }
+        | Command::SetMarginType { command, .. }
+        | Command::SetPositionMode { command, .. } => Some(*command),
+        _ => None,
+    }
+}
+fn symbols(cx: &Cx<'_, Pending>, command: &Command) -> Vec<String> {
+    let mut result = match command {
+        Command::PlaceOrders { orders, .. } => orders.iter().map(|o| o.symbol.clone()).collect(),
+        Command::AmendOrder { id, .. } => cx
+            .store
+            .order(id)
+            .map(|o| vec![o.symbol.clone()])
+            .unwrap_or_default(),
+        Command::SetLeverage { symbol, .. } | Command::SetMarginType { symbol, .. } => {
+            vec![symbol.clone()]
+        }
+        _ => vec![],
+    };
+    let mut seen = HashSet::new();
+    result.retain(|s| seen.insert(s.clone()));
+    result
+}
+fn needs_position_read(cx: &Cx<'_, Pending>, command: &Command, uta: bool) -> bool {
+    if let Command::PlaceOrders { orders, .. } = command {
+        orders.iter().any(|o| {
+            is_algo(o.kind)
+                && (o.amount > 0.0 || uta)
+                && !cx.store.positions().iter().any(|p| {
+                    p.symbol == o.symbol
+                        && p.side == protected_position(o.side)
+                        && p.contracts > 0.0
+                })
+        })
+    } else if uta && let Command::AmendOrder { id, .. } = command {
+        cx.store.order(id).is_some_and(|o| {
+            is_algo(o.kind)
+                && !cx.store.positions().iter().any(|p| {
+                    p.symbol == o.symbol
+                        && p.side == protected_position(o.side)
+                        && p.contracts > 0.0
+                })
+        })
+    } else {
+        false
+    }
+}
+fn mint() -> Result<String, String> {
+    safe_cex_crypto::uuid::uuid()
+}
+fn side_text(side: OrderSide) -> &'static str {
+    if side == OrderSide::Buy {
+        "buy"
+    } else {
+        "sell"
+    }
+}
+fn opening_side(side: OrderSide) -> &'static str {
+    if side == OrderSide::Buy {
+        "long"
+    } else {
+        "short"
+    }
+}
+fn protected_side(side: OrderSide) -> &'static str {
+    if side == OrderSide::Buy {
+        "short"
+    } else {
+        "long"
+    }
+}
+fn protected_position(side: OrderSide) -> PositionSide {
+    if side == OrderSide::Buy {
+        PositionSide::Short
+    } else {
+        PositionSide::Long
+    }
+}
+fn margin_text(margin: MarginType) -> &'static str {
+    if margin == MarginType::Cross {
+        "crossed"
+    } else {
+        "isolated"
+    }
+}
+fn tif(value: Option<TimeInForce>) -> &'static str {
+    match value.unwrap_or(TimeInForce::GoodTillCancel) {
+        TimeInForce::GoodTillCancel => "gtc",
+        TimeInForce::ImmediateOrCancel => "ioc",
+        TimeInForce::FillOrKill => "fok",
+        TimeInForce::PostOnly => "post_only",
+    }
+}
+fn trigger(value: Option<StopTriggerType>) -> &'static str {
+    if value == Some(StopTriggerType::LastPrice) {
+        "fill_price"
+    } else {
+        "mark_price"
+    }
+}
+fn uta_trigger(value: Option<StopTriggerType>) -> &'static str {
+    if value == Some(StopTriggerType::LastPrice) {
+        "market"
+    } else {
+        "mark"
+    }
+}
+fn number(v: f64, step: f64) -> String {
+    num::format(num::adjust(v, step))
+}
+fn floor_lot(v: f64, step: f64) -> f64 {
+    if step > 0.0 {
+        clean(((v / step) + 1e-10).floor() * step)
+    } else {
+        v
+    }
+}
+fn native_id(order: &Order) -> String {
+    order.parent_id.clone().unwrap_or_else(|| order.id.clone())
+}
+fn related(orders: &[Order], order: &Order) -> Vec<Order> {
+    let id = native_id(order);
+    orders
+        .iter()
+        .filter(|o| native_id(o) == id)
+        .cloned()
+        .collect()
+}
+fn fallback_plan(order: &Order) -> &'static str {
+    match (order.kind, order.amount > 0.0) {
+        (OrderType::TakeProfit, true) => "profit_plan",
+        (OrderType::TakeProfit, false) => "pos_profit",
+        (OrderType::TrailingStopLoss, _) => "track_plan",
+        (_, true) => "loss_plan",
+        _ => "pos_loss",
+    }
+}
+fn place_opts(order: &Order) -> PlaceOrderOpts {
+    PlaceOrderOpts {
+        symbol: order.symbol.clone(),
+        kind: order.kind,
+        side: order.side,
+        amount: order.amount,
+        price: Some(order.price),
+        trigger_price: None,
+        stop_loss: order.stop_loss,
+        take_profit: order.take_profit,
+        reduce_only: Some(order.reduce_only),
+        time_in_force: order.time_in_force,
+        trigger_type: order.trigger_type,
+        tp_trigger_type: order.trigger_type,
+        sl_trigger_type: order.trigger_type,
+        client_order_id: None,
+        close: order.close,
+    }
+}
