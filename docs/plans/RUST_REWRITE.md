@@ -53,7 +53,7 @@ Action  = WsConnect | WsSend | WsClose
 - Symbols are interned to a `u32` market index. Tickers live in a `Vec` indexed
   by it, with a per-field dirty mask.
 - Order books are sorted `Vec<(price, amount)>` per side, keyed per market.
-- The Store holds typed state (`safe-cex-engine/src/model.rs`) and change
+- The Store holds typed state (`sdk-rs/engine/src/model.rs`) and change
   tracking; it is written out only as flush frames.
 
 ## Data shapes: the flush frame
@@ -107,8 +107,8 @@ a row of the most recent `TICKERS` section. `POSITIONS` holds open positions
 only; per-market leverage and margin type live in `SETTINGS`, replacing the
 zero-size placeholder positions TS kept for every market. An order's packed
 enum word carries its reject reason (flags bits 4-5). Enum codes and flag bits are
-defined once in `safe-cex-engine/src/wire.rs` and mirrored by the decoder in
-`safe-cex-wasm/js/wire.mjs`.
+defined once in `sdk-rs/engine/src/wire.rs` and mirrored by the decoder in
+`hosts/wasm/js/wire.mjs`.
 
 ### Crossing rules
 
@@ -211,8 +211,8 @@ memory.
 
 ### 4. Hosts
 
-- Browser worker: `safe-cex-wasm` + `host.mjs` — done.
-- Native: `safe-cex-native`, tokio + tokio-tungstenite + reqwest over a
+- Browser worker: `hosts/wasm` + `host.mjs` — done.
+- Native: `hosts/native` (`safe-cex-native`), tokio + tokio-tungstenite + reqwest over a
   pluggable transport, driving the same engine — done (`examples/watch.rs`
   runs it live; `tests/host.rs` drives the loop from a tape).
 - Cloudflare: the same wasm build and `host.mjs` inside a Durable Object —
@@ -290,6 +290,26 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 
 - Binance testnet (or live test-account) API keys for the live private tape.
   The documented-payload tape does not need them.
+
+## Repository layout
+
+```
+sdk-rs/                   Rust workspace
+  engine/                 safe-cex-engine: the sans-I/O core, store, frame
+  crypto/                 safe-cex-crypto: signing primitives
+  hosts/wasm/             safe-cex-wasm + js/ (host, frame reader, Workers
+                          host); the @tealstreet/safe-cex-wasm package
+  hosts/native/           safe-cex-native: tokio host
+  venues/<venue>/         safe-cex-venue-<venue>, one crate per venue
+  harness/  scripts/
+packages/                 TypeScript
+```
+
+TypeScript lives on beside it: `packages/safe-cex` keeps the shell (worker,
+store, chasers, TWAP, CLI, types) and reaches Rust only through
+`@tealstreet/safe-cex-wasm`. Each venue under
+`packages/safe-cex/src/exchanges/` is deleted once its Rust port ships, and
+the shell shrinks as its pieces move into the engine.
 
 ## Branching
 

@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
-import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../safe-cex-wasm/js/wire.mjs';
+import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
 
 const { values } = parseArgs({
@@ -196,8 +196,8 @@ const marketFields = (m) => ({
 });
 
 async function runRust() {
-  const { EngineHost } = await import('../safe-cex-wasm/js/host.mjs');
-  const { Frame, TickerState, MARKET_COLUMNS } = await import('../safe-cex-wasm/js/wire.mjs');
+  const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
+  const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine();
   const tape = new Tape();

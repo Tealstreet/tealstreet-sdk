@@ -5,13 +5,13 @@ You port one venue from TypeScript safe-cex to the Rust engine. Read
 
 ## Reference
 
-- The finished pattern: `sdk-rs/safe-cex-venue-binance/` — `lib.rs` (public
+- The finished pattern: `sdk-rs/venues/binance/` — `lib.rs` (public
   data, socket watchdog, `Venue` impl incl. `books()`), `account.rs` (private
   stream, REST reconciliation, stale-snapshot guards), `trading.rs` (commands
   as sequenced jobs, client-order-id contract), `history.rs` (rare reads as
   JSON), `paths.rs`, `sign.rs`, `wire.rs` (borrowed serde structs), and
   `tests/` (scripted tests from documented payloads, `tests/support/`).
-- The engine: `sdk-rs/safe-cex-engine/src/` — `Venue`, `Cx`
+- The engine: `sdk-rs/engine/src/` — `Venue`, `Cx`
   (`request_streamed` + `on_item` for large lists), `Store` (settings,
   hedged), `json::ArraySplitter`, `paging::RangeWalk`, `num`, `wire`.
 - The TS you replace (behaviour, never code to transliterate):
@@ -22,7 +22,7 @@ You port one venue from TypeScript safe-cex to the Rust engine. Read
 
 ## Build
 
-A crate `sdk-rs/safe-cex-venue-<venue>/` implementing `Venue`:
+A crate `sdk-rs/venues/<venue>/ (crate `safe-cex-venue-<venue>`)` implementing `Venue`:
 
 - Public: markets, tickers (REST seed + stream), full-depth books with the
   venue's sequence/gap rules, candles (stream + `FetchCandles`). Large REST
@@ -36,8 +36,8 @@ A crate `sdk-rs/safe-cex-venue-<venue>/` implementing `Venue`:
 - A liveness watchdog on every socket with the venue's ping protocol.
 - Tests from the venue's documented payload examples.
 
-Register it: workspace `Cargo.toml`, `safe-cex-wasm` (`Cargo.toml` and the
-`WasmEngine::new` match), `RUST_VENUES` in
+Register it (the workspace picks up `venues/*` itself): `hosts/wasm`
+(`Cargo.toml` and the `WasmEngine::new` match), `RUST_VENUES` in
 `packages/safe-cex/src/exchanges/rust/rust.exchange.ts`, a `venues.mjs` entry,
 and `sdk-rs/harness/private-tape-<venue>.mjs` with a root `package.json`
 script beside `rust:private-tape`. Extend `replay.mjs` generically; never
@@ -64,6 +64,9 @@ Toolchain: `export PATH="$HOME/.rustup/toolchains/1.99.0-aarch64-apple-darwin/bi
   `gate.mjs` with a comment, and in your commit message). Never silently
   diverge.
 - Short comments, only for non-obvious decisions; match Binance's density.
+- Delete what becomes provably unused as you go: helpers in `sdk-rs/crypto`
+  left from the first port that no venue calls, and anything your venue
+  replaces. Never keep dead code "for later".
 - `corepack yarn` only, never `npx`; never `node <script>` directly (use the
   yarn scripts). No load tests.
 - Commit on your lane branch with clear messages at stable points. Never

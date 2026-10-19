@@ -6,7 +6,7 @@
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
-import { EngineHost, nativeTransport } from '../safe-cex-wasm/js/host.mjs';
+import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
 
 const { values } = parseArgs({
