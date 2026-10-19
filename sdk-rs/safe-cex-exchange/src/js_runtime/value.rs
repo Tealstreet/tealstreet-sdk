@@ -2412,3 +2412,7 @@ fn same_value(a: &Js, b: &Js) -> bool {
         _ => a.strict_equals(b),
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/support/value_input_helpers.rs"]
+mod native_input_tests;

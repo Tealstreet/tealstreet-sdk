@@ -733,7 +733,8 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::value::arg",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: direct production argument selection matches independent Node arguments access for missing and explicit undefined, native signed zero, NaN, UTF16, BigInt and original object/array/function referents; selection performs no coercion or projection."
     },
     {
       "package": "safe-cex-exchange",
@@ -743,12 +744,14 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::value::same_optional_value",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: the optional prototype-slot comparator preserves missing versus present undefined and delegates present values to source SameValue semantics. Direct native observations match Node own-presence plus Object.is; this host Option profile does not admit missing as a JS value."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::value::same_value",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: direct production SameValue matches Object.is for NaN signs/payloads, distinct zero signs, native UTF16/BigInt/scalar domains and shared versus separate object, array, function, Map and Set referents. No divergent behavior is observed in the bounded native profiles."
     },
     {
       "package": "safe-cex-exchange",

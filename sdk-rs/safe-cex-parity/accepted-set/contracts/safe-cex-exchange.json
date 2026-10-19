@@ -41349,5 +41349,2177 @@
         }
       ]
     }
+  },
+  "safe_cex_exchange::js_runtime::value::arg": {
+  "category": "decoder",
+  "api": {
+    "kind": "function",
+    "name": "arg",
+    "signature": {
+      "inputs": [
+        [
+          "args",
+          {
+            "borrowed_ref": {
+              "lifetime": null,
+              "is_mutable": false,
+              "type": {
+                "slice": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          }
+        ],
+        [
+          "i",
+          {
+            "primitive": "usize"
+          }
+        ]
+      ],
+      "output": {
+        "resolved_path": {
+          "path": "safe_cex_exchange::js_runtime::value::Js",
+          "args": null
+        }
+      },
+      "is_c_variadic": false
+    },
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    }
+  },
+  "evidence": "ACCEPT: direct production argument selection matches independent Node arguments access for missing and explicit undefined, native signed zero, NaN, UTF16, BigInt and original object/array/function referents; selection performs no coercion or projection. Actual production functions are invoked by scripts/value-input-observers.rs; scripts/value-input-oracle.cjs independently derives expectations in Node. The cfg(test) value child executes the same native helpers.",
+  "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/value-input-observers.rs\")); } observation::argument($value, $type) }",
+  "cases": [
+    {
+      "input": 0,
+      "output": {
+        "ok": true,
+        "value": [
+          "undefined"
+        ],
+        "originalReference": false
+      }
+    },
+    {
+      "input": 1,
+      "output": {
+        "ok": true,
+        "value": [
+          "null"
+        ],
+        "originalReference": false
+      }
+    },
+    {
+      "input": 2,
+      "output": {
+        "ok": true,
+        "value": [
+          "number",
+          "8000000000000000"
+        ],
+        "originalReference": false
+      }
+    },
+    {
+      "input": 3,
+      "output": {
+        "ok": true,
+        "value": [
+          "number",
+          "4045000000000000"
+        ],
+        "originalReference": false
+      }
+    },
+    {
+      "input": 4,
+      "output": {
+        "ok": true,
+        "value": [
+          "nan"
+        ],
+        "originalReference": false
+      }
+    },
+    {
+      "input": 5,
+      "output": {
+        "ok": true,
+        "value": [
+          "string",
+          [
+            55296,
+            56320,
+            57343
+          ]
+        ],
+        "originalReference": false
+      }
+    },
+    {
+      "input": 6,
+      "output": {
+        "ok": true,
+        "value": [
+          "reference",
+          true,
+          false,
+          false
+        ],
+        "originalReference": true
+      }
+    },
+    {
+      "input": 7,
+      "output": {
+        "ok": true,
+        "value": [
+          "reference",
+          false,
+          true,
+          false
+        ],
+        "originalReference": true
+      }
+    },
+    {
+      "input": 8,
+      "output": {
+        "ok": true,
+        "value": [
+          "reference",
+          false,
+          false,
+          true
+        ],
+        "originalReference": true
+      }
+    },
+    {
+      "input": 9,
+      "output": {
+        "ok": true,
+        "value": [
+          "bigint",
+          "17"
+        ],
+        "originalReference": false
+      }
+    },
+    {
+      "input": 10,
+      "output": {
+        "ok": true,
+        "value": [
+          "undefined"
+        ],
+        "originalReference": false
+      }
+    },
+    {
+      "input": 9007199254740991,
+      "output": {
+        "ok": true,
+        "value": [
+          "undefined"
+        ],
+        "originalReference": false
+      }
+    }
+  ],
+  "nativeObservation": {
+    "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/value-input-observers.rs\")); } observation::argument($value, $type) }",
+    "nativeFields": [
+      "value",
+      "originalReference"
+    ],
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": [
+            "undefined"
+          ],
+          "originalReference": false
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": true,
+          "value": [
+            "null"
+          ],
+          "originalReference": false
+        }
+      },
+      {
+        "input": 2,
+        "output": {
+          "ok": true,
+          "value": [
+            "number",
+            "8000000000000000"
+          ],
+          "originalReference": false
+        }
+      },
+      {
+        "input": 3,
+        "output": {
+          "ok": true,
+          "value": [
+            "number",
+            "4045000000000000"
+          ],
+          "originalReference": false
+        }
+      },
+      {
+        "input": 4,
+        "output": {
+          "ok": true,
+          "value": [
+            "nan"
+          ],
+          "originalReference": false
+        }
+      },
+      {
+        "input": 5,
+        "output": {
+          "ok": true,
+          "value": [
+            "string",
+            [
+              55296,
+              56320,
+              57343
+            ]
+          ],
+          "originalReference": false
+        }
+      },
+      {
+        "input": 6,
+        "output": {
+          "ok": true,
+          "value": [
+            "reference",
+            true,
+            false,
+            false
+          ],
+          "originalReference": true
+        }
+      },
+      {
+        "input": 7,
+        "output": {
+          "ok": true,
+          "value": [
+            "reference",
+            false,
+            true,
+            false
+          ],
+          "originalReference": true
+        }
+      },
+      {
+        "input": 8,
+        "output": {
+          "ok": true,
+          "value": [
+            "reference",
+            false,
+            false,
+            true
+          ],
+          "originalReference": true
+        }
+      },
+      {
+        "input": 9,
+        "output": {
+          "ok": true,
+          "value": [
+            "bigint",
+            "17"
+          ],
+          "originalReference": false
+        }
+      },
+      {
+        "input": 10,
+        "output": {
+          "ok": true,
+          "value": [
+            "undefined"
+          ],
+          "originalReference": false
+        }
+      },
+      {
+        "input": 9007199254740991,
+        "output": {
+          "ok": true,
+          "value": [
+            "undefined"
+          ],
+          "originalReference": false
+        }
+      }
+    ]
   }
+},
+  "safe_cex_exchange::js_runtime::value::same_optional_value": {
+  "category": "decoder",
+  "api": {
+    "kind": "function",
+    "name": "same_optional_value",
+    "signature": {
+      "inputs": [
+        [
+          "left",
+          {
+            "borrowed_ref": {
+              "lifetime": null,
+              "is_mutable": false,
+              "type": {
+                "resolved_path": {
+                  "path": "core::option::Option",
+                  "args": {
+                    "angle_bracketed": {
+                      "args": [
+                        {
+                          "type": {
+                            "resolved_path": {
+                              "path": "safe_cex_exchange::js_runtime::value::Js",
+                              "args": null
+                            }
+                          }
+                        }
+                      ],
+                      "constraints": []
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ],
+        [
+          "right",
+          {
+            "borrowed_ref": {
+              "lifetime": null,
+              "is_mutable": false,
+              "type": {
+                "resolved_path": {
+                  "path": "core::option::Option",
+                  "args": {
+                    "angle_bracketed": {
+                      "args": [
+                        {
+                          "type": {
+                            "resolved_path": {
+                              "path": "safe_cex_exchange::js_runtime::value::Js",
+                              "args": null
+                            }
+                          }
+                        }
+                      ],
+                      "constraints": []
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      ],
+      "output": {
+        "primitive": "bool"
+      },
+      "is_c_variadic": false
+    },
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    }
+  },
+  "evidence": "ACCEPT: the optional prototype-slot comparator preserves missing versus present undefined and delegates present values to source SameValue semantics. Direct native observations match Node own-presence plus Object.is; this host Option profile does not admit missing as a JS value. Actual production functions are invoked by scripts/value-input-observers.rs; scripts/value-input-oracle.cjs independently derives expectations in Node. The cfg(test) value child executes the same native helpers.",
+  "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/value-input-observers.rs\")); } observation::optional($value, $type) }",
+  "cases": [
+    {
+      "input": "none",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": false,
+        "rightPresent": false
+      }
+    },
+    {
+      "input": "missing-left",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": false,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "missing-right",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": false
+      }
+    },
+    {
+      "input": "nan",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "nan-payload",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "nan-sign",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "zero",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "minus-zero",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "plus-zero",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "infinity",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "infinity-sign",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "number",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "other-number",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "nullish",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "undefined",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "null",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "boolean",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "other-boolean",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "boolean-number",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "number-string",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "units",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "other-units",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "high-low",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "bigint",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "other-bigint",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "bigint-number",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "symbol",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "object",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "other-object",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "array",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "other-array",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "function",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "other-function",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "map",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "other-map",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "set",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    },
+    {
+      "input": "other-set",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "leftPresent": true,
+        "rightPresent": true
+      }
+    }
+  ],
+  "nativeObservation": {
+    "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/value-input-observers.rs\")); } observation::optional($value, $type) }",
+    "nativeFields": [
+      "equal",
+      "leftPresent",
+      "rightPresent"
+    ],
+    "cases": [
+      {
+        "input": "none",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": false,
+          "rightPresent": false
+        }
+      },
+      {
+        "input": "missing-left",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": false,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "missing-right",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": false
+        }
+      },
+      {
+        "input": "nan",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "nan-payload",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "nan-sign",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "zero",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "minus-zero",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "plus-zero",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "infinity",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "infinity-sign",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "number",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "other-number",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "nullish",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "undefined",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "null",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "boolean",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "other-boolean",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "boolean-number",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "number-string",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "units",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "other-units",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "high-low",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "bigint",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "other-bigint",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "bigint-number",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "symbol",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "object",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "other-object",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "array",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "other-array",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "function",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "other-function",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "map",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "other-map",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "set",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      },
+      {
+        "input": "other-set",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "leftPresent": true,
+          "rightPresent": true
+        }
+      }
+    ]
+  }
+},
+  "safe_cex_exchange::js_runtime::value::same_value": {
+  "category": "decoder",
+  "api": {
+    "kind": "function",
+    "name": "same_value",
+    "signature": {
+      "inputs": [
+        [
+          "a",
+          {
+            "borrowed_ref": {
+              "lifetime": null,
+              "is_mutable": false,
+              "type": {
+                "resolved_path": {
+                  "path": "safe_cex_exchange::js_runtime::value::Js",
+                  "args": null
+                }
+              }
+            }
+          }
+        ],
+        [
+          "b",
+          {
+            "borrowed_ref": {
+              "lifetime": null,
+              "is_mutable": false,
+              "type": {
+                "resolved_path": {
+                  "path": "safe_cex_exchange::js_runtime::value::Js",
+                  "args": null
+                }
+              }
+            }
+          }
+        ]
+      ],
+      "output": {
+        "primitive": "bool"
+      },
+      "is_c_variadic": false
+    },
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    }
+  },
+  "evidence": "ACCEPT: direct production SameValue matches Object.is for NaN signs/payloads, distinct zero signs, native UTF16/BigInt/scalar domains and shared versus separate object, array, function, Map and Set referents. No divergent behavior is observed in the bounded native profiles. Actual production functions are invoked by scripts/value-input-observers.rs; scripts/value-input-oracle.cjs independently derives expectations in Node. The cfg(test) value child executes the same native helpers.",
+  "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/value-input-observers.rs\")); } observation::equality($value, $type) }",
+  "cases": [
+    {
+      "input": "nan",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "nan"
+        ],
+        "right": [
+          "nan"
+        ]
+      }
+    },
+    {
+      "input": "nan-payload",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "nan"
+        ],
+        "right": [
+          "nan"
+        ]
+      }
+    },
+    {
+      "input": "nan-sign",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "nan"
+        ],
+        "right": [
+          "nan"
+        ]
+      }
+    },
+    {
+      "input": "zero",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "number",
+          "8000000000000000"
+        ],
+        "right": [
+          "number",
+          "0000000000000000"
+        ]
+      }
+    },
+    {
+      "input": "minus-zero",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "number",
+          "8000000000000000"
+        ],
+        "right": [
+          "number",
+          "8000000000000000"
+        ]
+      }
+    },
+    {
+      "input": "plus-zero",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "number",
+          "0000000000000000"
+        ],
+        "right": [
+          "number",
+          "0000000000000000"
+        ]
+      }
+    },
+    {
+      "input": "infinity",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "number",
+          "7ff0000000000000"
+        ],
+        "right": [
+          "number",
+          "7ff0000000000000"
+        ]
+      }
+    },
+    {
+      "input": "infinity-sign",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "number",
+          "7ff0000000000000"
+        ],
+        "right": [
+          "number",
+          "fff0000000000000"
+        ]
+      }
+    },
+    {
+      "input": "number",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "number",
+          "3ff0000000000000"
+        ],
+        "right": [
+          "number",
+          "3ff0000000000000"
+        ]
+      }
+    },
+    {
+      "input": "other-number",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "number",
+          "3ff0000000000000"
+        ],
+        "right": [
+          "number",
+          "4000000000000000"
+        ]
+      }
+    },
+    {
+      "input": "nullish",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "null"
+        ],
+        "right": [
+          "undefined"
+        ]
+      }
+    },
+    {
+      "input": "undefined",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "undefined"
+        ],
+        "right": [
+          "undefined"
+        ]
+      }
+    },
+    {
+      "input": "null",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "null"
+        ],
+        "right": [
+          "null"
+        ]
+      }
+    },
+    {
+      "input": "boolean",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "boolean",
+          true
+        ],
+        "right": [
+          "boolean",
+          true
+        ]
+      }
+    },
+    {
+      "input": "other-boolean",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "boolean",
+          true
+        ],
+        "right": [
+          "boolean",
+          false
+        ]
+      }
+    },
+    {
+      "input": "boolean-number",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "boolean",
+          true
+        ],
+        "right": [
+          "number",
+          "3ff0000000000000"
+        ]
+      }
+    },
+    {
+      "input": "number-string",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "number",
+          "3ff0000000000000"
+        ],
+        "right": [
+          "string",
+          [
+            49
+          ]
+        ]
+      }
+    },
+    {
+      "input": "units",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "string",
+          [
+            55296
+          ]
+        ],
+        "right": [
+          "string",
+          [
+            55296
+          ]
+        ]
+      }
+    },
+    {
+      "input": "other-units",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "string",
+          [
+            55296
+          ]
+        ],
+        "right": [
+          "string",
+          [
+            65533
+          ]
+        ]
+      }
+    },
+    {
+      "input": "high-low",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "string",
+          [
+            55296
+          ]
+        ],
+        "right": [
+          "string",
+          [
+            56320
+          ]
+        ]
+      }
+    },
+    {
+      "input": "bigint",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "bigint",
+          "17"
+        ],
+        "right": [
+          "bigint",
+          "17"
+        ]
+      }
+    },
+    {
+      "input": "other-bigint",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "bigint",
+          "17"
+        ],
+        "right": [
+          "bigint",
+          "18"
+        ]
+      }
+    },
+    {
+      "input": "bigint-number",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "bigint",
+          "17"
+        ],
+        "right": [
+          "number",
+          "4031000000000000"
+        ]
+      }
+    },
+    {
+      "input": "symbol",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "symbol"
+        ],
+        "right": [
+          "symbol"
+        ]
+      }
+    },
+    {
+      "input": "object",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "reference",
+          true
+        ],
+        "right": [
+          "reference",
+          true
+        ]
+      }
+    },
+    {
+      "input": "other-object",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "reference",
+          true
+        ],
+        "right": [
+          "reference",
+          false
+        ]
+      }
+    },
+    {
+      "input": "array",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "reference",
+          true
+        ],
+        "right": [
+          "reference",
+          true
+        ]
+      }
+    },
+    {
+      "input": "other-array",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "reference",
+          true
+        ],
+        "right": [
+          "reference",
+          false
+        ]
+      }
+    },
+    {
+      "input": "function",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "reference",
+          true
+        ],
+        "right": [
+          "reference",
+          true
+        ]
+      }
+    },
+    {
+      "input": "other-function",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "reference",
+          true
+        ],
+        "right": [
+          "reference",
+          false
+        ]
+      }
+    },
+    {
+      "input": "map",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "reference",
+          true
+        ],
+        "right": [
+          "reference",
+          true
+        ]
+      }
+    },
+    {
+      "input": "other-map",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "reference",
+          true
+        ],
+        "right": [
+          "reference",
+          false
+        ]
+      }
+    },
+    {
+      "input": "set",
+      "output": {
+        "ok": true,
+        "equal": true,
+        "left": [
+          "reference",
+          true
+        ],
+        "right": [
+          "reference",
+          true
+        ]
+      }
+    },
+    {
+      "input": "other-set",
+      "output": {
+        "ok": true,
+        "equal": false,
+        "left": [
+          "reference",
+          true
+        ],
+        "right": [
+          "reference",
+          false
+        ]
+      }
+    }
+  ],
+  "nativeObservation": {
+    "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/value-input-observers.rs\")); } observation::equality($value, $type) }",
+    "nativeFields": [
+      "equal",
+      "left",
+      "right"
+    ],
+    "cases": [
+      {
+        "input": "nan",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "nan"
+          ],
+          "right": [
+            "nan"
+          ]
+        }
+      },
+      {
+        "input": "nan-payload",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "nan"
+          ],
+          "right": [
+            "nan"
+          ]
+        }
+      },
+      {
+        "input": "nan-sign",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "nan"
+          ],
+          "right": [
+            "nan"
+          ]
+        }
+      },
+      {
+        "input": "zero",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "number",
+            "8000000000000000"
+          ],
+          "right": [
+            "number",
+            "0000000000000000"
+          ]
+        }
+      },
+      {
+        "input": "minus-zero",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "number",
+            "8000000000000000"
+          ],
+          "right": [
+            "number",
+            "8000000000000000"
+          ]
+        }
+      },
+      {
+        "input": "plus-zero",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "number",
+            "0000000000000000"
+          ],
+          "right": [
+            "number",
+            "0000000000000000"
+          ]
+        }
+      },
+      {
+        "input": "infinity",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "number",
+            "7ff0000000000000"
+          ],
+          "right": [
+            "number",
+            "7ff0000000000000"
+          ]
+        }
+      },
+      {
+        "input": "infinity-sign",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "number",
+            "7ff0000000000000"
+          ],
+          "right": [
+            "number",
+            "fff0000000000000"
+          ]
+        }
+      },
+      {
+        "input": "number",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "number",
+            "3ff0000000000000"
+          ],
+          "right": [
+            "number",
+            "3ff0000000000000"
+          ]
+        }
+      },
+      {
+        "input": "other-number",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "number",
+            "3ff0000000000000"
+          ],
+          "right": [
+            "number",
+            "4000000000000000"
+          ]
+        }
+      },
+      {
+        "input": "nullish",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "null"
+          ],
+          "right": [
+            "undefined"
+          ]
+        }
+      },
+      {
+        "input": "undefined",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "undefined"
+          ],
+          "right": [
+            "undefined"
+          ]
+        }
+      },
+      {
+        "input": "null",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "null"
+          ],
+          "right": [
+            "null"
+          ]
+        }
+      },
+      {
+        "input": "boolean",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "boolean",
+            true
+          ],
+          "right": [
+            "boolean",
+            true
+          ]
+        }
+      },
+      {
+        "input": "other-boolean",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "boolean",
+            true
+          ],
+          "right": [
+            "boolean",
+            false
+          ]
+        }
+      },
+      {
+        "input": "boolean-number",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "boolean",
+            true
+          ],
+          "right": [
+            "number",
+            "3ff0000000000000"
+          ]
+        }
+      },
+      {
+        "input": "number-string",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "number",
+            "3ff0000000000000"
+          ],
+          "right": [
+            "string",
+            [
+              49
+            ]
+          ]
+        }
+      },
+      {
+        "input": "units",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "string",
+            [
+              55296
+            ]
+          ],
+          "right": [
+            "string",
+            [
+              55296
+            ]
+          ]
+        }
+      },
+      {
+        "input": "other-units",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "string",
+            [
+              55296
+            ]
+          ],
+          "right": [
+            "string",
+            [
+              65533
+            ]
+          ]
+        }
+      },
+      {
+        "input": "high-low",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "string",
+            [
+              55296
+            ]
+          ],
+          "right": [
+            "string",
+            [
+              56320
+            ]
+          ]
+        }
+      },
+      {
+        "input": "bigint",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "bigint",
+            "17"
+          ],
+          "right": [
+            "bigint",
+            "17"
+          ]
+        }
+      },
+      {
+        "input": "other-bigint",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "bigint",
+            "17"
+          ],
+          "right": [
+            "bigint",
+            "18"
+          ]
+        }
+      },
+      {
+        "input": "bigint-number",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "bigint",
+            "17"
+          ],
+          "right": [
+            "number",
+            "4031000000000000"
+          ]
+        }
+      },
+      {
+        "input": "symbol",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "symbol"
+          ],
+          "right": [
+            "symbol"
+          ]
+        }
+      },
+      {
+        "input": "object",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "reference",
+            true
+          ],
+          "right": [
+            "reference",
+            true
+          ]
+        }
+      },
+      {
+        "input": "other-object",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "reference",
+            true
+          ],
+          "right": [
+            "reference",
+            false
+          ]
+        }
+      },
+      {
+        "input": "array",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "reference",
+            true
+          ],
+          "right": [
+            "reference",
+            true
+          ]
+        }
+      },
+      {
+        "input": "other-array",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "reference",
+            true
+          ],
+          "right": [
+            "reference",
+            false
+          ]
+        }
+      },
+      {
+        "input": "function",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "reference",
+            true
+          ],
+          "right": [
+            "reference",
+            true
+          ]
+        }
+      },
+      {
+        "input": "other-function",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "reference",
+            true
+          ],
+          "right": [
+            "reference",
+            false
+          ]
+        }
+      },
+      {
+        "input": "map",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "reference",
+            true
+          ],
+          "right": [
+            "reference",
+            true
+          ]
+        }
+      },
+      {
+        "input": "other-map",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "reference",
+            true
+          ],
+          "right": [
+            "reference",
+            false
+          ]
+        }
+      },
+      {
+        "input": "set",
+        "output": {
+          "ok": true,
+          "equal": true,
+          "left": [
+            "reference",
+            true
+          ],
+          "right": [
+            "reference",
+            true
+          ]
+        }
+      },
+      {
+        "input": "other-set",
+        "output": {
+          "ok": true,
+          "equal": false,
+          "left": [
+            "reference",
+            true
+          ],
+          "right": [
+            "reference",
+            false
+          ]
+        }
+      }
+    ]
+  }
+}
 }
