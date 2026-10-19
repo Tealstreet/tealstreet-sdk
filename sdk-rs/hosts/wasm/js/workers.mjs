@@ -8,7 +8,7 @@
 //   <- binary messages: flush frames (a snapshot first), read with wire.mjs
 //   <- { op: 'done', id, result } | { op: 'done', id, error } | { op: 'log', level, message }
 // Credentials arrive with 'start' and live only in the object's memory.
-import { EngineHost } from './host.mjs';
+import { EngineHost, socketMessages } from './host.mjs';
 
 /** Outbound sockets and requests from a Worker or Durable Object. */
 export const workersTransport = () => ({
@@ -23,9 +23,8 @@ export const workersTransport = () => ({
         socket = response.webSocket;
         if (!socket) return onClose(1006);
         socket.accept();
-        socket.addEventListener('message', (event) => {
-          if (typeof event.data === 'string') onMessage(event.data);
-        });
+        const receive = socketMessages(onMessage, () => socket.close());
+        socket.addEventListener('message', (event) => receive(event.data));
         socket.addEventListener('close', (event) => onClose(event.code));
         socket.addEventListener('error', () => onClose(1006));
         if (closed) socket.close();

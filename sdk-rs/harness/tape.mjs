@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
 import { Responses } from './responses.mjs';
+import { isRead, subscriptionKeys } from './requests.mjs';
 
 /** Per-request values: clocks, signatures and generated client ids. */
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
@@ -91,6 +92,12 @@ export class Tape {
     this.isPrivate = isPrivate;
     this.timeoutMs = timeoutMs;
     this.commandIndex = 0;
+    this.time = 0;
+    this.generations = new Map();
+    this.startupSubscriptions = new Map(
+      Array.from(venue.startupSubscriptions?.(records, books) ?? [], (key) => [key, false]),
+    );
+    this.pendingStartupSubscriptions = this.startupSubscriptions.size;
     this.audit = venue.createSocketAudit?.(impl, { isPrivate, books, tickers: venue.publicTickers?.(records) });
     this.callerIds = new Set(
       records
@@ -108,8 +115,9 @@ export class Tape {
       this.responses.get(key).push(record);
       if (this.isWrite(record.method, record.url)) this.writeOrder.push(record);
     }
-    if (venue.checkRequest) {
+    if (venue.checkRequest || venue.requestKey) {
       const responseKey = (method, url, body) => {
+        if (venue.requestKey) return venue.requestKey(method, url, body, this.callerIds);
         const base = `${method} ${canonicalUrl(url, this.callerIds, this.venue)}`;
         const exact = `${base} BODY ${canonicalBody(body, this.callerIds, venue)}`;
         return this.responses.has(exact) ? exact : base;
@@ -125,7 +133,7 @@ export class Tape {
         this.isWrite.bind(this),
       );
     }
-    this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
+    this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command' || r.type === 'close');
     this.open = new Map();
     this.waiters = new Set();
     this.unserved = 0;
@@ -133,8 +141,9 @@ export class Tape {
 
   invalidSignatures = 0;
   subscriptions = new Set();
+  protocolSubscriptions = new Set();
   isWrite(method, url) {
-    return this.venue.isWrite?.(method, url) ?? method !== 'GET';
+    return this.venue.isWrite?.(method, url) ?? !isRead(method, url);
   }
   get missingWrites() {
     if (this.responseStore) return this.responseStore.unusedWrites();
@@ -147,7 +156,7 @@ export class Tape {
       throw new Error(`invalid replay signature: ${method} ${url}`);
     }
     if (this.responseStore) {
-      const response = this.responseStore.respond(method, url, body, this.commandIndex);
+      const response = this.responseStore.respond(method, url, body, this.commandIndex, this.time);
       this.unserved = this.responseStore.unserved;
       return response;
     }
@@ -161,15 +170,19 @@ export class Tape {
       return { status: 599, body: '' };
     }
     // Reconciliation reads may advance to a new fixture stage after a command.
-    const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= this.commandIndex);
+    const eligible = queue.filter(
+      (r) => (r.afterCommand ?? 0) <= this.commandIndex && (r.availableAfter ?? r.effectiveAt ?? 0) <= this.time,
+    );
     if (!eligible.length) {
       this.unserved++;
       return { status: 599, body: '' };
     }
     const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
     const current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
-    const timed = current.filter((record) => (record.effectiveAt ?? 0) <= (this.time ?? 0));
-    const timedRead = !this.isWrite(method, url) && current.some((record) => record.effectiveAt !== undefined);
+    const timed = current.filter((record) => (record.availableAfter ?? record.effectiveAt ?? 0) <= (this.time ?? 0));
+    const timedRead =
+      !this.isWrite(method, url) &&
+      current.some((record) => record.availableAfter !== undefined || record.effectiveAt !== undefined);
     const record = timedRead ? timed.at(-1) : current[0];
     if (!record) {
       this.unserved++;
@@ -191,9 +204,14 @@ export class Tape {
     return { status: record.status, headers: record.headers ?? '', body: responseBody };
   }
 
-  connect(url, onOpen, onMessage) {
+  connect(url, onOpen, onMessage, onClose) {
+    const key = canonicalUrl(url, this.callerIds, this.venue);
+    const generation = (this.generations.get(key) ?? 0) + 1;
+    this.generations.set(key, generation);
     const socket = {
       url,
+      generation,
+      onClose,
       onMessage: (text) => {
         this.audit?.received(url, text);
         onMessage(text);
@@ -215,6 +233,13 @@ export class Tape {
   }
 
   send(socket, text) {
+    for (const key of subscriptionKeys(socket.url, text)) {
+      this.protocolSubscriptions.add(`${socket.generation} ${key}`);
+      if (this.startupSubscriptions.get(key) === false) {
+        this.startupSubscriptions.set(key, true);
+        this.pendingStartupSubscriptions--;
+      }
+    }
     this.audit?.sent(socket.url, text);
     if (this.venue.respondToPing && text === 'ping') {
       setImmediate(() => {
@@ -357,11 +382,12 @@ export class Tape {
    */
   async play(onTick, ready = async () => {}, runCommand = async () => {}) {
     const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
-    for (const url of urls) await this.socketFor(url);
+    if (urls.length) await this.socketFor(urls[0]);
     await withTimeout(
       (async () => {
         await ready();
-        while (this.audit && !this.audit.ready()) await new Promise((resolve) => setTimeout(resolve, 5));
+        while ((this.audit && !this.audit.ready()) || this.pendingStartupSubscriptions)
+          await new Promise((resolve) => setTimeout(resolve, 5));
       })(),
       'account/books readiness',
       this.timeoutMs,
@@ -389,19 +415,27 @@ export class Tape {
         );
       } else {
         const socket = await this.socketFor(frame.url, frame.text);
-        if ((this.venue.validateLogin || this.venue.validateSubscriptions) && frame.text.trimStart().startsWith('{')) {
-          const message = JSON.parse(frame.text);
+        if (frame.type === 'close') {
+          socket.closed = true;
+          socket.onClose?.(frame.code ?? 1006);
+        } else {
           if (
-            this.venue.validateLogin &&
-            message.event === 'login' &&
-            String(message.code) === '0' &&
-            !socket.loginVerified
+            (this.venue.validateLogin || this.venue.validateSubscriptions) &&
+            frame.text.trimStart().startsWith('{')
           ) {
-            throw new Error(`Taped login success preceded a valid login on ${frame.url}`);
+            const message = JSON.parse(frame.text);
+            if (
+              this.venue.validateLogin &&
+              message.event === 'login' &&
+              String(message.code) === '0' &&
+              !socket.loginVerified
+            ) {
+              throw new Error(`Taped login success preceded a valid login on ${frame.url}`);
+            }
+            this.assertSubscribed(socket, message);
           }
-          this.assertSubscribed(socket, message);
+          socket.onMessage(frame.text);
         }
-        socket.onMessage(frame.text);
       }
       delivered++;
       onTick?.(frame.t);

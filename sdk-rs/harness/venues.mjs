@@ -2,6 +2,7 @@ import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:cryp
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { parseRequestJson } from './request-json.mjs';
+import { requestKey } from './requests.mjs';
 
 const root = '../../packages/safe-cex/src/exchanges';
 
@@ -127,6 +128,15 @@ export const VENUES = {
     compareFillPrices: true,
     isWrite: (method) => method !== 'GET',
   },
+  bingx: {
+    rust: 'bingx',
+    ts: { module: `${root}/bingx/bingx.exchange.ts`, className: 'BingxExchange', name: 'bingx' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('market.depth.')).length >= count,
+    privateSocket: '?listenKey=',
+    matchRequestBody: true,
+    requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds),
+  },
   weex: {
     rust: 'weex',
     ts: { module: `${root}/weex/weex.exchange.ts`, className: 'WeexExchange', name: 'weex' },
@@ -171,6 +181,7 @@ export const VENUES = {
     privateSocket: '/exchange/v1/user',
     matchRequestBody: true,
     requestBodyParams: true,
+    requestBody: (body) => body?.params ?? body,
     publicTickers: (records) => {
       const seed = records.find((r) => r.type === 'http' && r.url.endsWith('/public/get-instruments'));
       return seed ? JSON.parse(seed.body).result.data.filter((r) => r.inst_type === 'PERPETUAL_SWAP' && r.tradable).map((r) => r.symbol) : [];
@@ -278,8 +289,22 @@ export const VENUES = {
     ts: { module: `${root}/bybit/bybit.exchange.ts`, className: 'BybitExchange', name: 'bybit' },
     /** Book topics get a message handler once each subscription reaches the socket. */
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >=
-      count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >= count,
+    startupSubscriptions: (records, books) => {
+      const symbols = new Set();
+      for (const record of records) {
+        if (record.type !== 'http' || record.method !== 'GET' || !(record.status >= 200 && record.status < 300) ||
+            new URL(record.url).pathname !== '/v5/market/instruments-info') continue;
+        const body = JSON.parse(record.body);
+        if (Number(body.retCode) !== 0) continue;
+        for (const row of body.result?.list ?? []) {
+          if (['USDT', 'USDC'].includes(row.quoteCoin) && typeof row.symbol === 'string' && row.symbol) symbols.add(row.symbol);
+        }
+      }
+      const socket = 'wss://stream.bybit.com/v5/public/linear subscribe ';
+      return [...symbols].map((symbol) => `${socket}tickers.${symbol}`)
+        .concat(books.map((symbol) => `${socket}orderbook.1000.${symbol}`));
+    },
     privateSocket: '/v5/private',
     isWrite: (method) => method === 'POST',
     matchRequestBody: true,

@@ -75,14 +75,19 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
 
 /** Loaded code is excluded; collect before I/O and after replay state settles. */
 const baseline = async () => {
+  const deadline = performance.now() + 1000;
   let previous;
-  let stable = 0;
-  for (let i = 0; i < 8; i++) {
+  let stableSince;
+  while (performance.now() < deadline) {
     globalThis.gc?.();
-    await new Promise(setImmediate);
+    // Loader/native cleanup can outlive several immediate turns. Require real
+    // elapsed quiescence so imported transient buffers cannot inflate baseline.
+    await new Promise((resolve) => setTimeout(resolve, 10));
     const memory = process.memoryUsage();
-    stable = memory.arrayBuffers === previous ? stable + 1 : 0;
-    if (stable >= 2) return memory;
+    const now = performance.now();
+    if (now >= deadline) break;
+    if (memory.arrayBuffers !== previous) stableSince = now;
+    if (now - stableSince >= 100) return memory;
     previous = memory.arrayBuffers;
   }
   throw new Error('Backing-buffer memory did not settle');
@@ -138,9 +143,9 @@ async function runRust() {
   const transport = {
     now: () => Date.now(),
     webSocketHeaders: true,
-    connect: (url, { headers, onOpen, onMessage }) => {
+    connect: (url, { headers, onOpen, onMessage, onClose }) => {
       venue.validateSocket?.(url, headers);
-      const socket = tape.connect(url, onOpen, onMessage);
+      const socket = tape.connect(url, onOpen, onMessage, onClose);
       return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
     request: async ({ method, url, body: requestBody, headers, signal }) => {
@@ -162,7 +167,21 @@ async function runRust() {
     ...venue.options,
     ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }),
   };
-  const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
+  const engine = new WasmEngine(venue.rust, JSON.stringify(options));
+  if (process.env.RUST_MEMORY_TRACE) {
+    let last = wasmMemoryBytes();
+    for (const method of ['start', 'httpStart', 'httpChunk', 'httpEnd', 'wsMessage', 'takeFrame']) {
+      const original = engine[method].bind(engine);
+      engine[method] = (...args) => {
+        const result = original(...args);
+        const bytes = wasmMemoryBytes();
+        if (bytes !== last) console.error(`memory ${method} ${args[0]}: ${last} -> ${bytes}`);
+        last = bytes;
+        return result;
+      };
+    }
+  }
+  const host = new EngineHost(engine, transport, {
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
       const received = values['no-egress'] ? buffer : structuredClone(buffer, { transfer: [buffer] });
@@ -256,7 +275,7 @@ async function runRust() {
     unusedWrites: tape.missingWrites,
     protocolErrors: tape.audit?.errors() ?? [],
     invalidSignatures: tape.invalidSignatures,
-    subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : undefined,
+    subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : [...tape.protocolSubscriptions].sort(),
     store: { markets: marketRows, tickers: tickerRows },
     books: bookRows,
     account,
@@ -334,6 +353,11 @@ async function runTs() {
           this.onmessage?.({ data });
           venue.afterTsFrame?.(exchange);
         },
+        (code) => {
+          this.readyState = 3;
+          for (const fn of this.listeners.close) fn({ code });
+          this.onclose?.({ code });
+        },
       );
     }
     addEventListener(type, fn) {
@@ -408,7 +432,7 @@ async function runTs() {
       ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE }
       : { key: '', secret: '', publicDataOnly: true }),
   };
-  const exchange = new Exchange(venue.ts.name, options, store);
+  const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
   venue.configureTs?.(exchange);
   venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
@@ -498,7 +522,7 @@ async function runTs() {
     unusedWrites: tape.missingWrites,
     protocolErrors: tape.audit?.errors() ?? [],
     invalidSignatures: tape.invalidSignatures,
-    subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : undefined,
+    subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : [...tape.protocolSubscriptions].sort(),
     store: snapshot,
     books: bookCopies,
     account,

@@ -286,3 +286,22 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   (2.48x), memory 5.1/2.7 MB (1.89x). Private correctness: Backpack 21,
   Binance 14, Bybit 18, Crypto.com 21, WEEX 20, four OKX variants 29 each.
   All reviews/checks above pass; pushing this final head for CI and landing.
+- Six-venue head 5cfd928d5c passed every Rust CI job/all fifteen replay gates
+  and push repository CI. While the PR repository job was still running,
+  BingX PR #1305 landed and caused conflicts. Integrated target 9ddec5d0a4,
+  preserving all seven constructors/client-ID rules and Backpack behavior.
+- Reviews confirm compact string interning/indexed tickers, metadata envelopes
+  and binary socket handling preserve Backpack semantics. Kept sparse string
+  caches, bound class transport and all pre-engine-call disposal guards. Added
+  a delayed binary Blob/disposal regression. Re-review found decompression used
+  replacement UTF-8 decoding; switched to fatal decoding with gzip/deflate
+  malformed-ID/symbol regressions (no mutated frame delivered). Review clear.
+- All 20 SDK WASM tests, 20 host tests, 49 harness tests, Backpack 49/engine 34
+  native tests, workspace native/WASM clippy, bans/fmt, typecheck44/lint28 pass.
+  Shared helpers retain exact ordered single-use Backpack requests/auth/oracle,
+  independent account-presence checks, generation/subscription barriers and all
+  other venue audits. Only public fixtures gate CPU/memory as documented; all
+  three public performance thresholds remain strict. Private metrics stay
+  informational, with correctness/request/write/protocol checks unchanged.
+- Seven-venue WASM is 2,924,643 bytes within a measured 3 MiB aggregate budget.
+  All seventeen replay gates are running before the next push/green-CI wait.

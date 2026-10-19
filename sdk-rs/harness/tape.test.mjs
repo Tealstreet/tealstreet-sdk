@@ -343,3 +343,60 @@ test('an untimed baseline remains available before a later timed snapshot', () =
   tape.time = 1000;
   assert.equal(tape.respond('GET', URL).body, 'future');
 });
+
+test('BingX request-key hook preserves exact query JSON and single-use writes', async () => {
+  const { requestKey } = await import('./requests.mjs');
+  const route = 'https://open-api.bingx.com/openApi/swap/v2/trade/order';
+  const expected =
+    route + '?timestamp=1&quantity=1&clientOrderId=caller&takeProfit=' + encodeURIComponent('{"stopPrice":"2"}');
+  const tape = new Tape(
+    [
+      { type: 'command', orders: [{ clientOrderId: 'caller' }] },
+      { ...record('POST'), url: expected },
+    ],
+    { requestKey: (method, url, body, ids) => requestKey(method, url, body, ids) },
+    false,
+  );
+  const actual = expected.replace('timestamp=1', 'timestamp=2');
+  assert.equal(tape.respond('POST', actual.replace('caller', 'changed')).status, 599);
+  assert.equal(
+    tape.respond('POST', actual.replace(encodeURIComponent('{"stopPrice":"2"}'), encodeURIComponent('{"stopPrice":2}')))
+      .status,
+    599,
+  );
+  assert.equal(tape.respond('POST', actual).status, 200);
+  assert.equal(tape.respond('POST', actual).status, 599);
+  assert.equal(tape.missingWrites, 0);
+});
+
+test('recorded socket closes deliver later frames to a new subscribed generation', async () => {
+  const url = 'wss://example.test/public';
+  const tape = new Tape(
+    [
+      { type: 'ws', t: 0, url, text: 'first' },
+      { type: 'close', t: 1, url },
+      { type: 'ws', t: 2, url, text: 'second' },
+    ],
+    { startupSubscriptions: () => ['wss://example.test/public subscribe tickers.BTC'] },
+    false,
+    200,
+  );
+  const messages = [];
+  const connect = () => {
+    const socket = tape.connect(
+      url,
+      () => tape.send(socket, '{"op":"subscribe","args":["tickers.BTC"]}'),
+      (text) => messages.push(text),
+      connect,
+    );
+    return socket;
+  };
+  connect();
+  assert.equal(await tape.play(), 3);
+  assert.deepEqual(messages, ['first', 'second']);
+  assert.deepEqual([...tape.protocolSubscriptions].sort(), [
+    '1 wss://example.test/public subscribe tickers.BTC',
+    '2 wss://example.test/public subscribe tickers.BTC',
+  ]);
+  assert.equal(tape.pendingStartupSubscriptions, 0);
+});

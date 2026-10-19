@@ -9,6 +9,7 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
@@ -455,6 +456,11 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 recv_window: options.recv_window,
+            }))),
+            "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
             }))),
             "weex" => Box::new(Engine::new(WeexFutures::new(WeexOptions {
                 public_data_only: options.public_data_only,

@@ -256,11 +256,11 @@ Then: exchange-server moves to the native host and streams the same frames
 (with `BOOK_DELTA` sections for networked clients — full books every flush
 are ~450 KB/s for two 1,000-level books).
 
-### 7. CI — Binance, Bybit, Backpack, OKX, Crypto.com and WEEX
+### 7. CI — Binance, Bybit, Backpack, OKX, Crypto.com, WEEX and BingX
 
 - Bans, fmt, clippy, native tests, wasm32 build and clippy.
 - Replay gate (`rust.yml`, job "replay gate"): release wasm with the pinned
-  wasm-bindgen, a 2.5 MiB combined size budget, the committed public fixtures
+  wasm-bindgen, an explicit combined-venue size budget in `rust.yml`, committed public fixtures
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
   and each venue's generated private tape gated on identical account state.
 
@@ -278,10 +278,11 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Bybit linear | done ([#1298](https://github.com/Tealstreet/tealstreet-sdk/pull/1298)) |
 | OKX (+EU, demo) | done (#1302) |
 | Crypto.com | done (#1303) |
-| Bitget, Hyperliquid, BloFin, BingX, MEXC, WEEX, Bitunix, Backpack | wave 1 lanes running |
-| KuCoin | wave 2 lane running |
+| WEEX | done (#1301) |
+| Bitget, Hyperliquid, BloFin, BingX, MEXC, Bitunix, Backpack | wave 1 lanes running |
+| KuCoin, Phemex | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
-| WOO, Phemex, Lighter, Paradex, GRVT, AsterDEX, Orderly family, ApeX Omni, Kraken, Coinbase, Bitrue, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse, Bybit inverse/spot/demo | wave 2, as wave 1 lanes merge |
+| WOO, Lighter, Paradex, GRVT, AsterDEX, Orderly family, ApeX Omni, Kraken, Coinbase, Bitrue, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse, Bybit inverse/spot/demo | wave 2, as wave 1 lanes merge |
 
 ### 9. Delete TypeScript and merge
 
