@@ -318,8 +318,14 @@ fn touch(last: f64, step: f64) -> (f64, f64) {
     if last <= 0. {
         return (0., 0.);
     }
-    // Decimal arithmetic at the venue's tick precision avoids binary subtraction noise.
-    let factor = 10f64.powi(num::decimals(step) as i32);
+    // Native ticks are powers of ten. Recover common scales without formatting;
+    // above 15 digits reciprocal rounding can lose an integer tick.
+    let scale = step.recip().round();
+    let factor = if (1. ..=1e15).contains(&scale) {
+        scale
+    } else {
+        10f64.powi(num::decimals(step) as i32)
+    };
     (
         ((last * factor - step * factor).round() / factor).max(0.),
         (last * factor + step * factor).round() / factor,
@@ -830,5 +836,31 @@ impl Venue for Bingx {
                 .filter(|(_, b)| b.ready)
                 .map(|(s, b)| (s.as_str(), &b.book)),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn native_tick_scales_preserve_decimal_touch_prices() {
+        for precision in 0..=18 {
+            let factor = 10f64.powi(precision);
+            let step = factor.recip();
+            for last in [0., step, 0.000_001_234_567_89, 1.234_567_89, 90_000.123_456] {
+                let expected = if last <= 0. {
+                    (0., 0.)
+                } else {
+                    (
+                        ((last * factor - step * factor).round() / factor).max(0.),
+                        (last * factor + step * factor).round() / factor,
+                    )
+                };
+                assert_eq!(
+                    super::touch(last, step),
+                    expected,
+                    "precision={precision}, last={last}"
+                );
+            }
+        }
     }
 }

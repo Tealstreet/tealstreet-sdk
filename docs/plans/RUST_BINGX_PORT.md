@@ -190,3 +190,13 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
 - Added BingX public/private gates to CI. Combined wasm measured1,849,367bytes;
   explicit combined budget2MiB. All venue gates rerun after final hot-path tuning;
   first merged replay passed output/memory but missed steady CPU, so still WIP.
+
+### Post-sync precision hot path
+
+- Decimal touch prices recover common native power-of-ten scales numerically,
+  preserving the original formatting fallback above15digits. A18digit regression
+  prevented an unsafe reciprocal-only change; precision0..18 vectors pass.
+  Independent review confirms both callers use native power-of-ten tick sizes.
+- BingX79 tests pass. Merged public3-run gate PASS: CPU77.5/61.8ms,
+  steady29.4/24.5ms, memory ratio1.03. Combined wasm1,849,491bytes (<2MiB).
+  Other merged gates and a Node22 CI-toolchain check are next.
