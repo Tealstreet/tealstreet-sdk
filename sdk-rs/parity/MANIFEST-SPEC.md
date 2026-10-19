@@ -3423,11 +3423,12 @@ differences beyond these listed costs or establish concrete host assembly.
   the source module's stable initialization value.
 - `isSigningCaptureRequest` reads an own data marker so property execution does
   not implicitly control HTTP accounting. Inherited/accessor markers are outside
-  that ABI; own JSON truthiness remains required. `isUnknownOutcome` classifies
-  materialized error properties without executing another error-object protocol
-  during placement recovery. Getter/prototype/executable coercion and identity
-  are omitted, and coercion failure is a string Result instead of a thrown
-  object. JSON admission does not imply every numeric intermediate is finite.
+  that ABI; own JSON truthiness remains required.
+  `isUnknownOutcome` now uses one capability-based decision body: native Js
+  callers perform live property reads/coercions and retain original throws;
+  the materialized-JSON adapter delegates for typed callers. The constructed
+  primary/demo submission witness in Store per-row-rulings reconciles the
+  former projection choice as row443 FIX, without changing retry policy.
 - `readBlob` keeps acquisition with the platform and decompression with the byte
   utility, avoiding another Blob receiver/accessor protocol. The host supplies
   the byte future; native progress requires polling and dropping it can cancel

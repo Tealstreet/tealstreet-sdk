@@ -194,3 +194,33 @@ slot is modeled.
 
 Seventeen of the 27 Store rows are now reconciled. Ten Store rows and the
 separate num row remain assigned.
+
+## Lost-send classification
+
+| Census row | Verdict | Production observation and reason |
+| --- | --- | --- |
+| 443 `isUnknownOutcome` | FIX | Real primary/demo `submitCreateOrders` projected the entire rejected object to JSON before deciding whether to rethrow a lost response. An unread surrogate replaced the original timeout rejection; inherited/nonenumerable error fields and native infinity could also change the decision. The shared classifier now reads the four source properties in destructuring order through explicit value capabilities. The native binding uses canonical Get, Number, strict membership and UTF-16 RegExp without projecting the error. The existing materialized-JSON API delegates to this same decision algorithm. |
+
+`binding::exchange::receiver_tests::audit_unknown_outcome_preserves_native_submission_rejection`
+constructs real Bybit primary/demo exchanges with the production receiver and
+canonical Store. Twelve submission profiles per variant compare the maintained
+TS `submitCreateOrders` and actual `unknownSendOutcome.ts` module with the native
+receiver. Only terminal post and diagnostic reporting are supplied. The test
+observes original rejection identity, exactly one send, reporting count and
+returned empty results before serialization. Profiles include opaque UTF-16,
+own undefined/NaN, inherited codes, hidden messages, infinity, unused throwing
+getters, source response precedence, the signing veto and absent caller IDs.
+
+Sixteen further profiles per variant call the same installed native global and
+maintained TS helper. They retain exact property/coercion order, original getter
+and conversion throws, repeated message coercion, function exclusion, inherited
+array fields and short-circuited response data. Six BigInt profiles pin mixed relational comparison and explicit Number conversion, including valueOf order and overflow, through the canonical shared operations. The original production code
+compiles but fails the real submission comparison by replacing the rejection with
+a typed UTF-16 admission error. No placement retry, signing or request-method
+policy changes; a potentially executed order is still never automatically resent.
+
+The lower materialized-JSON adapter remains available for typed callers; its
+input type does not become a general native-object carrier. Native venue calls
+use the live capabilities directly. Eighteen of the 27 Store rows are reconciled
+including the prior REST diagnostic consumer batch. Nine Store rows and the
+separate num row remain assigned.

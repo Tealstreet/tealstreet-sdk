@@ -2176,6 +2176,14 @@ Private authentication recovery reports the supplied ExchangeError through the
 runtime exception sink before warning/reconnect, preserving its retained cause.
 See `PRIVATE_OPEN_REVIEW.md` for the bounded disposal/recovery differences.
 
+
+The Js accepted contract covers all forty compiler-discovered native entrypoints.
+`tests/js_entrypoint_contracts.rs` shares direct native observers with the canonical
+accepted driver and compares 85 independent Node profiles for sparse mutation,
+equality, OrdinaryHasInstance, raw UTF-16 writes and write-hook publication.
+Native reference identity and write observers retain their host-specific domains;
+these bounded observations do not claim complete ECMAScript conformance.
+
 Native sockets with a separate callback owner use `install_native_handler_stats`
 to bind selected-key live counts into Base's record/pong/cleanup/reconciliation
 algorithm. They never copy callbacks into Base's registry or bypass the shared
