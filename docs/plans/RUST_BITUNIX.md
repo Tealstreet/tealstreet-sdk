@@ -383,3 +383,22 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   clock/socket core alongside all prior controls, then rerun affected gates.
   Landing changes browser wasm optimization to `s`; keep that default first and
   verify its CPU/memory results and actual combined artifact size.
+
+### MEXC landing integration checkpoint
+
+- Merging pinned 0018bba71a after seven-venue checks and independent reviews pass.
+  Keep optional independent leverage rails backward compatible; Bitunix retains
+  its single-leverage settings by defaulting the new optional rail fields.
+- Disjoint reviewers audit engine, socket hosts and the shared replay clock/tape
+  integration. All prior matching, lifecycle, oracle and measurement controls
+  must survive; build/gates run on landing's size-optimized browser artifact.
+- Engine auto-merge retains all prior APIs/fast paths; settings reservation now
+  includes optional rail columns. Regression fails before fix, all 48 engine
+  tests PASS. Shared socket tape is used by production replay; 49 helper tests
+  PASS including explicit lifecycle, close and URL-sharing regressions.
+- Eight factories and aliases, bounded ordered compression, headers/disposal,
+  MEXC command cleanup/error metadata and legacy rail decoding are retained;
+  focused host/socket 19 and Workers transport 5 tests PASS.
+- Workspace bans/fmt/clippy PASS. Full workspace tests, wasm lint/build and root
+  checks continue; final measured artifact and combined replays are recorded on
+  PR #1309. Keep the existing 3 MiB budget with landing's browser optimization.

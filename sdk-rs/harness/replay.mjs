@@ -10,6 +10,8 @@ import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
 import { isRead, subscriptionKeys } from './requests.mjs';
+import { replayStoreReady, ReplayClock, Tape as SharedTape } from './tape.mjs';
+import { setTimeout as realTimeout, clearTimeout as realClearTimeout, setInterval as realInterval, clearInterval as realClearInterval } from 'node:timers';
 import { parseRequestJson } from './request-json.mjs';
 import { retainedMemory } from './memory.mjs';
 import { Responses } from './responses.mjs';
@@ -38,8 +40,11 @@ const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes
     return record;
   });
 const bookSymbols = values.books.split(',').filter(Boolean);
+const metadata = records.find((r) => r.type === 'meta');
+let clockStart = performance.now();
+if (Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
 // A wrong startup URL, missing socket or lost command must fail the gate.
-const replayDeadline = setTimeout(() => {
+const replayDeadline = realTimeout(() => {
   console.error('Replay exceeded its 120-second deadline');
   process.exit(1);
 }, 120_000);
@@ -49,13 +54,13 @@ const within = async (promise, ms, label) => {
   let timer;
   try {
     return await Promise.race([promise, new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new ReplayTimeout(`${label} exceeded ${ms} ms`)), ms);
+      timer = realTimeout(() => reject(new ReplayTimeout(`${label} exceeded ${ms} ms`)), ms);
     })]);
-  } finally { clearTimeout(timer); }
+  } finally { realClearTimeout(timer); }
 };
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
-const isPrivate = records.some((r) =>
+const isPrivate = metadata?.private ?? records.some((r) =>
   venue.isPrivateRecord ? venue.isPrivateRecord(r) : Boolean(venue.privateSocket && r.url?.includes(venue.privateSocket)),
 );
 const KEY = 'replay-key';
@@ -82,10 +87,12 @@ const canonicalBody = (body) => {
   } catch { return String(body); }
   if (values.venue === 'cryptocom' && value?.method && value?.params) value = value.params;
   const sorted = (value) => {
+    if (typeof value === 'bigint' && values.venue === 'mexc') return String(value);
     if (Array.isArray(value)) return value.map(sorted);
     if (!value || typeof value !== 'object') return value;
     return Object.fromEntries(Object.entries(value).filter(([key, v]) => v !== undefined &&
-      (!clientFields.has(key) || callerIds.has(v)) && !(venue.volatileBodyFields && VOLATILE.has(key)))
+      (!clientFields.has(key) || callerIds.has(v)) && !(venue.volatileBodyFields && VOLATILE.has(key)) &&
+      !(values.venue === 'mexc' && ['externalOid', 'requestId'].includes(key) && !callerIds.has(v)))
       .sort(([a], [b]) => a.localeCompare(b)).map(([key, v]) => [key,
         !callerIds.has(v) && venue.generatedBodyId?.(key, v) ? '<generated>' : sorted(v),
       ]));
@@ -94,6 +101,12 @@ const canonicalBody = (body) => {
 };
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
+  if (values.venue === 'mexc' && /\/private\/(planorder|stoporder)\/list\/orders$/.test(parsed.pathname)
+    && parsed.searchParams.has('start_time') && parsed.searchParams.has('end_time')) {
+    const end = Number(parsed.searchParams.get('end_time'));
+    parsed.searchParams.set('start_time', String(Number(parsed.searchParams.get('start_time')) - end));
+    parsed.searchParams.set('end_time', 'now');
+  }
   const query = [...parsed.searchParams]
     .filter(([name, value]) => !VOLATILE.has(name) && (!clientFields.has(name) || callerIds.has(value)))
     .map(([name, value]) => [name, value.startsWith('[') || value.startsWith('{') ? canonicalBody(value) : value])
@@ -109,27 +122,20 @@ const apiSupported = (value) => value == null || value === '' ? true
 const isWriteRequest = (method, url) => venue.isWrite?.(method, url) ?? !isRead(method, url);
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
-class Tape {
+class Tape extends SharedTape {
   constructor(impl) {
-    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records) });
-    this.responses = new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
-      venue.matchRequestBody ? undefined : (method, url) => requestKey(method, url));
-    // Each connection URL is immutable tape metadata. Share its canonical
-    // spelling instead of allocating one concatenated URL per frame.
-    const urls = new Map();
-    this.frames = records.filter((r) => ['ws', 'command', 'open', 'close'].includes(r.type)).map((r) => {
-      if (r.url) {
-        if (!urls.has(r.url)) urls.set(r.url, canonicalUrl(r.url));
-        r = { ...r, url: urls.get(r.url) };
-      }
-      if (r.type !== 'ws') return r;
-      const m = r.text.trimStart().startsWith('{') ? JSON.parse(r.text) : {};
-      const topic = m.channel ? { channel: m.channel } : m.ch ? (m.symbol ? { ch: m.ch, symbol: m.symbol } : { ch: m.ch }) : undefined;
-      return { ...r, topic: topic && JSON.stringify(canonicalObject(topic)), channel: m.ch, subscriptionKey: m.arg && JSON.stringify(canonicalObject(m.arg)) };
+    super(records, { isPrivate, canonicalize: canonicalUrl,
+      explicitOpens: values.venue === 'bitunix', legacyLatest: false,
+      responses: new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
+        venue.matchRequestBody ? undefined : (method, url) => requestKey(method, url)),
+      prepareFrame: (r) => {
+        if (r.type !== 'ws') return r;
+        const m = r.text.trimStart().startsWith('{') ? JSON.parse(r.text) : {};
+        const topic = m.channel ? { channel: m.channel } : m.ch ? (m.symbol ? { ch: m.ch, symbol: m.symbol } : { ch: m.ch }) : undefined;
+        return { ...r, topic: topic && JSON.stringify(canonicalObject(topic)), channel: m.ch, subscriptionKey: m.arg && JSON.stringify(canonicalObject(m.arg)) };
+      },
     });
-    this.sockets = [];
-    this.connectionCounts = new Map();
-    this.byConnection = new Map();
+    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records) });
     this.commandIndex = 0;
     // Retain expected keys/backing storage across both memory samples: deleting
     // startup-only harness state would subtract it from workload retained memory.
@@ -226,29 +232,6 @@ class Tape {
     return this.responses.respond(method, url, body, this.commandIndex, this.time);
   }
 
-  connect(url, onOpen, onMessage, onClose) {
-    const rawUrl = url;
-    url = canonicalUrl(url);
-    const connection = this.connectionCounts.get(url) ?? 0;
-    this.connectionCounts.set(url, connection + 1);
-    const socket = { url, rawUrl, connection, onOpen, onMessage, onClose, closed: false, opened: false, topics: new Set(), publicTopics: new Set(), subscriptionArgs: new Map(), loginVerified: false };
-    this.sockets.push(socket);
-    this.byConnection.set(`${url}:${connection}`, socket);
-    // Old synthetic fixtures have no lifecycle records; live tapes drive every
-    // open explicitly, including failed startup attempts and reconnects.
-    const hasLifecycle = records.some((r) => r.type === 'open' && canonicalUrl(r.url) === url);
-    const legacyInitial = values.venue !== 'bitunix' && connection === 0 &&
-      !records.some((r) => r.type === 'connect' && canonicalUrl(r.url) === url);
-    if (!hasLifecycle || legacyInitial) setImmediate(() => this.openSocket(socket));
-    return socket;
-  }
-
-  openSocket(socket) {
-    if (socket.closed || socket.opened) return;
-    socket.opened = true;
-    socket.onOpen();
-  }
-
   assertSubscribed(socket, message, subscriptionKey) {
     if (!(venue.validateSubscriptions ?? venue.validateLogin) || !message.arg?.channel || !Array.isArray(message.data)) return;
     // Public arg objects usually identify one exact subscription. Avoid an
@@ -289,27 +272,6 @@ class Tape {
     if (missing) throw new Error(`${missing} taped write(s) were not sent`);
   }
 
-  async socketFor(frame) {
-    const deadline = performance.now() + 10_000;
-    for (;;) {
-      const exact = frame.connection !== undefined && this.byConnection.get(`${frame.url}:${frame.connection}`);
-      if (exact && (!exact.closed || frame.type === 'close')) return exact;
-      if (performance.now() > deadline) throw new Error(`missing tape socket ${frame.url} connection=${frame.connection}; active=${this.sockets.map((s) => `${s.url}:${s.connection}:${s.closed}`).join()}`);
-      const candidates = this.sockets.filter((s) => s.url === frame.url && (!s.closed || frame.type === 'close') &&
-        (frame.connection === undefined || s.connection === frame.connection));
-      if (frame.connection !== undefined || candidates.length === 1) {
-        if (candidates[0]) return candidates[0];
-      } else if (candidates.length > 1 && frame.text) {
-        const message = JSON.parse(frame.text);
-        const topic = JSON.stringify(canonicalObject(message.ch ? { ch: message.ch, symbol: message.symbol } : { channel: message.channel }));
-        const matched = candidates.filter((s) => s.topics.has(topic));
-        if (matched.length === 1) return matched[0];
-        throw new Error(`ambiguous legacy tape socket ${frame.url} ${topic}; record connection IDs`);
-      }
-      await new Promise((r) => setTimeout(r, 1));
-    }
-  }
-
   validateTopic(socket, frame) {
     if (values.venue !== 'bitunix') return;
     if (socket.url.includes(venue.privateSocket)) {
@@ -319,31 +281,20 @@ class Tape {
     if (frame.topic && !socket.topics.has(frame.topic)) this.socketErrors.push(`unsubscribed ${socket.connection} ${frame.topic}`);
   }
 
-  async lifecycle(frame) {
-    const socket = await this.socketFor(frame);
-    if (frame.type === 'open') this.openSocket(socket);
-    else {
-      if (frame.local && !socket.closed) throw new Error(`recorded local close was not requested: ${frame.url}:${frame.connection}`);
-      if (!frame.local && socket.closed) throw new Error('socket closed before recorded remote close');
-      socket.closed = true;
-      if (!frame.local) socket.onClose?.(frame.code ?? 1006);
-    }
-  }
-
   /**
    * Deliver every frame in order, yielding to the event loop between frames.
    * Commands are awaited where they fall. A private tape is paced: each record
    * waits until its time after the account is ready.
    */
-  async play(onTick, ready = async () => {}, runCommand = async () => {}) {
+  async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
     let initialized;
     const ensureReady = () => initialized ??= within((async () => {
       await ready();
-      while (this.pendingStartupSubscriptions) await new Promise((resolve) => setTimeout(resolve, 1));
+      while (this.pendingStartupSubscriptions) await new Promise((resolve) => realTimeout(resolve, 1));
       if (venue.startupTopics) {
         const expected = venue.startupTopics(records, bookSymbols).map((arg) => JSON.stringify(canonicalObject(arg)));
         const complete = () => expected.every((topic) => this.sockets.some((socket) => socket.opened && !socket.closed && socket.topics.has(topic)));
-        while (!complete()) await new Promise((r) => setTimeout(r, 10));
+        while (!complete()) await new Promise((r) => realTimeout(r, 10));
       }
       if (values.venue !== 'bitunix') return;
       const symbols = JSON.parse(records.find((r) => r.type === 'http' && r.url.includes('/market/trading_pairs')).body).data
@@ -352,11 +303,13 @@ class Tape {
       const deadline = performance.now() + 10_000;
       while (active() < symbols * 2) {
         if (performance.now() > deadline) throw new Error(`active startup topics missing: expected ${symbols * 2}, got ${active()}`);
-        await new Promise((r) => setTimeout(r, 5));
+        await new Promise((r) => realTimeout(r, 5));
       }
     })(), 15_000, 'Replay startup');
     const recordedLifecycle = records.some((r) => r.type === 'connect');
     if (values.venue !== 'bitunix' && !recordedLifecycle) await ensureReady();
+    begin();
+    clock?.start();
     this.peakBytes = Math.max(this.peakBytes ?? 0, this.sampleMemory?.() ?? 0);
     const start = performance.now();
     let delivered = 0;
@@ -365,9 +318,10 @@ class Tape {
       if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
       if (isPrivate) {
         const wait = frame.t - (performance.now() - start);
-        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+        if (wait > 0) await new Promise((resolve) => realTimeout(resolve, wait));
       }
       this.time = frame.t;
+      await clock?.advance(frame.t);
       if (frame.type === 'command') {
         await ensureReady();
         this.commandIndex++;
@@ -383,7 +337,7 @@ class Tape {
           if (values.venue === 'bitunix' && frame.topic && !socket.url.includes(venue.privateSocket)) {
             const deadline = performance.now() + 10_000;
             while (!socket.topics.has(frame.topic) && !socket.closed && performance.now() < deadline)
-              await new Promise((r) => setTimeout(r, 5));
+              await new Promise((r) => realTimeout(r, 5));
           }
           if ((venue.validateLogin || venue.validateSubscriptions) && frame.text.trimStart().startsWith('{')) {
             const message = JSON.parse(frame.text);
@@ -452,7 +406,7 @@ const baseline = async () => {
     globalThis.gc?.();
     // Loader/native cleanup can outlive several immediate turns. Require real
     // elapsed quiescence so imported transient buffers cannot inflate baseline.
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => realTimeout(resolve, 10));
     const memory = process.memoryUsage();
     const now = performance.now();
     if (now >= deadline) break;
@@ -491,6 +445,8 @@ async function runRust() {
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine();
   const tape = new Tape('rust');
+  const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());
+  clock?.install();
   const encoder = new TextEncoder();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
@@ -510,7 +466,7 @@ async function runRust() {
     connect: (url, { headers, onOpen, onMessage, onClose }) => {
       venue.validateSocket?.(url, headers);
       const socket = tape.connect(url, onOpen, (text) => { tape.audit?.received(url, text); onMessage(text); }, onClose);
-      return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
+      return { send: (text) => tape.send(socket, text), close: () => tape.close(socket, 1000, true) };
     },
     request: async ({ method, url, body: requestBody, headers }) => {
       const { status, headers: responseHeaders = '', body } = tape.respond(method, url, requestBody, headers);
@@ -553,11 +509,10 @@ async function runRust() {
       }
     },
   });
-  const sampling = setInterval(() => { tape.peakBytes = Math.max(tape.peakBytes ?? 0, tape.sampleMemory()); }, 5);
+  const sampling = realInterval(() => { tape.peakBytes = Math.max(tape.peakBytes ?? 0, tape.sampleMemory()); }, 5);
   host.start();
   for (const symbol of bookSymbols) host.command({ op: 'subscribeOrderBook', symbol });
   let lastFlush = -Infinity;
-  const allLoaded = 31;
   const flushTimer = isPrivate ? setInterval(() => host.flush(), 250) : undefined;
   const frames = await tape.play(
     (t) => {
@@ -568,20 +523,27 @@ async function runRust() {
       }
     },
     async () => {
-      while ((isPrivate && (status?.loaded ?? 0) !== allLoaded) || (tape.audit && !tape.audit.ready())) await new Promise((r) => setTimeout(r, 5));
+      for (;;) {
+        host.flush();
+        if (replayStoreReady(status?.loaded ?? 0, isPrivate) && (!tape.audit || tape.audit.ready()) && tape.sockets.some((s) => s.opened && !s.closed)) break;
+        await new Promise((r) => realTimeout(r, 5));
+      }
     },
     (record) => {
       const { op, ...rest } = record;
       return host.command({ op, ...commandArgs(rest) });
     },
+    clock,
+    () => { if (isPrivate) clockStart = performance.now(); },
   );
   await settle();
   tape.assertWritesConsumed();
   clearInterval(flushTimer);
   host.flush();
-  clearInterval(sampling);
+  realClearInterval(sampling);
   const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark, tape.peakBytes);
   host.dispose();
+  clock?.restore();
 
   // Rebuild comparable records outside the measured window.
   const marketRows = [];
@@ -636,7 +598,8 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   }
   const settingRows = [];
   for (let i = 0; i < (settings?.count ?? 0); i++) {
-    settingRows.push({ symbol: symbol(settings.market[i]), leverage: settings.leverage[i], marginType: settings.marginType(i) });
+    settingRows.push({ symbol: symbol(settings.market[i]), marginType: settings.marginType(i),
+      ...(venue.independentLeverage ? { buyLeverage: settings.buyLeverage[i], sellLeverage: settings.sellLeverage[i] } : { leverage: settings.leverage[i] }) });
   }
   return {
     hedged: status?.hedged ?? false,
@@ -650,6 +613,8 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 
 async function runTs() {
   const tape = new Tape('ts');
+  const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());
+  clock?.install();
   class TapeWebSocket {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -685,10 +650,14 @@ async function runTs() {
     send(text) { tape.send(this.socket, text); }
     close() {
       this.readyState = 3;
-      this.socket.closed = true;
+      tape.close(this.socket, 1000, true);
     }
   }
   globalThis.WebSocket = TapeWebSocket;
+  const { createRequire } = await import('node:module');
+  const require = createRequire(new URL('../../packages/safe-cex/src/exchanges/base.ws.ts', import.meta.url));
+  const wsModule = require.resolve('ws');
+  require.cache[wsModule] = { id: wsModule, filename: wsModule, loaded: true, exports: TapeWebSocket };
   const { [venue.ts.className]: Exchange } = await import(venue.ts.module);
   const { DefaultStore } = await import('../../packages/safe-cex/src/store/store.base.ts');
   const adapter = async (config) => {
@@ -737,11 +706,11 @@ async function runTs() {
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
-  const sampling = setInterval(() => { tape.peakBytes = Math.max(tape.peakBytes ?? 0, tape.sampleMemory()); }, 5);
+  const sampling = realInterval(() => { tape.peakBytes = Math.max(tape.peakBytes ?? 0, tape.sampleMemory()); }, 5);
   const started = exchange.start();
   const prepared = started.then(() => venue.prepareTsReady?.(exchange, { isPrivate }));
   const subscribed = (async () => {
-    while (!store.markets.length) await new Promise((r) => setTimeout(r, 1));
+    while (!store.markets.length) await new Promise((r) => realTimeout(r, 1));
     for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => {
       // KNOWN_TS_FIXES: BingX's feed supplies descending asks. Apply the
       // independent price-order contract before consumers and flush hashes.
@@ -767,18 +736,20 @@ async function runTs() {
     },
     async () => {
       await prepared;
-      while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
+      while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => realTimeout(r, 5));
       const loaded = () => Object.values(store.loaded).every(Boolean);
-      while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
+      while (isPrivate && !loaded()) await new Promise((r) => realTimeout(r, 5));
     },
     (record) => runTsCommand(exchange, store, record, { candleListeners, candleUpdates }),
+    clock,
+    () => { if (isPrivate) clockStart = performance.now(); },
   );
   await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
   await settle();
   tape.assertWritesConsumed();
   postStore();
   if (!values['no-egress']) for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
-  clearInterval(sampling);
+  realClearInterval(sampling);
   const metrics = await measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark, tape.peakBytes);
   const snapshot = {
     markets: (values['no-egress'] ? store : mainStore).markets.map((m) => ({ ...m })),
@@ -794,11 +765,12 @@ async function runTs() {
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.
         positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
-        settings: [...new Map(store.positions.filter((p) => p.leverage > 0).sort((a, b) => a.contracts - b.contracts).map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }])).values()],
+        settings: venue.tsSettings?.(exchange, store) ?? [...new Map(store.positions.filter((p) => p.leverage > 0).sort((a, b) => a.contracts - b.contracts).map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }])).values()],
         fills: executions.map((f) => ({ id: f.orderId ?? f.id, symbol: f.symbol, side: f.side, amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
       }
     : undefined;
   exchange.dispose();
+  clock?.restore();
   return { frames, metrics, bookEvents, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
 }
 
@@ -814,11 +786,13 @@ async function runTsCommand(exchange, store, record, { candleListeners, candleUp
       const order = store.orders.find((o) => o.id === args.id);
       if (!order) throw new Error(`unknown order ${args.id}`);
       const update = Object.fromEntries(['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]));
-      return exchange.updateOrder({ order, update });
+      const result = await exchange.updateOrder({ order, update });
+      return values.venue === 'mexc' ? result ?? [] : result;
     }
     case 'setLeverage': await exchange.setLeverage(args.symbol, args.leverage); return [];
     case 'setMarginType': await exchange.changeMarginType(args.isolated, args.symbol); return [];
     case 'setPositionMode': await exchange.changePositionMode(args.hedged); return [];
+    case 'fetchLeverage': return exchange.fetchLeverageForSymbol(args.symbol);
     case 'fetchFills': return exchange.fetchHistoricalFills(args);
     case 'fetchOrderHistory': return exchange.fetchHistoricalOrders(args);
     case 'fetchIncome': {
@@ -859,7 +833,7 @@ function normalizeAccount(account) {
     reduceOnly: Boolean(o.reduceOnly),
     close: Boolean(o.close),
     trigger: o.tpTriggerType ?? o.slTriggerType ?? o.triggerType ?? null,
-    rejectReason: o.extra?.rejectReason ?? o.rejectReason ?? null,
+    rejectReason: o.extra?.rejectReason ?? o.rejectReason ?? venue.tsRejectReason?.(o) ?? null,
   });
   const position = (p) => ({
     symbol: p.symbol,
@@ -881,7 +855,8 @@ function normalizeAccount(account) {
     balance: account.balance,
     orders: account.orders.map(order).sort(bySymbol),
     positions: account.positions.map(position).sort(bySymbol),
-    settings: [...account.settings].sort(bySymbol),
+    settings: account.settings.map((s) => ({ symbol: s.symbol, marginType: s.marginType,
+      ...(venue.independentLeverage ? { buyLeverage: s.buyLeverage, sellLeverage: s.sellLeverage } : { leverage: s.leverage }) })).sort(bySymbol),
     fills: account.fills,
   };
 }
@@ -910,5 +885,5 @@ writeFileSync(
     bookEvents: result.bookEvents.sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1])),
   }),
 );
-clearTimeout(replayDeadline);
+realClearTimeout(replayDeadline);
 process.exit(0);

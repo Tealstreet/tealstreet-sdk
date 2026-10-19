@@ -406,6 +406,35 @@ mod tests {
     }
 
     #[test]
+    fn settings_reservation_includes_optional_leverage_columns() {
+        for rails in [false, true] {
+            let mut store = Store::default();
+            store.set_settings((0..64).map(|market| {
+                (
+                    market,
+                    crate::store::MarketSetting {
+                        leverage: 10.0,
+                        buy_leverage: rails.then_some(20.0),
+                        sell_leverage: rails.then_some(30.0),
+                        ..crate::store::MarketSetting::default()
+                    },
+                )
+            }));
+            let pending = store.everything();
+            let mut writer = FrameWriter::new(Vec::new(), 1.0);
+            store.write(&pending, &mut writer);
+            let capacity = writer.buf.capacity();
+            let frame = writer.finish();
+            assert!(capacity < frame.len() + 16, "reserve every settings column");
+            let payload = sections(&frame)
+                .find(|(kind, _)| *kind == section::SETTINGS)
+                .unwrap()
+                .1;
+            assert_eq!(payload.len(), 8 + 64 * (8 + if rails { 24 } else { 8 }));
+        }
+    }
+
+    #[test]
     fn interning_resolves_hash_collisions_by_full_string_equality() {
         let mut w = FrameWriter::new(Vec::new(), 0.);
         assert_eq!(w.intern("one", 7), 0);

@@ -59,7 +59,7 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
 const venue = venueOf(values.venue);
-const isPrivate = tape.some((record) =>
+const isPrivate = tape.find((record) => record.type === 'meta')?.private ?? tape.some((record) =>
   venue.isPrivateRecord ? venue.isPrivateRecord(record) : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
 );
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
@@ -91,6 +91,21 @@ const isPrivate = tape.some((record) =>
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
+  if (values.venue === 'mexc') {
+    // Full incremental depth, rather than replacing a 20-level snapshot.
+    // Sized stops choose the closing leverage rail even without reduceOnly.
+    // Bracket prices reach the native entry; unsupported opening triggers reject.
+    // Cancel-all reaches regular, plan and position-stop endpoints.
+    // Cancel/replace recomputes remaining size after racing fills; Closed wins
+    // over a late cancellation acknowledgement. Failed reads preserve state.
+    // Regular cumulative fills stay monotonic; terminal rows never reopen.
+    // Stale amend reads cannot regress those fills or place a replacement.
+    // REST/optimistic rows retain cumulative fills; amendments retain attached
+    // brackets and standalone stop sources through venue reconciliation.
+    // Native bracket clears and corrected sources win over delayed placement acks.
+    // Repeated private execution IDs emit one fill within the replay window.
+    return;
+  }
   if (values.venue === 'bingx') {
     // BingX TS emits a terminal cumulative fill, ignores partial executions,
     // and drops its terminal watermark so TRADE_UPDATE can repeat that fill.
@@ -166,10 +181,7 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
     if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
   }
-  if (values.venue === 'bybit') for (const order of account.orders) {
-    const fixed = rustAccount.orders.find((o) => o.id === order.id);
-    if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled') order.rejectReason = 'PostOnly';
-  }
+
 };
 KNOWN_TS_FIXES.okx = [
   'full books retain levels past a stale last trade',

@@ -131,6 +131,7 @@ impl BitunixFutures {
                     MarketSetting {
                         leverage: 10.0,
                         margin_type: Some(MarginType::Cross),
+                        ..MarketSetting::default()
                     },
                 )
             })

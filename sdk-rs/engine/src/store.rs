@@ -60,10 +60,12 @@ fn ticker_values(t: &Ticker) -> [f64; 11] {
 }
 
 /// The account's leverage and margin type on one market.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MarketSetting {
     pub leverage: f64,
     pub margin_type: Option<MarginType>,
+    pub buy_leverage: Option<f64>,
+    pub sell_leverage: Option<f64>,
 }
 
 #[derive(Default)]
@@ -328,6 +330,7 @@ impl Store {
         let setting = self.settings.entry(market).or_insert(MarketSetting {
             leverage: f64::NAN,
             margin_type: None,
+            ..MarketSetting::default()
         });
         let before = *setting;
         update(setting);
@@ -540,7 +543,16 @@ impl Store {
             bytes += table(self.positions.len(), 2, 9);
         }
         if changes.settings {
-            bytes += table(self.settings.len(), 2, 1);
+            let floats = if self
+                .settings
+                .values()
+                .any(|s| s.buy_leverage.is_some() || s.sell_leverage.is_some())
+            {
+                3
+            } else {
+                1
+            };
+            bytes += table(self.settings.len(), 2, floats);
         }
         if changes.balance {
             bytes += 40;
@@ -664,6 +676,19 @@ impl Store {
         );
         w.pad();
         w.f64s(rows.iter().map(|(_, s)| s.leverage));
+        if rows
+            .iter()
+            .any(|(_, s)| s.buy_leverage.is_some() || s.sell_leverage.is_some())
+        {
+            w.f64s(
+                rows.iter()
+                    .map(|(_, s)| s.buy_leverage.unwrap_or(s.leverage)),
+            );
+            w.f64s(
+                rows.iter()
+                    .map(|(_, s)| s.sell_leverage.unwrap_or(s.leverage)),
+            );
+        }
         w.end();
     }
 

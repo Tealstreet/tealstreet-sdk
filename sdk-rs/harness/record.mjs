@@ -8,6 +8,7 @@ import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
+import { canonicalUrl } from './tape.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 
 const { values } = parseArgs({
@@ -25,31 +26,34 @@ const started = Date.now();
 let capturing = true;
 const write = (record) => { if (capturing) tape.write(`${JSON.stringify({ t: Date.now() - started, ...record })}\n`); };
 
+write({ type: 'meta', epoch: started, private: false });
+
 const live = nativeTransport();
 const connections = new Map();
 const closedUrls = new Set();
 const recording = {
   ...live,
   connect(url, handlers) {
-    const connection = connections.get(url) ?? 0;
-    connections.set(url, connection + 1);
-    write({ type: 'connect', url, connection, initial: !closedUrls.has(url) });
+    const key = canonicalUrl(url);
+    const connection = connections.get(key) ?? 0;
+    connections.set(key, connection + 1);
+    write({ type: 'connect', url, connection, socket: connection, initial: !closedUrls.has(key) });
     let closed = false;
     const closeRecord = (code, local = false) => {
       if (closed) return;
       closed = true;
-      closedUrls.add(url);
-      write({ type: 'close', url, connection, code, local });
+      closedUrls.add(key);
+      write({ type: 'close', url, connection, socket: connection, code, local });
     };
     const socket = live.connect(url, {
       headers: handlers.headers,
       onOpen: () => {
-        write({ type: 'open', url, connection });
+        write({ type: 'open', url, connection, socket: connection });
         handlers.onOpen();
       },
       onMessage: (text) => {
         frames++;
-        write({ type: 'ws', url, connection, text });
+        write({ type: 'ws', url, connection, socket: connection, text });
         handlers.onMessage(text);
       },
       onClose: (code) => {
