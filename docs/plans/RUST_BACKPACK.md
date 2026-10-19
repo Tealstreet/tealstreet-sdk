@@ -305,3 +305,10 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   informational, with correctness/request/write/protocol checks unchanged.
 - Seven-venue WASM is 2,924,643 bytes within a measured 3 MiB aggregate budget.
   All seventeen replay gates are running before the next push/green-CI wait.
+- Required brief replay gates all PASS on the seven-venue build: Backpack
+  public CPU 112.0/48.5 ms (2.31x), steady 56.1/19.3 ms (2.91x), retained
+  memory 3.2/1.7 MB (1.87x); private 21 frames PASS. Binance public CPU
+  236.3/95.0 ms (2.49x), steady 143.3/35.8 ms (4.00x), retained memory
+  4.2/2.4 MB (1.76x); private 14 frames PASS. Pushing the reviewed candidate
+  for CI while auxiliary venue replays finish locally; all seventeen CI gates
+  must pass before landing. The previous six-venue head completed all CI green.
