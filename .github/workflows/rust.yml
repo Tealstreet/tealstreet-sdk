@@ -1,656 +1,92 @@
-# The Rust tier, on the PUBLIC mirror's free runners. Authored in the monorepo at
-# mirrors/tealstreet-sdk/.github/workflows/rust.yml; contributors cannot edit it
-# here (CODEOWNERS + branch protection).
+# Rust engine CI. Requirements live in docs/plans/RUST_REWRITE.md.
 #
-# It used to live in tealstreet-next, where five of its six jobs sat on five
-# shared self-hosted runner slots in a PRIVATE repo. Everything this workflow
-# touches is slice code that this repo now owns, so this is where it runs, and
-# tealstreet-next has no Rust workflow at all.
-#
-# Keep every step GitHub-owned: this repo's Actions policy is `selected` with
-# `github_owned_allowed: true` and an EMPTY pattern list, so one foreign action
-# fails the whole RUN at startup and takes the other jobs with it.
+# Keep every step GitHub-owned: this repo's Actions policy allows only
+# GitHub-owned actions, so one foreign action fails the whole run at startup.
 name: Rust SDK
 
 on:
+  workflow_dispatch:
   push:
-    branches: [master, feat/safe-cex-rust]
+    branches: [master, feat/rust-rewrite]
     paths:
-      - 'packages/poseidon-crypto/**'
-      - 'packages/lighter-sdk/src/signer/**'
       - 'sdk-rs/**'
-      - 'packages/safe-cex/**'
-      - 'packages/safe-cex/src/exchanges/coinbase/**'
-      - 'packages/data-structures/src/Queue.ts'
-      - 'packages/data-structures/src/QueueWithMaxSize.ts'
-      - 'packages/data-structures/src/TimeLimitedQueue.ts'
-      - 'thirdparty/reconnecting-websocket/**'
-      - 'packages/script-api-core/src/order/**'
-      - 'packages/safe-cex/src/utils/safe-math.ts'
-      - 'packages/safe-cex/src/utils/risk.ts'
-      - 'packages/safe-cex/src/instrument-class/**'
-      - 'packages/safe-cex/src/utils/virtualClock.ts'
-      - 'packages/safe-cex/src/utils/runtime.ts'
-      - 'packages/safe-cex/src/utils/incrementalFills.ts'
-      - 'packages/safe-cex/src/utils/updateOrderBook.ts'
-      - 'packages/safe-cex/src/store/store.base.ts'
-      - 'packages/safe-cex/src/exchanges/apexomni/**'
-      - 'packages/safe-cex/src/exchanges/base.ts'
-      - 'packages/safe-cex/src/exchanges/binance/**'
-      - 'packages/safe-cex/src/exchanges/cryptocom/**'
-      - 'packages/safe-cex/src/exchanges/mexc/**'
-      - 'packages/safe-cex/src/exchanges/woo/**'
-      - 'packages/safe-cex/src/journal/woo.position-adapter.ts'
-      - 'packages/safe-cex/src/safeCexAxiosCreate.ts'
-      - 'packages/safe-cex/src/utils/roeRoi/**'
-      - 'packages/safe-cex/src/utils/oldestCursorId.ts'
-      - 'packages/script-api-core/src/order/positionSizing.ts'
-      - 'packages/safe-cex/src/transport/**'
-      - 'packages/safe-cex/src/exchangeMetadata.ts'
-      - 'packages/safe-cex/src/exchanges/lighter/**'
-      - 'packages/lighter-sdk/**'
-      - 'packages/poseidon-crypto/**'
-      - 'packages/http-over-websocket/**'
-      - 'packages/http-over-websocket/src/egressRegion.ts'
-      - 'packages/http-over-websocket/src/tunnelEndpoints.ts'
-      - 'tsconfig.base.json'
-      - 'package.json'
-      - 'yarn.lock'
-      - 'apps/module-frame/package.json'
-      - 'sdk-rs/scripts/rust-ci-wiring.test.mjs'
-      - 'sdk-rs/parity/extract-ts/scripts/check-dependency.mjs'
-      - 'packages/safe-cex-web/src/candleCache/**'
-      - 'packages/safe-cex-server/src/candleCache/**'
-      - 'packages/safe-cex-react-native/src/candleCache/**'
-      - 'packages/json-parse/src/**'
       - '.github/workflows/rust.yml'
-      - 'mirrors/tealstreet-sdk/.github/workflows/rust.yml'
-      - 'mirrors/tealstreet-sdk/.github/workflows/ci.yml'
   pull_request:
     paths:
-      - 'packages/poseidon-crypto/**'
-      - 'packages/lighter-sdk/src/signer/**'
       - 'sdk-rs/**'
-      - 'packages/safe-cex/**'
-      - 'packages/safe-cex/src/exchanges/coinbase/**'
-      - 'packages/data-structures/src/Queue.ts'
-      - 'packages/data-structures/src/QueueWithMaxSize.ts'
-      - 'packages/data-structures/src/TimeLimitedQueue.ts'
-      - 'thirdparty/reconnecting-websocket/**'
-      - 'packages/script-api-core/src/order/**'
-      - 'packages/safe-cex/src/utils/safe-math.ts'
-      - 'packages/safe-cex/src/utils/risk.ts'
-      - 'packages/safe-cex/src/instrument-class/**'
-      - 'packages/safe-cex/src/utils/virtualClock.ts'
-      - 'packages/safe-cex/src/utils/runtime.ts'
-      - 'packages/safe-cex/src/utils/incrementalFills.ts'
-      - 'packages/safe-cex/src/utils/updateOrderBook.ts'
-      - 'packages/safe-cex/src/store/store.base.ts'
-      - 'packages/safe-cex/src/exchanges/apexomni/**'
-      - 'packages/safe-cex/src/exchanges/base.ts'
-      - 'packages/safe-cex/src/exchanges/binance/**'
-      - 'packages/safe-cex/src/exchanges/cryptocom/**'
-      - 'packages/safe-cex/src/exchanges/mexc/**'
-      - 'packages/safe-cex/src/exchanges/woo/**'
-      - 'packages/safe-cex/src/journal/woo.position-adapter.ts'
-      - 'packages/safe-cex/src/safeCexAxiosCreate.ts'
-      - 'packages/safe-cex/src/utils/roeRoi/**'
-      - 'packages/safe-cex/src/utils/oldestCursorId.ts'
-      - 'packages/script-api-core/src/order/positionSizing.ts'
-      - 'packages/safe-cex/src/transport/**'
-      - 'packages/safe-cex/src/exchangeMetadata.ts'
-      - 'packages/safe-cex/src/exchanges/lighter/**'
-      - 'packages/lighter-sdk/**'
-      - 'packages/poseidon-crypto/**'
-      - 'packages/http-over-websocket/**'
-      - 'packages/http-over-websocket/src/egressRegion.ts'
-      - 'packages/http-over-websocket/src/tunnelEndpoints.ts'
-      - 'tsconfig.base.json'
-      - 'package.json'
-      - 'yarn.lock'
-      - 'apps/module-frame/package.json'
-      - 'sdk-rs/scripts/rust-ci-wiring.test.mjs'
-      - 'sdk-rs/parity/extract-ts/scripts/check-dependency.mjs'
-      - 'packages/safe-cex-web/src/candleCache/**'
-      - 'packages/safe-cex-server/src/candleCache/**'
-      - 'packages/safe-cex-react-native/src/candleCache/**'
-      - 'packages/json-parse/src/**'
       - '.github/workflows/rust.yml'
-      - 'mirrors/tealstreet-sdk/.github/workflows/rust.yml'
-      - 'mirrors/tealstreet-sdk/.github/workflows/ci.yml'
 
 permissions:
   contents: read
 
 concurrency:
   group: rust-${{ github.ref }}
-  # Pushes cancel too. GitHub keeps only ONE pending run per group, so when
-  # merges land faster than the suite completes the queued run is cancelled and
-  # replaced anyway — it just never reports as superseded. On 2026-10-14, 44 of
-  # 48 push runs on feat/safe-cex-rust were cancelled that way and the branch
-  # went entirely unvalidated. Cancelling in progress makes the tip the thing
-  # that gets tested, and says so.
   cancel-in-progress: true
 
 env:
   RUSTFLAGS: -Dwarnings
-  # The test tier ran out of runner disk (os error 28) even after the SDK purge;
-  # incremental state and debug info are most of target/ and CI never uses them.
   CARGO_INCREMENTAL: 0
-  CARGO_PROFILE_DEV_DEBUG: 0
-  CARGO_PROFILE_TEST_DEBUG: 0
 
 defaults:
   run:
     working-directory: sdk-rs
 
 jobs:
-  numeric-observations:
-    name: Rust / numeric engine observations
+  bans:
+    name: Rust / banned patterns
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24.20.0
-      - name: Measure actual Linux engine outputs
-        run: |
-          node safe-cex-num/tests/measure.cjs "${{ runner.temp }}/numeric-observations"
-          node safe-cex-num/tests/gate.cjs > /dev/null
-      - uses: actions/upload-artifact@v7
-        with:
-          name: numeric-observations-${{ runner.os }}-${{ runner.arch }}
-          path: ${{ runner.temp }}/numeric-observations
-          if-no-files-found: error
+      - name: Reject JavaScript emulation and deleted-port dependencies
+        run: ./scripts/check-bans.sh
 
   native:
-    name: Rust / ${{ matrix.check }}
-    # Free: this repo is PUBLIC. The same four checks ran on five shared
-    # self-hosted slots in the private monorepo until 2026-10-16, which is the
-    # capacity problem this move solves.
+    name: Rust / native ${{ matrix.check }}
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ matrix.check == 'test' && 60 || 15 }}
-    services:
-      redis:
-        image: ${{ matrix.check == 'test' && 'redis:7-alpine' || '' }}
-        ports:
-          - 6379/tcp
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
           - check: fmt
-            command: cargo fmt --check
+            command: cargo fmt --all --check
           - check: clippy
-            command: cargo clippy --locked --all-targets
-          - check: build
-            command: cargo build --locked
+            command: cargo clippy --locked --workspace --all-targets
           - check: test
-            command: cargo test --locked --no-fail-fast
+            command: cargo test --locked --workspace
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 1
-      # The test tier builds every crate plus the TS/native oracles and ran the
-      # hosted runner out of disk (os error 28) late in the job. Drop preinstalled
-      # SDKs this workflow never uses before the build starts.
-      - name: Free runner disk for the test tier
-        if: matrix.check == 'test'
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
-          df -h /
-      - name: Cache cargo
-        uses: actions/cache@v6
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             sdk-rs/target
-          key: ${{ runner.os }}-cargo-sdk-rs-nodebug-${{ matrix.check }}-${{ hashFiles('sdk-rs/**/Cargo.toml', 'sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-sdk-rs-nodebug-${{ matrix.check }}-
-      - name: Bootstrap Rust
-        run: rustup toolchain install stable --profile minimal --no-self-update
-      # Bootstrap provides rustup; this loads the workspace pin and components.
-      - name: Load workspace toolchain
+          key: ${{ runner.os }}-cargo-${{ matrix.check }}-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-${{ matrix.check }}-
+      - name: Install pinned toolchain
         run: rustup show
-      - name: Set up Node for differential tests and crypto fixtures
-        if: matrix.check == 'test'
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24.20.0
-      - name: Install isolated TypeScript for routing oracle
-        if: matrix.check == 'test'
-        working-directory: .
-        run: |
-          node sdk-rs/safe-cex-types/ci-deps.cjs "$RUNNER_TEMP/routing-typescript-deps"
-          test "$(corepack yarn --version)" = "$(node -p "require('./package.json').packageManager.split('@')[1]")"
-          corepack yarn --cwd "$RUNNER_TEMP/routing-typescript-deps" install --frozen-lockfile --ignore-scripts --non-interactive
-          echo "SAFE_CEX_TYPESCRIPT_PATH=$RUNNER_TEMP/routing-typescript-deps/node_modules/typescript" >> "$GITHUB_ENV"
-      - name: Install isolated worker oracle dependencies
-        if: matrix.check == 'test'
-        working-directory: .
-        run: |
-          node sdk-rs/safe-cex-webworker/ci-deps.cjs "$RUNNER_TEMP/worker-oracle-deps"
-          corepack yarn --cwd "$RUNNER_TEMP/worker-oracle-deps" install --frozen-lockfile --ignore-scripts --non-interactive
-          echo "SAFE_CEX_WORKER_LODASH_PATH=$RUNNER_TEMP/worker-oracle-deps/node_modules/lodash" >> "$GITHUB_ENV"
-      - name: Install isolated crypto oracle dependencies
-        if: matrix.check == 'test'
-        working-directory: .
-        run: |
-          node sdk-rs/safe-cex-crypto/scripts/ci-deps.cjs "$RUNNER_TEMP/crypto-oracle-deps"
-          test "$(corepack yarn --version)" = "$(node -p "require('./package.json').packageManager.split('@')[1]")"
-          corepack yarn --cwd "$RUNNER_TEMP/crypto-oracle-deps" install --frozen-lockfile --ignore-scripts --non-interactive
-          echo "SAFE_CEX_CRYPTO_ORACLE_DEPS=$RUNNER_TEMP/crypto-oracle-deps" >> "$GITHUB_ENV"
-      - name: Prepare pinned zkLink native oracle
-        if: matrix.check == 'test'
-        working-directory: .
-        run: |
-          node sdk-rs/safe-cex-crypto/scripts/zklink-native.cjs --prepare "$RUNNER_TEMP/zklink-native-oracle"
-          echo "SAFE_CEX_ZKLINK_NATIVE_ORACLE=$RUNNER_TEMP/zklink-native-oracle" >> "$GITHUB_ENV"
-      # `cargo test` spawns Node differential tests that require the slice's own
-      # packages (lodash, ethers, dayjs...), so the workspace must be installed.
-      - name: Install workspace dependencies for differential tests
-        if: matrix.check == 'test'
-        working-directory: .
-        run: |
-          test "$(corepack yarn --version)" = "$(node -p "require('./package.json').packageManager.split('@')[1]")"
-          corepack yarn install --frozen-lockfile --ignore-scripts --non-interactive --network-timeout 600000
-      - name: Audit cancellable future classifications
-        if: matrix.check == 'test'
-        run: |
-          node --test safe-cex-exchange/scripts/cancellable-futures.test.cjs
-          cargo test --locked -p safe-cex-exchange --all-features --test cancellable_future_inventory --jobs 2
-      - name: Fetch binding ratchet base
-        if: matrix.check == 'test' && github.event_name == 'pull_request'
-        env:
-          BINDING_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: git fetch --no-tags --depth=1 origin "$BINDING_BASE_SHA"
       - name: Run ${{ matrix.check }}
-        env:
-          VENUE_BINDING_BASE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
         run: ${{ matrix.command }}
-      - name: Run Lighter Go-WASM vector oracle
-        if: matrix.check == 'test'
-        working-directory: .
-        run: yarn crypto:lighter:check
-      - name: Run all crypto signing oracles
-        if: matrix.check == 'test'
-        working-directory: .
-        run: yarn crypto:oracles:check
-      - name: Run Hyperliquid TypeScript accepted-set oracle
-        if: matrix.check == 'test'
-        working-directory: .
-        run: yarn venue-oracle:hyperliquid
-      - name: Run routing TypeScript equivalence gate
-        if: matrix.check == 'test'
-        run: |
-          node --test scripts/rust-ci-wiring.test.mjs
-          node safe-cex-transport/scripts/routing.mjs --check --equivalence
-          cargo test --locked -p safe-cex-transport --all-targets -- --include-ignored
-          cargo test --locked -p safe-cex-transport --doc
-      - name: Check exchange core parity and lifecycle
-        if: matrix.check == 'test'
-        env:
-          VENUE_BINDING_BASE_REF: ${{ github.event.pull_request.base.sha || github.sha }}
-        run: |
-          node safe-cex-exchange/scripts/ci-deps.cjs "$RUNNER_TEMP/exchange-typescript-deps"
-          corepack yarn --cwd "$RUNNER_TEMP/exchange-typescript-deps" install --frozen-lockfile --ignore-scripts --non-interactive
-          export SAFE_CEX_TYPESCRIPT_PATH="$RUNNER_TEMP/exchange-typescript-deps/node_modules/typescript"
-          node --test safe-cex-exchange/scripts/ci.test.mjs safe-cex-exchange/scripts/health-features.test.mjs
-          node safe-cex-exchange/scripts/generate-health.cjs --check
-          node safe-cex-exchange/scripts/generate-error-reporting.cjs --check
-          node safe-cex-exchange/scripts/client-id-patterns.mjs
-          cargo clippy --locked -p safe-cex-exchange --all-features --all-targets
-          cargo test --locked -p safe-cex-exchange --all-features --all-targets -- --include-ignored
-          cargo test --locked -p safe-cex-exchange --all-features --doc
-      - name: Run GRVT venue TypeScript equivalence gate
-        if: matrix.check == 'test'
-        working-directory: .
-        run: |
-          corepack yarn venue-oracle:grvt
-      - name: Run OKX venue TypeScript equivalence gate
-        if: matrix.check == 'test'
-        working-directory: .
-        run: |
-          corepack yarn venue-oracle:okx
-      # Local hermetic tests omit Node; CI must still run both live TS oracles.
-      - name: Run numeric TypeScript differential gate
-        if: matrix.check == 'test'
-        run: |
-          node --test safe-cex-num/tests/gate.test.cjs
-          cargo test --locked -p safe-cex-num --all-targets -- --include-ignored --nocapture
-      - name: Check crypto with arbitrary-precision JSON feature unification
-        if: matrix.check == 'test'
-        run: |
-          cargo test --locked -p safe-cex-crypto --features serde_json/arbitrary_precision --lib -- --list | grep -Fx 'ws_tests::arbitrary_precision_overflow_returns_correlated_errors: test'
-          cargo test --locked -p safe-cex-crypto --features serde_json/arbitrary_precision --lib ws_tests::arbitrary_precision_overflow_returns_correlated_errors -- --exact
-      - name: Check shared candle-cache ignored oracles
-        if: matrix.check == 'test'
-        env:
-          SAFE_CEX_TYPESCRIPT_PATH: ${{ github.workspace }}/node_modules/typescript
-          P3B_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports[6379] }}/0
-          P3B_REDIS_SERVER: /usr/bin/redis-server
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends redis-server
-          cargo test --locked -p safe-cex-candle-cache --test p4_calendar --test divergence_audit --jobs 1 -- --include-ignored
-          cargo test --locked -p safe-cex-candle-cache --lib --jobs 1 -- --list | grep -Fx 'tests::maintained_typescript_null_record_bugs: test'
-          cargo test --locked -p safe-cex-candle-cache --lib tests::maintained_typescript_null_record_bugs --jobs 1 -- --exact --include-ignored
-          cargo test --locked -p safe-cex-candle-cache --test runtime_backends --jobs 1 -- --include-ignored --test-threads=1
-      - name: Regenerate crypto signing fixtures
-        if: matrix.check == 'test'
-        run: node safe-cex-crypto/tests/fixtures/generate.cjs
-      - name: Check crypto fixture regeneration determinism
-        if: matrix.check == 'test'
-        run: git diff --exit-code -- safe-cex-crypto/tests/fixtures/node-crypto.json
 
   wasm:
-    name: Rust / wasm core
+    name: Rust / wasm32
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 1
-      - name: Cache cargo
-        uses: actions/cache@v6
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             sdk-rs/target
-          key: ${{ runner.os }}-cargo-sdk-rs-wasm-${{ hashFiles('sdk-rs/**/Cargo.toml', 'sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-sdk-rs-wasm-
-      - name: Bootstrap Rust
-        run: rustup toolchain install stable --profile minimal --no-self-update
-      - name: Load workspace toolchain
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-wasm-
+      - name: Install pinned toolchain
         run: rustup show
-      # Every workspace member requires an explicit wasm or native-only classification.
-      - name: Set up Node for wasm coverage audit
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24.20.0
-      - name: Audit wasm workspace coverage
-        run: node --test scripts/rust-wasm.test.mjs
-      - name: Build wasm workspace
-        run: node scripts/rust-wasm.mjs --build
-      - name: Lint wasm workspace
-        run: node scripts/rust-wasm.mjs --clippy
-      - name: Build exchange core wasm feature sets
-        run: |
-          cargo build --locked -p safe-cex-exchange --target wasm32-unknown-unknown
-          cargo build --locked -p safe-cex-exchange --all-features --target wasm32-unknown-unknown
-      - name: Verify transport warnings in actual wasm
-        run: |
-          node safe-cex-ffi/scripts/setup.mjs
-          node safe-cex-transport/scripts/warning-wasm.mjs
-      # Retain the crypto chunk’s core build alongside the full policy build.
-      - name: Build wasm core
-        run: cargo build --locked --target wasm32-unknown-unknown -p safe-cex-types -p safe-cex-num -p safe-cex-store -p safe-cex-crypto
-
-  ffi:
-    needs: [native, wasm]
-    name: Rust / FFI smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        host: [node, wasm]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 1
-      - name: Cache cargo
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ${{ env.CARGO_HOME }}/bin
-            sdk-rs/target
-          key: ${{ runner.os }}-cargo-sdk-rs-ffi-${{ matrix.host }}-${{ hashFiles('sdk-rs/**/Cargo.toml', 'sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-sdk-rs-ffi-${{ matrix.host }}-
-      - name: Bootstrap Rust
-        run: rustup toolchain install stable --profile minimal --no-self-update
-      - name: Load workspace toolchain
-        run: rustup show
-      - name: Set up Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - name: Set up Bun
-        working-directory: .
-        env:
-          BUN_VERSION: '1.3.5'
-        run: |
-          curl -fsSLo bun.zip \
-            "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip"
-          unzip -q bun.zip
-          mkdir -p "$HOME/.bun/bin"
-          mv bun-linux-x64/bun "$HOME/.bun/bin/bun"
-          chmod +x "$HOME/.bun/bin/bun"
-          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
-      - name: Check native bindings
-        if: matrix.host == 'node'
-        run: |
-          cargo clippy --locked -p safe-cex-ffi --features node --all-targets -- -D warnings
-          cargo build --locked -p safe-cex-ffi --features node
-      - name: Execute Bun native smoke
-        if: matrix.host == 'node'
-        working-directory: .
-        run: yarn ffi:smoke:node
-      - name: Check wasm bindings
-        if: matrix.host == 'wasm'
-        run: |
-          cargo clippy --locked -p safe-cex-ffi --features wasm --target wasm32-unknown-unknown -- -D warnings
-          cargo build --locked -p safe-cex-ffi --features wasm --target wasm32-unknown-unknown
-      - name: Provision matching wasm-bindgen CLI
-        if: matrix.host == 'wasm'
-        working-directory: .
-        run: yarn ffi:setup
-      - name: Install browser dependencies
-        if: matrix.host == 'wasm'
-        working-directory: .
-        env:
-          HUSKY: '0'
-          TURBO_TELEMETRY_DISABLED: '1'
-          PUPPETEER_CACHE_DIR: ${{ runner.temp }}/ffi-chrome
-        run: |
-          yarn install --frozen-lockfile
-          # The existing escape suite checks the postcondition after this known CLI crash.
-          yarn workspace tealstreet-module-frame exec puppeteer browsers install chrome || true
-          node -e 'const fs = require("node:fs"); (async () => { const path = await (await import("./sdk-rs/safe-cex-ffi/smoke/web/puppeteer.mjs")).default.executablePath(); if (!fs.existsSync(path)) throw new Error("no Chrome at " + path); })().catch(error => { console.error(error); process.exit(1); });'
-      - name: Execute browser Worker smoke
-        if: matrix.host == 'wasm'
-        working-directory: .
-        env:
-          PUPPETEER_CACHE_DIR: ${{ runner.temp }}/ffi-chrome
-        run: yarn ffi:smoke:web
-
-  types:
-    name: Rust / TypeScript parity
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          filter: blob:none
-      - name: Use Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24.20.0
-      - name: Install isolated oracle dependencies from the repo lockfile
-        working-directory: .
-        run: |
-          node sdk-rs/safe-cex-types/ci-deps.cjs "$RUNNER_TEMP/safe-cex-types-deps"
-          test "$(corepack yarn --version)" = "$(node -p "require('./package.json').packageManager.split('@')[1]")"
-          corepack yarn --cwd "$RUNNER_TEMP/safe-cex-types-deps" install --frozen-lockfile --ignore-scripts --non-interactive
-          echo "SAFE_CEX_TYPESCRIPT_PATH=$RUNNER_TEMP/safe-cex-types-deps/node_modules/typescript" >> "$GITHUB_ENV"
-      - name: Check generated account policy
-        working-directory: .
-        run: node sdk-rs/safe-cex-types/scripts/account-policy.cjs --check
-      - name: Cache cargo
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            sdk-rs/target
-          key: ${{ runner.os }}-cargo-sdk-rs-types-${{ hashFiles('sdk-rs/**/Cargo.toml', 'sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-sdk-rs-types-
-      - name: Bootstrap Rust
-        run: rustup toolchain install stable --profile minimal --component rustfmt --no-self-update
-      - name: Load workspace toolchain
-        run: rustup show
-      - name: Regenerate TypeScript bindings
-        run: |
-          cargo run --locked -p safe-cex-types --example generate
-          node safe-cex-types/generate.cjs
-      - name: Check regeneration determinism
-        run: |
-          git diff --exit-code
-          git status --short --untracked-files=all -- safe-cex-types/bindings
-          test -z "$(git status --porcelain --untracked-files=all -- safe-cex-types/bindings)"
-      # Coverage builds the full TS program; isolated TypeScript alone cannot resolve it.
-      - name: Check isolated parity extractor runtime install
-        working-directory: .
-        run: node sdk-rs/parity/extract-ts/scripts/check-clean-install.mjs
-      - name: Install dependencies for manifest coverage
-        working-directory: .
-        env:
-          HUSKY: '0'
-          TURBO_TELEMETRY_DISABLED: '1'
-        run: |
-          test "$(corepack yarn --version)" = "$(node -p "require('./package.json').packageManager.split('@')[1]")"
-          corepack yarn install --frozen-lockfile --ignore-scripts --non-interactive
-      - name: Check Bitget TypeScript equivalence
-        working-directory: .
-        run: yarn venue-oracle:bitget
-      - name: Check parity manifest coverage
-        working-directory: .
-        run: yarn parity:extract --check
-      - name: Check Coinbase live TypeScript oracle
-        working-directory: .
-        run: corepack yarn venue-oracle:coinbase
-      - name: Check Crypto.com live TypeScript oracle
-        working-directory: .
-        run: yarn venue-oracle:cryptocom
-      - name: Check live KuCoin TypeScript equivalence
-        working-directory: .
-        run: yarn venue-oracle:kucoin
-      - name: Check live registry TypeScript equivalence
-        working-directory: .
-        run: yarn registry:check
-      - name: Check apexomni live TypeScript conformance
-        working-directory: .
-        run: yarn venue-oracle:apexomni
-      - name: Check venue oracle binance
-        working-directory: .
-        run: yarn venue-oracle:binance
-      - name: Check live Asterdex TypeScript equivalence
-        working-directory: .
-        run: yarn venue-oracle:asterdex
-      - name: Check mexc live TypeScript oracle
-        working-directory: .
-        run: yarn venue-oracle:mexc
-      - name: Check production accepted sets
-        working-directory: .
-        run: yarn parity:accepted
-      - name: Check accepted-set negative controls
-        working-directory: .
-        run: yarn parity:accepted:controls
-      - name: Check parity invention and status
-        working-directory: .
-        run: yarn parity:check
-      - name: Check TypeScript parity and generator regressions
-        run: |
-          node --test safe-cex-types/tests/*.test.cjs
-          node safe-cex-types/tests/check-types.cjs
-          node safe-cex-types/tests/check-runtime-imports.cjs
-
-      - name: Check live store TypeScript conformance
-        run: cargo test --locked -p safe-cex-store --all-targets -- --include-ignored --nocapture
-      - name: Check live lighter TypeScript oracle
-        working-directory: .
-        run: yarn venue-oracle:lighter
-
-      - name: Check live venue bybit conformance
-        working-directory: .
-        run: yarn venue-oracle:bybit
-
-      - name: Check WOO venue TypeScript oracle
-        working-directory: .
-        run: yarn venue-oracle:woo
-      - name: Check live model and production store seams
-        run: cargo test --locked -p safe-cex-types -p safe-cex --all-targets -- --include-ignored
-
-      - name: Check live worker TypeScript equivalence
-        working-directory: .
-        run: |
-          node sdk-rs/safe-cex-webworker/ci-deps.cjs "$RUNNER_TEMP/worker-oracle-deps"
-          corepack yarn --cwd "$RUNNER_TEMP/worker-oracle-deps" install --frozen-lockfile --ignore-scripts --non-interactive
-          export SAFE_CEX_WORKER_LODASH_PATH="$RUNNER_TEMP/worker-oracle-deps/node_modules/lodash"
-          yarn worker-oracle
-
-  js-primitives:
-    name: Rust / shared ECMAScript primitives
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Pin Node for shared primitive oracles
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24.20.0
-      - name: Bootstrap Rust
-        run: rustup toolchain install stable --profile minimal --no-self-update
-      - name: Load workspace toolchain
-        run: rustup show
-      - name: Check shared root collation
-        run: cargo test --locked -p safe-cex-num --test js_collation --jobs 2
-      - name: Check shared Math extrema
-        run: cargo test --locked -p safe-cex-num --test js_math_extrema --jobs 2
-      - name: Check shared Date parsing
-        run: cargo test --locked -p safe-cex-num --test js_date --jobs 2
-      - name: Install shared primitive oracle dependencies
-        working-directory: .
-        run: |
-          node sdk-rs/safe-cex-types/ci-deps.cjs "$RUNNER_TEMP/routing-typescript-deps"
-          test "$(corepack yarn --version)" = "$(node -p "require('./package.json').packageManager.split('@')[1]")"
-          corepack yarn --cwd "$RUNNER_TEMP/routing-typescript-deps" install --frozen-lockfile --ignore-scripts --non-interactive
-          echo "SAFE_CEX_TYPESCRIPT_PATH=$RUNNER_TEMP/routing-typescript-deps/node_modules/typescript" >> "$GITHUB_ENV"
-      - name: Check shared lodash casing
-        run: cargo test --locked -p safe-cex-num --test lodash_case --jobs 2
-      - name: Check shared inherited table members
-        run: cargo test --locked -p safe-cex-num --test js_table_lookup --jobs 2
-      - name: Check shared string replacement
-        run: cargo test --locked -p safe-cex-num --test js_replace --jobs 2
-      - name: Check shared JSON property entries
-        run: cargo test --locked -p safe-cex-num --test js_property --jobs 2
-      - name: Check shared lodash random
-        run: cargo test --locked -p safe-cex-num --test lodash_random --jobs 2
-      - name: Check shared numeric ingress
-        env:
-          CARGO_BUILD_JOBS: 2
-        run: cargo test --locked -p safe-cex-num --test numeric_ingress --lib --jobs 2
-      - name: Check shared unknown-value get-key
-        run: cargo test --locked -p safe-cex-num --test get_key_unknown --test get_key --jobs 2
+      - name: Build every crate for wasm32
+        run: cargo build --locked --workspace --target wasm32-unknown-unknown
+      - name: Lint every crate for wasm32
+        run: cargo clippy --locked --workspace --target wasm32-unknown-unknown
