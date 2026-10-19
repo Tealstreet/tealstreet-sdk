@@ -6,6 +6,7 @@ import type { StoreWorkerPayload, StoreWorkerStorePayload } from './StoreWorkerP
 import throttle from 'lodash/throttle';
 
 import { exchangeRegistry } from '../exchanges/registry';
+import { isRustVenue, RustEngineExchange } from '../exchanges/rust/rust.exchange';
 import { DefaultStore, PACKED_TICKER_FIELDS } from '../store/store.base';
 import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
@@ -309,7 +310,8 @@ export class ExchangeWorker {
       if (!loader) {
         throw new Error(`Unknown exchange: ${this._exchangeName}`);
       }
-      const Exchange = await loader();
+      const runsOnRust = this._options.engine === 'rust' && isRustVenue(this._exchangeName);
+      const Exchange = runsOnRust ? RustEngineExchange : await loader();
       if (startupToken !== this._startupToken) {
         return false;
       }

@@ -2,7 +2,9 @@ import react from '@vitejs/plugin-react';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { defineConfig } from 'vitest/config';
 
-const testFiles = ['./src/**/*.test.{js,jsx,ts,tsx}'];
+// `yarn test-wasm` runs only the tests that drive the built wasm engine.
+const wasmTests = process.env.SAFE_CEX_WASM_TESTS === '1';
+const testFiles = wasmTests ? ['./src/**/*.wasm.test.{js,jsx,ts,tsx}'] : ['./src/**/*.test.{js,jsx,ts,tsx}'];
 
 export default defineConfig({
   plugins: [
@@ -45,6 +47,8 @@ export default defineConfig({
       '**/.{idea,git,cache,output,temp}/**',
       '**/*.integration.test.{js,jsx,ts,tsx}',
       '**/*.network.test.{js,jsx,ts,tsx}',
+      // Need the built wasm engine; the Rust CI job runs them (yarn test-wasm).
+      ...(wasmTests ? [] : ['**/*.wasm.test.{js,jsx,ts,tsx}']),
     ],
   },
 });

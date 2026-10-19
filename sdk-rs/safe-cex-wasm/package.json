@@ -1,0 +1,29 @@
+{
+  "name": "@tealstreet/safe-cex-wasm",
+  "version": "0.0.1",
+  "private": true,
+  "description": "The Rust exchange engine for browsers and Workers: wasm build, host and frame reader",
+  "type": "module",
+  "exports": {
+    "./host": {
+      "types": "./js/host.d.mts",
+      "default": "./js/host.mjs"
+    },
+    "./wire": {
+      "types": "./js/wire.d.mts",
+      "default": "./js/wire.mjs"
+    },
+    "./web": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/safe_cex_wasm.js"
+    },
+    "./node": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/safe_cex_wasm.js"
+    }
+  },
+  "scripts": {
+    "build": "bash ../harness/build.sh"
+  },
+  "license": "MIT"
+}

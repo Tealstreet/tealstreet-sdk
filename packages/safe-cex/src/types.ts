@@ -119,6 +119,8 @@ export type ExchangeOptions = {
   /** Bybit Brazil accounts require this site id on REST and WS upgrade requests. */
   readonly bybitSiteId?: 'BRA_BTL';
   readonly publicDataOnly?: boolean;
+  /** Run this account on the Rust engine when its venue has one (`RUST_VENUES`). */
+  readonly engine?: 'rust';
   readonly privateOnly?: boolean;
   readonly tealstreetProxy?: boolean;
   // tunnel (http over websocket)
