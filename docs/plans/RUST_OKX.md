@@ -208,3 +208,24 @@ Never touch master, rebase, or force-push.
   intentional Rust correction without normalizing the mismatched setting.
 - Landing budget is now1,468,006 bytes for the aggregate browser engine. This
   lane preserves that budget and still removes debug name/producers metadata.
+
+### Integrated final gates (fe226c8211)
+
+All local gates PASS after merging the current landing branch. Three independent
+integration cross-reviews PASS; findings and resolutions are posted on PR1302.
+
+| Public replay (3 runs) | Frames | Markets/tickers | Books | TS/Rust main CPU ms | TS/Rust steady CPU ms | Memory improvement |
+| --- | ---: | --- | ---: | --- | --- | --- |
+| OKX | 8,902 | 494/494 | 2 | 626.6/588.3 (1.07x) | 489.9/445.0 (1.10x) | 1.02x |
+| Binance | 871 | 917/783 | 3 | 169.4/60.2 (2.81x) | 96.5/20.5 (4.70x) | 1.12x |
+| Bybit | 8,742 | 912/912 | 2 | 174.0/118.5 (1.47x) | 123.6/62.0 (1.99x) | 1.36x |
+
+- All public outputs identical. All six private tapes PASS: OKX aliases each29
+  frames/12 commands, Binance14 frames, Bybit18 frames; no unmatched requests.
+- Release WASM1,444,636 bytes (landing budget1,468,006). Workspace bans/fmt,
+  locked all-target clippy, locked native tests, and locked WASM clippy PASS.
+  OKX64 native tests + engine14 tests; combined SDK WASM16 and Workers host2
+  tests PASS. Post-integration package typecheck/lint PASS.
+- Initial full repository verification PASS(27 tasks); targeted fixes and merge
+  have their own passing regressions. PR must now pass the updated CI before
+  merge; no requested implementation work remains beyond landing/CI handling.
