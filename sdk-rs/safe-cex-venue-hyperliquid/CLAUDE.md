@@ -496,3 +496,10 @@ portable typed Result adapter is distinct from the production exception object.
 The signing interceptor supplies a fallible request-emission hook through
 `prepare_request`/`execute`; the native factory returns its execution-local
 original listener error before transport. See `FIX_AUDIT_API_SIGNING.md`.
+
+The startup construction-order regression compares the actual maintained
+`fetchMarketsHelper` and DefaultStore with the constructed native exchange.
+It reads canonical facade own keys directly: Store diagnostics precede loaded
+state, and each ticker retains `openInterest` after `quoteVolume`. The shared
+Host facade preserves mapper construction order without a typed re-encoding;
+do not replace that ingress with a Ticker struct roundtrip or an order table.

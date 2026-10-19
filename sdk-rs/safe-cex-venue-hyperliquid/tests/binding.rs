@@ -1786,22 +1786,44 @@ fn startup_finishes_all_hip3_requests_under_fixed_and_advancing_native_clocks() 
 fn startup_store_and_ticker_key_order_match_maintained_mapper() {
     let output = std::process::Command::new("node")
         .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
-        .args(["--import", "tsx", "sdk-rs/safe-cex-venue-hyperliquid/tests/ticker-construction-order-source.cjs"])
-        .output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        .args([
+            "--import",
+            "tsx",
+            "sdk-rs/safe-cex-venue-hyperliquid/tests/ticker-construction-order-source.cjs",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let source: Value = serde_json::from_slice(&output.stdout).unwrap();
     let f = started();
     let facade = safe_cex_exchange::native_store::facade(f.exchange.base().store.clone()).unwrap();
     let keys = |v: &safe_cex_exchange::js_runtime::value::Js| -> Value {
-        json!(v.own_keys().iter().map(|k| String::from_utf16(k).unwrap()).collect::<Vec<_>>())
+        json!(
+            v.own_keys()
+                .iter()
+                .map(|k| String::from_utf16(k).unwrap())
+                .collect::<Vec<_>>()
+        )
     };
     let snapshot = facade.call_method("serialize", vec![]).unwrap();
-    assert_eq!(keys(&snapshot), source["root"], "HL_STORE_ROOT_KEY_ORDER post-1248 canonical snapshot");
+    assert_eq!(
+        keys(&snapshot),
+        source["root"],
+        "HL_STORE_ROOT_KEY_ORDER post-1248 canonical snapshot"
+    );
     let tickers = facade.get("tickers").unwrap();
     assert_eq!(tickers.get("length").unwrap().to_number().unwrap(), 2.0);
     for i in 0..2 {
         let ticker = tickers.get(&i.to_string()).unwrap();
-        assert_eq!(keys(&ticker), source["tickers"][i], "HL_TICKER_INGRESS_KEY_ORDER row {i}");
+        assert_eq!(
+            keys(&ticker),
+            source["tickers"][i],
+            "HL_TICKER_INGRESS_KEY_ORDER row {i}"
+        );
     }
     f.exchange.dispose().unwrap();
 }
