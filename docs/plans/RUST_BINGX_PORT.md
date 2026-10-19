@@ -83,3 +83,18 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   uses native integer precision and borrowed streamed ticker rows. Known TS
   fixes declared in gate: precision zero, terminal cumulative/repeated fills,
   and private close-position `cp` alias. Public gate recheck pending rebuild.
+
+### Trading checkpoint
+
+- Sequenced preflighted placement/brackets/conditionals/trailing, cancellation,
+  stable-ID quantity amendment, atomic LIMIT price replacement and settings
+  commands integrated. Account observations preserve native status for safe
+  `ONLY_PENDING` replacements. Writes invalidate in-flight account snapshots.
+- Independent review found missing full-stop quantity, stale replacement ACK
+  overwrites, contradictory/rejected ACK acceptance, oversized bracket legs and
+  PENDING restrictions. All corrected with dedicated regressions; 26 trading
+  tests pass. Public 6 + account 18 + account unit 2 remain green.
+- Verified current official docs bundle explicitly requires full-stop quantity;
+  updated nearby guidance and gate declarations. Live public feed also sends
+  descending asks and '-' placeholders; Rust sorts snapshots and keeps ticker
+  fields finite. Repeat public gate pending final wasm build.

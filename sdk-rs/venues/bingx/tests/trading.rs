@@ -1,0 +1,781 @@
+//! Exercise the trading state machine independently of polling and sockets.
+#[allow(dead_code)]
+#[path = "../src/paths.rs"]
+mod paths;
+#[allow(dead_code)]
+#[path = "../src/sign.rs"]
+mod sign;
+#[path = "../src/trading.rs"]
+mod trading;
+
+use safe_cex_engine::book::Book;
+use safe_cex_engine::model::*;
+use safe_cex_engine::{
+    Action, Command, Cx, Engine, Event, HttpRequest, Notice, Response, SocketId, TimerId, Venue,
+};
+use sign::Credentials;
+use trading::Trading;
+
+pub enum Pending {
+    Trade(trading::Request),
+}
+struct TestVenue {
+    trading: Trading,
+    initial: Option<(Order, String, String)>,
+    credentials: Credentials,
+}
+impl Venue for TestVenue {
+    type Pending = Pending;
+    fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        cx.store.set_markets(vec![market()]);
+        cx.store.set_tickers(vec![Ticker {
+            id: "BTC-USDT".into(),
+            symbol: "BTCUSDT".into(),
+            last: 100.0,
+            mark: 100.0,
+            ..Ticker::default()
+        }]);
+        if let Some((order, raw, status)) = self.initial.take() {
+            self.trading
+                .observe_order(&order, &raw, "BOTH", false, &status);
+            cx.store.set_orders(vec![order]);
+        }
+    }
+    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
+    fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
+    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
+    fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        let Pending::Trade(request) = pending;
+        let _ = (request.places_order(), request.changes_settings());
+        self.trading
+            .on_response(cx, Some(&self.credentials), request, response);
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        let Pending::Trade(request) = pending;
+        self.trading
+            .on_failed(cx, Some(&self.credentials), request, error);
+    }
+    fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
+    fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        self.trading.command(cx, Some(&self.credentials), command);
+    }
+    fn book(&self, _: &str) -> Option<&Book> {
+        None
+    }
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        Box::new(std::iter::empty())
+    }
+}
+struct Harness {
+    engine: Engine<TestVenue>,
+    requests: Vec<HttpRequest>,
+    done: Vec<Result<String, String>>,
+}
+impl Harness {
+    fn new(initial: Option<(Order, &str)>) -> Self {
+        Self::with_status(initial, "NEW")
+    }
+    fn with_status(initial: Option<(Order, &str)>, status: &str) -> Self {
+        let mut engine = Engine::new(TestVenue {
+            trading: Trading::default(),
+            initial: initial.map(|(o, k)| (o, k.into(), status.into())),
+            credentials: Credentials {
+                key: "key".into(),
+                secret: "secret".into(),
+            },
+        });
+        engine.start(1_000.0);
+        let mut h = Self {
+            engine,
+            requests: Vec::new(),
+            done: Vec::new(),
+        };
+        h.collect();
+        h
+    }
+    fn collect(&mut self) {
+        for action in self.engine.drain_actions() {
+            match action {
+                Action::Http(r) => self.requests.push(r),
+                Action::Notice(Notice::CommandDone { result, .. }) => self.done.push(result),
+                _ => {}
+            }
+        }
+    }
+    fn command(&mut self, command: Command) {
+        self.engine.handle(1_000.0, Event::Command(command));
+        self.collect();
+    }
+    fn reply(&mut self, body: &str) {
+        let id = self.requests.remove(0).id;
+        self.engine.handle(
+            1_001.0,
+            Event::HttpResponse {
+                request: id,
+                response: Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+        self.collect();
+    }
+    fn failed(&mut self) {
+        let id = self.requests.remove(0).id;
+        self.engine.handle(
+            1_001.0,
+            Event::HttpFailed {
+                request: id,
+                error: "connection lost",
+            },
+        );
+        self.collect();
+    }
+    fn place(&mut self, orders: Vec<PlaceOrderOpts>) {
+        self.command(Command::PlaceOrders { command: 1, orders });
+    }
+    fn body(&self) -> &str {
+        self.requests[0].body.as_deref().unwrap()
+    }
+}
+fn market() -> Market {
+    Market {
+        id: "BTC-USDT".into(),
+        symbol: "BTCUSDT".into(),
+        pretty_symbol: None,
+        base: "BTC".into(),
+        quote: "USDT".into(),
+        active: true,
+        precision: Precision {
+            amount: 0.001,
+            price: 0.1,
+        },
+        limits: Limits {
+            amount: MinMax {
+                min: 0.001,
+                max: 10.0,
+            },
+            leverage: MinMax {
+                min: 1.0,
+                max: 100.0,
+            },
+            price: None,
+        },
+        contract_size: None,
+        is_expiring: None,
+        is_inverse: None,
+        is_spot: None,
+        is_perpetual: Some(true),
+        is_read_only: None,
+        taker_fee: None,
+        maker_fee: None,
+    }
+}
+fn opts() -> PlaceOrderOpts {
+    serde_json::from_str(
+        r#"{"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":95}"#,
+    )
+    .unwrap()
+}
+fn order() -> Order {
+    Order {
+        id: "9223372036854775806".into(),
+        parent_id: None,
+        status: OrderStatus::Open,
+        symbol: "BTCUSDT".into(),
+        kind: OrderType::Limit,
+        side: OrderSide::Buy,
+        price: 95.0,
+        amount: 1.0,
+        filled: 0.0,
+        remaining: 1.0,
+        reduce_only: false,
+        close: Some(false),
+        client_order_id: Some("original".into()),
+        time_in_force: Some(TimeInForce::GoodTillCancel),
+        last_update: 1_000.0,
+        trigger_type: None,
+        take_profit: None,
+        stop_loss: None,
+        extra: None,
+    }
+}
+fn position() -> Position {
+    Position {
+        id: "BTCUSDT:long".into(),
+        symbol: "BTCUSDT".into(),
+        side: PositionSide::Long,
+        entry_price: 100.0,
+        notional: 200.0,
+        leverage: 10.0,
+        margin_type: Some(MarginType::Cross),
+        position_mode: Some(PositionMode::Oneway),
+        unrealized_pnl: 0.0,
+        realized_pnl: None,
+        contracts: 2.0,
+        liquidation_price: 0.0,
+        margin_size: None,
+        last_update: None,
+    }
+}
+
+#[test]
+fn every_order_is_preflighted_before_the_first_write() {
+    for invalid in [
+        PlaceOrderOpts {
+            client_order_id: Some("UPPER".into()),
+            ..opts()
+        },
+        PlaceOrderOpts {
+            client_order_id: Some("bracket".into()),
+            stop_loss: Some(90.0),
+            ..opts()
+        },
+        PlaceOrderOpts {
+            amount: f64::NAN,
+            ..opts()
+        },
+        PlaceOrderOpts {
+            client_order_id: Some("oversized".into()),
+            amount: 11.0,
+            ..opts()
+        },
+    ] {
+        let mut h = Harness::new(None);
+        h.place(vec![opts(), invalid]);
+        assert!(h.requests.is_empty());
+        assert!(h.done[0].is_err());
+    }
+    let mut h = Harness::new(None);
+    let o = PlaceOrderOpts {
+        client_order_id: Some("same".into()),
+        ..opts()
+    };
+    h.place(vec![o.clone(), o]);
+    assert!(h.requests.is_empty());
+    assert!(h.done[0].is_err());
+}
+#[test]
+fn caller_id_is_exact_and_large_ack_id_is_lossless() {
+    let mut h = Harness::new(None);
+    h.place(vec![PlaceOrderOpts {
+        client_order_id: Some("caller-ä_001".into()),
+        ..opts()
+    }]);
+    assert!(h.body().contains("\"clientOrderId\":\"caller-ä_001\""));
+    h.reply(r#"{"code":0,"data":{"order":{"orderId":9223372036854775806,"orderID":"9223372036854775806"}}}"#);
+    assert_eq!(h.done[0].as_ref().unwrap(), "[\"9223372036854775806\"]");
+}
+#[test]
+fn placements_are_sequential_and_an_ambiguous_write_is_never_retried() {
+    let mut h = Harness::new(None);
+    h.place(vec![opts(), opts()]);
+    assert_eq!(h.requests.len(), 1);
+    h.reply(r#"{"code":0,"data":{"orderId":1}}"#);
+    assert_eq!(h.requests.len(), 1);
+    h.failed();
+    assert!(h.requests.is_empty());
+    assert!(h.done[0].is_err());
+}
+#[test]
+fn brackets_have_no_client_id_and_use_opposite_side() {
+    let mut h = Harness::new(None);
+    h.engine.store_mut().set_hedged(true);
+    h.place(vec![PlaceOrderOpts {
+        stop_loss: Some(90.0),
+        take_profit: Some(110.0),
+        ..opts()
+    }]);
+    assert!(h.body().contains("\"positionSide\":\"LONG\""));
+    h.reply(r#"{"code":0,"data":{"orderId":1}}"#);
+    for id in [2, 3] {
+        assert!(h.body().contains("\"type\":\"TRIGGER_MARKET\""));
+        assert!(h.body().contains("\"side\":\"SELL\""));
+        assert!(h.body().contains("\"positionSide\":\"LONG\""));
+        assert!(!h.body().contains("clientOrderId"));
+        assert!(!h.body().contains("reduceOnly"));
+        h.reply(&format!(r#"{{"code":0,"data":{{"orderId":{id}}}}}"#));
+    }
+    assert_eq!(h.done[0].as_ref().unwrap(), "[\"1\",\"2\",\"3\"]");
+}
+#[test]
+fn full_position_stop_has_reconciled_quantity_and_close_flag_without_reduce_only() {
+    let mut h = Harness::new(None);
+    h.engine.store_mut().set_positions(vec![position()]);
+    h.place(vec![PlaceOrderOpts {
+        kind: OrderType::StopLoss,
+        side: OrderSide::Sell,
+        amount: 0.0,
+        price: Some(90.0),
+        close: Some(true),
+        ..opts()
+    }]);
+    assert!(h.body().contains("\"closePosition\":\"true\""));
+    assert!(h.body().contains("\"type\":\"STOP_MARKET\""));
+    assert!(h.body().contains("\"quantity\":2.0"));
+    assert!(!h.body().contains("reduceOnly"));
+}
+#[test]
+fn trailing_uses_position_size_and_fractional_callback() {
+    let mut h = Harness::new(None);
+    h.engine.store_mut().set_positions(vec![position()]);
+    h.place(vec![PlaceOrderOpts {
+        kind: OrderType::TrailingStopLoss,
+        side: OrderSide::Sell,
+        price: Some(95.0),
+        ..opts()
+    }]);
+    assert!(h.body().contains("\"symbol\":\"BTC-USDT\""));
+    assert!(h.body().contains("\"priceRate\":0.05"));
+    assert!(h.body().contains("\"quantity\":2.0"));
+    assert!(!h.body().contains("clientOrderId"));
+}
+#[test]
+fn quantity_amend_keeps_id_and_requires_matching_acknowledgement() {
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: None,
+        amount: Some(2.0),
+    });
+    assert!(h.requests[0].url.ends_with("/trade/amend"));
+    h.reply(
+        r#"{"code":0,"data":{"orderId":"9223372036854775806","symbol":"BTC-USDT","quantity":"2"}}"#,
+    );
+    assert!(h.done[0].is_ok());
+    assert_eq!(h.engine.store().orders()[0].amount, 1.0);
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: None,
+        amount: Some(2.0),
+    });
+    h.reply(r#"{"code":0,"data":{"orderId":"wrong","symbol":"BTC-USDT","quantity":"2"}}"#);
+    assert!(h.done[0].is_err());
+}
+#[test]
+fn partial_fills_and_combined_changes_fail_before_writes() {
+    let mut partial = order();
+    partial.filled = 0.1;
+    partial.remaining = 0.9;
+    for (o, price, amount) in [
+        (partial, None, Some(2.0)),
+        (order(), Some(96.0), Some(2.0)),
+        (order(), None, Some(1.0001)),
+    ] {
+        let mut h = Harness::new(Some((o, "LIMIT")));
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: order().id,
+            price,
+            amount,
+        });
+        assert!(h.requests.is_empty());
+        assert!(h.done[0].is_err());
+    }
+}
+#[test]
+fn price_replace_is_atomic_and_uses_successful_new_id() {
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.0),
+        amount: None,
+    });
+    assert!(h.body().contains("\"cancelClientOrderId\":\"original\""));
+    assert!(
+        h.body()
+            .contains("\"cancelReplaceMode\":\"STOP_ON_FAILURE\"")
+    );
+    assert!(h.body().contains("\"cancelRestrictions\":\"ONLY_NEW\""));
+    h.reply(r#"{"code":0,"data":{"cancelResult":"true","replaceResult":"true","newOrderResponse":{"orderId":9223372036854775807}}}"#);
+    assert_eq!(h.done[0].as_ref().unwrap(), "[\"9223372036854775807\"]");
+    assert_eq!(
+        h.engine.store().order(&order().id).unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(
+        h.engine.store().order("9223372036854775807").unwrap().price,
+        96.0
+    );
+}
+#[test]
+fn cancel_continues_after_failure_and_marks_only_successes() {
+    let mut second = order();
+    second.id = "2".into();
+    let mut h = Harness::new(None);
+    h.engine.store_mut().set_orders(vec![order(), second]);
+    h.command(Command::CancelOrders {
+        command: 1,
+        ids: vec![order().id, "2".into()],
+    });
+    h.reply(r#"{"code":109500,"msg":"busy"}"#);
+    assert_eq!(h.requests.len(), 1);
+    assert_eq!(
+        h.engine.store().order(&order().id).unwrap().status,
+        OrderStatus::Open
+    );
+    h.reply(r#"{"code":80016,"msg":"order absent"}"#);
+    assert_eq!(
+        h.engine.store().order("2").unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert!(h.done[0].is_err());
+}
+#[test]
+fn trigger_replacement_stops_when_cancel_fails() {
+    let mut trigger = order();
+    trigger.kind = OrderType::StopLoss;
+    trigger.side = OrderSide::Sell;
+    trigger.price = 90.0;
+    trigger.client_order_id = None;
+    trigger.time_in_force = None;
+    let mut h = Harness::new(Some((trigger, "STOP_MARKET")));
+    h.engine.store_mut().set_positions(vec![position()]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(91.0),
+        amount: None,
+    });
+    assert_eq!(h.requests.len(), 1);
+    h.failed();
+    assert!(h.requests.is_empty());
+    assert!(h.done[0].is_err());
+}
+#[test]
+fn hedged_leverage_updates_both_sides_sequentially() {
+    let mut h = Harness::new(None);
+    h.engine.store_mut().set_hedged(true);
+    h.command(Command::SetLeverage {
+        command: 1,
+        symbol: "BTCUSDT".into(),
+        leverage: 20.0,
+    });
+    assert!(h.body().contains("\"side\":\"LONG\""));
+    h.reply(r#"{"code":0,"data":{}}"#);
+    assert!(h.body().contains("\"side\":\"SHORT\""));
+    assert!(h.engine.store().setting("BTCUSDT").is_none());
+    h.reply(r#"{"code":0,"data":{}}"#);
+    assert_eq!(h.engine.store().setting("BTCUSDT").unwrap().leverage, 20.0);
+}
+
+#[test]
+fn an_absent_trigger_is_not_confirmation_to_place_a_replacement() {
+    let mut trigger = order();
+    trigger.kind = OrderType::StopLoss;
+    trigger.side = OrderSide::Sell;
+    trigger.price = 90.0;
+    trigger.client_order_id = None;
+    trigger.time_in_force = None;
+    let mut h = Harness::new(Some((trigger, "STOP_MARKET")));
+    h.engine.store_mut().set_positions(vec![position()]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(91.0),
+        amount: None,
+    });
+    h.reply(r#"{"code":80016,"msg":"order absent"}"#);
+    assert!(h.requests.is_empty());
+    assert!(h.done[0].is_err());
+}
+
+#[test]
+fn successful_cancel_with_failed_replacement_marks_old_order_canceled() {
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.0),
+        amount: None,
+    });
+    h.reply(r#"{"code":0,"data":{"cancelResult":"SUCCESS","newOrderResult":"FAILED"}}"#);
+    assert!(h.done[0].is_err());
+    assert_eq!(
+        h.engine.store().order(&order().id).unwrap().status,
+        OrderStatus::Canceled
+    );
+}
+
+#[test]
+fn cancel_replace_preserves_numeric_int64_without_a_client_id() {
+    let mut o = order();
+    o.client_order_id = None;
+    let mut h = Harness::new(Some((o, "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.0),
+        amount: None,
+    });
+    assert!(h.body().contains("\"cancelOrderId\":9223372036854775806"));
+    assert!(!h.body().contains("cancelClientOrderId"));
+}
+
+#[test]
+fn raw_trigger_kind_is_authoritative_even_if_normalized_kind_was_reclassified() {
+    let mut o = order();
+    o.kind = OrderType::TakeProfit;
+    o.side = OrderSide::Sell;
+    o.price = 90.0;
+    o.time_in_force = None;
+    let mut h = Harness::new(Some((o, "STOP_MARKET")));
+    h.engine.store_mut().set_positions(vec![position()]);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(91.0),
+        amount: None,
+    });
+    h.reply(r#"{"code":0,"data":{}}"#);
+    assert!(h.body().contains("\"type\":\"STOP_MARKET\""));
+    assert!(h.body().contains("\"workingType\":\"MARK_PRICE\""));
+}
+
+#[test]
+fn split_quantities_conserve_the_original_amount() {
+    #[derive(serde::Deserialize)]
+    struct Quantity {
+        quantity: f64,
+    }
+    let mut h = Harness::new(None);
+    h.place(vec![PlaceOrderOpts {
+        amount: 25.001,
+        ..opts()
+    }]);
+    let mut total = 0.0;
+    for id in 1..=3 {
+        let q: Quantity = serde_json::from_str(h.body()).unwrap();
+        assert!(q.quantity > 0.0 && q.quantity <= 10.0);
+        total += q.quantity;
+        h.reply(&format!(r#"{{"code":0,"data":{{"orderId":{id}}}}}"#));
+    }
+    assert!((total - 25.001).abs() < 1e-10);
+    assert!(h.done[0].is_ok());
+}
+
+#[test]
+fn overflowing_normalization_is_rejected_before_any_write() {
+    for o in [
+        PlaceOrderOpts {
+            price: Some(f64::MAX),
+            ..opts()
+        },
+        PlaceOrderOpts {
+            amount: f64::MAX,
+            ..opts()
+        },
+        PlaceOrderOpts {
+            stop_loss: Some(f64::MAX),
+            ..opts()
+        },
+    ] {
+        let mut h = Harness::new(None);
+        h.place(vec![opts(), o]);
+        assert!(h.requests.is_empty());
+        assert!(h.done[0].is_err());
+    }
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(f64::MAX),
+        amount: None,
+    });
+    assert!(h.requests.is_empty());
+    assert!(h.done[0].is_err());
+}
+
+#[test]
+fn empty_native_client_id_uses_exact_numeric_cancel_id() {
+    let mut o = order();
+    o.client_order_id = Some(String::new());
+    let mut h = Harness::new(Some((o, "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.0),
+        amount: None,
+    });
+    assert!(h.body().contains("\"cancelOrderId\":9223372036854775806"));
+    assert!(!h.body().contains("cancelClientOrderId"));
+}
+
+#[test]
+fn full_stop_quantity_comes_from_the_position_for_both_stop_families() {
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let mut h = Harness::new(None);
+        h.engine.store_mut().set_positions(vec![position()]);
+        h.place(vec![PlaceOrderOpts {
+            kind,
+            side: OrderSide::Sell,
+            amount: 7.0,
+            close: Some(true),
+            reduce_only: Some(true),
+            price: Some(90.0),
+            ..opts()
+        }]);
+        assert!(h.body().contains("\"quantity\":2.0"));
+        assert!(h.body().contains("\"stopPrice\":90.0"));
+        assert!(h.body().contains("\"closePosition\":\"true\""));
+        assert!(!h.body().contains("reduceOnly"));
+    }
+}
+
+#[test]
+fn malformed_or_rejected_entry_acknowledgements_never_send_brackets() {
+    for body in [
+        r#"{"code":0,"data":{"order":{"orderId":"1","orderID":"2","status":"NEW"}}}"#,
+        r#"{"code":0,"data":{"orderId":"1","order":{"orderId":"2","status":"NEW"}}}"#,
+        r#"{"code":0,"data":{"order":{"orderId":"1","status":"REJECTED"}}}"#,
+        r#"{"code":0,"data":{"order":{"orderId":"1","status":"FAILED"}}}"#,
+        r#"{"code":0,"data":{"order":{"orderId":" ","status":"NEW"}}}"#,
+    ] {
+        let mut h = Harness::new(None);
+        h.place(vec![PlaceOrderOpts {
+            stop_loss: Some(90.0),
+            ..opts()
+        }]);
+        h.reply(body);
+        assert!(
+            h.requests.is_empty(),
+            "invalid acknowledgement sent another write: {body}"
+        );
+        assert!(h.done[0].is_err());
+    }
+}
+
+#[test]
+fn replacement_acknowledgement_preserves_streamed_partial_and_terminal_rows() {
+    for status in [
+        OrderStatus::Open,
+        OrderStatus::Closed,
+        OrderStatus::Canceled,
+    ] {
+        let mut h = Harness::new(Some((order(), "LIMIT")));
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: order().id,
+            price: Some(96.0),
+            amount: None,
+        });
+        let mut streamed = order();
+        streamed.id = "replacement".into();
+        streamed.status = status;
+        streamed.price = 96.0;
+        streamed.filled = if status == OrderStatus::Closed {
+            1.0
+        } else {
+            0.2
+        };
+        streamed.remaining = 1.0 - streamed.filled;
+        streamed.last_update = 1_000.5;
+        h.engine.store_mut().upsert_order(streamed.clone());
+        h.reply(r#"{"code":0,"data":{"cancelResult":"SUCCESS","newOrderResult":"SUCCESS","newOrderId":"replacement"}}"#);
+        assert!(h.done[0].is_ok());
+        assert_eq!(h.engine.store().order("replacement"), Some(&streamed));
+    }
+}
+
+#[test]
+fn replacement_acknowledgements_require_consistent_ids_and_accepted_status() {
+    for body in [
+        r#"{"code":0,"data":{"cancelResult":"SUCCESS","newOrderResult":"SUCCESS","newOrderId":"1","newOrderResponse":{"orderId":"2","status":"NEW"}}}"#,
+        r#"{"code":0,"data":{"cancelResult":"SUCCESS","newOrderResult":"SUCCESS","newOrderResponse":{"orderId":"2","orderID":"3"}}}"#,
+        r#"{"code":0,"data":{"cancelResult":"SUCCESS","newOrderResult":"SUCCESS","newOrderResponse":{"orderId":"2","status":"REJECTED"}}}"#,
+    ] {
+        let mut h = Harness::new(Some((order(), "LIMIT")));
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: order().id,
+            price: Some(96.0),
+            amount: None,
+        });
+        h.reply(body);
+        assert!(h.done[0].is_err());
+        assert_eq!(h.engine.store().orders().len(), 1);
+        assert_eq!(h.engine.store().orders()[0].status, OrderStatus::Canceled);
+    }
+}
+
+#[test]
+fn pending_native_orders_use_the_pending_cancel_restriction() {
+    let mut h = Harness::with_status(Some((order(), "LIMIT")), "PENDING");
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.0),
+        amount: None,
+    });
+    assert!(h.body().contains("\"cancelRestrictions\":\"ONLY_PENDING\""));
+    let mut h = Harness::with_status(Some((order(), "LIMIT")), "");
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.0),
+        amount: None,
+    });
+    assert!(h.requests.is_empty());
+    assert!(h.done[0].is_err());
+}
+
+#[test]
+fn entry_and_bracket_lots_respect_the_maximum_and_conserve_protected_quantity() {
+    #[derive(serde::Deserialize)]
+    struct Quantity {
+        quantity: f64,
+    }
+    let mut h = Harness::new(None);
+    h.place(vec![PlaceOrderOpts {
+        amount: 25.001,
+        stop_loss: Some(90.0),
+        take_profit: Some(110.0),
+        ..opts()
+    }]);
+    for family in 0..3 {
+        let mut total = 0.0;
+        for lot in 0..3 {
+            let q: Quantity = serde_json::from_str(h.body()).unwrap();
+            assert!(q.quantity > 0.0 && q.quantity <= 10.0);
+            total += q.quantity;
+            if family > 0 {
+                assert!(h.body().contains("\"type\":\"TRIGGER_MARKET\""));
+            }
+            h.reply(&format!(
+                r#"{{"code":0,"data":{{"orderId":{}}}}}"#,
+                family * 3 + lot + 1
+            ));
+        }
+        assert!((total - 25.001).abs() < 1e-10);
+    }
+    assert!(h.done[0].is_ok());
+}
+
+#[test]
+fn trigger_replacement_requires_a_consistent_cancellation_acknowledgement() {
+    for data in [
+        r#"{"orderId":"another-order","status":"CANCELED"}"#,
+        r#"{"orderId":"9223372036854775806","status":"REJECTED"}"#,
+    ] {
+        let mut o = order();
+        o.kind = OrderType::StopLoss;
+        o.side = OrderSide::Sell;
+        o.price = 90.0;
+        let mut h = Harness::new(Some((o, "STOP_MARKET")));
+        h.engine.store_mut().set_positions(vec![position()]);
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: order().id,
+            price: Some(91.0),
+            amount: None,
+        });
+        h.reply(&format!(r#"{{"code":0,"data":{data}}}"#));
+        assert!(h.requests.is_empty());
+        assert!(h.done[0].is_err());
+    }
+}

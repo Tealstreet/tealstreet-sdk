@@ -3,6 +3,21 @@ use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
 
+fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Number<'a> {
+        Bare(f64),
+        Text(#[serde(borrow)] Str<'a>),
+        Null(()),
+    }
+    Ok(match Number::deserialize(d)? {
+        Number::Bare(n) => n.is_finite().then_some(n),
+        Number::Text(s) => s.parse::<f64>().ok().filter(|n| n.is_finite()),
+        Number::Null(()) => None,
+    })
+}
+
 pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -85,12 +100,12 @@ pub struct LiveTicker<'a> {
     pub index_price: f64,
     #[serde(deserialize_with = "number")]
     pub funding_rate: f64,
-    #[serde(deserialize_with = "number")]
-    pub change_percentage: f64,
-    #[serde(rename = "volumeF", deserialize_with = "number")]
-    pub volume: f64,
-    #[serde(rename = "valueF", deserialize_with = "number")]
-    pub value: f64,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub change_percentage: Option<f64>,
+    #[serde(rename = "volumeF", default, deserialize_with = "optional_number")]
+    pub volume: Option<f64>,
+    #[serde(rename = "valueF", default, deserialize_with = "optional_number")]
+    pub value: Option<f64>,
 }
 
 #[derive(Deserialize)]

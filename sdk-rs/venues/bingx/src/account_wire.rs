@@ -186,7 +186,7 @@ pub struct NativeOrder<'a> {
     pub avg_price: f64,
     #[serde(default, alias = "R", alias = "ro", deserialize_with = "boolean")]
     pub reduce_only: bool,
-    #[serde(default, deserialize_with = "boolean")]
+    #[serde(default, alias = "cp", deserialize_with = "boolean")]
     pub close_position: bool,
     #[serde(default, deserialize_with = "boolean")]
     pub post_only: bool,

@@ -56,7 +56,7 @@ pub enum Request {
     },
 }
 
-type OrderMeta = (Order, String, String, bool);
+type OrderMeta = (Order, String, String, bool, String);
 
 #[derive(Default)]
 pub struct Account {
@@ -1120,6 +1120,7 @@ fn observation(order: Order, native: &NativeOrder<'_>) -> OrderMeta {
                 .stop_loss
                 .as_ref()
                 .is_some_and(Protection::meaningful),
+        native.status.as_deref().unwrap_or_default().to_owned(),
     )
 }
 

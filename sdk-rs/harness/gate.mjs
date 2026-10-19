@@ -59,6 +59,11 @@ for (const impl of ['ts', 'rust']) {
 }
 const isPrivate = Boolean(ts.account);
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
+// BingX additionally fixes write/read defects covered by native contract tests:
+// - closePosition=true STOP_MARKET/TAKE_PROFIT_MARKET requires quantity.
+// - A rejected/ambiguous entry must stop its remaining bracket placement jobs.
+// - fillHistory uses startTs/endTs/pageSize/pageIndex, not TS's ignored params.
+// - Contradictory placement IDs or rejected ACK status must not advance jobs.
 //  - A position first seen on the user stream keeps the margin size of TS's
 //    zero-size placeholder (0); Rust takes the isolated wallet, or notional
 //    over leverage for cross.
@@ -127,7 +132,9 @@ if (values.venue === 'bingx') {
       }
     }
   }
+  // TS parses non-trading '-' placeholders into NaN; Rust stores finite zeros.
   for (const ticker of ts.tickers) {
+    for (const field of ['percentage', 'volume', 'quoteVolume']) if (ticker[field] === null) ticker[field] = 0;
     if (!prices.has(ticker.symbol)) continue;
     ticker.bid = Math.max(ticker.last - 1, 0);
     ticker.ask = ticker.last + 1;
@@ -135,6 +142,14 @@ if (values.venue === 'bingx') {
 }
 compare('market', ts.markets, rust.markets);
 compare('ticker', ts.tickers, rust.tickers);
+// KNOWN_TS_FIXES: BingX's internal feed sends asks descending; TS forwards
+// that order. Consumers require best ask first, so Rust sorts full snapshots.
+if (values.venue === 'bingx') {
+  for (const book of Object.values(ts.books)) {
+    book.bids.sort((a,b) => b[0]-a[0]);
+    book.asks.sort((a,b) => a[0]-b[0]);
+  }
+}
 for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
   if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
     differences.push(`book ${symbol} differs`);

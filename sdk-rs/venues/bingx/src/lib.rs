@@ -3,6 +3,7 @@ pub mod account;
 pub mod account_wire;
 pub mod paths;
 pub mod sign;
+mod trading;
 mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
@@ -25,6 +26,7 @@ pub struct Options {
 
 pub enum Pending {
     Account(account::Request),
+    Trade(trading::Request),
     Markets {
         rows: Vec<Market>,
         valid: bool,
@@ -69,6 +71,7 @@ struct BookState {
 
 pub struct Bingx {
     account: account::Account,
+    trading: trading::Trading,
     credentials: Option<Credentials>,
     public: Connection,
     books: HashMap<String, BookState>,
@@ -94,6 +97,7 @@ impl Bingx {
         };
         Self {
             account: account::Account::default(),
+            trading: trading::Trading::default(),
             credentials,
             public: Connection::default(),
             books: HashMap::new(),
@@ -105,6 +109,14 @@ impl Bingx {
             retries: HashMap::new(),
             failures: [0; 3],
         }
+    }
+
+    fn observe_orders(&mut self, cx: &Cx<'_, Pending>) {
+        for (order, kind, side, attached, native_status) in self.account.drain_order_meta() {
+            self.trading
+                .observe_order(&order, &kind, &side, attached, &native_status);
+        }
+        self.trading.retain_open_orders(cx.store);
     }
 
     fn retry_list(&mut self, cx: &mut Cx<'_, Pending>, kind: List) {
@@ -233,9 +245,9 @@ impl Bingx {
                         t.mark = row.fair_price;
                         t.index = row.index_price;
                         t.funding_rate = row.funding_rate / 100.;
-                        t.percentage = row.change_percentage;
-                        t.volume = row.volume;
-                        t.quote_volume = row.value;
+                        t.percentage = row.change_percentage.unwrap_or_default();
+                        t.volume = row.volume.unwrap_or_default();
+                        t.quote_volume = row.value.unwrap_or_default();
                         t.funding_time = 0.;
                     });
                 },
@@ -420,7 +432,7 @@ impl Venue for Bingx {
             if let Some(c) = &self.credentials {
                 self.account.on_message(cx, text, c);
             }
-            self.account.drain_order_meta().for_each(drop);
+            self.observe_orders(cx);
         } else if self.public.socket == Some(socket) {
             self.public_message(cx, text)
         }
@@ -437,44 +449,50 @@ impl Venue for Bingx {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Account(request) => self.account.on_item(cx, request, item),
-            Pending::Markets { rows, valid } => match serde_json::from_str::<Contract<'_>>(item) {
-                Ok(m) => rows.push(Market {
-                    id: m.symbol.to_string(),
-                    symbol: m.symbol.replace('-', ""),
-                    pretty_symbol: None,
-                    base: m.asset.into_owned(),
-                    quote: m.currency.into_owned(),
-                    active: m.status == 1.,
-                    precision: Precision {
-                        amount: 10f64.powi(m.quantity_precision as i32).recip(),
-                        price: 10f64.powi(m.price_precision as i32).recip(),
-                    },
-                    limits: Limits {
-                        amount: MinMax {
-                            min: m.trade_min_limit,
-                            max: f64::INFINITY,
+            Pending::Trade(_) => {}
+            Pending::Markets { rows, valid } => {
+                if rows.len() == rows.capacity() {
+                    rows.reserve_exact(128)
+                }
+                match serde_json::from_str::<Contract<'_>>(item) {
+                    Ok(m) => rows.push(Market {
+                        id: m.symbol.to_string(),
+                        symbol: m.symbol.replace('-', ""),
+                        pretty_symbol: None,
+                        base: m.asset.into_owned(),
+                        quote: m.currency.into_owned(),
+                        active: m.status == 1.,
+                        precision: Precision {
+                            amount: 10f64.powi(m.quantity_precision as i32).recip(),
+                            price: 10f64.powi(m.price_precision as i32).recip(),
                         },
-                        leverage: MinMax {
-                            min: 1.,
-                            max: if m.max_long_leverage > 0. {
-                                m.max_long_leverage
-                            } else {
-                                100.
+                        limits: Limits {
+                            amount: MinMax {
+                                min: m.trade_min_limit,
+                                max: f64::INFINITY,
                             },
+                            leverage: MinMax {
+                                min: 1.,
+                                max: if m.max_long_leverage > 0. {
+                                    m.max_long_leverage
+                                } else {
+                                    100.
+                                },
+                            },
+                            price: None,
                         },
-                        price: None,
-                    },
-                    contract_size: None,
-                    is_expiring: None,
-                    is_inverse: None,
-                    is_spot: None,
-                    is_perpetual: None,
-                    is_read_only: None,
-                    taker_fee: None,
-                    maker_fee: None,
-                }),
-                Err(_) => *valid = false,
-            },
+                        contract_size: None,
+                        is_expiring: None,
+                        is_inverse: None,
+                        is_spot: None,
+                        is_perpetual: None,
+                        is_read_only: None,
+                        taker_fee: None,
+                        maker_fee: None,
+                    }),
+                    Err(_) => *valid = false,
+                }
+            }
             Pending::Daily { rows, valid } => match serde_json::from_str::<Daily<'_>>(item) {
                 Ok(d) => {
                     if let Some(m) = cx.store.market_by_id(&d.symbol) {
@@ -515,11 +533,27 @@ impl Venue for Bingx {
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         let pending = match pending {
+            Pending::Trade(request) => {
+                self.account.bump_orders();
+                self.account.bump_positions();
+                let settings = request.changes_settings() && success(response).is_ok();
+                if request.places_order() && (200..300).contains(&response.status) {
+                    self.account.accept_placed_response(cx, response.body);
+                }
+                self.trading
+                    .on_response(cx, self.credentials.as_ref(), request, response);
+                if settings && let Some(c) = &self.credentials {
+                    self.account.reconcile(cx, c);
+                }
+
+                self.observe_orders(cx);
+                return;
+            }
             Pending::Account(request) => {
                 if let Some(c) = &self.credentials {
                     self.account.on_response(cx, request, response, c);
                 }
-                self.account.drain_order_meta().for_each(drop);
+                self.observe_orders(cx);
                 return;
             }
             pending => pending,
@@ -529,14 +563,18 @@ impl Venue for Bingx {
             return;
         }
         match pending {
-            Pending::Markets { rows, valid: true } => {
+            Pending::Markets {
+                mut rows,
+                valid: true,
+            } => {
+                rows.shrink_to_fit();
                 cx.store.set_markets(rows);
                 self.connect(cx);
                 self.read(
                     cx,
                     paths::DAILY,
                     Pending::Daily {
-                        rows: Vec::new(),
+                        rows: Vec::with_capacity(cx.store.markets().len()),
                         valid: true,
                     },
                 )
@@ -552,11 +590,15 @@ impl Venue for Bingx {
                 self.read(cx, paths::PREMIUM, Pending::Premium { valid: true })
             }
             Pending::Premium { valid: true } => {
-                let rows = std::mem::take(&mut self.seed)
+                let mut rows = Vec::with_capacity(self.seed.len());
+                for (t, seen) in std::mem::take(&mut self.seed)
                     .into_iter()
                     .zip(self.seed_reported.drain(..))
-                    .filter_map(|(t, seen)| seen.then_some(t))
-                    .collect();
+                {
+                    if seen {
+                        rows.push(t)
+                    }
+                }
                 self.seed_index = HashMap::new();
                 cx.store.set_tickers(rows);
                 if let Some(c) = &self.credentials {
@@ -579,6 +621,11 @@ impl Venue for Bingx {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Trade(request) => {
+                self.trading
+                    .on_failed(cx, self.credentials.as_ref(), request, error);
+                return;
+            }
             Pending::Account(request) => {
                 if let Some(c) = &self.credentials {
                     self.account.on_request_failed(cx, request, error, c);
@@ -611,7 +658,7 @@ impl Venue for Bingx {
                 List::Daily => (
                     paths::DAILY,
                     Pending::Daily {
-                        rows: Vec::new(),
+                        rows: Vec::with_capacity(cx.store.markets().len()),
                         valid: true,
                     },
                 ),
@@ -736,10 +783,13 @@ impl Venue for Bingx {
                     },
                 );
             }
-            _ => cx.log(
-                LogLevel::Warning,
-                "BingX private commands are not initialized",
-            ),
+            other => {
+                self.account.bump_orders();
+                self.account.bump_positions();
+                if !self.trading.command(cx, self.credentials.as_ref(), other) {
+                    cx.log(LogLevel::Warning, "unsupported BingX command");
+                }
+            }
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {
