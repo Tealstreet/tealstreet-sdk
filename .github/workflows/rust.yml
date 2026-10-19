@@ -10,10 +10,12 @@ on:
     branches: [master, feat/rust-rewrite]
     paths:
       - 'sdk-rs/**'
+      - 'packages/safe-cex/**'
       - '.github/workflows/rust.yml'
   pull_request:
     paths:
       - 'sdk-rs/**'
+      - 'packages/safe-cex/**'
       - '.github/workflows/rust.yml'
 
 permissions:
@@ -90,3 +92,52 @@ jobs:
         run: cargo build --locked --workspace --target wasm32-unknown-unknown
       - name: Lint every crate for wasm32
         run: cargo clippy --locked --workspace --target wasm32-unknown-unknown
+
+  # Replays recorded traffic through TS and Rust: output must be identical, and
+  # on public data Rust must use less CPU and less memory (see the plan's gates).
+  gate:
+    name: Rust / replay gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      WASM_BINDGEN_VERSION: 0.2.129
+      # The browser engine's size budget for one venue.
+      WASM_BUDGET_BYTES: 1258291
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/wasm-bindgen
+            sdk-rs/target
+          key: ${{ runner.os }}-cargo-gate-${{ hashFiles('sdk-rs/Cargo.lock', 'sdk-rs/rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-gate-
+      - name: Install pinned toolchain and wasm-bindgen
+        run: |
+          (cd sdk-rs && rustup show)
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "$WASM_BINDGEN_VERSION"; then
+            cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
+          fi
+      - run: yarn install --frozen-lockfile --network-timeout 600000
+      - name: Build the wasm engine
+        run: yarn rust:build-wasm
+      - name: Check the wasm size budget
+        run: |
+          size=$(stat -c%s sdk-rs/safe-cex-wasm/pkg/node/safe_cex_wasm_bg.wasm)
+          echo "wasm: $size bytes (budget $WASM_BUDGET_BYTES)"
+          test "$size" -le "$WASM_BUDGET_BYTES"
+      - name: Binance public data (correctness, CPU and memory)
+        run: yarn rust:gate --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz
+      - name: Binance account and trading (correctness)
+        run: |
+          yarn rust:private-tape
+          yarn rust:gate --tape sdk-rs/harness/tapes/binance-private.jsonl --runs 1 --books ''
