@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "238 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "239 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -911,7 +911,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "f2bfff1934ca4484087b6407f4b6c1100519cc204d55bd4a67832bfbee7ac12d"
+          "sha256": "f8c8ce60924e8321174a6a63f0e61262e7ab7f2e1d9ca343f144208e3f03802e"
         }
       ],
       "guards": [
@@ -1451,7 +1451,7 @@
         },
         {
           "file": "src/owned_tasks.rs",
-          "sha256": "8164b0c8c7190e5ac99f096ab05faea552b6254ac3834044c63ed2bb3d491d81"
+          "sha256": "37769eb3f0e919ef4e198cdf31afb7244eed296b56d5fcdde6b7911598d3774e"
         },
         {
           "file": "src/waiters.rs",
@@ -1810,7 +1810,7 @@
         },
         {
           "file": "src/owned_tasks.rs",
-          "sha256": "8164b0c8c7190e5ac99f096ab05faea552b6254ac3834044c63ed2bb3d491d81"
+          "sha256": "37769eb3f0e919ef4e198cdf31afb7244eed296b56d5fcdde6b7911598d3774e"
         },
         {
           "file": "src/js_runtime/promise.rs",
@@ -1844,7 +1844,7 @@
         },
         {
           "file": "src/owned_tasks.rs",
-          "sha256": "8164b0c8c7190e5ac99f096ab05faea552b6254ac3834044c63ed2bb3d491d81"
+          "sha256": "37769eb3f0e919ef4e198cdf31afb7244eed296b56d5fcdde6b7911598d3774e"
         },
         {
           "file": "src/js_runtime/promise.rs",
@@ -2004,7 +2004,7 @@
         },
         {
           "file": "src/owned_tasks.rs",
-          "sha256": "8164b0c8c7190e5ac99f096ab05faea552b6254ac3834044c63ed2bb3d491d81"
+          "sha256": "37769eb3f0e919ef4e198cdf31afb7244eed296b56d5fcdde6b7911598d3774e"
         },
         {
           "file": "src/js_runtime/promise.rs",
@@ -2439,11 +2439,11 @@
       "source_dependencies": [
         {
           "file": "src/owned_tasks.rs",
-          "sha256": "8164b0c8c7190e5ac99f096ab05faea552b6254ac3834044c63ed2bb3d491d81"
+          "sha256": "37769eb3f0e919ef4e198cdf31afb7244eed296b56d5fcdde6b7911598d3774e"
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "f2bfff1934ca4484087b6407f4b6c1100519cc204d55bd4a67832bfbee7ac12d"
+          "sha256": "f8c8ce60924e8321174a6a63f0e61262e7ab7f2e1d9ca343f144208e3f03802e"
         }
       ],
       "guards": [
@@ -2757,7 +2757,7 @@
         },
         {
           "file": "src/owned_tasks.rs",
-          "sha256": "8164b0c8c7190e5ac99f096ab05faea552b6254ac3834044c63ed2bb3d491d81"
+          "sha256": "37769eb3f0e919ef4e198cdf31afb7244eed296b56d5fcdde6b7911598d3774e"
         },
         {
           "file": "src/waiters.rs",
@@ -2968,7 +2968,7 @@
         },
         {
           "file": "src/owned_tasks.rs",
-          "sha256": "8164b0c8c7190e5ac99f096ab05faea552b6254ac3834044c63ed2bb3d491d81"
+          "sha256": "37769eb3f0e919ef4e198cdf31afb7244eed296b56d5fcdde6b7911598d3774e"
         }
       ],
       "guards": [
@@ -3013,7 +3013,7 @@
         },
         {
           "file": "src/owned_tasks.rs",
-          "sha256": "8164b0c8c7190e5ac99f096ab05faea552b6254ac3834044c63ed2bb3d491d81"
+          "sha256": "37769eb3f0e919ef4e198cdf31afb7244eed296b56d5fcdde6b7911598d3774e"
         }
       ],
       "guards": [
@@ -3117,7 +3117,7 @@
         },
         {
           "file": "src/owned_tasks.rs",
-          "sha256": "8164b0c8c7190e5ac99f096ab05faea552b6254ac3834044c63ed2bb3d491d81"
+          "sha256": "37769eb3f0e919ef4e198cdf31afb7244eed296b56d5fcdde6b7911598d3774e"
         }
       ],
       "witnesses": [
@@ -3210,7 +3210,7 @@
         },
         {
           "file": "src/owned_tasks.rs",
-          "sha256": "8164b0c8c7190e5ac99f096ab05faea552b6254ac3834044c63ed2bb3d491d81"
+          "sha256": "37769eb3f0e919ef4e198cdf31afb7244eed296b56d5fcdde6b7911598d3774e"
         },
         {
           "file": "src/eager.rs",
@@ -3251,6 +3251,17 @@
       "producer_sha256": "a93ead9bce8a44ef9ec0a05555a0cdc264287193692fc7d858a4d637b3147ea2",
       "classification": "immediate",
       "reason": "Reviewed std thread_local! expansion: PROTOTYPES owns only weak realm/ArrayData references in a synchronous RefCell registry. Prototype allocation and descriptor installation are synchronous; registered method closures invoke canonical array operations only when called. No future, host task, timer, shared waiter or cancellation latch is created by this allocator. Native array descriptor/alias/coercion tests cover the resulting owner. Reviewed callable splice registration: the same synchronous weak-realm prototype allocator installs one additional method name; no future, timer, task, waiter or cancellation owner is created by registration. The callable adapter delegates the existing checked mutation after source coercion."
+    },
+    {
+      "owner": "src/runtime.rs::RateScheduler as safe_cex_transport :: rate_limit :: RateLimitScheduler::schedule_reset",
+      "boundaries": [
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "f5178dd6e338d95f73265e6f66ac4abc356d2d08aca1dbf5be563ec0e64a0887",
+      "classification": "delegated",
+      "reason": "One independently scheduled Timer delegates to the original BaseExchange OwnedTasks registry. Dispose and limiter Drop cancel the same operation; its once-only completion runs outside callback and limiter borrows and visibly rejects queued admission. Constructed Bybit controlled-clock dispose/drop and queued-error witnesses exercise this ownership.",
+      "delegate": "src/owned_tasks.rs::OwnedTasks::start_classified"
     }
   ]
 }
