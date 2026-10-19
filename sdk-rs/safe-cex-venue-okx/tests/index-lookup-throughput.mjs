@@ -110,6 +110,7 @@ console.log(
       lookup,
       tsBefore,
       tsAfter,
+      cpuDidNotRegress: lookup.cpuMs.median <= control.cpuMs.median,
       cpuSpeedup: control.cpuMs.median / lookup.cpuMs.median,
       wallSpeedup: control.wallMs.median / lookup.wallMs.median,
       candidateToTsCpu: lookup.cpuMs.median / tsAfter.cpuMs.median,
@@ -120,4 +121,9 @@ console.log(
     null,
     2,
   ),
+);
+
+assert(
+  lookup.cpuMs.median < control.cpuMs.median,
+  'Lookup slice must reduce native CPU median on the matched full tape',
 );
