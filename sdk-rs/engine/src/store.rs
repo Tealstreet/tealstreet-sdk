@@ -9,7 +9,8 @@ use std::collections::HashMap;
 pub struct Store {
     markets: Vec<Market>,
     market_by_symbol: HashMap<String, u32>,
-    market_by_id: HashMap<String, u32>,
+    // When every instrument ID is its symbol, the symbol index serves both.
+    market_by_id: Option<HashMap<String, u32>>,
     tickers: Vec<Ticker>,
     ticker_by_symbol: HashMap<String, u32>,
     orders: Vec<Order>,
@@ -102,6 +103,8 @@ impl Store {
 
     pub fn market_by_id(&self, id: &str) -> Option<&Market> {
         self.market_by_id
+            .as_ref()
+            .unwrap_or(&self.market_by_symbol)
             .get(id)
             .map(|&index| &self.markets[index as usize])
     }
@@ -114,9 +117,14 @@ impl Store {
             .collect();
         self.market_by_id = markets
             .iter()
-            .enumerate()
-            .map(|(index, market)| (market.id.clone(), index as u32))
-            .collect();
+            .any(|market| market.id != market.symbol)
+            .then(|| {
+                markets
+                    .iter()
+                    .enumerate()
+                    .map(|(index, market)| (market.id.clone(), index as u32))
+                    .collect()
+            });
         self.markets = markets;
         self.changes.markets = true;
         self.set_loaded(|loaded| loaded.markets = true);
@@ -155,7 +163,12 @@ impl Store {
 
     /// Update by venue instrument ID without allocating a copy of its symbol.
     pub fn update_ticker_by_market_id(&mut self, id: &str, update: impl FnOnce(&mut Ticker)) {
-        let Some(&market) = self.market_by_id.get(id) else {
+        let Some(&market) = self
+            .market_by_id
+            .as_ref()
+            .unwrap_or(&self.market_by_symbol)
+            .get(id)
+        else {
             return;
         };
         let Some(&index) = self
@@ -669,10 +682,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn instrument_updates_follow_symbol_mapping_after_replacement_and_reordering() {
+    fn market(id: &str, symbol: &str) -> Market {
         use crate::model::{Limits, MinMax, Precision};
-        let market = |id: &str, symbol: &str| Market {
+        Market {
             id: id.into(),
             symbol: symbol.into(),
             pretty_symbol: None,
@@ -702,7 +714,11 @@ mod tests {
             is_read_only: None,
             taker_fee: None,
             maker_fee: None,
-        };
+        }
+    }
+
+    #[test]
+    fn instrument_updates_follow_symbol_mapping_after_replacement_and_reordering() {
         let mut store = Store::default();
         store.set_markets(vec![market("A-SWAP", "A"), market("B-SWAP", "B")]);
         store.set_tickers(vec![ticker("B"), ticker("A")]);
@@ -725,6 +741,41 @@ mod tests {
         store.take_pending();
         store.update_ticker_by_market_id("C-SWAP", |_| panic!("missing ticker must not update"));
         assert!(store.take_pending().ticker_deltas.is_empty());
+    }
+
+    #[test]
+    fn instrument_lookup_preserves_identity_mixed_and_duplicate_id_semantics() {
+        let mut store = Store::default();
+        let mut last_a = market("A", "A");
+        last_a.precision.price = 2.0;
+        store.set_markets(vec![market("A", "A"), market("B", "B"), last_a]);
+        assert!(store.market_by_id.is_none());
+        assert_eq!(store.market_by_id("A").unwrap().precision.price, 2.0);
+        assert_eq!(store.market("A").unwrap().precision.price, 2.0);
+        store.set_tickers(vec![ticker("A"), ticker("B")]);
+        store.take_pending();
+        store.update_ticker_by_market_id("A", |ticker| ticker.bid = 3.0);
+        assert_eq!(store.take_pending().ticker_deltas, [(0, 1)]);
+
+        store.set_markets(vec![market("X", "A"), market("X", "B")]);
+        assert!(store.market_by_id.is_some());
+        assert_eq!(store.market_by_id("X").unwrap().symbol, "B");
+        assert!(
+            store.market_by_id("A").is_none(),
+            "mixed IDs do not fall back per entry"
+        );
+        store.take_pending();
+        store.update_ticker_by_market_id("X", |ticker| ticker.last = 4.0);
+        assert_eq!(store.ticker("B").unwrap().last, 4.0);
+        assert_eq!(store.take_pending().ticker_deltas, [(1, 1 << 2)]);
+
+        store.set_markets(vec![market("C", "C")]);
+        assert!(store.market_by_id.is_none());
+        assert!(store.market_by_id("X").is_none());
+        assert_eq!(store.market_by_id("C").unwrap().symbol, "C");
+        store.set_markets(Vec::new());
+        assert!(store.market_by_id.is_none());
+        assert!(store.market_by_id("C").is_none());
     }
 
     #[test]

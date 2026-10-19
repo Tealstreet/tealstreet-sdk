@@ -15,7 +15,7 @@
 const CHUNK_BYTES = 64 * 1024;
 const BATCH_BYTES = 1024 * 1024;
 const BATCH_MESSAGES = 256;
-const RETAINED_SCRATCH_BYTES = 64 * 1024;
+const RETAINED_SCRATCH_BYTES = 16 * 1024;
 const encoder = new TextEncoder();
 
 export class EngineHost {

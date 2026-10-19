@@ -217,10 +217,25 @@ impl ArraySplitter {
     }
 
     pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
-        for &byte in data {
+        let mut cursor = 0;
+        while cursor < data.len() {
             if self.invalid {
                 return;
             }
+            if self.phase == Phase::InArray && self.in_string && !self.escaped {
+                let rest = &data[cursor..];
+                let length = rest
+                    .iter()
+                    .position(|byte| matches!(byte, b'"' | b'\\'))
+                    .unwrap_or(rest.len());
+                if length > 0 {
+                    self.item.extend_from_slice(&rest[..length]);
+                    cursor += length;
+                    continue;
+                }
+            }
+            let byte = data[cursor];
+            cursor += 1;
             if self.phase != Phase::InArray {
                 self.keep(byte);
                 if self.invalid {
@@ -347,6 +362,83 @@ impl ArraySplitter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn string_runs_preserve_rows_metadata_and_validation_at_every_split() {
+        let valid = r#"["plain {[]},:",{"escaped":"a\"b\\c","unicode":"\u96ea雪🦀","slash":"\/"},["nested",true],1.2e3,null]"#.as_bytes().to_vec();
+        let mut bodies = vec![
+            valid,
+            br#"["bad\q"]"#.to_vec(),
+            br#"["bad\uD800"]"#.to_vec(),
+            br#"["unterminated\"#.to_vec(),
+            b"[\"invalid\xff UTF8\"]".to_vec(),
+            b"[\"raw\x00control\"]".to_vec(),
+            b"[\"raw\nnewline\"]".to_vec(),
+        ];
+        bodies.push(format!("[\"{}\",\"tail\"]", "雪\\\"x".repeat(2_000)).into_bytes());
+        let state = |at, body: &[u8], chunks: &[usize]| {
+            let mut splitter = ArraySplitter::new(at);
+            let mut items = Vec::new();
+            let mut start = 0;
+            for &end in chunks {
+                splitter.feed(&body[start..end], |item| items.push(item.to_owned()));
+                start = end;
+            }
+            splitter.feed(&body[start..], |item| items.push(item.to_owned()));
+            (
+                items,
+                splitter.finished(),
+                splitter.outside,
+                splitter.envelope,
+            )
+        };
+        for array in &bodies {
+            for at in [
+                ArrayAt::Root,
+                ArrayAt::Field("data"),
+                ArrayAt::EnvelopeField("data"),
+                ArrayAt::Path(&["result", "data"]),
+            ] {
+                let mut body = match at {
+                    ArrayAt::Root => Vec::new(),
+                    ArrayAt::Field(_) | ArrayAt::EnvelopeField(_) => {
+                        r#"{"meta":"before\\雪","data":"#.as_bytes().to_vec()
+                    }
+                    ArrayAt::Path(_) => {
+                        r#"{"meta":"before\\雪","result":{"data":"#.as_bytes().to_vec()
+                    }
+                };
+                body.extend_from_slice(array);
+                match at {
+                    ArrayAt::Root => {}
+                    ArrayAt::Field(_) | ArrayAt::EnvelopeField(_) => {
+                        body.extend_from_slice(br#", "after":"tail\"text"}"#)
+                    }
+                    ArrayAt::Path(_) => {
+                        body.extend_from_slice(br#", "after":"tail\"text"}, "code":0}"#)
+                    }
+                }
+                let scalar = state(at, &body, &(1..body.len()).collect::<Vec<_>>());
+                assert_eq!(state(at, &body, &[]), scalar);
+                // Large runs exercise bulk copying without quadratic test work.
+                let ends: Vec<_> = if body.len() < 1_000 {
+                    (1..body.len()).collect()
+                } else {
+                    vec![1, 2, 3, 7, body.len() / 2, body.len() - 2, body.len() - 1]
+                };
+                for end in ends {
+                    assert_eq!(state(at, &body, &[end]), scalar, "split {end}, mode {at:?}");
+                }
+                assert_eq!(
+                    scalar.1,
+                    std::str::from_utf8(&body).is_ok()
+                        && serde_json::from_slice::<IgnoredAny>(&body).is_ok(),
+                    "mode {at:?}, body {}",
+                    String::from_utf8_lossy(&body)
+                );
+            }
+        }
+    }
 
     #[test]
     fn nested_envelopes_validate_items_and_preserve_suffixes() {

@@ -174,3 +174,29 @@ First valid isolated-control/final-harness comparison, three-run medians:
 OKX CPU 1.49x -> 1.81x, retained memory 1.60x -> 1.89x (Rust 209.2 -> 167.8 ms;
 WASM 1.4 -> 1.0 MB). Other three family comparisons remain in progress. Full
 repository verification is green: 44 typecheck tasks, 28 lint, 27 test tasks.
+
+### Five-family integration and remaining margins
+
+Merged WEEX landing at `7e4dee9c96`, preserving authenticated socket upgrade
+headers, capability-derived options, 20-second HTTP lifetimes, ticker-symbol
+commands and all reviewed batching/lifecycle behavior. Family builds now include
+WEEX. Root replay gained an explicit script for diagnostic runs.
+
+The valid four-family comparison showed wider CPU/memory on OKX and Bybit, but
+Binance's retained memory regressed slightly and Crypto.com still failed cold
+main-thread CPU under machine contention. Do not mark these gates complete.
+Profiling Crypto.com identifies streamed startup HTTP as its largest engine
+component; controlled after-build measurements remain required.
+
+Reviewed follow-ups (25 engine tests/clippy pass):
+- Streamed JSON copies ordinary string runs, preserving the scalar state machine
+  at quotes/escapes, UTF-8 checks, full syntax validation and metadata limits.
+- Store shares the symbol index when **all** market IDs equal symbols, otherwise
+  retains the full original ID map. This preserves duplicate/mixed-ID semantics
+  and avoids unnecessary maps/strings on Binance, Bybit and Crypto.com.
+- Retained JS batch scratch is capped at 16 KiB (batch count/byte bounds unchanged).
+  A focused regression verifies medium scratch is released and small scratch reused.
+
+All five family artifacts and the updated memory profiles are rebuilding. The
+next control must pin the five-family landing source and retain an isolated
+Cargo target; use the exact final harness on both sides.

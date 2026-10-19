@@ -92,9 +92,12 @@ test('bounded batches do not drop messages and oversize scratch is released', ()
   f.send(2, 'x'.repeat(1024 * 1024));
   assert.equal(f.calls.at(-1)[1][0][2].length, 1024 * 1024);
   assert.ok(f.host.batchBuffer.length <= 1024 * 1024);
-  f.send(1, 'x'.repeat(30_000));
+  f.send(1, 'x'.repeat(10_000));
   f.tick();
-  assert.ok(f.host.batchBuffer.length <= 64 * 1024);
+  assert.equal(f.host.batchBuffer.length, 0, 'a moderate burst does not become retained scratch');
+  f.send(1, 'small message');
+  f.tick();
+  assert.ok(f.host.batchBuffer.length > 0 && f.host.batchBuffer.length <= 16 * 1024);
   f.host.dispose();
 });
 

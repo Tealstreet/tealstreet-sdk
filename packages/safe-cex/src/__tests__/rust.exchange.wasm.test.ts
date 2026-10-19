@@ -554,6 +554,6 @@ describe('RustEngineExchange', () => {
 });
 
 it('WEEX private engines require the passphrase before starting I/O', async () => {
-  const { WasmEngine } = await loadNodeEngine();
+  const { WasmEngine } = await loadNodeEngine('weex');
   expect(() => new WasmEngine('weex', JSON.stringify({ key: 'replay-key', secret: 'replay-secret' }))).toThrow('WEEX requires a passphrase');
 });
