@@ -3587,6 +3587,7 @@ dependencies = [
 name = "safe-cex-native"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "futures-util",
  "reqwest",
  "rustls",
@@ -3611,6 +3612,16 @@ name = "safe-cex-venue-blofin"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "safe-cex-venue-bingx"
+version = "0.1.0"
+dependencies = [
  "safe-cex-crypto",
  "safe-cex-engine",
  "serde",
@@ -3665,6 +3676,7 @@ dependencies = [
  "safe-cex-engine",
  "safe-cex-venue-binance",
  "safe-cex-venue-blofin",
+ "safe-cex-venue-bingx",
  "safe-cex-venue-bybit",
  "safe-cex-venue-cryptocom",
  "safe-cex-venue-okx",

@@ -262,7 +262,7 @@ are ~450 KB/s for two 1,000-level books).
 
 - Bans, fmt, clippy, native tests, wasm32 build and clippy.
 - Replay gate (`rust.yml`, job "replay gate"): release wasm with the pinned
-  wasm-bindgen, a 2.25 MiB combined Binance/Bybit/Crypto.com/OKX/WEEX size budget, the committed public fixtures
+  wasm-bindgen, an explicit combined-venue size budget in `rust.yml`, committed public fixtures
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
   and the generated private tape gated on identical account state.
 
@@ -281,7 +281,9 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | OKX (+EU, demo) | done (#1302) |
 | Crypto.com | done (#1303) |
 | WEEX | done (#1301) |
-| Bitget, Hyperliquid, BloFin, BingX, MEXC, Bitunix, Backpack | wave 1 lanes running |
+| BingX | done (#1305) |
+| Bitget, Hyperliquid, BloFin, MEXC, Bitunix, Backpack | wave 1, PRs in review |
+| Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | lane starting |
 | KuCoin, Phemex | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | WOO, Lighter, Paradex, GRVT, AsterDEX, Orderly family, ApeX Omni, Kraken, Coinbase, Bitrue, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse, Bybit inverse/spot/demo | wave 2, as wave 1 lanes merge |

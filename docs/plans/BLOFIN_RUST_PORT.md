@@ -443,3 +443,27 @@ artifact from `3aa26dc83a`, using Node22.23.3 and three public medians:
   streaming parser, semantic replay/memory accounting, or SDK/header/trading
   boundaries. Detailed findings/fixes are posted to PR1300. Await green final
   CI, then merge into feat/rust-rewrite and create a fresh follow-up branch.
+
+### BingX landing integration
+
+- Six-venue PR CI Rust checks and all15 replay gates passed. CI BloFin public:
+  total CPU82.1/59.2ms, steady47.8/25.9ms, retained2.7/1.5MB (TS/Rust);
+  CI artifact2,297,685bytes. The push repository run passed while its duplicate
+  PR run was finishing. BingX landed before merge and introduced conflicts.
+- Merging landing `022ab79de5`. Preserve all seven venue registrations and
+  BingX strict request matching, streamed aliases, ticker indexing/reservation,
+  intern collision handling and lazy host decoding. Independent engine review
+  passes38 tests/clippy; host/SDK review passes12 JS host tests with all
+  BloFin CID/passphrase/range/leverage/global-margin hooks and side columns.
+- BingX rejects unsupported leverage reads even without credentials; settings
+  literals retain scalar fallback. Harness review preserves incoming request
+  canonicalization/staging/audits plus BloFin exact caller IDs, cache-bust
+  exception, write consumption and settled memory accounting.
+- Inherited aggregate budget is now2.5MiB (2,621,440bytes). Seven-venue
+  build/native/root/harness validation and exact-artifact replay gates follow.
+
+- Seven-venue native452 and harness33 tests pass; host12, root TC44/lint28,
+  venue/wasm clippy, fmt and bans pass. Combined initial artifact2,720,924bytes
+  exceeds inherited2,621,440. Evaluate size profiles on WEEX/BingX with shared
+  engine/BloFin/OKX/serde_json O3 unchanged, then require all public CPU/memory
+  gates and private parity on that exact artifact. No budget increase.

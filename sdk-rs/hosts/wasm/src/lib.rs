@@ -8,6 +8,7 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
@@ -462,6 +463,11 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 passphrase: options.passphrase,
+            }))),
+            "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
             }))),
             "weex" => Box::new(Engine::new(WeexFutures::new(WeexOptions {
                 public_data_only: options.public_data_only,
