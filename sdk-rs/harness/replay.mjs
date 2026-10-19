@@ -304,6 +304,7 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
     processCpuMs: (cpu.user + cpu.system) / 1000,
     wallMs,
     rssBytes: memory.rss,
+    heapBeforeBytes: heapBefore.heapUsed,
     heapUsedBytes: memory.heapUsed,
     heapRetainedBytes: memory.heapUsed - heapBefore.heapUsed,
     bufferRetainedBytes: memory.arrayBuffers - heapBefore.arrayBuffers,

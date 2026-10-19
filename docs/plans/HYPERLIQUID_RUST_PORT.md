@@ -380,3 +380,23 @@ bans passed before the last two MEXC regressions. The Node22 Hyperliquid rerun
 reproduced an invalid cold buffer baseline (-88) while warm runs retained+32;
 five seconds of idle stability still yielded-24 on a fresh tsx disk cache.
 Investigate loader allocation lifetime; longer quiescence alone is disproven.
+
+Memory audit correction: the prior claim that a negative component necessarily
+invalidates this baseline was wrong. The estimator is NET retained growth:
+signed heap/buffer differences may shrink while the aggregate remains positive.
+Longer waits, no-cache, setup-factory and deferred-entry experiments did not
+reliably remove those legitimate counter changes; none are adopted. Keep the
+original sampler/formula and raw signed deltas. Validate finite/nonnegative
+absolute before/after counters and wasm/aggregate, finite signed differences,
+and exact difference/sum consistency. Independent review accepts this correction;
+no clamp, retry, sample exclusion or comparative-threshold change is introduced.
+All83 harness tests pass, including deterministic negative-component arithmetic
+regressions. Original-sampler Node22 Hyperliquid public gate passes all3pairs:
+TS/Rust CPU526.5/62.4ms,steady41.6/25.9ms,retained5.4/1.8MB. MEXC real Node22
+private gate now also passes exact requests/writes and account state. All530
+native workspace tests and native/wasm Clippy pass on the settled Rust source.
+
+Origin has advanced to d9db55921c with BloFin and MEXC parity fixtures. Merge
+that landing tree before final CI; preserve all nine constructors, the scoped
+reconciliation/terminal fixes, strict request identity, and validated net-memory
+arithmetic. Re-run affected gates and independent integration reviews.

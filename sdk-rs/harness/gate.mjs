@@ -11,6 +11,7 @@ import { gunzipSync } from 'node:zlib';
 import { fixWeexConditionals } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { venueOf } from './venues.mjs';
+import { memoryMetricErrors } from './memory.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -324,9 +325,9 @@ for (let run = 0; run < runs; run++) {
     const output = impl === 'ts' ? ts : rust;
     const unserved = output.unserved;
     if (Boolean(output.account) !== isPrivate) differences.push(impl + ': account presence differs from tape classification');
-    // Paced private tapes gate correctness; their unscored heap can shed loaded code.
-    if (!isPrivate) for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
-      if (!Number.isFinite(output.metrics[field]) || output.metrics[field] < 0) differences.push(`${impl}: invalid ${field} (${output.metrics[field]}); baseline is invalid`);
+    // Paced private tapes gate correctness; public tapes score net retained growth.
+    if (!isPrivate) for (const error of memoryMetricErrors(output.metrics)) {
+      differences.push(`${impl}: ${error}; baseline is invalid`);
     }
     if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
     for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
