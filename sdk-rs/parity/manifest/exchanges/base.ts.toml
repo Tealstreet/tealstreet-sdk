@@ -542,9 +542,9 @@ note = "Overridable venue hook retains the source default. safe-cex-exchange/src
 ts = "BaseExchange.fetchOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-exchange/src/exchange.rs::Exchange::fetch_ohlcv"
+rs = ["safe-cex-exchange/src/exchange.rs::Exchange::fetch_ohlcv", "safe-cex-exchange/src/exchange.rs::Exchange::fetch_ohlcv_native"]
 status = "ported"
-note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::fetch_ohlcv is the typed Rust composition of this source symbol."
+note = "Overridable venue hook retains the source default. fetch_ohlcv is the explicit typed SDK projection; fetch_ohlcv_native retains the receiver Js for native commands. KuCoin and Bitrue override that view; all remaining default families have exact construction-order proofs in safe-cex-registry/REST_RETURN_ORDER_REVIEW.md and native_host_kucoin_mexc."
 
 [[symbol]]
 ts = "BaseExchange.fetchHistoricalFills"
