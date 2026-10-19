@@ -1,5 +1,5 @@
 //! Where a host's sockets and requests go: the network, or a recording.
-use crate::{Events, HostEvent};
+use crate::{Events, HostEvent, now_ms};
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::{HttpRequest, Method, SocketId};
 use std::io::Read;
@@ -105,11 +105,13 @@ impl Transport for NetworkTransport {
                 tokio::select! {
                     message = ws.next() => match message {
                         Some(Ok(Message::Text(text))) => {
-                            if events.send(HostEvent::WsMessage(socket, text.to_string())).is_err() {
+                            let received_at = now_ms();
+                            if events.send_at(HostEvent::WsMessage(socket, text.to_string()), received_at).is_err() {
                                 return;
                             }
                         }
                         Some(Ok(Message::Binary(bytes))) => {
+                            let received_at = now_ms();
                             let mut decoded = Vec::new();
                             let result = if bytes.starts_with(&[0x1f, 0x8b]) {
                                 flate2::read::GzDecoder::new(bytes.as_ref()).read_to_end(&mut decoded)
@@ -120,7 +122,9 @@ impl Transport for NetworkTransport {
                                 Ok(decoded.len())
                             };
                             let Ok(text) = result.and_then(|_| String::from_utf8(decoded).map_err(std::io::Error::other)) else {break 1007};
-                            let _ = events.send(HostEvent::WsMessage(socket, text));
+                            if events.send_at(HostEvent::WsMessage(socket, text), received_at).is_err() {
+                                return;
+                            }
                         }
                         // Answering pings needs a flush on a quiet socket.
                         Some(Ok(Message::Ping(_))) => {

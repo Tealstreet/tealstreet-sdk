@@ -17,7 +17,7 @@ export interface Transport {
   now(): number;
   connect(
     url: string,
-    handlers: { headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
+    handlers: { headers?: Record<string, string>; onOpen(): void; onMessage(text: string, receivedAt?: number): void; onClose(code?: number, receivedAt?: number): void },
   ): Socket;
   request(request: {
     method: string;
@@ -67,4 +67,9 @@ export class EngineHost {
 export function nativeTransport(): Transport;
 
 /** Ordered text and gzip/deflate binary WebSocket message decoding. */
-export function socketMessages(onMessage: (text: string) => void, onError: (error: unknown) => void): (data: string | Blob | ArrayBuffer | ArrayBufferView) => void;
+export interface SocketMessages {
+  (data: string | Blob | ArrayBuffer | ArrayBufferView, receivedAt?: number): void | Promise<void>;
+  close(code?: number, receivedAt?: number): void | Promise<void>;
+  cancel(): void;
+}
+export function socketMessages(onMessage: (text: string, receivedAt?: number) => void, onError: (error: unknown, receivedAt?: number) => void, onClose?: (code?: number, receivedAt?: number) => void): SocketMessages;

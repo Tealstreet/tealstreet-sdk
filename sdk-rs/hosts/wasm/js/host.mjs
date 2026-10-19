@@ -151,9 +151,9 @@ export class EngineHost {
     this.run(engine.httpEnd(id, transport.now()));
   }
 
-  message(socket, text) {
+  message(socket, text, receivedAt) {
     if (this.disposed) return;
-    const now = this.transport.now();
+    const now = receivedAt ?? this.transport.now();
     if (!this.batchMessages) {
       this.run(this.engine.wsMessage(socket, text, now));
       return;
@@ -238,13 +238,13 @@ export class EngineHost {
             if (this.disposed) return;
             this.run(engine.wsOpen(id, transport.now()));
           },
-          onMessage: (text) => this.message(id, text),
-          onClose: (code) => {
+          onMessage: (text, receivedAt) => this.message(id, text, receivedAt),
+          onClose: (code, receivedAt) => {
             if (this.disposed) return;
             this.drainMessages();
             if (this.disposed) return;
             this.sockets.delete(id);
-            this.run(engine.wsClose(id, code ?? 1006, transport.now()));
+            this.run(engine.wsClose(id, code ?? 1006, receivedAt ?? transport.now()));
           },
         });
         if (this.disposed) socket.close();
@@ -330,8 +330,19 @@ async function* chunks(stream) {
 }
 
 /** Decode binary feeds in arrival order while leaving text feeds synchronous. */
-export const socketMessages = (onMessage, onError) => {
+export const socketMessages = (onMessage, onError, onClose = () => {}) => {
   let pending;
+  let accepting = true;
+  let failed = false;
+  let cancelled = false;
+  let closeQueued = false;
+  const enqueue = (task) => {
+    const next = (pending ?? Promise.resolve()).then(task, task);
+    pending = next;
+    const clear = () => { if (pending === next) pending = undefined; };
+    next.then(clear, clear);
+    return next;
+  };
   const decode = async (data) => {
     if (typeof data === 'string') return data;
     const bytes = data instanceof Blob ? new Uint8Array(await data.arrayBuffer())
@@ -343,12 +354,32 @@ export const socketMessages = (onMessage, onError) => {
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format));
     return new Response(stream).text();
   };
-  return (data) => {
-    if (typeof data === 'string' && !pending) return onMessage(data);
-    const next = (pending ?? Promise.resolve()).then(() => decode(data)).then(onMessage);
-    pending = next;
-    next.catch(onError).finally(() => { if (pending === next) pending = undefined; });
+  const receive = (data, receivedAt = Date.now()) => {
+    if (!accepting || cancelled) return;
+    if (typeof data === 'string' && !pending) return onMessage(data, receivedAt);
+    return enqueue(async () => {
+      if (cancelled || failed) return;
+      try {
+        const text = await decode(data);
+        if (!cancelled && !failed) onMessage(text, receivedAt);
+      } catch (error) {
+        if (!cancelled && !failed) {
+          failed = true;
+          accepting = false;
+          onError(error, receivedAt);
+        }
+      }
+    });
   };
+  receive.close = (code, receivedAt = Date.now()) => {
+    if (closeQueued || cancelled) return;
+    closeQueued = true;
+    accepting = false;
+    const report = () => { if (!cancelled) onClose(code, receivedAt); };
+    return pending ? enqueue(report) : report();
+  };
+  receive.cancel = () => { cancelled = true; accepting = false; };
+  return receive;
 };
 
 /** Transport over the runtime's own WebSocket, fetch and timers. */
@@ -368,14 +399,30 @@ export const nativeTransport = () => {
   connect(url, { headers = {}, onOpen, onMessage, onClose }) {
     if (Object.keys(headers).length && !webSocketHeaders) throw new Error('WebSocket upgrade headers unavailable');
     const ws = webSocketHeaders ? new Socket(url, { headers: { 'User-Agent': 'Tealstreet', ...headers } }) : new Socket(url);
-    let closed = false;
-    const reportClose = (code) => { if (!closed) { closed = true; onClose(code); } };
-    ws.addEventListener('error', () => reportClose(1006));
-    ws.addEventListener('open', () => { if (!closed) onOpen(); });
-    const receive = socketMessages((text) => { if (!closed) onMessage(text); }, () => ws.close());
-    ws.addEventListener('message', (event) => receive(event.data));
-    ws.addEventListener('close', (event) => reportClose(event.code));
-    return { send: (text) => ws.send(text), close: () => ws.close() };
+    let reported = false;
+    let closing = false;
+    let localClose = false;
+    const reportClose = (code, receivedAt) => {
+      if (!reported) { reported = true; onClose(code, receivedAt); }
+    };
+    const receive = socketMessages(onMessage, (_error, receivedAt) => {
+      closing = true;
+      receive.close(1007, receivedAt);
+      ws.close();
+    }, reportClose);
+    const close = (code, receivedAt) => {
+      closing = true;
+      if (localClose) reportClose(code, receivedAt);
+      else receive.close(code, receivedAt);
+    };
+    ws.addEventListener('error', () => close(1006, Date.now()));
+    ws.addEventListener('open', () => { if (!closing) onOpen(); });
+    ws.addEventListener('message', (event) => receive(event.data, Date.now()));
+    ws.addEventListener('close', (event) => close(event.code, Date.now()));
+    return {
+      send: (text) => ws.send(text),
+      close: () => { localClose = true; closing = true; receive.cancel(); ws.close(); },
+    };
   },
   async request({ method, url, headers, body }) {
     const response = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(20_000) });

@@ -217,3 +217,18 @@ True six-family control rebuilt in its own target: all nine workspace crates
 compiled from pinned source, 116 source/manifest/config files audited, aggregate
 2576287 bytes, SHA256 309140b910d6905f1b33e662e89f57b791fc1d5039a50d35ed9c1bd2db2f2fa9.
 Eight private gates pass before this merge; final nine-gate rerun remains due.
+
+Six-family verification passes: 421 native workspace tests, bans/fmt/all-target
+clippy and wasm32 clippy, six isolated-family clippys, 43 JS host/socket/Workers
+tests, 23 SDK WASM tests, SDK typecheck/lint. Repository typecheck (44 tasks) and
+lint (28 tasks) pass; full repository tests and final replay gates are running.
+Fixed budgets calibrated against final shared selectors, bytes/budget:
+Binance 792804/817152, Bybit 772749/796672, Crypto.com 641665/661504,
+OKX 735378/757760, WEEX 875552/884736, BingX 829184/856064.
+Independent review reproduced and verified an incoming compressed-socket loss:
+remote close/error now follows preceding decoded messages, raw receive timestamps
+survive decoding, local close cancels pending delivery. Native stamps before
+inflation. Guarantee covers per-socket decoder order; existing independent async
+binary decoders are not serialized with unrelated sockets/HTTP/timers. Text input
+retains the engine batch barriers. Focused independent 22-test review passes.
+Optional memory tracing skips methods absent from the unbatched control.

@@ -423,11 +423,16 @@ mod tests {
                 ArrayAt::Root,
                 ArrayAt::Field("data"),
                 ArrayAt::EnvelopeField("data"),
+                ArrayAt::EnvelopeFieldOrNested("data", "list"),
+                ArrayAt::EnvelopeFieldOrNestedAny("data", &["list", "items"]),
                 ArrayAt::Path(&["result", "data"]),
             ] {
                 let mut body = match at {
                     ArrayAt::Root => Vec::new(),
-                    ArrayAt::Field(_) | ArrayAt::EnvelopeField(_) => {
+                    ArrayAt::Field(_)
+                    | ArrayAt::EnvelopeField(_)
+                    | ArrayAt::EnvelopeFieldOrNested(..)
+                    | ArrayAt::EnvelopeFieldOrNestedAny(..) => {
                         r#"{"meta":"before\\雪","data":"#.as_bytes().to_vec()
                     }
                     ArrayAt::Path(_) => {
@@ -437,7 +442,10 @@ mod tests {
                 body.extend_from_slice(array);
                 match at {
                     ArrayAt::Root => {}
-                    ArrayAt::Field(_) | ArrayAt::EnvelopeField(_) => {
+                    ArrayAt::Field(_)
+                    | ArrayAt::EnvelopeField(_)
+                    | ArrayAt::EnvelopeFieldOrNested(..)
+                    | ArrayAt::EnvelopeFieldOrNestedAny(..) => {
                         body.extend_from_slice(br#", "after":"tail\"text"}"#)
                     }
                     ArrayAt::Path(_) => {

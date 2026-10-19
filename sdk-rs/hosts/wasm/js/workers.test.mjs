@@ -118,6 +118,37 @@ test('the transport opens client sockets with an https upgrade', async () => {
   assert.deepEqual(events, ['open', 'hello', 1001]);
 });
 
+test('the Workers transport delivers pending binary data before a single remote close', async () => {
+  let release;
+  const ready = new Promise((resolve) => { release = resolve; });
+  const data = new class extends Blob {
+    async arrayBuffer() { await ready; return super.arrayBuffer(); }
+  }(['last fill']);
+  const events = [];
+  const before = upgrades.length;
+  workersTransport().connect('wss://fixture/market', {
+    onOpen() {},
+    onMessage: (text, now) => events.push([text, now]),
+    onClose: (code, now) => events.push(['close', code, now]),
+  });
+  await until(() => upgrades.length > before);
+  const socket = upgrades.at(-1).socket;
+  const originalNow = Date.now;
+  try {
+    Date.now = () => 17;
+    socket.dispatch('message', { data });
+    Date.now = () => 18;
+    socket.dispatch('message', { data: 'later text' });
+    Date.now = () => 19;
+    socket.dispatch('close', { code: 1000 });
+    socket.dispatch('error', {});
+  } finally { Date.now = originalNow; }
+  assert.deepEqual(events, []);
+  release();
+  await until(() => events.length >= 3);
+  assert.deepEqual(events, [['last fill', 17], ['later text', 18], ['close', 1000, 19]]);
+});
+
 test('the Durable Object runs an engine and streams frames to its clients', async () => {
   const EngineObject = createEngineObject({ loadEngine, flush: { store: 20, books: 20 } });
   const alarms = [];

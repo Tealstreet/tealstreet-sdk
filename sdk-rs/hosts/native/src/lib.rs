@@ -56,7 +56,15 @@ pub struct Events {
 impl Events {
     /// Enqueue a transport event without blocking, preserving arrival order.
     pub fn send(&self, event: HostEvent) -> Result<(), mpsc::error::SendError<HostEvent>> {
-        let received_at = (self.clock)();
+        self.send_at(event, (self.clock)())
+    }
+
+    /// Preserve the raw arrival time when decoding a received frame takes time.
+    pub fn send_at(
+        &self,
+        event: HostEvent,
+        received_at: f64,
+    ) -> Result<(), mpsc::error::SendError<HostEvent>> {
         self.sender
             .send(QueuedEvent { event, received_at })
             .map_err(|error| mpsc::error::SendError(error.0.event))

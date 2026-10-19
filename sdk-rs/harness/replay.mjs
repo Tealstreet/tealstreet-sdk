@@ -370,6 +370,7 @@ async function runRust() {
   if (process.env.RUST_MEMORY_TRACE) {
     let last = wasmMemoryBytes();
     for (const method of ['start', 'httpStart', 'httpChunk', 'httpEnd', 'wsMessage', 'wsMessages', 'takeFrame']) {
+      if (typeof engine[method] !== 'function') continue;
       const original = engine[method].bind(engine);
       engine[method] = (...args) => {
         const result = original(...args);

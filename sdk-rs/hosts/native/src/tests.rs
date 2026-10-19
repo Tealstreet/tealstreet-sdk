@@ -56,6 +56,19 @@ fn dispatch_next(host: &mut Host<RecordingVenue, NoTransport>) {
 }
 
 #[test]
+fn decoded_messages_keep_their_raw_arrival_time() {
+    let mut host = host();
+    host.events
+        .send_at(HostEvent::WsMessage(SocketId(1), "decoded".into()), 17.0)
+        .unwrap();
+    dispatch_next(&mut host);
+    assert_eq!(
+        host.engine.venue().0,
+        [(17.0, SocketId(1), "decoded".into())]
+    );
+}
+
+#[test]
 fn messages_retain_arrival_time_socket_order_and_close_barriers() {
     static TIME: AtomicU64 = AtomicU64::new(0);
     fn clock() -> f64 {

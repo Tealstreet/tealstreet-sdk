@@ -16,26 +16,39 @@ export const workersTransport = () => ({
   now: () => Date.now(),
   connect(url, { headers = {}, onOpen, onMessage, onClose }) {
     let socket;
-    let closed = false;
+    let receive;
+    let localClose = false;
+    let reported = false;
+    const reportClose = (code, receivedAt) => {
+      if (!reported) { reported = true; onClose(code, receivedAt); }
+    };
+    const close = (code, receivedAt) => {
+      if (localClose || !receive) reportClose(code, receivedAt);
+      else receive.close(code, receivedAt);
+    };
     // Workers open client WebSockets with an upgrade request over https.
     fetch(url.replace(/^ws/, 'http'), { headers: { ...headers, Upgrade: 'websocket' } }).then(
       (response) => {
         socket = response.webSocket;
-        if (!socket) return onClose(1006);
+        if (!socket) return close(1006, Date.now());
         socket.accept();
-        const receive = socketMessages(onMessage, () => socket.close());
-        socket.addEventListener('message', (event) => receive(event.data));
-        socket.addEventListener('close', (event) => onClose(event.code));
-        socket.addEventListener('error', () => onClose(1006));
-        if (closed) socket.close();
+        receive = socketMessages(onMessage, (_error, receivedAt) => {
+          receive.close(1007, receivedAt);
+          socket.close();
+        }, reportClose);
+        socket.addEventListener('message', (event) => receive(event.data, Date.now()));
+        socket.addEventListener('close', (event) => close(event.code, Date.now()));
+        socket.addEventListener('error', () => close(1006, Date.now()));
+        if (localClose) { receive.cancel(); socket.close(); }
         else onOpen();
       },
-      () => onClose(1006),
+      () => close(1006, Date.now()),
     );
     return {
       send: (text) => socket?.send(text),
       close: () => {
-        closed = true;
+        localClose = true;
+        receive?.cancel();
         socket?.close();
       },
     };
