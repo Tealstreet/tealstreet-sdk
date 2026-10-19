@@ -56,6 +56,243 @@ fn frame(venue: &AsterDEXExchange, value: Value) {
         .unwrap();
 }
 
+#[cfg(test)]
+fn native_input_source() -> Value {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/accepted-native-input-source.cjs"
+        ))
+        .env(
+            "SAFE_CEX_TYPESCRIPT_PATH",
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../../node_modules/typescript"),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+#[cfg(test)]
+fn native_input_tag(value: &Js) -> Value {
+    match value {
+        Js::Undefined => json!({"kind":"undefined"}),
+        Js::Null => json!({"kind":"null"}),
+        Js::Bool(value) => json!({"kind":"boolean","value":value}),
+        Js::Number(value) => json!({"kind":"number","bits":format!("{:016x}",value.to_bits())}),
+        Js::String(units) => json!({"kind":"string","units":units.as_ref()}),
+        _ => {
+            json!({"kind":"json","units":safe_cex_exchange::js_runtime::globals::stringify_json(value).unwrap().unwrap()})
+        }
+    }
+}
+#[test]
+fn native_input_fill_keeps_the_source_symbol_value() {
+    let source = native_input_source();
+    run(|venue, _| {
+        let fills = Rc::new(RefCell::new(Vec::new()));
+        let saved = fills.clone();
+        venue.base().on(
+            "fill",
+            Rc::new(move |_, fill| {
+                saved.borrow_mut().push(fill.clone());
+                Ok(())
+            }),
+        );
+        let socket = venue
+            .base()
+            .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Private)
+            .unwrap();
+        for (index, case) in source["fillCases"].as_array().unwrap().iter().enumerate() {
+            socket
+                .on_message(&safe_cex_transport::socket::SocketFrame::Text(
+                    case["frame"].as_str().unwrap().into(),
+                ))
+                .unwrap();
+            assert_eq!(
+                fills.borrow().len(),
+                index + 1,
+                "actual private socket emits each execution"
+            );
+            let fill = fills.borrow()[index].clone();
+            assert!(fill.has_own("symbol"));
+            assert_eq!(
+                native_input_tag(&fill.get("symbol").unwrap()),
+                case["symbol"],
+                "ASTER-NATIVE-INPUT source fill copies its symbol before any typed projection: {index}"
+            );
+        }
+    });
+}
+#[test]
+fn native_input_installed_signing_globals_match_source_byte_domains() {
+    let source = native_input_source();
+    run(|venue, _| {
+        for case in source["cryptoCases"].as_array().unwrap() {
+            let bytes = safe_cex_exchange::js_runtime::value::from_json(&case["bytes"]);
+            for (global, field) in [
+                ("ethers.keccak256", "keccak"),
+                ("ethers.hashMessage", "hashMessage"),
+            ] {
+                let result = venue
+                    .rt
+                    .global(global)
+                    .unwrap()
+                    .call(Js::Undefined, vec![bytes.clone()])
+                    .unwrap();
+                assert_eq!(
+                    result
+                        .array_values()
+                        .unwrap()
+                        .unwrap()
+                        .iter()
+                        .map(|value| value.to_number().unwrap())
+                        .collect::<Vec<_>>(),
+                    case[field]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|value| value.as_f64().unwrap())
+                        .collect::<Vec<_>>()
+                );
+            }
+            let result = venue
+                .rt
+                .global("ethers.getBytes")
+                .unwrap()
+                .call(Js::Undefined, vec![Js::str(case["hex"].as_str().unwrap())])
+                .unwrap();
+            assert_eq!(
+                result
+                    .array_values()
+                    .unwrap()
+                    .unwrap()
+                    .iter()
+                    .map(|value| value.to_number().unwrap())
+                    .collect::<Vec<_>>(),
+                case["bytes"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|value| value.as_f64().unwrap())
+                    .collect::<Vec<_>>()
+            );
+        }
+        for case in source["signatures"].as_array().unwrap() {
+            let result = venue
+                .rt
+                .global("generateV1Signature")
+                .unwrap()
+                .call(
+                    Js::Undefined,
+                    vec![
+                        Js::str(case["query"].as_str().unwrap()),
+                        Js::str(case["secret"].as_str().unwrap()),
+                    ],
+                )
+                .unwrap();
+            assert!(result.strict_equals(&Js::str(case["signature"].as_str().unwrap())));
+        }
+        let original = Js::object(vec![("marker", Js::Number(21.0))]);
+        let saved = original.clone();
+        let query = Js::object(vec![(
+            "toString",
+            Js::function("toString", move |_, _| {
+                Err(safe_cex_exchange::js_runtime::value::Thrown::new(
+                    saved.clone(),
+                ))
+            }),
+        )]);
+        let error = venue
+            .rt
+            .global("generateV1Signature")
+            .unwrap()
+            .call(Js::Undefined, vec![query, Js::str("secret")])
+            .unwrap_err();
+        assert!(
+            error.value.strict_equals(&original),
+            "text coercion retains the original getter failure"
+        );
+    });
+}
+#[test]
+fn native_input_scope_keeps_the_constructed_receiver_and_weak_owner() {
+    run(|venue, _| {
+        let receiver = Js::object(vec![("marker", Js::Number(21.0))]);
+        let weak = Rc::downgrade(&venue.rt.shared);
+        let context = binding::scope(&weak, receiver.clone()).unwrap();
+        assert!(Rc::ptr_eq(&context.shared, &venue.rt.shared));
+        assert!(
+            context.this.strict_equals(&receiver),
+            "ASTER-NATIVE-INPUT scope must retain its actual receiver"
+        );
+        drop(context);
+        let error = match binding::scope(&std::rc::Weak::new(), receiver) {
+            Ok(_) => panic!("expired owner must visibly reject"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .value
+                .get("message")
+                .unwrap()
+                .strict_equals(&Js::str("AsterDEX exchange was dropped"))
+        );
+    });
+}
+#[test]
+fn native_input_klines_preserves_custom_map_receiver_and_row_getter_failure() {
+    run(|_, _| {
+        let original = Js::object(vec![("failure", Js::Bool(true))]);
+        let saved = original.clone();
+        let row = Js::object(vec![]);
+        row.define_accessor(
+            "1",
+            Some(Rc::new(move |_| {
+                Err(safe_cex_exchange::js_runtime::value::Thrown::new(
+                    saved.clone(),
+                ))
+            })),
+            None,
+        )
+        .unwrap();
+        let error = crate::exchange_helpers::transform_klines(&Js::array(vec![row])).unwrap_err();
+        assert!(error.value.strict_equals(&original));
+        let rows = Js::object(vec![]);
+        let expected_receiver = rows.clone();
+        rows.define(
+            "map",
+            Js::function("map", move |this, args| {
+                assert!(this.strict_equals(&expected_receiver));
+                let row = safe_cex_exchange::js_runtime::value::from_json(&json!([
+                    1000,
+                    "-0",
+                    "Infinity",
+                    "-Infinity",
+                    "bad",
+                    true
+                ]));
+                args[0].call(Js::Undefined, vec![row])
+            }),
+        )
+        .unwrap();
+        let result = crate::exchange_helpers::transform_klines(&rows).unwrap();
+        assert_eq!(
+            result.get("open").unwrap().to_number().unwrap().to_bits(),
+            (-0.0f64).to_bits()
+        );
+        assert_eq!(
+            result.get("high").unwrap().to_number().unwrap(),
+            f64::INFINITY
+        );
+        assert!(result.get("close").unwrap().to_number().unwrap().is_nan());
+        rows.define("map", Js::Undefined).unwrap();
+    });
+}
+
 #[test]
 fn constructed_private_handlers_keep_surrogate_frames_and_their_neighbors() {
     run(|venue, _| {

@@ -242,3 +242,8 @@ sides; the bounded native witnesses catch that panic without hanging.
 PnL grouping sanitizes time/id keys and uses the original index to break ties;
 public depth admission rejects nonfinite prices, and API signing sorts UTF-16
 strings. Those remaining crate comparators have a total order.
+
+`NATIVE_INPUT_REVIEW.md` records the six native-input owner rulings. Private fill
+symbols use the canonical retained carrier at the raw copy and emitter sites;
+`native_emitter_tests` compares actual socket values and signing globals with
+maintained source, including UTF-16 units and nonfinite numeric bits.
