@@ -27,6 +27,7 @@ import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
+import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import {
@@ -41,6 +42,7 @@ import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
+  backpack: 'backpack',
   binancepm: 'binancepm',
   blofin: 'blofin',
   mexc: 'mexc',
@@ -65,6 +67,12 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  backpack: {
+    label: 'Backpack',
+    isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
+    requirement: 'be a canonical decimal uint32 between 1 and 4294967295',
+    isValid: (id) => /^[1-9]\d{0,9}$/.test(id) && Number(id) <= 0xffff_ffff,
+  },
   blofin: patternClientOrderIdRule('BloFin', /^[A-Za-z0-9]{1,32}$/, {
     mint: () => `${BLOFIN_BROKER_ID}${uuid()}`.slice(0, 32),
   }),
@@ -166,13 +174,27 @@ export class RustEngineExchange extends BaseExchange {
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
         endpoints,
+        recvWindow: this.options.extra?.recvWindow,
         privateWsHeaders: Boolean(transport.webSocketHeaders),
       }),
     );
-    this.host = new EngineHost(engine, transport, {
-      onFrame: this.receiveFrame,
-      onLog: this.receiveLog,
-    });
+    this.host = new EngineHost(
+      engine,
+      this.name === 'backpack'
+        ? {
+            webSocketHeaders: transport.webSocketHeaders,
+            now: virtualClock.getCurrentTimeMs,
+            connect: transport.connect.bind(transport),
+            request: transport.request.bind(transport),
+            setTimeout: transport.setTimeout.bind(transport),
+            clearTimeout: transport.clearTimeout.bind(transport),
+          }
+        : transport,
+      {
+        onFrame: this.receiveFrame,
+        onLog: this.receiveLog,
+      },
+    );
     this.host.start();
     this.updateTickerSymbols();
     // Books, candles and fills go out at the venue's book cadence, the rest
@@ -287,7 +309,7 @@ export class RustEngineExchange extends BaseExchange {
         }
       }
     }
-    if (this.name === 'bingx') this.assertCallerClientOrderIds(orders);
+    if (this.name === 'bingx' || this.name === 'backpack') this.assertCallerClientOrderIds(orders);
     if (isBybit) {
       this.assertCallerClientOrderIds(orders);
       for (const order of orders) {

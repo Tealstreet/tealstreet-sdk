@@ -7,9 +7,10 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
+import { sameCommandResults } from './tape.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
-import { fixWeexConditionals } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
+import { fixWeexConditionals } from './known-ts-fixes.mjs';
 import { venueOf } from './venues.mjs';
 
 const { values } = parseArgs({
@@ -29,7 +30,6 @@ const tapeRecords = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeB
   .map(JSON.parse);
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
-const records = tapeRecords;
 
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
@@ -48,7 +48,7 @@ const replay = (impl, run) => {
     out,
   );
   if (values['no-egress']) args.push('--no-egress');
-  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125_000 });
+  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125000 });
   if (result.status !== 0)
     throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
@@ -56,16 +56,6 @@ const replay = (impl, run) => {
 
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 
-// JSON object insertion order is immaterial; array order and values are exact.
-const stable = (value) => {
-  if (Array.isArray(value)) return value.map(stable);
-  if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, stable(value[key])]),
-  );
-};
 const differences = [];
 const compare = (label, a, b) => {
   const keyed = (rows) => new Map(rows.map((row) => [row.symbol, row]));
@@ -84,6 +74,7 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
+
 const venue = venueOf(values.venue);
 const isPrivate =
   tapeRecords.find((record) => record.type === 'meta')?.private ??
@@ -92,7 +83,7 @@ const isPrivate =
       ? venue.isPrivateRecord(record)
       : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
   );
-
+const records = tapeRecords;
 const instrumentRows = tapeRecords
   .filter((r) => r.type === 'http' && new URL(r.url).pathname === '/v5/market/instruments-info')
   .flatMap((r) => JSON.parse(r.body).result?.list ?? []);
@@ -147,23 +138,38 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 //    Rust resumes the original caller intent before rendering any new payload.
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
-const binanceFixes = (account, rustAccount) => {
-  for (const position of account.positions) {
-    const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
-    if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
-  }
-};
-// The MEXC reference will receive these same repairs: this entry documents
-// deliberate corrections without replacing the TS result with Rust output.
+// TS bugs intentionally corrected in Rust. Backpack normalization derives
+// expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
-  blofin(account, rustAccount) {
-    binanceFixes(account, rustAccount);
+  blofin: (ts, rust) => {
+    const account = ts.account;
+    if (!account) return;
+    KNOWN_TS_FIXES.binance(ts, rust);
+    // The native empty position snapshot clears both aggregates; TS retains
+    // its last margin and unrealized PnL after the final position closes.
     if (account.positions.length === 0) {
       account.balance.used = 0;
       account.balance.upnl = 0;
     }
   },
-  bingx: (account, rustAccount) => {
+  mexc: () => {
+    // Full incremental depth, rather than replacing a 20-level snapshot.
+    // Sized stops choose the closing leverage rail even without reduceOnly.
+    // Bracket prices reach the native entry; unsupported opening triggers reject.
+    // Cancel-all reaches regular, plan and position-stop endpoints.
+    // Cancel/replace recomputes remaining size after racing fills; Closed wins
+    // over a late cancellation acknowledgement. Failed reads preserve state.
+    // Regular cumulative fills stay monotonic; terminal rows never reopen.
+    // Stale amend reads cannot regress those fills or place a replacement.
+    // REST/optimistic rows retain cumulative fills; amendments retain attached
+    // brackets and standalone stop sources through venue reconciliation.
+    // Native bracket clears and corrected sources win over delayed placement acks.
+    // Repeated private execution IDs emit one fill within the replay window.
+  },
+  binancepm: (ts, rust) => KNOWN_TS_FIXES.binance(ts, rust),
+  bingx: (ts) => {
+    const account = ts.account;
+    if (!account) return;
     if (values.venue === 'bingx') {
       // BingX TS emits a terminal cumulative fill, ignores partial executions,
       // and drops its terminal watermark so TRADE_UPDATE can repeat that fill.
@@ -224,9 +230,10 @@ const KNOWN_TS_FIXES = {
       return;
     }
   },
-  account: binanceFixes,
-  cryptocom: fixCryptocomAccount,
-  weex(account) {
+
+  weex(ts) {
+    const account = ts.account;
+    if (!account) return;
     // TS reads opening STOP/TP stream rows as protective orders and displays
     // the execution price as their trigger, corrupting conditional size amends.
     const bytes = readFileSync(values.tape);
@@ -261,38 +268,144 @@ const KNOWN_TS_FIXES = {
     'new account equity survives delayed snapshots and local balance ticks',
     'acknowledged leverage survives failed post-write snapshots',
   ],
-  binance: binanceFixes,
-  binancepm: binanceFixes,
-  // Bybit shares the zero-size-placeholder margin-size defect. Its PostOnly
-  // rejection reason is recovered from the original TS row in venues.mjs.
-  // Other native regressions intentionally corrected by the Bybit port:
-  // exact split remainders, no fallback after ambiguous batch-write failure,
-  // ticker seeding before connecting, and native Partial-stop amendment.
-  bybit: (account, rustAccount, output) => {
-    binanceFixes(account, rustAccount);
+
+  binance: (ts, rust) => {
+    for (const position of ts.account?.positions ?? []) {
+      const fixed = rust.account.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
+      if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+    }
+  },
+  bybit: (ts, rust) => {
+    if (!ts.account) return;
+    const output = ts;
+    KNOWN_TS_FIXES.binance(ts, rust);
     const required = (
       values.venue === 'hyrotrader'
         ? []
         : output.subscriptions.filter((key) => key.endsWith('/v5/private subscribe order'))
     ).flatMap((key) => ['execution', 'wallet'].map((topic) => key.replace(/order$/, topic)));
     output.subscriptions = [...new Set([...output.subscriptions, ...required])].sort();
+    const latest = new Map();
+    for (const record of records) {
+      if (record.type !== 'ws') continue;
+      const event = JSON.parse(record.text);
+      if (event.topic === 'order') for (const row of event.data) latest.set(row.orderId, row);
+    }
+    for (const order of ts.account.orders) {
+      if (
+        order.rejectReason === null &&
+        order.status === 'canceled' &&
+        latest.get(order.id)?.rejectReason === 'EC_PostOnlyWillTakeLiquidity'
+      )
+        order.rejectReason = 'PostOnly';
+    }
   },
-  mexc: () => {
-    // Full incremental depth, rather than replacing a 20-level snapshot.
-    // Sized stops choose the closing leverage rail even without reduceOnly.
-    // Bracket prices reach the native entry; unsupported opening triggers reject.
-    // Cancel-all reaches regular, plan and position-stop endpoints.
-    // Cancel/replace recomputes remaining size after racing fills; Closed wins
-    // over a late cancellation acknowledgement. Failed reads preserve state.
-    // Regular cumulative fills stay monotonic; terminal rows never reopen.
-    // Stale amend reads cannot regress those fills or place a replacement.
-    // REST/optimistic rows retain cumulative fills; amendments retain attached
-    // brackets and standalone stop sources through venue reconciliation.
-    // Native bracket clears and corrected sources win over delayed placement acks.
-    // Repeated private execution IDs emit one fill within the replay window.
+
+  // Attached TP/SL must remain market exits. The private tape declares the
+  // exact buggy TS request with tsRequestBody; Rust must match requestBody.
+  // Native regressions also correct TS repair losses (post-only/TIF/reduce-only)
+  // and cancellation races across concurrent writes and REST reconciliation.
+  backpack: (ts) => {
+    const bytes = readFileSync(values.tape);
+    const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
+      .toString()
+      .split('\n')
+      .filter(Boolean)
+      .map(JSON.parse);
+    const orders = new Map();
+    const positions = new Map();
+    const fills = [];
+    const executions = new Set();
+    const tickers = new Map(ts.tickers.map((t) => [t.symbol, t]));
+    for (const ticker of tickers.values()) Object.assign(ticker, { bid: 0, ask: 0 });
+    for (const record of records) {
+      if (
+        record.type === 'http' &&
+        record.method === 'GET' &&
+        new URL(record.url).pathname === '/api/v1/orders' &&
+        record.status === 200
+      ) {
+        for (const order of JSON.parse(record.body))
+          orders.set(String(order.id), { c: order.clientId, y: order.postOnly });
+      }
+      if (record.type !== 'ws') continue;
+      const { stream, data: d } = JSON.parse(record.text);
+      if (!d) continue;
+      // TS globally throttles tickers. That
+      // drops other markets' last updates. Rust coalesces at the flush boundary.
+      // TS also reads P/q instead of the documented o/V ticker fields.
+      const ticker = tickers.get(d.s);
+      if (ticker) {
+        if (stream?.startsWith('ticker.')) {
+          const change =
+            d.P !== undefined
+              ? Number(d.P) * 100
+              : Number(d.o) > 0
+                ? ((Number(d.c) - Number(d.o)) / Number(d.o)) * 100
+                : undefined;
+          Object.assign(ticker, {
+            last: Number(d.c),
+            ...(change === undefined ? {} : { percentage: change }),
+            volume: Number(d.v),
+            quoteVolume: Number(d.q ?? d.V),
+          });
+        }
+        if (stream?.startsWith('trade.')) ticker.last = Number(d.p);
+        if (stream?.startsWith('bookTicker.')) Object.assign(ticker, { bid: Number(d.b), ask: Number(d.a) });
+        // TS mistakes the first changed depth level for the best quote.
+        // bookTicker is the venue's authoritative best bid/ask stream; null
+        // sides mean empty (zero), which TS incorrectly leaves stale.
+      }
+      if (stream?.startsWith('account.orderUpdate')) {
+        const previous = orders.get(String(d.i));
+        if (!previous || (d.E ?? 0) >= (previous.E ?? 0)) orders.set(String(d.i), d);
+        // TS emits duplicates on reconnect; one execution must cross once.
+        if (d.e === 'orderFill' && Number(d.l) > 0) {
+          const key = d.t == null ? `${d.i}:${d.E}:${d.z}` : `${d.i}:${d.t}`;
+          if (!executions.has(key)) {
+            executions.add(key);
+            fills.push({
+              id: String(d.i),
+              symbol: d.s,
+              side: d.S === 'Bid' ? 'buy' : 'sell',
+              amount: Number(d.l),
+              price: Number(d.L ?? d.P ?? d.p ?? 0),
+            });
+          }
+        }
+      }
+      if (stream?.startsWith('account.positionUpdate') && (!positions.has(d.s) || d.E >= positions.get(d.s).E))
+        positions.set(d.s, d);
+    }
+    if (!ts.account) return;
+    // TS returns Hedged but never publishes its fixed mode in Store options.
+    ts.account.hedged = true;
+    for (const order of ts.account.orders) {
+      const d = orders.get(order.id);
+      if (!d) continue;
+      // TS drops native client IDs on both REST and stream mapping.
+      order.clientOrderId = d.c == null ? null : String(d.c);
+      // REST postOnly / WS y are separate from GTC. TS loses maker protection.
+      if (d.y) order.timeInForce = 'PostOnly';
+      // Y is trigger quantity; Q is reverse-market quote quantity. A failed
+      // protection order is terminal, not open.
+      if (d.P !== undefined && d.Y !== undefined) {
+        order.amount = Number(d.Y);
+        order.remaining = order.amount - order.filled;
+      }
+      if (d.X === 'TriggerFailed') order.status = 'canceled';
+      // TS drops the trigger price source, so amend falls back to MarkPrice.
+      if (d.P !== undefined && d.B)
+        order.trigger = { MarkPrice: 'mark_price', LastPrice: 'last_price', IndexPrice: 'index_price' }[d.B] ?? null;
+    }
+    for (const position of ts.account.positions) {
+      const d = positions.get(position.symbol);
+      // B is entry; b is breakeven. Do not overwrite entry with breakeven.
+      if (d?.B !== undefined && Number(d.q) !== 0) position.entryPrice = Number(d.B);
+    }
+    ts.account.fills = fills;
   },
 };
-
 const normalizeBingxPublic = (ts) => {
   // KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
   // integer step 1. Correct that precision and its synthetic ticker touch only.
@@ -336,8 +449,7 @@ const normalizeBingxPublic = (ts) => {
     }
   }
 };
-
-function fixCryptocomAccount(account) {
+const fixCryptocomAccount = (account) => {
   // TS never sets the hedged store flag despite mapping positions as hedged.
   account.hedged = true;
   // TS omits user.trade entirely. Derive the execution oracle from documented
@@ -369,15 +481,14 @@ function fixCryptocomAccount(account) {
   // conservative 36-byte ceiling without JS string emulation.
   // Public throttle and public-only subscription corrections are the
   // afterTsFrame and prepareTsReady hooks in venues.mjs.
-}
+};
 for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
   if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
   // Every request must match a taped one: an unserved request sent different parameters.
   for (const impl of ['ts', 'rust']) {
-    const output = impl === 'ts' ? ts : rust;
-    const unserved = output.unserved;
+    const output = results[impl][run];
     if (Boolean(output.account) !== isPrivate)
       differences.push(impl + ': account presence differs from tape classification');
     // Invalid baselines fail even when private performance is informational.
@@ -391,8 +502,18 @@ for (let run = 0; run < runs; run++) {
       if (!output.books[symbol]) differences.push(`${impl}: requested book ${symbol} is missing`);
     }
     if (!output.markets.length || !output.tickers.length) differences.push(`${impl}: empty public seed`);
+    const unserved = output.unserved;
     if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
+    const { missingWrites, invalidSignatures } = results[impl][run];
+    if (missingWrites) differences.push(`${impl}: ${missingWrites} required taped write(s) never sent`);
+    if (invalidSignatures) differences.push(`${impl}: ${invalidSignatures} invalid signatures`);
   }
+  const fix =
+    KNOWN_TS_FIXES[values.venue] ??
+    (['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue)
+      ? KNOWN_TS_FIXES.bybit
+      : undefined);
+  if (typeof fix === 'function') fix(ts, rust);
   if (JSON.stringify(ts.wsRequests) !== JSON.stringify(rust.wsRequests))
     differences.push(
       `websocket requests differ: ts=${JSON.stringify(ts.wsRequests)} rust=${JSON.stringify(rust.wsRequests)}`,
@@ -408,31 +529,14 @@ for (let run = 0; run < runs; run++) {
       if (maxima.length) market.limits.amount.max = Math.min(...maxima);
     }
   }
-  if (isPrivate && ts.account && rust.account) {
-    const fix =
-      KNOWN_TS_FIXES[values.venue] ??
-      (['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue)
-        ? KNOWN_TS_FIXES.bybit
-        : undefined);
-    if (typeof fix === 'function') fix(ts.account, rust.account, ts);
-    if (values.venue === 'bybitinverse') {
-      const upnl = ts.account.positions.reduce(
-        (sum, p) => sum + (p.contracts > 0 ? (p.unrealizedPnl * p.notional) / p.contracts : 0),
-        0,
-      );
-      ts.account.balance.total = Math.round((ts.account.balance.total + ts.account.balance.upnl - upnl) * 1e8) / 1e8;
-      ts.account.balance.upnl = upnl;
-    }
-    for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
-      const left = JSON.stringify(ts.account[field]);
-      const right = JSON.stringify(rust.account[field]);
-      if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
-    }
+  if (isPrivate && ts.account && rust.account && values.venue === 'bybitinverse') {
+    const upnl = ts.account.positions.reduce(
+      (sum, p) => sum + (p.contracts > 0 ? (p.unrealizedPnl * p.notional) / p.contracts : 0),
+      0,
+    );
+    ts.account.balance.total = Math.round((ts.account.balance.total + ts.account.balance.upnl - upnl) * 1e8) / 1e8;
+    ts.account.balance.upnl = upnl;
   }
-  const left = JSON.stringify(stable(ts.commands));
-  const right = JSON.stringify(stable(rust.commands));
-  if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
-  normalizeBingxPublic(ts);
   if (['bybitinverse', 'bybitspot'].includes(values.venue)) {
     const privateRecord = tapeRecords.find(
       (record) => record.type === 'ws' && new URL(record.url).pathname === '/v5/private',
@@ -444,18 +548,28 @@ for (let run = 0; run < runs; run++) {
       privateUrl && `${privateUrl.origin}${privateUrl.pathname}`,
     );
   }
-  // OKX validates each native argument/wildcard against every delivered frame.
+  // OKX checks native wildcard coverage; Crypto audits auth/topics/heartbeats per socket.
   if (
     !values.venue.startsWith('okx') &&
     values.venue !== 'cryptocom' &&
     (!Array.isArray(ts.subscriptions) ||
       !Array.isArray(rust.subscriptions) ||
       JSON.stringify(ts.subscriptions) !== JSON.stringify(rust.subscriptions))
-  ) {
+  )
     differences.push(
-      `websocket subscriptions: ts=${JSON.stringify(ts.subscriptions)} rust=${JSON.stringify(rust.subscriptions)}`,
+      `subscriptions differ: ts=${JSON.stringify(ts.subscriptions)} rust=${JSON.stringify(rust.subscriptions)}`,
     );
+  if (isPrivate && ts.account && rust.account) {
+    if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
+    for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
+      const left = JSON.stringify(ts.account[field]);
+      const right = JSON.stringify(rust.account[field]);
+      if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
+    }
   }
+  if (!sameCommandResults(ts.commands, rust.commands))
+    differences.push(`command results: ts=${JSON.stringify(ts.commands)} rust=${JSON.stringify(rust.commands)}`);
+  normalizeBingxPublic(ts);
   // KNOWN_TS_FIXES: unavailable Crypto.com quotes produce NaN in TS.
   if (values.venue === 'cryptocom')
     for (const ticker of ts.tickers) {

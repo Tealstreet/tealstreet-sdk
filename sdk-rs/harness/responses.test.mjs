@@ -138,3 +138,14 @@ test('implementation-specific responses preserve exact matching and selected wri
   assert.throws(() => new Responses(records, key, undefined, write, true, 'typo'), /Unknown replay implementation/);
   assert.throws(() => new Responses([make('bad', 'typo')], key, undefined, write, true, 'rust'), /Unknown HTTP record/);
 });
+
+test('effectiveAt aliases availableAfter and never serves a future-only snapshot', () => {
+  const url = 'https://example.test/state';
+  const responses = new Responses(
+    [{ type: 'http', method: 'GET', url, status: 200, body: 'future', effectiveAt: 100 }],
+    (method, url) => method + url,
+  );
+  assert.equal(responses.respond('GET', url, undefined, 0, 99).status, 599);
+  assert.equal(responses.respond('GET', url, undefined, 0, 100).body, 'future');
+  assert.equal(responses.respond('GET', url, undefined, 0, 100).body, 'future');
+});

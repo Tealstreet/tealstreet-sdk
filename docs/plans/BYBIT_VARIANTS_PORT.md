@@ -338,3 +338,24 @@ optimization for wasm only, using the existing pinned toolchain and no new
 dependency. The resulting artifact is 2,582,022 bytes. Full functional and
 27 replay gates must pass on that artifact before pushing the integrated head,
 followed by green final-head CI again. Fixtures and thresholds remain unchanged.
+
+## Backpack landing integration checkpoint
+
+The BloFin integration passed all 12 public replays and 11 completed private
+replays before Backpack landed at `b265a0bab0`; the remaining OKX private runs
+were interrupted by the next merge and are not claimed as passing. The corrected
+BloFin private script uses the root `rust:private-tape:blofin` alias.
+
+Backpack's landing extracts Tape from replay. Preserve strict implementation
+filtering for both direct and typed response stores, typed matching for existing
+venues, Backpack's signed requests and ordered mutations, and Hyro's two-phase
+handshake. All 84 harness regressions pass, including extraction-specific cases.
+The shared planner rejects unsupported Bybit controls and non-finite numeric
+protections before JSON serialization. Backpack's native planner now also rejects
+an entire batch with Bybit-only controls; its 50 native tests pass. The shell
+client-ID policy rejects close orders consistently with the native planner.
+
+The rebuilt nine-venue wasm is 2,844,905 bytes at LLVM `z`. The 3 MiB budget comes
+from the Backpack landing unchanged. The complete matrix is now 29 replay gates
+(13 public, 16 private); final validation and green final-head CI remain required
+before merge. Hyro live connectivity remains unverified.
