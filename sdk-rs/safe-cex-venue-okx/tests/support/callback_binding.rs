@@ -345,7 +345,7 @@ fn book_state_maintained_source_access_and_commit_order() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).unwrap().trim(),
-        "5 maintained source state observations PASS"
+        "6 maintained source state observations PASS"
     );
 }
 
@@ -435,5 +435,59 @@ fn book_state_recovery_keeps_original_topic_live_across_sends() {
             "{\"op\":\"unsubscribe\",\"args\":[{\"channel\":\"books\",\"instId\":\"BTC\",\"extra\":\"before\"}]}",
             "{\"op\":\"subscribe\",\"args\":[{\"channel\":\"books\",\"instId\":\"BTC\",\"extra\":\"after\"}]}",
         ]
+    );
+}
+
+#[test]
+fn book_state_public_frame_does_not_enumerate_topic_state() {
+    let (_h, socket) = book_state_socket();
+    let cause = Js::object(vec![("opaque", Js::Bool(true))]);
+    let topics = Js::object(vec![]);
+    topics
+        .define_accessor(
+            "unrelated",
+            Some(Rc::new(move |_| Err(Thrown::new(cause.clone())))),
+            None,
+        )
+        .unwrap();
+    socket.set("topics", topics).unwrap();
+    let calls = Rc::new(Cell::new(0));
+    let count = calls.clone();
+    let sequences = socket.get("orderBookSequenceByHandler").unwrap();
+    let observed = sequences.clone();
+    socket
+        .get("messageHandlers")
+        .unwrap()
+        .set(
+            "books.BTC",
+            Js::array(vec![Js::function("book", move |_, _| {
+                assert!(
+                    observed
+                        .call_method("get", vec![Js::str("books.BTC")])?
+                        .strict_equals(&Js::str("10")),
+                    "selected state is committed before callback"
+                );
+                count.set(count.get() + 1);
+                Ok(Js::Undefined)
+            })]),
+        )
+        .unwrap();
+    let event = Js::object(vec![(
+        "data",
+        Js::str(
+            r#"{"arg":{"channel":"books","instId":"BTC"},"action":"snapshot","data":[{"seqId":"10"}]}"#,
+        ),
+    )]);
+    let result = socket.call_method("onMessage", vec![event]);
+    assert!(
+        result.is_ok(),
+        "public frame must not read unrelated topics: {result:?}"
+    );
+    assert_eq!(calls.get(), 1);
+    assert!(
+        socket
+            .get("orderBookSequenceByHandler")
+            .unwrap()
+            .strict_equals(&sequences)
     );
 }
