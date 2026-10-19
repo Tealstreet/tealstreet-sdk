@@ -64,6 +64,13 @@ const isPrivate = Boolean(ts.account);
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
+  if (values.venue === 'bitunix') {
+    // Bitunix fixes: failed reconciliation preserves state; live cumulative fills
+    // emit once; split orders use distinct generated client IDs; cancel replies
+    // require per-order success; replacements reconcile final remaining quantity.
+    // Scenario oracles are added with the Bitunix private tape in the gate phase.
+    return;
+  }
   for (const position of account.positions) {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
     if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;

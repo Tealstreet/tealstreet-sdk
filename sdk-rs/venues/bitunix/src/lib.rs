@@ -1,6 +1,7 @@
 //! Bitunix USDT futures: sans-I/O public and account state machines.
 mod account;
 mod sign;
+mod trading;
 mod wire;
 use safe_cex_engine::{
     Command, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, json, num,
@@ -30,6 +31,7 @@ pub struct Options {
 
 pub enum Pending {
     Private(account::Read),
+    Trade(trading::Request),
     Markets { rows: Vec<Market>, invalid: bool },
     Tickers { rows: Vec<Ticker>, invalid: bool },
     Candles { command: u32 },
@@ -58,6 +60,7 @@ pub struct BitunixFutures {
     options: Options,
     credentials: Option<sign::Credentials>,
     account: account::AccountState,
+    trading: trading::TradingState,
     sockets: Vec<Socket>,
     books: HashMap<String, Book>,
     candles: HashSet<(String, String)>,
@@ -80,6 +83,7 @@ impl BitunixFutures {
                     })
             },
             account: account::AccountState::default(),
+            trading: trading::TradingState::default(),
             options,
             sockets: Vec::new(),
             books: HashMap::new(),
@@ -420,7 +424,25 @@ impl Venue for BitunixFutures {
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         let pending = match pending {
             Pending::Private(read) => {
+                let after = read.after;
+                let success = (200..300).contains(&response.status)
+                    && data(response.body).is_ok()
+                    && !read.invalid
+                    && self.account.generations[read.axis.index()] == read.generation
+                    && self.account.serials[match read.axis {
+                        account::Axis::Balance => 0,
+                        account::Axis::Positions => 1,
+                        account::Axis::Orders => 2,
+                        account::Axis::Tpsl => 3,
+                    }] == read.serial;
                 self.account_response(cx, read, response);
+                if let Some(command) = after {
+                    self.prepared(cx, command, success);
+                }
+                return;
+            }
+            Pending::Trade(request) => {
+                self.trade_response(cx, request, response);
                 return;
             }
             other => other,
@@ -491,7 +513,11 @@ impl Venue for BitunixFutures {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Trade(request) => self.trade_failed(cx, request, error),
             Pending::Private(read) => {
+                if let Some(command) = read.after {
+                    self.prepared(cx, command, false);
+                }
                 cx.log(LogLevel::Warning, error);
                 self.debounce(cx, read.axis);
             }
@@ -503,6 +529,9 @@ impl Venue for BitunixFutures {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.trade_timer(cx, timer) {
+            return;
+        }
         if self.account_timer(cx, timer) {
             return;
         }
@@ -637,7 +666,7 @@ impl Venue for BitunixFutures {
                 };
                 cx.request(Method::Get,format!("{REST}{KLINE}?symbol={symbol}&interval={interval}&startTime={start}&endTime={end}{limit_query}"),self.headers(),None,Pending::Candles {command});
             }
-            _ => {}
+            other => self.trading_command(cx, other),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {

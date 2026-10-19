@@ -22,6 +22,7 @@ pub struct Read {
     pub axis: Axis,
     pub generation: u64,
     pub serial: u64,
+    pub after: Option<u32>,
     pub positions: Vec<Position>,
     pub identities: Vec<(String, String)>,
     pub orders: Vec<Order>,
@@ -62,7 +63,7 @@ pub struct AccountState {
     pub login_retry: Option<TimerId>,
 }
 impl Axis {
-    fn index(self) -> usize {
+    pub(crate) fn index(self) -> usize {
         match self {
             Self::Balance => 0,
             Self::Positions => 1,
@@ -139,7 +140,7 @@ impl BitunixFutures {
         self.account.tick = Some(cx.set_timer(5_000.0));
     }
     pub(crate) fn signed_request(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         method: Method,
         path: &str,
@@ -185,6 +186,14 @@ impl BitunixFutures {
         }
     }
     pub(crate) fn read_axis(&mut self, cx: &mut Cx<'_, Pending>, axis: Axis) {
+        self.read_axis_for(cx, axis, None);
+    }
+    pub(crate) fn read_axis_for(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        axis: Axis,
+        after: Option<u32>,
+    ) {
         if self.credentials.is_none() {
             return;
         }
@@ -207,6 +216,7 @@ impl BitunixFutures {
         };
         self.account.serials[slot] += 1;
         let read = Read {
+            after,
             serial: self.account.serials[slot],
             axis,
             generation: self.account.generations[axis.index()],
@@ -219,9 +229,16 @@ impl BitunixFutures {
         };
         self.signed_request(cx, Method::Get, path, params, None, Pending::Private(read));
     }
-    pub(crate) fn fail_private(&self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+    pub(crate) fn fail_private(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
             Pending::Candles { command } => cx.done(command, Err(error.into())),
+            Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::Private(read) => {
+                if let Some(command) = read.after {
+                    self.prepared(cx, command, false);
+                }
+                cx.log(LogLevel::Error, error);
+            }
             _ => cx.log(LogLevel::Error, error),
         }
     }
@@ -505,17 +522,27 @@ impl BitunixFutures {
             }
         }
     }
-    fn commit_orders(&mut self, cx: &mut Cx<'_, Pending>, read: Read) {
+    fn commit_orders(&mut self, cx: &mut Cx<'_, Pending>, mut read: Read) {
         let tpsl = read.axis == Axis::Tpsl;
+        let optimistic: std::collections::HashSet<_> = cx
+            .store
+            .orders()
+            .iter()
+            .filter(|o| matches!(o.status, OrderStatus::Creating | OrderStatus::Canceling))
+            .map(|o| o.id.clone())
+            .collect();
+        read.orders.retain(|o| !optimistic.contains(&o.id));
+        read.native.retain(|(id, _)| !optimistic.contains(id));
         let mut orders: Vec<_> = cx
             .store
             .orders()
             .iter()
             .filter(|o| {
-                self.account.native.get(&o.id).is_some_and(|n| {
-                    !n.attached
-                        && (o.kind == OrderType::StopLoss || o.kind == OrderType::TakeProfit)
-                }) != tpsl
+                optimistic.contains(&o.id)
+                    || self.account.native.get(&o.id).is_some_and(|n| {
+                        !n.attached
+                            && (o.kind == OrderType::StopLoss || o.kind == OrderType::TakeProfit)
+                    }) != tpsl
             })
             .cloned()
             .collect();
@@ -827,6 +854,15 @@ impl BitunixFutures {
                                     }
                                 }
                                 if tpsl {
+                                    let qty = if r.kind == OrderType::TakeProfit {
+                                        o.tp_qty.0
+                                    } else {
+                                        o.sl_qty.0
+                                    };
+                                    if qty > 0.0 {
+                                        r.amount = qty;
+                                        r.remaining = qty;
+                                    }
                                     let stop = if r.kind == OrderType::TakeProfit {
                                         &o.tp_stop_type
                                     } else {

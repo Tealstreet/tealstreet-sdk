@@ -361,3 +361,25 @@ pub fn time_ms(s: &str) -> f64 {
         })
         .unwrap_or(0.0)
 }
+
+/// Required quantities on mutation recovery must never default malformed input to zero.
+#[derive(Deserialize)]
+#[serde(transparent)]
+pub struct StrictNum(#[serde(deserialize_with = "strict_number")] pub f64);
+fn strict_number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Numeric<'a> {
+        Number(f64),
+        Text(#[serde(borrow)] Str<'a>),
+    }
+    let value = match Numeric::deserialize(d)? {
+        Numeric::Number(v) => v,
+        Numeric::Text(s) => s.parse::<f64>().map_err(de::Error::custom)?,
+    };
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(de::Error::custom("nonfinite quantity"))
+    }
+}

@@ -94,3 +94,27 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   10 engine tests PASS; crypto suite 28 unit + 1 independent integration PASS.
   Added another malformed-order snapshot regression before final phase run.
 - Remaining phases: trading, queries, harness/gates and integration.
+
+### Phase 3 implementation/review checkpoint
+
+- Sequenced write jobs implement placement, max-five symbol batches paced one
+  second apart, full/partial TP/SL, native amendments, cancellations and account
+  settings. Whole-batch caller-ID preflight is fail-closed; native amend keeps
+  client IDs. Creating/canceling state and failure cleanup are implemented.
+- Reviewer `trading_review` found and prompted fixes for unsafe split recovery,
+  missing per-item cancellation acknowledgement, wrong standalone target leg,
+  premature LIMIT fallback rejection, restore-state gaps and preparation hangs.
+- Cancel/recreate now reads the final canceled order detail before sizing the
+  replacement, so a fill racing an amend/cancel cannot reopen excess quantity.
+  This intentionally fixes TS's original-size replacement and unchecked cancel
+  results. Add both to the known-TS-fix gate entry in phase 5.
+- 10 trading regressions PASS; additional cancel/fill-race cases added. Clippy
+  --fix resolved three collapsible-if warnings; rerun plain clippy before commit.
+- Queries will keep TS's unsupported public-trades error: Bitunix TS has no
+  REST public-trades implementation; do not invent an endpoint.
+
+- Phase-3 final verification: plain clippy all targets PASS; 15 trading,
+  8 account, 7 public and 1 signing tests PASS. Added regressions for strict
+  final-fill recovery and preserving job-owned optimistic rows during reads.
+  All review blockers addressed; known TS corrections listed in gate.mjs and
+  commit message. Tape-derived normalization remains a phase-5 task.
