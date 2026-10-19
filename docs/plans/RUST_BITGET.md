@@ -343,3 +343,11 @@ all focused tests pass. Final rebuild, replay and repeat audit in progress.
   changing imports during the merge are invalidated, not counted as passes.
 - Six-venue rebuild/remeasurement and final regressions running; no thresholds
   on CPU/memory were relaxed. Current PR head must pass CI before merge.
+
+- Six-venue WASM is 2,623,379 bytes; fixed aggregate budget2.75MiB
+  (2,883,584bytes). Workspace native tests/clippy and WASM clippy pass.
+- Final integration audit clear. Bitget tape routing now indexes the same
+  product/channel/symbol tuple once at subscription time, avoiding a linear
+  scan/rebuilt strings across846topics for every frame. Both implementations
+  use the same transport and retain exact routing/unsubscribe checks.
+- All29harness tests pass; six-venue replays running against frozen code.

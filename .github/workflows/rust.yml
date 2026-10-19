@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Six-venue merge: retain 2.25 MiB pending bundle remeasurement.
-      WASM_BUDGET_BYTES: 2359296
+      # Six venues: measured 2,623,379 bytes; allow 2.75 MiB.
+      WASM_BUDGET_BYTES: 2883584
     defaults:
       run:
         working-directory: .

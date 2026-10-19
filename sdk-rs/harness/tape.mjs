@@ -202,7 +202,9 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
         for (const topic of message.args) {
           if (!topic || typeof (topic.channel ?? topic.topic) !== 'string' || !(topic.channel ?? topic.topic))
             throw new Error(`Invalid subscription topic on ${socket.url}`);
-          const key = JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
+          const key = bitget
+            ? topicKey(topic)
+            : JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
           if (message.op === 'subscribe') socket.topics.set(key, topic);
           else socket.topics.delete(key);
         }
@@ -303,9 +305,7 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
       const key = bitget && arg && topicKey(arg);
       // Bitget has three sockets at the same URL; recorded frames belong to
       // their subscribed topics, not whichever socket connected last.
-      const matching = key
-        ? sockets.filter((socket) => [...socket.topics.values()].some((topic) => topicKey(topic) === key))
-        : sockets;
+      const matching = key ? sockets.filter((socket) => socket.topics.has(key)) : sockets;
       if (key && !matching.length) throw new Error(`frame has no subscribed socket: ${frame.url} ${key}`);
       this.audit?.received(frame.url, frame.text);
       for (const socket of matching) {
