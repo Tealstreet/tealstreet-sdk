@@ -4,23 +4,13 @@
 //   node --expose-gc --import tsx sdk-rs/harness/replay.mjs --impl ts --tape <file>
 //   node --expose-gc sdk-rs/harness/replay.mjs --impl rust --tape <file>
 import { readFileSync } from 'node:fs';
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
-import {
-  replayStoreReady,
-  ReplayClock,
-  Tape as SharedTape,
-  canonicalUrl as mexcUrl,
-  canonicalBody as mexcBody,
-} from './tape.mjs';
+import { Tape, withTimeout, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
-import { requestKey as keyOf, subscriptionKeys, isRead } from './requests.mjs';
-import { parseRequestJson } from './request-json.mjs';
 import { retainedMemory, settledMemory } from './memory.mjs';
-import { Responses } from './responses.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -39,298 +29,27 @@ const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes
   .toString('utf8')
   .split('\n')
   .filter(Boolean)
-  .map((line) => {
-    const record = JSON.parse(line);
-    // Both tape spellings describe the earliest time a snapshot is visible.
-    if (record.effectiveAt !== undefined) record.availableAfter ??= record.effectiveAt;
-    return record;
-  });
+  .map((line) => JSON.parse(line));
 const bookSymbols = values.books.split(',').filter(Boolean);
-const metadata = records.find((r) => r.type === 'meta');
-// Pin generated timestamps and freshness windows to the tape, across processes.
-let clockStart = performance.now();
-if (Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
-// A wrong startup URL, missing socket or lost command must fail the gate.
+const metadata = records.find((record) => record.type === 'meta');
+let clockStart = performance.now();
+if (Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
+const isPrivate =
+  metadata?.private ?? records.some(venue.isPrivateRecord ?? ((r) => r.url?.includes(venue.privateSocket)));
+const credentials = venue.replayCredentials ?? { key: 'replay-key', secret: 'replay-secret' };
+const PASSPHRASE = credentials.passphrase ?? 'replay-passphrase';
 const replayDeadline = realTimeout(() => {
   console.error('Replay exceeded its 120-second deadline');
   process.exit(1);
-}, 120_000);
+}, 120000);
 replayDeadline.unref();
-class ReplayTimeout extends Error {}
-const within = async (promise, ms, label) => {
-  let timer;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        timer = realTimeout(() => reject(new ReplayTimeout(`${label} exceeded ${ms} ms`)), ms);
-      }),
-    ]);
-  } finally {
-    realClearTimeout(timer);
-  }
-};
-const isPrivate =
-  metadata?.private ??
-  records.some((r) =>
-    venue.isPrivateRecord
-      ? venue.isPrivateRecord(r)
-      : Boolean(venue.privateSocket && r.url?.includes(venue.privateSocket)),
-  );
-const KEY = 'replay-key';
-const SECRET = 'replay-secret';
-const PASSPHRASE = 'replay-passphrase';
-const callerIds = new Set();
-const collectCallerIds = (value) => {
-  if (!value || typeof value !== 'object') return;
-  if (typeof value.clientOrderId === 'string') callerIds.add(value.clientOrderId);
-  for (const nested of Object.values(value)) collectCallerIds(nested);
-};
-for (const record of records) if (record.type === 'command') collectCallerIds(record);
-
-// MEXC permits snowflake identifiers as native numbers or exact strings, and
-// active trigger queries use a clock-relative rolling lookback.
-const requestKey = (method, url, body) =>
-  values.venue === 'mexc' ? `${method} ${mexcUrl(url)} ${mexcBody(body)}` : keyOf(method, url, body, callerIds, venue);
-const canonicalUrl = (url) => {
-  const parsed = new URL(url);
-  parsed.searchParams.delete('requestId');
-  parsed.searchParams.sort();
-  return parsed.toString();
-};
-const isWriteRequest = (method, url) => venue.isWrite?.(method, url) ?? !isRead(method, url);
-
-/** Serves recorded HTTP responses and websocket frames in tape order. */
-class Tape extends SharedTape {
-  constructor(impl) {
-    super(records, { isPrivate });
-    this.audit = venue.createSocketAudit?.(impl, {
-      isPrivate,
-      books: bookSymbols,
-      tickers: venue.publicTickers?.(records),
-    });
-    this.responses = new Responses(records, requestKey, venue.checkRequest, isWriteRequest);
-    this.commandIndex = 0;
-    this.time = 0;
-    this.subscriptions = new Set();
-    // Retain expected keys/backing storage across both memory samples: deleting
-    // startup-only harness state would subtract it from workload retained memory.
-    this.startupSubscriptions = new Map(
-      Array.from(venue.startupSubscriptions?.(records, bookSymbols) ?? [], (key) => [key, false]),
-    );
-    this.pendingStartupSubscriptions = this.startupSubscriptions.size;
-    this.generations = new Map();
-  }
-
-  respond(method, url, body, headers) {
-    venue.validateRequest?.({ method, url, body, headers });
-    const now = this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time;
-    const response = this.responses.respond(method, url, body, this.commandIndex, now);
-    this.unserved = this.responses.unserved;
-    if (response.status === 599) console.error(`Unserved or premature request: ${requestKey(method, url, body)}`);
-    if (/"\$(clientAlgoId|newClientOrderId)"/.test(response.body)) {
-      let sent = body ?? {};
-      if (ArrayBuffer.isView(sent) || sent instanceof ArrayBuffer) sent = new TextDecoder().decode(sent);
-      if (typeof sent === 'string') sent = sent ? parseRequestJson(sent) : {};
-      response.body = response.body.replace(/"\$(clientAlgoId|newClientOrderId)"/g, (_, field) =>
-        JSON.stringify(sent[field] ?? null),
-      );
-    }
-    return response;
-  }
-  connect(url, onOpen, onMessage, onClose) {
-    let socket;
-    socket = super.connect(
-      url,
-      onOpen,
-      (text) => {
-        this.audit?.received(url, text);
-        if ((venue.validateLogin || venue.validateSubscriptions) && text.trimStart().startsWith('{')) {
-          const message = JSON.parse(text);
-          if (venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified)
-            throw new Error(`Taped login success preceded a valid login on ${url}`);
-          this.assertSubscribed(socket, message);
-        }
-        onMessage(text);
-      },
-      onClose,
-    );
-    const key = canonicalUrl(url);
-    socket.generation = (this.generations.get(key) ?? 0) + 1;
-    this.generations.set(key, socket.generation);
-    socket.loginVerified = false;
-    socket.topics = new Map();
-    return socket;
-  }
-  send(socket, text) {
-    this.sent(socket.url, text);
-    for (const key of subscriptionKeys(socket.url, text)) {
-      this.subscriptions.add(`${socket.generation} ${key}`);
-      if (this.startupSubscriptions.get(key) === false) {
-        this.startupSubscriptions.set(key, true);
-        this.pendingStartupSubscriptions--;
-      }
-    }
-    this.audit?.sent(socket.url, text);
-    if (venue.respondToPing && text === 'ping') {
-      setImmediate(() => {
-        if (!socket.closed) socket.onMessage('pong');
-      });
-      return;
-    }
-    // OKX's opt-in auth validation also uses its v5 subscription argument model.
-    const validateTopics = venue.validateSubscriptions ?? venue.validateLogin;
-    if (!venue.validateLogin && !validateTopics) return;
-    const message = JSON.parse(text);
-    if (validateTopics && ['subscribe', 'unsubscribe'].includes(message.op)) {
-      if (!Array.isArray(message.args)) throw new Error(`Invalid subscription on ${socket.url}`);
-      for (const topic of message.args) {
-        if (!topic || typeof topic.channel !== 'string' || !topic.channel)
-          throw new Error(`Invalid subscription topic on ${socket.url}`);
-        const key = JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
-        if (message.op === 'subscribe') socket.topics.set(key, topic);
-        else socket.topics.delete(key);
-      }
-      return;
-    }
-    if (!venue.validateLogin || !/\/(private|business)$/.test(new URL(socket.url).pathname)) return;
-    if (message.op !== 'login') return;
-    const arg = message.args?.length === 1 ? message.args[0] : undefined;
-    const timestamp = String(arg?.timestamp ?? '');
-    if (
-      arg?.apiKey !== KEY ||
-      arg?.passphrase !== PASSPHRASE ||
-      !/^\d+$/.test(timestamp) ||
-      !Number.isSafeInteger(Number(timestamp)) ||
-      Math.abs(Number(timestamp) - Date.now() / 1000) > 30
-    ) {
-      throw new Error(`Invalid OKX login credentials/timestamp on ${socket.url}`);
-    }
-    const expected = createHmac('sha256', SECRET).update(`${timestamp}GET/users/self/verify`).digest('base64');
-    const supplied = Buffer.from(String(arg.sign ?? ''));
-    const expectedBytes = Buffer.from(expected);
-    if (supplied.length !== expectedBytes.length || !timingSafeEqual(supplied, expectedBytes)) {
-      throw new Error(`Invalid OKX login signature on ${socket.url}`);
-    }
-    socket.loginVerified = true;
-  }
-
-  assertSubscribed(socket, message) {
-    if (!(venue.validateSubscriptions ?? venue.validateLogin) || !message.arg?.channel || !Array.isArray(message.data))
-      return;
-    const topics = [...socket.topics.values()].filter((topic) => topic.channel === message.arg.channel);
-    // Some documented messages put instId only on each data row, not arg.
-    const rows = message.data.length ? message.data : [null];
-    for (const row of rows) {
-      const object = row && !Array.isArray(row) && typeof row === 'object' ? row : {};
-      const covered = topics.some((topic) =>
-        Object.entries(topic).every(([key, value]) => {
-          if (key === 'channel') return true;
-          if (key === 'instType' && value === 'ANY') return true;
-          const values = [message.arg[key], object[key]].filter((v) => v !== undefined && v !== '');
-          if (!values.length && key === 'instType') {
-            const id = object.instId ?? message.arg.instId;
-            if (id?.endsWith('-SWAP')) values.push('SWAP');
-          }
-          return values.length > 0 && values.every((v) => v === value);
-        }),
-      );
-      if (!covered) {
-        throw new Error(
-          `Unsubscribed ${message.arg.channel} frame on ${socket.url}: ${JSON.stringify(message.arg)}${object.instId ? ` instId=${object.instId}` : ''}`,
-        );
-      }
-    }
-  }
-
-  assertWritesConsumed() {
-    const missing = this.responses.unusedWrites();
-    if (missing) {
-      const routes = [...this.responses.queues.values()].flat().filter((r) => isWriteRequest(r.method, r.url)).map((r) => r.method + ' ' + new URL(r.url).pathname);
-      throw new Error(`${missing} taped write(s) were not sent: ${routes.join(', ')}`);
-    }
-  }
-
-  async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
-    await within(
-      (async () => {
-        await ready();
-        while (this.pendingStartupSubscriptions) await new Promise((resolve) => setTimeout(resolve, 1));
-      })(),
-      15_000,
-      'Replay startup',
-    );
-    begin();
-    clock?.start();
-    this.replayClock = clock;
-    const start = performance.now();
-    let delivered = 0;
-    const warm = Math.floor(this.frames.length / 4);
-    for (const frame of this.frames) {
-      if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
-      if (isPrivate) {
-        const wait = frame.t - (performance.now() - start);
-        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-      }
-      this.time = frame.t;
-      await clock?.advance(frame.t);
-      if (frame.type === 'command') {
-        this.commandIndex++;
-        this.results.push(
-          await within(runCommand(frame), 15_000, `Command ${frame.op}`).then(
-            (ids) => ({ ok: ids }),
-            (error) => {
-              if (error instanceof ReplayTimeout) throw error;
-              return { error: String(error?.message ?? error) };
-            },
-          ),
-        );
-      } else {
-        const socket = await this.socketFor(frame.url, frame.socket);
-        if (frame.type === 'close') this.close(socket, frame.code);
-        else if (frame.type === 'ws') socket.onMessage(frame.text);
-      }
-      delivered++;
-      onTick?.(frame.t);
-      await new Promise(setImmediate);
-    }
-    return delivered;
-  }
-
-  get unusedWrites() {
-    return this.responses.unusedWrites();
-  }
-
-  results = [];
-  sentRequests = new Set();
-  sent(url, text) {
-    if (!venue.requestBodies || text === 'ping' || text === 'pong') return;
-    let message;
-    try {
-      message = JSON.parse(text);
-    } catch {
-      return;
-    }
-    if (message.op === 'subscribe' || message.op === 'unsubscribe') {
-      for (const topic of message.args ?? []) this.sentRequests.add(JSON.stringify({ url, op: message.op, topic }));
-    } else if (message.op === 'login') {
-      const args = message.args.map(({ timestamp, nonce, sign, ...credentials }) => credentials);
-      this.sentRequests.add(JSON.stringify({ url, op: 'login', args }));
-    }
-  }
-}
+const KEY = credentials.key;
+const SECRET = credentials.secret;
 
 const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
-};
-const until = async (predicate, label) => {
-  const deadline = performance.now() + 15000;
-  while (!predicate()) {
-    if (performance.now() > deadline) throw new Error(`Replay timed out waiting for ${label}`);
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
 };
 
 const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
@@ -374,11 +93,11 @@ const tickerFields = [
   'mark',
   'index',
   'percentage',
-  'openInterest',
   'fundingRate',
   'fundingTime',
   'volume',
   'quoteVolume',
+  'openInterest',
 ];
 const marketFields = (m) => ({
   id: m.id,
@@ -387,6 +106,7 @@ const marketFields = (m) => ({
   quote: m.quote,
   active: m.active,
   contractSize: m.contractSize ?? null,
+  // The engine frame carries trading increments (RUST_REWRITE.md MARKETS).
   precision: { amount: m.precision.amount, price: m.precision.price },
   limits: { amount: m.limits.amount },
 });
@@ -396,7 +116,7 @@ async function runRust() {
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine();
-  const tape = new Tape('rust');
+  const tape = new Tape(records, venue, isPrivate, 30000, 'rust', bookSymbols);
   const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());
   clock?.install();
   const encoder = new TextEncoder();
@@ -418,13 +138,13 @@ async function runRust() {
       const socket = tape.connect(url, onOpen, onMessage, onClose);
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
     },
-    request: async ({ method, url, body: requestBody, headers }) => {
+    request: async ({ method, url, body: requestBody, headers, signal }) => {
+      signal?.throwIfAborted();
       const { status, headers: responseHeaders = '', body } = tape.respond(method, url, requestBody, headers);
-      // Model nativeTransport's chunks so streamed lists do not allocate a whole
-      // response in wasm before the venue sees the first item.
       const chunks = async function* () {
         const bytes = encoder.encode(body);
         for (let offset = 0; offset < bytes.length; offset += 16 * 1024) {
+          signal?.throwIfAborted();
           yield bytes.subarray(offset, offset + 16 * 1024);
         }
       };
@@ -470,7 +190,7 @@ async function runRust() {
           market: executed.market[i],
           side: executed.side[i],
           amount: executed.rows[i * 2 + 1],
-          price: executed.rows[i * 2],
+          ...(venue.compareFillPrices ? { price: executed.rows[i * 2] } : {}),
           id: executed.orderId(i),
         });
       }
@@ -491,11 +211,16 @@ async function runRust() {
       }
     },
     async () => {
-      await until(() => {
+      const deadline = performance.now() + 15000;
+      while (
+        !replayStoreReady(status?.loaded ?? 0, isPrivate) ||
+        (tape.audit && !tape.audit.ready()) ||
+        !tape.open.size
+      ) {
+        if (performance.now() > deadline) throw new Error('Replay timed out waiting for Rust startup');
         host.flush();
-        return replayStoreReady(status?.loaded ?? 0, isPrivate) && (!tape.audit || tape.audit.ready());
-      }, 'Rust startup');
-      await until(() => tape.open.size > 0, 'Rust initial socket');
+        await new Promise((resolve) => realTimeout(resolve, 5));
+      }
     },
     (record) => {
       const { op, ...rest } = record;
@@ -548,10 +273,12 @@ async function runRust() {
     frames,
     metrics,
     unserved: tape.unserved,
-    subscriptions: [...tape.subscriptions].sort(),
-    unusedWrites: tape.unusedWrites,
+    missingWrites: tape.missingWrites,
+    unusedWrites: tape.missingWrites,
     protocolErrors: tape.audit?.errors() ?? [],
+    invalidSignatures: tape.invalidSignatures,
     wsRequests: [...tape.sentRequests].sort(),
+    subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : [...tape.protocolSubscriptions].sort(),
     store: { markets: marketRows, tickers: tickerRows },
     books: bookRows,
     account,
@@ -561,63 +288,17 @@ async function runRust() {
 
 const commandArgs = ({ t, type, ...args }) => args;
 
-async function tsCommand(exchange, store, record) {
-  const { op, ...args } = commandArgs(record);
-  switch (op) {
-    case 'placeOrders':
-      return exchange.placeOrders(args.orders);
-    case 'cancelOrders':
-      await exchange.cancelOrders(store.orders.filter((order) => args.ids.includes(order.id)));
-      return [];
-    case 'cancelSymbolOrders':
-      await exchange.cancelSymbolOrders(args.symbol);
-      return [];
-    case 'amendOrder': {
-      const order = store.orders.find((o) => o.id === args.id);
-      if (!order) throw new Error(values.venue === 'mexc' ? `Order ${args.id} not found` : `unknown order ${args.id}`);
-      const update = Object.fromEntries(
-        ['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]),
-      );
-      return (await exchange.updateOrder({ order, update })) ?? [];
-    }
-    case 'setLeverage':
-      await exchange.setLeverage(args.symbol, args.leverage);
-      return [];
-    case 'setMarginType':
-      await exchange.changeMarginType(args.isolated, args.symbol);
-      return [];
-    case 'setPositionMode':
-      await exchange.changePositionMode(args.hedged);
-      return [];
-    case 'fetchLeverage':
-      return exchange.fetchLeverageForSymbol(args.symbol);
-    case 'fetchFills':
-      return exchange.fetchHistoricalFills(args);
-    case 'fetchOrderHistory':
-      return exchange.fetchHistoricalOrders(args);
-    case 'fetchIncome':
-      return exchange.fetchIncomeHistory({
-        symbol: args.symbol,
-        incomeType: args.incomeType,
-        startTime: args.from,
-        endTime: args.to,
-        limit: args.limit,
-      });
-    case 'fetchPublicTrades':
-      return exchange.fetchPublicTrades(args.symbol, args.limit);
-    case 'fetchCandles':
-      return exchange.fetchOHLCV(args);
-    default:
-      throw new Error(`unknown command ${op}`);
-  }
-}
-
 /** Main-thread view of the account, rebuilt from the latest frame tables. */
 function rustAccount({ markets, orders, positions, balance, settings, status, fills }) {
   const symbol = (i) => markets.symbol(i);
   const orderRows = [];
   for (let i = 0; i < (orders?.count ?? 0); i++) {
-    const row = { id: orders.id(i), symbol: symbol(orders.market[i]), ...orderEnums(orders.enums[i]) };
+    const row = {
+      id: orders.id(i),
+      ...(venue.compareClientIds ? { clientOrderId: orders.clientOrderId(i) ?? null } : {}),
+      symbol: symbol(orders.market[i]),
+      ...orderEnums(orders.enums[i]),
+    };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
     orderRows.push(row);
   }
@@ -656,7 +337,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 }
 
 async function runTs() {
-  const tape = new Tape('ts');
+  const tape = new Tape(records, venue, isPrivate, 30000, 'ts', bookSymbols);
   const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());
   clock?.install();
   class TapeWebSocket {
@@ -708,6 +389,7 @@ async function runTs() {
   const require = createRequire(new URL('../../packages/safe-cex/src/exchanges/base.ws.ts', import.meta.url));
   const wsModule = require.resolve('ws');
   require.cache[wsModule] = { id: wsModule, filename: wsModule, loaded: true, exports: TapeWebSocket };
+
   const { [venue.ts.className]: Exchange } = await import(venue.ts.module);
   const { DefaultStore } = await import('../../packages/safe-cex/src/store/store.base.ts');
   const adapter = async (config) => {
@@ -727,22 +409,16 @@ async function runTs() {
       config.headers?.toJSON?.() ?? config.headers,
     );
     // The raw body: the client's own transformResponse parses it, big ids included.
-    const response = {
-      data: body,
-      status,
-      statusText: String(status),
-      headers: Object.fromEntries(
-        (responseHeaders ?? '')
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => {
-            const colon = line.indexOf(':');
-            return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()];
-          }),
-      ),
-      config,
-      request: {},
-    };
+    const headers = Object.fromEntries(
+      (responseHeaders ?? '')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => {
+          const colon = line.indexOf(':');
+          return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()];
+        }),
+    );
+    const response = { data: body, status, statusText: String(status), headers, config, request: {} };
     if (status >= 400) {
       const error = new Error(`Request failed with status code ${status}`);
       error.response = response;
@@ -772,7 +448,7 @@ async function runTs() {
       : { key: '', secret: '', publicDataOnly: true }),
   };
   const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
-  // Model the worker shell's local method dispatch, using the real methods.
+  // Model worker dispatch through the exchange's real local methods.
   exchange.emitter.on('callMethod', ({ method, args, requestId }) => {
     setImmediate(async () => {
       try {
@@ -814,18 +490,17 @@ async function runTs() {
     async () => {
       await Promise.all([started, subscribed]);
       venue.prepareTsReady?.(exchange, { isPrivate });
-      await until(() => venue.tsBooksSubscribed(exchange, bookSymbols.length), 'TS book subscriptions');
+      while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
       const loaded = () => Object.values(store.loaded).every(Boolean);
-      await until(() => !isPrivate || loaded(), `TS account startup (${JSON.stringify(store.loaded)})`);
-      await until(() => tape.open.size > 0, 'TS initial socket');
+      while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
     },
-    (record) => tsCommand(exchange, store, record),
+    (record) => runTsCommand(exchange, store, record),
     clock,
     () => {
       if (isPrivate) clockStart = performance.now();
     },
   );
-  await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
+  await withTimeout(Promise.all([started, subscribed]), 'TS startup/subscriptions');
   await settle();
   tape.assertWritesConsumed();
   postStore();
@@ -876,10 +551,12 @@ async function runTs() {
     frames,
     metrics,
     unserved: tape.unserved,
-    subscriptions: [...tape.subscriptions].sort(),
-    unusedWrites: tape.unusedWrites,
+    missingWrites: tape.missingWrites,
+    unusedWrites: tape.missingWrites,
     protocolErrors: tape.audit?.errors() ?? [],
+    invalidSignatures: tape.invalidSignatures,
     wsRequests: [...tape.sentRequests].sort(),
+    subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : [...tape.protocolSubscriptions].sort(),
     store: snapshot,
     books: bookCopies,
     account,
@@ -887,10 +564,58 @@ async function runTs() {
   };
 }
 
+async function runTsCommand(exchange, store, record) {
+  const { op, ...args } = commandArgs(record);
+  switch (op) {
+    case 'placeOrders':
+      return exchange.placeOrders(args.orders);
+    case 'cancelOrders':
+      await exchange.cancelOrders(store.orders.filter((order) => args.ids.includes(order.id)));
+      return [];
+    case 'cancelSymbolOrders':
+      await exchange.cancelSymbolOrders(args.symbol);
+      return [];
+    case 'amendOrder': {
+      const order = store.orders.find((o) => o.id === args.id);
+      if (!order) throw new Error(values.venue === 'mexc' ? `Order ${args.id} not found` : `unknown order ${args.id}`);
+      const update = Object.fromEntries(
+        ['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]),
+      );
+      return (await exchange.updateOrder({ order, update })) ?? [];
+    }
+    case 'setLeverage':
+      await exchange.setLeverage(args.symbol, args.leverage);
+      return [];
+    case 'setMarginType':
+      await exchange.changeMarginType(args.isolated, args.symbol);
+      return [];
+    case 'setPositionMode':
+      await exchange.changePositionMode(args.hedged);
+      return [];
+    case 'fetchLeverage':
+      return exchange.fetchLeverageForSymbol(args.symbol);
+    case 'fetchFills':
+      return exchange.fetchHistoricalFills(args);
+    case 'fetchOrderHistory':
+      return exchange.fetchHistoricalOrders(args);
+    case 'fetchIncome': {
+      const { from, to, ...options } = args;
+      return exchange.fetchIncomeHistory({ ...options, startTime: from, endTime: to });
+    }
+    case 'fetchPublicTrades':
+      return exchange.fetchPublicTrades(args.symbol, args.limit);
+    case 'fetchCandles':
+      return exchange.fetchOHLCV(args);
+    default:
+      throw new Error(`unknown command ${op}`);
+  }
+}
+
 /** The fields both implementations carry, in one shape. */
 function normalizeAccount(account) {
   const order = (o) => ({
     id: String(o.id),
+    ...(venue.compareClientIds ? { clientOrderId: o.clientOrderId ?? null } : {}),
     symbol: o.symbol,
     status: o.status,
     type: o.type,
@@ -899,6 +624,7 @@ function normalizeAccount(account) {
     amount: o.amount,
     filled: o.filled,
     remaining: o.remaining,
+    ...(venue.compareClientIds && o.type === 'limit' ? { timeInForce: o.timeInForce ?? null } : {}),
     reduceOnly: Boolean(o.reduceOnly),
     close: Boolean(o.close),
     trigger: o.tpTriggerType ?? o.slTriggerType ?? o.triggerType ?? null,
@@ -924,12 +650,12 @@ function normalizeAccount(account) {
     orders: account.orders.map(order).sort(bySymbol),
     positions: account.positions.map(position).sort(bySymbol),
     settings: account.settings
-      .map((s) => ({
-        symbol: s.symbol,
-        marginType: s.marginType,
+      .map((setting) => ({
+        symbol: setting.symbol,
+        marginType: setting.marginType,
         ...(venue.independentLeverage
-          ? { buyLeverage: s.buyLeverage, sellLeverage: s.sellLeverage }
-          : { leverage: s.leverage }),
+          ? { buyLeverage: setting.buyLeverage, sellLeverage: setting.sellLeverage }
+          : { leverage: setting.leverage }),
       }))
       .sort(bySymbol),
     fills: account.fills,
@@ -944,18 +670,22 @@ writeFileSync(
     impl: values.impl,
     frames: result.frames,
     unserved: result.unserved,
-    subscriptions: result.subscriptions,
+    missingWrites: result.missingWrites,
     unusedWrites: result.unusedWrites,
     protocolErrors: result.protocolErrors,
+    invalidSignatures: result.invalidSignatures,
     wsRequests: result.wsRequests,
+    subscriptions: result.subscriptions,
     metrics: result.metrics,
-    markets: result.store.markets.map(marketFields),
-    tickers: result.store.tickers.map((t) =>
-      Object.fromEntries([
-        ['symbol', t.symbol],
-        ...tickerFields.map((f) => [f, f === 'openInterest' ? (t[f] ?? 0) : t[f]]),
-      ]),
-    ),
+    markets: result.store.markets.filter(venue.marketFilter ?? (() => true)).map(marketFields),
+    tickers: result.store.tickers
+      .filter(venue.marketFilter ?? (() => true))
+      .map((t) =>
+        Object.fromEntries([
+          ['symbol', t.symbol],
+          ...tickerFields.map((f) => [f, f === 'openInterest' ? (t[f] ?? 0) : t[f]]),
+        ]),
+      ),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
     commands: result.commands,
