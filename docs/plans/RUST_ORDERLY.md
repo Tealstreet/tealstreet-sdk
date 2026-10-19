@@ -160,3 +160,35 @@ negative and Receive as positive; other income types fail explicitly. Match
 Binance JSON shapes, including seconds execution/income/public timestamps and
 millisecond historical createdTime/updatedTime. Public rows without native IDs
 use a deterministic content key plus identical-row occurrence discriminator.
+
+### Queries phase
+
+Implemented streamed fills (including direct order-trades lookup), ordinary and
+nested algo terminal history, settled funding and public trades. Order history
+omits the API's COMPLETED filter so rejected orders remain visible; Open rows
+are filtered locally. Output units follow Binance. Bounds: 50 pages, 500 rows
+per page, 1,000 results, algo depth8 and 1,000 nodes per root. Malformed/missing
+rows, repeated pages and failed later reads fail the complete command. Public
+trade IDs preserve identical same-time executions using occurrence suffixes.
+Funding starts are paced across concurrent commands and rechecked when delayed
+host timers fire; Pay is negative and Accrued rows are excluded.
+
+Independent review found/fixed delayed-timer funding bursts, nested bracket
+traversal, root status overwriting explicit child status, and opening bracket
+entries accidentally defaulting reduce-only. Final re-review has no blockers.
+Verification: all17 query tests and crate Clippy pass. SDK/harness integration
+is underway; its first public gate exposed broker-suffixed symbols and the
+obsolete aggregate funding topic, to be corrected before counting gates green.
+
+### Integration plan audit
+
+Ship all six aliases through production registries and a default WASM loader;
+retain the former implementation only in __tests__/reference for independent
+replay. Conditional package exports must keep Node filesystem glue outside the
+browser graph. Preserve applicationId, tick cadence, broker UUID/tags, account
+identity and startup rejection/disposal lifecycle. Honor selected REST routing
+at the host boundary; never silently send routed credentials directly.
+Use strict independent ED25519 verification and exact ordered bodies in tapes;
+correlate public snapshot responses by taped semantic request, symbol, socket
+generation and opaque-ID occurrence. Run actual live two-book20s recording,
+all alias/testnet private gates, existing venue regressions, and full checks.

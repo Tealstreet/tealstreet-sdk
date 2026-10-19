@@ -1,5 +1,6 @@
 //! Orderly perpetuals, shared by its six broker frontends.
 mod account;
+mod history;
 mod sign;
 mod trading;
 mod wire;
@@ -46,6 +47,7 @@ pub struct Options {
 }
 
 pub enum Pending {
+    History(history::Request),
     Trade(trading::Request),
     Account(account::Request),
     Markets {
@@ -105,6 +107,7 @@ pub struct Orderly {
     generation: u64,
     account: account::Account,
     trading: trading::Trading,
+    history: history::HistoryState,
 }
 impl Orderly {
     pub fn new(options: Options) -> Self {
@@ -119,6 +122,7 @@ impl Orderly {
             generation: 0,
             account: account::Account::default(),
             trading: trading::Trading::default(),
+            history: history::HistoryState::default(),
         }
     }
     fn rest(&self) -> &'static str {
@@ -551,9 +555,13 @@ impl Venue for Orderly {
             self.account_item(cx, request, item);
             return;
         }
+        if let Pending::History(request) = pending {
+            self.history_item(cx, request, item);
+            return;
+        }
         let result: Result<(), String> = (|| {
             match pending {
-                Pending::Account(_) | Pending::Trade(_) => unreachable!(),
+                Pending::Account(_) | Pending::Trade(_) | Pending::History(_) => unreachable!(),
                 Pending::Markets { rows, .. } => {
                     let r: MarketRow<'_> = serde_json::from_str(item).map_err(|e| e.to_string())?;
                     let Some(s) = symbol(&r.symbol) else {
@@ -660,7 +668,7 @@ impl Venue for Orderly {
                 Pending::Markets { invalid, .. }
                 | Pending::Tickers { invalid, .. }
                 | Pending::Candles { invalid, .. } => *invalid = true,
-                Pending::Account(_) | Pending::Trade(_) => unreachable!(),
+                Pending::Account(_) | Pending::Trade(_) | Pending::History(_) => unreachable!(),
             }
             cx.log(LogLevel::Error, e);
         }
@@ -673,6 +681,10 @@ impl Venue for Orderly {
         }
         if let Pending::Trade(request) = pending {
             self.trade_response(cx, request, response);
+            return;
+        }
+        if let Pending::History(request) = pending {
+            self.history_response(cx, request, response);
             return;
         }
         if let Err(e) = checked(response) {
@@ -717,12 +729,16 @@ impl Venue for Orderly {
         match pending {
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::History(request) => self.history_failed(cx, request, error),
             Pending::Markets { .. } => self.retry_seed(cx, Seed::Markets, error),
             Pending::Tickers { .. } => self.retry_seed(cx, Seed::Tickers, error),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.history_timer(cx, timer) {
+            return;
+        }
         if self.trade_timer(cx, timer) {
             return;
         }
@@ -897,9 +913,7 @@ impl Venue for Orderly {
                 );
             }
             Command::SetTickerSymbols { .. } => {}
-            Command::Query { command, .. } => {
-                cx.done(command, Err("Orderly query unavailable".into()))
-            }
+            Command::Query { command, query } => self.history_command(cx, command, query),
             trade => self.trade_command(cx, trade),
         }
     }
