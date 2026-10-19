@@ -5340,16 +5340,40 @@ fn client_query_serializer_preserves_axios_receiver_and_options() {
         let terminal = std::sync::Arc::new(Terminal::default());
         let trace = Rc::new(RefCell::new(Vec::<bool>::new()));
         let seen = trace.clone();
+        let original_options = Js::object(vec![]);
+        let options_owner = match &original_options {
+            Js::Object(owner) => Rc::downgrade(owner),
+            _ => unreachable!(),
+        };
+        let callable_owner = Rc::new(RefCell::new(std::rc::Weak::<
+            safe_cex_exchange::js_runtime::value::FunctionData,
+        >::new()));
+        let callable = callable_owner.clone();
         let serializer = Js::function("serialize", move |this, args| {
             seen.borrow_mut()
                 .extend([this.is_undefined(), args.len() == 2]);
             let options = arg(&args, 1);
-            seen.borrow_mut()
-                .push(options.get("serialize")?.is_callable());
+            let serialize = options.get("serialize")?;
+            seen.borrow_mut().push(
+                callable
+                    .borrow()
+                    .upgrade()
+                    .is_some_and(|owner| serialize.same_reference(&Js::Function(owner))),
+            );
+            seen.borrow_mut().push(
+                !object_form
+                    || options_owner
+                        .upgrade()
+                        .is_some_and(|owner| options.same_reference(&Js::Object(owner))),
+            );
             Ok(Js::str("native=query"))
         });
+        if let Js::Function(owner) = &serializer {
+            *callable_owner.borrow_mut() = Rc::downgrade(owner);
+        }
         let serializer = if object_form {
-            Js::object(vec![("serialize", serializer)])
+            original_options.define("serialize", serializer).unwrap();
+            original_options
         } else {
             serializer
         };
@@ -5371,7 +5395,7 @@ fn client_query_serializer_preserves_axios_receiver_and_options() {
         assert!(result.is_ok(), "actual host serializer setup: {result:?}");
         assert_eq!(
             *trace.borrow(),
-            [true, true, true],
+            [true, true, true, true],
             "Axios buildURL receiver/arguments, object={object_form}"
         );
         assert_eq!(terminal.seen.lock().unwrap()[0].url, "/ok?native=query");
