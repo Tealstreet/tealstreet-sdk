@@ -200,3 +200,14 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
 - BingX79 tests pass. Merged public3-run gate PASS: CPU77.5/61.8ms,
   steady29.4/24.5ms, memory ratio1.03. Combined wasm1,849,491bytes (<2MiB).
   Other merged gates and a Node22 CI-toolchain check are next.
+
+### Shared subscription gate exception
+
+- Exact outbound parity exposed landed Bybit's intentional extra execution and
+  wallet subscriptions (TS uses cumulative orders and REST wallet reads).
+  Declared the native stream improvement in KNOWN_TS_FIXES and Bybit notes.
+  Expected extra topics derive only from each TS private connection generation;
+  missing Rust execution/wallet or any other mismatch still fails. Independent
+  gate-integrity review has no blocker. Bybit private18-frame Node22 gate PASS.
+- All merged Node24 venue gates PASS after this declaration: BingX188/38frames,
+  Binance871/14frames, Bybit8742/18frames. Workspace clippy --all-targets passes.

@@ -60,7 +60,6 @@ for (const impl of ['ts', 'rust']) {
   const unserved = results[impl][0].unserved;
   if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
 }
-if (JSON.stringify(ts.subscriptions) !== JSON.stringify(rust.subscriptions)) differences.push(`websocket subscriptions: ts=${JSON.stringify(ts.subscriptions)} rust=${JSON.stringify(rust.subscriptions)}`);
 const isPrivate = Boolean(ts.account);
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 // BingX additionally fixes write/read defects covered by native contract tests:
@@ -86,6 +85,13 @@ const isPrivate = Boolean(ts.account);
 //  - Bybit: with no mark price, TS can add a second Partial stop on amend;
 //    Rust amends the existing native order ID.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
+  if (values.venue === 'bybit') {
+    // TS infers executions from cumulative orders and waits for REST wallet reads.
+    // Rust uses authoritative execution/wallet streams; require them per connection.
+    const required = ts.subscriptions.filter((key) => key.endsWith('/v5/private subscribe order'))
+      .flatMap((key) => ['execution', 'wallet'].map((topic) => key.replace(/order$/, topic)));
+    ts.subscriptions = [...new Set([...ts.subscriptions, ...required])].sort();
+  }
   if (values.venue === 'bingx') {
     // BingX TS emits a terminal cumulative fill, ignores partial executions,
     // and drops its terminal watermark so TRADE_UPDATE can repeat that fill.
@@ -175,6 +181,7 @@ if (values.venue === 'bingx') {
     book.asks.sort((a,b) => a[0]-b[0]);
   }
 }
+if (JSON.stringify(ts.subscriptions) !== JSON.stringify(rust.subscriptions)) differences.push(`websocket subscriptions: ts=${JSON.stringify(ts.subscriptions)} rust=${JSON.stringify(rust.subscriptions)}`);
 for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
   if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
     differences.push(`book ${symbol} differs`);
