@@ -260,6 +260,7 @@ fn decode_body(data: Value) -> Value {
 #[derive(Default)]
 pub struct Http {
     pub runtime: RefCell<Option<Rc<Runtime>>>,
+    pub response_headers: RefCell<Option<Value>>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Js)>)>>,
     pub requests: RefCell<Vec<Request>>,
 }
@@ -337,9 +338,9 @@ impl JsHttpHost for Http {
                 ("data", body),
                 (
                     "headers",
-                    from_json(
-                        &json!({"set-cookie":["gravity=fixture-session; Expires=Wed, 15 Nov 2023 00:00:00 GMT"],"x-grvt-account-id":"account-42"}),
-                    ),
+                    from_json(&self.response_headers.borrow().clone().unwrap_or_else(|| {
+                        json!({"set-cookie":["gravity=fixture-session; Expires=Wed, 15 Nov 2023 00:00:00 GMT"],"x-grvt-account-id":"account-42"})
+                    })),
                 ),
             ])),
             None => Err(Thrown::error(
