@@ -485,3 +485,11 @@ the owned cause crosses the production Promise/API boundaries.
 with the complete maintained signing module on both networks. Preserve the
 independent BytesLike probes; `FIX_AUDIT_SIGNING.md` states the finite input scope
 and keeps the typed raw-key Result adapter distinct from arbitrary wallet hooks.
+
+The unreadable order-response class audit uses the actual constructed binding,
+its original parser and placement catch branch. Preserve the custom Error
+constructor/prototype identity and the unreadable-only reconciliation branch.
+`FIX_AUDIT_ORDER_ERROR.md` records four native constructor profiles, fourteen
+source/native consumer profiles and three compiled semantic controls. The
+portable typed Result adapter is distinct from the production exception object.
+

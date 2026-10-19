@@ -6,6 +6,10 @@
 mod cloid_audit;
 
 #[cfg(test)]
+#[path = "../tests/support/order_error_audit.rs"]
+mod order_error_audit;
+
+#[cfg(test)]
 #[path = "../tests/support/signing_audit.rs"]
 mod signing_audit;
 
