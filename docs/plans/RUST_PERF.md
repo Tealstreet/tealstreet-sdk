@@ -232,3 +232,12 @@ inflation. Guarantee covers per-socket decoder order; existing independent async
 binary decoders are not serialized with unrelated sockets/HTTP/timers. Text input
 retains the engine batch barriers. Focused independent 22-test review passes.
 Optional memory tracing skips methods absent from the unbatched control.
+
+Repository rerun fully green: 44 typecheck, 28 lint, 27 test tasks. Final merged
+private correctness tapes pass for all nine variants: Binance 14 frames, Bybit18,
+Crypto.com21, WEEX20, BingX38, each OKX variant29. No unmatched requests/results.
+Follow-up memory review confirms market/ticker tables never append after Store
+replacement. Their setters now shrink spare incoming vector capacity before
+index construction; duplicate identity, row ordering, deltas and replacement
+cleanup are unchanged. Engine38 tests and independent review pass. Six release
+families rebuild before final public comparisons; no gate thresholds changed.

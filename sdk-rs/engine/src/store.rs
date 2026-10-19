@@ -118,7 +118,9 @@ impl Store {
             .map(|&index| &self.markets[index as usize])
     }
 
-    pub fn set_markets(&mut self, markets: Vec<Market>) {
+    pub fn set_markets(&mut self, mut markets: Vec<Market>) {
+        // Rows are replaced wholesale, so collection growth capacity is unused.
+        markets.shrink_to_fit();
         self.market_by_symbol = markets
             .iter()
             .enumerate()
@@ -148,7 +150,9 @@ impl Store {
             .map(|index| &self.tickers[index as usize])
     }
 
-    pub fn set_tickers(&mut self, tickers: Vec<Ticker>) {
+    pub fn set_tickers(&mut self, mut tickers: Vec<Ticker>) {
+        // Updates mutate existing rows; only replacement changes the row count.
+        tickers.shrink_to_fit();
         self.tickers = tickers;
         self.ticker_by_symbol = (0..self.tickers.len() as u32).collect();
         self.ticker_by_symbol.sort_unstable_by(|&a, &b| {
@@ -752,6 +756,42 @@ mod tests {
             taker_fee: None,
             maker_fee: None,
         }
+    }
+
+    #[test]
+    fn replacement_tables_release_spare_capacity_without_changing_row_identity() {
+        let mut store = Store::default();
+        let mut markets = Vec::with_capacity(64);
+        markets.extend([market("X", "B"), market("Y", "A"), market("X", "A")]);
+        let mut tickers = Vec::with_capacity(64);
+        let mut last_a = ticker("A");
+        last_a.last = 9.0;
+        tickers.extend([ticker("B"), ticker("A"), last_a]);
+        store.set_markets(markets);
+        store.set_tickers(tickers);
+
+        assert!(store.markets.capacity() < 64);
+        assert!(store.tickers.capacity() < 64);
+        assert_eq!(store.markets()[0].symbol, "B");
+        assert_eq!(store.markets()[1].id, "Y");
+        assert_eq!(store.market_index("A"), Some(2));
+        assert_eq!(store.market_index_by_id("X"), Some(2));
+        assert_eq!(store.tickers()[1].last, 0.0);
+        assert_eq!(store.ticker("A").unwrap().last, 9.0);
+        store.take_pending();
+        store.update_ticker_by_market_id("X", |row| row.last = 10.0);
+        assert_eq!(store.take_pending().ticker_deltas, [(2, 1 << 2)]);
+
+        store.update_ticker("B", |row| row.bid = 5.0);
+        store.set_markets(Vec::with_capacity(64));
+        store.set_tickers(Vec::with_capacity(64));
+        assert_eq!(store.markets.capacity(), 0);
+        assert_eq!(store.tickers.capacity(), 0);
+        assert!(store.market_by_id("X").is_none());
+        assert!(store.ticker("A").is_none());
+        assert!(store.ticker_masks.is_empty());
+        assert!(store.dirty_tickers.is_empty());
+        assert!(store.take_pending().ticker_deltas.is_empty());
     }
 
     #[test]
