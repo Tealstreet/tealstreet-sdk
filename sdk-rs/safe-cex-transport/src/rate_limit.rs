@@ -1,6 +1,7 @@
 use crate::{RestAdapter, RestExecution, RestRequest, RestResponse, TransportFuture};
 use std::collections::VecDeque;
 use std::future::poll_fn;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::task::{Poll, Waker};
 
@@ -9,9 +10,21 @@ pub trait RateLimitClock {
     fn now_ms(&self) -> u64;
     fn sleep_ms(&self, milliseconds: u64) -> TransportFuture<'_, ()>;
 }
+pub trait RateLimitTimer {
+    fn cancel(&self);
+}
+pub trait RateLimitScheduler {
+    fn schedule_reset(
+        &self,
+        milliseconds: u64,
+        callback: Box<dyn FnOnce(Result<(), crate::TransportError>)>,
+    ) -> Result<Box<dyn RateLimitTimer>, crate::TransportError>;
+}
 #[derive(Default)]
 struct State {
-    reset: Option<TransportFuture<'static, ()>>,
+    reset: Option<Box<dyn RateLimitTimer>>,
+    window: u64,
+    error: Option<crate::TransportError>,
     count: usize,
     next_ticket: u64,
     queue: VecDeque<(u64, Option<Waker>)>,
@@ -22,10 +35,10 @@ pub struct RateLimitedAdapter {
 }
 /// A FIFO rate slot acquired before request signing, shared by adapter and native clients.
 pub struct RateLimiter {
-    clock: Arc<dyn RateLimitClock>,
+    clock: Arc<dyn RateLimitScheduler>,
     max_requests: usize,
     per_milliseconds: u64,
-    state: Mutex<State>,
+    state: Rc<Mutex<State>>,
 }
 struct QueueGuard<'a> {
     state: &'a Mutex<State>,
@@ -46,7 +59,7 @@ impl Drop for QueueGuard<'_> {
 impl RateLimitedAdapter {
     pub fn new(
         inner: Arc<dyn RestAdapter>,
-        clock: Arc<dyn RateLimitClock>,
+        clock: Arc<dyn RateLimitScheduler>,
         max_requests: usize,
         per_milliseconds: u64,
     ) -> Self {
@@ -57,13 +70,17 @@ impl RateLimitedAdapter {
     }
 }
 impl RateLimiter {
-    pub fn new(clock: Arc<dyn RateLimitClock>, max_requests: usize, per_milliseconds: u64) -> Self {
+    pub fn new(
+        clock: Arc<dyn RateLimitScheduler>,
+        max_requests: usize,
+        per_milliseconds: u64,
+    ) -> Self {
         assert!(max_requests > 0 && per_milliseconds > 0);
         Self {
             clock,
             max_requests,
             per_milliseconds,
-            state: Mutex::new(State::default()),
+            state: Rc::new(Mutex::new(State::default())),
         }
     }
     /// Reserve one dispatch slot; dropping a pending acquire releases its FIFO ticket.
@@ -93,44 +110,45 @@ impl RateLimiter {
                 }
                 return Poll::Pending;
             }
-            let reset = state.reset.take();
-            drop(state);
-            let (reset, completed) = match reset {
-                Some(mut reset) => match reset.as_mut().poll(cx) {
-                    Poll::Ready(result) => (None, Some(result)),
-                    Poll::Pending => (Some(reset), None),
-                },
-                None => (None, None),
-            };
-            let mut state = self.state.lock().expect("rate limit lock");
-            state.reset = reset;
-            if let Some(result) = completed {
-                state.count = 0;
-                if let Err(error) = result {
-                    return Poll::Ready(Err(error));
-                }
+            if let Some(error) = state.error.take() {
+                return Poll::Ready(Err(error));
             }
             if state.count == self.max_requests {
+                state.queue.front_mut().expect("front reservation").1 = Some(cx.waker().clone());
                 return Poll::Pending;
             }
             state.count += 1;
             if state.count == 1 {
+                state.window += 1;
+                let window = state.window;
+                let owner = Rc::downgrade(&self.state);
                 drop(state);
-                let clock = self.clock.clone();
-                let delay = self.per_milliseconds;
-                let mut reset: TransportFuture<'static, ()> =
-                    Box::pin(async move { clock.sleep_ms(delay).await });
-                // Register at the first dispatch; later clock reads cannot
-                // postpone an elapsed window or strand a frozen replay clock.
-                let (reset, completed) = match reset.as_mut().poll(cx) {
-                    Poll::Pending => (Some(reset), None),
-                    Poll::Ready(result) => (None, Some(result)),
-                };
+                let reset = self.clock.schedule_reset(
+                    self.per_milliseconds,
+                    Box::new(move |result| {
+                        let Some(owner) = owner.upgrade() else { return };
+                        let (timer, wake) = {
+                            let mut state = owner.lock().expect("rate limit lock");
+                            if state.window != window {
+                                return;
+                            }
+                            state.count = 0;
+                            state.error = result.err();
+                            let timer = state.reset.take();
+                            let wake = state.queue.front_mut().and_then(|(_, waker)| waker.take());
+                            (timer, wake)
+                        };
+                        drop(timer);
+                        if let Some(wake) = wake {
+                            wake.wake();
+                        }
+                    }),
+                );
                 let mut state = self.state.lock().expect("rate limit lock");
-                state.reset = reset;
-                if let Some(result) = completed {
-                    state.count = 0;
-                    if let Err(error) = result {
+                match reset {
+                    Ok(reset) => state.reset = Some(reset),
+                    Err(error) => {
+                        state.count = 0;
                         return Poll::Ready(Err(error));
                     }
                 }
@@ -140,6 +158,14 @@ impl RateLimiter {
         .await;
         drop(guard);
         result
+    }
+}
+impl Drop for RateLimiter {
+    fn drop(&mut self) {
+        let reset = self.state.lock().expect("rate limit lock").reset.take();
+        if let Some(reset) = reset {
+            reset.cancel();
+        }
     }
 }
 impl RestAdapter for RateLimitedAdapter {

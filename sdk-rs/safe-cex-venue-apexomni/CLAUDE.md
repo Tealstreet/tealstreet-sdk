@@ -546,3 +546,10 @@ module-loading side effects. DIVERGENCE_REVIEW.md records the scope. The binding
 probe validates twice and signs two orders while only pumping jobs, without
 clock advancement. scripts/initialization-controls.py must compile a pending
 initializer fault, observe the named binding refusal and restore exact bytes.
+
+Startup constructs its zero-valued ticker as a canonical Js object in the actual
+TS constructor's field order: volume and quoteVolume precede mark/index. It writes
+that row directly to the canonical Store facade. A typed Ticker serializer cannot
+encode this venue-specific construction order. The real constructed binding test
+compares own keys with the maintained whole-class lifecycle capture before any
+JSON projection; later ticker patches keep existing field positions.

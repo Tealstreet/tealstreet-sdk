@@ -201,7 +201,7 @@ export function runProbes(root, metadata, packages, contracts, configuration = {
       text += '\n[[bin]]\nname = "accepted-set-production-runner"\npath = "__accepted_set_runner.rs"\n';
     }
     fs.writeFileSync(manifest, text);
-    const features = pkg.features.length ? ['--features', pkg.features.join(',')] : [];
+    const features = ['--no-default-features', ...(pkg.features.length ? ['--features', pkg.features.join(',')] : [])];
     const command = node ? ['build', '--color', 'never', '-p', pkg.package, '--jobs', jobs, '--lib', '--message-format=json', ...features] : wasm ? ['build', '--color', 'never', '-p', pkg.package, '--jobs', jobs, ...targetArgs, '--target', configuration.target, ...features] : ['run', '--color', 'never', '-p', pkg.package, '--jobs', jobs, '--bin', nativeBinary ? target.name : 'accepted-set-production-runner', ...features];
     const build = spawnSync('cargo', command, {
       cwd: path.join(sandbox, workspaceRelative), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,

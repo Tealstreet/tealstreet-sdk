@@ -72,6 +72,7 @@ const options = {
 };
 const cache = new Map(),
   sessions = [];
+let capturedSockets = [];
 let ca,
   hook,
   symbol,
@@ -79,7 +80,15 @@ let ca,
 async function session(implementation, mode, tape, label) {
   const requests = [],
     sockets = [];
-  const relay = await streamRelay({ directory, ca, hosts: adapter.hosts, mode, tape, records: sockets });
+  const relay = await streamRelay({
+    directory,
+    ca,
+    hosts: adapter.hosts,
+    mode,
+    tape,
+    records: sockets,
+    capturedSockets,
+  });
   const proxy = await recordingProxy({
     directory,
     ca,
@@ -194,6 +203,7 @@ try {
     ({ tape, symbol, candleTo } = bundle);
     for (const [key, value] of bundle.rest) cache.set(key, value);
     report.capture = { ...bundle.capture, reusedBundle: resolve(replayPath) };
+    capturedSockets = bundle.capture.sockets;
   } else {
     tape = {};
     console.log(`${exchange}: capture startup`);
@@ -217,6 +227,7 @@ try {
       requests: cleanRecords(capture.requests),
       sockets: capture.sockets,
     };
+    capturedSockets = report.capture.sockets;
     await capture.close();
     sessions.splice(sessions.indexOf(capture), 1);
     const rest = await Promise.all([...cache].map(async ([key, value]) => [key, await value]));

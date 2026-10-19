@@ -420,6 +420,10 @@ mod binding_harness;
 mod callback_binding;
 
 #[cfg(test)]
+#[path = "../../tests/support/index_lookup_binding.rs"]
+mod index_lookup_binding;
+
+#[cfg(test)]
 #[path = "../../tests/support/amendment_binding.rs"]
 mod amendment_binding;
 

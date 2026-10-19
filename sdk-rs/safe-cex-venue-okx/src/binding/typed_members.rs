@@ -14,7 +14,7 @@ use safe_cex_exchange::{
         client::JsRestAdapter,
         promise::await_js,
         scope::bound_member,
-        value::{Js, Thrown, arg, from_json, from_typed, to_js_json, to_json, to_typed},
+        value::{Js, Prop, Thrown, arg, from_json, from_typed, to_js_json, to_json, to_typed},
     },
     runtime::ExchangeError,
 };
@@ -255,34 +255,56 @@ fn market_shape(scope: &OkxScope, variant: Variant) {
     sync_member(scope, "getMarketInstrumentType", |_, a| {
         from_typed(&okx::get_market_instrument_type(&record(&arg(&a, 0))?).map_err(coercion)?)
     });
-    sync_member(scope, "getIndexTickerInstId", |_, a| {
-        let market: Market = to_typed(&arg(&a, 0))?;
-        Ok(Js::str(
-            &okx::get_index_ticker_inst_id(&market).map_err(coercion)?,
-        ))
+    sync_member(scope, "getIndexTickerInstId", |s, a| {
+        let string = capture(s, "String")?;
+        let market = arg(&a, 0);
+        let underlying = optional(&market.get("info")?, "uly")?;
+        let underlying = call(
+            &string,
+            vec![if underlying.truthy() {
+                underlying
+            } else {
+                Js::str("")
+            }],
+        )?;
+        if underlying.truthy() {
+            return Ok(underlying);
+        }
+        market.get("id")?.call_method(
+            "replace",
+            vec![
+                safe_cex_exchange::js_runtime::regexp::regexp(
+                    &"-SWAP$".encode_utf16().collect::<Vec<_>>(),
+                    &[],
+                )?,
+                Js::str(""),
+            ],
+        )
     });
     sync_member(scope, "getMarketsForIndexTickerInstId", |s, a| {
-        let js_markets = s
-            .this
-            .get("store")?
-            .get("markets")?
-            .array_values()?
-            .unwrap_or_default();
-        let markets = js_markets
-            .iter()
-            .map(to_typed::<Market>)
-            .collect::<Result<Vec<_>, _>>()?;
-        let instrument = String::from_utf16_lossy(&arg(&a, 0).to_js_string()?);
-        let matching =
-            okx::get_markets_for_index_ticker_inst_id(&markets, &instrument).map_err(coercion)?;
-        // Return the store's own market objects, as the source filter does.
-        Ok(Js::array(
-            matching
-                .into_iter()
-                .filter_map(|m| markets.iter().position(|x| std::ptr::eq(x, m)))
-                .map(|i| js_markets[i].clone())
-                .collect(),
-        ))
+        let markets = s.this.get("store")?.get("markets")?;
+        let this = s.this.clone();
+        let instrument = arg(&a, 0);
+        let predicate = Js::function("", move |_, a| {
+            Ok(Js::Bool(
+                this.call_method("getIndexTickerInstId", vec![arg(&a, 0)])?
+                    .strict_equals(&instrument),
+            ))
+        });
+        // Initialize the source arrow's one-parameter descriptor while this
+        // function is still private; no user property hooks participate.
+        if let Js::Function(function) = &predicate {
+            function.props.borrow_mut().insert(
+                "length".encode_utf16().collect::<Vec<_>>().into(),
+                Prop::DataDescriptor {
+                    value: Js::Number(1.),
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        markets.call_method("filter", vec![predicate])
     });
     sync_member(scope, "formatMarketSymbol", |_, a| {
         Ok(Js::str(

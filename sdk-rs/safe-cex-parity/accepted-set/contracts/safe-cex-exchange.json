@@ -35755,5 +35755,2043 @@
     },
     "reason": "Terminal Error presentation selector over existing native data descriptors. It returns only stored strings, stops on accessor or non-string shadows, walks prototype references with cycle detection, and renders UTF-16 lossily only for the terminal sink. It does not parse input or admit a domain model; no getter or coercion hook is executed.",
     "evidence": "tests/native_console_default.rs::native_error_diagnostics_read_data_without_executing_user_hooks executes the production NativeRuntime console sink in a subprocess: inherited hidden data and malformed UTF-16 render, own getter/non-string shadows suppress inherited messages without executing user code, empty names preserve message-only output, and a cyclic chain terminates with the Error fallback."
+  },
+  "safe_cex_exchange::runtime::rate_limit_scheduler": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "rate_limit_scheduler",
+      "signature": {
+        "inputs": [
+          [
+            "owner",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::exchange::BaseExchange",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::sync::Arc",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "dyn_trait": {
+                        "traits": [
+                          {
+                            "trait": {
+                              "path": "safe_cex_transport::rate_limit::RateLimitScheduler",
+                              "args": null
+                            },
+                            "generic_params": []
+                          }
+                        ],
+                        "lifetime": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Constructs only a native scheduler capability over an existing ExchangeRuntime. Its reset runs as one independently owned Timer operation; no serialized input or model decoding occurs. Limiter Drop cancels the registration. The scheduler holds only a weak reference to the existing BaseExchange task registry; dispose cancels its timers even while JS clients are retained.",
+    "evidence": "The actual constructed Bybit fetchTickers route reproduces master failure and restored controlled-clock advance, subsequent HTTP and timer cancellation in ticker_prototype_native::constructed_public_reads_do_not_strand_idle_limiter_replay_deadlines. Maintained installed axios-rate-limit executes the frozen-Date timer profile in the same test."
+  },
+  "safe_cex_exchange::js_runtime::ccxt::exact": {
+    "api": {
+      "kind": "function",
+      "name": "exact",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "n",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
+    "reason": "Strict comparison of an existing native Js tag/value with an internal numeric mode. It neither coerces a mode object nor decodes a serialized input. Actual installed decimalToPrecision probes distinguish numeric ROUND from string and object modes; this classification grants no exemption to the formatter."
+  },
+  "safe_cex_exchange::js_runtime::ccxt::integer": {
+    "api": {
+      "kind": "function",
+      "name": "integer",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v).map(Js::Number); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "cases": [
+      {
+        "input": {
+          "tag": "string",
+          "value": " -0x10junk"
+        },
+        "output": {
+          "ok": true,
+          "type": "number",
+          "units": null,
+          "bits": "13848568854164275200"
+        }
+      },
+      {
+        "input": {
+          "tag": "string",
+          "value": "3.9junk"
+        },
+        "output": {
+          "ok": true,
+          "type": "number",
+          "units": null,
+          "bits": "4613937818241073152"
+        }
+      },
+      {
+        "input": {
+          "tag": "undefined"
+        },
+        "output": {
+          "ok": true,
+          "type": "number",
+          "units": null,
+          "bits": "9221120237041090560"
+        }
+      },
+      {
+        "input": {
+          "tag": "utf16",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": true,
+          "type": "number",
+          "units": null,
+          "bits": "9221120237041090560"
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v).map(Js::Number); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "nativeFields": [
+        "type",
+        "units",
+        "bits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "tag": "string",
+            "value": " -0x10junk"
+          },
+          "output": {
+            "ok": true,
+            "type": "number",
+            "units": null,
+            "bits": "13848568854164275200"
+          }
+        },
+        {
+          "input": {
+            "tag": "string",
+            "value": "3.9junk"
+          },
+          "output": {
+            "ok": true,
+            "type": "number",
+            "units": null,
+            "bits": "4613937818241073152"
+          }
+        },
+        {
+          "input": {
+            "tag": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "type": "number",
+            "units": null,
+            "bits": "9221120237041090560"
+          }
+        },
+        {
+          "input": {
+            "tag": "utf16",
+            "units": [
+              55296
+            ]
+          },
+          "output": {
+            "ok": true,
+            "type": "number",
+            "units": null,
+            "bits": "9221120237041090560"
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::ccxt::number_to_string": {
+    "api": {
+      "kind": "function",
+      "name": "number_to_string",
+      "signature": {
+        "inputs": [
+          [
+            "x",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "cases": [
+      {
+        "input": {
+          "tag": "number",
+          "bits": "4487126258331716666"
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            48,
+            46,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            49
+          ],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "number",
+          "bits": "4952307604018087811"
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            49,
+            50,
+            51,
+            52,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48,
+            48
+          ],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "undefined"
+        },
+        "output": {
+          "ok": true,
+          "type": "undefined",
+          "units": null,
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "utf16",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            55296
+          ],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "null"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "units": [
+            67,
+            97,
+            110,
+            110,
+            111,
+            116,
+            32,
+            114,
+            101,
+            97,
+            100,
+            32,
+            112,
+            114,
+            111,
+            112,
+            101,
+            114,
+            116,
+            105,
+            101,
+            115,
+            32,
+            111,
+            102,
+            32,
+            110,
+            117,
+            108,
+            108,
+            32,
+            40,
+            114,
+            101,
+            97,
+            100,
+            105,
+            110,
+            103,
+            32,
+            39,
+            116,
+            111,
+            83,
+            116,
+            114,
+            105,
+            110,
+            103,
+            39,
+            41
+          ]
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "nativeFields": [
+        "type",
+        "units",
+        "bits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "tag": "number",
+            "bits": "4487126258331716666"
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              48,
+              46,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              49
+            ],
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "number",
+            "bits": "4952307604018087811"
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              49,
+              50,
+              51,
+              52,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48,
+              48
+            ],
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "type": "undefined",
+            "units": null,
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "utf16",
+            "units": [
+              55296
+            ]
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              55296
+            ],
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "null"
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "units": [
+              67,
+              97,
+              110,
+              110,
+              111,
+              116,
+              32,
+              114,
+              101,
+              97,
+              100,
+              32,
+              112,
+              114,
+              111,
+              112,
+              101,
+              114,
+              116,
+              105,
+              101,
+              115,
+              32,
+              111,
+              102,
+              32,
+              110,
+              117,
+              108,
+              108,
+              32,
+              40,
+              114,
+              101,
+              97,
+              100,
+              105,
+              110,
+              103,
+              32,
+              39,
+              116,
+              111,
+              83,
+              116,
+              114,
+              105,
+              110,
+              103,
+              39,
+              41
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::ccxt::parse_precision": {
+    "api": {
+      "kind": "function",
+      "name": "parse_precision",
+      "signature": {
+        "inputs": [
+          [
+            "x",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "cases": [
+      {
+        "input": {
+          "tag": "string",
+          "value": "3junk"
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            48,
+            46,
+            48,
+            48,
+            49
+          ],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "number",
+          "bits": "0"
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            49
+          ],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "undefined"
+        },
+        "output": {
+          "ok": true,
+          "type": "undefined",
+          "units": null,
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "utf16",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            48,
+            46,
+            49
+          ],
+          "bits": null
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "nativeFields": [
+        "type",
+        "units",
+        "bits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "tag": "string",
+            "value": "3junk"
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              48,
+              46,
+              48,
+              48,
+              49
+            ],
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "number",
+            "bits": "0"
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              49
+            ],
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "type": "undefined",
+            "units": null,
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "utf16",
+            "units": [
+              55296
+            ]
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              48,
+              46,
+              49
+            ],
+            "bits": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::ccxt::safe_string": {
+    "api": {
+      "kind": "function",
+      "name": "safe_string",
+      "signature": {
+        "inputs": [
+          [
+            "o",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "k",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "default",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&Js::object(vec![(\"x\",v)]), &Js::str(\"x\"), Js::str(\"default\")); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "cases": [
+      {
+        "input": {
+          "tag": "utf16",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            55296
+          ],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "number",
+          "bits": "4631107791820423168"
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            52,
+            50
+          ],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "undefined"
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            100,
+            101,
+            102,
+            97,
+            117,
+            108,
+            116
+          ],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "null"
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            100,
+            101,
+            102,
+            97,
+            117,
+            108,
+            116
+          ],
+          "bits": null
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&Js::object(vec![(\"x\",v)]), &Js::str(\"x\"), Js::str(\"default\")); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "nativeFields": [
+        "type",
+        "units",
+        "bits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "tag": "utf16",
+            "units": [
+              55296
+            ]
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              55296
+            ],
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "number",
+            "bits": "4631107791820423168"
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              52,
+              50
+            ],
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "undefined"
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              100,
+              101,
+              102,
+              97,
+              117,
+              108,
+              116
+            ],
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "null"
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              100,
+              101,
+              102,
+              97,
+              117,
+              108,
+              116
+            ],
+            "bits": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::ccxt::precision_from_string": {
+    "api": {
+      "kind": "function",
+      "name": "precision_from_string",
+      "signature": {
+        "inputs": [
+          [
+            "s",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v).map(Js::Number); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "cases": [
+      {
+        "input": {
+          "tag": "string",
+          "value": "1e-8"
+        },
+        "output": {
+          "ok": true,
+          "type": "number",
+          "units": null,
+          "bits": "4620693217682128896"
+        }
+      },
+      {
+        "input": {
+          "tag": "string",
+          "value": "0.0500"
+        },
+        "output": {
+          "ok": true,
+          "type": "number",
+          "units": null,
+          "bits": "4611686018427387904"
+        }
+      },
+      {
+        "input": {
+          "tag": "string",
+          "value": "120"
+        },
+        "output": {
+          "ok": true,
+          "type": "number",
+          "units": null,
+          "bits": "0"
+        }
+      },
+      {
+        "input": {
+          "tag": "utf16",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": true,
+          "type": "number",
+          "units": null,
+          "bits": "0"
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v).map(Js::Number); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "nativeFields": [
+        "type",
+        "units",
+        "bits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "tag": "string",
+            "value": "1e-8"
+          },
+          "output": {
+            "ok": true,
+            "type": "number",
+            "units": null,
+            "bits": "4620693217682128896"
+          }
+        },
+        {
+          "input": {
+            "tag": "string",
+            "value": "0.0500"
+          },
+          "output": {
+            "ok": true,
+            "type": "number",
+            "units": null,
+            "bits": "4611686018427387904"
+          }
+        },
+        {
+          "input": {
+            "tag": "string",
+            "value": "120"
+          },
+          "output": {
+            "ok": true,
+            "type": "number",
+            "units": null,
+            "bits": "0"
+          }
+        },
+        {
+          "input": {
+            "tag": "utf16",
+            "units": [
+              55296
+            ]
+          },
+          "output": {
+            "ok": true,
+            "type": "number",
+            "units": null,
+            "bits": "0"
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::ccxt::numeric_string": {
+    "api": {
+      "kind": "function",
+      "name": "numeric_string",
+      "signature": {
+        "inputs": [
+          [
+            "x",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "cases": [
+      {
+        "input": {
+          "tag": "number",
+          "bits": "4638144666238189568"
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            49,
+            50,
+            48
+          ],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "number",
+          "bits": "4576918229304087675"
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            48,
+            46,
+            48,
+            49
+          ],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "utf16",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            55296
+          ],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "null"
+        },
+        "output": {
+          "ok": false,
+          "name": "TypeError",
+          "units": [
+            67,
+            97,
+            110,
+            110,
+            111,
+            116,
+            32,
+            114,
+            101,
+            97,
+            100,
+            32,
+            112,
+            114,
+            111,
+            112,
+            101,
+            114,
+            116,
+            105,
+            101,
+            115,
+            32,
+            111,
+            102,
+            32,
+            110,
+            117,
+            108,
+            108,
+            32,
+            40,
+            114,
+            101,
+            97,
+            100,
+            105,
+            110,
+            103,
+            32,
+            39,
+            116,
+            111,
+            83,
+            116,
+            114,
+            105,
+            110,
+            103,
+            39,
+            41
+          ]
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(&v); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "nativeFields": [
+        "type",
+        "units",
+        "bits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "tag": "number",
+            "bits": "4638144666238189568"
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              49,
+              50,
+              48
+            ],
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "number",
+            "bits": "4576918229304087675"
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              48,
+              46,
+              48,
+              49
+            ],
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "utf16",
+            "units": [
+              55296
+            ]
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              55296
+            ],
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "null"
+          },
+          "output": {
+            "ok": false,
+            "name": "TypeError",
+            "units": [
+              67,
+              97,
+              110,
+              110,
+              111,
+              116,
+              32,
+              114,
+              101,
+              97,
+              100,
+              32,
+              112,
+              114,
+              111,
+              112,
+              101,
+              114,
+              116,
+              105,
+              101,
+              115,
+              32,
+              111,
+              102,
+              32,
+              110,
+              117,
+              108,
+              108,
+              32,
+              40,
+              114,
+              101,
+              97,
+              100,
+              105,
+              110,
+              103,
+              32,
+              39,
+              116,
+              111,
+              83,
+              116,
+              114,
+              105,
+              110,
+              103,
+              39,
+              41
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::ccxt::decimal_to_precision": {
+    "api": {
+      "kind": "function",
+      "name": "decimal_to_precision",
+      "signature": {
+        "inputs": [
+          [
+            "x",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "rounding",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "digits",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "counting",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "padding",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
+    "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(v, Js::Number(1.), Js::Number(2.), Js::Number(2.), Js::Number(5.)); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+    "cases": [
+      {
+        "input": {
+          "tag": "string",
+          "value": "1.2345"
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            49,
+            46,
+            50,
+            51
+          ],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "string",
+          "value": "-1.235"
+        },
+        "output": {
+          "ok": true,
+          "type": "string",
+          "units": [
+            45,
+            49,
+            46,
+            50,
+            52
+          ],
+          "bits": null
+        }
+      },
+      {
+        "input": {
+          "tag": "utf16",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": false,
+          "name": "Error",
+          "units": [
+            55296,
+            58,
+            32,
+            105,
+            110,
+            118,
+            97,
+            108,
+            105,
+            100,
+            32,
+            110,
+            117,
+            109,
+            98,
+            101,
+            114,
+            32,
+            40,
+            99,
+            111,
+            110,
+            116,
+            97,
+            105,
+            110,
+            115,
+            32,
+            97,
+            110,
+            32,
+            105,
+            108,
+            108,
+            101,
+            103,
+            97,
+            108,
+            32,
+            99,
+            104,
+            97,
+            114,
+            97,
+            99,
+            116,
+            101,
+            114,
+            32,
+            39,
+            55296,
+            39,
+            41
+          ]
+        }
+      },
+      {
+        "input": {
+          "tag": "string",
+          "value": "1e-8"
+        },
+        "output": {
+          "ok": false,
+          "name": "Error",
+          "units": [
+            49,
+            101,
+            45,
+            56,
+            58,
+            32,
+            105,
+            110,
+            118,
+            97,
+            108,
+            105,
+            100,
+            32,
+            110,
+            117,
+            109,
+            98,
+            101,
+            114,
+            32,
+            40,
+            99,
+            111,
+            110,
+            116,
+            97,
+            105,
+            110,
+            115,
+            32,
+            97,
+            110,
+            32,
+            105,
+            108,
+            108,
+            101,
+            103,
+            97,
+            108,
+            32,
+            99,
+            104,
+            97,
+            114,
+            97,
+            99,
+            116,
+            101,
+            114,
+            32,
+            39,
+            101,
+            39,
+            41
+          ]
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ use crate::js_runtime::value::Js; let v=match $value[\"tag\"].as_str().unwrap() { \"string\"=>Js::str($value[\"value\"].as_str().unwrap()), \"number\"=>Js::Number(f64::from_bits($value[\"bits\"].as_str().unwrap().parse().unwrap())), \"undefined\"=>Js::Undefined, \"null\"=>Js::Null, \"utf16\"=>Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|v|v.as_u64().unwrap() as u16).collect::<Vec<_>>()), _=>panic!(\"unknown independently specified native fixture\") }; let result=$type(v, Js::Number(1.), Js::Number(2.), Js::Number(2.), Js::Number(5.)); match result { Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.type_of(),\"units\":match &v {Js::String(s)=>Some(s.as_ref()),_=>None},\"bits\":match &v {Js::Number(n)=>Some(n.to_bits().to_string()),_=>None}}), Err(e)=>serde_json::json!({\"ok\":false,\"name\":e.value.get(\"name\").unwrap().to_display(),\"units\":e.value.get(\"message\").unwrap().to_js_string().unwrap().as_ref()}) } }",
+      "nativeFields": [
+        "type",
+        "units",
+        "bits"
+      ],
+      "cases": [
+        {
+          "input": {
+            "tag": "string",
+            "value": "1.2345"
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              49,
+              46,
+              50,
+              51
+            ],
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "string",
+            "value": "-1.235"
+          },
+          "output": {
+            "ok": true,
+            "type": "string",
+            "units": [
+              45,
+              49,
+              46,
+              50,
+              52
+            ],
+            "bits": null
+          }
+        },
+        {
+          "input": {
+            "tag": "utf16",
+            "units": [
+              55296
+            ]
+          },
+          "output": {
+            "ok": false,
+            "name": "Error",
+            "units": [
+              55296,
+              58,
+              32,
+              105,
+              110,
+              118,
+              97,
+              108,
+              105,
+              100,
+              32,
+              110,
+              117,
+              109,
+              98,
+              101,
+              114,
+              32,
+              40,
+              99,
+              111,
+              110,
+              116,
+              97,
+              105,
+              110,
+              115,
+              32,
+              97,
+              110,
+              32,
+              105,
+              108,
+              108,
+              101,
+              103,
+              97,
+              108,
+              32,
+              99,
+              104,
+              97,
+              114,
+              97,
+              99,
+              116,
+              101,
+              114,
+              32,
+              39,
+              55296,
+              39,
+              41
+            ]
+          }
+        },
+        {
+          "input": {
+            "tag": "string",
+            "value": "1e-8"
+          },
+          "output": {
+            "ok": false,
+            "name": "Error",
+            "units": [
+              49,
+              101,
+              45,
+              56,
+              58,
+              32,
+              105,
+              110,
+              118,
+              97,
+              108,
+              105,
+              100,
+              32,
+              110,
+              117,
+              109,
+              98,
+              101,
+              114,
+              32,
+              40,
+              99,
+              111,
+              110,
+              116,
+              97,
+              105,
+              110,
+              115,
+              32,
+              97,
+              110,
+              32,
+              105,
+              108,
+              108,
+              101,
+              103,
+              97,
+              108,
+              32,
+              99,
+              104,
+              97,
+              114,
+              97,
+              99,
+              116,
+              101,
+              114,
+              32,
+              39,
+              101,
+              39,
+              41
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::ccxt::install": {
+    "api": {
+      "kind": "function",
+      "name": "install",
+      "signature": {
+        "inputs": [
+          [
+            "g",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
+    "reason": "Defines the nine constant descriptors and four native callable imports on an existing Js globals object. It does not inspect or decode a user payload. All installed CCXT binding tests execute this actual constructor through install_library and check every constant and callable; no decoder permission transfers to the installed callbacks."
   }
 }

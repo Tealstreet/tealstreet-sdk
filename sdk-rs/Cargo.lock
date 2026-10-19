@@ -4180,6 +4180,7 @@ name = "safe-cex-venue-bitunix"
 version = "0.1.0"
 dependencies = [
  "flate2",
+ "indexmap 2.14.2",
  "safe-cex-exchange",
  "safe-cex-num",
  "safe-cex-store",
@@ -4376,6 +4377,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tokio",
 ]
 
 [[package]]

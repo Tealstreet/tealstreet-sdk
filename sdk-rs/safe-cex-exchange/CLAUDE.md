@@ -15,6 +15,11 @@ Native proxy authorization carries its marker in config extensions, never header
 read-only diagnostic slots cannot reject the request. Remote signing publishes
 its timing stamps after the signed-header merge and preserves them in returned
 success/failure configs. Skipped or refused signing does not fabricate stamps.
+Both factories publish actual HTTP outcomes to the lower crate's single REST
+diagnostic cache, retaining numeric config values and bound header accessors.
+Direct failures are recorded before enhancement; routed failures are recorded
+afterwards. Config materialization follows installed Axios before terminal send,
+so accessor failures remain request-setup failures rather than phantom wire calls.
 Socket diagnostics reuse the shared auth-operation predicate after JSON parsing.
 The Bitget owned-transport regression pins retry eligibility after that boundary.
 Native network rejections retain the actual RestRequest as an opaque request
@@ -1930,6 +1935,8 @@ one-argument precision-count helper. The installed native/source tests cover
 123 scalar cases, UTF16 results, original value/throw identity, repeated property
 reads and precision operand coercion. The separate Realm implementation is
 removed only with the atomic Hyperliquid family consolidation.
+The nine native-input owner classifications and their actual installed/direct
+probes are reviewed individually in CCXT_NATIVE_INPUT_REVIEW.md.
 
 Operator numeric/default-hint conversion of ordinary objects and functions uses
 `Js::ordinary_to_primitive`, the same live hook traversal as direct value coercion.
@@ -2043,6 +2050,11 @@ See ARRAY_STORAGE_REVIEW.md for the length/descriptor/iterator algorithms, atomi
 consumer boundaries and independent native/Node/compiled controls. The browser
 DATA bridge caches identity before walking enumerable indexed and named fields.
 
+Array.prototype.constructor is its own nonenumerable writable/configurable data
+property and retains the installed Array facade. ARRAY_STORAGE_REVIEW.md records
+the Node identity/mutation proof and the approved single-pair-per-realm Rc cycle
+limit; repeated operations and installations do not grow that retained graph.
+
 Internal update listeners subscribe to the canonical Store's native state referent.
 They do not project StoreData or visit unrelated getters before emitter fanout.
 Typed subscribers remain explicit projection boundaries at their reached slots;
@@ -2128,6 +2140,16 @@ engine-dependent. Array sort compacts defined values before TimSort, then writes
 undefined values and deletes remaining holes; four native/Node profiles pin the
 comparator schedule as well as sparse output.
 
+Store payload preparation consumes the canonical `Js` graph. Its shallow root
+spread preserves construction order, including dynamically appended fields, and
+keeps model rows intact instead of round-tripping them through shared DTOs.
+Only updateIds, loaded and socketHealth are cloned before returning; truthy info
+is stripped with object rest in source order. The scalar ticker baseline reads
+only the packed protocol's eleven fields; that protocol order is independent of
+a ticker object's own-key order. Native post capture owns the resulting graph
+without JSON projection. Typed worker processors convert their existing frame
+once at the preparer's input; there is no second payload algorithm.
+
 Direct calls of the canonical Object.prototype.toString referent use the same
 intrinsic object-tag implementation as ordinary coercion. The actual Aster
 private fill witness compares an object ID against its maintained TS constructor;
@@ -2143,6 +2165,16 @@ NaN payloads canonicalize as Node structuredClone does.
 Uncloneable values and unmodeled object kinds produce visible DataCloneError.
 The worker recorder intentionally drops clone failures as perfFixture.ts does;
 other callers receive the error. Node's real structuredClone supplies the oracle.
+
+Exchange::listen_ohlcv_retained is the native callback entry for listener payloads
+whose runtime shape differs from the explicit typed Candle API. Typed-only venues
+adapt their existing declared listener; Phemex overrides it with the original Js
+payload. Native account delivery captures that retained value without coercion.
+The 906-frame Phemex binding probe compares all 19 maintained-source callbacks.
+
+Private authentication recovery reports the supplied ExchangeError through the
+runtime exception sink before warning/reconnect, preserving its retained cause.
+See `PRIVATE_OPEN_REVIEW.md` for the bounded disposal/recovery differences.
 
 Native sockets with a separate callback owner use `install_native_handler_stats`
 to bind selected-key live counts into Base's record/pong/cleanup/reconciliation
