@@ -211,6 +211,37 @@ fn unsupported_income_missing_symbol_and_invalid_ranges_finish_with_errors() {
         assert!(result(&mut e).is_err());
     }
 }
+
+#[test]
+fn general_income_cannot_silently_return_a_funding_only_ledger() {
+    for kind in [
+        None,
+        Some("REALIZED_PNL"),
+        Some("COMMISSION"),
+        Some("TRANSFER"),
+    ] {
+        let mut e = ready();
+        e.handle(
+            1000.0,
+            Event::Command(Command::Query {
+                command: 99,
+                query: Query::Income {
+                    symbol: Some("BTCUSDT".into()),
+                    kind: kind.map(str::to_owned),
+                    from_ms: None,
+                    to_ms: None,
+                    limit: None,
+                },
+            }),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(actions.iter().any(|a| matches!(a,
+            Action::Notice(Notice::CommandDone { result: Err(error), .. })
+            if error == "MEXC income supports only kind FUNDING_FEE"
+        )));
+    }
+}
 #[test]
 fn wide_ranges_are_split_into_disjoint_ninety_day_windows() {
     let mut e = ready();
