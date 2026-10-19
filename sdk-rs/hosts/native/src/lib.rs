@@ -5,8 +5,13 @@
 //! drive the same loop as the network.
 #![cfg(not(target_arch = "wasm32"))]
 
+mod routing;
 mod transport;
 
+pub use routing::{
+    HttpRoute, HttpRouteMode, ProxyTokenFuture, ProxyTokenProvider, RoutingPlan, SocketChannel,
+    SocketChannelRule, WsRoute, WsRoutes,
+};
 pub use transport::{NetworkTransport, Transport};
 
 use safe_cex_engine::{
@@ -159,19 +164,31 @@ impl<V: Venue, T: Transport> Host<V, T> {
         let actions: Vec<Action> = self.engine.drain_actions().collect();
         for action in actions {
             match action {
-                Action::WsConnect { socket, url } => {
-                    let outgoing = self.transport.connect(socket, url, self.events.clone());
+                Action::WsConnect {
+                    socket,
+                    url,
+                    channel,
+                } => {
+                    let outgoing = self.transport.connect_channel(
+                        socket,
+                        url,
+                        vec![],
+                        channel,
+                        self.events.clone(),
+                    );
                     self.sockets.insert(socket, outgoing);
                 }
                 Action::WsConnectWithHeaders {
                     socket,
                     url,
                     headers,
+                    channel,
                 } => {
-                    let outgoing = self.transport.connect_with_headers(
+                    let outgoing = self.transport.connect_channel(
                         socket,
                         url,
                         headers,
+                        channel,
                         self.events.clone(),
                     );
                     self.sockets.insert(socket, outgoing);

@@ -155,3 +155,44 @@ test('Workers derives private upgrade capability from its transport', async () =
     assert.equal(options.key, 'replay-key');
   } finally { object.leave(client); }
 });
+
+test('Workers runs engine effects through its configured account transport', async () => {
+  const destinations = [];
+  const EngineObject = createEngineObject({
+    loadEngine: async () => ({ WasmEngine: class {
+      start() { return JSON.stringify([{ op: 'wsConnect', socket: 1, url: 'wss://venue.test/shared', channel: 'private' }]); }
+    } }),
+    createTransport: (venue, options, raw) => {
+      assert.equal(venue, 'okx');
+      assert.equal(options.tealstreetProxy, true);
+      return { ...raw, connect: (url, handlers) => {
+        destinations.push([url, handlers.channel]);
+        return { send() {}, close() {} };
+      } };
+    },
+  });
+  const object = new EngineObject({ storage: { setAlarm() {} } });
+  const client = { send() {} };
+  try {
+    await object.receive(client, JSON.stringify({ op: 'start', venue: 'okx', options: { tealstreetProxy: true } }));
+    assert.deepEqual(destinations, [['wss://venue.test/shared', 'private']]);
+  } finally { object.leave(client); }
+});
+
+test('Workers refuses requested routing without an account transport factory', async () => {
+  const messages = [];
+  const EngineObject = createEngineObject({ loadEngine: async () => ({ WasmEngine: class {
+    constructor() { throw new Error('must not construct an unrouted engine'); }
+  } }) });
+  const object = new EngineObject({ storage: { setAlarm() {} } });
+  for (const options of [{ tealstreetProxy: true }, { tealstreetTunnel: true }, { tealstreetWsRoute: true },
+    { overrideProxyUrl: 'https://proxy.test' }, { bybitSiteId: 'BRA_BTL' }]) {
+    await object.receive({ send: (text) => messages.push(JSON.parse(text)) }, JSON.stringify({
+      op: 'start', venue: 'bingx', options,
+    }));
+  }
+  assert.equal(object.host, undefined);
+  assert.equal(messages[0].level, 'error');
+  assert.match(messages[0].message, /configured createTransport/);
+  assert.equal(messages.length, 5);
+});

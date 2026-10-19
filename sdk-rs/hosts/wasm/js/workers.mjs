@@ -66,9 +66,11 @@ const KEEPALIVE_MS = 30_000;
 /**
  * A Durable Object class running one engine. `loadEngine` resolves the
  * wasm-bindgen module (`{ WasmEngine }`) the deployment bundles; `flush`
- * gives the store and book cadences in ms.
+ * gives the store and book cadences in ms. Account-backed deployments supply
+ * `createTransport(venue, options, raw)` from safe-cex's createEngineTransport;
+ * the default is an explicitly direct engine host.
  */
-export const createEngineObject = ({ loadEngine, flush = { store: 250, books: 60 } }) =>
+export const createEngineObject = ({ loadEngine, createTransport, flush = { store: 250, books: 60 } }) =>
   class EngineObject {
     constructor(state) {
       this.state = state;
@@ -96,7 +98,13 @@ export const createEngineObject = ({ loadEngine, flush = { store: 250, books: 60
       const message = JSON.parse(data);
       if (message.op === 'start' && !this.host) {
         const { WasmEngine } = await loadEngine();
-        const transport = workersTransport();
+        if (!createTransport && (message.options?.tealstreetProxy || message.options?.tealstreetTunnel
+          || message.options?.tealstreetWsRoute || message.options?.overrideProxyUrl || message.options?.bybitSiteId)) {
+          client.send(JSON.stringify({ op: 'log', level: 'error', message: 'Engine routing requires a configured createTransport factory' }));
+          return;
+        }
+        const raw = workersTransport();
+        const transport = createTransport ? createTransport(message.venue, message.options, raw) : raw;
         this.host = new EngineHost(
           new WasmEngine(message.venue, JSON.stringify({ ...message.options, privateWsHeaders: transport.webSocketHeaders })),
           transport,

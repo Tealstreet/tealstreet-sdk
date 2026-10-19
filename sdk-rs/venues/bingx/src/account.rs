@@ -629,8 +629,10 @@ impl Account {
                     return;
                 };
                 self.key = Some(key.into());
-                self.socket =
-                    Some(cx.connect(format!("{}?listenKey={key}", crate::paths::PRIVATE_WS)));
+                self.socket = Some(cx.connect_channel(
+                    format!("{}?listenKey={key}", crate::paths::PRIVATE_WS),
+                    safe_cex_engine::SocketChannel::Private,
+                ));
                 self.received_at = cx.now;
                 self.heartbeat = Some(cx.set_timer(PING_MS));
             }

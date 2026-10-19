@@ -16,7 +16,8 @@ if (isNodeOrBun) {
   try {
     // Dynamic import to avoid bundling ws in browser builds
 
-    NodeWebSocket = require('ws');
+    const nodeModule = globalThis.process?.getBuiltinModule?.('module');
+    NodeWebSocket = typeof require === 'function' ? require('ws') : nodeModule?.createRequire(import.meta.url)('ws');
   } catch {
     // ws not available, will fall back to global WebSocket
   }

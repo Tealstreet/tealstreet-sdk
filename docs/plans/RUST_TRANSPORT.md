@@ -38,3 +38,28 @@ nested workspace.
   REST precedence, WS routes and upgrade headers. Native HOW requires a generic
   protocol implementation because it cannot invoke a JS package.
 - Plan audit underway with independent TS routing and native-host reviewers.
+
+### Implementation checkpoint
+
+- HTTP and sockets now wrap the registered TS provider. REST policies reuse the
+  cached resolver output, authorization stays per operation, and HOW uses the
+  existing package with exact raw request/response strings. Preserved Binance
+  public-client, BingX default tunnel and WEEX/GRVT/BloFin adapter exceptions.
+- Added explicit sans-I/O socket roles through Cx/actions, wasm/native hosts and
+  all six venues. Hosts reuse sticky fallback/relay behavior; JS relay messages
+  share ordered binary decoding and close guards. Workers can install the
+  account transport factory and fail closed on routing requests without it.
+- Native consumes a serializable TS-resolved policy, with dynamic context JWTs,
+  proxy rewriting, generic HOW/relay handshakes, raw/compressed response decoding,
+  deadlines, cancellation and no sent-write replay. No Rust venue routing table.
+- Phase 1/2 independent reviews fixed lowercase Binance key routing, missing
+  Brazil site headers, relay send ordering/close handling and compressed relays.
+  Phase 3 review fixed HOW v2 query parity, strict raw response handling, empty
+  header selection and cancellation during token acquisition.
+- Focused routing: 49 new TS tests (including 3,672 first socket destinations),
+  existing routing goldens unchanged. Native: 19 tests; JS hosts: 13 tests.
+  Repository typecheck 44/44, lint 28/28, test tasks 27/27 passed (6,540 safe-cex
+  tests per suite before the final binary regressions). Full Rust checks and wasm
+  rebuild/replay verification continue in phase 4.
+- Existing secondary signing options cannot be honored by the engine's single
+  signer; reject them before startup instead of silently using primary egress.

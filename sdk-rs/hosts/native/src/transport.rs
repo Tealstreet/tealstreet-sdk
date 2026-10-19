@@ -1,8 +1,14 @@
 //! Where a host's sockets and requests go: the network, or a recording.
+use crate::routing::{
+    HttpRouteMode, ProxyTokenProvider, RoutingPlan, RoutingState, authenticate_how,
+    authenticate_relay, insert_header, request_how,
+};
 use crate::{Events, HostEvent};
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_engine::{HttpRequest, Method, SocketId};
 use std::io::Read;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{
     Message,
@@ -30,6 +36,21 @@ pub trait Transport {
         let _ = events.send(HostEvent::WsClosed(socket, 1006));
         mpsc::unbounded_channel().0
     }
+    /// Explicit channel roles let sockets sharing an upstream URL route independently.
+    fn connect_channel(
+        &self,
+        socket: SocketId,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        _channel: Option<safe_cex_engine::SocketChannel>,
+        events: Events,
+    ) -> mpsc::UnboundedSender<String> {
+        if headers.is_empty() {
+            self.connect(socket, url, events)
+        } else {
+            self.connect_with_headers(socket, url, headers, events)
+        }
+    }
     /// Run a request, reporting its start, body chunks and end on `events`.
     /// Bound its lifetime and report `HttpFailed` on timeout, including the body.
     fn request(&self, request: HttpRequest, events: Events);
@@ -39,17 +60,26 @@ pub trait Transport {
 #[derive(Clone)]
 pub struct NetworkTransport {
     http: reqwest::Client,
+    routing: Option<Arc<RoutingState>>,
 }
 
 impl NetworkTransport {
     pub fn new() -> Self {
-        // One process-wide rustls provider: ring, shared with tungstenite.
         let _ = rustls::crypto::ring::default_provider().install_default();
         Self {
             http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(20))
+                .timeout(Duration::from_secs(20))
                 .build()
                 .expect("an HTTP client with the default configuration"),
+            routing: None,
+        }
+    }
+
+    /// Apply the account plan resolved once by TypeScript, outside the engine.
+    pub fn with_routing(plan: RoutingPlan, tokens: ProxyTokenProvider) -> Self {
+        Self {
+            routing: Some(Arc::new(RoutingState::new(plan, tokens))),
+            ..Self::new()
         }
     }
 }
@@ -58,6 +88,25 @@ impl Default for NetworkTransport {
     fn default() -> Self {
         Self::new()
     }
+}
+
+async fn open_socket(
+    url: &str,
+    headers: Vec<(String, String)>,
+) -> Result<crate::routing::Socket, String> {
+    let mut request = url
+        .into_client_request()
+        .map_err(|error| error.to_string())?;
+    for (name, value) in headers {
+        request.headers_mut().insert(
+            HeaderName::from_bytes(name.as_bytes()).map_err(|error| error.to_string())?,
+            HeaderValue::from_str(&value).map_err(|error| error.to_string())?,
+        );
+    }
+    tokio_tungstenite::connect_async(request)
+        .await
+        .map(|(socket, _)| socket)
+        .map_err(|error| error.to_string())
 }
 
 impl Transport for NetworkTransport {
@@ -77,67 +126,97 @@ impl Transport for NetworkTransport {
         headers: Vec<(&'static str, String)>,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        self.connect_channel(socket, url, headers, None, events)
+    }
+
+    fn connect_channel(
+        &self,
+        socket: SocketId,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        channel: Option<safe_cex_engine::SocketChannel>,
+        events: Events,
+    ) -> mpsc::UnboundedSender<String> {
         let (outgoing, mut pending) = mpsc::unbounded_channel::<String>();
+        let routing = self.routing.clone();
+        let headers = headers
+            .into_iter()
+            .map(|(name, value)| (name.to_owned(), value))
+            .collect();
+        let (selected, direct_headers) = if let Some(state) = &routing {
+            (Some(state.socket(&url, headers, channel)), Vec::new())
+        } else {
+            (None, headers)
+        };
         tokio::spawn(async move {
-            let request = (|| {
-                let mut request = url.into_client_request().ok()?;
-                for (name, value) in headers {
-                    request.headers_mut().insert(
-                        HeaderName::from_bytes(name.as_bytes()).ok()?,
-                        HeaderValue::from_str(&value).ok()?,
-                    );
-                }
-                Some(request)
-            })();
-            let Some(request) = request else {
-                let _ = events.send(HostEvent::WsClosed(socket, 1006));
-                return;
+            let (target, headers, relay, key) = match selected {
+                Some(selected) => (
+                    selected.url,
+                    selected.headers,
+                    selected.relay,
+                    Some(selected.key),
+                ),
+                None => (url, direct_headers, None, None),
             };
-            let mut ws = match tokio_tungstenite::connect_async(request).await {
-                Ok((ws, _)) => ws,
-                Err(_) => {
+            let opening = async {
+                let mut ws = open_socket(&target, headers).await?;
+                if let Some(upstream) = relay {
+                    let state = routing.as_ref().ok_or("relay requires routing")?;
+                    authenticate_relay(&mut ws, &state.tokens, &upstream).await?;
+                }
+                Ok::<_, String>(ws)
+            };
+            let opening = tokio::time::timeout(Duration::from_secs(15), opening);
+            tokio::pin!(opening);
+            let mut queued = Vec::new();
+            let mut ws = loop {
+                tokio::select! {
+                    biased;
+                    message = pending.recv() => match message {
+                        Some(message) => queued.push(message),
+                        None => return,
+                    },
+                    result = &mut opening => match result {
+                        Ok(Ok(ws)) => break ws,
+                        _ => { let _ = events.send(HostEvent::WsClosed(socket, 1006)); return; }
+                    },
+                }
+            };
+            if pending.is_closed() {
+                let _ = ws.close(None).await;
+                return;
+            }
+            let _ = events.send(HostEvent::WsOpened(socket));
+            for message in queued {
+                if ws.send(Message::text(message)).await.is_err() {
                     let _ = events.send(HostEvent::WsClosed(socket, 1006));
                     return;
                 }
-            };
-            let _ = events.send(HostEvent::WsOpened(socket));
+            }
             let code = loop {
                 tokio::select! {
                     message = ws.next() => match message {
                         Some(Ok(Message::Text(text))) => {
+                            if let (Some(state), Some(key)) = (&routing, &key) { state.message(key); }
                             let _ = events.send(HostEvent::WsMessage(socket, text.to_string()));
                         }
                         Some(Ok(Message::Binary(bytes))) => {
+                            if let (Some(state), Some(key)) = (&routing, &key) { state.message(key); }
                             let mut decoded = Vec::new();
-                            let result = if bytes.starts_with(&[0x1f, 0x8b]) {
-                                flate2::read::GzDecoder::new(bytes.as_ref()).read_to_end(&mut decoded)
-                            } else if bytes.first() == Some(&0x78) {
-                                flate2::read::ZlibDecoder::new(bytes.as_ref()).read_to_end(&mut decoded)
-                            } else {
-                                decoded.extend_from_slice(&bytes);
-                                Ok(decoded.len())
-                            };
-                            let Ok(text) = result.and_then(|_| String::from_utf8(decoded).map_err(std::io::Error::other)) else {break 1007};
+                            let result = if bytes.starts_with(&[0x1f, 0x8b]) { flate2::read::GzDecoder::new(bytes.as_ref()).read_to_end(&mut decoded) }
+                                else if bytes.first() == Some(&0x78) { flate2::read::ZlibDecoder::new(bytes.as_ref()).read_to_end(&mut decoded) }
+                                else { decoded.extend_from_slice(&bytes); Ok(decoded.len()) };
+                            let Ok(text) = result.and_then(|_| String::from_utf8(decoded).map_err(std::io::Error::other)) else { break 1007 };
                             let _ = events.send(HostEvent::WsMessage(socket, text));
                         }
-                        // Answering pings needs a flush on a quiet socket.
-                        Some(Ok(Message::Ping(_))) => {
-                            let _ = ws.flush().await;
-                        }
-                        Some(Ok(Message::Close(frame))) => break frame.map_or(1005, |f| u16::from(f.code)),
+                        Some(Ok(Message::Ping(_))) => { let _ = ws.flush().await; }
+                        Some(Ok(Message::Close(frame))) => break frame.map_or(1005, |frame| u16::from(frame.code)),
                         Some(Ok(_)) => {}
                         Some(Err(_)) | None => break 1006,
                     },
                     text = pending.recv() => match text {
-                        Some(text) => {
-                            if ws.send(Message::text(text)).await.is_err() {
-                                break 1006;
-                            }
-                        }
-                        None => {
-                            let _ = ws.close(None).await;
-                            return;
-                        }
+                        Some(text) => { if ws.send(Message::text(text)).await.is_err() { break 1006; } }
+                        None => { let _ = ws.close(None).await; return; }
                     },
                 }
             };
@@ -146,54 +225,110 @@ impl Transport for NetworkTransport {
         outgoing
     }
 
-    fn request(&self, request: HttpRequest, events: Events) {
+    fn request(&self, mut request: HttpRequest, events: Events) {
         let http = self.http.clone();
+        let routing = self.routing.clone();
         tokio::spawn(async move {
             let id = request.id;
-            let method = match request.method {
-                Method::Get => reqwest::Method::GET,
-                Method::Post => reqwest::Method::POST,
-                Method::Put => reqwest::Method::PUT,
-                Method::Delete => reqwest::Method::DELETE,
-            };
-            let mut builder = http.request(method, &request.url);
-            for (name, value) in &request.headers {
-                builder = builder.header(*name, value);
-            }
-            if let Some(body) = request.body {
-                builder = builder.body(body);
-            }
-            let response = match builder.send().await {
-                Ok(response) => response,
-                Err(error) => {
-                    let _ = events.send(HostEvent::HttpFailed(id, error.to_string()));
-                    return;
-                }
-            };
-            let headers = response
-                .headers()
-                .iter()
-                .filter_map(|(name, value)| Some(format!("{name}: {}", value.to_str().ok()?)))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let _ = events.send(HostEvent::HttpStart {
-                request: id,
-                status: response.status().as_u16(),
-                headers,
-            });
-            let mut body = response.bytes_stream();
-            while let Some(chunk) = body.next().await {
-                match chunk {
-                    Ok(chunk) => {
-                        let _ = events.send(HostEvent::HttpChunk(id, chunk.to_vec()));
+            let operation = async {
+                let route = routing.as_ref().map(|state| state.http(&request));
+                let mut headers: Vec<_> = request
+                    .headers
+                    .iter()
+                    .map(|(name, value)| ((*name).to_owned(), value.clone()))
+                    .collect();
+                if let Some(route) = &route {
+                    if !route.prefix.is_empty() {
+                        request.url = format!("{}/{}", route.prefix, request.url);
                     }
-                    Err(error) => {
-                        let _ = events.send(HostEvent::HttpFailed(id, error.to_string()));
-                        return;
+                    for (name, value) in &route.headers {
+                        insert_header(&mut headers, name.clone(), value.clone());
+                    }
+                    if route.authorize {
+                        let token = (routing.as_ref().unwrap().tokens)().await?;
+                        if !token.is_empty() {
+                            insert_header(
+                                &mut headers,
+                                route.authorization_header.clone(),
+                                format!("Bearer {token}"),
+                            );
+                        }
+                    }
+                    if route.mode == HttpRouteMode::How {
+                        let tunnel = route
+                            .tunnel_url
+                            .as_deref()
+                            .ok_or("HOW route missing tunnelUrl")?;
+                        let state = routing.as_ref().unwrap();
+                        let upgrade = state
+                            .plan
+                            .ws_headers
+                            .iter()
+                            .map(|(name, value)| (name.clone(), value.clone()))
+                            .collect();
+                        let mut tunnel =
+                            reqwest::Url::parse(tunnel).map_err(|error| error.to_string())?;
+                        let query: Vec<_> = tunnel
+                            .query_pairs()
+                            .filter(|(name, _)| name != "v" && name != "t")
+                            .map(|(name, value)| (name.into_owned(), value.into_owned()))
+                            .collect();
+                        tunnel.set_query(None);
+                        tunnel
+                            .query_pairs_mut()
+                            .extend_pairs(query)
+                            .append_pair("v", "2")
+                            .append_pair("t", &format!("{:.0}", crate::now_ms()));
+                        let mut ws = open_socket(tunnel.as_str(), upgrade).await?;
+                        authenticate_how(&mut ws, &state.tokens).await?;
+                        let result = request_how(&mut ws, &request, &headers, &events).await;
+                        let _ = ws.close(None).await;
+                        return result;
                     }
                 }
+                let method = match request.method {
+                    Method::Get => reqwest::Method::GET,
+                    Method::Post => reqwest::Method::POST,
+                    Method::Put => reqwest::Method::PUT,
+                    Method::Delete => reqwest::Method::DELETE,
+                };
+                let mut builder = http.request(method, &request.url);
+                for (name, value) in headers {
+                    builder = builder.header(name, value);
+                }
+                if let Some(body) = request.body {
+                    builder = builder.body(body);
+                }
+                let response = builder.send().await.map_err(|error| error.to_string())?;
+                let headers = response
+                    .headers()
+                    .iter()
+                    .filter_map(|(name, value)| Some(format!("{name}: {}", value.to_str().ok()?)))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let _ = events.send(HostEvent::HttpStart {
+                    request: id,
+                    status: response.status().as_u16(),
+                    headers,
+                });
+                let mut body = response.bytes_stream();
+                while let Some(chunk) = body.next().await {
+                    let chunk = chunk.map_err(|error| error.to_string())?;
+                    for piece in chunk.chunks(16 * 1024) {
+                        let _ = events.send(HostEvent::HttpChunk(id, piece.to_vec()));
+                    }
+                }
+                let _ = events.send(HostEvent::HttpEnd(id));
+                Ok::<_, String>(())
+            };
+            let failure = match tokio::time::timeout(Duration::from_secs(20), operation).await {
+                Ok(Ok(())) => None,
+                Ok(Err(error)) => Some(error),
+                Err(_) => Some("transport request timed out".into()),
+            };
+            if let Some(error) = failure {
+                let _ = events.send(HostEvent::HttpFailed(id, error));
             }
-            let _ = events.send(HostEvent::HttpEnd(id));
         });
     }
 }

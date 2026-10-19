@@ -112,6 +112,9 @@ yarn test           # Vitest
   admitted them. Non-whitelisted connections retain the normal JWT flow.
 - Browser uses native WebSocket and sends its own UA; Node.js/Bun must use a
   constructor path that accepts headers.
+- Pure ESM Node hosts load `ws` through `process.getBuiltinModule('module')` and
+  `createRequire(import.meta.url)` when CommonJS `require` is absent. Both HOW
+  and relay must retain this path so engine hosts keep WAF upgrade headers.
 - Short-lived Node tools that touch HOW should call `disposeHOWWebSockets()`
   before exit. The SG/JA HOW clients are module-singletons, so exchange-level
   disposal alone does not close their sockets/timers.

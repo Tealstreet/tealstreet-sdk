@@ -27,6 +27,18 @@ test('required upgrade headers are forwarded only to capable transports', () => 
   }
 });
 
+test('feed roles survive the engine action boundary for identical upstream URLs', () => {
+  const roles = [];
+  const host = new EngineHost({}, {
+    now: () => 0,
+    connect: (url, handlers) => { roles.push([url, handlers.channel]); return { close() {}, send() {} }; },
+  });
+  for (const [socket, channel] of ['public', 'private', 'business'].entries()) {
+    host.execute({ op: 'wsConnect', socket, url: 'wss://venue.test/stream', channel });
+  }
+  assert.deepEqual(roles, ['public', 'private', 'business'].map((role) => ['wss://venue.test/stream', role]));
+});
+
 for (const closeBeforeOpen of [false, true]) {
   test(`Node socket reports ${closeBeforeOpen ? 'close before open' : 'a refused upgrade'} once without an unhandled error`, async () => {
     const server = createServer();

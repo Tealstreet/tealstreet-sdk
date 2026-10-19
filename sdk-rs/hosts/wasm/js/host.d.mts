@@ -17,7 +17,7 @@ export interface Transport {
   now(): number;
   connect(
     url: string,
-    handlers: { headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
+    handlers: { channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
   ): Socket;
   request(request: {
     method: string;

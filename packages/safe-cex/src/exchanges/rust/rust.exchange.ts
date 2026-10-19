@@ -24,6 +24,7 @@ import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
+import { createEngineTransport } from '../../transport/engine';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
@@ -119,6 +120,9 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   start = async () => {
+    if (this.options.secondary_key || this.options.secondary_secret) {
+      throw new Error('Rust engine secondary signing keys are unsupported; use a primary-key account');
+    }
     if (!this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
@@ -127,10 +131,17 @@ export class RustEngineExchange extends BaseExchange {
     if (this.isDisposed) return;
     const { key, secret, passphrase, testnet } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
-    const transport = engineTransport();
+    const transport = createEngineTransport(this.name, this.options, engineTransport());
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
-      JSON.stringify({ key, secret, passphrase, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly), privateWsHeaders: Boolean(transport.webSocketHeaders) }),
+      JSON.stringify({
+        key,
+        secret,
+        passphrase,
+        testnet: Boolean(testnet),
+        publicDataOnly: Boolean(publicDataOnly),
+        privateWsHeaders: Boolean(transport.webSocketHeaders),
+      }),
     );
     this.host = new EngineHost(engine, transport, {
       onFrame: this.receiveFrame,

@@ -23,6 +23,9 @@ export {
   isExchangeSupportedOnMobile,
 } from './exchangeMetadata';
 
+export { createEngineTransport, resolveEngineRoutingPlan } from './transport/engine';
+export type { EngineRoutingPlan } from './transport/engine';
+
 // Cache for loaded exchange classes
 const exchangeCache = new Map<ExchangeName, typeof BaseExchange>();
 

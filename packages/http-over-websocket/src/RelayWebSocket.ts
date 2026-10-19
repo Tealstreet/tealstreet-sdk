@@ -41,7 +41,8 @@ const isNodeOrBun = typeof process !== 'undefined' && (process.versions?.node ||
 if (isNodeOrBun) {
   try {
     // Dynamic require so browser bundles never see `ws`.
-    NodeWebSocket = require('ws');
+    const nodeModule = globalThis.process?.getBuiltinModule?.('module');
+    NodeWebSocket = typeof require === 'function' ? require('ws') : nodeModule?.createRequire(import.meta.url)('ws');
   } catch {
     // ws not available: fall back to the global WebSocket below.
   }

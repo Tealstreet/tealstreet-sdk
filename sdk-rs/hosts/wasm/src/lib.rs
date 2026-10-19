@@ -74,6 +74,8 @@ enum ActionOut<'a> {
         socket: u32,
         url: &'a str,
         #[serde(skip_serializing_if = "Option::is_none")]
+        channel: Option<&'static str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         headers: Option<Vec<(&'static str, &'a str)>>,
     },
     WsSend {
@@ -111,6 +113,14 @@ enum ActionOut<'a> {
     },
 }
 
+fn socket_channel(channel: &safe_cex_engine::SocketChannel) -> &'static str {
+    match channel {
+        safe_cex_engine::SocketChannel::Public => "public",
+        safe_cex_engine::SocketChannel::Private => "private",
+        safe_cex_engine::SocketChannel::Business => "business",
+    }
+}
+
 fn encode(actions: &[Action]) -> String {
     if actions.is_empty() {
         return String::new();
@@ -118,18 +128,25 @@ fn encode(actions: &[Action]) -> String {
     let out: Vec<ActionOut<'_>> = actions
         .iter()
         .map(|action| match action {
-            Action::WsConnect { socket, url } => ActionOut::WsConnect {
+            Action::WsConnect {
+                socket,
+                url,
+                channel,
+            } => ActionOut::WsConnect {
                 socket: socket.0,
                 url,
+                channel: channel.as_ref().map(socket_channel),
                 headers: None,
             },
             Action::WsConnectWithHeaders {
                 socket,
                 url,
                 headers,
+                channel,
             } => ActionOut::WsConnect {
                 socket: socket.0,
                 url,
+                channel: channel.as_ref().map(socket_channel),
                 headers: Some(headers.iter().map(|(k, v)| (*k, v.as_str())).collect()),
             },
             Action::WsSend { socket, text } => ActionOut::WsSend {

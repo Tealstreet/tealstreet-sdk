@@ -1,6 +1,6 @@
 import type { CreateAxiosDefaults } from 'axios';
 import type { ExchangeName, ExchangeOptions } from '../../types';
-import type { TransportProvider } from '../types';
+import type { ResolvedRouting, TransportProvider } from '../types';
 
 import { isRelayUrl } from '@tealstreet/http-over-websocket/src/tunnelEndpoints';
 import { getProxyToken } from '../../accessToken';
@@ -9,17 +9,30 @@ import {
   bigIntAxiosHttpOverWebsocketAdapter,
   createAxiosHttpOverWebsocketAdapter,
 } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
-import { resolveExchangeRouting } from './routing/resolveExchangeRouting';
 import { isNodeOrBunRuntime } from '../../utils/runtime';
-import { getPublicCorsProxy, PRIVATE_PROXY_GRVT_TINY, PRIVATE_PROXY_JP } from './transportResolution';
 import { markRestProxyHeader } from '../../utils/venueRestDiagnostics';
+import { resolveExchangeRouting } from './routing/resolveExchangeRouting';
+import { getPublicCorsProxy, PRIVATE_PROXY_GRVT_TINY, PRIVATE_PROXY_JP } from './transportResolution';
 
 /** Headers the tradetunnel's CloudFront/WAF expects on a non-browser WebSocket upgrade. */
-const TEALSTREET_WS_HEADERS = {
+export const TEALSTREET_WS_HEADERS = {
   Origin: 'https://preview.tealstreet.io',
   'User-Agent':
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
 };
+
+export const TEALSTREET_REST_HEADERS = {
+  Origin: 'https://trade.tealstreet.io',
+  Referer: 'https://trade.tealstreet.io/',
+  'User-Agent':
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'sec-fetch-mode': 'cors',
+  'sec-fetch-site': 'cross-site',
+  'sec-fetch-dest': 'empty',
+};
+
+export const proxyAuthorizationHeader = (exchange: ExchangeName): string =>
+  exchange === 'grvt' || exchange === 'mexc' ? 'Tealstreet-Authorization' : 'Authorization';
 
 const isTealstreetWebSocketUrl = (url: string): boolean => {
   try {
@@ -34,19 +47,23 @@ export const getProxyForAxios = (
   config: CreateAxiosDefaults,
   options: ExchangeOptions,
   exchange: ExchangeName,
+  routing?: ResolvedRouting,
 ): string =>
   config.baseURL?.includes('binance') &&
-  (options.publicDataOnly || !Boolean((config?.headers as any)?.['X-MBX-APIKEY']))
+  (options.publicDataOnly ||
+    !Object.entries(config.headers ?? {}).some(
+      ([name, value]) => name.toLowerCase() === 'x-mbx-apikey' && Boolean(value),
+    ))
     ? getPublicCorsProxy()
     : options.tealstreetProxy
-      ? resolveExchangeRouting(exchange, options).restProxyHost
+      ? (routing ?? resolveExchangeRouting(exchange, options)).restProxyHost
       : '';
 
 /** Tealstreet's own proxy pools, tradetunnel and Caddy passthroughs. */
 export const tealstreetTransport: TransportProvider = {
   name: 'tealstreet',
 
-  rest: ({ exchange, options, config }) => {
+  rest: ({ exchange, options, config, routing }) => {
     // GRVT and blofin cannot use the tunnel, so a tunnel request for them means the proxy.
     const effectiveOptions =
       (exchange === 'grvt' || exchange === 'blofin') && options.tealstreetTunnel
@@ -56,7 +73,7 @@ export const tealstreetTransport: TransportProvider = {
     const privateProxyUrl =
       options.tealstreetTunnel && exchange !== 'blofin' && exchange !== 'grvt'
         ? ''
-        : getProxyForAxios(config, effectiveOptions, exchange);
+        : getProxyForAxios(config, effectiveOptions, exchange, routing);
     const proxied = privateProxyUrl !== '';
     const baseURLWithProxy = proxied ? `${privateProxyUrl}/${config?.baseURL}` : config?.baseURL;
 
@@ -82,23 +99,13 @@ export const tealstreetTransport: TransportProvider = {
         markRestProxyHeader(request, token ? 'present' : 'empty');
 
         if (token) {
-          if (exchange === 'grvt' || exchange === 'mexc') {
-            request.headers['Tealstreet-Authorization'] = `Bearer ${token}`;
-          } else {
-            request.headers.Authorization = `Bearer ${token}`;
-          }
+          request.headers[proxyAuthorizationHeader(exchange)] = `Bearer ${token}`;
         }
 
         // Add browser-like headers for CLI requests to proxy
         // Cloudflare Worker requires these headers for CORS validation
         if (isNodeOrBunRuntime()) {
-          request.headers.Origin = 'https://trade.tealstreet.io';
-          request.headers.Referer = 'https://trade.tealstreet.io/';
-          request.headers['User-Agent'] =
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-          request.headers['sec-fetch-mode'] = 'cors';
-          request.headers['sec-fetch-site'] = 'cross-site';
-          request.headers['sec-fetch-dest'] = 'empty';
+          Object.assign(request.headers, TEALSTREET_REST_HEADERS);
         }
       },
     };
@@ -107,7 +114,10 @@ export const tealstreetTransport: TransportProvider = {
   restAdapter: ({ variant }) => {
     if (variant === 'default') return axiosHttpOverWebsocketAdapter;
     if (variant === 'bigInt') return bigIntAxiosHttpOverWebsocketAdapter;
-    return createAxiosHttpOverWebsocketAdapter({ region: variant.region });
+    return createAxiosHttpOverWebsocketAdapter({
+      region: variant.region,
+      ...(variant.raw ? { customParser: (body) => body } : {}),
+    });
   },
 
   proxyPrefix: ({ exchange, options, config }) => getProxyForAxios(config, options, exchange),
