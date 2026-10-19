@@ -170,3 +170,12 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   bans/fmt/native and wasm clippy/release build. Root typecheck 44 tasks and
   lint 28 tasks PASS. Review findings/remediation posted on PR #1299; all three
   sub-agent re-reviews are clear. CI completion and landing remain pending.
+- Final fetch brought in Bybit PR #1298 and the green-CI landing rule. Merged
+  with standing conflict authorization, preserving landing structure, both
+  client-ID rules/SDK tests/WASM constructors and Bybit nested streamed envelopes.
+  Shared Tape retains exact writes/auth/bounds plus canonical volatile requestId
+  URLs for Bybit. Recorder retains whole request bodies and both response forms.
+- SDK and harness merge re-reviews are clear; removed duplicate amend dispatch.
+  Eight harness tests and engine/Backpack native suites pass after resolution.
+  Rebuilding the combined three-venue wasm and rerunning all six venue gates,
+  including Bybit, before waiting for green CI and merging PR #1299.

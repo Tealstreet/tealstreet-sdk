@@ -27,12 +27,14 @@ import { FrameApplier } from '../../store/frameApplier';
 import { LogSeverity } from '../../types';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   backpack: 'backpack',
   binancepm: 'binancepm',
+  bybit: 'bybit',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
@@ -67,14 +69,7 @@ const STORE_FLUSH_MS = 250;
  * reads the same store it always has. Trading methods are engine commands.
  */
 export class RustEngineExchange extends BaseExchange {
-  protected readonly clientOrderIdRule: ClientOrderIdRule | undefined =
-    this.name === 'backpack'
-      ? {
-          label: 'Backpack',
-          requirement: 'be a canonical decimal uint32 between 1 and 4294967295',
-          isValid: (id) => /^[1-9]\d{0,9}$/.test(id) && Number(id) <= 0xffff_ffff,
-        }
-      : undefined;
+  protected readonly clientOrderIdRule: ClientOrderIdRule | undefined;
   private host?: EngineHostType;
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
@@ -90,6 +85,16 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
+    this.clientOrderIdRule =
+      exchangeName === 'bybit'
+        ? patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/)
+        : exchangeName === 'backpack'
+          ? {
+              label: 'Backpack',
+              requirement: 'be a canonical decimal uint32 between 1 and 4294967295',
+              isValid: (id) => /^[1-9]\d{0,9}$/.test(id) && Number(id) <= 0xffff_ffff,
+            }
+          : undefined;
     this.applier = new FrameApplier(store);
   }
 
@@ -206,8 +211,8 @@ export class RustEngineExchange extends BaseExchange {
     return this.host.command(command) as Promise<T>;
   };
 
-  placeOrders = (orders: PlaceOrderOpts[]) => {
-    if (this.name === 'backpack') this.assertCallerClientOrderIds(orders);
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (this.name === 'bybit' || this.name === 'backpack') this.assertCallerClientOrderIds(orders);
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 

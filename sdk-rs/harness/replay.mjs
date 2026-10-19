@@ -371,6 +371,14 @@ async function runTs() {
         await exchange.cancelOrders(store.orders.filter((order) => record.ids.includes(order.id)));
         return [];
       }
+      if (record.op === 'amendOrder') {
+        const order = store.orders.find((o) => o.id === record.id);
+        const update = {
+          ...(record.price !== undefined && { price: record.price }),
+          ...(record.amount !== undefined && { amount: record.amount }),
+        };
+        return exchange.updateOrder({ order, update });
+      }
       if (record.op === 'cancelSymbolOrders') {
         await exchange.cancelSymbolOrders(record.symbol);
         return [];

@@ -71,6 +71,17 @@ const isPrivate = Boolean(ts.account);
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
+//  - Bybit: TS drops the reject reason of a post-only order cancelled for taking
+//    liquidity (`EC_PostOnlyWillTakeLiquidity`); Rust reports it as PostOnly.
+//  - Bybit: TS can round split quantities away from the requested total;
+//    Rust uses maximum-size lots and the exact remainder.
+//  - Bybit: TS falls back from failed batch writes to single creates, even
+//    after ambiguous HTTP/transport failures; Rust never resends those writes.
+//  - Bybit: TS may drop the initial ticker snapshot before a slow REST seed;
+//    Rust installs the seed before connecting. These cases have native regression
+//    coverage; the committed replay tapes require no normalization for them.
+//  - Bybit: with no mark price, TS can add a second Partial stop on amend;
+//    Rust amends the existing native order ID.
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
@@ -78,6 +89,30 @@ const KNOWN_TS_FIXES = {
     for (const position of ts.account?.positions ?? []) {
       const fixed = rust.account.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
       if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+    }
+  },
+  bybit: (ts, rust) => {
+    if (!ts.account) return;
+    KNOWN_TS_FIXES.binance(ts, rust);
+    const bytes = readFileSync(values.tape);
+    const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
+      .toString()
+      .split('\n')
+      .filter(Boolean)
+      .map(JSON.parse);
+    const latest = new Map();
+    for (const record of records) {
+      if (record.type !== 'ws') continue;
+      const event = JSON.parse(record.text);
+      if (event.topic === 'order') for (const row of event.data) latest.set(row.orderId, row);
+    }
+    for (const order of ts.account.orders) {
+      if (
+        order.rejectReason === null &&
+        order.status === 'canceled' &&
+        latest.get(order.id)?.rejectReason === 'EC_PostOnlyWillTakeLiquidity'
+      )
+        order.rejectReason = 'PostOnly';
     }
   },
   // Attached TP/SL must remain market exits. The private tape declares the

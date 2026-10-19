@@ -131,3 +131,15 @@ test('declared TS wire defect does not relax the Rust request body', () => {
   const ts = new Tape([row], {}, false, 30000, 'ts');
   assert.equal(ts.respond('POST', URL, row.tsRequestBody).status, 200);
 });
+
+test('Bybit per-connection requestId is volatile for HTTP and sockets', async () => {
+  const response = { ...record('GET'), url: 'https://example.test/order?symbol=BTCUSDT&requestId=recorded' };
+  const tape = new Tape([response], {}, false, 200);
+  assert.equal(tape.respond('GET', 'https://example.test/order?requestId=live&symbol=BTCUSDT').status, 200);
+  const socket = tape.connect(
+    'wss://example.test/v5/public/linear?requestId=live',
+    () => {},
+    () => {},
+  );
+  assert.equal(await tape.socketFor('wss://example.test/v5/public/linear?requestId=recorded'), socket);
+});

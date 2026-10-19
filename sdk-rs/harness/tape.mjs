@@ -1,5 +1,5 @@
 /** Per-request values: clocks, signatures and generated client ids. */
-const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId']);
+const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
 export const canonicalUrl = (url) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams]
@@ -108,8 +108,9 @@ export class Tape {
     const socket = { url, onMessage, closed: false, subscriptions: new Set() };
     setImmediate(() => {
       if (socket.closed) return;
-      if (!this.open.has(url)) this.open.set(url, []);
-      this.open.get(url).push(socket);
+      const key = canonicalUrl(url);
+      if (!this.open.has(key)) this.open.set(key, []);
+      this.open.get(key).push(socket);
       onOpen();
       for (const waiter of [...this.waiters]) waiter();
     });
@@ -144,7 +145,7 @@ export class Tape {
   async socketFor(url, text) {
     const stream = text && this.venue.streamOf?.(text);
     const find = () => {
-      const sockets = (this.open.get(url) ?? []).filter((s) => !s.closed);
+      const sockets = (this.open.get(canonicalUrl(url)) ?? []).filter((s) => !s.closed);
       return stream
         ? sockets.find((s) => [...s.subscriptions].some((topic) => stream === topic || stream.startsWith(`${topic}.`)))
         : sockets[0];

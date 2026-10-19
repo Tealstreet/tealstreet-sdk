@@ -20,6 +20,7 @@
     "rust:test-harness": "node --test sdk-rs/harness/*.test.mjs",
     "rust:private-tape-backpack": "node sdk-rs/harness/private-tape-backpack.mjs",
     "rust:private-tape": "node sdk-rs/harness/private-tape.mjs",
+    "rust:private-tape-bybit": "node sdk-rs/harness/private-tape-bybit.mjs",
     "rust:trim-tape": "node sdk-rs/harness/trim-tape.mjs",
     "rust:gate": "node sdk-rs/harness/gate.mjs"
   },

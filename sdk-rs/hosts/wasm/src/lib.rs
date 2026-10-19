@@ -9,6 +9,7 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -425,6 +426,12 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 recv_window: options.recv_window,
+            }))),
+            "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
             }))),
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };
