@@ -6,6 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { gunzipSync } from 'node:zlib';
 
 const { values } = parseArgs({
   options: {
@@ -64,6 +65,38 @@ const isPrivate = Boolean(ts.account);
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
+  if (values.venue === 'bingx') {
+    // BingX TS emits a terminal cumulative fill, ignores partial executions,
+    // and drops its terminal watermark so TRADE_UPDATE can repeat that fill.
+    // Use the taped per-execution oracle; Rust is still compared against it.
+    const bytes = readFileSync(values.tape);
+    const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes).toString().trim().split('\n').map(JSON.parse);
+    const watermark = new Map();
+    const fills = [];
+    for (const record of records) {
+      if (record.type !== 'ws' || !record.url?.includes('?listenKey=')) continue;
+      let event;
+      try { event = JSON.parse(record.text); } catch { continue; }
+      if (!['ORDER_TRADE_UPDATE', 'TRADE_UPDATE'].includes(event.e)) continue;
+      const o = event.o;
+      if (!['PARTIALLY_FILLED', 'FILLED'].includes(o.X)) continue;
+      const id = String(o.i);
+      const cumulative = Number(o.z);
+      const previous = watermark.get(id) ?? 0;
+      const amount = Math.max(0, cumulative - previous);
+      watermark.set(id, Math.max(previous, cumulative));
+      if (amount > 0) fills.push({ id, symbol: o.s.replaceAll('-', ''), side: o.S === 'BUY' ? 'buy' : 'sell', amount: Number(o.l) > 0 ? Math.min(amount, Number(o.l)) : amount });
+    }
+    account.fills = fills;
+    // TS's private mapper reads closePosition but misses the native cp alias.
+    for (const record of records) {
+      if (record.type !== 'ws') continue;
+      let event; try { event = JSON.parse(record.text); } catch { continue; }
+      const row = account.orders.find((o) => o.id === String(event.o?.i));
+      if (row && event.o.cp !== undefined) row.close = event.o.cp === true || event.o.cp === 'true';
+    }
+    return;
+  }
   for (const position of account.positions) {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
     if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
@@ -79,6 +112,26 @@ if (isPrivate) {
   const left = JSON.stringify(ts.commands);
   const right = JSON.stringify(rust.commands);
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
+}
+// KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
+// integer step 1. Correct that precision and its synthetic ticker touch only.
+if (values.venue === 'bingx') {
+  const bySymbol = new Map(rust.markets.map((m) => [m.symbol, m]));
+  const prices = new Map();
+  for (const market of ts.markets) {
+    const native = bySymbol.get(market.symbol);
+    for (const field of ['amount', 'price']) {
+      if (market.precision[field] === 0.1 && native?.precision[field] === 1) {
+        market.precision[field] = 1;
+        if (field === 'price') prices.set(market.symbol, 1);
+      }
+    }
+  }
+  for (const ticker of ts.tickers) {
+    if (!prices.has(ticker.symbol)) continue;
+    ticker.bid = Math.max(ticker.last - 1, 0);
+    ticker.ask = ticker.last + 1;
+  }
 }
 compare('market', ts.markets, rust.markets);
 compare('ticker', ts.tickers, rust.tickers);

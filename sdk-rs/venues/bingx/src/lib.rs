@@ -1,4 +1,6 @@
 //! BingX stablecoin-margined perpetual swaps on the sans-I/O engine.
+pub mod account;
+pub mod account_wire;
 pub mod paths;
 pub mod sign;
 mod wire;
@@ -22,6 +24,7 @@ pub struct Options {
 }
 
 pub enum Pending {
+    Account(account::Request),
     Markets {
         rows: Vec<Market>,
         valid: bool,
@@ -65,6 +68,7 @@ struct BookState {
 }
 
 pub struct Bingx {
+    account: account::Account,
     credentials: Option<Credentials>,
     public: Connection,
     books: HashMap<String, BookState>,
@@ -89,6 +93,7 @@ impl Bingx {
                 .map(|(key, secret)| Credentials { key, secret })
         };
         Self {
+            account: account::Account::default(),
             credentials,
             public: Connection::default(),
             books: HashMap::new(),
@@ -199,43 +204,44 @@ impl Bingx {
         if text == "Pong" {
             return;
         }
-        #[derive(Deserialize)]
-        struct Control {
-            ping: Option<serde::de::IgnoredAny>,
-            pong: Option<serde::de::IgnoredAny>,
-        }
-        if let Ok(control) = serde_json::from_str::<Control>(text) {
-            if control.ping.is_some() {
-                cx.send(socket, "Pong");
-                return;
-            }
-            if control.pong.is_some() {
-                return;
-            }
-        }
         let Ok(message) = serde_json::from_str::<Message<'_>>(text) else {
             return;
         };
+        if message.ping.is_some() {
+            cx.send(socket, "Pong");
+            return;
+        }
+        if message.pong.is_some() {
+            return;
+        }
+        let Some(data) = message.data else { return };
         if message.data_type == "market.contracts" {
-            for row in message.data.contracts {
-                let Some(market) = cx.store.market_by_id(&row.symbol) else {
-                    continue;
-                };
-                let symbol = market.symbol.clone();
-                let step = market.precision.price;
-                cx.store.update_ticker(&symbol, |t| {
-                    if row.trade_price > 0. {
-                        t.last = row.trade_price;
-                        (t.bid, t.ask) = touch(row.trade_price, step)
-                    }
-                    t.mark = row.fair_price;
-                    t.index = row.index_price;
-                    t.funding_rate = row.funding_rate / 100.;
-                    t.percentage = row.change_percentage;
-                    t.volume = row.volume;
-                    t.quote_volume = row.value;
-                    t.funding_time = 0.;
-                });
+            let result = safe_cex_engine::json::each_in_field::<LiveTicker<'_>>(
+                data.get(),
+                "contracts",
+                |row| {
+                    let Some(market) = cx.store.market_by_id(&row.symbol) else {
+                        return;
+                    };
+                    let symbol = market.symbol.clone();
+                    let step = market.precision.price;
+                    cx.store.update_ticker(&symbol, |t| {
+                        if row.trade_price > 0. {
+                            t.last = row.trade_price;
+                            (t.bid, t.ask) = touch(row.trade_price, step)
+                        }
+                        t.mark = row.fair_price;
+                        t.index = row.index_price;
+                        t.funding_rate = row.funding_rate / 100.;
+                        t.percentage = row.change_percentage;
+                        t.volume = row.volume;
+                        t.quote_volume = row.value;
+                        t.funding_time = 0.;
+                    });
+                },
+            );
+            if result.is_err() {
+                cx.log(LogLevel::Warning, "invalid BingX ticker frame")
             }
             return;
         }
@@ -247,7 +253,7 @@ impl Bingx {
                 return;
             };
             let symbol = m.symbol.clone();
-            let (Some(bids), Some(asks)) = (message.data.bids, message.data.asks) else {
+            let Ok(Depth { bids, asks }) = serde_json::from_str::<Depth>(data.get()) else {
                 return;
             };
             if let Some(state) = self.books.get_mut(&symbol) {
@@ -275,7 +281,10 @@ impl Bingx {
                 .filter(|(s, i)| s == &symbol && stream_interval(i) == Some(native_interval))
                 .cloned()
                 .collect();
-            if let Some(row) = message.data.kline_infos_vo.into_iter().next() {
+            let Ok(data) = serde_json::from_str::<CandleData>(data.get()) else {
+                return;
+            };
+            if let Some(row) = data.kline_infos_vo.into_iter().next() {
                 let candle = Candle::from(row);
                 for (symbol, interval) in matches {
                     cx.candle(&symbol, &interval, candle)
@@ -367,11 +376,19 @@ impl Venue for Bingx {
                 valid: true,
             },
         );
-        cx.store.set_balance(Default::default());
-        cx.store.set_orders(Vec::new());
-        cx.store.set_positions(Vec::new());
+        if self.credentials.is_none() {
+            cx.store.set_balance(Default::default());
+            cx.store.set_orders(Vec::new());
+            cx.store.set_positions(Vec::new());
+        }
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        if self.account.handles_socket(socket) {
+            if let Some(c) = &self.credentials {
+                self.account.on_open(cx, c);
+            }
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -399,17 +416,27 @@ impl Venue for Bingx {
         cx.send(socket, "Ping");
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
-        if self.public.socket == Some(socket) {
+        if self.account.handles_socket(socket) {
+            if let Some(c) = &self.credentials {
+                self.account.on_message(cx, text, c);
+            }
+            self.account.drain_order_meta().for_each(drop);
+        } else if self.public.socket == Some(socket) {
             self.public_message(cx, text)
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
-        if self.public.socket == Some(socket) {
+        if self.account.handles_socket(socket) {
+            if let Some(c) = &self.credentials {
+                self.account.on_close(cx, c);
+            }
+        } else if self.public.socket == Some(socket) {
             self.reconnect(cx)
         }
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::Markets { rows, valid } => match serde_json::from_str::<Contract<'_>>(item) {
                 Ok(m) => rows.push(Market {
                     id: m.symbol.to_string(),
@@ -419,8 +446,8 @@ impl Venue for Bingx {
                     quote: m.currency.into_owned(),
                     active: m.status == 1.,
                     precision: Precision {
-                        amount: 10f64.powf(-m.quantity_precision),
-                        price: 10f64.powf(-m.price_precision),
+                        amount: 10f64.powi(m.quantity_precision as i32).recip(),
+                        price: 10f64.powi(m.price_precision as i32).recip(),
                     },
                     limits: Limits {
                         amount: MinMax {
@@ -487,6 +514,16 @@ impl Venue for Bingx {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        let pending = match pending {
+            Pending::Account(request) => {
+                if let Some(c) = &self.credentials {
+                    self.account.on_response(cx, request, response, c);
+                }
+                self.account.drain_order_meta().for_each(drop);
+                return;
+            }
+            pending => pending,
+        };
         if let Err(error) = success(response) {
             self.on_request_failed(cx, pending, &error);
             return;
@@ -520,8 +557,11 @@ impl Venue for Bingx {
                     .zip(self.seed_reported.drain(..))
                     .filter_map(|(t, seen)| seen.then_some(t))
                     .collect();
-                self.seed_index.clear();
-                cx.store.set_tickers(rows)
+                self.seed_index = HashMap::new();
+                cx.store.set_tickers(rows);
+                if let Some(c) = &self.credentials {
+                    self.account.start(cx, c);
+                }
             }
             Pending::Candles {
                 command,
@@ -539,6 +579,12 @@ impl Venue for Bingx {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Account(request) => {
+                if let Some(c) = &self.credentials {
+                    self.account.on_request_failed(cx, request, error, c);
+                }
+                return;
+            }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Markets { .. } => self.retry_list(cx, List::Markets),
             Pending::Daily { .. } => self.retry_list(cx, List::Daily),
@@ -547,6 +593,12 @@ impl Venue for Bingx {
         cx.log(LogLevel::Error, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account.handles_timer(timer) {
+            if let Some(c) = &self.credentials {
+                self.account.on_timer(cx, timer, c);
+            }
+            return;
+        }
         if let Some(kind) = self.retries.remove(&timer) {
             let (path, pending) = match kind {
                 List::Markets => (

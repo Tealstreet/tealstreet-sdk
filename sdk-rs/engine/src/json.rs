@@ -106,6 +106,8 @@ pub enum ArrayAt {
     Field(&'static str),
     /// Preserve the surrounding object (with an empty array) for envelope validation.
     EnvelopeField(&'static str),
+    /// Either `field: []` or `field: { nested: [] }`, preserving its envelope.
+    EnvelopeFieldOrNested(&'static str, &'static str),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -134,6 +136,7 @@ pub struct ArraySplitter {
     item: Vec<u8>,
     envelope: Vec<u8>,
     envelope_truncated: bool,
+    nested_parent: bool,
 }
 
 impl ArraySplitter {
@@ -151,6 +154,7 @@ impl ArraySplitter {
             item: Vec::new(),
             envelope: Vec::new(),
             envelope_truncated: false,
+            nested_parent: false,
         }
     }
 
@@ -161,14 +165,20 @@ impl ArraySplitter {
 
     /// Only opt-in streams retain metadata; old streams keep their empty response body.
     pub fn envelope(&self) -> Option<&[u8]> {
-        matches!(self.at, ArrayAt::EnvelopeField(_)).then_some(&self.envelope)
+        matches!(
+            self.at,
+            ArrayAt::EnvelopeField(_) | ArrayAt::EnvelopeFieldOrNested(_, _)
+        )
+        .then_some(&self.envelope)
     }
 
     pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
         for &byte in data {
-            if matches!(self.at, ArrayAt::EnvelopeField(_))
-                && (self.phase != Phase::InArray
-                    || (!self.in_string && self.depth == self.array_depth && byte == b']'))
+            if matches!(
+                self.at,
+                ArrayAt::EnvelopeField(_) | ArrayAt::EnvelopeFieldOrNested(_, _)
+            ) && (self.phase != Phase::InArray
+                || (!self.in_string && self.depth == self.array_depth && byte == b']'))
             {
                 // Oversized metadata fails JSON validation rather than retaining arbitrary bodies.
                 if self.envelope.len() < 16_384 {
@@ -203,17 +213,40 @@ impl ArraySplitter {
             match byte {
                 b'"' => {
                     self.in_string = true;
-                    if self.phase == Phase::Seeking && self.depth == 1 {
+                    if self.phase == Phase::Seeking
+                        && (self.depth == 1 || self.depth == 2 && self.nested_parent)
+                    {
                         self.key.clear();
                         self.capturing_key = true;
                         self.armed = false;
                     }
                 }
-                b':' if self.phase == Phase::Seeking && self.depth == 1 => {
-                    self.armed = matches!(self.at, ArrayAt::Field(name) | ArrayAt::EnvelopeField(name) if name.as_bytes() == self.key);
+                b':' if self.phase == Phase::Seeking
+                    && (self.depth == 1 || self.depth == 2 && self.nested_parent) =>
+                {
+                    self.armed = match self.at {
+                        ArrayAt::Root => false,
+                        ArrayAt::Field(name) | ArrayAt::EnvelopeField(name) => {
+                            self.depth == 1 && name.as_bytes() == self.key
+                        }
+                        ArrayAt::EnvelopeFieldOrNested(field, nested) => {
+                            (self.depth == 1 && field.as_bytes() == self.key)
+                                || (self.depth == 2
+                                    && self.nested_parent
+                                    && nested.as_bytes() == self.key)
+                        }
+                    };
                     continue;
                 }
                 b'[' | b'{' => {
+                    if self.phase == Phase::Seeking
+                        && self.depth == 1
+                        && self.armed
+                        && byte == b'{'
+                        && matches!(self.at, ArrayAt::EnvelopeFieldOrNested(_, _))
+                    {
+                        self.nested_parent = true;
+                    }
                     self.depth += 1;
                     if self.phase == Phase::Seeking {
                         let found = byte == b'['
@@ -221,6 +254,11 @@ impl ArraySplitter {
                                 ArrayAt::Root => self.depth == 1,
                                 ArrayAt::Field(_) | ArrayAt::EnvelopeField(_) => {
                                     self.armed && self.depth == 2
+                                }
+                                ArrayAt::EnvelopeFieldOrNested(_, _) => {
+                                    self.armed
+                                        && (self.depth == 2
+                                            || self.depth == 3 && self.nested_parent)
                                 }
                             };
                         self.armed = false;
@@ -238,6 +276,9 @@ impl ArraySplitter {
                         continue;
                     }
                     self.depth = self.depth.saturating_sub(1);
+                    if self.depth < 2 {
+                        self.nested_parent = false;
+                    }
                 }
                 b',' if at_array_level => {
                     self.emit(&mut on_item);
@@ -296,6 +337,27 @@ mod tests {
         let mut splitter = ArraySplitter::new(ArrayAt::Field("symbols"));
         splitter.feed(br#"{"other":[1],"symbolsX":[2]}"#, |_| panic!("no match"));
         assert!(!splitter.finished());
+    }
+
+    #[test]
+    fn streams_either_direct_or_nested_envelope_arrays() {
+        for text in [
+            r#"{"code":0,"data":[{"n":1}],"msg":""}"#,
+            r#"{"code":0,"data":{"orders":[{"n":1}]},"msg":""}"#,
+        ] {
+            for size in [1, 3, 1000] {
+                let mut splitter =
+                    ArraySplitter::new(ArrayAt::EnvelopeFieldOrNested("data", "orders"));
+                let mut items = Vec::new();
+                for chunk in text.as_bytes().chunks(size) {
+                    splitter.feed(chunk, |s| items.push(s.to_owned()))
+                }
+                assert!(splitter.finished());
+                assert_eq!(items, [r#"{"n":1}"#]);
+                let envelope = std::str::from_utf8(splitter.envelope().unwrap()).unwrap();
+                assert_eq!(envelope, text.replace(r#"{"n":1}"#, ""));
+            }
+        }
     }
 
     #[test]

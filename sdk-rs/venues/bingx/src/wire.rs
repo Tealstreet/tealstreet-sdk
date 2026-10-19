@@ -129,23 +129,26 @@ impl From<Kline> for safe_cex_engine::model::Candle {
     }
 }
 
-#[derive(Default, Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MessageData<'a> {
-    #[serde(default, borrow)]
-    pub contracts: Vec<LiveTicker<'a>>,
-    #[serde(default)]
-    pub bids: Option<Vec<Level>>,
-    #[serde(default)]
-    pub asks: Option<Vec<Level>>,
-    #[serde(default)]
+pub struct Depth {
+    pub bids: Vec<Level>,
+    pub asks: Vec<Level>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CandleData {
     pub kline_infos_vo: Vec<Kline>,
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Message<'a> {
     #[serde(default, borrow)]
     pub data_type: Str<'a>,
-    #[serde(default, borrow)]
-    pub data: MessageData<'a>,
+    #[serde(borrow)]
+    pub data: Option<&'a serde_json::value::RawValue>,
+    pub ping: Option<serde::de::IgnoredAny>,
+    pub pong: Option<serde::de::IgnoredAny>,
 }

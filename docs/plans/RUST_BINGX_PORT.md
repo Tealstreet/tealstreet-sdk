@@ -66,3 +66,20 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   definitions/export; `ethereum::is_address` only has predicate-specific tests.
   Removed those first-port facades; kept address validation and signing
   primitives with live callers. Updated licence notice paths after nesting.
+
+### Private checkpoint
+
+- Account module integrated: unsigned production listen keys, independent
+  keepalive/expiry/recovery, socket watchdog, REST position mode and account
+  reconciliation, settings, and stale-read guards. Both open-order envelopes
+  stream row by row via the engine's new nested-array selector.
+- Independent review found historical fill replay, liquidation drops, unbounded
+  dedupe and placement-ACK suppression. Fixed with REST-only historical fill
+  baselines, per-execution quantities, bounded terminal tombstones, and
+  ACK-before-WS regressions. 18 account integration tests and 2 unit tests pass;
+  public regressions (6) also pass. Account clippy passes with warnings denied.
+- Live public tape recorded for 20s, two books. First gate exposed TS precision
+  zero mapped incorrectly to 0.1, and excessive Rust ticker allocation. Rust
+  uses native integer precision and borrowed streamed ticker rows. Known TS
+  fixes declared in gate: precision zero, terminal cumulative/repeated fills,
+  and private close-position `cp` alias. Public gate recheck pending rebuild.
