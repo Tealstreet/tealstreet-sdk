@@ -124,6 +124,12 @@ const KNOWN_TS_FIXES = {
     'conditional orders and mixed bracket trigger references fail before writes instead of dropping fields',
     'cancelSymbolOrders cancels the stop book too (reference signed transport fills this omission)',
     'open orders walk every numbered page; TS reads only its default first page',
+    'socket readiness and subscriptions wait for welcome; TS sends on TCP open',
+    'cancel-replace proves terminal cancellation and subtracts fills during cancellation',
+    'stop-to-normal migration remains visible across independent REST books',
+    'settings streams update flat symbols and fence delayed metadata reads',
+    'partial order stream rows retain REST-known safety flags',
+    'immediate bracket replacement retains submitted protections before reconciliation',
     'cached book snapshot gaps retain the entire contiguous buffered suffix (TS reference fixed with a regression)',
   ],
   bingx: (account, rustAccount) => {

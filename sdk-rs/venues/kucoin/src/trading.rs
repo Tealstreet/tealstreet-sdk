@@ -1,5 +1,5 @@
 //! Preflighted write plans; a lost response never resends a mutation.
-use crate::wire::Envelope;
+use crate::wire::{Envelope, Number};
 use crate::{Kucoin, Pending, api_symbol, encode};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::*;
@@ -10,12 +10,22 @@ use std::collections::{HashMap, HashSet, VecDeque};
 #[derive(Clone)]
 enum Call {
     Place,
+    PlaceAfterCancel { id: String, filled: f64 },
     Cancel { id: String, fallback: bool },
+    ConfirmCancel(Box<Replacement>),
     Write,
     Leverage { symbol: String, leverage: f64 },
     Margin { symbol: String, isolated: bool },
     CheckMode { hedged: bool },
     Mode { hedged: bool },
+}
+#[derive(Clone)]
+struct Replacement {
+    id: String,
+    options: PlaceOrderOpts,
+    filled: f64,
+    polls: u8,
+    read_retries: u8,
 }
 #[derive(Clone)]
 struct Step {
@@ -183,6 +193,18 @@ fn cancel(id: &str, symbol: &str) -> Step {
         },
     }
 }
+fn confirm_cancel(replacement: Replacement, symbol: &str) -> Step {
+    Step {
+        method: Method::Get,
+        path: format!(
+            "/api/v1/orders/{}?symbol={}",
+            encode(&replacement.id),
+            encode(symbol)
+        ),
+        body: None,
+        call: Call::ConfirmCancel(Box::new(replacement)),
+    }
+}
 fn json<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value).expect("typed KuCoin request")
 }
@@ -347,14 +369,24 @@ impl Kucoin {
         if id.contains("__") && parent.id == order.id {
             return Err("KuCoin attached stop parent unavailable".into());
         }
+        if !self.account_order_complete(&parent.id) {
+            return Err("KuCoin order metadata unavailable; wait for reconciliation".into());
+        }
         let market = cx
             .store
             .market(&parent.symbol)
             .ok_or("KuCoin order market unavailable")?;
-        let mut sl = parent.stop_loss;
-        let mut tp = parent.take_profit;
-        let mut sl_trigger = parent.trigger_type;
-        let mut tp_trigger = parent.trigger_type;
+        let placement = self.account_placement(parent_id);
+        let mut sl = parent
+            .stop_loss
+            .or(placement.and_then(|order| order.stop_loss));
+        let mut tp = parent
+            .take_profit
+            .or(placement.and_then(|order| order.take_profit));
+        let mut sl_trigger = parent
+            .trigger_type
+            .or(placement.and_then(|order| order.trigger_type));
+        let mut tp_trigger = sl_trigger;
         for related in cx
             .store
             .orders()
@@ -434,9 +466,25 @@ impl Kucoin {
                 id, price, amount, ..
             } => {
                 let (parent, opts) = self.replacement(cx, &id, price, amount)?;
-                let place = self.format_placement(cx, &opts)?;
+                self.format_placement(cx, &opts)?;
                 steps.push_back(cancel(&parent.id, &api_symbol(cx.store, &parent.symbol)));
-                steps.push_back(place);
+                let filled = parent
+                    .extra
+                    .as_ref()
+                    .and_then(|extra| extra.filled_in_placement_units)
+                    .unwrap_or(
+                        parent.filled / crate::account::contract_size(cx.store, &parent.symbol),
+                    );
+                steps.push_back(confirm_cancel(
+                    Replacement {
+                        id: parent.id,
+                        options: opts,
+                        filled,
+                        polls: 0,
+                        read_retries: 0,
+                    },
+                    &api_symbol(cx.store, &parent.symbol),
+                ));
             }
             Command::CancelOrders { ids, .. } => {
                 let mut seen = HashSet::new();
@@ -681,7 +729,20 @@ impl Kucoin {
         self.drive_trading(cx);
         true
     }
-    fn send_trade(&self, cx: &mut Cx<'_, Pending>, request: Request) {
+    fn send_trade(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+        if let Call::PlaceAfterCancel { id, filled } = &request.step.call
+            && self.account_order_filled(id) > *filled
+        {
+            let error = "KuCoin newer fills invalidated cancellation proof";
+            cx.log(LogLevel::Error, error);
+            let job = self.trading.jobs.get_mut(&request.command).unwrap();
+            job.error = Some(error.into());
+            job.steps.clear();
+            self.trading.active = false;
+            self.trading.queue.push_front(request.command);
+            self.trading.timer = Some(cx.set_timer(20.0));
+            return;
+        }
         let method = request.step.method;
         let path = request.step.path.clone();
         let body = request.step.body.clone();
@@ -772,6 +833,7 @@ impl Kucoin {
             );
             return;
         }
+        let mut delay = 20.0;
         let result = envelope
             .map_err(|_| format!("Invalid KuCoin response (HTTP {status})"))
             .and_then(|row| {
@@ -781,8 +843,8 @@ impl Kucoin {
                         row.code, row.msg
                     ));
                 }
-                match request.step.call {
-                    Call::Place => {
+                match request.step.call.clone() {
+                    Call::Place | Call::PlaceAfterCancel { .. } => {
                         #[derive(Deserialize)]
                         #[serde(rename_all = "camelCase")]
                         struct Created<'a> {
@@ -795,12 +857,99 @@ impl Kucoin {
                         if created.order_id.is_empty() {
                             return Err("Missing KuCoin order id".into());
                         }
+                        if let Some(body) = request.step.body.as_deref() {
+                            self.account_placed_order(cx, created.order_id, body);
+                        }
                         self.trading
                             .jobs
                             .get_mut(&request.command)
                             .unwrap()
                             .ids
                             .push(created.order_id.into());
+                    }
+                    Call::ConfirmCancel(mut replacement) => {
+                        #[derive(Deserialize)]
+                        #[serde(rename_all = "camelCase")]
+                        struct FinalOrder<'a> {
+                            #[serde(default, alias = "orderId")]
+                            id: &'a str,
+                            #[serde(default)]
+                            is_active: Option<bool>,
+                            #[serde(default)]
+                            cancel_exist: Option<bool>,
+                            #[serde(default)]
+                            status: &'a str,
+                            #[serde(default)]
+                            size: Option<Number>,
+                            #[serde(default)]
+                            filled_size: Option<Number>,
+                            #[serde(default)]
+                            deal_size: Option<Number>,
+                        }
+                        let final_order: FinalOrder = serde_json::from_str(
+                            row.data.ok_or("Missing KuCoin cancellation proof")?.get(),
+                        )
+                        .map_err(|_| "Invalid KuCoin cancellation proof")?;
+                        if final_order.id != replacement.id {
+                            return Err("KuCoin cancellation proof has the wrong order id".into());
+                        }
+                        let canceled = final_order.is_active != Some(true)
+                            && (matches!(final_order.status, "canceled" | "cancelled")
+                                || final_order.is_active == Some(false)
+                                    && final_order.cancel_exist == Some(true));
+                        let filled = final_order
+                            .filled_size
+                            .or(final_order.deal_size)
+                            .map(Number::get)
+                            .ok_or("KuCoin cancellation proof missing final fills")?;
+                        if filled
+                            < replacement
+                                .filled
+                                .max(self.account_order_filled(&replacement.id))
+                        {
+                            return Err("KuCoin cancellation proof has stale fills".into());
+                        }
+                        let fully_filled = final_order.is_active == Some(false)
+                            && final_order
+                                .size
+                                .is_some_and(|n| n.get() > 0.0 && filled >= n.get());
+                        if !canceled && !fully_filled {
+                            if replacement.polls >= 30 {
+                                return Err("KuCoin cancellation could not be confirmed".into());
+                            }
+                            replacement.polls += 1;
+                            replacement.read_retries = 0;
+                            let symbol = api_symbol(cx.store, &replacement.options.symbol);
+                            self.trading
+                                .jobs
+                                .get_mut(&request.command)
+                                .unwrap()
+                                .steps
+                                .push_front(confirm_cancel(*replacement, &symbol));
+                            delay = 100.0;
+                            return Ok(());
+                        }
+                        let full_position_stop =
+                            advanced(replacement.options.kind) && replacement.options.amount == 0.0;
+                        if !full_position_stop {
+                            replacement.options.amount -= filled - replacement.filled;
+                        }
+                        self.account_order_terminal(cx, &replacement.id);
+                        if full_position_stop && canceled && !fully_filled
+                            || !full_position_stop && replacement.options.amount > 0.0
+                        {
+                            let mut step = self.format_placement(cx, &replacement.options)?;
+                            step.call = Call::PlaceAfterCancel {
+                                id: replacement.id.clone(),
+                                filled,
+                            };
+                            self.trading
+                                .jobs
+                                .get_mut(&request.command)
+                                .unwrap()
+                                .steps
+                                .push_front(step);
+                        }
                     }
                     Call::Leverage { symbol, leverage } => {
                         self.account_settings_changed();
@@ -852,6 +1001,22 @@ impl Kucoin {
                 Ok(())
             });
         if let Err(error) = result {
+            if let Call::ConfirmCancel(mut replacement) = request.step.call
+                && replacement.read_retries < 2
+            {
+                replacement.read_retries += 1;
+                let symbol = api_symbol(cx.store, &replacement.options.symbol);
+                self.trading
+                    .jobs
+                    .get_mut(&request.command)
+                    .unwrap()
+                    .steps
+                    .push_front(confirm_cancel(*replacement, &symbol));
+                self.trading.active = false;
+                self.trading.queue.push_front(request.command);
+                self.trading.timer = Some(cx.set_timer(100.0));
+                return;
+            }
             cx.log(LogLevel::Error, &error);
             let job = self.trading.jobs.get_mut(&request.command).unwrap();
             job.error = Some(error);
@@ -859,6 +1024,6 @@ impl Kucoin {
         }
         self.trading.active = false;
         self.trading.queue.push_front(request.command);
-        self.trading.timer = Some(cx.set_timer(20.0));
+        self.trading.timer = Some(cx.set_timer(delay));
     }
 }

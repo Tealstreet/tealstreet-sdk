@@ -92,10 +92,13 @@ impl Harness {
         self.response(&request, 200, body);
     }
     fn pace(&mut self) {
+        self.advance(20.0);
+    }
+    fn advance(&mut self, delay: f64) {
         let index = self
             .actions
             .iter()
-            .position(|a| matches!(a,Action::SetTimer{at_ms,..} if *at_ms==self.now+20.0))
+            .position(|a| matches!(a,Action::SetTimer{at_ms,..} if *at_ms==self.now+delay))
             .unwrap_or_else(|| panic!("missing pacing timer: {:?}", self.actions));
         let Action::SetTimer { timer, at_ms } = self.actions.remove(index) else {
             unreachable!()
@@ -162,6 +165,14 @@ impl Harness {
                 ..Default::default()
             }),
         });
+    }
+    fn confirm_cancel(&mut self, id: &str, size: f64, filled: f64) {
+        let request = self.take(&format!("/api/v1/orders/{id}"));
+        assert_eq!(request.method, Method::Get);
+        self.response(&request, 200, &format!(
+            r#"{{"code":"200000","data":{{"id":"{id}","isActive":false,"cancelExist":true,"status":"done","size":{size},"filledSize":{filled}}}}}"#
+        ));
+        self.pace();
     }
 }
 fn order() -> PlaceOrderOpts {
@@ -353,6 +364,7 @@ fn cancel_replace_uses_remaining_native_once_and_a_new_client_id() {
         r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
     );
     h.pace();
+    h.confirm_cancel("old", 10.0, 4.0);
     let create = h.take("/api/v1/orders");
     let body = create.body.unwrap();
     assert!(body.contains(r#""size":"6""#));
@@ -397,6 +409,7 @@ fn virtual_leg_amend_keeps_both_protections_and_uses_st_orders() {
         r#"{"code":"200000","data":{"cancelledOrderIds":["parent"]}}"#,
     );
     h.pace();
+    h.confirm_cancel("parent", 10.0, 4.0);
     let request = h.take("/api/v1/st-orders");
     let body = request.body.unwrap();
     for expected in [
@@ -684,4 +697,153 @@ fn isolated_hedged_placement_uses_the_target_sides_leverage() {
                 .contains(&format!(r#""leverage":{expected}"#))
         );
     }
+}
+
+#[test]
+fn cancel_replace_waits_for_terminal_proof_and_subtracts_intervening_fills() {
+    for (amount, expected) in [(None, "2"), (Some(9.0), "5")] {
+        let mut h = Harness::new();
+        h.set_order("old", OrderType::Limit, 6.0);
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: "old".into(),
+            price: Some(101.0),
+            amount,
+        });
+        h.metadata(false, "CROSS");
+        h.reply(
+            "/orders/old",
+            r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+        );
+        h.pace();
+        let pending = h.take("/orders/old");
+        assert_eq!(pending.method, Method::Get);
+        assert!(!h.has("/api/v1/orders"));
+        h.response(&pending, 200, r#"{"code":"200000","data":{"id":"old","isActive":true,"cancelExist":false,"status":"open","size":10,"filledSize":6}}"#);
+        assert!(!h.has("/api/v1/orders"));
+        h.advance(100.0);
+        h.confirm_cancel("old", 10.0, 8.0);
+        let request = h.take("/api/v1/orders");
+        assert_eq!(request.method, Method::Post);
+        assert!(
+            request
+                .body
+                .unwrap()
+                .contains(&format!(r#""size":"{expected}""#))
+        );
+        assert!(h.engine.store().order("old").is_none());
+    }
+}
+
+#[test]
+fn fully_filled_order_during_cancel_is_not_replaced_by_price_only_amend() {
+    let mut h = Harness::new();
+    h.set_order("old", OrderType::Limit, 6.0);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    h.metadata(false, "CROSS");
+    h.reply(
+        "/orders/old",
+        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    );
+    h.pace();
+    h.confirm_cancel("old", 10.0, 10.0);
+    assert!(!h.has("/api/v1/orders"));
+    assert_eq!(h.done(1), &Ok("[]".into()));
+}
+
+#[test]
+fn failed_confirmation_reads_retry_without_sending_a_replacement() {
+    let mut h = Harness::new();
+    h.set_order("old", OrderType::Limit, 6.0);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    h.metadata(false, "CROSS");
+    h.reply(
+        "/orders/old",
+        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    );
+    h.pace();
+    for attempt in 0..3 {
+        let request = h.take("/orders/old");
+        assert_eq!(request.method, Method::Get);
+        h.event(Event::HttpFailed {
+            request: request.id,
+            error: "read failed",
+        });
+        assert!(!h.has("/api/v1/orders"));
+        if attempt < 2 {
+            h.advance(100.0);
+        } else {
+            h.pace();
+        }
+    }
+    assert!(h.done(1).is_err());
+}
+
+#[test]
+fn active_cancellation_proof_has_a_bounded_poll_count() {
+    let mut h = Harness::new();
+    h.set_order("old", OrderType::Limit, 6.0);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    h.metadata(false, "CROSS");
+    h.reply(
+        "/orders/old",
+        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    );
+    h.pace();
+    for attempt in 0..33 {
+        let request = h.take("/orders/old");
+        assert_eq!(request.method, Method::Get);
+        h.response(
+            &request,
+            200,
+            r#"{"code":"200000","data":{"id":"old","isActive":true,"size":10,"filledSize":4}}"#,
+        );
+        assert!(!h.has("/api/v1/orders"));
+        if attempt < 32 {
+            h.advance(100.0);
+        } else {
+            h.pace();
+        }
+    }
+    assert!(h.done(1).is_err());
+}
+
+#[test]
+fn explicit_active_flag_overrides_a_contradictory_canceled_status() {
+    let mut h = Harness::new();
+    h.set_order("old", OrderType::Limit, 6.0);
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: "old".into(),
+        price: Some(101.0),
+        amount: None,
+    });
+    h.metadata(false, "CROSS");
+    h.reply(
+        "/orders/old",
+        r#"{"code":"200000","data":{"cancelledOrderIds":["old"]}}"#,
+    );
+    h.pace();
+    let request = h.take("/orders/old");
+    h.response(&request, 200, r#"{"code":"200000","data":{"id":"old","status":"canceled","isActive":true,"cancelExist":true,"size":10,"filledSize":4}}"#);
+    assert!(!h.has("/api/v1/orders"));
+    h.advance(100.0);
+    h.confirm_cancel("old", 10.0, 4.0);
+    let body = h.take("/api/v1/orders").body.unwrap();
+    assert!(body.contains(r#""size":"6""#), "{body}");
 }

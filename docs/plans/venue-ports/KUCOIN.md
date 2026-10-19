@@ -246,3 +246,21 @@ review of recorded welcome routing and position bridge passes; harness 52,
 wasm 20 and fresh TS typecheck/lint/6,563 unit tests pass. The private/trading
 repair and final cancellation-race audit are finishing before aggregate native,
 wasm rebuild/replays, fix commit, push, and round 2 review.
+
+### Review repair checkpoint before BloFin integration
+
+All repairs pass the aggregate KuCoin crate: 95 tests, fmt/bans and all-target
+clippy with warnings denied. Private 23/trading 28 cover the final fill watermark,
+contradictory active proof, terminal removal and pre-send race. R10 P1 was found
+in the final safety audit: own brackets could lose protections before first REST
+reconciliation. The private placement cache now preserves submitted levels and
+trigger reference across immediate or delayed-REST amendments; two regressions
+pass. Direct unsupported FetchLeverage commands now return an error instead of
+reaching an unreachable trading fallback (before/after-start regression).
+
+Independent round-2 public/replay/bridge review passes. Query and private repairs
+are ready for cross-review of this committed checkpoint. Parent TS typecheck,
+lint and all 6,563 tests pass after the bridge change, as do wasm 20 and harness
+52. Landing advanced through BloFin (#1300) and MEXC parity (#1311); integrate
+that next, preserving typed mutation matching, signed headers, welcome bootstrap,
+queued read draining and native extras, then rebuild/rerun integrated gates.

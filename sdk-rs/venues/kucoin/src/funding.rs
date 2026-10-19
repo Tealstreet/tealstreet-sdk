@@ -131,7 +131,7 @@ impl Kucoin {
             cx.done(command, Err(format!("Unknown KuCoin market {symbol}")));
             return;
         };
-        let end = to_ms.unwrap_or(cx.now);
+        let end = to_ms.unwrap_or_else(|| cx.now.floor());
         let start = from_ms.unwrap_or((end - DAY as f64).max(0.0));
         let (Some(from), Some(end)) = (millis(start), millis(end)) else {
             cx.done(command, Err("Invalid KuCoin funding time range".into()));

@@ -25,6 +25,7 @@ const records = ['public', 'private'].map((kind) => ({ type: 'http', url: `https
 test('KuCoin token audit validates endpoint, private topics and no follow-up login', () => {
   const audit = kucoin.createSocketAudit('rust', { isPrivate: true, books: [], records });
   const url = endpoint + '?token=private-token&connectId=123';
+  audit.received(url, '{"type":"welcome"}');
   for (const topic of ['/contractMarket/tradeOrders', '/contractMarket/advancedOrders', '/contract/positionAll', '/contractAccount/wallet', '/contract/marginMode', '/contract/crossLeverage']) audit.sent(url, JSON.stringify({ type: 'subscribe', topic, privateChannel: true }));
   assert.equal(audit.ready(), true);
   assert.deepEqual(audit.errors(), []);
@@ -34,6 +35,7 @@ test('KuCoin token audit validates endpoint, private topics and no follow-up log
 test('KuCoin rejects wrong token, unsubscribed frames and session topic overflow', () => {
   const audit = kucoin.createSocketAudit('rust', { isPrivate: false, books: [], records });
   const url = endpoint + '?token=public-token&connectId=123';
+  audit.received(url, '{"type":"welcome"}');
   audit.received(url, '{"type":"message","topic":"/contractMarket/level2:XBTUSDTM"}');
   for (let i = 0; i < 5; i++) audit.sent(url, JSON.stringify({ type: 'subscribe', topic: '/contractMarket/snapshot:' + Array.from({ length: 100 }, (_, j) => `S${i * 100 + j}`).join(','), privateChannel: false }));
   audit.sent(endpoint + '?token=bad&connectId=123', '{"type":"ping","id":1}');
@@ -45,6 +47,7 @@ test('KuCoin rejects wrong token, unsubscribed frames and session topic overflow
 test('KuCoin readiness requires active bid/ask and mark/index topics for each book', () => {
   const audit = kucoin.createSocketAudit('rust', { isPrivate: false, books: ['BTCUSDT'], records });
   const url = endpoint + '?token=public-token&connectId=123';
+  audit.received(url, '{"type":"welcome"}');
   const send = (topic) => audit.sent(url, JSON.stringify({ type: 'subscribe', topic, privateChannel: false }));
   send('/contractMarket/level2:XBTUSDTM');
   assert.equal(audit.ready(), false);
@@ -105,4 +108,11 @@ test('stalled queued reads leave the real replay deadline runnable', async () =>
     await settling;
     clock.restore();
   }
+});
+
+test('Rust KuCoin subscription audit rejects sends before recorded welcome', () => {
+  const audit = kucoin.createSocketAudit('rust', { isPrivate: false, books: [], records });
+  const url = endpoint + '?token=public-token&connectId=123';
+  audit.sent(url, '{"type":"subscribe","topic":"/contractMarket/snapshot:XBTUSDTM","privateChannel":false}');
+  assert(audit.errors().some((error) => error.includes('before welcome')));
 });

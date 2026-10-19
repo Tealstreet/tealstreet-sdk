@@ -55,6 +55,8 @@ enum Row {
 struct Execution {
     id: String,
     timestamp: f64,
+    #[serde(skip)]
+    time_ns: u128,
     symbol: String,
     order_id: String,
     price: f64,
@@ -206,6 +208,14 @@ fn millis(value: f64) -> Option<u64> {
         .then_some(value as u64)
 }
 impl Row {
+    fn in_range(&self, start: u64, end: u64) -> bool {
+        if let Self::Fill(row) = self {
+            // Output seconds cannot round-trip exact millisecond boundaries.
+            (u128::from(start) * 1_000_000..=u128::from(end) * 1_000_000).contains(&row.time_ns)
+        } else {
+            self.time() >= start as f64 && self.time() <= end as f64
+        }
+    }
     fn key(&self) -> String {
         match self {
             Self::Fill(r) => r.id.clone(),
@@ -279,7 +289,7 @@ impl Kucoin {
             cx.done(command, Err(format!("Unknown KuCoin market {s}")));
             return;
         }
-        let end = to.unwrap_or(cx.now);
+        let end = to.unwrap_or_else(|| cx.now.floor());
         let start = from.unwrap_or((end - DAY as f64).max(0.0));
         let (Some(start), Some(end)) = (millis(start), millis(end)) else {
             cx.done(command, Err("Invalid KuCoin query time range".into()));
@@ -405,14 +415,19 @@ impl Kucoin {
                     let Some(m) = cx.store.markets().iter().find(|m| m.id == v.symbol) else {
                         return Ok(());
                     };
-                    let timestamp = if let Some(t) = v.trade_time {
-                        integer(t).ok_or("invalid tradeTime")? as f64 / 1e9
+                    let (time_ns, timestamp) = if let Some(t) = v.trade_time {
+                        let ns = integer(t).ok_or("invalid tradeTime")?;
+                        (u128::from(ns), ns as f64 / 1e9)
                     } else {
-                        v.created_at as f64 / 1000.0
+                        (
+                            u128::from(v.created_at) * 1_000_000,
+                            v.created_at as f64 / 1000.0,
+                        )
                     };
                     Row::Fill(Execution {
                         id: v.trade_id.into(),
                         timestamp,
+                        time_ns,
                         symbol: m.symbol.clone(),
                         order_id: v.order_id.into(),
                         price: number(v.price),
@@ -526,9 +541,7 @@ impl Kucoin {
                     })
                 }
             };
-            if r.kind == Kind::Trades
-                || (row.time() >= r.start as f64 && row.time() <= r.chunk_end as f64)
-            {
+            if r.kind == Kind::Trades || row.in_range(r.start, r.chunk_end) {
                 r.page_rows.push(row);
             }
             Ok(())
@@ -777,6 +790,123 @@ mod tests {
         qty: f64,
         timestamp: f64,
         commission: f64,
+    }
+    #[test]
+    fn fill_range_uses_exact_native_time_before_seconds_conversion() {
+        const AT: u64 = 1_740_640_088_002;
+        for nanos in [true, false] {
+            let mut e = engine();
+            let r = query(
+                &mut e,
+                Query::Fills {
+                    symbol: Some("BTCUSDT".into()),
+                    order_id: None,
+                    from_ms: Some(AT as f64),
+                    to_ms: Some(AT as f64),
+                    limit: Some(10),
+                },
+            );
+            let items = [-1_i128, 0, 1]
+                .into_iter()
+                .map(|delta| {
+                    let created = (i128::from(AT) + delta) as u64;
+                    let time = if nanos {
+                        format!(",\"tradeTime\":{}", i128::from(AT) * 1_000_000 + delta)
+                    } else {
+                        String::new()
+                    };
+                    format!(
+                        r#"{{"symbol":"XBTUSDTM","tradeId":"{delta}","orderId":"order","side":"buy","liquidity":"maker","price":"100","size":1,"fee":"0","feeCurrency":"USDT","createdAt":{created}{time}}}"#
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            let body = format!(
+                r#"{{"code":"200000","data":{{"currentPage":1,"totalPage":1,"totalNum":3,"items":[{items}]}}}}"#
+            );
+            let actions = reply(&mut e, r, &body);
+            #[derive(Deserialize)]
+            struct Id {
+                id: String,
+            }
+            let rows: Vec<Id> = serde_json::from_str(done(&actions)).unwrap();
+            assert_eq!(rows.len(), 1, "nanosecond timestamp: {nanos}");
+            assert_eq!(rows[0].id, "0");
+        }
+    }
+    #[test]
+    fn default_query_ranges_accept_fractional_native_clock() {
+        for query in [
+            Query::PublicTrades {
+                symbol: "BTCUSDT".into(),
+                limit: None,
+            },
+            Query::Fills {
+                symbol: None,
+                order_id: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+            Query::OrderHistory {
+                symbol: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+            Query::Income {
+                symbol: None,
+                kind: None,
+                from_ms: None,
+                to_ms: None,
+                limit: None,
+            },
+        ] {
+            let mut e = engine();
+            e.handle(
+                1_740_640_088_002.5,
+                Event::Command(safe_cex_engine::Command::Query { command: 77, query }),
+            );
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            let request = actions
+                .iter()
+                .find_map(|a| {
+                    if let Action::Http(r) = a {
+                        Some(r)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| panic!("{actions:?}"));
+            if !request.url.contains("/trade/history") {
+                assert!(request.url.contains("endAt=1740640088002"));
+            }
+        }
+    }
+    #[test]
+    fn explicit_fractional_query_ranges_remain_invalid() {
+        for (from_ms, to_ms) in [(Some(1000.5), Some(2000.0)), (Some(1000.0), Some(2000.5))] {
+            let mut e = engine();
+            e.handle(
+                2000.5,
+                Event::Command(safe_cex_engine::Command::Query {
+                    command: 77,
+                    query: Query::Fills {
+                        symbol: None,
+                        order_id: None,
+                        from_ms,
+                        to_ms,
+                        limit: None,
+                    },
+                }),
+            );
+            let actions = e.drain_actions().collect::<Vec<_>>();
+            assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+            assert!(actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(Notice::CommandDone { result: Err(_), .. })
+            )));
+        }
     }
     #[test]
     fn ledger_offset_is_exact_and_does_not_depend_on_row_order() {

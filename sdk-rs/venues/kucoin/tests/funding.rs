@@ -246,6 +246,34 @@ fn non_explicit_query_obeys_its_limit() {
     assert_eq!(rows[0].tran_id, "1");
 }
 #[test]
+fn default_funding_range_accepts_fractional_native_clock() {
+    let mut h = Harness::new();
+    h.now = 1_740_640_088_002.5;
+    h.event(Event::Command(Command::Query {
+        command: 1,
+        query: Query::Income {
+            symbol: Some("BTCUSDT".into()),
+            kind: Some("FUNDING_FEE".into()),
+            from_ms: None,
+            to_ms: None,
+            limit: None,
+        },
+    }));
+    let r = h.take();
+    assert!(r.url.contains("endAt=1740640088002"));
+    h.reply(&r, &row(1, 1_740_640_088_000), false);
+    assert!(h.result().is_ok());
+}
+#[test]
+fn explicit_fractional_funding_ranges_remain_invalid() {
+    for (from, to) in [(1000.5, 2000.0), (1000.0, 2000.5)] {
+        let mut h = Harness::new();
+        h.query(from, to, None);
+        assert!(h.result().is_err());
+        assert!(!h.actions.iter().any(|a| matches!(a, Action::Http(_))));
+    }
+}
+#[test]
 fn failed_partial_page_is_rolled_back_before_a_read_retry() {
     let mut h = Harness::new();
     h.query(1000.0, 3000.0, None);

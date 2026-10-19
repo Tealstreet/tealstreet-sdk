@@ -39,6 +39,7 @@ export const kucoin = {
       stable = pending.size ? 0 : stable + 1;
     }
   },
+  startupMessage: (record) => { try { return JSON.parse(record.text).type === 'welcome'; } catch { return false; } },
   volatileQueryFields: ['connectId'],
   matchRequestBody: true,
   generatedBodyId: (key, value) => key === 'clientOid' && typeof value === 'string',
@@ -66,7 +67,7 @@ export const kucoin = {
       header['kc-api-passphrase'] === hmac('replay-passphrase') && /^\d+$/.test(timestamp ?? '') &&
       Math.abs(Date.now() - Number(timestamp)) < 60_000 && header['kc-api-sign'] === hmac(timestamp + method + path + (body ?? ''));
   },
-  createSocketAudit(_impl, { isPrivate, books, tickers = [], records = [] }) {
+  createSocketAudit(impl, { isPrivate, books, tickers = [], records = [] }) {
     const tokens = new Map();
     for (const r of records.filter((r) => r.type === 'http' && r.url.includes('/bullet-'))) {
       const data = JSON.parse(r.body).data;
@@ -79,7 +80,7 @@ export const kucoin = {
         const parsed = new URL(url), token = tokens.get(parsed.searchParams.get('token'));
         if (!token || !url.startsWith(token.endpoint + '?')) failures.push('socket did not use bullet token and endpoint');
         if (!parsed.searchParams.get('connectId')) failures.push('socket missing connectId');
-        connections.set(url, { private: token?.private ?? false, topics: new Set(), pings: new Set() });
+        connections.set(url, { private: token?.private ?? false, topics: new Set(), pings: new Set(), welcomed: false });
       }
       return connections.get(url);
     };
@@ -87,6 +88,7 @@ export const kucoin = {
     return {
       sent(url, text) {
         const s = state(url), m = JSON.parse(text);
+        if (impl === 'rust' && ['subscribe', 'ping'].includes(m.type) && !s.welcomed) failures.push('KuCoin sent before welcome');
         if (m.type === 'login' || m.type === 'auth') failures.push('unexpected post-token authentication');
         if (m.type === 'ping') { if (m.id === undefined) failures.push('ping missing id'); s.pings.add(String(m.id)); }
         if (['subscribe', 'unsubscribe'].includes(m.type)) {
@@ -100,6 +102,7 @@ export const kucoin = {
       },
       received(url, text) {
         const s = state(url), m = JSON.parse(text);
+        if (m.type === 'welcome') s.welcomed = true;
         if (m.type === 'pong' && m.id !== undefined) s.pings.delete(String(m.id));
         if (m.type === 'message' && m.topic && !s.topics.has(m.topic)) failures.push(`unsubscribed KuCoin topic ${m.topic}`);
       },

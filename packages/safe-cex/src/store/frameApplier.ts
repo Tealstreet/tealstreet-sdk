@@ -142,6 +142,9 @@ export class FrameApplier {
           leverage: positions.leverage[i],
           unrealizedPnl: positions.unrealizedPnl[i],
           contracts: positions.contracts[i],
+          ...(this.nativePlacementAmounts && { extra: {
+            contractsNative: divide(positions.contracts[i], this.contractSizes[positions.market[i]]),
+          } }),
           liquidationPrice: positions.liquidationPrice[i],
           ...(mode !== undefined && { positionMode: mode }),
           ...(enums.marginType !== undefined && { marginType: enums.marginType as MarginType }),

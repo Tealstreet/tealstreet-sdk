@@ -71,8 +71,13 @@ pub(crate) struct Account {
     pub(crate) mode_known: bool,
     metadata: HashSet<String>,
     order_versions: HashMap<String, u64>,
+    order_fills: HashMap<String, f64>,
     order_books: HashMap<String, bool>,
     terminal: HashSet<String>,
+    order_absences: HashMap<String, u64>,
+    incomplete_orders: HashSet<String>,
+    // REST rows may omit submitted brackets; retain them until terminal proof.
+    placed_orders: HashMap<String, Order>,
     position_versions: HashMap<String, u64>,
     closures: HashMap<String, f64>,
     executions: HashSet<String>,
@@ -107,13 +112,13 @@ struct OrderRow<'a> {
     #[serde(default)]
     remain_size: Option<Number>,
     #[serde(default)]
-    reduce_only: bool,
+    reduce_only: Option<bool>,
     #[serde(default)]
-    close_order: bool,
+    close_order: Option<bool>,
     #[serde(default)]
-    time_in_force: &'a str,
+    time_in_force: Option<&'a str>,
     #[serde(default)]
-    post_only: bool,
+    post_only: Option<bool>,
     #[serde(default)]
     update_time: Number,
     #[serde(default)]
@@ -170,6 +175,44 @@ fn symbol(store: &Store, id: &str) -> String {
         .unwrap_or_else(|| crate::internal_symbol(id))
 }
 impl OrderRow<'_> {
+    fn complete(&self) -> bool {
+        self.reduce_only.is_some()
+            && self.close_order.is_some()
+            && self.time_in_force.is_some()
+            && self.post_only.is_some()
+    }
+
+    fn merge(&self, order: &mut Order, old: &Order) {
+        if self.reduce_only.is_none() {
+            order.reduce_only = old.reduce_only;
+        }
+        if self.close_order.is_none() {
+            order.close = old.close;
+        }
+        if self.time_in_force.is_none() && self.post_only.is_none()
+            || self.post_only.is_none() && old.time_in_force == Some(TimeInForce::PostOnly)
+        {
+            order.time_in_force = old.time_in_force;
+        } else if self.time_in_force.is_none() && self.post_only != Some(true) {
+            order.time_in_force = old
+                .time_in_force
+                .filter(|tif| *tif != TimeInForce::PostOnly)
+                .or(Some(TimeInForce::GoodTillCancel));
+        }
+        if self.client_oid.is_none() {
+            order.client_order_id.clone_from(&old.client_order_id);
+        }
+        if self.order_type.is_empty()
+            && !matches!(self.event, "limit" | "market")
+            && self.stop.is_none()
+        {
+            order.kind = old.kind;
+        }
+        if self.stop_price_type.is_empty() {
+            order.trigger_type = old.trigger_type;
+        }
+    }
+
     fn orders(&self, store: &Store, now: f64) -> Vec<Order> {
         let symbol = symbol(store, self.symbol);
         let multiplier = contract_size(store, &symbol);
@@ -264,15 +307,15 @@ impl OrderRow<'_> {
             amount: base_amount(self.size.get(), multiplier),
             filled: base_amount(self.filled_size.get(), multiplier),
             remaining: base_amount(remaining, multiplier),
-            reduce_only: self.reduce_only,
-            close: Some(self.close_order),
+            reduce_only: self.reduce_only.unwrap_or(false),
+            close: self.close_order,
             client_order_id: self.client_oid.map(str::to_owned),
-            time_in_force: Some(if self.post_only {
+            time_in_force: Some(if self.post_only == Some(true) {
                 TimeInForce::PostOnly
             } else {
                 match self.time_in_force {
-                    "IOC" => TimeInForce::ImmediateOrCancel,
-                    "FOK" => TimeInForce::FillOrKill,
+                    Some("IOC") => TimeInForce::ImmediateOrCancel,
+                    Some("FOK") => TimeInForce::FillOrKill,
                     _ => TimeInForce::GoodTillCancel,
                 }
             }),
@@ -468,6 +511,65 @@ struct Metadata<'a> {
 }
 
 impl Kucoin {
+    pub(crate) fn account_order_complete(&self, id: &str) -> bool {
+        !self.account.incomplete_orders.contains(id)
+    }
+
+    pub(crate) fn account_placement(&self, id: &str) -> Option<&Order> {
+        self.account.placed_orders.get(id)
+    }
+
+    pub(crate) fn account_order_filled(&self, id: &str) -> f64 {
+        self.account.order_fills.get(id).copied().unwrap_or(0.0)
+    }
+
+    pub(crate) fn account_placed_order(&mut self, cx: &mut Cx<'_, Pending>, id: &str, body: &str) {
+        if self.account.terminal.contains(id) {
+            return;
+        }
+        let Ok(row) = serde_json::from_str::<OrderRow>(body) else {
+            return;
+        };
+        let mut orders = row.orders(cx.store, cx.now);
+        let mut order = orders.remove(0);
+        order.stop_loss = orders
+            .iter()
+            .find(|leg| leg.kind == OrderType::StopLoss)
+            .map(|leg| leg.price);
+        order.take_profit = orders
+            .iter()
+            .find(|leg| leg.kind == OrderType::TakeProfit)
+            .map(|leg| leg.price);
+        order.id = id.into();
+        order.close = Some(row.close_order.unwrap_or(false));
+        if let Some(old) = cx.store.order(id) {
+            let mut hydrated = old.clone();
+            hydrated.reduce_only = order.reduce_only;
+            hydrated.close = order.close;
+            hydrated.time_in_force = order.time_in_force;
+            hydrated.kind = order.kind;
+            hydrated.client_order_id.clone_from(&order.client_order_id);
+            hydrated.trigger_type = order.trigger_type;
+            cx.store.upsert_order(hydrated);
+        }
+        self.account.incomplete_orders.remove(id);
+        self.account.placed_orders.insert(id.into(), order);
+    }
+
+    pub(crate) fn account_order_terminal(&mut self, cx: &mut Cx<'_, Pending>, parent: &str) {
+        self.account.revision += 1;
+        for suffix in ["", "__stop_loss", "__take_profit"] {
+            let id = format!("{parent}{suffix}");
+            self.account
+                .order_versions
+                .insert(id.clone(), self.account.revision);
+            self.account.terminal.insert(id.clone());
+            self.account.incomplete_orders.remove(&id);
+            self.account.placed_orders.remove(&id);
+            cx.store.remove_orders(&[&id]);
+        }
+    }
+
     pub(crate) fn account_settings_changed(&mut self) {
         self.account.revision += 1;
         self.account.settings_revision = self.account.revision;
@@ -603,6 +705,24 @@ impl Kucoin {
             return;
         }
         let envelope = envelope.unwrap();
+        if request.revision < self.account.settings_revision {
+            match &request.read {
+                Read::Mode => {
+                    if !self.account.mode_known {
+                        self.account_issue(cx, Request::new(Read::Mode, self.account.revision));
+                        return;
+                    }
+                }
+                Read::Margin(symbol) | Read::Leverage(symbol) => {
+                    let symbol = symbol.clone();
+                    self.account.metadata.remove(&symbol);
+                    self.account_finished(cx);
+                    self.account_metadata(cx, &symbol);
+                    return;
+                }
+                _ => {}
+            }
+        }
         match request.read.clone() {
             Read::Positions => {
                 let mut positions = Vec::new();
@@ -720,7 +840,10 @@ impl Kucoin {
                             <= request.revision
                         && !request.orders.iter().any(|row| row.id == old.id)
                     {
-                        self.account.terminal.insert(old.id.clone());
+                        self.account.revision += 1;
+                        self.account
+                            .order_absences
+                            .insert(old.id.clone(), self.account.revision);
                     }
                 }
                 let mut orders: Vec<Order> = cx
@@ -745,7 +868,20 @@ impl Kucoin {
                     .cloned()
                     .collect();
                 for mut row in request.orders {
+                    if let Some(filled) = row
+                        .extra
+                        .as_ref()
+                        .and_then(|extra| extra.filled_in_placement_units)
+                    {
+                        let watermark = self.account.order_fills.entry(row.id.clone()).or_default();
+                        *watermark = watermark.max(filled);
+                    }
                     if self.account.terminal.contains(&row.id)
+                        || self
+                            .account
+                            .order_absences
+                            .get(&row.id)
+                            .is_some_and(|revision| *revision > request.revision)
                         || self
                             .account
                             .order_versions
@@ -758,7 +894,12 @@ impl Kucoin {
                     }
                     if let Some(old) = cx.store.order(&row.id) {
                         if old.last_update > row.last_update {
-                            row = old.clone();
+                            let mut newer = old.clone();
+                            newer.reduce_only = row.reduce_only;
+                            newer.close = row.close;
+                            newer.time_in_force = row.time_in_force;
+                            newer.client_order_id = row.client_order_id;
+                            row = newer;
                         } else if old.remaining < row.remaining {
                             row.remaining = old.remaining;
                             if let (Some(a), Some(b)) = (&mut row.extra, &old.extra) {
@@ -767,6 +908,7 @@ impl Kucoin {
                         }
                     }
                     self.account.order_books.insert(row.id.clone(), stop);
+                    self.account.incomplete_orders.remove(&row.id);
                     if row.status == OrderStatus::Open && !orders.iter().any(|o| o.id == row.id) {
                         orders.push(row);
                     }
@@ -798,11 +940,6 @@ impl Kucoin {
                 }
             }
             Read::Margin(symbol) => {
-                if request.revision < self.account.settings_revision {
-                    self.account.metadata.remove(&symbol);
-                    self.account_finished(cx);
-                    return;
-                }
                 let Some(row) = envelope
                     .data
                     .and_then(|r| serde_json::from_str::<Metadata>(r.get()).ok())
@@ -888,6 +1025,12 @@ impl Kucoin {
             if orders[0].id.is_empty() {
                 return;
             }
+            let watermark = self
+                .account
+                .order_fills
+                .entry(orders[0].id.clone())
+                .or_default();
+            *watermark = watermark.max(row.filled_size.get());
             if row.match_size.get() > 0.0 && row.match_price.get() > 0.0 {
                 let key = if row.trade_id.is_empty() {
                     #[derive(Deserialize)]
@@ -937,17 +1080,24 @@ impl Kucoin {
                 orders[0].status,
                 OrderStatus::Canceled | OrderStatus::Closed
             ) {
-                for suffix in ["", "__stop_loss", "__take_profit"] {
-                    let id = format!("{}{suffix}", orders[0].id);
-                    self.account
-                        .order_versions
-                        .insert(id.clone(), self.account.revision);
-                    self.account.terminal.insert(id.clone());
-                    cx.store.remove_orders(&[&id]);
-                }
+                self.account_order_terminal(cx, &orders[0].id);
                 return;
             }
-            for order in orders {
+            let parent_id = orders[0].id.clone();
+            let incomplete = !row.complete()
+                && (self.account.incomplete_orders.contains(&parent_id)
+                    || cx.store.order(&parent_id).is_none())
+                && !self.account.placed_orders.contains_key(&parent_id);
+            if incomplete {
+                self.account.incomplete_orders.insert(parent_id.clone());
+                if let Some(timer) = self.account.refresh.take() {
+                    cx.clear_timer(timer);
+                }
+                self.account.refresh = Some(cx.set_timer(500.0));
+            } else {
+                self.account.incomplete_orders.remove(&parent_id);
+            }
+            for mut order in orders {
                 self.account
                     .order_versions
                     .insert(order.id.clone(), self.account.revision);
@@ -964,10 +1114,47 @@ impl Kucoin {
                         .order(&order.id)
                         .is_none_or(|old| old.last_update <= order.last_update)
                 {
+                    if let Some(old) = cx
+                        .store
+                        .order(&order.id)
+                        .or_else(|| self.account.placed_orders.get(&order.id))
+                    {
+                        row.merge(&mut order, old);
+                    }
                     cx.store.upsert_order(order);
                 }
             }
             return;
+        }
+        if topic == "/contract/marginMode" {
+            if let Ok(rows) = serde_json::from_str::<HashMap<&str, &str>>(data.get()) {
+                for (id, value) in rows {
+                    if !matches!(value, "CROSS" | "ISOLATED") {
+                        continue;
+                    }
+                    let symbol = symbol(cx.store, id);
+                    self.account_settings_changed();
+                    let margin_type = margin(value, None);
+                    cx.store.update_setting(&symbol, |s| {
+                        if s.margin_type != Some(margin_type) {
+                            s.leverage = f64::NAN;
+                        }
+                        s.margin_type = Some(margin_type);
+                    });
+                }
+            }
+        } else if topic == "/contract/crossLeverage"
+            && let Ok(rows) = serde_json::from_str::<HashMap<&str, Metadata>>(data.get())
+        {
+            for (id, value) in rows {
+                if value.leverage.get() <= 0.0 {
+                    continue;
+                }
+                let symbol = symbol(cx.store, id);
+                self.account_settings_changed();
+                cx.store
+                    .update_setting(&symbol, |s| s.leverage = value.leverage.get());
+            }
         }
         if topic.starts_with("/contract/position")
             && let Ok(row) = serde_json::from_str::<PositionRow>(data.get())

@@ -153,8 +153,10 @@ export class ReplayClock {
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 export class Tape {
-  constructor(records, { isPrivate = false, urlKey = canonicalUrl } = {}) {
+  constructor(records, { isPrivate = false, urlKey = canonicalUrl, startupMessage } = {}) {
     this.urlKey = urlKey;
+    this.startupMessage = startupMessage;
+    this.startupDelivered = new Set();
     this.isPrivate = isPrivate;
     this.responses = new Map();
     for (const record of records.filter((r) => r.type === 'http')) {
@@ -194,6 +196,16 @@ export class Tape {
       if (socket.closed) return;
       this.open.set(`${key}\n${ordinal}`, socket);
       onOpen();
+      // Recorded handshakes precede readiness; business traffic stays in order.
+      if (!this.playing && this.startupMessage) {
+        const frame = this.frames.find((r) => r.type !== 'open' && r.type !== 'command'
+          && !this.startupDelivered.has(r) && this.urlKey(r.url) === key
+          && (r.socket === undefined || r.socket === ordinal));
+        if (frame?.type === 'ws' && this.startupMessage(frame)) {
+          this.startupDelivered.add(frame);
+          socket.onMessage(frame.text);
+        }
+      }
     });
     return socket;
   }
@@ -228,6 +240,7 @@ export class Tape {
   async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
     await ready();
     begin();
+    this.playing = true;
     clock?.start();
     const start = performance.now();
     let delivered = 0;
@@ -246,7 +259,7 @@ export class Tape {
             (error) => ({ error: String(error?.message ?? error) }),
           ),
         );
-      } else {
+      } else if (!this.startupDelivered.has(frame)) {
         const socket = await this.socketFor(frame.url, frame.socket);
         if (frame.type === 'close') this.close(socket, frame.code);
         else if (frame.type === 'ws') socket.onMessage(frame.text);

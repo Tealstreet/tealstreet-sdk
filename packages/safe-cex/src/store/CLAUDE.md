@@ -7,7 +7,9 @@ throttled postMessage.
 Rust order frames keep quantities in published base units. For MEXC and KuCoin futures, `FrameApplier`
 also derives native placement-unit order extras from `contractSize` so chaser
 arithmetic retains its native-volume contract. Use decimal-safe division here:
-a base fill of 0.3 at multiplier 0.1 must reconstruct exactly 3 lots. `SETTINGS` optionally carries
+a base fill of 0.3 at multiplier 0.1 must reconstruct exactly 3 lots.
+Position frames also restore `extra.contractsNative` for native-volume venues,
+which copier closes consume as their placement quantity. `SETTINGS` optionally carries
 separate buy/sell leverage columns; do not collapse these hedge rails to the
 single representative leverage value when applying frames.
 

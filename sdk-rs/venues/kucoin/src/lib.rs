@@ -68,6 +68,7 @@ struct Connection {
     role: Role,
     socket: Option<SocketId>,
     open: bool,
+    ready: bool,
     subscribed: bool,
     last: f64,
     ping_interval: f64,
@@ -82,6 +83,7 @@ impl Connection {
             role,
             socket: None,
             open: false,
+            ready: false,
             subscribed: false,
             last: 0.0,
             ping_interval: 18000.0,
@@ -300,7 +302,6 @@ impl Kucoin {
         }
         if self.credentials.is_some() {
             self.connections.push(Connection::new(Role::Private));
-            self.account_start(cx);
         } else {
             cx.store.set_balance(Balance::default());
             cx.store.set_positions(vec![]);
@@ -318,7 +319,7 @@ impl Kucoin {
         subscribe: bool,
     ) {
         let c = &self.connections[channel];
-        if !c.open {
+        if !c.ready {
             return;
         }
         let Some(socket) = c.socket else {
@@ -365,7 +366,7 @@ impl Kucoin {
         }
     }
     fn subscribe_all(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
-        if self.connections[channel].subscribed {
+        if !self.connections[channel].ready || self.connections[channel].subscribed {
             return;
         }
         self.connections[channel].subscribed = true;
@@ -422,7 +423,7 @@ impl Kucoin {
     }
     fn ping(&mut self, cx: &mut Cx<'_, Pending>, channel: usize) {
         let c = &mut self.connections[channel];
-        if !c.open || c.pong.is_some() {
+        if !c.ready || c.pong.is_some() {
             return;
         }
         if let Some(socket) = c.socket {
@@ -441,11 +442,17 @@ impl Kucoin {
         }
     }
     fn fetch_depth(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        if !self.connections.first().is_some_and(|c| c.ready) {
+            return;
+        }
         let Some(book) = self.books.get_mut(symbol) else {
             return;
         };
         if book.loading {
             return;
+        }
+        if let Some(timer) = book.retry.take() {
+            cx.clear_timer(timer);
         }
         book.loading = true;
         self.book_generation += 1;
@@ -687,14 +694,6 @@ impl Venue for Kucoin {
         };
         self.connections[channel].open = true;
         self.connections[channel].last = cx.now;
-        if let Some(timer) = self.connections[channel].pong.take() {
-            cx.clear_timer(timer);
-        }
-        if matches!(self.connections[channel].role, Role::Private) {
-            self.account_start(cx);
-        }
-        self.subscribe_all(cx, channel);
-        self.ping(cx, channel);
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         let Some(channel) = self
@@ -708,14 +707,28 @@ impl Venue for Kucoin {
         let Ok(message) = serde_json::from_str::<Message>(text) else {
             return;
         };
+        if message.kind == "welcome" {
+            if self.connections[channel].ready {
+                return;
+            }
+            self.connections[channel].ready = true;
+            if let Some(timer) = self.connections[channel].pong.take() {
+                cx.clear_timer(timer);
+            }
+            if matches!(self.connections[channel].role, Role::Private) {
+                self.account_start(cx);
+            }
+            self.subscribe_all(cx, channel);
+            self.ping(cx, channel);
+            return;
+        }
+        if !self.connections[channel].ready {
+            return;
+        }
         if message.kind == "pong" {
             if let Some(timer) = self.connections[channel].pong.take() {
                 cx.clear_timer(timer);
             }
-            return;
-        }
-        if message.kind == "welcome" {
-            self.subscribe_all(cx, channel);
             return;
         }
         let Some(data) = message.data else {
@@ -765,6 +778,7 @@ impl Venue for Kucoin {
         };
         let c = &mut self.connections[channel];
         c.open = false;
+        c.ready = false;
         c.subscribed = false;
         c.socket = None;
         for timer in [c.ping.take(), c.pong.take()].into_iter().flatten() {
@@ -772,6 +786,9 @@ impl Venue for Kucoin {
         }
         if matches!(c.role, Role::Detail) {
             for book in self.books.values_mut() {
+                if let Some(timer) = book.retry.take() {
+                    cx.clear_timer(timer);
+                }
                 book.synced = false;
                 book.loading = false;
                 self.book_generation += 1;
@@ -991,6 +1008,9 @@ impl Venue for Kucoin {
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
             Command::SetTickerSymbols { .. } => {}
+            Command::FetchLeverage { command, .. } => {
+                cx.done(command, Err("KuCoin leverage query is unsupported".into()));
+            }
             Command::SubscribeOrderBook { symbol } => {
                 if cx.store.loaded().markets && cx.store.market(&symbol).is_none() {
                     cx.log(LogLevel::Error, "unknown KuCoin market");
@@ -1010,7 +1030,7 @@ impl Venue for Kucoin {
                 state.subscribers += 1;
                 if state.subscribers == 1 {
                     self.detail(cx, &symbol, true);
-                    if self.connections.first().is_some_and(|c| c.open) {
+                    if self.connections.first().is_some_and(|c| c.ready) {
                         self.fetch_depth(cx, &symbol);
                     }
                 }

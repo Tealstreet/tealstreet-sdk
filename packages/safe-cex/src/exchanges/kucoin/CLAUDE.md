@@ -928,3 +928,6 @@ The documented private tape and public capture replay live in `sdk-rs/harness`;
 
 The Rust frame bridge reconstructs native remainder/fill extras with decimal-safe
 division by contractSize, preserving chaser placement units (0.3 / 0.1 = 3 lots).
+
+The bridge also restores position extra.contractsNative; cross-trade closes use
+that native lot count instead of the published base position quantity.

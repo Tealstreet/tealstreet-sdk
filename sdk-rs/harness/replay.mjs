@@ -122,7 +122,7 @@ const isWriteRequest = (method, url) => venue.isWrite?.(method, url) ?? !isRead(
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape extends SharedTape {
   constructor(impl) {
-    super(records, { isPrivate, urlKey: canonicalUrl });
+    super(records, { isPrivate, urlKey: canonicalUrl, startupMessage: venue.startupMessage });
     this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records), records });
     this.responses = new Responses(records, requestKey, venue.checkRequest, isWriteRequest, Boolean(venue.matchRequestBody || venue.isWrite));
     this.commandIndex = 0;
@@ -259,6 +259,7 @@ class Tape extends SharedTape {
       while (this.pendingStartupSubscriptions) await new Promise((resolve) => setTimeout(resolve, 1));
     })(), 15_000, 'Replay startup');
     begin();
+    this.playing = true;
     clock?.start();
     this.replayClock = clock;
     const start = performance.now();
@@ -281,7 +282,7 @@ class Tape extends SharedTape {
             return { error: String(error?.message ?? error) };
           },
         ));
-      } else {
+      } else if (!this.startupDelivered.has(frame)) {
         const socket = await this.socketFor(frame.url, frame.socket);
         if (frame.type === 'close') this.close(socket, frame.code);
         else if (frame.type === 'ws') socket.onMessage(frame.text);

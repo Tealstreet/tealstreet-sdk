@@ -70,6 +70,15 @@ fn seeded(count: usize) -> (Engine<Kucoin>, Vec<HttpRequest>) {
     let r = requests(&mut e);
     (e, r)
 }
+fn welcome(e: &mut Engine<Kucoin>, socket: SocketId) {
+    e.handle(
+        0.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"type":"welcome"}"#,
+        },
+    );
+}
 fn ready() -> (Engine<Kucoin>, SocketId) {
     let (mut e, requests) = seeded(1);
     for (i, r) in requests.iter().enumerate() {
@@ -93,6 +102,7 @@ fn ready() -> (Engine<Kucoin>, SocketId) {
         .collect::<Vec<_>>();
     for socket in &sockets {
         e.handle(0.0, Event::WsOpened { socket: *socket });
+        welcome(&mut e, *socket);
     }
     e.drain_actions().for_each(drop);
     (e, sockets[0])
@@ -140,6 +150,7 @@ fn snapshot_pool_stays_under_session_and_frame_limits() {
     let mut total = 0;
     for socket in sockets {
         e.handle(0.0, Event::WsOpened { socket });
+        welcome(&mut e, socket);
         let mut owned = 0;
         for a in e.drain_actions() {
             if let Action::WsSend { text, .. } = a
@@ -274,6 +285,7 @@ fn missed_pong_closes_socket_and_gets_a_fresh_bullet() {
         })
         .unwrap();
     e.handle(0.0, Event::WsOpened { socket });
+    welcome(&mut e, socket);
     let timer = e
         .drain_actions()
         .find_map(|a| {
@@ -469,6 +481,7 @@ fn book_subscription_before_market_seed_is_retained_and_cancelled_by_reference_c
         })
         .unwrap();
     e.handle(0.0, Event::WsOpened { socket });
+    welcome(&mut e, socket);
     let actions = e.drain_actions().collect::<Vec<_>>();
     assert!(actions.iter().any(
         |a| matches!(a,Action::WsSend{text,..}if text.contains("/contractMarket/level2:XBTUSDTM"))
@@ -524,4 +537,319 @@ fn ticker_interest_hints_are_safe_before_and_after_startup() {
         }),
     );
     assert!(!e.has_actions());
+}
+
+#[test]
+fn disconnect_cancels_pending_book_retry() {
+    let (mut e, socket) = ready();
+    e.handle(
+        1.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let request = requests(&mut e).remove(0);
+    e.handle(
+        2.0,
+        Event::HttpFailed {
+            request: request.id,
+            error: "offline",
+        },
+    );
+    let retry = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1002.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(3.0, Event::WsClosed { socket, code: 1006 });
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::ClearTimer {timer} if *timer==retry))
+    );
+    let reconnect = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1003.0,
+            } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1002.0, Event::TimerFired { timer: retry });
+    assert!(requests(&mut e).is_empty());
+    assert!(e.book("BTCUSDT").is_none());
+    e.handle(1003.0, Event::TimerFired { timer: reconnect });
+    let r = requests(&mut e).remove(0);
+    answer(
+        &mut e,
+        &r,
+        r#"{"code":"200000","data":{"token":"fresh","instanceServers":[{"endpoint":"wss://example.test","pingInterval":18000,"pingTimeout":10000}]}}"#,
+    );
+    let socket = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1004.0, Event::WsOpened { socket });
+    assert!(requests(&mut e).is_empty());
+    welcome(&mut e, socket);
+    assert!(requests(&mut e)[0].url.contains("level2/snapshot"));
+}
+#[test]
+fn obsolete_retry_cannot_rollback_already_recovered_book() {
+    let (mut e, socket) = ready();
+    e.handle(
+        1.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let r = requests(&mut e).remove(0);
+    e.handle(
+        2.0,
+        Event::HttpFailed {
+            request: r.id,
+            error: "offline",
+        },
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1002.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(3.0,Event::WsMessage{socket,text:r#"{"type":"message","topic":"/contractMarket/level2:XBTUSDTM","data":{"sequence":101,"change":"99,buy,7"}}"#});
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a,Action::ClearTimer{timer:t}if *t==timer))
+    );
+    let r = actions
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    answer(
+        &mut e,
+        &r,
+        r#"{"code":"200000","data":{"sequence":100,"bids":[[99,2]],"asks":[]}}"#,
+    );
+    assert_eq!(e.book("BTCUSDT").unwrap().bids()[0].1, 7.0);
+    e.drain_actions().for_each(drop);
+    e.handle(1002.0, Event::TimerFired { timer });
+    assert!(requests(&mut e).is_empty());
+    e.handle(1003.0,Event::WsMessage{socket,text:r#"{"type":"message","topic":"/contractMarket/level2:XBTUSDTM","data":{"sequence":102,"change":"99,buy,9"}}"#});
+    assert_eq!(e.book("BTCUSDT").unwrap().bids()[0].1, 9.0);
+}
+
+fn awaiting_welcome() -> (Engine<Kucoin>, SocketId, safe_cex_engine::TimerId) {
+    let (mut e, tokens) = seeded(1);
+    answer(
+        &mut e,
+        &tokens[0],
+        r#"{"code":"200000","data":{"token":"handshake","instanceServers":[{"endpoint":"wss://example.test","pingInterval":18000,"pingTimeout":10000}]}}"#,
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let socket = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let timer = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 10000.0,
+            } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1.0, Event::WsOpened { socket });
+    (e, socket, timer)
+}
+
+#[test]
+fn subscriptions_and_data_wait_for_welcome_and_duplicate_welcome_is_ignored() {
+    let (mut e, socket, _) = awaiting_welcome();
+    e.handle(
+        2.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    e.handle(
+        2.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: "1m".into(),
+        }),
+    );
+    e.handle(
+        3.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"type":"pong"}"#,
+        },
+    );
+    e.handle(3.0, Event::WsMessage { socket, text: r#"{"type":"message","topic":"/contractMarket/snapshot:XBTUSDTM","data":{"symbol":"XBTUSDTM","lastPrice":"999"}}"# });
+    assert!(!e.has_actions());
+    assert_eq!(e.store().tickers()[0].last, 100.0);
+    welcome(&mut e, socket);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::WsSend { text, .. } if text.contains("subscribe")))
+            .count(),
+        4
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("ping")))
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("level2/snapshot")))
+    );
+    welcome(&mut e, socket);
+    assert!(!e.has_actions());
+}
+
+#[test]
+fn missing_welcome_reconnects_even_if_an_early_pong_arrives() {
+    let (mut e, socket, timer) = awaiting_welcome();
+    e.handle(
+        2.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"type":"pong"}"#,
+        },
+    );
+    assert!(!e.has_actions());
+    e.handle(10000.0, Event::TimerFired { timer });
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::WsClose { socket: s } if *s == socket))
+    );
+    let timer = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 11000.0,
+            } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(11000.0, Event::TimerFired { timer });
+    assert!(requests(&mut e)[0].url.ends_with("bullet-public"));
+    welcome(&mut e, socket);
+    assert!(!e.has_actions());
+}
+
+#[test]
+fn private_snapshot_starts_only_once_after_private_welcome() {
+    let mut e = Engine::new(Kucoin::new(Options {
+        key: Some("key".into()),
+        secret: Some("secret".into()),
+        passphrase: Some("passphrase".into()),
+        ..Default::default()
+    }));
+    e.start(0.0);
+    let r = requests(&mut e).remove(0);
+    answer(
+        &mut e,
+        &r,
+        &format!(r#"{{"code":"200000","data":[{MARKET}]}}"#),
+    );
+    let r = requests(&mut e).remove(0);
+    answer(
+        &mut e,
+        &r,
+        r#"{"code":"200000","data":[{"symbol":"XBTUSDTM","price":"100"}]}"#,
+    );
+    let tokens = requests(&mut e);
+    assert_eq!(tokens.len(), 3);
+    assert!(tokens.iter().all(|r| r.url.contains("/bullet-")));
+    let r = tokens
+        .iter()
+        .find(|r| r.url.ends_with("bullet-private"))
+        .unwrap();
+    answer(
+        &mut e,
+        r,
+        r#"{"code":"200000","data":{"token":"private","instanceServers":[{"endpoint":"wss://example.test","pingInterval":18000,"pingTimeout":10000}]}}"#,
+    );
+    let socket = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1.0, Event::WsOpened { socket });
+    assert!(!e.has_actions());
+    welcome(&mut e, socket);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("/positions")))
+    );
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::WsSend { text, .. } if text.contains("subscribe")))
+            .count(),
+        6
+    );
+    welcome(&mut e, socket);
+    assert!(!e.has_actions());
+}
+
+#[test]
+fn direct_leverage_query_rejects_without_requests_before_and_after_start() {
+    let unstarted = Engine::new(Kucoin::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    for (mut e, command) in [(unstarted, 41), (ready().0, 42)] {
+        e.handle(
+            0.0,
+            Event::Command(Command::FetchLeverage {
+                command,
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        let actions = e.drain_actions().collect::<Vec<_>>();
+        assert!(
+            matches!(actions.as_slice(), [Action::Notice(safe_cex_engine::Notice::CommandDone {
+            command: id, result: Err(error),
+        })] if *id == command && error == "KuCoin leverage query is unsupported")
+        );
+    }
 }

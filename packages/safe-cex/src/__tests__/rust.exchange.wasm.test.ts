@@ -751,7 +751,7 @@ describe('RustEngineExchange', () => {
       now: () => Date.now(),
       connect: (url, handlers) => {
         expect(url).toMatch(/^wss:\/\/kucoin.test\/socket\?token=token-/);
-        setTimeout(handlers.onOpen, 0);
+        setTimeout(() => { handlers.onOpen(); handlers.onMessage(JSON.stringify({ type: 'welcome', id: 'fixture' })); }, 0);
         return { close: () => {}, send: (text) => {
           const message = JSON.parse(text) as { type: string; topic?: string; id?: string };
           expect(message.type).not.toBe('login');
@@ -788,6 +788,14 @@ describe('RustEngineExchange', () => {
     await exchange.start();
     expect(store.marketsBySymbol.BTCUSDT.contractSize).toBe(0.1);
     expect(store.positions[0].contracts).toBe(1);
+    expect(store.positions[0].extra?.contractsNative).toBe(10);
+    const { CrossTradeManager } = await import('../crossTrade/runtime/CrossTradeManager');
+    const masterStore = new DefaultStore();
+    masterStore.update({ markets: store.markets, tickers: store.tickers });
+    const closes: number[] = [];
+    const copier = new CrossTradeManager({ getExchange: () => undefined, placeOrder: async (_copier, _market, _price, _account, _side, amount) => { closes.push(amount); } });
+    await (copier as any)._auditCopierPositions({ masterWeight: 1 }, { account: 'copier', weight: 1, symbolMappings: {} }, { name: 'binance', store: masterStore }, exchange);
+    expect(closes).toEqual([10]);
     expect(store.orders[0]).toMatchObject({ amount: 0.7, filled: 0.3, remaining: 0.4, extra: { remainingNative: 4, filledInPlacementUnits: 3 } });
     const ids = await exchange.placeOrder({ symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, price: 95, amount: 2, clientOrderId: 'caller-id' });
     expect(ids).toEqual(['native-order']);

@@ -47,6 +47,7 @@ const placed = { orderId: 'placed-order', symbol: 'XBTUSDTM', type: 'open', orde
 message(privateUrl, '/contractMarket/tradeOrders', placed);
 command({ op: 'amendOrder', id: 'placed-order', price: 96 });
 http('DELETE', '/api/v1/orders/placed-order?symbol=XBTUSDTM', { cancelledOrderIds: ['placed-order'] });
+get('/api/v1/orders/placed-order?symbol=XBTUSDTM', { ...resting, id: 'placed-order', size: 2, filledSize: 0, dealSize: 0, isActive: false, cancelExist: true, status: 'done' }, { afterCommand: 2 });
 http('POST', '/api/v1/orders', { orderId: 'replacement' }, { symbol: 'XBTUSDTM', type: 'limit', side: 'buy', price: '96', size: '2', leverage: 10, reduceOnly: false, marginMode: 'CROSS', timeInForce: 'GTC', clientOid: 'generated-replacement' });
 message(privateUrl, '/contractMarket/tradeOrders', { ...placed, type: 'canceled', status: 'canceled' });
 message(privateUrl, '/contractMarket/tradeOrders', { ...placed, orderId: 'replacement', clientOid: 'generated-replacement', price: '96' });

@@ -205,3 +205,35 @@ test('venue socket keys preserve bullet tokens while normalizing generated conne
   assert.equal(received, 'depth');
   assert.notEqual(urlKey(socket.url), urlKey('wss://bullet.test/socket?token=private&connectId=runtime'));
 });
+
+test('recorded welcomes establish readiness once without consuming business frames', async () => {
+  const url = 'wss://bullet.test/endpoint?token=recorded';
+  const records = [
+    { type: 'ws', t: 1, url, text: '{"type":"welcome"}' },
+    { type: 'ws', t: 2, url, text: '{"type":"message"}' },
+  ];
+  const tape = new Tape(records, { startupMessage: (r) => JSON.parse(r.text).type === 'welcome' });
+  const observed = [];
+  tape.connect(url, () => observed.push('open'), (text) => observed.push(JSON.parse(text).type));
+  const frames = await tape.play(undefined, async () => {
+    await new Promise(setImmediate);
+    assert.deepEqual(observed, ['open', 'welcome']);
+    observed.push('ready');
+  });
+  assert.equal(frames, 2);
+  assert.deepEqual(observed, ['open', 'welcome', 'ready', 'message']);
+});
+
+test('startup replay never invents a welcome or pulls one past business traffic', async () => {
+  const url = 'wss://bullet.test/endpoint?token=recorded';
+  for (const rows of [[], [
+    { type: 'ws', t: 1, url, text: '{"type":"message"}' },
+    { type: 'ws', t: 2, url, text: '{"type":"welcome"}' },
+  ]]) {
+    const tape = new Tape(rows, { startupMessage: (r) => JSON.parse(r.text).type === 'welcome' });
+    const observed = [];
+    tape.connect(url, () => {}, (text) => observed.push(text));
+    await new Promise(setImmediate);
+    assert.deepEqual(observed, []);
+  }
+});
