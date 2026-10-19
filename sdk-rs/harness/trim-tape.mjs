@@ -1,5 +1,5 @@
 // Cut a recorded tape to its first seconds and gzip it, for a fixture small
-// enough to commit. HTTP responses are kept, at most three per request.
+// enough to commit. Keep every HTTP anchor inside the selected window.
 //
 //   corepack yarn rust:trim-tape --tape <in.jsonl> --seconds 6 --out <out.jsonl.gz>
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -11,13 +11,9 @@ const { values } = parseArgs({
 });
 const limit = Number(values.seconds) * 1000;
 const lines = readFileSync(values.tape, 'utf8').split('\n').filter(Boolean);
-const served = new Map();
 const kept = lines.filter((line) => {
   const record = JSON.parse(line);
-  if (record.type !== 'http') return record.t <= limit;
-  const key = `${record.method} ${record.url}`;
-  served.set(key, (served.get(key) ?? 0) + 1);
-  return served.get(key) <= 3;
+  return record.type === 'meta' || record.t <= limit;
 });
 writeFileSync(values.out, gzipSync(`${kept.join('\n')}\n`, { level: 9 }));
 console.log(JSON.stringify({ out: values.out, records: kept.length, of: lines.length }));

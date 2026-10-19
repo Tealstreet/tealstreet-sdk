@@ -167,6 +167,14 @@ pub struct Ticker {
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderExtra {
+    #[serde(skip)]
+    pub take_profit_known: bool,
+    #[serde(skip)]
+    pub stop_loss_known: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tp_trigger_type: Option<StopTriggerType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sl_trigger_type: Option<StopTriggerType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remaining_native: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -296,8 +304,14 @@ pub struct PlaceOrderOpts {
     pub tp_trigger_type: Option<StopTriggerType>,
     #[serde(default)]
     pub sl_trigger_type: Option<StopTriggerType>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "caller_client_order_id")]
     pub client_order_id: Option<String>,
     #[serde(default)]
     pub close: Option<bool>,
+}
+
+fn caller_client_order_id<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
 }

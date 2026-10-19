@@ -6,6 +6,7 @@ import type {
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
+  FetchedLeverage,
   HistoricalOrder,
   IncomeHistoryOptions,
   IncomeRecord,
@@ -36,6 +37,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   backpack: 'backpack',
   binancepm: 'binancepm',
+  mexc: 'mexc',
   bingx: 'bingx',
   bybit: 'bybit',
   cryptocom: 'cryptocom',
@@ -117,7 +119,7 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
-    this.applier = new FrameApplier(store);
+    this.applier = new FrameApplier(store, this.name === 'mexc');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
   }
 
@@ -179,6 +181,12 @@ export class RustEngineExchange extends BaseExchange {
 
   /** The whole current state as one frame, for a consumer that starts late. */
   snapshotFrame = () => this.host?.snapshot();
+
+  updateSymbolMetadata = async (symbol: string) => {
+    if (this.name !== 'mexc' || this.options.publicDataOnly) return;
+    const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+    this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: rails } });
+  };
 
   private receiveFrame = (buffer: ArrayBuffer) => {
     const frame = new Frame(buffer);

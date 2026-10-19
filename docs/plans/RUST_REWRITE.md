@@ -102,6 +102,11 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution |
 | 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]` |
 
+Venues with independent hedge leverage append f64 `buyLeverage[n]` and
+`sellLeverage[n]` columns to `SETTINGS`. Section length distinguishes this
+optional extension; older frames use `leverage` for both rails. Venues with
+one leverage keep the original payload unchanged.
+
 A market index is a row of the most recent `MARKETS` section; a ticker index is
 a row of the most recent `TICKERS` section. `POSITIONS` holds open positions
 only; per-market leverage and margin type live in `SETTINGS`, replacing the
@@ -279,7 +284,10 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | OKX (+EU, demo) | done (#1302) |
 | Crypto.com | done (#1303) |
 | WEEX | done (#1301) |
-| Bitget, Hyperliquid, BloFin, BingX, MEXC, Bitunix, Backpack | wave 1 lanes running |
+| BingX | done (#1305) |
+| MEXC | done (#1304); conditional/trailing parity check pending |
+| Bitget, Hyperliquid, BloFin, Bitunix, Backpack | wave 1, PRs in review |
+| Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | lane starting |
 | KuCoin, Phemex | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | WOO, Lighter, Paradex, GRVT, AsterDEX, Orderly family, ApeX Omni, Kraken, Coinbase, Bitrue, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse, Bybit inverse/spot/demo | wave 2, as wave 1 lanes merge |

@@ -128,6 +128,29 @@ export const VENUES = {
     compareFillPrices: true,
     isWrite: (method) => method !== 'GET',
   },
+  mexc: {
+    rust: 'mexc',
+    matchRequestBody: true,
+    canonicalIntegerStrings: true,
+    ignoredBodyFields: ['externalOid', 'requestId'],
+    rollingListWindows: true,
+    ts: { module: `${root}/mexc/mexc.exchange.ts`, className: 'MexcExchange', name: 'mexc' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depth.')).length >= count,
+    // Public/private sockets share this URL; tapes identify their ordinal.
+    privateSocket: undefined,
+    independentLeverage: true,
+    tsSettings: (exchange, store) =>
+      store.markets.map((market) => {
+        const config = exchange.symbolSettings.get(market.symbol) ?? exchange.deriveSymbolConfig(market.symbol);
+        return {
+          symbol: market.symbol,
+          marginType: config.marginType,
+          buyLeverage: config.buyLeverage,
+          sellLeverage: config.sellLeverage,
+        };
+      }),
+  },
   bingx: {
     rust: 'bingx',
     ts: { module: `${root}/bingx/bingx.exchange.ts`, className: 'BingxExchange', name: 'bingx' },
@@ -306,6 +329,10 @@ export const VENUES = {
         .concat(books.map((symbol) => `${socket}orderbook.1000.${symbol}`));
     },
     privateSocket: '/v5/private',
+    tsRejectReason: (order) =>
+      order.status === 'canceled' && order.info?.rejectReason === 'EC_PostOnlyWillTakeLiquidity'
+        ? 'PostOnly'
+        : undefined,
     isWrite: (method) => method === 'POST',
     matchRequestBody: true,
     volatileBodyFields: true,

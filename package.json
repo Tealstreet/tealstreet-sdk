@@ -20,6 +20,7 @@
     "rust:record": "node sdk-rs/harness/record.mjs",
     "rust:private-tape-backpack": "node sdk-rs/harness/private-tape-backpack.mjs",
     "rust:private-tape": "node sdk-rs/harness/private-tape.mjs",
+    "rust:private-tape-mexc": "node sdk-rs/harness/private-tape-mexc.mjs",
     "rust:private-tape-bingx": "node sdk-rs/harness/private-tape-bingx.mjs",
     "rust:private-tape-bybit": "node sdk-rs/harness/private-tape-bybit.mjs",
     "rust:private-tape-cryptocom": "node sdk-rs/harness/private-tape-cryptocom.mjs",

@@ -409,6 +409,7 @@ impl ConfigRow<'_> {
                 self.cross_leverage
             },
             margin_type: Some(margin(&self.margin_type)),
+            ..MarketSetting::default()
         }
     }
 }

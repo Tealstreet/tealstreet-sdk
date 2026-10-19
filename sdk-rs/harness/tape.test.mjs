@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import { createHmac, createPrivateKey, sign } from 'node:crypto';
 import { test } from 'node:test';
-import { canonicalBody, canonicalUrl, sameCommandResults, Tape, withTimeout } from './tape.mjs';
+import {
+  bodyBytes,
+  replayStoreReady,
+  ReplayClock,
+  canonicalBody,
+  canonicalUrl,
+  sameCommandResults,
+  Tape,
+  withTimeout,
+} from './tape.mjs';
 import { venueOf } from './venues.mjs';
 const URL = 'https://example.test/order';
 const record = (method, requestBody) => ({
@@ -46,6 +55,11 @@ test('two sockets at one URL route by actual subscription; wrong topic times out
   tape.send(one, JSON.stringify({ method: 'SUBSCRIBE', params: ['ticker.SOL_USDC_PERP'] }));
   tape.send(two, JSON.stringify({ method: 'SUBSCRIBE', params: ['account.orderUpdate'] }));
   assert.equal(await tape.socketFor('wss://example.test', JSON.stringify({ stream: 'account.orderUpdate' })), two);
+  assert.equal(await tape.socketFor('wss://example.test', JSON.stringify({ stream: 'account.orderUpdate' }), 1), two);
+  await assert.rejects(
+    tape.socketFor('wss://example.test', JSON.stringify({ stream: 'account.orderUpdate' }), 0),
+    /timeout/,
+  );
   await assert.rejects(tape.socketFor('wss://example.test', JSON.stringify({ stream: 'depth.missing' })), /timeout/);
   await assert.rejects(withTimeout(new Promise(() => {}), 'readiness', 1), /readiness/);
 });
@@ -399,4 +413,293 @@ test('recorded socket closes deliver later frames to a new subscribed generation
     '2 wss://example.test/public subscribe tickers.BTC',
   ]);
   assert.equal(tape.pendingStartupSubscriptions, 0);
+});
+
+{
+  const mexc = venueOf('mexc');
+  const mexcBody = (body) => canonicalBody(body, new Set(), mexc);
+  const mexcUrl = (url) => canonicalUrl(url, new Set(), mexc);
+  class MexcTape extends Tape {
+    constructor(records, options = {}) {
+      super(records, { ...mexc, ...options }, options.isPrivate ?? false);
+    }
+  }
+  const url = 'https://api.mexc.com/api/v1/private/order/cancel';
+  test('POST matching preserves snowflakes and consumes every accepted write once', () => {
+    const tape = new MexcTape([
+      {
+        type: 'http',
+        method: 'POST',
+        url,
+        status: 200,
+        body: 'accepted',
+        requestBody: '{"id":"739113577038255617","vol":2}',
+      },
+    ]);
+    assert.equal(tape.respond('POST', url, '{"vol":2,"id":739113577038255617}').body, 'accepted');
+    assert.equal(tape.respond('POST', url, '{"id":"739113577038255617","vol":2}').status, 599);
+    assert.notEqual(mexcBody('[739113577038255617]'), mexcBody('[739113577038255618]'));
+  });
+
+  test('body matching ignores only generated externalOid and keeps nested business fields', () => {
+    assert.equal(
+      mexcBody('[{"externalOid":"random1","price":"59000","vol":60}]'),
+      mexcBody('[{"vol":60,"price":"59000","externalOid":"random2"}]'),
+    );
+    assert.notEqual(mexcBody('{"vol":60}'), mexcBody('{"vol":61}'));
+    assert.notEqual(mexcBody('{"symbol":"BTC_USDT"}'), mexcBody('{"symbol":"ETH_USDT"}'));
+  });
+
+  test('only GET may reuse its last recorded snapshot', () => {
+    const tape = new MexcTape([
+      { type: 'http', method: 'GET', url, status: 200, body: 'one' },
+      { type: 'http', method: 'GET', url, status: 200, body: 'two' },
+    ]);
+    assert.deepEqual(
+      [tape.respond('GET', url).body, tape.respond('GET', url).body, tape.respond('GET', url).body],
+      ['one', 'two', 'two'],
+    );
+  });
+
+  test('rolling reconciliation windows keep exact widths; historical queries keep absolute bounds', () => {
+    const active = 'https://api.mexc.com/api/v1/private/planorder/list/orders';
+    assert.equal(
+      mexcUrl(`${active}?start_time=10&end_time=100&states=1`),
+      mexcUrl(`${active}?states=1&end_time=200&start_time=110`),
+    );
+    assert.notEqual(mexcUrl(`${active}?start_time=10&end_time=100`), mexcUrl(`${active}?start_time=11&end_time=100`));
+    const history = 'https://api.mexc.com/api/v1/private/order/list/history_orders';
+    assert.notEqual(
+      mexcUrl(`${history}?start_time=10&end_time=100`),
+      mexcUrl(`${history}?start_time=110&end_time=200`),
+    );
+    assert.equal(
+      mexcUrl('https://fapi.binance.com/fapi/v1/order?symbol=BTCUSDT&timestamp=1&signature=a'),
+      mexcUrl('https://fapi.binance.com/fapi/v1/order?signature=b&timestamp=2&symbol=BTCUSDT'),
+    );
+  });
+
+  test('shared-URL sockets and reconnects deliver lifecycle events in tape order', { timeout: 1000 }, async () => {
+    const socketUrl = 'wss://contract.mexc.com/edge';
+    const records = [
+      { type: 'open', t: 0, url: socketUrl, socket: 0 },
+      { type: 'ws', t: 1, url: socketUrl, socket: 1, text: 'private' },
+      { type: 'close', t: 2, url: socketUrl, socket: 0, code: 1006 },
+      { type: 'open', t: 3, url: socketUrl, socket: 2 },
+      { type: 'ws', t: 4, url: socketUrl, socket: 2, text: 'reconnected' },
+    ];
+    const tape = new MexcTape(records);
+    const seen = [];
+    tape.connect(
+      socketUrl,
+      () => {},
+      (text) => seen.push(`public:${text}`),
+      (code) => {
+        seen.push(`close:${code}`);
+        tape.connect(
+          socketUrl,
+          () => {},
+          (text) => seen.push(`public:${text}`),
+        );
+      },
+    );
+    tape.connect(
+      socketUrl,
+      () => {},
+      (text) => seen.push(`private:${text}`),
+    );
+    assert.equal(await tape.play(), 5);
+    assert.deepEqual(seen, ['private:private', 'close:1006', 'public:reconnected']);
+  });
+
+  test('recorded streamed response bytes remain reusable after collection', async () => {
+    async function* chunks() {
+      yield new Uint8Array([123, 34]);
+      yield new Uint8Array([118, 34, 58, 49, 125]);
+    }
+    const bytes = await bodyBytes(chunks());
+    assert.equal(new TextDecoder().decode(bytes), '{"v":1}');
+    assert.equal(await bodyBytes(bytes), bytes);
+    assert.equal(new TextDecoder().decode(bytes), '{"v":1}');
+  });
+
+  test('public timers advance by recorded time with cancellation and repeated intervals', async () => {
+    const clock = new ReplayClock(1700000000000);
+    clock.install();
+    try {
+      clock.start();
+      const seen = [];
+      const interval = setInterval(() => seen.push(Date.now()), 100);
+      const canceled = setTimeout(() => seen.push('canceled'), 150);
+      clearTimeout(canceled);
+      setTimeout(() => {
+        clearInterval(interval);
+        setTimeout(() => seen.push('retry'), 50);
+      }, 250);
+      await clock.advance(299);
+      assert.deepEqual(seen, [1700000000100, 1700000000200]);
+      await clock.advance(300);
+      assert.deepEqual(seen, [1700000000100, 1700000000200, 'retry']);
+    } finally {
+      clock.restore();
+    }
+  });
+
+  test('the replay epoch begins after account startup and before its first command', async () => {
+    const tape = new MexcTape([{ type: 'command', t: 0, op: 'example' }], { isPrivate: true });
+    const seen = [];
+    await tape.play(
+      undefined,
+      async () => {
+        seen.push('ready');
+      },
+      async () => {
+        seen.push('command');
+        return [];
+      },
+      undefined,
+      () => seen.push('epoch'),
+    );
+    assert.deepEqual(seen, ['ready', 'epoch', 'command']);
+  });
+
+  test('Bybit request IDs are volatile while native client order IDs remain exact', () => {
+    assert.equal(
+      mexcUrl('wss://stream.bybit.com/v5/private?requestId=recorded'),
+      mexcUrl('wss://stream.bybit.com/v5/private?requestId=runtime'),
+    );
+    assert.equal(
+      mexcBody('{"requestId":"recorded","qty":"1","orderLinkId":"caller"}'),
+      mexcBody('{"qty":"1","orderLinkId":"caller","requestId":"runtime"}'),
+    );
+    assert.notEqual(mexcBody('{"orderLinkId":"caller"}'), mexcBody('{"orderLinkId":"different"}'));
+    assert.notEqual(mexcBody('{"qty":"1"}'), mexcBody('{"qty":"2"}'));
+  });
+
+  test(
+    'legacy Bybit sockets match generated URLs and retain latest-connection routing',
+    { timeout: 1000 },
+    async () => {
+      const url = 'wss://stream.bybit.com/v5/private';
+      const tape = new MexcTape([{ type: 'ws', t: 0, url, text: 'private' }]);
+      const seen = [];
+      const first = tape.connect(
+        `${url}?requestId=first`,
+        () => {},
+        (text) => seen.push(`first:${text}`),
+      );
+      await new Promise(setImmediate);
+      tape.close(first);
+      tape.connect(
+        `${url}?requestId=second`,
+        () => {},
+        (text) => seen.push(`second:${text}`),
+      );
+      assert.equal(await tape.play(), 1);
+      assert.deepEqual(seen, ['second:private']);
+    },
+  );
+
+  test('Bybit PostOnly rejection derives from the original TS row, independently of Rust', async () => {
+    const { VENUES } = await import('./venues.mjs');
+    const reason = VENUES.bybit.tsRejectReason;
+    assert.equal(reason({ status: 'canceled', info: { rejectReason: 'EC_PostOnlyWillTakeLiquidity' } }), 'PostOnly');
+    assert.equal(reason({ status: 'canceled', info: { rejectReason: 'EC_PerCancelRequest' } }), undefined);
+    assert.equal(reason({ status: 'open', info: { rejectReason: 'EC_PostOnlyWillTakeLiquidity' } }), undefined);
+  });
+
+  test('public replay starts with market/ticker seed while private replay waits for account state', () => {
+    assert.equal(replayStoreReady(12, false), true);
+    assert.equal(replayStoreReady(12, true), false);
+    assert.equal(replayStoreReady(31, true), true);
+    assert.equal(replayStoreReady(8, false), false);
+    assert.equal(replayStoreReady(4, false), false);
+  });
+}
+
+test('MEXC ID normalization preserves other venue body wire types', () => {
+  const integer = '{"id":739113577038255617}';
+  const text = '{"id":"739113577038255617"}';
+  assert.notEqual(canonicalBody(integer), canonicalBody(text));
+  assert.notEqual(canonicalBody({ externalOid: 'first' }), canonicalBody({ externalOid: 'second' }));
+  assert.equal(canonicalBody(integer, new Set(), venueOf('mexc')), canonicalBody(text, new Set(), venueOf('mexc')));
+});
+
+test('requests fired during public clock advancement observe their timer time', async () => {
+  const clock = new ReplayClock(1700000000000);
+  clock.install();
+  try {
+    const tape = new Tape(
+      [
+        { ...record('GET'), body: 'initial' },
+        { ...record('GET'), body: 'future', availableAfter: 200 },
+      ],
+      { checkRequest: () => true },
+      false,
+    );
+    tape.replayClock = clock;
+    tape.time = 300;
+    clock.start();
+    let observed;
+    setTimeout(() => {
+      observed = tape.respond('GET', URL).body;
+    }, 100);
+    await clock.advance(300);
+    assert.equal(observed, 'initial');
+    assert.equal(tape.respond('GET', URL).body, 'future');
+  } finally {
+    clock.restore();
+  }
+});
+
+test('public commands pump retry timers without reversing time at the next frame', async () => {
+  const epoch = 1700000000000;
+  const clock = new ReplayClock(epoch);
+  clock.install();
+  try {
+    const tape = new Tape(
+      [
+        { type: 'command', t: 0, op: 'retry' },
+        { type: 'command', t: 50, op: 'next' },
+      ],
+      {},
+      false,
+      500,
+    );
+    const observed = [];
+    const ticks = [];
+    await tape.play(
+      (t) => ticks.push(t),
+      async () => {},
+      async (frame) => {
+        if (frame.op === 'retry') await new Promise((resolve) => setTimeout(resolve, 100));
+        observed.push(Date.now() - epoch);
+        return [];
+      },
+      clock,
+    );
+    assert.deepEqual(observed, [100, 100]);
+    assert.deepEqual(ticks, [0, 50]);
+  } finally {
+    clock.restore();
+  }
+});
+
+test('a public command with no completion still hits its real timeout', async () => {
+  const clock = new ReplayClock(1700000000000);
+  clock.install();
+  try {
+    const tape = new Tape([{ type: 'command', t: 0, op: 'never' }], {}, false, 20);
+    await assert.rejects(
+      tape.play(
+        undefined,
+        async () => {},
+        () => new Promise(() => {}),
+        clock,
+      ),
+      /replay timeout: command never/,
+    );
+  } finally {
+    clock.restore();
+  }
 });

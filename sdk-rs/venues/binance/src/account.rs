@@ -512,6 +512,7 @@ impl BinanceFutures {
                     let setting = MarketSetting {
                         leverage,
                         margin_type: Some(MarginType::Cross),
+                        ..MarketSetting::default()
                     };
                     configs.push((p.symbol.to_string(), setting));
                 }
@@ -554,6 +555,7 @@ impl BinanceFutures {
                         MarketSetting {
                             leverage: c.leverage,
                             margin_type: Some(margin_type),
+                            ..MarketSetting::default()
                         },
                     ));
                 }

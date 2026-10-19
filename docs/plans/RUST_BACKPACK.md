@@ -312,3 +312,22 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   4.2/2.4 MB (1.76x); private 14 frames PASS. Pushing the reviewed candidate
   for CI while auxiliary venue replays finish locally; all seventeen CI gates
   must pass before landing. The previous six-venue head completed all CI green.
+- Seven-venue head 6b53912de3 completed all repository and Rust CI jobs green,
+  including all seventeen replay gates. CI Backpack public CPU 124.8/48.6 ms
+  (2.57x), steady 46.7/19.4 ms (2.41x), retained memory 3.1/1.5 MB (2.04x).
+  Before landing, MEXC PR #1304 introduced another target conflict. Integrated
+  target 63d521a860, preserving all eight venue constructors and Backpack's
+  signing, client IDs, quantities and account settings. The target's production
+  wasm size optimization is retained consistently for tests and replay builds.
+- Independent integration reviews confirm optional side-leverage fields remain
+  compatible with Backpack's global leverage; MEXC body normalization is scoped
+  to MEXC, while Backpack keeps exact body types and ordered single-use writes.
+  Shared replay clock uses recorded time for public timers and real bounded
+  deadlines. Review found ordinal routing could bypass Backpack's subscription
+  check on new recordings; require both ordinal and the actual stream topic.
+  Full eight-venue build, nineteen replays and current-head CI remain pending.
+- A second adversarial finding exposed public commands waiting forever on the
+  newly virtualized timers. Added bounded timer pumping during those commands,
+  monotonic replay time, and delayed-command/real-timeout regressions. Ordinal
+  and clock fixes re-reviewed clear; all 65 harness tests pass. Backpack 49 and
+  engine 38 native tests pass, as do workspace native clippy, bans and format.

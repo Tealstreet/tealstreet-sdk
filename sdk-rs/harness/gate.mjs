@@ -75,11 +75,13 @@ for (let run = 0; run < runs; run++) {
 const [ts, rust] = [results.ts[0], results.rust[0]];
 
 const venue = venueOf(values.venue);
-const isPrivate = tapeRecords.some((record) =>
-  venue.isPrivateRecord
-    ? venue.isPrivateRecord(record)
-    : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
-);
+const isPrivate =
+  tapeRecords.find((record) => record.type === 'meta')?.private ??
+  tapeRecords.some((record) =>
+    venue.isPrivateRecord
+      ? venue.isPrivateRecord(record)
+      : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
+  );
 const records = tapeRecords;
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 // BingX additionally fixes write/read defects covered by native contract tests:
@@ -110,6 +112,21 @@ const records = tapeRecords;
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  mexc: () => {
+    // Full incremental depth, rather than replacing a 20-level snapshot.
+    // Sized stops choose the closing leverage rail even without reduceOnly.
+    // Bracket prices reach the native entry; unsupported opening triggers reject.
+    // Cancel-all reaches regular, plan and position-stop endpoints.
+    // Cancel/replace recomputes remaining size after racing fills; Closed wins
+    // over a late cancellation acknowledgement. Failed reads preserve state.
+    // Regular cumulative fills stay monotonic; terminal rows never reopen.
+    // Stale amend reads cannot regress those fills or place a replacement.
+    // REST/optimistic rows retain cumulative fills; amendments retain attached
+    // brackets and standalone stop sources through venue reconciliation.
+    // Native bracket clears and corrected sources win over delayed placement acks.
+    // Repeated private execution IDs emit one fill within the replay window.
+  },
+  binancepm: (ts, rust) => KNOWN_TS_FIXES.binance(ts, rust),
   bingx: (ts) => {
     const account = ts.account;
     if (!account) return;
