@@ -1210,5 +1210,138 @@
   "interruptedRun": {
     "path": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/parity-bybit/.cache/okx-index-release-interrupted-20261019T004341Z",
     "reason": "Sam STOP order interrupted priorcontrol; incomplete sample preserved and not treated as complete evidence. Candidate had not started. This fresh approved pair contains all completed samples."
+  },
+  "finalIntegrationValidation": {
+    "rustSourceHead": "1e17b7ce68d8daf0819561f5b149b034cf7d064b",
+    "inherited1193": "5fd82dda16c8dfeaca03419238aa9e23b1d879a1",
+    "lookupSourceUnchangedFromMeasuredCandidate": true,
+    "testCounts": {
+      "binaries": 44,
+      "passed": 151,
+      "failed": 0,
+      "ignored": 0,
+      "statuses": [
+        "ok"
+      ]
+    },
+    "gates": [
+      {
+        "gate": "fmt",
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--check"
+        ],
+        "cwd": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/parity-bybit/sdk-rs",
+        "log": "/tmp/okx-index-post1193-fmt.log",
+        "started": 1792394468.993542,
+        "exit": 0,
+        "seconds": 31.193543195724487,
+        "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "gate": "lib",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "safe-cex-venue-okx",
+          "--all-targets",
+          "--no-fail-fast",
+          "--jobs",
+          "1",
+          "--",
+          "--include-ignored"
+        ],
+        "cwd": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/parity-bybit/sdk-rs",
+        "log": "/tmp/okx-index-post1193-lib.log",
+        "started": 1792394500.1884952,
+        "exit": 0,
+        "seconds": 459.90240573883057,
+        "logSha256": "45467494f10bb018c0495fdce2b916acdd29f5f256b673981e2532c8e8602ec0"
+      },
+      {
+        "gate": "index",
+        "command": [
+          "cargo",
+          "run",
+          "--locked",
+          "-p",
+          "safe-cex-parity",
+          "--bin",
+          "parity-check",
+          "--jobs",
+          "1",
+          "--"
+        ],
+        "cwd": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/parity-bybit/sdk-rs",
+        "log": "/tmp/okx-index-post1193-index.log",
+        "started": 1792394960.10061,
+        "exit": 0,
+        "seconds": 19.899595975875854,
+        "logSha256": "ff2d8735608ed280247b42d1399a0454241a4c5e5949d3c49cd294909016b4c6"
+      },
+      {
+        "gate": "cancellation",
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-p",
+          "safe-cex-exchange",
+          "--all-features",
+          "--test",
+          "cancellable_future_inventory",
+          "--jobs",
+          "1"
+        ],
+        "cwd": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/parity-bybit/sdk-rs",
+        "log": "/tmp/okx-index-post1193-cancellation.log",
+        "started": 1792394980.0157912,
+        "exit": 0,
+        "seconds": 56.068814754486084,
+        "logSha256": "1020cb1758abc709002afca547eaae570bcf231b097fc3fa1641fb9b2c81b916"
+      },
+      {
+        "gate": "clippy",
+        "command": [
+          "cargo",
+          "clippy",
+          "--locked",
+          "-p",
+          "safe-cex-venue-okx",
+          "--all-targets",
+          "--jobs",
+          "1",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "cwd": "/Users/sam/cs/tealstreet-sdk/.aimux/worktrees/parity-bybit/sdk-rs",
+        "log": "/tmp/okx-index-post1193-clippy.log",
+        "started": 1792395036.085891,
+        "exit": 0,
+        "seconds": 101.45113396644592,
+        "logSha256": "2b77a4159efa37422ead6bb806be8144cba26cc2cf4a0fcc57e56807b4871078"
+      },
+      {
+        "gate": "wiring",
+        "command": "CARGO_INCREMENTAL=0 CARGO=/Users/sam/.rustup/toolchains/1.99.0-aarch64-apple-darwin/bin/cargo /Users/sam/.nvm/versions/node/v24.20.0/bin/node --test scripts/rust-ci-wiring.test.mjs",
+        "exit": 0,
+        "log": "/tmp/okx-index-post1193-wiring.log",
+        "logSha256": "59fd0f56b521153a5d0acfc2caae02b5e1ce9047f63786060911855c645a87b2"
+      },
+      {
+        "gate": "extractor",
+        "command": "corepack yarn parity:extract:check",
+        "exit": 0,
+        "log": "/tmp/okx-index-post1193-extractor.log",
+        "logSha256": "b49ec515f4c84349d6b115c6cf6e4af87b4a666265795879b5a068fc514a8d3a"
+      }
+    ],
+    "priorInheritedFailure": "market_events_native nowPASS on finalintegratedsource; original assertion unchanged",
+    "harnessSetupQualification": "One earlier wiring attempt failed before tests because child cargo was not found; preserved /tmp/okx-index-resume-final-wiring.log. Explicit Cargo and Node24 environment rerun passes376, finalreplay passes376. No source/test relaxation."
   }
 }

@@ -70,3 +70,13 @@ node sdk-rs/safe-cex-venue-okx/tests/index-lookup-throughput.mjs \
 The checker requires the approved sample count, full native drain, complete
 observable output identity and a lower native CPU median. It reports the wider
 two-times-TS target independently.
+
+## Final integration validation
+
+The normal master merge includes #1193's retained handler ABI; the measured
+lookup body is unchanged. All 151 OKX tests across 44 binaries pass, including
+maintained source oracles and the previously inherited `market_events_native`
+assertion. Full index (7,563 rows / 16,268 public Rust items), cancellation
+(6 pass, one explicit discovery export ignored), fmt, scoped strict all-target
+Clippy, CI wiring (376 tests), and extractor coverage (zero drift) pass.
+The versioned receipt records the tested source head, commands and log hashes.
