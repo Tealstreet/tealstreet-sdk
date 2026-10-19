@@ -205,11 +205,16 @@ async function telemetryMessages() {
  assert.equal(rows.length,2);return rows;
 }
 async function telemetryAudit() {
- const rows=[], oldNow=Date.now, oldError=console.error;
+ const rows=[], oldNow=Date.now, oldError=console.error, oldEnvironment=process.env.NODE_ENV;
+ const developmentCode=ts.transpileModule(fs.readFileSync(path.join(root,'packages/safe-cex/src/utils/isDevelopment.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText;
  provider={rest:({config})=>({baseURL:config.baseURL,proxied:true,authorize:async config=>{config.headers.set('Proxy-Authorization','token');}})};
  try {
   for(const development of [false,true])for(const endpoint of ['none','every','periodic','both'])for(const direct of [false,true]) {
-   imported['./utils/isDevelopment'].isDevelopment=development;
+   process.env.NODE_ENV=development?'development':'production';
+   const developmentModule={exports:{}};
+   new Function('module','exports',developmentCode)(developmentModule,developmentModule.exports);
+   assert.equal(developmentModule.exports.isDevelopment,development);
+   imported['./utils/isDevelopment']=developmentModule.exports;
    const local={exports:{}};
    new Function('module','exports','require',code)(local,local.exports,name=>imported[name]);
    let now=1000,ok=0,other=0;const events=[];
@@ -229,7 +234,7 @@ async function telemetryAudit() {
    for(const time of [1000,1001,30999,31000]){now=time;await xhr.post('/telemetry',{text:'\ud800',n:Infinity}, {params:{zero:-0,skip:undefined}});}
    rows.push({development,endpoint,direct,events});
   }
- } finally {Date.now=oldNow;console.error=oldError;imported['./utils/isDevelopment'].isDevelopment=false;}
+ } finally {Date.now=oldNow;console.error=oldError;imported['./utils/isDevelopment']={isDevelopment:false};if(oldEnvironment===undefined)delete process.env.NODE_ENV;else process.env.NODE_ENV=oldEnvironment;}
  assert.equal(rows.length,16);return rows;
 }
 (async()=>{
