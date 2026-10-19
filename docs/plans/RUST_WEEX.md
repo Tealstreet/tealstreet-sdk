@@ -64,11 +64,12 @@ by a sub-agent at each phase boundary. Never touch master or rebase.
   command and signed-request parity. Binance public: 871 frames, CPU 228.2ms
   versus 100.5ms (2.27x), steady 126.6ms versus 42.1ms (3.01x), memory 2.3MB
   versus 2.0MB (1.15x). Binance private: 14 frames, exact parity.
-- Native tests: 60 WEEX, 10 engine and 29 Binance passed. Root typecheck44
-  tasks and lint28 tasks passed. SDK wasm tests5 and host tests7 passed.
-  Bans/fmt and native/wasm clippy passed. Final crypto cleanup recheck/build
-  and broad TS suite (two workers, 30-second test timeout) are in progress;
-  earlier root runs passed all but unrelated timed-out suites.
+- Native tests: 60 WEEX, 10 engine and 29 Binance passed. Root typecheck (44
+  tasks) and lint (28 tasks) passed. SDK wasm tests5 and host tests7 passed.
+  Bans/fmt and native/wasm clippy passed. Post-cleanup workspace/wasm clippy and release build also pass; wasm is
+  byte-identical to the replayed artifact (1,443,799 bytes). The broad TS suite
+  passes all 6,489 tests with two workers and a 30-second test timeout; earlier
+  root runs passed the other packages but hit unrelated suite timeouts.
 - Crypto cleanup removes unused wallet wrappers, address predicate, fixed
   venue-specific ABI tuple builder and lenient base64 decoder. Shared signing
   primitives remain; 27 unit, one integration and three compile-fail doctests
