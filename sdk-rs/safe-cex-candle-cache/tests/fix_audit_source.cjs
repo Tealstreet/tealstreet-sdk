@@ -9,6 +9,26 @@ const intervals = ['1s','5s','15s','30s','1m','3m','5m','15m','30m','1h','2h','4
 const candle = timestamp => ({ timestamp, open:11, high:17, low:7, close:13, volume:19 });
 const terminal = (values, reads = []) => ({ get:async k => { reads.push(k); return values.get(k); }, set:async(k,v)=>values.set(k,v), delete:async k=>values.delete(k), listKeys:async p=>[...values.keys()].filter(k=>k.startsWith(p)) });
 (async () => {
+  if (process.argv.includes('--seeded-clean-candles')) {
+    const bits = value => { const b=Buffer.alloc(8); b.writeDoubleBE(value); return b.toString('hex'); };
+    const pack = row => ['timestamp','open','high','low','close','volume'].map(key=>bits(row[key]));
+    const value = timestamp => ({timestamp,open:100,high:110,low:90,close:105,volume:1000});
+    const firstNan={...value(NaN),close:777};
+    const cases=[[...Array.from({length:5},(_,i)=>value(10-i)),firstNan,...Array.from({length:5},(_,i)=>value(5-i)),value(NaN)],[NaN,Infinity,-0,-Infinity,0].map(value)];
+    let seed=0x123456789abcdef0n;
+    for(let c=0;c<2000;c++) {
+      const input=[{...value(NaN),close:c}];
+      for(let i=0;i<64;i++) {
+        seed=BigInt.asUintN(64,seed*6364136223846793005n+1n);
+        if(seed%7n===0n) input.push(value(NaN));
+        else input.push({...value(Number((seed>>32n)%81n)-40),close:i});
+      }
+      cases.push(input);
+    }
+    assert.equal(cases.length,2002,'legacy seeded source floor');
+    process.stdout.write(JSON.stringify(cases.map(rows=>cleanCandles(rows).map(pack))));
+    return;
+  }
   if (process.argv.includes('--clean-candles')) {
     const bits = value => { const b=Buffer.alloc(8); b.writeDoubleBE(value); return b.toString('hex'); };
     const pack = row => ['timestamp','open','high','low','close','volume'].map(key=>bits(row[key]));
