@@ -969,3 +969,54 @@ fn filled_source_aborts_inflight_amend_but_own_cancel_frame_allows_replacement()
         }
     }
 }
+
+#[test]
+fn delayed_source_fill_after_replacement_dispatch_preserves_confirmed_replacement_ids() {
+    let (mut e, socket) = ready("disabled");
+    open_order(&mut e, socket, 1900.0);
+    e.handle(
+        2000.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "9".into(),
+            price: Some(85.0),
+            amount: None,
+        }),
+    );
+    let cancel = write(&mut e);
+    reply_at(
+        &mut e,
+        &cancel,
+        2001.0,
+        r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#,
+    );
+    let actions = fire_timers(&mut e);
+    let replacement = action_write(&actions);
+    let cloid = body(replacement)["action"]["orders"][0]["c"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    message(
+        &mut e,
+        socket,
+        2400.0,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"0"},"status":"filled"}]}"#,
+    );
+    reply_at(
+        &mut e,
+        replacement,
+        2401.0,
+        r#"{"status":"ok","response":{"type":"order","data":{"statuses":[{"resting":{"oid":10}}]}}}"#,
+    );
+    let result = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(Notice::CommandDone { command: 1, result }) => Some(result.unwrap()),
+            _ => None,
+        })
+        .unwrap();
+    let result: Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(result["orderIds"], serde_json::json!(["10"]));
+    assert_eq!(result["clientOrderId"], cloid);
+    assert!(e.store().order("10").is_some());
+}

@@ -204,3 +204,10 @@ signing restores optimistic cancellation status. Regressions also cover flat
 settings recovery and prewrite REST revisions with future source timestamps.
 All 56 Hyperliquid tests (19 trading), Clippy with denied warnings and formatting
 pass on the settled source. The independent final lifecycle review is pending.
+
+Final lifecycle correction: after a replacement has already been dispatched, a
+late source-fill event cannot hide its acknowledged replacement IDs/cloid behind
+an error. Completed jobs return their known result; fills before dispatch still
+abort. Independent final reviewer accepts this correction and reports no remaining
+P1/P2 findings in scope, with diminishing returns. All 57 Hyperliquid tests
+(20 trading), Clippy, formatting and diff checks pass.

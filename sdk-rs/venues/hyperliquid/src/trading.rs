@@ -477,12 +477,12 @@ impl Hyperliquid {
         let Some(job) = self.trading.active.as_ref() else {
             return;
         };
-        if job.amend_filled {
-            self.finish_trade(cx, Err("Hyperliquid amendment source was filled".into()));
-            return;
-        }
         if job.steps.is_empty() {
             self.finish_trade(cx, Ok(()));
+            return;
+        }
+        if job.amend_filled {
+            self.finish_trade(cx, Err("Hyperliquid amendment source was filled".into()));
             return;
         }
         if self.trading.write_at.is_some_and(|at| cx.now - at < 334.0) {
