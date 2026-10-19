@@ -36,4 +36,11 @@ repairs. Current source alone would not establish the original capabilities.
 
 ## Progress
 
-- Planning and initial source audit complete; independent audit pending.
+- Independent source/history audit PASS: baseline `ff0277bacd` confirms all
+  three conclusions above. No new production capability is required for TS
+  parity. Existing sized/full-position TP/SL remain supported.
+- Added native single/mixed-batch conditional/trailing preflight tests and
+  general-income no-HTTP tests, plus two mixed-batch private replay cases.
+  Independent phase review PASS; 22 trading + 8 history tests pass.
+- Native MEXC total: 53 tests pass; bans, formatting, native and wasm clippy
+  pass. Replay and repository checks in progress.

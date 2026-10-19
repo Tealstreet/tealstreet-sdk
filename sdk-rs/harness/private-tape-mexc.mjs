@@ -275,6 +275,15 @@ http('POST', '/api/v1/private/stoporder/cancel_all', null, envelope(null), { sym
 ws(3100, 1, 'push.personal.order', { ...resting, state: 4 });
 ws(3300, 1, 'push.personal.stop.order', { ...stop, state: 2 });
 
+// TS has no opening conditional/trailing implementation. A valid first leg
+// must not leak a regular write when a later leg requests either capability.
+for (const [index, type] of ['conditional', 'trailing_stop_market'].entries()) {
+  command(575 + index * 50, 'placeOrders', { orders: [
+    { symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 20, price: 59000 },
+    { symbol: 'BTCUSDT', type, side: 'buy', amount: 20, price: 59000, triggerPrice: 61000 },
+  ] });
+}
+
 records.sort((a, b) => a.t - b.t);
 mkdirSync(dirname(values.out), { recursive: true });
 writeFileSync(values.out, `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);
