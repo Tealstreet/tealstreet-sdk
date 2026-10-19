@@ -179,7 +179,7 @@ impl ExchangeConstructorHost<(), ExchangeOptions, ()> for Constructor {
         max_rps: f64,
     ) -> Result<Rc<Client>, ExchangeError> {
         let primary = Lane::create(options.clone(), &self.build, &self.install)?;
-        primary.limit(parent.runtime.clone(), max_rps as usize);
+        primary.limit(parent, max_rps as usize);
         let secondary = match secondary_options(options) {
             Some(secondary) => Lane::create(secondary, &self.build, &self.install)?,
             None => primary.clone(),
