@@ -143,4 +143,17 @@ for (let rotation = 0; rotation < 6; rotation++) {
   worker._options = { hostedMode: true };
   cases.push({ input, expected: worker._prepareStorePayload(store.state, { forceFullStore: true }) });
 }
-console.log(JSON.stringify({ snapshot: Object.keys(snapshot), live: Object.keys(store.state), cases }));
+const ownStore = new DefaultStore(),
+  ownWorker = new context.Worker();
+ownWorker._store = ownStore;
+ownWorker._options = { hostedMode: true };
+const ownUndefined = [];
+function observeUndefined(data, kind) {
+  const prepared = ownWorker._prepareStorePayload(data, { forceFullStore: true });
+  ownUndefined.push({ kind, own: Object.hasOwn(prepared, 'starkConfig'), type: typeof prepared.starkConfig });
+}
+observeUndefined(ownStore.serialize(), 'snapshot');
+ownStore.updateStarkConfig(undefined);
+observeUndefined(ownStore.state, 'live-clear');
+observeUndefined(ownStore.serialize(), 'snapshot-after-clear');
+console.log(JSON.stringify({ snapshot: Object.keys(snapshot), live: Object.keys(store.state), cases, ownUndefined }));

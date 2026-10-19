@@ -177,6 +177,81 @@ mod construction_order_tests {
     use safe_cex_types::ExchangeName;
 
     #[test]
+    fn actual_okx_delivery_retains_own_undefined_stark_config() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(tokio::task::LocalSet::new().run_until(async {
+                let output = std::process::Command::new("node")
+                    .arg(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/tests/native_store_order_source.mjs"
+                    ))
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                let profiles = source["ownUndefined"].as_array().unwrap();
+                assert_eq!(profiles.len(), 3);
+                let store: Rc<dyn Store> = Rc::new(DefaultStore::new());
+                let host = native_venue_host(hyperliquid_rate_limiter());
+                let exchange = rust_constructor(&ExchangeName::Okx, host)
+                    .unwrap()
+                    .construct(
+                        ExchangeName::Okx,
+                        serde_json::from_value(json!({"key":"", "secret":"", "passphrase":"fixture-only", "hostedMode":true}))
+                            .unwrap(),
+                        store.clone(),
+                    )
+                    .unwrap();
+                let posts = Rc::new(RefCell::new(Vec::new()));
+                let captured = posts.clone();
+                let delivery = NativeStoreDelivery::new(
+                    &exchange,
+                    &store,
+                    Rc::new(move |value| captured.borrow_mut().push(value)),
+                );
+                let callback = delivery.clone();
+                let unsubscribe = store.subscribe_native(Box::new(move |data, _| {
+                    callback.update(data).map_err(Into::into)
+                }));
+                delivery.snapshot().unwrap();
+                store::facade(store.clone())
+                    .unwrap()
+                    .call_method("updateStarkConfig", vec![Js::Undefined])
+                    .unwrap();
+                delivery.snapshot().unwrap();
+                let actual = posts.borrow();
+                assert_eq!(actual.len(), profiles.len());
+                for (index, profile) in profiles.iter().enumerate() {
+                    assert_eq!(
+                        profile["own"], true,
+                        "maintained TS own starkConfig {index}"
+                    );
+                    assert_eq!(
+                        profile["type"], "undefined",
+                        "maintained TS starkConfig type {index}"
+                    );
+                    assert_eq!(
+                        actual[index].get("starkConfig"),
+                        Some(&NativeValue::Undefined),
+                        "STORE-OWN-UNDEFINED actual OKX {}",
+                        profile["kind"]
+                    );
+                }
+                drop(actual);
+                unsubscribe();
+                delivery.cancel();
+                exchange.dispose().unwrap();
+            }));
+    }
+
+    #[test]
     fn actual_native_delivery_preserves_all_model_construction_orders() {
         tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(
             tokio::task::LocalSet::new().run_until(async {

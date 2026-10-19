@@ -34,6 +34,12 @@ subsequent patches replace values without moving existing keys.
   profiles rotate each nested object's insertion order and retain dynamically
   appended root config. OwnedJsValue equality checks key sequences and values
   before JSON. The baseline test compiled and failed at MODEL-CONSTRUCTION-ORDER.
+- actual_okx_delivery_retains_own_undefined_stark_config checks the real OKX
+  constructor, live config-clear notification and final snapshots. Maintained
+  DefaultStore/worker profiles retain starkConfig as an own undefined property;
+  no DTO or JSON projection may turn it into absence. A compiled omission fault
+  fails the named STORE-OWN-UNDEFINED snapshot assertion; exact restoration
+  replays both actual native-delivery tests.
 - native_account_store checks the real account startup full snapshot's key list
   before JSON; its existing HTTP/gateway and trailing-throttle assertions remain.
 - Apex binding::start_ticker_retains_maintained_constructor_key_order executes
