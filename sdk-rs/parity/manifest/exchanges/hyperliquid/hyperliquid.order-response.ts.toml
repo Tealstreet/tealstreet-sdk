@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.order-response.ts"
-rust_files = [ "safe-cex-venue-hyperliquid/src/order_response.rs" ]
+rust_files = [ "safe-cex-venue-hyperliquid/src/order_response.rs", "safe-cex-venue-hyperliquid/src/realm/imports_venue.rs" ]
 
 [[symbol]]
 ts = "EMPTY_HYPERLIQUID_ORDER_RESPONSE_MESSAGE"
@@ -22,9 +22,9 @@ note = "Live TypeScript raw-input oracle binds this pure operation. Renamed targ
 ts = "HyperliquidUnreadableOrderResponseError"
 kind = "class"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/order_response.rs::HyperliquidUnreadableOrderResponseError", "safe-cex-venue-hyperliquid/src/order_response.rs::HyperliquidOrderResponseError" ]
-status = "divergent"
-note = "CHOSEN: Split error into unreadable diagnostic structure and typed Venue/Unreadable result distinction rather than Error inheritance; caller can reconcile only unreadable responses. Renamed targets: `safe-cex-venue-hyperliquid/src/order_response.rs::HyperliquidUnreadableOrderResponseError` `safe-cex-venue-hyperliquid/src/order_response.rs::HyperliquidOrderResponseError`. Structured Rust results are chosen rather than JS exception objects so native and wasm callers receive an actionable error without a panic. A tagged JS-error representation is possible; any missing name/message remains a finding, not an impossibility."
+rs = [ "safe-cex-venue-hyperliquid/src/order_response.rs::HyperliquidUnreadableOrderResponseError", "safe-cex-venue-hyperliquid/src/order_response.rs::HyperliquidOrderResponseError", "safe-cex-venue-hyperliquid/src/realm/imports_venue.rs::unreadable_error_class" ]
+status = "ported"
+note = "The constructed production exchange already installs the custom Error subclass via unreadable_error_class; its response parser reconstructs Unreadable results with that same constructor. The actual bound placement consumer uses instanceof to refresh exactly once on unreadable responses, and rethrows plain venue Errors without that refresh. binding::order_error_audit compares 4 constructor and 14 real-consumer profiles with freshly executed maintained TS, including native prototype identity, descriptors, UTF-16 name/message/display and exact IDs/effects. Three compiled semantic controls require named native failures followed by exact-source-restored passes. The standalone portable Result adapter remains typed; the historical missing-inheritance claim does not describe the production binding. See FIX_AUDIT_ORDER_ERROR.md; no production/Realm/shared-guard change. Renamed targets: `safe-cex-venue-hyperliquid/src/order_response.rs::HyperliquidOrderResponseError` `safe-cex-venue-hyperliquid/src/realm/imports_venue.rs::unreadable_error_class`."
 
 [[symbol]]
 ts = "HyperliquidUnreadableOrderResponseError.constructor"
