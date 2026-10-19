@@ -286,7 +286,11 @@ fn private_signing_failure_sends_no_auth_or_subscribe_and_recovers() {
         "PARADEX AUTH FAILURE shared recovery must execute: {logs:?}"
     );
     let reports = runtime.errors.borrow();
-    assert_eq!(reports.len(), 1, "shared recovery reports the original cause once");
+    assert_eq!(
+        reports.len(),
+        1,
+        "shared recovery reports the original cause once"
+    );
     assert!(
         logs.iter().any(|message| message.contains(&reports[0])),
         "runtime report preserves the cause from the source authentication catch"
