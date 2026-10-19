@@ -144,6 +144,8 @@ impl TunnelHost for NoTunnel {
 
 #[derive(Default)]
 pub struct Host {
+    #[cfg(not(target_arch = "wasm32"))]
+    native: Option<Rc<safe_cex_exchange::native::NativeRuntime>>,
     sleep_wakers: virtual_time::SleepWakers,
     pub now: Cell<f64>,
     jobs: RefCell<Vec<(Job, Arc<Flag>)>>,
@@ -153,6 +155,13 @@ pub struct Host {
     pub sockets: RefCell<Vec<Rc<Wire>>>,
 }
 impl Host {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_native(native: Rc<safe_cex_exchange::native::NativeRuntime>) -> Self {
+        Self {
+            native: Some(native),
+            ..Self::default()
+        }
+    }
     /// Run every runnable job to quiescence without advancing the clock.
     pub fn settle(&self) {
         self.sleep_wakers.wake_due(self.now.get());
@@ -257,12 +266,24 @@ impl Host {
 }
 impl ExchangeRuntime for Host {
     fn monotonic_now_ms(&self) -> f64 {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(native) = &self.native {
+            return native.monotonic_now_ms();
+        }
         self.now.get()
     }
     fn now_ms(&self) -> f64 {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(native) = &self.native {
+            return native.now_ms();
+        }
         1_700_000_000_000.0 + self.now.get()
     }
     fn sleep(&self, delay_ms: u64) -> ExchangeFuture<'static, ()> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(native) = &self.native {
+            return native.sleep(delay_ms);
+        }
         let fired = Rc::new(Cell::new(false));
         self.timers
             .borrow_mut()
@@ -273,6 +294,10 @@ impl ExchangeRuntime for Host {
         ))
     }
     fn spawn_local(&self, future: Job) -> Box<dyn ExchangeTask> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(native) = &self.native {
+            return native.spawn_local(future);
+        }
         self.jobs
             .borrow_mut()
             .push((future, Arc::new(Flag(AtomicBool::new(true)))));

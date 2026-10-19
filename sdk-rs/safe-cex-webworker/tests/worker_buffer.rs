@@ -89,7 +89,8 @@ fn native(count: usize, mode: &str) -> Value {
             }
             Ok("TypeError: handler failed".into())
         },
-        |message, error, extra| {
+        |message, error, payload, index, total| {
+            let extra = json!({"payloadOp":payload.op,"messageIndex":index,"totalBuffered":total});
             assert!(Rc::ptr_eq(&error, &failure), "BUFFER report error identity");
             events
                 .borrow_mut()
@@ -196,7 +197,7 @@ fn buffered_payload_numbers_and_error_strings_keep_their_boundaries() {
         );
         let buffer = RefCell::new(vec![item]);
         let mut observed = None;
-        flush_buffered_messages::<()>(
+        flush_buffered_messages::<(), _>(
             &buffer,
             |_, _| Ok(()),
             |item| {
@@ -210,7 +211,7 @@ fn buffered_payload_numbers_and_error_strings_keep_their_boundaries() {
                 Ok(())
             },
             |_| unreachable!(),
-            |_, _, _| unreachable!(),
+            |_, _, _, _, _| unreachable!(),
         )
         .unwrap();
         assert_eq!(
@@ -228,7 +229,7 @@ fn buffered_payload_numbers_and_error_strings_keep_their_boundaries() {
             |_, _| Ok(()),
             |_| Err(()),
             |_| Ok(row["text"].as_str().unwrap().to_owned()),
-            |text, _, _| {
+            |text, _, _, _, _| {
                 message = text.into();
                 Ok(())
             },

@@ -1,4 +1,6 @@
 // Live source capture: validated Node 26.7.0 on darwin/arm64; CI executes on its own host.
+import assert from 'node:assert/strict';
+import {sourceStore} from '../../safe-cex-store/tests/store_source.mjs';
 import fs from 'node:fs';import vm from 'node:vm';import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript');
 const throttle=require(process.env.SAFE_CEX_WORKER_LODASH_PATH ? process.env.SAFE_CEX_WORKER_LODASH_PATH+'/throttle.js' : 'lodash/throttle');
@@ -20,6 +22,29 @@ const traces=[
  [sub('a'),emit(1),advance(90),emit(2),advance(100),emit(3),advance(120),emit(4),advance(180),advance(220)],
 ];
 if(process.argv.includes('--nonfinite-witness'))traces.push([sub('a'),{op:'poisonTicker'},emit(1),emit(2)],[sub('a'),{op:'poisonBook'},emit(1)]);
+// Exercise the maintained handler and DefaultStore together, before projection.
+if (process.argv.includes('--subscriber-identity')) {
+ const {Store}=sourceStore();
+ const rows=[];
+ for (const name of ['Error','TypeError']) {
+  const store=new Store();store.update({markets:[market],tickers:[{...ticker}]},true);
+  const original=new (name==='TypeError'?TypeError:Error)('bbo subscriber failed');
+  let posts=0,first=0,later=0,callback;
+  const exchange={name:'bybit',options:{},store,listenOrderBook(symbol,fn){assert.equal(symbol,'BTC');callback=fn;return ()=>{};}};
+  const context=vm.createContext({throttle,exchangeMetadata:{bybit:{orderbookTickDelay:100}},console});
+  vm.runInContext(ts.transpileModule(source('BaseHandler')+'\n'+source('OrderBookSubscriptionsHandler')+'\nglobalThis.Handler=OrderBookSubscriptionsHandler;', {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);
+  const handler=new context.Handler('a','bybit',exchange,{postMessage(){assert.equal(store.tickers[0].bid,99);posts++;}},{},{});
+  handler.handle({op:'subscribeOrderBook',data:{subId:'identity',symbol:'BTC'}});
+  store.subscribe(()=>{first++;assert.equal(posts,1);assert.equal(store.tickers[0].bid,101);assert.equal(store.tickers[0].ask,103);throw original;});
+  store.subscribe(()=>later++);
+  let caught;try{callback({bids:[{price:101,amount:2,total:7}],asks:[{price:103,amount:3,total:11}]});}catch(error){caught=error;}
+  assert.equal(caught,original,'exact original subscriber Error survives committed Store write');
+  assert.equal(first,1);assert.equal(later,0);
+  rows.push({name:caught.name,message:caught.message,identity:caught===original,posts,first,later,bid:store.tickers[0].bid,ask:store.tickers[0].ask});
+ }
+ process.stdout.write(JSON.stringify(rows));
+ process.exit(0);
+}
 const scenarios=[];
 const numberKind=n=>Number.isNaN(n)?'NaN':n===Infinity?'Infinity':n===-Infinity?'-Infinity':Object.is(n,-0)?'-0':String(n);
 for(const kind of ['orderbook','ohlcv'])for(const multiplier of [0,0.5,1,2,-1])for(const actions of traces){

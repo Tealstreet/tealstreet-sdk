@@ -229,3 +229,11 @@ with hex/base64 encoding, and Stark with fixed felt-pair encoding. Venue callers
 own Stark typed-data hashing; the shared provider bridge forwards that exact hash
 to the same native PayloadSigner trait used for HMAC. Neither scheme selection nor
 provider installation serializes executable capabilities into account options.
+
+
+Lighter source provenance also records the reviewed `cd8ed4a6ce` package-only
+coverage-v8 development dependency bump in both lighter-sdk and poseidon-crypto.
+The guards verify each complete current package digest before substituting its
+original capture digest. Keep the original 92-case artifact, generator and
+24-case signing supplement semantic SHA unchanged; a dev-tool provenance review
+must never refresh signing expectations or hide an unreviewed source change.

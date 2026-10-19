@@ -39,5 +39,6 @@ await pending;
 assert.equal(calls,1,'MARGIN cleanup source fetch count');
 assert.equal(publications.length,3,'MARGIN cleanup source publication count');
 assert.deepEqual(publications[0],['OTHER','BTC'],'MARGIN cleanup source placeholder keys');
+assert.deepEqual(publications[1],['42','OTHER','BTC'],'MARGIN numeric keys enumerate first before cleanup');
 assert.deepEqual(publications[2],['42','OTHER'],'MARGIN cleanup source final keys');
 process.stdout.write(JSON.stringify({architecture:process.arch,nodeMajor:process.versions.node.split('.')[0],calls,publications,fetched:store.fetchedLeverage}));

@@ -69,19 +69,19 @@
     "category": "delegated",
     "file": "safe-cex-venue-kraken/src/binding/host_typed.rs",
     "reason": "Reviewed the complete current production SpotCancelHost impl. post_cancel forwards the supplied endpoint, field and original native ID to the live unlimitedXHR.post member and awaits its original native Promise. It adds no response/model schema and preserves synchronous and asynchronous Thrown values. The witness reaches the real constructed Spot client, signing interceptors and terminal HTTP: two distinct IDs, exact endpoint/form field/nonce and nonempty API signature. tests/support/accepted_additional_receivers.rs::post_cancel_uses_the_signed_spot_client_and_original_id uses the actual Scope of a constructed KrakenExchange. scripts/additional-receiver-controls.py requires this method's independent compiled named failure and exact-source restored pass.",
-    "itemSha256": "06c49fa8144c68cd970643bb427faee965de90a1d20c925ba01006e07883673b"
+    "itemSha256": "e7617e1cde47413f114ab9b1dd75e28fae6bf2fd76726332165b0109efd9db9f"
   },
   "safe_cex_venue_kraken::spot_cancel::SpotCancelHost::error_message for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
     "category": "delegated",
     "file": "safe-cex-venue-kraken/src/binding/host_typed.rs",
     "reason": "Reviewed the complete current production SpotCancelHost impl. error_message delegates optional original Thrown.value.message lookup and JS truthiness, preserving the original truthy cell or supplied text fallback. It no longer converts through ExchangeError/String. The witness observes native object identity, lone UTF16, infinity, NaN/negative-zero/false/empty/nullish fallback and original getter-thrown identity. tests/support/accepted_additional_receivers.rs::spot_error_message_keeps_truthy_text_and_falsy_fallback uses the actual Scope of a constructed KrakenExchange. scripts/additional-receiver-controls.py requires this method's independent compiled named failure and exact-source restored pass.",
-    "itemSha256": "06c49fa8144c68cd970643bb427faee965de90a1d20c925ba01006e07883673b"
+    "itemSha256": "e7617e1cde47413f114ab9b1dd75e28fae6bf2fd76726332165b0109efd9db9f"
   },
   "safe_cex_venue_kraken::spot_cancel::SpotCancelHost::emit_error for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
     "category": "delegated",
     "file": "safe-cex-venue-kraken/src/binding/host_typed.rs",
     "reason": "Reviewed the complete current production SpotCancelHost impl. emit_error forwards the original native message and supplied static context to the already-assembled emitAndLogError member. BaseExchange owns formatting/reporting; this method admits no error record or model. The witness records the real BaseExchange terminal console arguments and contextual error event; the assembled cancel regression additionally preserves lone UTF16 before its fresh Error rethrow. tests/support/accepted_additional_receivers.rs::spot_emit_error_reaches_the_real_base_reporter uses the actual Scope of a constructed KrakenExchange. scripts/additional-receiver-controls.py requires this method's independent compiled named failure and exact-source restored pass.",
-    "itemSha256": "06c49fa8144c68cd970643bb427faee965de90a1d20c925ba01006e07883673b"
+    "itemSha256": "e7617e1cde47413f114ab9b1dd75e28fae6bf2fd76726332165b0109efd9db9f"
   },
   "safe_cex_venue_kraken::private_accounts::AccountHost::position_id for safe_cex_exchange::js_runtime::scope::Scope<safe_cex_venue_kraken::binding::rt::KrakenExtra>": {
     "category": "non-decoder",

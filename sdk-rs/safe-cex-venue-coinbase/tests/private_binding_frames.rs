@@ -210,7 +210,13 @@ fn real_private_write_timeout_emits_forced_toast_once_until_recovery() {
             h.runtime.advance(8000.0);
         };
         place();
-        let reason = h.store.socket_health().unwrap().unwrap()["privateDegradedReason"]
+        let reason = h
+            .store
+            .socket_health()
+            .unwrap()
+            .unwrap()
+            .into_value()
+            .unwrap()["privateDegradedReason"]
             .as_str()
             .unwrap()
             .to_owned();
@@ -330,7 +336,12 @@ fn health_callbacks_preserve_source_throws_and_effect_order(fault: &'static str)
         );
         health_check_write(&h);
         assert!(
-            h.store.socket_health().unwrap().unwrap()["privateDegradedReason"]
+            h.store
+                .socket_health()
+                .unwrap()
+                .unwrap()
+                .into_value()
+                .unwrap()["privateDegradedReason"]
                 .as_str()
                 .unwrap()
                 .contains("Coinbase private WS"),
@@ -389,7 +400,12 @@ fn real_auth_failure_log_callback_reaches_socket_host() {
             json!({"type":"error","message":"authentication failed"}),
         );
         assert!(
-            h.store.socket_health().unwrap().unwrap()["privateDegradedReason"]
+            h.store
+                .socket_health()
+                .unwrap()
+                .unwrap()
+                .into_value()
+                .unwrap()["privateDegradedReason"]
                 .as_str()
                 .unwrap()
                 .contains("Coinbase private WS authentication failed")
