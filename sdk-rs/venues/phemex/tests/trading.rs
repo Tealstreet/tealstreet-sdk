@@ -365,7 +365,7 @@ fn cancel_deduplicates_children_and_chunks_ten() {
     let a = respond(
         &mut e,
         r,
-        json!({"code":0,"data":{"orderID":"order-0","bizError":0}}),
+        json!({"code":0,"data":(0..10).map(|i|json!({"orderID":format!("order-{i}"),"ordStatus":"Canceled","bizError":0})).collect::<Vec<_>>()}),
     );
     let r = &writes(&a)[0];
     assert!(r.url.contains("/g-orders?"));
@@ -373,7 +373,7 @@ fn cancel_deduplicates_children_and_chunks_ten() {
     let a = respond(
         &mut e,
         r,
-        json!({"code":0,"data":{"orderID":"order-10","bizError":0}}),
+        json!({"code":0,"data":{"orderID":"order-10","ordStatus":"Canceled","bizError":0}}),
     );
     assert_eq!(done(&a).unwrap(), "[]");
     assert!(
@@ -432,7 +432,11 @@ fn replacement_preserves_brackets_postonly_and_remaining() {
         },
     );
     let cancel = &writes(&a)[0];
-    let a = respond(&mut e, cancel, json!({"code":0,"data":{"orderID":"old"}}));
+    let a = respond(
+        &mut e,
+        cancel,
+        json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}),
+    );
     let r = &writes(&a)[0];
     assert_eq!(p(r, "orderQtyRq").as_deref(), Some("0.06"));
     assert_eq!(p(r, "priceRp").as_deref(), Some("69500"));
@@ -479,7 +483,11 @@ fn fill_during_cancel_prevents_replacement() {
         o.filled = 0.05;
         o.remaining = 0.05;
     });
-    let a = respond(&mut e, r, json!({"code":0,"data":{"orderID":"old"}}));
+    let a = respond(
+        &mut e,
+        r,
+        json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled"}}),
+    );
     assert!(writes(&a).is_empty());
     assert!(done(&a).is_err());
 }
@@ -589,7 +597,7 @@ fn partial_cancel_array_preserves_success_and_rolls_back_rejection() {
     let a = respond(
         &mut e,
         r,
-        json!({"code":0,"data":[{"orderID":"one","code":0},{"orderID":"two","code":10001}]}),
+        json!({"code":0,"data":[{"orderID":"one","code":0,"ordStatus":"Canceled"},{"orderID":"two","code":10001}]}),
     );
     assert!(done(&a).is_err());
     assert_eq!(
@@ -743,6 +751,368 @@ fn cancel_symbol_rejects_retained_loaded_snapshot_while_disconnected() {
     assert!(done(&a).is_err());
     assert!(writes(&a).is_empty());
     assert!(e.store().loaded().orders);
+}
+
+fn authenticated(mode: &str) -> (Engine<PhemexPerpetuals>, SocketId) {
+    let (mut e, socket) = engine_with_socket(mode);
+    e.handle(1000., Event::WsOpened { socket });
+    e.handle(
+        1000.,
+        Event::WsMessage {
+            socket,
+            text: r#"{"id":999,"result":{"status":"success"}}"#,
+        },
+    );
+    e.drain_actions().for_each(drop);
+    (e, socket)
+}
+fn ws_orders(e: &mut Engine<PhemexPerpetuals>, socket: SocketId, rows: Vec<Value>) {
+    let text =
+        json!({"type":"incremental","timestamp":2_000_000_000_u64,"orders_p":rows}).to_string();
+    e.handle(
+        1002.,
+        Event::WsMessage {
+            socket,
+            text: &text,
+        },
+    );
+    e.drain_actions().for_each(drop);
+}
+fn live_row(id: &str) -> Value {
+    json!({"orderID":id,"symbol":"BTCUSDT","side":"Buy","posSide":"Merged","ordType":"Limit","ordStatus":"New","orderQty":"0.1","cumQty":"0","leavesQty":"0.1","priceRp":"69000"})
+}
+
+#[test]
+fn standalone_stop_loss_amend_preserves_last_price_trigger() {
+    let mut e = engine();
+    let mut o = order("old");
+    o.kind = OrderType::StopLoss;
+    o.reduce_only = true;
+    o.side = OrderSide::Sell;
+    o.trigger_type = Some(StopTriggerType::LastPrice);
+    o.price = 68000.;
+    e.store_mut().upsert_order(o);
+    let a = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "old".into(),
+            price: Some(67900.),
+            amount: None,
+        },
+    );
+    let r = &writes(&a)[0];
+    let a = respond(
+        &mut e,
+        r,
+        json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled","cumQtyRq":"0"}}),
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "ordType").as_deref(), Some("Stop"));
+    assert_eq!(p(r, "triggerType").as_deref(), Some("ByLastPrice"));
+}
+
+#[test]
+fn standalone_take_profit_amend_preserves_mark_price_trigger() {
+    let mut e = engine();
+    let mut o = order("old");
+    o.kind = OrderType::TakeProfit;
+    o.reduce_only = true;
+    o.side = OrderSide::Sell;
+    o.trigger_type = Some(StopTriggerType::MarkPrice);
+    o.price = 71000.;
+    e.store_mut().upsert_order(o);
+    let a = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "old".into(),
+            price: Some(71100.),
+            amount: None,
+        },
+    );
+    let r = &writes(&a)[0];
+    let a = respond(
+        &mut e,
+        r,
+        json!({"code":0,"data":{"orderID":"old","ordStatus":"Canceled","cumQtyRq":"0"}}),
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "ordType").as_deref(), Some("MarketIfTouched"));
+    assert_eq!(p(r, "triggerType").as_deref(), Some("ByMarkPrice"));
+}
+
+#[test]
+fn accepted_init_cancel_never_replaces_or_tombstones_before_private_finality() {
+    let (mut e, socket) = authenticated("OneWay");
+    e.store_mut().upsert_order(order("old"));
+    let a = command(
+        &mut e,
+        Command::AmendOrder {
+            command: 1,
+            id: "old".into(),
+            price: Some(67900.),
+            amount: None,
+        },
+    );
+    let r = &writes(&a)[0];
+    let a = respond(
+        &mut e,
+        r,
+        json!({"code":0,"data":{"orderID":"old","ordStatus":"Init","execStatus":"Init","bizError":0,"cumQtyRq":"0"}}),
+    );
+    assert!(writes(&a).is_empty());
+    assert!(done(&a).is_err());
+    assert_eq!(
+        e.store().order("old").unwrap().status,
+        OrderStatus::Canceling
+    );
+    ws_orders(&mut e, socket, vec![live_row("old")]);
+    assert_eq!(e.store().order("old").unwrap().status, OrderStatus::Open);
+}
+
+#[test]
+fn accepted_bulk_init_leaves_every_order_pending_without_tombstones() {
+    let (mut e, socket) = authenticated("OneWay");
+    for id in ["one", "two"] {
+        e.store_mut().upsert_order(order(id));
+    }
+    let a = command(
+        &mut e,
+        Command::CancelOrders {
+            command: 1,
+            ids: vec!["one".into(), "two".into()],
+        },
+    );
+    let r = &writes(&a)[0];
+    assert!(r.url.contains("/g-orders?"));
+    let a = respond(
+        &mut e,
+        r,
+        json!({"code":0,"data":{"orderID":"one","ordStatus":"Init","execStatus":"Init","bizError":0}}),
+    );
+    assert_eq!(done(&a).unwrap(), "[]");
+    assert!(writes(&a).is_empty());
+    assert!(
+        e.store()
+            .orders()
+            .iter()
+            .all(|o| o.status == OrderStatus::Canceling)
+    );
+    ws_orders(&mut e, socket, vec![live_row("one"), live_row("two")]);
+    assert!(
+        e.store()
+            .orders()
+            .iter()
+            .all(|o| o.status == OrderStatus::Open)
+    );
+}
+
+#[test]
+fn partial_cancel_rejection_does_not_roll_back_an_accepted_pending_sibling() {
+    let mut e = engine();
+    for id in ["one", "two"] {
+        e.store_mut().upsert_order(order(id));
+    }
+    let a = command(
+        &mut e,
+        Command::CancelOrders {
+            command: 1,
+            ids: vec!["one".into(), "two".into()],
+        },
+    );
+    let r = &writes(&a)[0];
+    let a = respond(
+        &mut e,
+        r,
+        json!({"code":0,"data":[{"orderID":"one","ordStatus":"Init","execStatus":"Init","bizError":0},{"orderID":"two","ordStatus":"Rejected","bizError":11001}]}),
+    );
+    assert!(done(&a).is_err());
+    assert!(writes(&a).is_empty());
+    assert_eq!(
+        e.store().order("one").unwrap().status,
+        OrderStatus::Canceling
+    );
+    assert_eq!(e.store().order("two").unwrap().status, OrderStatus::Open);
+}
+
+#[test]
+fn missing_or_rejected_cancel_results_restore_previous_state() {
+    for value in [
+        json!({"code":0}),
+        json!({"code":0,"data":null}),
+        json!({"code":0,"data":{"orderID":"old"}}),
+        json!({"code":0,"data":{"orderID":"old","ordStatus":"Rejected"}}),
+    ] {
+        let mut e = engine();
+        e.store_mut().upsert_order(order("old"));
+        let a = command(
+            &mut e,
+            Command::AmendOrder {
+                command: 1,
+                id: "old".into(),
+                price: Some(67900.),
+                amount: None,
+            },
+        );
+        let r = &writes(&a)[0];
+        let a = respond(&mut e, r, value);
+        assert!(done(&a).is_err());
+        assert!(writes(&a).is_empty());
+        assert_eq!(e.store().order("old").unwrap().status, OrderStatus::Open);
+    }
+}
+
+#[test]
+fn duplicate_cancel_identity_cannot_prove_terminal_outcome() {
+    let mut e = engine();
+    e.store_mut().upsert_order(order("old"));
+    let a = command(
+        &mut e,
+        Command::CancelOrders {
+            command: 1,
+            ids: vec!["old".into()],
+        },
+    );
+    let r = &writes(&a)[0];
+    let a = respond(
+        &mut e,
+        r,
+        json!({"code":0,"data":[{"orderID":"old","ordStatus":"Canceled"},{"orderID":"old","ordStatus":"Init"}]}),
+    );
+    assert!(done(&a).is_err());
+    assert!(writes(&a).is_empty());
+    assert_eq!(e.store().order("old").unwrap().status, OrderStatus::Open);
+}
+
+#[test]
+fn single_bulk_final_row_does_not_finalize_other_requested_ids() {
+    let mut e = engine();
+    for id in ["one", "two"] {
+        e.store_mut().upsert_order(order(id));
+    }
+    let a = command(
+        &mut e,
+        Command::CancelOrders {
+            command: 1,
+            ids: vec!["one".into(), "two".into()],
+        },
+    );
+    let r = &writes(&a)[0];
+    let a = respond(
+        &mut e,
+        r,
+        json!({"code":0,"data":{"orderID":"one","ordStatus":"Canceled"}}),
+    );
+    assert_eq!(done(&a).unwrap(), "[]");
+    assert_eq!(
+        e.store().order("one").unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(
+        e.store().order("two").unwrap().status,
+        OrderStatus::Canceling
+    );
+}
+
+#[test]
+fn margin_only_hedged_update_preserves_distinct_side_leverages_after_ack() {
+    let (mut e, socket) = authenticated("Hedged");
+    let text = r#"{"type":"incremental","positions_p":[{"symbol":"BTCUSDT","currency":"USDT","posMode":"Hedged","posSide":"Short","size":"0","leverageRr":"-20","crossMargin":true}]}"#;
+    e.handle(1000., Event::WsMessage { socket, text });
+    e.drain_actions().for_each(drop);
+    let a = command(
+        &mut e,
+        Command::SetMarginType {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            isolated: true,
+        },
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "longLeverageRr").as_deref(), Some("10"));
+    assert_eq!(p(r, "shortLeverageRr").as_deref(), Some("20"));
+    let a = respond(&mut e, r, json!({"code":0,"data":null}));
+    assert_eq!(done(&a).unwrap(), "[]");
+    let a = command(
+        &mut e,
+        Command::SetMarginType {
+            command: 2,
+            symbol: "BTCUSDT".into(),
+            isolated: false,
+        },
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "longLeverageRr").as_deref(), Some("-10"));
+    assert_eq!(p(r, "shortLeverageRr").as_deref(), Some("-20"));
+}
+
+#[test]
+fn decimal_maximum_accepts_one_exact_caller_order_without_oversized_lots() {
+    let mut e = engine();
+    let mut markets = e.store().markets().to_vec();
+    markets[0].precision.amount = 0.1;
+    markets[0].limits.amount.max = 0.3;
+    e.store_mut().set_markets(markets);
+    let mut o = opts("decimal-caller");
+    o.amount = 0.3;
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 1,
+            orders: vec![o],
+        },
+    );
+    let r = &writes(&a)[0];
+    assert_eq!(p(r, "orderQtyRq").as_deref(), Some("0.3"));
+    assert_eq!(p(r, "clOrdID").as_deref(), Some("decimal-caller"));
+    let a = respond(&mut e, r, ack(r, "actual"));
+    assert!(done(&a).is_ok());
+    assert!(writes(&a).is_empty());
+    let mut markets = e.store().markets().to_vec();
+    markets[0].limits.amount.max = 0.29;
+    e.store_mut().set_markets(markets);
+    let mut o = opts("");
+    o.amount = 0.3;
+    let a = command(
+        &mut e,
+        Command::PlaceOrders {
+            command: 2,
+            orders: vec![o],
+        },
+    );
+    assert_eq!(p(&writes(&a)[0], "orderQtyRq").as_deref(), Some("0.2"));
+}
+
+#[test]
+fn imported_limit_trigger_amend_fails_before_destructive_cancel() {
+    for kind in ["StopLimit", "LimitIfTouched"] {
+        let (mut e, socket) = authenticated("OneWay");
+        let mut row = live_row("imported");
+        row["ordType"] = json!(kind);
+        row["side"] = json!("Sell");
+        row["reduceOnly"] = json!(true);
+        row["triggerType"] = json!("ByLastPrice");
+        row["stopDirection"] = json!("Falling");
+        row["stopPxRp"] = json!("68000");
+        row["priceRp"] = json!("67950");
+        ws_orders(&mut e, socket, vec![row]);
+        let a = command(
+            &mut e,
+            Command::AmendOrder {
+                command: 1,
+                id: "imported".into(),
+                price: Some(68100.),
+                amount: None,
+            },
+        );
+        assert!(done(&a).is_err());
+        assert!(writes(&a).is_empty());
+        assert_eq!(
+            e.store().order("imported").unwrap().status,
+            OrderStatus::Open
+        );
+    }
 }
 
 #[test]

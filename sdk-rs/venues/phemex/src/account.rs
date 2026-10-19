@@ -22,7 +22,6 @@ pub struct Request {
     currency: usize,
     write_revision: u64,
     slice_revision: u64,
-    started_ns: u64,
     positions: Vec<Position>,
     contexts: HashMap<String, Context>,
     versions: HashMap<String, u64>,
@@ -58,6 +57,7 @@ pub struct State {
     terminal_floor: u64,
     order_versions: HashMap<String, u64>,
     position_versions: HashMap<String, u64>,
+    position_absent: HashSet<String>,
     fills: HashSet<String>,
     fill_queue: VecDeque<(String, u64)>,
     fill_floor: u64,
@@ -226,7 +226,6 @@ impl PhemexPerpetuals {
                 currency,
                 write_revision: self.account.write_revision,
                 slice_revision: self.account.slices[currency].revision,
-                started_ns: (cx.now * 1e6) as u64,
                 positions: vec![],
                 contexts: HashMap::new(),
                 versions: HashMap::new(),
@@ -357,8 +356,40 @@ impl PhemexPerpetuals {
                 })
                 .cloned()
                 .collect();
+            // A successful full slice also versions omissions. Keep exact native versions
+            // for present rows: fresh authoritative REST may contain a long-lived position.
+            let present: HashSet<_> = request.positions.iter().map(|p| p.id.clone()).collect();
+            let mut known: HashSet<_> = self.account.position_versions.keys().cloned().collect();
+            known.extend(cx.store.positions().iter().map(|p| p.id.clone()));
+            known.extend(request.versions.keys().cloned());
+            for key in known {
+                let symbol = key.split(':').next().unwrap_or(&key);
+                if !cx
+                    .store
+                    .market(symbol)
+                    .is_some_and(|m| m.quote == CURRENCIES[currency])
+                {
+                    continue;
+                }
+                if present.contains(&key) {
+                    self.account.position_absent.remove(&key);
+                    self.account.position_versions.insert(
+                        key.clone(),
+                        request.versions.get(&key).copied().unwrap_or(0),
+                    );
+                } else {
+                    let version = self
+                        .account
+                        .position_versions
+                        .get(&key)
+                        .copied()
+                        .unwrap_or(0)
+                        .max(request.versions.get(&key).copied().unwrap_or(0));
+                    self.account.position_versions.insert(key.clone(), version);
+                    self.account.position_absent.insert(key);
+                }
+            }
             positions.extend(request.positions);
-            self.account.position_versions.extend(request.versions);
             cx.store.set_positions(positions);
             for (symbol, context) in request.contexts {
                 self.account.install_context(cx, &symbol, context);
@@ -371,9 +402,6 @@ impl PhemexPerpetuals {
                 upnl,
             };
             self.account.slices[currency].revision += 1;
-            self.account.slices[currency].last_timestamp = self.account.slices[currency]
-                .last_timestamp
-                .max(request.started_ns);
             self.account_publish_balance(cx);
         }
         self.account_finish(cx, currency, false);
@@ -580,6 +608,51 @@ impl PhemexPerpetuals {
             );
             return true;
         }
+        // Validate every known semantic mapping before granting snapshot authority or
+        // consuming the sequence; a corrected retry with the same sequence must work.
+        let mut staged_positions = Vec::new();
+        let mut staged_contexts = HashMap::new();
+        if let Some(rows) = positions {
+            for row in rows {
+                let symbol = row.symbol.to_ascii_uppercase();
+                let Some(market) = cx.store.market(&symbol) else {
+                    continue;
+                };
+                let Some(currency) = CURRENCIES.iter().position(|c| *c == market.quote) else {
+                    continue;
+                };
+                let prior = staged_contexts
+                    .get(&symbol)
+                    .copied()
+                    .or_else(|| self.account.context(&symbol));
+                let Some((context, position)) = row.map(cx.store, prior) else {
+                    cx.log(
+                        LogLevel::Warning,
+                        "Phemex invalid position mapping; retaining private frame",
+                    );
+                    return true;
+                };
+                if !row.currency.is_empty() && row.currency != CURRENCIES[currency] {
+                    cx.log(
+                        LogLevel::Warning,
+                        "Phemex mismatched position settlement; retaining private frame",
+                    );
+                    return true;
+                }
+                staged_contexts.insert(symbol, context);
+                staged_positions.push((row, currency, context, position));
+            }
+        }
+        if accounts.as_ref().is_some_and(|rows| {
+            rows.iter()
+                .any(|row| CURRENCIES.contains(&row.currency.as_ref()) && row.used < 0.)
+        }) {
+            cx.log(
+                LogLevel::Warning,
+                "Phemex invalid account mapping; retaining private frame",
+            );
+            return true;
+        }
         if let Some(sequence) = message.sequence {
             self.account.sequence = Some(sequence);
         }
@@ -595,7 +668,11 @@ impl PhemexPerpetuals {
                 if snapshot && !safe_snapshot && cx.store.order(&row.order_id).is_some() {
                     continue;
                 }
-                let version = row.version().max(message.timestamp);
+                let version = if row.version() > 0 {
+                    row.version()
+                } else {
+                    message.timestamp
+                };
                 if !snapshot {
                     self.account_fill(cx, row, version);
                     if (row.cumulative().is_some() || row.leaves().is_some())
@@ -663,23 +740,32 @@ impl PhemexPerpetuals {
                 self.account.snapshot = true;
             }
         }
-        if let Some(rows) = positions {
-            for row in rows {
-                let Some(market) = cx.store.market(&row.symbol.to_ascii_uppercase()) else {
-                    continue;
+        if message.positions_p.is_some() {
+            for (row, currency, context, position) in staged_positions {
+                let version = if row.transact_time_ns > 0 {
+                    row.transact_time_ns
+                } else {
+                    message.timestamp
                 };
-                let Some(currency) = CURRENCIES.iter().position(|c| *c == market.quote) else {
-                    continue;
-                };
-                let Some((context, position)) = row.map(
-                    cx.store,
-                    self.account.context(&row.symbol.to_ascii_uppercase()),
-                ) else {
-                    cx.log(LogLevel::Warning, "Phemex invalid position update");
-                    continue;
-                };
-                let version = row.transact_time_ns.max(message.timestamp);
                 let key = position_key(&row, context);
+                let last = self
+                    .account
+                    .position_versions
+                    .get(&key)
+                    .copied()
+                    .unwrap_or(0);
+                let absent = self.account.position_absent.contains(&key)
+                    || cx.store.position(&key).is_none();
+                // Fence known omitted IDs using only their native observations;
+                // local time and another symbol's timestamp cannot order this key.
+                if position.is_some() && absent && version <= last {
+                    continue;
+                }
+                // Untimestamped flat context rows may retain settings while already flat,
+                // but cannot erase a versioned live exposure.
+                if version == 0 && cx.store.position(&key).is_some() && last > 0 {
+                    continue;
+                }
                 if self
                     .account
                     .position_versions
@@ -700,7 +786,15 @@ impl PhemexPerpetuals {
                 {
                     continue;
                 }
-                self.account.position_versions.insert(key, version);
+                if position.is_some() {
+                    self.account.position_absent.remove(&key);
+                    self.account.position_versions.insert(key.clone(), version);
+                } else {
+                    self.account.position_absent.insert(key.clone());
+                    self.account
+                        .position_versions
+                        .insert(key, last.max(version));
+                }
                 self.account
                     .install_context(cx, &row.symbol.to_ascii_uppercase(), context);
                 if let Some(mut position) = position {
@@ -737,9 +831,10 @@ impl PhemexPerpetuals {
                 else {
                     continue;
                 };
-                if row.used < 0.
-                    || (message.timestamp < self.account.slices[currency].last_timestamp)
-                {
+                // REST has no native account timestamp. Retain the latest observed
+                // WS version across reads, rather than promoting the client clock.
+                let last = self.account.slices[currency].last_timestamp;
+                if row.used < 0. || (last > 0 && message.timestamp <= last) {
                     continue;
                 }
                 self.account.slices[currency].last_timestamp = message.timestamp;

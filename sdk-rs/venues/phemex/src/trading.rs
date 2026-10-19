@@ -317,7 +317,9 @@ impl PhemexPerpetuals {
             } else {
                 (amount / m.precision.amount).round()
             };
-            let max_units = (max / m.precision.amount).floor();
+            let nearest_max = num::adjust(max, m.precision.amount);
+            let max_units = (nearest_max / m.precision.amount).round()
+                - if nearest_max > max { 1.0 } else { 0.0 };
             if o.client_order_id.is_some() && units > max_units {
                 return Err("Phemex caller clientOrderId cannot span split orders".into());
             }
@@ -328,6 +330,9 @@ impl PhemexPerpetuals {
             {
                 return Err("Phemex order cannot be safely split".into());
             }
+            if !max_units.is_finite() || max_units > 9_007_199_254_740_991.0 {
+                return Err("Phemex market maximum cannot be represented safely".into());
+            }
             let mut left = units;
             while left > 0.0 {
                 let qty = if full_close {
@@ -336,6 +341,9 @@ impl PhemexPerpetuals {
                     num::adjust(left.min(max_units) * m.precision.amount, m.precision.amount)
                 };
                 left -= left.min(max_units);
+                if qty > max {
+                    return Err("Phemex split lot exceeds market maximum".into());
+                }
                 if !full_close && qty < m.limits.amount.min {
                     return Err("Phemex split remainder below minimum quantity".into());
                 }
@@ -576,6 +584,17 @@ impl PhemexPerpetuals {
         if parent.status != OrderStatus::Open {
             return Err("Phemex replacement requires an open parent order".into());
         }
+        if matches!(parent.kind, OrderType::StopLoss | OrderType::TakeProfit)
+            && parent
+                .extra
+                .as_ref()
+                .is_some_and(|extra| extra.conditional_order_price.is_some())
+        {
+            return Err(
+                "Phemex imported limit-trigger orders cannot be safely canceled and replaced"
+                    .into(),
+            );
+        }
         if parent.kind == OrderType::TrailingStopLoss {
             return Err(
                 "Phemex trailing cancel-replace cannot preserve its original offset".into(),
@@ -635,8 +654,24 @@ impl PhemexPerpetuals {
             reduce_only: Some(parent.reduce_only),
             time_in_force: parent.time_in_force,
             trigger_type: parent.trigger_type,
-            tp_trigger_type: types.tp,
-            sl_trigger_type: types.sl,
+            tp_trigger_type: if parent.kind == OrderType::TakeProfit {
+                Some(
+                    parent
+                        .trigger_type
+                        .ok_or("Phemex cannot preserve standalone take-profit trigger type")?,
+                )
+            } else {
+                types.tp
+            },
+            sl_trigger_type: if parent.kind == OrderType::StopLoss {
+                Some(
+                    parent
+                        .trigger_type
+                        .ok_or("Phemex cannot preserve standalone stop-loss trigger type")?,
+                )
+            } else {
+                types.sl
+            },
             client_order_id: None,
             close: parent.close,
         };
@@ -669,25 +704,46 @@ impl PhemexPerpetuals {
             .context(&symbol)
             .ok_or("Phemex current leverage/margin context is unknown")?;
         let margin = margin.unwrap_or(context.margin_type);
-        let leverage = leverage.unwrap_or(context.long_leverage);
-        if !leverage.is_finite() || leverage <= 0.0 {
-            return Err("Phemex leverage must be finite and positive".into());
-        }
-        let leverage = leverage.clamp(m.limits.leverage.min, m.limits.leverage.max);
-        if !leverage.is_finite() || leverage <= 0.0 {
+        if !m.limits.leverage.min.is_finite()
+            || !m.limits.leverage.max.is_finite()
+            || m.limits.leverage.min <= 0.0
+            || m.limits.leverage.min > m.limits.leverage.max
+        {
             return Err("Phemex market leverage limits are invalid".into());
         }
-        let signed = if margin == MarginType::Cross {
-            -leverage
+        let changing_leverage = leverage.is_some();
+        let long = leverage.unwrap_or(context.long_leverage);
+        let short = if context.mode == PositionMode::Hedged && !changing_leverage {
+            context.short_leverage
         } else {
-            leverage
+            long
+        };
+        if !long.is_finite() || long <= 0.0 || !short.is_finite() || short <= 0.0 {
+            return Err("Phemex current side leverage is unknown or invalid".into());
+        }
+        let long = if changing_leverage {
+            long.clamp(m.limits.leverage.min, m.limits.leverage.max)
+        } else {
+            long
+        };
+        let short = if changing_leverage {
+            short.clamp(m.limits.leverage.min, m.limits.leverage.max)
+        } else {
+            short
+        };
+        let signed = |value: f64| {
+            if margin == MarginType::Cross {
+                -value
+            } else {
+                value
+            }
         };
         let mut params = vec![("symbol", self.native_symbol(&m.symbol).to_owned())];
         if context.mode == PositionMode::Hedged {
-            params.push(("longLeverageRr", num::format(signed)));
-            params.push(("shortLeverageRr", num::format(signed)));
+            params.push(("longLeverageRr", num::format(signed(long))));
+            params.push(("shortLeverageRr", num::format(signed(short))));
         } else {
-            params.push(("leverageRr", num::format(signed)));
+            params.push(("leverageRr", num::format(signed(long))));
         }
         Ok(VecDeque::from([Step {
             method: Method::Put,
@@ -695,7 +751,7 @@ impl PhemexPerpetuals {
             query: query(params),
             call: Call::Settings {
                 symbol,
-                leverage: Some(leverage),
+                leverage: changing_leverage.then_some(long),
                 margin: Some(margin),
                 mode: None,
             },
@@ -1012,83 +1068,103 @@ impl PhemexPerpetuals {
                     if self.account.order_revision() != request.revision {
                         return Err("Phemex order changed during cancel acknowledgement; await reconciliation".into());
                     }
-                    let mut successful = ids.clone();
+                    let raw = env
+                        .data
+                        .filter(|raw| raw.get() != "null")
+                        .ok_or("Phemex missing cancel acknowledgement")?;
+                    let result: CancelResult = serde_json::from_str(raw.get())
+                        .map_err(|_| "Phemex malformed cancel acknowledgement")?;
+                    let (rows, array) = match result {
+                        CancelResult::Rows(rows) => (rows, true),
+                        CancelResult::Row(row) => (vec![row], false),
+                    };
+                    let mut seen = HashSet::new();
+                    let mut accepted = HashSet::new();
+                    let mut finalized = HashMap::new();
                     let mut problem = None;
-                    if let Some(raw) = env.data
-                        && raw.get() != "null"
-                    {
-                        let result: CancelResult = serde_json::from_str(raw.get())
-                            .map_err(|_| "Phemex malformed cancel acknowledgement")?;
-                        let (rows, array) = match result {
-                            CancelResult::Rows(r) => (r, true),
-                            CancelResult::Row(r) => (vec![r], false),
+                    for row in rows {
+                        if !ids.contains(&row.order_id) || !seen.insert(row.order_id.clone()) {
+                            accepted.remove(&row.order_id);
+                            finalized.remove(&row.order_id);
+                            problem = Some("Phemex cancel identity mismatch".to_string());
+                            continue;
+                        }
+                        if row.code != 0
+                            || row.biz_error != 0
+                            || row.exec_status.eq_ignore_ascii_case("Rejected")
+                        {
+                            problem = Some(format!(
+                                "Phemex cancel row rejected: {} {}",
+                                row.code, row.biz_error
+                            ));
+                            continue;
+                        }
+                        let filled = row.cum_qty_rq.or(row.cum_qty).or(row.exec_qty);
+                        if filled.is_some_and(|v| !v.is_finite() || v < 0.0) {
+                            problem = Some("Phemex invalid cancel cumulative fill".into());
+                            continue;
+                        }
+                        let status = match row.ord_status.to_ascii_lowercase().as_str() {
+                            "init" => None,
+                            "canceled" | "cancelled" => Some(OrderStatus::Canceled),
+                            "filled" => Some(OrderStatus::Closed),
+                            _ => {
+                                problem = Some(
+                                    "Phemex cancel acknowledgement has no confirmed outcome".into(),
+                                );
+                                continue;
+                            }
                         };
-                        let mut seen = HashSet::new();
-                        successful.clear();
-                        for row in rows {
-                            if !ids.contains(&row.order_id) || !seen.insert(row.order_id.clone()) {
-                                problem = Some("Phemex cancel identity mismatch".to_string());
-                                continue;
-                            }
-                            if row.code != 0 || row.biz_error != 0 {
-                                problem = Some(format!(
-                                    "Phemex cancel row rejected: {} {}",
-                                    row.code, row.biz_error
-                                ));
-                                continue;
-                            }
-                            let filled = row.cum_qty_rq.or(row.cum_qty).or(row.exec_qty);
-                            if filled.is_some_and(|v| !v.is_finite() || v < 0.0) {
-                                problem = Some("Phemex invalid cancel cumulative fill".into());
-                                continue;
-                            }
-                            if let Some(filled) = filled
-                                && cx
-                                    .store
-                                    .order(&row.order_id)
-                                    .is_some_and(|o| filled > o.filled)
-                            {
-                                cx.store.update_order(&row.order_id, |o| {
-                                    o.filled = filled;
-                                    o.remaining = (o.amount - filled).max(0.0);
-                                });
-                            }
-                            if row.ord_status.eq_ignore_ascii_case("Filled") {
-                                cx.store
-                                    .set_order_status(&row.order_id, OrderStatus::Closed);
-                            }
-                            successful.push(row.order_id);
+                        if let Some(filled) = filled
+                            && cx
+                                .store
+                                .order(&row.order_id)
+                                .is_some_and(|o| filled > o.filled)
+                        {
+                            cx.store.update_order(&row.order_id, |o| {
+                                o.filled = filled;
+                                o.remaining = (o.amount - filled).max(0.0);
+                            });
                         }
-                        if seen.is_empty() || array && seen.len() != ids.len() {
-                            problem = Some("Phemex missing cancel acknowledgement rows".into());
-                        }
-                        // The documented bulk response is a single representative row.
-                        if !array && problem.is_none() {
-                            successful = ids.clone();
+                        accepted.insert(row.order_id.clone());
+                        if let Some(status) = status {
+                            finalized.insert(row.order_id, status);
                         }
                     }
+                    if seen.is_empty() || array && seen.len() != ids.len() {
+                        problem = Some("Phemex missing cancel acknowledgement rows".into());
+                    }
+                    // A documented bulk object acknowledges the request, but its
+                    // representative order row proves finality only for that ID.
+                    if !array && problem.is_none() {
+                        accepted.extend(ids.iter().cloned());
+                    }
                     for o in before {
-                        let success = native(&o.id)
-                            .ok()
-                            .is_some_and(|id| successful.iter().any(|x| x == id));
+                        let base = native(&o.id).ok();
+                        let status = base.and_then(|id| finalized.get(id)).copied();
+                        let accepted = base.is_some_and(|id| accepted.contains(id));
                         if cx.store.order(&o.id).is_some_and(|current| {
                             current.status == OrderStatus::Canceling
                                 && current.amount == o.amount
                                 && current.filled >= o.filled
                         }) {
-                            if success {
-                                cx.store.set_order_status(&o.id, OrderStatus::Canceled);
-                            } else if cx
-                                .store
-                                .order(&o.id)
-                                .is_some_and(|current| current.filled == o.filled)
+                            if let Some(status) = status {
+                                cx.store.set_order_status(&o.id, status);
+                            } else if !accepted
+                                && cx
+                                    .store
+                                    .order(&o.id)
+                                    .is_some_and(|current| current.filled == o.filled)
                             {
                                 cx.store.set_order_status(&o.id, o.status);
                             }
                         }
                     }
-                    for id in successful {
-                        self.account.terminal(&id, cx.now);
+                    for id in finalized.keys() {
+                        self.account.terminal(id, cx.now);
+                    }
+                    if !accepted.is_empty() {
+                        self.account_write(cx);
                     }
                     if let Some(error) = problem {
                         return Err(error);

@@ -536,3 +536,292 @@ fn incomplete_fill_blocks_amend_until_same_order_cumulative_update() {
             .any(|r| r.method != safe_cex_engine::Method::Get)
     );
 }
+
+#[test]
+fn native_versions_take_precedence_over_fresh_outer_timestamp() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    push_orders(&mut e, s, "snapshot", 1, &order("New", 100));
+    push_orders(
+        &mut e,
+        s,
+        "incremental",
+        2,
+        &order("New", 200).replace("69000", "70000"),
+    );
+    let stale_position = BTC
+        .replace("0.01", "0")
+        .replace("1700000000000000000", "1699999999999999999");
+    ws(
+        &mut e,
+        s,
+        &format!(
+            r#"{{"sequence":3,"timestamp":1700000000000000300,"orders_p":[{}],"positions_p":[{stale_position}]}}"#,
+            order("New", 100)
+        ),
+    );
+    assert_eq!(e.store().order("one").unwrap().price, 70000.);
+    assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.01);
+}
+
+fn refresh(e: &mut Engine<PhemexPerpetuals>, at: f64) -> Vec<Action> {
+    let actions: Vec<_> = e.drain_actions().collect();
+    e.handle(
+        at,
+        Event::TimerFired {
+            timer: timer(&actions, at),
+        },
+    );
+    e.drain_actions().collect()
+}
+
+#[test]
+fn complete_rest_omission_fences_same_version_ws_but_allows_old_active_rest() {
+    // Native exchange timestamps need not agree with the local clock. Both an
+    // ordinary clock and a future exchange clock must fence omitted positions.
+    for timestamp in ["1700000000000000000", "4000000000000000000"] {
+        let (mut e, a, s) = started();
+        let btc = BTC.replace("1700000000000000000", timestamp);
+        response(
+            &mut e,
+            NOW,
+            request(&a, "currency=USDT").id,
+            200,
+            &envelope("USDT", 1000., 69., &btc),
+        );
+        response(
+            &mut e,
+            NOW,
+            request(&a, "currency=USDC").id,
+            200,
+            &envelope("USDC", 200., 19., ETH),
+        );
+        authenticate(&mut e, s);
+        let a = refresh(&mut e, NOW + 2000.);
+        response(
+            &mut e,
+            NOW + 2000.,
+            request(&a, "currency=USDT").id,
+            200,
+            &envelope("USDT", 1000., 0., ""),
+        );
+        response(
+            &mut e,
+            NOW + 2000.,
+            request(&a, "currency=USDC").id,
+            200,
+            &envelope("USDC", 200., 19., ETH),
+        );
+        assert!(e.store().position("BTCUSDT").is_none());
+        ws(
+            &mut e,
+            s,
+            &format!(r#"{{"sequence":1,"positions_p":[{btc}]}}"#),
+        );
+        assert!(
+            e.store().position("BTCUSDT").is_none(),
+            "stale omitted position reopened"
+        );
+        let a = refresh(&mut e, NOW + 4000.);
+        response(
+            &mut e,
+            NOW + 4000.,
+            request(&a, "currency=USDT").id,
+            200,
+            &envelope("USDT", 1000., 69., &btc),
+        );
+        response(
+            &mut e,
+            NOW + 4000.,
+            request(&a, "currency=USDC").id,
+            200,
+            &envelope("USDC", 200., 19., ETH),
+        );
+        assert_eq!(
+            e.store().position("BTCUSDT").unwrap().contracts,
+            0.01,
+            "authoritative REST must accept genuinely active old native timestamps"
+        );
+    }
+}
+
+#[test]
+fn invalid_semantic_snapshot_cannot_consume_sequence_or_partial_authority() {
+    for bad_row in [
+        format!(r#""positions_p":[{}]"#, BTC.replace("69000", "0")),
+        r#""accounts_p":[{"currency":"USDT","accountBalanceRv":"9000","totalUsedBalanceRv":"-1"}]"#
+            .into(),
+    ] {
+        let (mut e, a, s) = started();
+        seed(&mut e, &a);
+        authenticate(&mut e, s);
+        let balance = e.store().balance().clone();
+        ws(
+            &mut e,
+            s,
+            &format!(r#"{{"type":"snapshot","sequence":1,"orders_p":[],{bad_row}}}"#),
+        );
+        assert!(!e.store().loaded().orders);
+        assert_eq!(e.store().balance(), &balance);
+        assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.01);
+        ws(
+            &mut e,
+            s,
+            &format!(
+                r#"{{"type":"snapshot","sequence":1,"orders_p":[{}],"positions_p":[{}]}}"#,
+                order("New", 1),
+                BTC.replace("0.01", "0.02")
+            ),
+        );
+        assert!(e.store().loaded().orders);
+        assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Open);
+        assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.02);
+    }
+}
+
+#[test]
+fn stale_cumulative_row_with_new_outer_time_does_not_clear_fill_uncertainty() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    push_orders(&mut e, s, "snapshot", 1, &order("New", 1));
+    let sparse = order("PartiallyFilled", 20)
+        .replace(
+            "\"cumQty\":\"0\",",
+            r#""execID":"sparse","execQty":"0.1","execPriceRp":"69000","tradeType":"Trade","#,
+        )
+        .replace("\"leavesQty\":\"0.3\",", "");
+    push_orders(&mut e, s, "incremental", 2, &sparse);
+    ws(
+        &mut e,
+        s,
+        &format!(
+            r#"{{"sequence":3,"timestamp":30,"orders_p":[{}]}}"#,
+            order("New", 10)
+        ),
+    );
+    assert!(requests(&amend(&mut e)).is_empty());
+    let cumulative = order("PartiallyFilled", 20)
+        .replace("\"cumQty\":\"0\"", "\"cumQty\":\"0.1\"")
+        .replace("\"leavesQty\":\"0.3\"", "\"leavesQty\":\"0.2\"");
+    push_orders(&mut e, s, "incremental", 4, &cumulative);
+    assert!(!requests(&amend(&mut e)).is_empty());
+}
+
+#[test]
+fn late_unique_execution_after_terminal_emits_fill_without_reopening_order() {
+    let (mut e, _, s) = started();
+    authenticate(&mut e, s);
+    push_orders(&mut e, s, "snapshot", 1, "");
+    let terminal = order("Filled", 20).replace("\"cumQty\":\"0\"",
+        r#""cumQty":"0.3","execID":"second","execQty":"0.2","execPriceRp":"69100","tradeType":"Trade""#);
+    push_orders(&mut e, s, "incremental", 2, &terminal);
+    let late = terminal
+        .replace("second", "first")
+        .replace("Filled", "PartiallyFilled")
+        .replace("\"execQty\":\"0.2\"", "\"execQty\":\"0.1\"")
+        .replace("\"execPriceRp\":\"69100\"", "\"execPriceRp\":\"69000\"")
+        .replace("\"transactTimeNs\":20", "\"transactTimeNs\":19");
+    push_orders(&mut e, s, "incremental", 3, &late);
+    push_orders(&mut e, s, "incremental", 4, &late);
+    assert_eq!(e.store().order("one").unwrap().status, OrderStatus::Closed);
+    let frame = e.take_market_frame(NOW).unwrap();
+    let payload = safe_cex_engine::wire::sections(frame)
+        .find(|(kind, _)| *kind == 11)
+        .unwrap()
+        .1;
+    assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 2);
+    let data = &payload[payload.len() - 32..];
+    assert_eq!(f64::from_le_bytes(data[..8].try_into().unwrap()), 69100.);
+    assert_eq!(f64::from_le_bytes(data[8..16].try_into().unwrap()), 0.2);
+    assert_eq!(f64::from_le_bytes(data[16..24].try_into().unwrap()), 69000.);
+    assert_eq!(f64::from_le_bytes(data[24..].try_into().unwrap()), 0.1);
+}
+
+#[test]
+fn rest_omission_fence_accepts_new_native_opening_when_exchange_clock_lags() {
+    let (mut e, a, s) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, s);
+    let a = refresh(&mut e, NOW + 2000.);
+    response(
+        &mut e,
+        NOW + 2000.,
+        request(&a, "currency=USDT").id,
+        200,
+        &envelope("USDT", 1000., 0., ""),
+    );
+    response(
+        &mut e,
+        NOW + 2000.,
+        request(&a, "currency=USDC").id,
+        200,
+        &envelope("USDC", 200., 19., ETH),
+    );
+    assert!(e.store().position("BTCUSDT").is_none());
+    let opening = BTC.replace("1700000000000000000", "1700000001500000000");
+    e.handle(
+        NOW + 2000.,
+        Event::WsMessage {
+            socket: s,
+            text: &format!(r#"{{"sequence":1,"positions_p":[{opening}]}}"#),
+        },
+    );
+    assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.01);
+}
+
+#[test]
+fn rest_balance_accepts_new_native_version_behind_client_clock_and_fences_replay() {
+    let (mut e, a, socket) = started();
+    seed(&mut e, &a);
+    authenticate(&mut e, socket);
+    let initial = r#"{"timestamp":1700000001000000000,"accounts_p":[{"currency":"USDT","accountBalanceRv":"2000","totalUsedBalanceRv":"10"}]}"#;
+    e.handle(
+        NOW + 1000.,
+        Event::WsMessage {
+            socket,
+            text: initial,
+        },
+    );
+    let a = refresh(&mut e, NOW + 2000.);
+    response(
+        &mut e,
+        NOW + 2000.,
+        request(&a, "currency=USDT").id,
+        200,
+        &envelope("USDT", 3000., 20., BTC),
+    );
+    response(
+        &mut e,
+        NOW + 2000.,
+        request(&a, "currency=USDC").id,
+        200,
+        &envelope("USDC", 200., 19., ETH),
+    );
+    let authoritative = e.store().balance().clone();
+    assert_eq!(authoritative.total, 3200.);
+    e.handle(
+        NOW + 2000.,
+        Event::WsMessage {
+            socket,
+            text: initial,
+        },
+    );
+    assert_eq!(
+        e.store().balance(),
+        &authoritative,
+        "equal native replay undid REST"
+    );
+    e.handle(NOW + 2000., Event::WsMessage { socket, text:
+        r#"{"timestamp":1700000000999999999,"accounts_p":[{"currency":"USDT","accountBalanceRv":"100","totalUsedBalanceRv":"1"}]}"# });
+    assert_eq!(
+        e.store().balance(),
+        &authoritative,
+        "older native replay undid REST"
+    );
+    e.handle(NOW + 2000., Event::WsMessage { socket, text:
+        r#"{"timestamp":1700000001500000000,"accounts_p":[{"currency":"USDT","accountBalanceRv":"4000","totalUsedBalanceRv":"30"}]}"# });
+    assert_eq!(e.store().balance().used, 49.);
+    assert_eq!(e.store().balance().total, 4190.);
+}

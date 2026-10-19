@@ -396,7 +396,12 @@ impl OrderRow<'_> {
             },
             take_profit: (self.take_profit_rp > 0.).then_some(self.take_profit_rp),
             stop_loss: (self.stop_loss_rp > 0.).then_some(self.stop_loss_rp),
-            extra: None,
+            extra: matches!(self.kind.as_ref(), "StopLimit" | "LimitIfTouched").then_some(
+                OrderExtra {
+                    conditional_order_price: Some(self.price_rp),
+                    ..OrderExtra::default()
+                },
+            ),
         };
         let mut orders = vec![primary];
         for (suffix, kind, price, source) in [
