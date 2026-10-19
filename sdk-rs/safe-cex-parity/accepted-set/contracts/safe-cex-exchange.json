@@ -42071,6 +42071,548 @@
       }
     ]
   },
+  "safe_cex_exchange::js_runtime::structured_clone::structured_clone": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "structured_clone",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/STRUCTURED_CLONE_REVIEW.md; actual recorder PerfFixture::record -> structured_clone, direct native graph profiles against Node structuredClone, plus existing real listener record/dump/replay. Exact compiler API from fresh native/default inventory. Stack accessor-versus-data representation alone is approved engine-specific ACCEPT; supplied units/read/write/flags and exact message/cause descriptors remain pinned.",
+    "call": "{ mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js,Prop,Thrown,error_object,utf16}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/structured-clone-observers.rs\")); } observation::observe($value, |value| $type(value)) }",
+    "cases": [
+      {
+        "input": "primitives",
+        "output": {
+          "ownUndefined": true,
+          "nil": true,
+          "bool": true,
+          "numbers": [
+            "8000000000000000",
+            "0000000000000000",
+            "NaN",
+            "7ff0000000000000",
+            "fff0000000000000"
+          ],
+          "units": [
+            55296,
+            88,
+            56320
+          ],
+          "big": "9007199254740993"
+        }
+      },
+      {
+        "input": "graph",
+        "output": {
+          "detached": true,
+          "self": true,
+          "alias": true,
+          "mapKey": true,
+          "mapValue": true,
+          "set": [
+            true,
+            true
+          ],
+          "value": 17
+        }
+      },
+      {
+        "input": "sparse",
+        "output": {
+          "length": 4,
+          "keys": [
+            "1",
+            "3",
+            "extra"
+          ],
+          "hole": true,
+          "ownUndefined": true,
+          "bits": "8000000000000000",
+          "units": [
+            55296
+          ],
+          "descriptor": [
+            true,
+            true,
+            true
+          ]
+        }
+      },
+      {
+        "input": "getters",
+        "output": {
+          "events": [
+            "a"
+          ],
+          "keys": [
+            "a",
+            "c"
+          ],
+          "bits": "8000000000000000",
+          "c": 2,
+          "descriptor": [
+            true,
+            true,
+            true
+          ]
+        }
+      },
+      {
+        "input": "error",
+        "output": {
+          "name": "TypeError",
+          "units": [
+            55296,
+            88,
+            56320
+          ],
+          "stack": [
+            56320,
+            116,
+            114,
+            97,
+            99,
+            101
+          ],
+          "alias": true,
+          "detached": true,
+          "extra": false,
+          "keys": [],
+          "messageDescriptor": [
+            true,
+            false,
+            true
+          ],
+          "stackFlags": [
+            false,
+            true
+          ],
+          "causeDescriptor": [
+            true,
+            false,
+            true
+          ],
+          "stackWrite": [
+            55296,
+            114,
+            101,
+            112,
+            108,
+            97,
+            99,
+            101,
+            109,
+            101,
+            110,
+            116
+          ]
+        }
+      },
+      {
+        "input": "error-undefined",
+        "output": {
+          "message": false,
+          "stack": true,
+          "cause": true,
+          "keys": [],
+          "stackFlags": [
+            false,
+            true
+          ],
+          "causeDescriptor": [
+            true,
+            false,
+            true
+          ],
+          "stackWrite": 23
+        }
+      },
+      {
+        "input": "refusal",
+        "output": [
+          "DataCloneError",
+          "DataCloneError"
+        ]
+      },
+      {
+        "input": "getter-throw",
+        "output": {
+          "identity": true,
+          "calls": 1
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::structured_clone::hidden": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "hidden",
+      "signature": {
+        "inputs": [
+          [
+            "target",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/STRUCTURED_CLONE_REVIEW.md; actual recorder PerfFixture::record -> structured_clone, direct native graph profiles against Node structuredClone, plus existing real listener record/dump/replay. Exact compiler API from fresh native/default inventory. Stack accessor-versus-data representation alone is approved engine-specific ACCEPT; supplied units/read/write/flags and exact message/cause descriptors remain pinned.",
+    "reason": "Private descriptor writer used only on the freshly allocated Error inside copy: installs the already selected Js value without parsing, validation, coercion or authority. Does not interpret arbitrary input or return a model. Node-backed error/error-undefined decoder profiles reach this exact writer and inspect message/cause writable/nonenumerable/configurable descriptors, own undefined and stack values/write/flags. This classification grants no graph-reader or external-input permission."
+  },
+  "safe_cex_exchange::js_runtime::structured_clone::copy": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "copy",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "seen",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "tuple": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                    "args": null
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                    "args": null
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/STRUCTURED_CLONE_REVIEW.md; actual recorder PerfFixture::record -> structured_clone, direct native graph profiles against Node structuredClone, plus existing real listener record/dump/replay. Exact compiler API from fresh native/default inventory. Stack accessor-versus-data representation alone is approved engine-specific ACCEPT; supplied units/read/write/flags and exact message/cause descriptors remain pinned.",
+    "call": "{ mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js,Prop,Thrown,error_object,utf16}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/structured-clone-observers.rs\")); } observation::observe($value, |value| $type(value, &mut Vec::new())) }",
+    "cases": [
+      {
+        "input": "primitives",
+        "output": {
+          "ownUndefined": true,
+          "nil": true,
+          "bool": true,
+          "numbers": [
+            "8000000000000000",
+            "0000000000000000",
+            "NaN",
+            "7ff0000000000000",
+            "fff0000000000000"
+          ],
+          "units": [
+            55296,
+            88,
+            56320
+          ],
+          "big": "9007199254740993"
+        }
+      },
+      {
+        "input": "graph",
+        "output": {
+          "detached": true,
+          "self": true,
+          "alias": true,
+          "mapKey": true,
+          "mapValue": true,
+          "set": [
+            true,
+            true
+          ],
+          "value": 17
+        }
+      },
+      {
+        "input": "sparse",
+        "output": {
+          "length": 4,
+          "keys": [
+            "1",
+            "3",
+            "extra"
+          ],
+          "hole": true,
+          "ownUndefined": true,
+          "bits": "8000000000000000",
+          "units": [
+            55296
+          ],
+          "descriptor": [
+            true,
+            true,
+            true
+          ]
+        }
+      },
+      {
+        "input": "getters",
+        "output": {
+          "events": [
+            "a"
+          ],
+          "keys": [
+            "a",
+            "c"
+          ],
+          "bits": "8000000000000000",
+          "c": 2,
+          "descriptor": [
+            true,
+            true,
+            true
+          ]
+        }
+      },
+      {
+        "input": "error",
+        "output": {
+          "name": "TypeError",
+          "units": [
+            55296,
+            88,
+            56320
+          ],
+          "stack": [
+            56320,
+            116,
+            114,
+            97,
+            99,
+            101
+          ],
+          "alias": true,
+          "detached": true,
+          "extra": false,
+          "keys": [],
+          "messageDescriptor": [
+            true,
+            false,
+            true
+          ],
+          "stackFlags": [
+            false,
+            true
+          ],
+          "causeDescriptor": [
+            true,
+            false,
+            true
+          ],
+          "stackWrite": [
+            55296,
+            114,
+            101,
+            112,
+            108,
+            97,
+            99,
+            101,
+            109,
+            101,
+            110,
+            116
+          ]
+        }
+      },
+      {
+        "input": "error-undefined",
+        "output": {
+          "message": false,
+          "stack": true,
+          "cause": true,
+          "keys": [],
+          "stackFlags": [
+            false,
+            true
+          ],
+          "causeDescriptor": [
+            true,
+            false,
+            true
+          ],
+          "stackWrite": 23
+        }
+      },
+      {
+        "input": "refusal",
+        "output": [
+          "DataCloneError",
+          "DataCloneError"
+        ]
+      },
+      {
+        "input": "getter-throw",
+        "output": {
+          "identity": true,
+          "calls": 1
+        }
+      }
+    ]
+  },
   "safe_cex_exchange::js_runtime::promise::race_iterable": {
     "category": "non-decoder",
     "api": {

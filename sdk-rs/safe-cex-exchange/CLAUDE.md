@@ -2198,3 +2198,9 @@ JS-backed socket bridges use `js_runtime::sockets::install_js_handler_stats` wit
 an existing receiver's weak handle. The core reads only the live selected table
 entry for record, pong, cleanup and reconciliation; it never mirrors callbacks or
 retains the socket owner. `SocketCore` and Hyperliquid's custom bridge share it.
+
+The three recorder clone input owners have separate exact compiler contracts;
+see STRUCTURED_CLONE_REVIEW.md. Graph readers execute the native/Node profiles;
+the private hidden descriptor writer is a non-decoder and is observed through
+cloned Error fields. Only V8's lazy stack accessor representation is accepted;
+supplied stack values, UTF16, writes and flags remain compared against Node.

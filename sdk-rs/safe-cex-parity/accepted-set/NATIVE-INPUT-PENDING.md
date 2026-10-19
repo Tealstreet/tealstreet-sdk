@@ -19,6 +19,10 @@ Master integration adds three separately counted pending rows introduced by #123
 `safe_cex_exchange::js_runtime::structured_clone`. Their owner is codex-0xekzz.
 The original cohort remains 149; that integration total is 152 (146 core, six AsterDEX).
 These additions grant no measurement permission and use the same exact-owner gate.
+The three clone rows are now classified: structured_clone/copy have ordinary
+executed native graph contracts and hidden is the internal descriptor writer.
+Node-backed evidence and the single approved stack-representation residual are
+recorded in safe-cex-exchange/STRUCTURED_CLONE_REVIEW.md.
 
 The #901 response-carrier cutover (`84b06aec6f`) also introduced the native
 `safe_cex_venue_apexomni::api_runtime::ApexApi` response input, discovered by

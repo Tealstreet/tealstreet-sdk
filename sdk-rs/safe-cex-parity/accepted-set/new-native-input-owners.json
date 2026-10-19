@@ -769,26 +769,26 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::structured_clone::structured_clone",
-      "state": "pending",
+      "state": "classified",
       "introduced": "introduced on master by #1238",
       "owner": "codex-0xekzz",
-      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+      "ruling": "ACCEPT reviewed existing recorder clone scope; STRUCTURED_CLONE_REVIEW.md records Node graph, UTF16, native number/presence/identity and Error descriptor observations. Ordinary exact-API graph-reader decoder contracts execute actual native values; hidden is only the internal descriptor writer with no decode/validation. Only V8 lazy stack accessor representation is accepted; stack values/read/write/flags and message/cause data descriptors stay pinned. No pending-ledger measurement exemption."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::structured_clone::copy",
-      "state": "pending",
+      "state": "classified",
       "introduced": "introduced on master by #1238",
       "owner": "codex-0xekzz",
-      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+      "ruling": "ACCEPT reviewed existing recorder clone scope; STRUCTURED_CLONE_REVIEW.md records Node graph, UTF16, native number/presence/identity and Error descriptor observations. Ordinary exact-API graph-reader decoder contracts execute actual native values; hidden is only the internal descriptor writer with no decode/validation. Only V8 lazy stack accessor representation is accepted; stack values/read/write/flags and message/cause data descriptors stay pinned. No pending-ledger measurement exemption."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::structured_clone::hidden",
-      "state": "pending",
+      "state": "classified",
       "introduced": "introduced on master by #1238",
       "owner": "codex-0xekzz",
-      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+      "ruling": "ACCEPT reviewed existing recorder clone scope; STRUCTURED_CLONE_REVIEW.md records Node graph, UTF16, native number/presence/identity and Error descriptor observations. Ordinary exact-API graph-reader decoder contracts execute actual native values; hidden is only the internal descriptor writer with no decode/validation. Only V8 lazy stack accessor representation is accepted; stack values/read/write/flags and message/cause data descriptors stay pinned. No pending-ledger measurement exemption."
     },
     {
       "package": "safe-cex-venue-apexomni",
