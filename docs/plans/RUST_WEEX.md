@@ -86,3 +86,22 @@ standing authorization, keeping the landing structure), rerun affected gates, pu
 `feat/rust-rewrite`, post adversarial local sub-agent findings as PR comments,
 fix/review until clean or diminishing returns, merge PR and branch from the
 updated rewrite branch. Report real gate numbers and any unfinished work.
+
+## PR review checkpoint
+
+PR #1301 targets `feat/rust-rewrite`. Round1 local adversarial findings are
+posted as PR comments. The shared review fixed a circular conditional-price
+oracle: expected trigger/type now comes independently from taped venue payloads,
+including exact large IDs and protective markers. Five oracle regressions pass;
+the private fixture now retains a conditional and final changed position/order
+stream state (19 frames), and its replay passes. Real HTTP transports have
+20-second body-inclusive deadlines; the splitter exposes validated metadata so
+income continuation flags are available without retaining streamed rows.
+
+Account/trading/history fixes and independent re-reviews are in progress for
+hung reconciliation, imported trailing-order cancellation, rollback ownership,
+partial-fill and bracket-preserving replacement, settings mutation ownership,
+and positive income continuation. Final verification and landing follow those
+fixes. Initial GitHub Rust gates and PR CI passed. The first-push scan identified
+one old Binance unit-test vector from published official documentation; an exact
+historical fingerprint exception is verified locally, without broad rule changes.

@@ -211,7 +211,7 @@ export const nativeTransport = () => {
     return { send: (text) => ws.send(text), close: () => ws.close() };
   },
   async request({ method, url, headers, body }) {
-    const response = await fetch(url, { method, headers, body });
+    const response = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(20_000) });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
     return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };

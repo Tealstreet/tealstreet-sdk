@@ -6,6 +6,8 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { gunzipSync } from 'node:zlib';
+import { fixWeexConditionals } from './known-ts-fixes.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -70,17 +72,13 @@ const KNOWN_TS_FIXES = {
       if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
     }
   },
-  weex(account, rustAccount) {
+  weex(account) {
     // TS reads opening STOP/TP stream rows as protective orders and displays
     // the execution price as their trigger, corrupting conditional size amends.
-    for (const order of account.orders) {
-      const fixed = rustAccount.orders.find((o) => o.id === order.id);
-      if (fixed?.type === 'conditional' && !order.reduceOnly
-        && ['conditional', 'stop_market', 'take_profit_market'].includes(order.type)) {
-        order.type = 'conditional';
-        order.price = fixed.price;
-      }
-    }
+    const bytes = readFileSync(values.tape);
+    const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
+      .toString('utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    fixWeexConditionals(account, records);
     // Additional deliberate fixes, covered by native regressions: failed
     // normal/algo reads retain the complete last snapshot; stale depth/private
     // frames cannot undo newer state; repeated fill IDs emit once; missing

@@ -25,10 +25,17 @@ const row = (orderId, symbol, side, quantity, price, extra = {}) => ({ orderId, 
 const resting = row('702345678901234560', 'BTCUSDT', 'BUY', '0.005', '68000');
 const placedBtc = row('702345678901234561', 'BTCUSDT', 'BUY', '0.002', '69300', { clientOrderId: 'caller-btc' });
 const placedEth = row('702345678901234562', 'ETHUSDT', 'SELL', '0.5', '3600', { clientOrderId: 'caller-eth' });
+// Later than write acknowledgements in either replay, so stream updates are
+// authoritative. The final checkpoint precedes the next periodic REST cycle.
+const streamTime = 4_000_000_000_000;
+const finalEth = { ...placedEth, price: '3610', executedQty: '0.1', status: 'PARTIALLY_FILLED', updateTime: streamTime };
+const finalPosition = { ...position, size: '0.02', openValue: '1380', marginSize: '69', unrealizePnl: '12', updatedTime: String(streamTime) };
 const algo = { algoId: '702345678901234563', symbol: 'BTCUSDT', side: 'BUY', orderType: 'STOP_MARKET', algoStatus: 'NEW', quantity: '0.001', triggerPrice: '70000', price: '0', timeInForce: 'GTC', createTime: 1773298805123 };
 const protective = { algoId: '702345678901234564', symbol: 'BTCUSDT', side: 'SELL', orderType: 'TAKE_PROFIT_MARKET', planType: 'TAKE_PROFIT', reduceOnly: true, algoStatus: 'NEW', quantity: '0.01', triggerPrice: '76000', price: '0', timeInForce: 'GTC', createTime: 1773298805123 };
-for (const [at, rows] of [[0, [resting]], [2800, [resting, placedBtc, placedEth]], [4000, [resting, placedEth]], [5200, [placedEth]]]) http('GET', '/capi/v3/openOrders?limit=100&page=0', rows, undefined, at);
-for (const [at, rows] of [[0, []], [3200, [algo]], [4400, [protective]], [5200, []]]) http('GET', '/capi/v3/openAlgoOrders?limit=100&page=1', rows, undefined, at);
+const finalAlgo = { ...algo, algoId: '702345678901234565', triggerPrice: '71000' };
+for (const [at, rows] of [[0, [resting]], [2800, [resting, placedBtc, placedEth]], [4000, [resting, placedEth]], [5200, [placedEth]], [7200, [finalEth]]]) http('GET', '/capi/v3/openOrders?limit=100&page=0', rows, undefined, at);
+http('GET', '/capi/v3/account/position/allPosition', [finalPosition], undefined, 7200);
+for (const [at, rows] of [[0, []], [3200, [algo]], [4400, [protective]], [5200, []], [6000, [finalAlgo]]]) http('GET', '/capi/v3/openAlgoOrders?limit=100&page=1', rows, undefined, at);
 ws(400, PUBLIC, { event: 'ping', time: '1773298805000' });
 ws(800, PRIVATE, { type: 'ping', time: '1773298805000' });
 ws(1200, PRIVATE, { e: 'positions', E: 1773298805123, d: [position] });
@@ -50,7 +57,12 @@ command(5200, { op: 'cancelSymbolOrders', symbol: 'BTCUSDT' });
 http('DELETE', '/capi/v3/allOpenOrders?symbol=BTCUSDT', [{ orderId: resting.orderId, success: true }]);
 http('DELETE', '/capi/v3/algoOpenOrders?symbol=BTCUSDT', [{ orderId: protective.algoId, success: true }]);
 ws(5600, PRIVATE, { e: 'account', E: 1773298805123, d: [{ coin: 'USDT', amount: '4950' }] });
-ws(7200, PRIVATE, { type: 'ping', time: '1773298805000' });
+command(6000, { op: 'placeOrders', orders: [{ symbol: 'BTCUSDT', type: 'conditional', side: 'buy', amount: 0.001, triggerPrice: 71000 }] });
+http('POST', '/capi/v3/algoOrder', { orderId: finalAlgo.algoId, clientOrderId: '$clientAlgoId', success: true }, { symbol: 'BTCUSDT', side: 'BUY', positionSide: 'LONG', type: 'STOP_MARKET', quantity: '0.001', triggerPrice: '71000' });
+ws(6400, PRIVATE, { e: 'orders', E: 1773298805123, d: [finalAlgo] });
+ws(7200, PRIVATE, { e: 'positions', E: streamTime, d: [finalPosition] });
+ws(7200, PRIVATE, { e: 'orders', E: streamTime, d: [finalEth] });
+ws(7200, PRIVATE, { type: 'ping', time: String(streamTime) });
 mkdirSync(dirname(values.out), { recursive: true });
 records.sort((a, b) => a.t - b.t);
 writeFileSync(values.out, records.map((r) => JSON.stringify(r)).join('\n') + '\n');

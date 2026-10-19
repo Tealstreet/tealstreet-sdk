@@ -30,6 +30,7 @@ pub trait Transport {
         mpsc::unbounded_channel().0
     }
     /// Run a request, reporting its start, body chunks and end on `events`.
+    /// Bound its lifetime and report `HttpFailed` on timeout, including the body.
     fn request(&self, request: HttpRequest, events: Events);
 }
 
@@ -45,6 +46,7 @@ impl NetworkTransport {
         let _ = rustls::crypto::ring::default_provider().install_default();
         Self {
             http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(20))
                 .build()
                 .expect("an HTTP client with the default configuration"),
         }

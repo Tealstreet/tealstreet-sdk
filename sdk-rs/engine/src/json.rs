@@ -162,6 +162,11 @@ impl ArraySplitter {
             && serde_json::from_slice::<IgnoredAny>(&self.envelope).is_ok()
     }
 
+    /// Validated response metadata, with streamed rows replaced by null.
+    pub fn envelope(&self) -> &str {
+        std::str::from_utf8(&self.envelope).unwrap_or("")
+    }
+
     pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
         for &byte in data {
             if self.envelope.len() >= 1_048_576 {
@@ -270,6 +275,30 @@ impl ArraySplitter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streamed_metadata_retains_paging_flags_without_rows() {
+        let mut splitter = ArraySplitter::new(ArrayAt::Field("items"));
+        splitter.feed(
+            br#"{"items":[{"id":1},{"id":2}],"hasNextPage":true,"nextKey":{"id":"3"}}"#,
+            |_| {},
+        );
+        assert!(splitter.finished());
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Metadata {
+            has_next_page: bool,
+            next_key: Option<Key>,
+        }
+        #[derive(Deserialize)]
+        struct Key {
+            id: String,
+        }
+        let metadata: Metadata = serde_json::from_str(splitter.envelope()).unwrap();
+        assert!(metadata.has_next_page);
+        assert_eq!(metadata.next_key.unwrap().id, "3");
+        assert!(!splitter.envelope().contains("\"id\":1"));
+    }
 
     #[test]
     fn rejects_invalid_documents_after_streaming_rows() {
