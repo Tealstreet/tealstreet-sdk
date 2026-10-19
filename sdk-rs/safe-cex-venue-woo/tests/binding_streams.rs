@@ -1315,3 +1315,112 @@ fn retained_ticker_frame_normalizes_before_identifier_admission() {
     );
     h.venue().dispose().unwrap();
 }
+fn selected_ticker_lookup_stays_local(topic: &str, field: &str, fields: Value, expected: f64) {
+    use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+    use std::cell::Cell;
+    let h = started(json!({"publicDataOnly": true}), public_routes);
+    let facade = safe_cex_exchange::js_runtime::native_store::facade(h.store.clone()).unwrap();
+    let map = facade.get("tickersBySymbol").unwrap();
+    let selected = map.get("BTCUSDT").unwrap();
+    let reads = Rc::new(Cell::new(0));
+    let observed = reads.clone();
+    let original = Js::object(vec![("label", Js::str("unrelated ticker"))]);
+    let thrown = original.clone();
+    map.define_accessor(
+        "UNRELATED",
+        Some(Rc::new(move |_| {
+            observed.set(observed.get() + 1);
+            Err(Thrown::new(thrown.clone()))
+        })),
+        None,
+    )
+    .unwrap();
+    h.runtime.reports.borrow_mut().clear();
+    let mut row = fields.as_object().unwrap().clone();
+    row.insert("symbol".into(), json!("PERP_BTC_USDT"));
+    push(
+        &h,
+        &socket(&h, PUBLIC_URL),
+        json!({"topic": topic, "data": [row]}),
+    );
+    assert_eq!(reads.get(), 0, "{topic}: unselected ticker getter was read");
+    assert!(map.get("BTCUSDT").unwrap().strict_equals(&selected));
+    assert!(
+        selected
+            .get(field)
+            .unwrap()
+            .strict_equals(&Js::Number(expected)),
+        "{topic}: selected field did not update"
+    );
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{topic}: {:?}",
+        h.runtime.reports.borrow()
+    );
+    assert!(
+        map.get("UNRELATED")
+            .unwrap_err()
+            .value
+            .strict_equals(&original)
+    );
+    assert_eq!(
+        reads.get(),
+        1,
+        "the installed poison getter must be observable directly"
+    );
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn public_tickers_do_not_project_unselected_tickers() {
+    selected_ticker_lookup_stays_local(
+        "tickers",
+        "last",
+        json!({"close":117.5,"amount":9001.5,"volume":21.25}),
+        117.5,
+    );
+}
+
+#[test]
+fn public_bbos_do_not_project_unselected_tickers() {
+    selected_ticker_lookup_stays_local("bbos", "bid", json!({"bid":116.25,"ask":118.75}), 116.25);
+}
+
+#[test]
+fn public_markprices_do_not_project_unselected_tickers() {
+    selected_ticker_lookup_stays_local("markprices", "mark", json!({"price":119.125}), 119.125);
+}
+
+#[test]
+fn selected_ticker_lookup_matches_the_maintained_class() {
+    let output = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .env(
+            "TSX_TSCONFIG_PATH",
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../packages/safe-cex/tsconfig.json"
+            ),
+        )
+        .args([
+            "--import",
+            "tsx",
+            "sdk-rs/safe-cex-venue-woo/scripts/selected-ticker-lookup-source.cjs",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let actual: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        actual,
+        json!({"observations":[
+            {"topic":"tickers","unrelatedReads":0,"selectedIdentity":true,"value":117.5},
+            {"topic":"bbos","unrelatedReads":0,"selectedIdentity":true,"value":116.25},
+            {"topic":"markprices","unrelatedReads":0,"selectedIdentity":true,"value":119.125}
+        ]})
+    );
+}

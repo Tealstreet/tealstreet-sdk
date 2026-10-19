@@ -96,15 +96,10 @@ fn update_public_tickers(
             ));
             continue;
         };
-        // Source uppercasing prevents inherited-member spellings. Drop the
-        // read borrow before the mutation or a synchronous callback can fail.
-        let id = store
-            .tickers_by_symbol()?
-            .get(&symbol)
-            .map(|ticker| ticker.id.clone());
-        let Some(id) = id else {
+        let ticker = store.lookup_ticker_by_symbol(&symbol)?;
+        if !ticker.is_truthy() {
             continue;
-        };
+        }
         let mut patch = ModelPatch::default();
         for (target, source) in fields {
             // Preserve later source/store errors ahead of typed row reports.
@@ -128,6 +123,9 @@ fn update_public_tickers(
             };
             patch.set_number(*target, number);
         }
+        let Some(id) = ticker.update_id()? else {
+            continue;
+        };
         // Preserve the typed mutation failure until core recovers its cause.
         let updated: Result<(), StoreMutationError> = store.update_ticker(&id, &patch);
         updated.map_err(|error: StoreMutationError| ExchangeError::from(error))?;
