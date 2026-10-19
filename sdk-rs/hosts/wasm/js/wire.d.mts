@@ -97,6 +97,8 @@ export interface SettingTable {
   count: number;
   market: Uint32Array;
   leverage: Float64Array;
+  buyLeverage: Float64Array;
+  sellLeverage: Float64Array;
   marginType(i: number): 'isolated' | 'cross' | undefined;
 }
 export interface FillRows {

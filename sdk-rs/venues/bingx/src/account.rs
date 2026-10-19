@@ -516,6 +516,7 @@ impl Account {
                         MarketSetting {
                             leverage: row.leverage,
                             margin_type: Some(margin),
+                            ..MarketSetting::default()
                         },
                     ));
                 }
