@@ -48,3 +48,14 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
 - Next: private phase. PATCH transport groundwork remains uncommitted until
   used there. Local corepack was absent; installed a temporary executable in
   /tmp/backpack-tools and installing frozen Yarn dependencies for later gates.
+
+- Private phase checkpoint before overseer-requested workspace merge: first
+  private suite and signing tests passed (14 total), clippy passed. Review
+  found Y-vs-Q trigger size, TriggerFailed status, B-vs-b entry precedence,
+  overlapping snapshots, and read-chain failure coupling. Fixes are in the
+  checkpoint; expanded tests and final review remain pending. These inherited
+  TS bugs must be declared in KNOWN_TS_FIXES and the private phase commit.
+- Overseer requested merging nested workspace commit b32847fca6 now. Temporarily
+  remove old explicit Backpack workspace registration before the structural
+  merge, then move crate to sdk-rs/venues/backpack (glob member discovery).
+  Re-read updated brief; audit crypto leftovers for provably unused code.

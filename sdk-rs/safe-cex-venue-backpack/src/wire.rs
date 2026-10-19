@@ -270,3 +270,137 @@ pub fn finite(text: &str) -> Result<f64, String> {
         .filter(|n| n.is_finite())
         .ok_or_else(|| "invalid number".into())
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountRow {
+    #[serde(deserialize_with = "number")]
+    pub leverage_limit: f64,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Collateral {
+    #[serde(deserialize_with = "number")]
+    pub net_equity: f64,
+    #[serde(deserialize_with = "number")]
+    pub net_equity_available: f64,
+    #[serde(deserialize_with = "number")]
+    pub net_equity_locked: f64,
+    #[serde(deserialize_with = "number")]
+    pub pnl_unrealized: f64,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionRow<'a> {
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(deserialize_with = "number")]
+    pub net_quantity: f64,
+    #[serde(deserialize_with = "number")]
+    pub entry_price: f64,
+    #[serde(deserialize_with = "number")]
+    pub net_exposure_notional: f64,
+    #[serde(deserialize_with = "number")]
+    pub pnl_unrealized: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub est_liquidation_price: f64,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderRow<'a> {
+    #[serde(borrow)]
+    pub id: Str<'a>,
+    pub client_id: Option<u32>,
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(borrow)]
+    pub side: Str<'a>,
+    #[serde(borrow)]
+    pub order_type: Str<'a>,
+    #[serde(default, deserialize_with = "number")]
+    pub price: f64,
+    pub trigger_price: Option<Number>,
+    #[serde(borrow, default)]
+    pub trigger_by: Option<Str<'a>>,
+    #[serde(default, deserialize_with = "number")]
+    pub quantity: f64,
+    pub trigger_quantity: Option<Number>,
+    #[serde(default, deserialize_with = "number")]
+    pub executed_quantity: f64,
+    #[serde(borrow, default)]
+    pub time_in_force: Str<'a>,
+    #[serde(borrow)]
+    pub status: Str<'a>,
+    #[serde(deserialize_with = "number")]
+    pub created_at: f64,
+    pub reduce_only: Option<bool>,
+}
+#[derive(Deserialize)]
+pub struct OrderEvent<'a> {
+    #[serde(borrow)]
+    pub e: Str<'a>,
+    #[serde(borrow)]
+    pub i: Str<'a>,
+    pub c: Option<ClientId<'a>>,
+    #[serde(rename = "E", deserialize_with = "number")]
+    pub event_time: f64,
+    #[serde(rename = "X", borrow)]
+    pub status: Str<'a>,
+    #[serde(borrow)]
+    pub s: Str<'a>,
+    #[serde(borrow)]
+    pub o: Str<'a>,
+    #[serde(rename = "S", borrow)]
+    pub side: Str<'a>,
+    pub p: Option<Number>,
+    #[serde(rename = "P")]
+    pub trigger_price: Option<Number>,
+    #[serde(default, deserialize_with = "number")]
+    pub q: f64,
+    #[serde(rename = "Y")]
+    pub trigger_quantity: Option<Number>,
+    pub l: Option<Number>,
+    #[serde(rename = "L")]
+    pub execution_price: Option<Number>,
+    #[serde(deserialize_with = "number")]
+    pub z: f64,
+    #[serde(borrow, default)]
+    pub f: Str<'a>,
+    #[serde(default)]
+    pub r: bool,
+    pub t: Option<u64>,
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum ClientId<'a> {
+    Number(u32),
+    Text(#[serde(borrow)] Str<'a>),
+}
+impl ClientId<'_> {
+    pub fn text(&self) -> String {
+        match self {
+            Self::Number(n) => n.to_string(),
+            Self::Text(s) => s.to_string(),
+        }
+    }
+}
+#[derive(Deserialize)]
+pub struct PositionEvent<'a> {
+    #[serde(borrow)]
+    pub s: Str<'a>,
+    pub b: Option<Number>,
+    #[serde(rename = "B")]
+    pub entry: Option<Number>,
+    #[serde(deserialize_with = "number")]
+    pub q: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub n: f64,
+    #[serde(rename = "P", default, deserialize_with = "number")]
+    pub upnl: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub l: f64,
+    #[serde(deserialize_with = "number")]
+    pub f: f64,
+    #[serde(rename = "E", deserialize_with = "number")]
+    pub event_time: f64,
+}

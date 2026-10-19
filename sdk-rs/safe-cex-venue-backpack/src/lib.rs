@@ -1,4 +1,5 @@
 //! Backpack perpetuals on the sans-I/O engine.
+mod account;
 mod sign;
 mod wire;
 
@@ -23,6 +24,7 @@ pub struct Options {
 }
 
 pub enum Pending {
+    Account(account::Request),
     Markets {
         rows: Vec<Market>,
         invalid: bool,
@@ -91,6 +93,7 @@ pub struct Backpack {
     books: HashMap<String, BookState>,
     candles: HashMap<(String, String), u32>,
     seed: Seed,
+    account: account::Account,
     generation: u64,
 }
 
@@ -102,6 +105,7 @@ impl Backpack {
             books: HashMap::new(),
             candles: HashMap::new(),
             seed: Seed::default(),
+            account: account::Account::default(),
             generation: 0,
         }
     }
@@ -165,6 +169,7 @@ impl Backpack {
         }
         cx.store.set_tickers(tickers);
         self.public.socket = Some(cx.connect(WS));
+        self.account_start(cx);
         if self.options.public_data_only || self.options.key.as_ref().is_none_or(String::is_empty) {
             cx.store.set_orders(vec![]);
             cx.store.set_positions(vec![]);
@@ -374,6 +379,10 @@ impl Venue for Backpack {
         );
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        if self.account.socket.socket == Some(socket) {
+            self.private_open(cx, socket);
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -405,6 +414,12 @@ impl Venue for Backpack {
         }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        if self.account.socket.socket == Some(socket) {
+            if let Err(e) = self.private_message(cx, text) {
+                cx.log(LogLevel::Error, e);
+            }
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -428,6 +443,10 @@ impl Venue for Backpack {
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
+        if self.account.socket.socket == Some(socket) {
+            self.private_close(cx, socket);
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -447,6 +466,10 @@ impl Venue for Backpack {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         let result = match pending {
+            Pending::Account(request) => {
+                self.account_item(cx, request, item);
+                return;
+            }
             Pending::Markets { rows, invalid } => {
                 let r = serde_json::from_str::<MarketRow<'_>>(item).map(|r| {
                     if r.visible == Some(false)
@@ -564,6 +587,10 @@ impl Venue for Backpack {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account(request) = pending {
+            self.account_response(cx, request, response);
+            return;
+        }
         if !(200..300).contains(&response.status) {
             self.on_request_failed(
                 cx,
@@ -683,6 +710,7 @@ impl Venue for Backpack {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Depth { symbol, generation }
                 if self
                     .books
@@ -696,6 +724,9 @@ impl Venue for Backpack {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account_timer(cx, timer) {
+            return;
+        }
         if self.public.reconnect == Some(timer) {
             self.public.reconnect = None;
             self.public.socket = Some(cx.connect(WS));
