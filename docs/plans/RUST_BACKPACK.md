@@ -39,5 +39,12 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
 
 - Read current spec, port brief, root/package/venue guidance, engine/Binance
   seams and TS Backpack behavior. Verified official signing API documentation.
-- Worktree initially clean on requested branch. Added initial signing and
-  PATCH transport groundwork; public implementation in progress.
+- Public phase verified: bans, crate fmt/clippy, 7 deterministic tests passed.
+  Sub-agent review found four issues (recovery streak reset, symbol isolation,
+  preserving gap evidence, malformed candles); all fixed and re-reviewed.
+  Corrected conflicting older recovery documentation to match TS behavior.
+- Live markets endpoint checked: current payload uses nested filters and null
+  maxQuantity, supported alongside top-level increment fields.
+- Next: private phase. PATCH transport groundwork remains uncommitted until
+  used there. Local corepack was absent; installed a temporary executable in
+  /tmp/backpack-tools and installing frozen Yarn dependencies for later gates.
