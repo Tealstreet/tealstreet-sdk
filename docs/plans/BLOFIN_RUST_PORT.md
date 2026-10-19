@@ -204,3 +204,10 @@ merge that PR, and create a fresh follow-up branch. No rebase or force push.
 - Root test run: 6,486 passed, four unrelated HyroTrader import timeouts at the
   default five-second limit. Isolated HyroTrader recheck with 30-second timeout:
   all 10 passed. Full root retry is running; no unrelated production edits.
+
+- Isolated Binance public gate: 871 frames, 917 markets, 783 tickers, 3 books;
+  TS/Rust CPU 212.4/92.4ms, steady 118.7/36.7ms, retained 2.3/2.0MB. PASS.
+  Binance private gate: 14 frames, exact parity, PASS.
+- Every Rust/wasm/replay gate required by VENUE_PORT_BRIEF passes on the stable
+  build. Phase-end adversarial reviews rechecked fixes and report no blockers.
+  Proceeding to PR review while the additional full JS timeout-adjusted run finishes.
