@@ -131,6 +131,12 @@ pub struct Depth {
     pub asks: Vec<Level>,
 }
 #[derive(Deserialize)]
+pub struct DepthSnapshot {
+    pub version: u64,
+    pub bids: Vec<Level>,
+    pub asks: Vec<Level>,
+}
+#[derive(Deserialize)]
 pub struct Level(
     #[serde(deserialize_with = "number")] pub f64,
     #[serde(deserialize_with = "number")] pub f64,

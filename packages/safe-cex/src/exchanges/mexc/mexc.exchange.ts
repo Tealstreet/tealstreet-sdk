@@ -623,10 +623,21 @@ export class MexcExchange extends BaseExchange {
     const { data } = await this.xhr.get(`${ENDPOINTS.DEPTH}/${market.id}`, {
       params: { limit },
     });
-    return {
-      ...normalizeOrderBook(data, market),
-      lastUpdateId: toIntegerString(extractData(data)?.version),
-    };
+    this.assertCommonSuccess(data, 'MEXC depth read');
+    const payload = extractData<Record<string, any>>(data);
+    const version = toIntegerString(payload?.version);
+    const number = (value: unknown): number =>
+      typeof value === 'number' || (typeof value === 'string' && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(value.trim())) ? Number(value) : NaN;
+    const validSide = (rows: unknown): boolean => Array.isArray(rows) && rows.every((row) => {
+      if (!Array.isArray(row) || row.length < 2) return false;
+      const price = number(row[0]);
+      const volume = number(row[1]);
+      return Number.isFinite(price) && price > 0 && Number.isFinite(volume) && volume >= 0;
+    });
+    if (!/^\d+$/.test(version) || !validSide(payload?.bids) || !validSide(payload?.asks)) {
+      throw new Error('Invalid MEXC depth snapshot');
+    }
+    return { ...normalizeOrderBook(data, market), lastUpdateId: version };
   };
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {

@@ -34,7 +34,7 @@ const depthVersion = (value: unknown): bigint | undefined => {
 };
 
 const depthNumber = (value: unknown): number =>
-  typeof value === 'number' || (typeof value === 'string' && value.trim() !== '') ? Number(value) : NaN;
+  typeof value === 'number' || (typeof value === 'string' && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(value.trim())) ? Number(value) : NaN;
 
 export class MexcPublicWebsocket extends BaseWebSocket<MexcExchange> {
   protected override treatAnyMessageAsPong = true;

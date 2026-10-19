@@ -64,6 +64,18 @@ describe('MEXC incremental futures depth', () => {
     return { exchange, ws, socket, books, listener, depth, messages };
   };
 
+  it.each([
+    { success: true, code: 0, data: { version: 10, bids: [['0x64', 10]], asks: [] } },
+    { success: false, code: 510, data: { version: 10, bids: [], asks: [] } },
+    { success: true, code: 0, data: { version: 10, bids: [[100, 10], [99]], asks: [] } },
+    { success: true, code: 0, data: { version: 10, bids: [[100, 'invalid']], asks: [] } },
+    { success: true, code: 0, data: { version: 10, bids: [[100, null]], asks: [] } },
+  ])('rejects an invalid raw REST snapshot before normalization can discard its rows', async (data) => {
+    const { exchange } = setup();
+    exchange.xhr = { get: vi.fn().mockResolvedValue({ data }) } as any;
+    await expect(exchange.fetchOrderBook('BTCUSDT', 1000)).rejects.toThrow();
+  });
+
   it('subscribes before the 1000-level REST read and keeps one subscription until the final listener leaves', async () => {
     const { exchange, ws, listener, messages } = setup();
     const response = deferred<Snapshot>();

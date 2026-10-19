@@ -289,3 +289,28 @@ fn candle_ranges_are_not_truncated_without_an_explicit_limit() {
     let decoded: Vec<serde::de::IgnoredAny> = serde_json::from_str(&rows).unwrap();
     assert_eq!(decoded.len(), 1000);
 }
+
+#[test]
+fn invalid_rest_depth_never_commits_a_partial_or_empty_anchor() {
+    for body in [
+        r#"{"success":true,"code":0,"data":{"version":10,"bids":[[60000,10],[59999]],"asks":[]}}"#,
+        r#"{"success":true,"code":0,"data":{"version":10,"bids":[]}}"#,
+        r#"{"success":true,"code":0,"data":{"version":10,"bids":[[60000,-1]],"asks":[]}}"#,
+    ] {
+        let (mut e, _) = started();
+        e.drain_actions().for_each(drop);
+        e.handle(
+            150.0,
+            Event::Command(Command::SubscribeOrderBook {
+                symbol: "BTCUSDT".into(),
+            }),
+        );
+        let r = requests(&mut e).remove(0);
+        response(&mut e, &r, body);
+        assert!(e.book("BTCUSDT").is_none());
+        assert!(
+            e.drain_actions()
+                .any(|a| matches!(a, Action::SetTimer { .. }))
+        );
+    }
+}

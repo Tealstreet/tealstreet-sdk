@@ -579,7 +579,21 @@ impl Venue for MexcFutures {
             }
             Pending::Depth { symbol, generation } => {
                 let depth = Envelope::checked(response.body).and_then(|e| {
-                    serde_json::from_str::<Depth>(e.payload()?).map_err(|e| e.to_string())
+                    let snapshot: DepthSnapshot =
+                        serde_json::from_str(e.payload()?).map_err(|e| e.to_string())?;
+                    if snapshot
+                        .bids
+                        .iter()
+                        .chain(&snapshot.asks)
+                        .any(|Level(p, v, _)| *p <= 0.0 || *v < 0.0)
+                    {
+                        return Err("Invalid MEXC depth snapshot level".into());
+                    }
+                    Ok(Depth {
+                        version: snapshot.version,
+                        bids: snapshot.bids,
+                        asks: snapshot.asks,
+                    })
                 });
                 let Some(state) = self.books.get_mut(&symbol) else {
                     return;
