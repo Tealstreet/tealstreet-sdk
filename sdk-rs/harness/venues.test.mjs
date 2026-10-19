@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { venueOf } from './venues.mjs';
+import { subscriptionKeys } from './requests.mjs';
 const venue = venueOf('cryptocom');
 const privateUrl = 'wss://stream.crypto.com/exchange/v1/user';
 const publicUrl = 'wss://stream.crypto.com/exchange/v1/market';
@@ -130,4 +131,30 @@ test('WEEX timestamp freshness accepts both edges of the replay clock window', (
     headers['ACCESS-SIGN'] = createHmac('sha256', 'replay-secret').update(`${timestamp}/v3/ws/private`).digest('base64');
     assert.doesNotThrow(() => weex.validateSocket('wss://ws-contract.weex.com/v3/ws/private', headers, now));
   }
+});
+
+
+test('Bybit public readiness waits for every requested book after paced ticker chunks', () => {
+  const bybit = venueOf('bybit');
+  const books = ['BTCUSDT', 'ETHUSDT'];
+  const subscriptions = new Set();
+  const send = (url, topics) => {
+    for (const key of subscriptionKeys(url, { op: 'subscribe', args: topics, req_id: 'generated' })) subscriptions.add(key);
+  };
+  const url = 'wss://stream.bybit.com/v5/public/linear?requestId=generated&max_active_time=1m';
+  assert.equal(bybit.rustBooksSubscribed(subscriptions, []), true);
+  assert.equal(bybit.rustBooksSubscribed(subscriptions, books), false);
+  for (let chunk = 0; chunk < 3; chunk++) {
+    send(url, Array.from({ length: 10 }, (_, i) => `tickers.COIN${chunk * 10 + i}USDT`));
+    assert.equal(bybit.rustBooksSubscribed(subscriptions, books), false);
+  }
+  // Private feeds, the wrong depth, and unsubscribe records cannot release playback.
+  send('wss://stream.bybit.com/v5/private', books.map((symbol) => `orderbook.1000.${symbol}`));
+  send(url, books.map((symbol) => `orderbook.50.${symbol}`));
+  for (const key of subscriptionKeys(url, { op: 'unsubscribe', args: ['orderbook.1000.ETHUSDT'] })) subscriptions.add(key);
+  assert.equal(bybit.rustBooksSubscribed(subscriptions, books), false);
+  send(url, ['orderbook.1000.BTCUSDT']);
+  assert.equal(bybit.rustBooksSubscribed(subscriptions, books), false);
+  send(url.replace('requestId=generated', 'requestId=another'), ['orderbook.1000.ETHUSDT']);
+  assert.equal(bybit.rustBooksSubscribed(subscriptions, books), true);
 });

@@ -2,6 +2,7 @@
 // against, and the name the Rust engine is built with.
 import { createHmac } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
+import { subscriptionKeys } from './requests.mjs';
 
 const root = '../../packages/safe-cex/src/exchanges';
 
@@ -216,6 +217,16 @@ export const VENUES = {
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >= count,
     privateSocket: '/v5/private',
+    // Books follow every ticker chunk in Bybit's paced public outbox.
+    rustBooksSubscribed: (subscriptions, books) => {
+      if (!books.length) return true;
+      const urls = new Set([...subscriptions].filter((key) => key.startsWith('WS '))
+        .map((key) => key.slice(3, key.indexOf(' ', 3)))
+        .filter((url) => new URL(url).pathname === '/v5/public/linear'));
+      return [...urls].some((url) => subscriptionKeys(url,
+        { op: 'subscribe', args: books.map((symbol) => `orderbook.1000.${symbol}`) })
+        .every((key) => subscriptions.has(key)));
+    },
     isWrite: (method) => method === 'POST',
     matchRequestBody: true,
     volatileBodyFields: true,

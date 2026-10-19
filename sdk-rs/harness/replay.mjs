@@ -368,7 +368,11 @@ async function runRust() {
       }
     },
     async () => {
-      while ((isPrivate && (status?.loaded ?? 0) !== allLoaded) || (tape.audit && !tape.audit.ready())) await new Promise((r) => setTimeout(r, 5));
+      while ((isPrivate && (status?.loaded ?? 0) !== allLoaded)
+        || (tape.audit && !tape.audit.ready())
+        || (!isPrivate && venue.rustBooksSubscribed && !venue.rustBooksSubscribed(tape.subscriptions, bookSymbols))) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
     },
     (record) => {
       const { op, ...rest } = record;

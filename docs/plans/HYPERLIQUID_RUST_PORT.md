@@ -275,3 +275,12 @@ Independent reviewers accepted the union and Crypto.com automatic budget fix.
 The harness review found missing WEEX auth timestamp validation; both REST and
 upgrade now require safe millisecond timestamps within 30 seconds. Fourteen
 malicious signed cases reproduced the gap before the fix; 54 harness tests pass.
+
+First six-venue CI replay exposed a harness startup race in Bybit: accelerated
+playback could finish before its paced subscription outbox reached the requested
+books, so complete output/performance passed while topic parity failed. Public
+Rust playback now waits for all requested Bybit book topics (queued after initial
+tickers), matching the TS readiness barrier. Private auth readiness and strict
+post-run topic/write comparisons are unchanged. Fifty-five harness tests pass,
+including a regression that refuses early ticker-only/wrong-depth/private topics.
+CI venue jobs no longer cancel other venues on one failure, preserving diagnostics.
