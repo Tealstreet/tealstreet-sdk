@@ -35,7 +35,10 @@ value carrier, conversion fallback or runtime-selection flag.
   canonical resolver. The constructed `withStartupTimeout` test preserves the
   original result reference and reaches zero pending/blocking jobs on real and
   controlled clocks after cancellation of the losing timeout. This is promise
-  scheduling, not domain decoding.
+  scheduling, not domain decoding. Internal completion observation does not
+  mark the returned race handled: the installed native/Node rejection corpus
+  requires an ignored rejected winner to report once, while caught races and
+  losing rejections stay quiet. The old completion observer is a compiled RED.
 - Native `post()` follows the Axios promise-tail/interceptor checkpoint before
   adapter dispatch. All four weight-limiter scenarios compare the original
   source: adapter count zero at call return, FIFO reservations at 0/150/200,

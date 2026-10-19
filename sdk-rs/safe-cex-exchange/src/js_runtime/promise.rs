@@ -313,7 +313,11 @@ pub(super) fn race_iterable(runtime: &Rc<dyn ExchangeRuntime>, value: &Js) -> Pr
             runtime,
             Box::pin(async move {
                 let mut input = Box::pin(input.wait());
-                let mut finished = Box::pin(output.reaction());
+                let mut finished = Box::pin(PromiseWait {
+                    state: output.0.clone(),
+                    registration: None,
+                    defer_settled: false,
+                });
                 let settlement = std::future::poll_fn(|cx| {
                     if let Poll::Ready(value) = input.as_mut().poll(cx) {
                         return Poll::Ready(Some(value));
