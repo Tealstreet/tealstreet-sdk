@@ -34,6 +34,13 @@ impl RateLimitClock for Clock {
     }
 }
 fn venue(name: ExchangeName) -> Rc<BybitExchange> {
+    venue_with_signer(name, None, VirtualClock::default())
+}
+fn venue_with_signer(
+    name: ExchangeName,
+    signer: Option<safe_cex_exchange::js_runtime::base_exchange::HostedSigner>,
+    clock: VirtualClock,
+) -> Rc<BybitExchange> {
     BybitExchange::create(
         name,
         serde_json::from_value(serde_json::json!({"key":"", "secret":"", "publicDataOnly":true}))
@@ -41,12 +48,12 @@ fn venue(name: ExchangeName) -> Rc<BybitExchange> {
         Rc::new(DefaultStore::new()),
         BybitDependencies {
             runtime: native_runtime(),
-            remote_signer: None,
+            remote_signer: signer,
             wire: Arc::new(NoWire),
             http_host: Rc::new(NativeHttpHost::default()),
             rate_limit_clock: Arc::new(Clock),
             retry_clock: Rc::new(Clock),
-            clock: VirtualClock::default(),
+            clock,
             external_public_data: None,
             relay_enabled: false,
         },
@@ -192,4 +199,77 @@ fn private_filter_maintained_source_live_indices() {
     );
     let profiles: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(profiles.as_array().unwrap().len(), 7);
+}
+
+#[test]
+fn inverse_auth_production_clock_keeps_finite_expiry_at_real_signer() {
+    use safe_cex_transport::signing::{RemoteSigner, RemoteSignerRequest, RemoteSignerResponse};
+    use std::time::Duration;
+    struct Signer(Rc<RefCell<Option<RemoteSignerRequest>>>);
+    impl safe_cex_exchange::runtime::RemoteSigner for Signer {
+        fn is_available(&self) -> bool {
+            true
+        }
+        fn on_availability_change(
+            &self,
+            _: Rc<dyn Fn(bool)>,
+        ) -> safe_cex_exchange::runtime::Cleanup {
+            Box::new(|| {})
+        }
+    }
+    impl RemoteSigner for Signer {
+        fn sign(&self, request: RemoteSignerRequest) -> TransportFuture<'_, RemoteSignerResponse> {
+            assert!(
+                self.0.borrow_mut().replace(request).is_none(),
+                "one original signer invocation"
+            );
+            Box::pin(std::future::pending())
+        }
+    }
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(tokio::task::LocalSet::new().run_until(async {
+        let seen = Rc::new(RefCell::new(None));
+        let clock = VirtualClock::default();
+        let before = clock.get_current_time_ms();
+        assert!(before.is_finite(), "production native wall clock is finite");
+        // The native reconnect policy clears even a previously installed offset.
+        clock.sync_from_server_time(before + 300_000.);
+        let exchange = venue_with_signer(ExchangeName::Bybitinverse, Some((Rc::new(Signer(seen.clone())), Some("inverse-account".into()))), clock.clone());
+        let socket = exchange.base().get_socket(SocketSlot::Private).unwrap();
+        socket.on_open().await.unwrap();
+        assert!(seen.borrow().is_none(), "the source25ms wait precedes auth");
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while seen.borrow().is_none() { tokio::time::sleep(Duration::from_millis(1)).await; }
+        }).await.expect("real inverse protocol reaches its hosted signer");
+        let after = VirtualClock::default().get_current_time_ms();
+        let request = seen.borrow_mut().take().unwrap();
+        let RemoteSignerRequest::WsAuth { exchange_name, account_name, request } = request else { panic!("original WS signer request kind") };
+        assert_eq!(exchange_name, ExchangeName::Bybit);
+        assert_eq!(account_name.as_deref(), Some("inverse-account"));
+        let auth = request.ws_auth.unwrap();
+        let extra: serde_json::Value = serde_json::from_str(auth.extra_data.unwrap().get()).unwrap();
+        let expires = extra["expires"].as_f64().expect("finite production expiry is a number before the signer waiter settles");
+        assert!(expires.is_finite());
+        assert!(expires >= before + 10_000. && expires <= after + 10_000., "native clock sync must clear stale offsets before sampling auth: {expires}/{before}/{after}");
+        assert_eq!(auth.to_sign.unwrap(), format!("GET/realtime{}", safe_cex_num::js_number_string(expires)));
+        exchange.base().dispose().unwrap();
+    }));
+}
+
+#[test]
+#[ignore = "executes maintained TypeScript clock and inverse auth with the production Node branch"]
+fn inverse_auth_maintained_source_clock_is_finite() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/private-auth-clock-fixtures.cjs"
+        ))
+        .output()
+        .expect("Node inverse auth clock oracle");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let profiles: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(profiles.as_array().unwrap().len(), 3);
 }

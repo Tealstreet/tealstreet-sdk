@@ -185,4 +185,27 @@ snapshot and ignored-selector faults must fail the named real-frame witness;
 `private-filter-controls.py` restores exact source bytes and requires GREEN.
 
 This milestone reconciles delegated row35. Rows6/16 retain their separate #1198
-history milestone; the other nine delegated rows remain open.
+history milestone; the other delegated rows retain the separate verdicts below.
+
+
+## Delegated inverse auth: row 25 ACCEPT
+
+The numeric-expiry difference requires a nonfinite clock result. The production
+native registry supplies `VIRTUAL_CLOCK`, whose default clock reads SystemTime;
+private reconnect clears its prior offset before the auth sample. Auth adds a
+fixed10000ms, with no account/configuration expiry input. An injected broken clock
+can still exercise the previously recorded nonfinite JSON boundary; it does not
+describe this constructed native production path. The coordinator authorized this
+reachability classification on thread-dm50ve5c1yer,2026-10-19.
+
+`inverse_auth_production_clock_keeps_finite_expiry_at_real_signer` enters the real
+inverse private onOpen, waits for its source25ms boundary and captures the original
+hosted signer request before its pending result settles. It verifies the actual
+clock interval, cleared stale offset, finite native expiry, exact signing payload,
+request kind and account identity. The maintained inverse auth and clock members
+execute three native-Node profiles with real Date.now and the original offset
+reset. A compiled null-expiry production fault must fail this witness before an
+exact restored GREEN. No auth/signing carrier or production body changes here.
+
+This socket batch reconciles rows25 and35. History rows6/16 remain in #1198;
+the eight other delegated rows remain open.

@@ -1,0 +1,16 @@
+{
+  "source_sha256": "85f8b669355489849f61cbf556751b5ad5c214bd01c386b48d0ce7d2cc99dcfd",
+  "executed": 1,
+  "controls": [
+    {
+      "control": "null-expiry",
+      "compiled_runtime_red": true,
+      "red_log": "/tmp/bybit-inverse-auth-clock-null-expiry-red.log",
+      "red_sha256": "50db896c56584d04bddadc20c72351369589b14a69f67e694d5d35abb89c0f72",
+      "exact_restore": true,
+      "green": true,
+      "green_log": "/tmp/bybit-inverse-auth-clock-null-expiry-restore-green.log",
+      "green_sha256": "1d76fba29e28efc19b79c47a91852f0ff51a3fb52cf889df7e8181d72fd76306"
+    }
+  ]
+}

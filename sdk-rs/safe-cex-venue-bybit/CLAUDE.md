@@ -1003,3 +1003,10 @@ projecting the completed selection for event delivery. Do not snapshot input row
 before `tradesCategoryOf`: it is a live callback and can replace, delete or truncate
 later indices. The dedicated socket audit runs seven maintained-source profiles
 and fourteen actual primary/demo frame profiles with original row identity.
+
+
+The delegated inverse-auth audit captures the original hosted signer request
+through actual private onOpen and the real native clock. Reconnect clears the
+old offset before adding the fixed10000ms window; no account expiry option is
+read. Keep the original finite numeric payload and source signing text. Broken
+clock nonfinite fixtures remain separate from this production reachability proof.
