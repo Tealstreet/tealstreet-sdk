@@ -1,6 +1,6 @@
 [file]
 ts = "packages/lighter-sdk/src/client/http-types.ts"
-rust_files = [ "safe-cex-venue-lighter/src/http_models.rs", "safe-cex-venue-lighter/src/http_transactions.rs", "safe-cex-venue-lighter/src/transaction_client.rs", "safe-cex-lighter-sdk/src/http_types.rs" ]
+rust_files = [ "safe-cex-venue-lighter/src/http_models.rs", "safe-cex-venue-lighter/src/http_transactions.rs", "safe-cex-venue-lighter/src/transaction_client.rs", "safe-cex-lighter-sdk/src/http_types.rs", "safe-cex-venue-lighter/src/binding/sdk_client.rs" ]
 
 [[symbol]]
 ts = "LighterApiClientConfig"
@@ -200,12 +200,12 @@ kind = "class"
 layer = "adapted"
 rs = "safe-cex-lighter-sdk/src/http_types.rs::LighterApiError"
 status = "divergent"
-note = "FORCED: concrete native API error retains name, UTF16 message/code/request ID, opaque details identity and full binary64 status. It has no JavaScript Error.prototype inheritance, instanceof brand, non-enumerable Error message or engine stack. Four actual-source constructor/native field witnesses; own bucket evidence in safe-cex-lighter-sdk/GATE_EVIDENCE.md."
+note = "Native metadata carrier retains UTF16 fields, opaque details identity and binary64 status. The shipped venue now assembles the Error-derived JS instance through its canonical installed Error constructor: inherited Error.prototype/toString, non-enumerable message, own field order and optional capture effects are real-binding witnessed. Shared runtime engine stack generation remains an OPEN diagnostic residual; no synthetic V8 stack is claimed. See safe-cex-venue-lighter/ERROR_CONSTRUCTOR_REVIEW.md."
 
 [[symbol]]
 ts = "LighterApiError.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = "safe-cex-lighter-sdk/src/http_types.rs::LighterApiError::new"
+rs = [ "safe-cex-lighter-sdk/src/http_types.rs::LighterApiError::new", "safe-cex-venue-lighter/src/binding/sdk_client.rs::lighter_api_error" ]
 status = "divergent"
-note = "FORCED: native constructor applies UNKNOWN_ERROR only for omitted/undefined code and preserves all fields/details aliases, but cannot execute JS Error super construction or optional V8 captureStackTrace. Actual source capture calls and throwing/non-callable capture witnesses show observable behavior absent from native allocation. Own bucket justification in safe-cex-lighter-sdk/GATE_EVIDENCE.md."
+note = "Binding constructor target: safe-cex-venue-lighter/src/binding/sdk_client.rs::lighter_api_error. The typed new method supplies native metadata/default code; the shipped binding constructor executes canonical Error super with original message/new.target, initializes source fields in order and performs both captureStackTrace reads and its receiver-bound call after assignments. NativeRuntime/reqwest-host Realm regressions fail on master for enumerable message and skipped capture; restored semantics retain UTF16 diagnostics, details/constructor identity, thrown identity and the exact non-callable TypeError. Shared default engine stack generation remains OPEN; see safe-cex-venue-lighter/ERROR_CONSTRUCTOR_REVIEW.md."
