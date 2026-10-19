@@ -1306,14 +1306,14 @@ impl BaseExchange {
             return Box::pin(async { Ok(true) });
         }
         if let Err(error) = self.emit("remoteSignerStatus", Js::str("disconnected")) {
-            return Box::pin(async move { Err(error) });
+            return crate::eager::start_eager(&self.runtime, async move { Err(error) });
         }
         if self.is_disposed() {
             return Box::pin(async { Ok(false) });
         }
         if signer.is_available() {
             if let Err(error) = self.emit("remoteSignerStatus", Js::str("connected")) {
-                return Box::pin(async move { Err(error) });
+                return crate::eager::start_eager(&self.runtime, async move { Err(error) });
             }
             return Box::pin(async { Ok(true) });
         }
@@ -1358,7 +1358,7 @@ impl BaseExchange {
         } else {
             *waiter.unsubscribe.borrow_mut() = Some(cleanup);
         }
-        Box::pin(async move {
+        crate::eager::start_eager(&self.runtime, async move {
             let _guard = guard;
             std::future::poll_fn(|cx| {
                 if let Some(value) = *waiter.result.borrow() {
