@@ -44,4 +44,16 @@ and cut a follow-up branch. Never touch master or force-push.
 - Official depth protocol:
   https://mexcdevelop.github.io/apidocs/contract_v1_en/#how-is-depth-information-maintained
   (uncompressed versions are contiguous; discard old updates and resync gaps).
-- Implementation not started. No gates claimed.
+- Public phase implemented and reviewed by `public_review`; all four findings
+  fixed and re-reviewed clean: stale re-subscription snapshots, startup read
+  retries, omitted candle limits, malformed streamed lists.
+- Public verification: bans pass, crate clippy passes, 8 MEXC integration tests
+  and 11 engine unit tests pass. Root lint: 28/28 tasks pass. Root typecheck
+  and tests still running; final replay/performance gates remain phase 5.
+- Engine adds opt-in `EnvelopeField` streaming to retain and validate the
+  surrounding response without retaining the large list. Existing Binance
+  streaming behavior is unchanged.
+- Private-phase plan audit: keep native position IDs and separate long/short
+  leverage internally; stream snapshot rows into temporary typed collections;
+  compare snapshot-start revision with order/position/setting updates before
+  commit; preserve last-known-good data on failed envelopes or pages.

@@ -604,7 +604,7 @@ impl<V: Venue> Engine<V> {
             let response = Response {
                 status: incoming.status,
                 headers: &incoming.headers,
-                body: "",
+                body: splitter.envelope().unwrap_or(""),
             };
             self.venue.on_response(&mut cx, pending, response);
             return;

@@ -8,6 +8,7 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -410,6 +411,11 @@ impl WasmEngine {
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: EngineOptions = serde_json::from_str(options_json)?;
         let inner: Box<dyn AnyEngine> = match venue {
+            "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
             "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
