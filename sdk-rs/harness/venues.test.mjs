@@ -61,3 +61,20 @@ test('public audit requires ticker subscriptions before replay', () => {
   assert.equal(ready.ready(), true);
   assert.deepEqual(ready.errors(), []);
 });
+
+test('public Crypto.com startup subscribes after the first socket opens', async () => {
+  const calls = [];
+  const exchange = {
+    store: { markets: [{ id: 'BTCUSD-PERP', info: { underlyingSymbol: 'BTCUSD-INDEX' } }] },
+    publicWebsocket: { isConnected: false, subscribeToMarketData: (markets) => calls.push(markets) },
+  };
+  const ready = venue.prepareTsReady(exchange, { isPrivate: false });
+  await new Promise(setImmediate);
+  assert.deepEqual(calls, []);
+  exchange.publicWebsocket.isConnected = true;
+  await ready;
+  assert.deepEqual(calls, [[{ instrumentName: 'BTCUSD-PERP', indexInstrumentName: 'BTCUSD-INDEX' }]]);
+  exchange.publicWebsocket.isConnected = false;
+  await venue.prepareTsReady(exchange, { isPrivate: true });
+  assert.equal(calls.length, 1);
+});

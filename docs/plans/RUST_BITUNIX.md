@@ -290,3 +290,26 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   outputs identical. GC counts and thresholds unchanged; helper 19 tests PASS.
 - Actual merged landing parent is 6cd219ce4c (WEEX plus status-only landing
   updates), already containing 4046db3826. Bitunix private 42 records PASS.
+
+### Final integrated local gates PASS
+
+| Public tape (3 runs) | CPU TS / Rust ms | Retained TS / Rust MB | Peak TS / Rust MB |
+| --- | ---: | ---: | ---: |
+| bitunix | 318.8 / 274.7 | 3.5 / 2.2 | 31.1 / 15.9 |
+| binance | 197.9 / 97.5 | 4.6 / 2.4 | 34.5 / 12.4 |
+| bybit | 199.3 / 139.2 | 6.5 / 2.6 | 33.6 / 10.6 |
+| okx | 204.2 / 137.6 | 4.7 / 3.0 | 31.5 / 10.4 |
+| cryptocom | 65.1 / 61.5 | 2.1 / 1.5 | 14.5 / 5.4 |
+| weex | 234.2 / 160.9 | 5.3 / 2.7 | 20.7 / 7.2 |
+
+- All public outputs match, with Rust main-thread CPU, retained memory and sampled
+  peak below TS. Private correctness PASS: Bitunix 42, Binance 14, Bybit 18,
+  Crypto.com 21, WEEX 20, and each of four OKX aliases 29 records.
+- Crypto.com public-only oracle now waits for its first socket open before
+  subscribing; sending during CONNECTING had induced a premature reconnect.
+  New regression plus helper suite 20 tests PASS. Other gate thresholds and
+  protocol checks remain unchanged.
+- Core validation remains PASS: workspace bans/fmt/clippy/tests, wasm build/lint,
+  root typecheck/lint/tests, adapter 17/host 20 tests; bundle 2,518,643 bytes.
+  Next: push, PR into feat/rust-rewrite, adversarial reviews, then green CI and
+  authorized PR merge/fresh follow-up branch.

@@ -102,8 +102,12 @@ export const VENUES = {
       return seed ? JSON.parse(seed.body).result.data.filter((r) => r.inst_type === 'PERPETUAL_SWAP' && r.tradable).map((r) => r.symbol) : [];
     },
     // KNOWN_TS_FIXES: public-only startup returns before market subscriptions.
-    prepareTsReady: (exchange, { isPrivate }) => {
-      if (!isPrivate) exchange.publicWebsocket.subscribeToMarketData(exchange.store.markets.map((m) => ({ instrumentName: m.id, indexInstrumentName: m.info?.underlyingSymbol })));
+    prepareTsReady: async (exchange, { isPrivate }) => {
+      if (isPrivate) return;
+      // Public-only start resolves while the socket is still CONNECTING.
+      // Sending then makes BaseWebSocket reconnect before its first open.
+      while (!exchange.publicWebsocket.isConnected) await new Promise((resolve) => setTimeout(resolve, 1));
+      exchange.publicWebsocket.subscribeToMarketData(exchange.store.markets.map((m) => ({ instrumentName: m.id, indexInstrumentName: m.info?.underlyingSymbol })));
     },
     // KNOWN_TS_FIXES: the global ticker/book throttles drop updates across
     // symbols. Reset after every frame so each next update gets a leading call,
