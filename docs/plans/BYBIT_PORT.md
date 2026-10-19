@@ -12,7 +12,7 @@ Target: `feat/rust-rewrite`; lane: `feat/rust-bybit`. Original port: `332622a5ff
    reviews of account/trading and public/engine/harness behavior. Post the
    findings, fix actionable issues with regression coverage, rerun affected
    gates, and repeat reviews until passing or diminishing returns.
-3. Verify CI, merge into `feat/rust-rewrite`, then cut a fresh follow-up branch.
+3. Verify CI status, merge into `feat/rust-rewrite`, then cut a fresh follow-up branch.
 
 ## Progress
 
@@ -24,30 +24,39 @@ Target: `feat/rust-rewrite`; lane: `feat/rust-bybit`. Original port: `332622a5ff
 - All brief gates passed after migration. Fresh 20-second Bybit recording:
   28,860 websocket messages; committed six-second fixture: 8,742 frames,
   912 markets/tickers and two books. Median of three public replay runs:
-  TS/Rust main-thread CPU 540.0/385.8 ms (1.40x), steady CPU 347.5/226.6 ms
-  (1.53x), retained memory 3.2/2.1 MB (1.50x).
+  TS/Rust main-thread CPU 463.1/294.3 ms (1.57x), steady CPU 303.0/171.8 ms
+  (1.76x), retained memory 3.2/2.1 MB (1.49x).
 - Bybit private replay: 18 frames, PASS. Binance public: 871 frames,
-  CPU 151.6/59.2 ms (2.56x), memory 2.2/1.8 MB (1.19x), PASS.
+  CPU 254.4/108.4 ms (2.35x), memory 2.2/1.8 MB (1.18x), PASS.
   Binance private: 14 frames, PASS.
 - Bans, Bybit fmt/clippy/tests, wasm clippy, release build and corrected
-  package build passed. Engine unit tests: 10; Bybit integration tests: 27
-  plus signing/body unit tests. Workers host tests: 2; wasm shell tests: 4.
+  package build passed. Engine unit tests: 10. Final Bybit tests: 3 unit, 27 account/trading,
+  13 public. Workers host tests: 2; wasm shell tests: 6.
 - Added Bybit public/private CI gates. Updated the former one-venue size
-  budget to 1.4 MiB for the measured 1,318,547-byte dual-venue engine.
-- Root typecheck/lint passed. Root tests found an existing wasm test in
-  the forbidden exchange runtime tree; moved it into `src/__tests__/`
-  and reran its boundary and integration checks. Full root gates rerunning.
+  budget to 1.4 MiB for the measured 1,332,666-byte dual-venue engine.
+- Moved an existing wasm test outside the forbidden exchange runtime tree;
+  its boundary and integration checks pass.
 - PR: https://github.com/Tealstreet/tealstreet-sdk/pull/1298 into
   `feat/rust-rewrite`. Layout review and adversarial findings posted there.
-- Root gates now pass: typecheck 44 tasks, lint 28 tasks, tests 27 tasks
-  (safe-cex 451 test files / 6,489 tests).
+- Root typecheck (44 tasks) and lint (28 tasks) pass. The post-migration
+  root suite passed all 27 tasks. Final broad reruns hit unrelated import
+  timeouts: the last two-worker run passed 6,488/6,489 safe-cex unit tests,
+  with the existing metadata construction test exceeding its fixed 60 seconds.
+  Its isolated rerun passed all five tests in 22.46 seconds. An earlier final
+  safe-cex test-ci run passed all 451 files / 6,489 tests.
 - Adversarial fixes: subscription-ack snapshot refresh with in-flight followup;
   per-symbol position modes and a signed read before writes for unknown flat
   symbols; Partial stop native amendments; no retry after ambiguous batch
   responses; exact split totals; guarded startup pagination/retries; socket
   connection after REST ticker seed; Bybit shell client-ID helpers.
-- Targeted tests after fixes: 3 unit + 26 account + 13 public pass; clippy
-  passes. Shell wasm regressions: 6 tests pass. Final gates and re-review follow.
+- Targeted tests after fixes: 3 unit + 27 account + 13 public pass; clippy
+  passes. Shell wasm regressions: 6 tests pass. All four final replay gates
+  pass after the fixes. Both reviewers pass the final implementation; the private
+  reviewer independently reran the mode-switch race regression.
+- GitHub checks on runtime commit `f04b620712`: both TS CI runs, both secret
+  scans, Rust native fmt/clippy/tests, wasm32 and replay gate pass. The banned
+  patterns job remained queued when checked; that gate passes locally.
+  Final documentation checkpoint CI may still be pending.
 
 ## Intentional TS fixes
 
