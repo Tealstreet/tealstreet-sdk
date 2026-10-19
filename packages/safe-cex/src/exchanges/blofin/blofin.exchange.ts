@@ -1438,7 +1438,7 @@ export class BlofinExchange extends BaseExchange {
   };
 
   cancelSymbolOrders = async (symbol: string) => {
-    const orders = this.store.orders.filter((o) => o.symbol === symbol);
+    const orders = this.store.orders.filter((o) => o.symbol === symbol && o.status === OrderStatus.Open);
     await this.cancelOrders(orders);
   };
 

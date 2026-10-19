@@ -100,7 +100,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 9 | `BALANCE` | f64 `[used, free, total, upnl]` |
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
 | 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution |
-| 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]` |
+| 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]`; optional appended f64 `buyLeverage[n]`, `sellLeverage[n]` |
 
 Venues with independent hedge leverage append f64 `buyLeverage[n]` and
 `sellLeverage[n]` columns to `SETTINGS`. Section length distinguishes this
@@ -110,7 +110,9 @@ one leverage keep the original payload unchanged.
 A market index is a row of the most recent `MARKETS` section; a ticker index is
 a row of the most recent `TICKERS` section. `POSITIONS` holds open positions
 only; per-market leverage and margin type live in `SETTINGS`, replacing the
-zero-size placeholder positions TS kept for every market. An order's packed
+zero-size placeholder positions TS kept for every market. SETTINGS may append
+independent buy/sell leverage columns; absent/non-finite side values fall back
+to the scalar leverage, so older frames remain readable. An order's packed
 enum word carries its reject reason (flags bits 4-5). Enum codes and flag bits are
 defined once in `sdk-rs/engine/src/wire.rs` and mirrored by the decoder in
 `hosts/wasm/js/wire.mjs`.
@@ -261,13 +263,13 @@ Then: exchange-server moves to the native host and streams the same frames
 (with `BOOK_DELTA` sections for networked clients — full books every flush
 are ~450 KB/s for two 1,000-level books).
 
-### 7. CI — done for Binance
+### 7. CI — Binance, Bybit, Backpack, OKX, Crypto.com, WEEX and BingX
 
 - Bans, fmt, clippy, native tests, wasm32 build and clippy.
 - Replay gate (`rust.yml`, job "replay gate"): release wasm with the pinned
   wasm-bindgen, an explicit combined-venue size budget in `rust.yml`, committed public fixtures
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
-  and the generated private tape gated on identical account state.
+  and each venue's generated private tape gated on identical account state.
 
 ### 8. Remaining venues — in progress
 
@@ -286,7 +288,9 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | WEEX | done (#1301) |
 | BingX | done (#1305) |
 | MEXC | done (#1304); conditional/trailing parity check pending |
-| Bitget, Hyperliquid, BloFin, Bitunix, Backpack | wave 1, PRs in review |
+| BloFin | done (#1300) |
+| Backpack | done (#1299) |
+| Bitget, Hyperliquid, Bitunix | wave 1, PRs in review |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | lane starting |
 | KuCoin, Phemex | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |

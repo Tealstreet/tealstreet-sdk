@@ -1,10 +1,71 @@
+import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
-import { createHmac } from 'node:crypto';
-import { parseRequestJson } from './request-json.mjs';
 import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
+import { parseRequestJson } from './request-json.mjs';
+import { requestKey } from './requests.mjs';
 
 const root = '../../packages/safe-cex/src/exchanges';
+
+// Public deterministic replay credentials, never a funded account.
+const backpackSeed = Buffer.alloc(32, 7);
+const backpackPrivate = createPrivateKey({
+  key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), backpackSeed]),
+  format: 'der',
+  type: 'pkcs8',
+});
+const backpackPublic = createPublicKey(backpackPrivate);
+const backpackKey = backpackPublic.export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64');
+const backpackInstructions = {
+  'GET /api/v1/account': 'accountQuery',
+  'PATCH /api/v1/account': 'accountUpdate',
+  'GET /api/v1/position': 'positionQuery',
+  'GET /api/v1/capital/collateral': 'collateralQuery',
+  'GET /api/v1/orders': 'orderQueryAll',
+  'POST /api/v1/order': 'orderExecute',
+  'POST /api/v1/orders': 'orderExecute',
+  'DELETE /api/v1/order': 'orderCancel',
+  'DELETE /api/v1/orders': 'orderCancelAll',
+  'GET /wapi/v1/history/fills': 'fillHistoryQueryAll',
+  'GET /wapi/v1/history/orders': 'orderHistoryQueryAll',
+  'GET /wapi/v1/history/funding': 'fundingHistoryQueryAll',
+};
+const verifyBackpackSubscribe = (message) => {
+  if (!(message.params ?? []).some((p) => p.startsWith('account.')) || message.method !== 'SUBSCRIBE') return true;
+  const [key, signature, timestamp, window] = message.signature ?? [];
+  return (
+    key === backpackKey &&
+    window === '5000' &&
+    verify(
+      null,
+      Buffer.from(`instruction=subscribe&timestamp=${timestamp}&window=${window}`),
+      backpackPublic,
+      Buffer.from(signature ?? '', 'base64'),
+    )
+  );
+};
+const verifyBackpack = ({ method, url, headers, body }) => {
+  const parsed = new URL(url);
+  const instruction = backpackInstructions[`${method} ${parsed.pathname}`];
+  if (!instruction) return true;
+  const h = Object.fromEntries(
+    (Array.isArray(headers) ? headers : Object.entries(headers ?? {})).map(([k, v]) => [k.toLowerCase(), String(v)]),
+  );
+  if (h['x-api-key'] !== backpackKey || h['x-broker-id'] !== '1200') return false;
+  const params = method === 'GET' ? Object.fromEntries(parsed.searchParams) : JSON.parse(body ?? '{}');
+  const rows = Array.isArray(params) ? params : [params];
+  const pieces = rows.map(
+    (row) =>
+      `instruction=${instruction}` +
+      Object.keys(row)
+        .sort()
+        .filter((k) => row[k] != null)
+        .map((k) => `&${k}=${encodeURIComponent(String(row[k]))}`)
+        .join(''),
+  );
+  const payload = `${pieces.join('&')}&timestamp=${h['x-timestamp']}&window=${h['x-window']}`;
+  return verify(null, Buffer.from(payload), backpackPublic, Buffer.from(h['x-signature'] ?? '', 'base64'));
+};
 
 const okx = (name) => ({
   rust: name,
@@ -57,9 +118,50 @@ export const VENUES = {
     validateRequest: validateWooRequest,
     compareFillPrices: true,
   },
+  backpack: {
+    rust: 'backpack',
+    ts: { module: `${root}/backpack/backpack.exchange.ts`, className: 'BackpackExchange', name: 'backpack' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depth.')).length >= count,
+    isPrivateRecord: (record) => record.type === 'ws' && JSON.parse(record.text).stream?.startsWith('account.'),
+    streamOf: (text) => {
+      try {
+        return JSON.parse(text).stream;
+      } catch {
+        return undefined;
+      }
+    },
+    marketFilter: (row) => row.symbol.endsWith('_PERP'),
+    replayCredentials: { key: backpackKey, secret: backpackSeed.toString('base64') },
+    verifyRequest: verifyBackpack,
+    verifySubscribe: verifyBackpackSubscribe,
+    compareSubscriptions: true,
+    compareWriteOrder: true,
+    compareClientIds: true,
+    compareFillPrices: true,
+    isWrite: (method) => method !== 'GET',
+  },
+  blofin: {
+    rust: 'blofin',
+    ts: { module: `${root}/blofin/blofin.exchange.ts`, className: 'BlofinExchange', name: 'blofin' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('books.')).length >= count,
+    privateSocket: '/ws/private',
+    compareFillPrices: true,
+    options: { passphrase: 'replay-passphrase' },
+    cacheBustPaths: ['/api/v1/market/instruments'],
+    requestBodies: true,
+    volatileBodyFields: true,
+    isWrite: (method) => method !== 'GET',
+    defaultBodyValues: { tpTriggerPriceType: 'last', slTriggerPriceType: 'last', triggerPriceType: 'last' },
+    generatedId: (key, value) => key === 'clientOrderId' && value.startsWith('b3cdedc0a20880ba'),
+  },
   mexc: {
     rust: 'mexc',
     matchRequestBody: true,
+    canonicalIntegerStrings: true,
+    ignoredBodyFields: ['externalOid', 'requestId'],
+    rollingListWindows: true,
     ts: { module: `${root}/mexc/mexc.exchange.ts`, className: 'MexcExchange', name: 'mexc' },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depth.')).length >= count,
@@ -81,9 +183,11 @@ export const VENUES = {
     rust: 'bingx',
     ts: { module: `${root}/bingx/bingx.exchange.ts`, className: 'BingxExchange', name: 'bingx' },
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('market.depth.')).length >= count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('market.depth.')).length >=
+      count,
     privateSocket: '?listenKey=',
     matchRequestBody: true,
+    requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds),
   },
   weex: {
     rust: 'weex',
@@ -92,9 +196,11 @@ export const VENUES = {
     matchRequestBody: true,
     volatileBodyFields: true,
     // WEEX's income history is a read despite using POST.
-    isWrite: (method, url) => method !== 'GET' && !(method === 'POST' && new URL(url).pathname === '/capi/v3/account/income'),
+    isWrite: (method, url) =>
+      method !== 'GET' && !(method === 'POST' && new URL(url).pathname === '/capi/v3/account/income'),
     options: { passphrase: 'replay-passphrase', privateWsHeaders: true },
-    tsBooksSubscribed: (exchange, count) => [...exchange.publicWebsocket.topics].filter((t) => t.endsWith('@depth200')).length >= count,
+    tsBooksSubscribed: (exchange, count) =>
+      [...exchange.publicWebsocket.topics].filter((t) => t.endsWith('@depth200')).length >= count,
     prepareTs(exchange, WebSocket) {
       for (const socket of [exchange.publicWebsocket, exchange.privateWebsocket]) {
         socket.createWebsocket = (url, protocols, options = {}) => {
@@ -110,15 +216,27 @@ export const VENUES = {
       if (parsed.pathname.startsWith('/capi/v3/market/')) return;
       const lookup = (name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
       const time = lookup('ACCESS-TIMESTAMP');
-      const signature = createHmac('sha256', 'replay-secret').update(`${time}${method}${parsed.pathname}${parsed.search}${body || ''}`).digest('base64');
-      if (lookup('ACCESS-KEY') !== 'replay-key' || lookup('ACCESS-PASSPHRASE') !== 'replay-passphrase' || lookup('ACCESS-SIGN') !== signature) throw new Error(`invalid WEEX signed request: ${method} ${parsed.pathname}`);
+      const signature = createHmac('sha256', 'replay-secret')
+        .update(`${time}${method}${parsed.pathname}${parsed.search}${body || ''}`)
+        .digest('base64');
+      if (
+        lookup('ACCESS-KEY') !== 'replay-key' ||
+        lookup('ACCESS-PASSPHRASE') !== 'replay-passphrase' ||
+        lookup('ACCESS-SIGN') !== signature
+      )
+        throw new Error(`invalid WEEX signed request: ${method} ${parsed.pathname}`);
     },
     validateSocket(url, headers = {}) {
       if (!url.includes('/v3/ws/private')) return;
       const lookup = (name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
       const time = lookup('ACCESS-TIMESTAMP');
       const signature = createHmac('sha256', 'replay-secret').update(`${time}/v3/ws/private`).digest('base64');
-      if (lookup('ACCESS-KEY') !== 'replay-key' || lookup('ACCESS-PASSPHRASE') !== 'replay-passphrase' || lookup('ACCESS-SIGN') !== signature) throw new Error('invalid WEEX upgrade authentication');
+      if (
+        lookup('ACCESS-KEY') !== 'replay-key' ||
+        lookup('ACCESS-PASSPHRASE') !== 'replay-passphrase' ||
+        lookup('ACCESS-SIGN') !== signature
+      )
+        throw new Error('invalid WEEX upgrade authentication');
     },
   },
   cryptocom: {
@@ -128,14 +246,22 @@ export const VENUES = {
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('book.')).length >= count,
     privateSocket: '/exchange/v1/user',
     matchRequestBody: true,
+    requestBodyParams: true,
     requestBody: (body) => body?.params ?? body,
     publicTickers: (records) => {
       const seed = records.find((r) => r.type === 'http' && r.url.endsWith('/public/get-instruments'));
-      return seed ? JSON.parse(seed.body).result.data.filter((r) => r.inst_type === 'PERPETUAL_SWAP' && r.tradable).map((r) => r.symbol) : [];
+      return seed
+        ? JSON.parse(seed.body)
+            .result.data.filter((r) => r.inst_type === 'PERPETUAL_SWAP' && r.tradable)
+            .map((r) => r.symbol)
+        : [];
     },
     // KNOWN_TS_FIXES: public-only startup returns before market subscriptions.
     prepareTsReady: (exchange, { isPrivate }) => {
-      if (!isPrivate) exchange.publicWebsocket.subscribeToMarketData(exchange.store.markets.map((m) => ({ instrumentName: m.id, indexInstrumentName: m.info?.underlyingSymbol })));
+      if (!isPrivate)
+        exchange.publicWebsocket.subscribeToMarketData(
+          exchange.store.markets.map((m) => ({ instrumentName: m.id, indexInstrumentName: m.info?.underlyingSymbol })),
+        );
     },
     // KNOWN_TS_FIXES: the global ticker/book throttles drop updates across
     // symbols. Reset after every frame so each next update gets a leading call,
@@ -144,12 +270,14 @@ export const VENUES = {
       exchange.publicWebsocket.handleTickerUpdate.cancel();
       exchange.publicWebsocket.handleBookUpdate.cancel();
     },
-    isWrite: (method, url) => method === 'POST' && /private\/(advanced\/)?(create|amend|cancel|change|close)-/.test(new URL(url).pathname),
+    isWrite: (method, url) =>
+      method === 'POST' && /private\/(advanced\/)?(create|amend|cancel|change|close)-/.test(new URL(url).pathname),
     createSocketAudit: (impl, { isPrivate, books, tickers = [] }) => {
       const connections = new Map();
       const failures = [];
       const socket = (url) => {
-        if (!connections.has(url)) connections.set(url, { auth: false, authAck: false, channels: new Set(), heartbeats: new Set() });
+        if (!connections.has(url))
+          connections.set(url, { auth: false, authAck: false, channels: new Set(), heartbeats: new Set() });
         return connections.get(url);
       };
       return {
@@ -168,10 +296,16 @@ export const VENUES = {
           const state = socket(url);
           if (frame.method === 'public/auth') {
             const payload = frame.method + frame.id + frame.api_key + frame.nonce;
-            state.auth = Number.isSafeInteger(frame.id) && Number.isSafeInteger(frame.nonce) && Math.abs(Date.now() - frame.nonce) < 60_000 && frame.api_key === 'replay-key' && frame.sig === createHmac('sha256', 'replay-secret').update(payload).digest('hex');
+            state.auth =
+              Number.isSafeInteger(frame.id) &&
+              Number.isSafeInteger(frame.nonce) &&
+              Math.abs(Date.now() - frame.nonce) < 60_000 &&
+              frame.api_key === 'replay-key' &&
+              frame.sig === createHmac('sha256', 'replay-secret').update(payload).digest('hex');
             if (!state.auth) failures.push('invalid private WS auth signature');
           } else if (frame.method === 'subscribe') {
-            if (url.endsWith('/user') && !state.authAck) failures.push('private subscriptions sent before authentication');
+            if (url.endsWith('/user') && !state.authAck)
+              failures.push('private subscriptions sent before authentication');
             for (const channel of frame.params.channels) state.channels.add(channel);
           } else if (frame.method === 'unsubscribe') {
             for (const channel of frame.params.channels) state.channels.delete(channel);
@@ -182,8 +316,23 @@ export const VENUES = {
         ready() {
           const entries = [...connections.entries()];
           if (isPrivate && !entries.some(([url, state]) => url.endsWith('/user') && state.auth)) return false;
-          if (tickers.length && !entries.some(([url, state]) => url.endsWith('/market') && tickers.slice(0, 350 - books.length).every((symbol) => state.channels.has('ticker.' + symbol)))) return false;
-          if (books.length && !entries.some(([url, state]) => url.endsWith('/market') && books.every((symbol) => state.channels.has('book.' + symbol + '.50')))) return false;
+          if (
+            tickers.length &&
+            !entries.some(
+              ([url, state]) =>
+                url.endsWith('/market') &&
+                tickers.slice(0, 350 - books.length).every((symbol) => state.channels.has('ticker.' + symbol)),
+            )
+          )
+            return false;
+          if (
+            books.length &&
+            !entries.some(
+              ([url, state]) =>
+                url.endsWith('/market') && books.every((symbol) => state.channels.has('book.' + symbol + '.50')),
+            )
+          )
+            return false;
           return true;
         },
         errors() {
@@ -191,15 +340,24 @@ export const VENUES = {
             if (state.heartbeats.size) failures.push('heartbeat response missing');
             if (url.endsWith('/user') && isPrivate) {
               if (!state.auth) failures.push('private WS never authenticated');
-              const required = ['user.order', 'user.advance.order', 'user.positions', 'user.balance', ...(impl === 'rust' ? ['user.trade'] : [])];
-              for (const channel of required) if (!state.channels.has(channel)) failures.push('missing private subscription ' + channel);
+              const required = [
+                'user.order',
+                'user.advance.order',
+                'user.positions',
+                'user.balance',
+                ...(impl === 'rust' ? ['user.trade'] : []),
+              ];
+              for (const channel of required)
+                if (!state.channels.has(channel)) failures.push('missing private subscription ' + channel);
             }
-            if (url.endsWith('/market')) for (const symbol of tickers.slice(0, 350 - books.length)) {
-              if (!state.channels.has('ticker.' + symbol)) failures.push('missing ticker subscription ' + symbol);
-            }
-            if (url.endsWith('/market')) for (const symbol of books) {
-              if (!state.channels.has('book.' + symbol + '.50')) failures.push('missing book subscription ' + symbol);
-            }
+            if (url.endsWith('/market'))
+              for (const symbol of tickers.slice(0, 350 - books.length)) {
+                if (!state.channels.has('ticker.' + symbol)) failures.push('missing ticker subscription ' + symbol);
+              }
+            if (url.endsWith('/market'))
+              for (const symbol of books) {
+                if (!state.channels.has('book.' + symbol + '.50')) failures.push('missing book subscription ' + symbol);
+              }
           }
           return failures;
         },
@@ -210,14 +368,26 @@ export const VENUES = {
       if (!path.startsWith('private/')) return true;
       try {
         const envelope = parseRequestJson(body);
-        const params = Object.keys(envelope.params).sort().map((key) => {
-          const value = envelope.params[key];
-          return key + (Array.isArray(value) ? value.join('') : String(value));
-        }).join('');
+        const params = Object.keys(envelope.params)
+          .sort()
+          .map((key) => {
+            const value = envelope.params[key];
+            return key + (Array.isArray(value) ? value.join('') : String(value));
+          })
+          .join('');
         const payload = envelope.method + envelope.id + envelope.api_key + params + envelope.nonce;
-        return method === 'POST' && envelope.method === path && Number.isSafeInteger(envelope.id) && Number.isSafeInteger(envelope.nonce) && Math.abs(Date.now() - envelope.nonce) < 60_000 && envelope.api_key === 'replay-key' &&
-          createHmac('sha256', 'replay-secret').update(payload).digest('hex') === envelope.sig;
-      } catch { return false; }
+        return (
+          method === 'POST' &&
+          envelope.method === path &&
+          Number.isSafeInteger(envelope.id) &&
+          Number.isSafeInteger(envelope.nonce) &&
+          Math.abs(Date.now() - envelope.nonce) < 60_000 &&
+          envelope.api_key === 'replay-key' &&
+          createHmac('sha256', 'replay-secret').update(payload).digest('hex') === envelope.sig
+        );
+      } catch {
+        return false;
+      }
     },
   },
   binance: {
@@ -236,20 +406,28 @@ export const VENUES = {
     ts: { module: `${root}/bybit/bybit.exchange.ts`, className: 'BybitExchange', name: 'bybit' },
     /** Book topics get a message handler once each subscription reaches the socket. */
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >= count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >=
+      count,
     startupSubscriptions: (records, books) => {
       const symbols = new Set();
       for (const record of records) {
-        if (record.type !== 'http' || record.method !== 'GET' || !(record.status >= 200 && record.status < 300) ||
-            new URL(record.url).pathname !== '/v5/market/instruments-info') continue;
+        if (
+          record.type !== 'http' ||
+          record.method !== 'GET' ||
+          !(record.status >= 200 && record.status < 300) ||
+          new URL(record.url).pathname !== '/v5/market/instruments-info'
+        )
+          continue;
         const body = JSON.parse(record.body);
         if (Number(body.retCode) !== 0) continue;
         for (const row of body.result?.list ?? []) {
-          if (['USDT', 'USDC'].includes(row.quoteCoin) && typeof row.symbol === 'string' && row.symbol) symbols.add(row.symbol);
+          if (['USDT', 'USDC'].includes(row.quoteCoin) && typeof row.symbol === 'string' && row.symbol)
+            symbols.add(row.symbol);
         }
       }
       const socket = 'wss://stream.bybit.com/v5/public/linear subscribe ';
-      return [...symbols].map((symbol) => `${socket}tickers.${symbol}`)
+      return [...symbols]
+        .map((symbol) => `${socket}tickers.${symbol}`)
         .concat(books.map((symbol) => `${socket}orderbook.1000.${symbol}`));
     },
     privateSocket: '/v5/private',
