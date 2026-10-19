@@ -87,6 +87,10 @@ const KNOWN_TS_FIXES = {
   }
   },
   bybit(account, rustAccount, tsResult) {
+    // TS's optional API-key/VIP UI metadata probe has no engine-frame output.
+    // Rust uses the conservative non-VIP batch limit; this is an intentional
+    // metadata omission, not a TS bug. All trading requests remain exact.
+    tsResult.requests = tsResult.requests.filter((key) => key !== 'GET https://api.bybit.com/v5/user/query-api?');
     // TS drops EC_PostOnlyWillTakeLiquidity; Rust reports PostOnly.
     for (const order of account.orders) {
       const fixed = rustAccount.orders.find((row) => row.id === order.id);

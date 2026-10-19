@@ -73,3 +73,13 @@ price (the TS fallback could create a duplicate).
 This lane ports linear USDT/USDC contracts. Inverse, spot and demo remain separate
 lanes. TS stays available as the replay oracle and as the base class of those
 unported variants; it cannot yet be deleted without breaking them.
+
+The shared harness now compares normalized outbound reads and subscriptions.
+It requires the native execution/wallet feeds in addition to TS's order/position
+feeds. One optional TS-only read, `GET /v5/user/query-api`, is explicitly excluded
+from request-set parity: it caches API-key/VIP UI metadata, which has no engine
+frame representation. Native keeps its conservative non-VIP ten-order batch
+limit; the private fixture's `No VIP` setting uses ten in both implementations.
+This metadata omission is intentional and is not classified as a TS bug. Every
+trading request, other read, authentication identity and subscription remains
+checked; unmatched tape requests still fail.

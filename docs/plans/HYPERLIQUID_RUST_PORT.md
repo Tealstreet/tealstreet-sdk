@@ -136,3 +136,30 @@ fixed availability to advance with delivered events and limits Binance fixture
 integration tests to the Binance CI matrix entry. Default combined-build replay
 revalidation is running. Origin has since landed Bybit; merge it next and repeat
 affected checks before opening the PR.
+
+Phase 5 complete after merging Bybit at `1e3dee5f5c`: all local gates pass.
+Final single-venue bundle sizes are Hyperliquid 1,148,178 bytes, Binance 907,396
+bytes and Bybit 886,508 bytes, each below 1,258,291 bytes. Default combined
+release build also passes, with all three constructors retained; six real-wasm
+TS bridge checks and two Workers host checks pass. The CI matrix runs those
+integration checks on the combined build before replacing it with the selected
+venue bundle for size/replay checks.
+
+| Venue | TS CPU ms | Rust CPU ms | TS steady ms | Rust steady ms | TS retained MB | Rust retained MB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Hyperliquid | 398.0 | 69.8 | 33.0 | 29.1 | 4.1 | 1.9 |
+| Binance | 149.6 | 62.8 | 81.8 | 20.8 | 2.3 | 2.3 (1.02x less) |
+| Bybit | 393.7 | 291.9 | 272.6 | 169.7 | 3.6 | 2.7 |
+
+Public numbers are three-run medians. All three private correctness gates pass.
+Bans, workspace fmt, venue Clippy, default wasm Clippy and 115 venue native tests
+pass. Repository typecheck, lint and test pass; the first post-merge test run
+hit three unrelated Hyro configuration import timeouts, and the complete retry
+passed without code changes. Twelve harness tests pass. Bybit's optional
+API-key/VIP UI metadata request has an explicit scoped normalization, documented
+in its port plan; this is an intentional omission, not a TS bug. Authentication,
+trading requests and every other read/subscription remain checked.
+
+Next: publish PR into feat/rust-rewrite, adversarial local reviews with findings
+posted on the PR, fixes/review repetition, then wait for green CI before merging
+and creating the follow-up branch.

@@ -141,14 +141,17 @@ jobs:
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
       - run: yarn install --frozen-lockfile --network-timeout 600000
-      - name: Build the venue wasm engine
-        run: yarn rust:build-wasm --venue ${{ matrix.venue }}
+      - name: Build the combined wasm engine
+        if: matrix.venue == 'binance'
+        run: yarn rust:build-wasm
       - name: The TS exchange on the wasm engine
         if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex test-wasm
       - name: The Cloudflare Workers host
         if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex-wasm test
+      - name: Build the venue wasm engine
+        run: yarn rust:build-wasm --venue ${{ matrix.venue }}
       - name: Check the wasm size budget
         run: |
           size=$(stat -c%s sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm)
