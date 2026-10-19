@@ -4,9 +4,10 @@ The Tealstreet exchange store. One `DefaultStore` per exchange
 account; mirrored across worker → main thread via the worker's
 throttled postMessage.
 
-Rust frames keep quantities in published base units. For MEXC, `FrameApplier`
+Rust order frames keep quantities in published base units. For MEXC and KuCoin futures, `FrameApplier`
 also derives native placement-unit order extras from `contractSize` so chaser
-arithmetic retains its native-volume contract. `SETTINGS` optionally carries
+arithmetic retains its native-volume contract. Use decimal-safe division here:
+a base fill of 0.3 at multiplier 0.1 must reconstruct exactly 3 lots. `SETTINGS` optionally carries
 separate buy/sell leverage columns; do not collapse these hedge rails to the
 single representative leverage value when applying frames.
 

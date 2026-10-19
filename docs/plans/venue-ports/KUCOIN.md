@@ -170,3 +170,43 @@ recovery and token URL routing. Workspace fmt/bans/native+wasm clippy/tests pass
 Eight-venue wasm is 2,662,854 bytes against the existing 3 MiB budget. Node 22
 full eight-venue replay and SDK integration verification are running; results
 below supersede the earlier seven-venue performance measurements.
+
+
+### Final local gates (eight venues, Node 22)
+
+All 19 replays PASS: eight public correctness/CPU/memory gates and eleven
+account/trading correctness gates (including all four OKX variants). KuCoin
+public: 16,157 replay lifecycle/data frames, 692 markets/tickers, two identical
+full books. Three-run medians:
+
+| Public venue | TS / Rust CPU (ms) | TS / Rust retained (MB) |
+| --- | --- | --- |
+| Binance | 294.1 / 130.4 | 4.2 / 2.2 |
+| MEXC | 1003.4 / 448.0 | 10.0 / 3.4 |
+| Bybit | 1070.4 / 752.9 | 6.3 / 2.4 |
+| BingX | 151.7 / 95.1 | 3.6 / 2.0 |
+| Crypto.com | 196.0 / 151.3 | 2.0 / 1.4 |
+| OKX | 1117.1 / 957.6 | 5.2 / 3.4 |
+| KuCoin | 1050.2 / 678.8 | 6.6 / 2.7 |
+| WEEX | 132.3 / 86.6 | 5.0 / 2.1 |
+
+KuCoin steady CPU 720.2 / 430.7 ms; private 32 frames / 17 commands PASS,
+with zero unserved/unused mutation or socket protocol failures. Under concurrent
+root tests, two Node 22 attempts hit the existing one-second backing-buffer
+settling deadline before comparison; reruns after root tests PASS unchanged.
+Root typecheck 44 tasks, lint 28 tasks, tests 27 tasks (6,563 safe-cex tests per
+suite) PASS. Workspace 531 native tests, fmt, bans and native/wasm clippy PASS;
+wasm integration 20, host 13 and harness 49 tests PASS. Wasm 2,662,854 bytes.
+
+Final shell audit found the incoming MEXC native-unit bridge must also apply to
+KuCoin. Extended its real wasm test to 7 lots at multiplier 0.1, filled 3 and
+remaining 4: proved failure from missing placement extras, then enabled the
+bridge and decimal-safe division (base 0.7/0.3/0.4; native 7/3/4). Independent
+review and final TS verification are recorded in the next checkpoint.
+
+Next: publish PR into feat/rust-rewrite, fresh adversarial local sub-agent
+reviews posted as comments, fix/review loop, green CI, merge and fresh branch.
+
+Final lot-bridge review PASS, no P1/P2; existing MEXC compatibility 3/3 PASS.
+Fresh Node 22 package typecheck/lint, all 6,563 unit tests (458 files) and all
+20 wasm integration tests PASS after the bridge fix. Local gates are complete.

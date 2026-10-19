@@ -763,14 +763,14 @@ describe('RustEngineExchange', () => {
         requests.push(request);
         const name = new URL(request.url).pathname.split('/').pop()!;
         const data: Record<string, unknown> = {
-          active: [{ symbol: 'XBTUSDTM', baseCurrency: 'XBT', settleCurrency: 'USDT', status: 'Open', lotSize: 1, tickSize: 0.1, multiplier: 0.001, maxOrderQty: 1000, maxLeverage: 100 }],
+          active: [{ symbol: 'XBTUSDTM', baseCurrency: 'XBT', settleCurrency: 'USDT', status: 'Open', lotSize: 1, tickSize: 0.1, multiplier: 0.1, maxOrderQty: 1000, maxLeverage: 100 }],
           allTickers: [{ symbol: 'XBTUSDTM', price: '100', bestBidPrice: '99', bestAskPrice: '101' }],
           positions: [{ symbol: 'XBTUSDTM', currentQty: 10, avgEntryPrice: '90', markPrice: '100', leverage: '10', marginMode: 'CROSS', positionMode: 0, unrealisedPnl: '0.1' }],
           'account-overview': { accountEquity: '1000', availableBalance: '900', orderMargin: '100', unrealisedPNL: '0.1' },
           getPositionMode: { positionMode: 0 },
           getMarginMode: { marginMode: 'CROSS' },
           getCrossUserLeverage: { leverage: '10' },
-          orders: request.method === 'POST' ? { orderId: 'native-order' } : { currentPage: 1, totalPage: 1, totalNum: 0, items: [] },
+          orders: request.method === 'POST' ? { orderId: 'native-order' } : { currentPage: 1, totalPage: 1, totalNum: 1, items: [{ id: 'existing-native', symbol: 'XBTUSDTM', side: 'buy', type: 'limit', status: 'open', price: '95', size: 7, filledSize: 3, remainSize: 4, createdAt: 1700000000000 }] },
           stopOrders: { currentPage: 1, totalPage: 1, totalNum: 0, items: [] },
           snapshot: { sequence: 100, bids: [[99, 3]], asks: [[101, 4]] },
         };
@@ -786,8 +786,9 @@ describe('RustEngineExchange', () => {
     const store = new DefaultStore();
     exchange = new RustEngineExchange('kucoin', { key: 'fixture-key', secret: 'fixture-secret', passphrase: 'fixture-passphrase', extra: { kucoinBroker: { partner: 'partner', brokerKey: 'broker-fixture', brokerName: 'tealstreet' } } }, store);
     await exchange.start();
-    expect(store.marketsBySymbol.BTCUSDT.contractSize).toBe(0.001);
-    expect(store.positions[0].contracts).toBe(0.01);
+    expect(store.marketsBySymbol.BTCUSDT.contractSize).toBe(0.1);
+    expect(store.positions[0].contracts).toBe(1);
+    expect(store.orders[0]).toMatchObject({ amount: 0.7, filled: 0.3, remaining: 0.4, extra: { remainingNative: 4, filledInPlacementUnits: 3 } });
     const ids = await exchange.placeOrder({ symbol: 'BTCUSDT', side: OrderSide.Buy, type: OrderType.Limit, price: 95, amount: 2, clientOrderId: 'caller-id' });
     expect(ids).toEqual(['native-order']);
     const write = requests.find((request) => request.method === 'POST' && request.url.endsWith('/orders'))!;

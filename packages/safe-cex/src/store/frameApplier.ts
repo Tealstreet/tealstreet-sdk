@@ -4,6 +4,7 @@ import type { PackedTickerDelta, Store, StoreUpdate } from './store.interface';
 
 import { LOADED_FLAG, MARKET_FLAG, TICKER_FIELDS, orderEnums, positionEnums } from '@tealstreet/safe-cex-wasm/wire';
 import { MarginType, OrderSide, PositionMode } from '../types';
+import { divide } from '../utils/safe-math';
 
 export type FrameBook = { symbol: string; orderbook: OrderBook };
 export type FrameCandle = { symbol: string; interval: string; candle: Candle };
@@ -116,8 +117,8 @@ export class FrameApplier {
           ...((enums.rejectReason || this.nativePlacementAmounts) && { extra: {
             ...(enums.rejectReason && { rejectReason: enums.rejectReason as never }),
             ...(this.nativePlacementAmounts && {
-              remainingNative: orders.remaining[i] / this.contractSizes[orders.market[i]],
-              filledInPlacementUnits: orders.filled[i] / this.contractSizes[orders.market[i]],
+              remainingNative: divide(orders.remaining[i], this.contractSizes[orders.market[i]]),
+              filledInPlacementUnits: divide(orders.filled[i], this.contractSizes[orders.market[i]]),
             }),
           } }),
         } as Order);

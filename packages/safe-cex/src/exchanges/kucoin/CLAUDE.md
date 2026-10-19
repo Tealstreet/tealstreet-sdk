@@ -925,3 +925,6 @@ current common command cannot express a safe native trigger direction/reference.
 
 The documented private tape and public capture replay live in `sdk-rs/harness`;
 `docs/plans/venue-ports/KUCOIN.md` records review findings and gate evidence.
+
+The Rust frame bridge reconstructs native remainder/fill extras with decimal-safe
+division by contractSize, preserving chaser placement units (0.3 / 0.1 = 3 lots).
