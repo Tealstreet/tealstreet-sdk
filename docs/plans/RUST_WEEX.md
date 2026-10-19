@@ -163,3 +163,18 @@ order before cancel, avoiding dependence on safety-read timing. It passes strict
 request-body/signature matching and requires every expected write to be consumed.
 No optional-write exception remains. Final matrix results are posted on PR#1301;
 landing still waits for green CI on this merged head.
+
+## Combined-venue memory regression
+
+The four-venue build exposed a local OKX public retained-memory miss: Rust
+2,526,248 bytes versus TS2,508,376. Public startup previously retained the
+full 5×market topic vector alongside serialized messages. It now serializes
+100 topics at a time, preserving channel order, instrument IDs and existing
+chunk boundaries. The 101-market regression covers all505 topics across
+channel boundaries; OKX public13/13 and clippy pass. Independent sub-agent
+review found no correctness issues. No gate thresholds or accounting changed.
+
+Rebuilt wasm is1,912,416 bytes. The isolated OKX replay passed with one fewer
+64KiB linear-memory page and111,880 bytes less retained memory than TS. The
+complete eleven-gate replay matrix and final-head CI are the remaining landing
+checks; final numbers will be recorded on PR#1301.
