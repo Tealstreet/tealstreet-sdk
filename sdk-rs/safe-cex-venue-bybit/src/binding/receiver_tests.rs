@@ -1813,40 +1813,331 @@ fn retained_audit_startup_preserves_family_request_order() {
 #[test]
 fn audit_unknown_outcome_preserves_native_submission_rejection() {
     let output = std::process::Command::new("node")
-        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/primary-batch-binding-oracle.cjs"))
-        .arg("--unknown-outcome").output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/primary-batch-binding-oracle.cjs"
+        ))
+        .arg("--unknown-outcome")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let source: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(source.len(), 12);
+    assert_eq!(source.len(), 22);
     run(async {
         for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
             for (profile, expected) in source.iter().enumerate() {
                 let exchange = venue(name.clone());
                 let rt = exchange.js.get().unwrap();
+                if profile >= 12 {
+                    let events = Rc::new(RefCell::new(Vec::<String>::new()));
+                    let marker = Js::object(vec![("marker", Js::Number(73.))]);
+                    let input = Js::object(vec![("message", Js::str("timeout"))]);
+                    let input = match profile {
+                        12 => {
+                            for (key, value) in [
+                                ("code", Js::Undefined),
+                                ("message", Js::str("timeout")),
+                                ("name", Js::Undefined),
+                                ("response", Js::Undefined),
+                            ] {
+                                let trace = events.clone();
+                                input
+                                    .define_accessor(
+                                        key,
+                                        Some(Rc::new(move |_| {
+                                            trace.borrow_mut().push(key.into());
+                                            Ok(value.clone())
+                                        })),
+                                        None,
+                                    )
+                                    .unwrap();
+                            }
+                            input
+                        }
+                        13 => {
+                            let reason = marker.clone();
+                            input
+                                .define_accessor(
+                                    "name",
+                                    Some(Rc::new(move |_| Err(Thrown::new(reason.clone())))),
+                                    None,
+                                )
+                                .unwrap();
+                            input
+                        }
+                        14 => {
+                            let trace = events.clone();
+                            input
+                                .set(
+                                    "message",
+                                    Js::object(vec![(
+                                        "toString",
+                                        Js::function("toString", move |_, _| {
+                                            trace.borrow_mut().push("string".into());
+                                            Ok(Js::str("timeout"))
+                                        }),
+                                    )]),
+                                )
+                                .unwrap();
+                            input
+                        }
+                        15 => {
+                            let reason = marker.clone();
+                            input
+                                .set(
+                                    "message",
+                                    Js::object(vec![(
+                                        "toString",
+                                        Js::function("toString", move |_, _| {
+                                            Err(Thrown::new(reason.clone()))
+                                        }),
+                                    )]),
+                                )
+                                .unwrap();
+                            input
+                        }
+                        16 | 17 => {
+                            let reason = marker.clone();
+                            let response = Js::object(vec![(
+                                "status",
+                                Js::Number(if profile == 16 { 503. } else { 400. }),
+                            )]);
+                            response
+                                .define_accessor(
+                                    "data",
+                                    Some(Rc::new(move |_| Err(Thrown::new(reason.clone())))),
+                                    None,
+                                )
+                                .unwrap();
+                            input.define("response", response).unwrap();
+                            input
+                        }
+                        18 => {
+                            let f = Js::function("error", |_, _| Ok(Js::Undefined));
+                            f.define("message", Js::str("timeout")).unwrap();
+                            f
+                        }
+                        19 => {
+                            let array = Js::array(vec![]);
+                            rt.global("Object")
+                                .unwrap()
+                                .call_method(
+                                    "setPrototypeOf",
+                                    vec![
+                                        array.clone(),
+                                        Js::object(vec![("message", Js::str("timeout"))]),
+                                    ],
+                                )
+                                .unwrap();
+                            array
+                        }
+                        20 => {
+                            input.set("message", Js::Null).unwrap();
+                            input
+                        }
+                        21 => {
+                            let trace = events.clone();
+                            let status = Js::object(vec![(
+                                "valueOf",
+                                Js::function("valueOf", move |_, _| {
+                                    trace.borrow_mut().push("status".into());
+                                    Ok(Js::Number(400.))
+                                }),
+                            )]);
+                            let trace = events.clone();
+                            let code = Js::object(vec![(
+                                "valueOf",
+                                Js::function("valueOf", move |_, _| {
+                                    trace.borrow_mut().push("venue".into());
+                                    Ok(Js::Number(-1007.))
+                                }),
+                            )]);
+                            input
+                                .define(
+                                    "response",
+                                    Js::object(vec![
+                                        ("status", status),
+                                        ("data", Js::object(vec![("code", code)])),
+                                    ]),
+                                )
+                                .unwrap();
+                            input
+                        }
+                        _ => unreachable!(),
+                    };
+                    let result = rt
+                        .global("isUnknownOutcome")
+                        .unwrap()
+                        .call(Js::Undefined, vec![input]);
+                    let value = result.as_ref().ok().map(Js::truthy);
+                    let observed = serde_json::json!({"value":value,"original":result.as_ref().err().is_some_and(|e|e.value.same_reference(&marker)),"events":*events.borrow()});
+                    assert_eq!(
+                        &observed, expected,
+                        "UNKNOWN_OUTCOME_PROPERTY {name:?} profile {profile}"
+                    );
+                    exchange.base.dispose().unwrap();
+                    continue;
+                }
                 let reason = Js::object(vec![("message", Js::str("timeout"))]);
                 match profile {
-                    0 => reason.define("opaque", Js::object(vec![("text", Js::utf16(&[0xd800])), ("number", Js::Number(f64::NAN)), ("missing", Js::Undefined)])).unwrap(),
-                    1 => rt.global("Object").unwrap().call_method("defineProperty", vec![reason.clone(), Js::str("message"), Js::object(vec![("value", Js::str("timeout")), ("enumerable", Js::Bool(false))])]).map(|_| ()).unwrap(),
-                    2 => { reason.set("message", Js::str("rejected")).unwrap();rt.global("Object").unwrap().call_method("setPrototypeOf", vec![reason.clone(), Js::object(vec![("code", Js::str("ECONNRESET"))])]).unwrap(); },
-                    3 => reason.define("response", Js::object(vec![("status", Js::Number(f64::INFINITY))])).unwrap(),
-                    4 => { reason.set("message", Js::str("Remote signer unavailable")).unwrap();reason.define("response", Js::object(vec![("status", Js::Number(503.))])).unwrap(); },
-                    5 => reason.define("response", Js::object(vec![("status", Js::Number(400.))])).unwrap(),
-                    6 => { reason.set("message", Js::str("rejected")).unwrap();reason.define("response", Js::object(vec![("status", Js::Number(400.)), ("data", Js::object(vec![("code", Js::Number(-1007.))]))])).unwrap(); },
-                    7 => { reason.set("message", Js::str("rejected")).unwrap();reason.define("name", Js::str("TradeTunnel")).unwrap(); },
-                    8 => reason.define_accessor("unused", Some(Rc::new(|_| Err(Thrown::error("Error", "unread getter")))), None).unwrap(),
-                    9 => {reason.set("message", Js::str("rejected")).unwrap();reason.define("name", Js::utf16(&[84,114,97,100,101,84,117,110,110,101,108,0xd800])).unwrap();},
-                    10 => {let response=Js::object(vec![("status", Js::Number(503.))]); response.define_accessor("unused", Some(Rc::new(|_| Err(Thrown::error("Error", "unread response field")))), None).unwrap();reason.define("response", response).unwrap();},
-                    11 => {},
+                    0 => reason
+                        .define(
+                            "opaque",
+                            Js::object(vec![
+                                ("text", Js::utf16(&[0xd800])),
+                                ("number", Js::Number(f64::NAN)),
+                                ("missing", Js::Undefined),
+                            ]),
+                        )
+                        .unwrap(),
+                    1 => rt
+                        .global("Object")
+                        .unwrap()
+                        .call_method(
+                            "defineProperty",
+                            vec![
+                                reason.clone(),
+                                Js::str("message"),
+                                Js::object(vec![
+                                    ("value", Js::str("timeout")),
+                                    ("enumerable", Js::Bool(false)),
+                                ]),
+                            ],
+                        )
+                        .map(|_| ())
+                        .unwrap(),
+                    2 => {
+                        reason.set("message", Js::str("rejected")).unwrap();
+                        rt.global("Object")
+                            .unwrap()
+                            .call_method(
+                                "setPrototypeOf",
+                                vec![
+                                    reason.clone(),
+                                    Js::object(vec![("code", Js::str("ECONNRESET"))]),
+                                ],
+                            )
+                            .unwrap();
+                    }
+                    3 => reason
+                        .define(
+                            "response",
+                            Js::object(vec![("status", Js::Number(f64::INFINITY))]),
+                        )
+                        .unwrap(),
+                    4 => {
+                        reason
+                            .set("message", Js::str("Remote signer unavailable"))
+                            .unwrap();
+                        reason
+                            .define("response", Js::object(vec![("status", Js::Number(503.))]))
+                            .unwrap();
+                    }
+                    5 => reason
+                        .define("response", Js::object(vec![("status", Js::Number(400.))]))
+                        .unwrap(),
+                    6 => {
+                        reason.set("message", Js::str("rejected")).unwrap();
+                        reason
+                            .define(
+                                "response",
+                                Js::object(vec![
+                                    ("status", Js::Number(400.)),
+                                    ("data", Js::object(vec![("code", Js::Number(-1007.))])),
+                                ]),
+                            )
+                            .unwrap();
+                    }
+                    7 => {
+                        reason.set("message", Js::str("rejected")).unwrap();
+                        reason.define("name", Js::str("TradeTunnel")).unwrap();
+                    }
+                    8 => reason
+                        .define_accessor(
+                            "unused",
+                            Some(Rc::new(|_| Err(Thrown::error("Error", "unread getter")))),
+                            None,
+                        )
+                        .unwrap(),
+                    9 => {
+                        reason.set("message", Js::str("rejected")).unwrap();
+                        reason
+                            .define(
+                                "name",
+                                Js::utf16(&[
+                                    84, 114, 97, 100, 101, 84, 117, 110, 110, 101, 108, 0xd800,
+                                ]),
+                            )
+                            .unwrap();
+                    }
+                    10 => {
+                        let response = Js::object(vec![("status", Js::Number(503.))]);
+                        response
+                            .define_accessor(
+                                "unused",
+                                Some(Rc::new(|_| {
+                                    Err(Thrown::error("Error", "unread response field"))
+                                })),
+                                None,
+                            )
+                            .unwrap();
+                        reason.define("response", response).unwrap();
+                    }
+                    11 => {}
                     _ => unreachable!(),
                 }
-                let sends=Rc::new(Cell::new(0));let count=sends.clone();let rejected=reason.clone();
-                rt.this.get("xhr").unwrap().define("post", Js::function("post", move |_, _| {count.set(count.get()+1);Err(Thrown::new(rejected.clone()))})).unwrap();
-                let reports=Rc::new(Cell::new(0));let count=reports.clone();
-                rt.this.define("emitAndLogError", Js::function("report", move |_, _| {count.set(count.get()+1);Ok(Js::Undefined)})).unwrap();
-                let result=rt.this.call_method("submitCreateOrders", vec![Js::array(vec![Js::object(vec![])]), Js::object(vec![("clientOrderId", if profile==11 {Js::Undefined} else {Js::str("caller")})])]).unwrap();
-                let result=await_js(&exchange.base.runtime, result).await;
-                let observed=serde_json::json!({"rejected":result.is_err(), "original":result.as_ref().err().is_some_and(|e| e.value.same_reference(&reason)), "sends":sends.get(), "reports":reports.get()});
-                assert_eq!(&observed, expected, "UNKNOWN_OUTCOME_BINDING {name:?} profile {profile}: {result:?}");
+                let sends = Rc::new(Cell::new(0));
+                let count = sends.clone();
+                let rejected = reason.clone();
+                rt.this
+                    .get("xhr")
+                    .unwrap()
+                    .define(
+                        "post",
+                        Js::function("post", move |_, _| {
+                            count.set(count.get() + 1);
+                            Err(Thrown::new(rejected.clone()))
+                        }),
+                    )
+                    .unwrap();
+                let reports = Rc::new(Cell::new(0));
+                let count = reports.clone();
+                rt.this
+                    .define(
+                        "emitAndLogError",
+                        Js::function("report", move |_, _| {
+                            count.set(count.get() + 1);
+                            Ok(Js::Undefined)
+                        }),
+                    )
+                    .unwrap();
+                let result = rt
+                    .this
+                    .call_method(
+                        "submitCreateOrders",
+                        vec![
+                            Js::array(vec![Js::object(vec![])]),
+                            Js::object(vec![(
+                                "clientOrderId",
+                                if profile == 11 {
+                                    Js::Undefined
+                                } else {
+                                    Js::str("caller")
+                                },
+                            )]),
+                        ],
+                    )
+                    .unwrap();
+                let result = await_js(&exchange.base.runtime, result).await;
+                let observed = serde_json::json!({"rejected":result.is_err(), "original":result.as_ref().err().is_some_and(|e| e.value.same_reference(&reason)), "sends":sends.get(), "reports":reports.get()});
+                assert_eq!(
+                    &observed, expected,
+                    "UNKNOWN_OUTCOME_BINDING {name:?} profile {profile}: {result:?}"
+                );
                 exchange.base.dispose().unwrap();
             }
         }

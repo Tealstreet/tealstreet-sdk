@@ -78,57 +78,97 @@ pub fn merge_updates_using_last_update<T>(
 /// ts: unknownSendOutcome.isUnsentSigningFailure. A hosted request that failed while
 /// getting its signature never reached the venue.
 pub fn is_unsent_signing_failure(message: Option<&str>) -> bool {
-    regex::Regex::new(r"(Signing request [^\t\n\v\f\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]+ timed out|Remote signer unavailable|Failed to send signing request|signing aborted)")
-        .expect("source regex")
-        .is_match(message.unwrap_or(""))
+    let message = Value::String(message.unwrap_or("").into());
+    JsonOutcome(Some(&message))
+        .outcome_test(NOT_SENT_PATTERN, false)
+        .expect("string source test")
 }
-pub fn is_unknown_outcome(error: &Value) -> Result<bool, String> {
-    use regex::Regex;
-    if !error.is_object() && !error.is_array() {
+/// Property and coercion capabilities for the shared lost-send decision.
+pub trait UnknownOutcomeValue: Sized {
+    type Error;
+    fn outcome_object(&self) -> bool;
+    fn outcome_get(&self, key: &str) -> Result<Self, Self::Error>;
+    fn outcome_nullish(&self) -> bool;
+    fn outcome_truthy(&self) -> bool;
+    fn outcome_number(&self) -> Result<f64, Self::Error>;
+    fn outcome_network_code(&self) -> bool;
+    fn outcome_test(&self, pattern: &str, ignore_case: bool) -> Result<bool, Self::Error>;
+}
+
+const NOT_SENT_PATTERN: &str = r"(Signing request \S+ timed out|Remote signer unavailable|Failed to send signing request|signing aborted)";
+const UNKNOWN_OUTCOME_PATTERN: &str = r"timeout|timed out|socket hang up|network error|network (connection|request) failed|tradetunnel|connection (lost|closed|reset)|failed to fetch|send status unknown|econnreset|econnaborted|etimedout|status code 5\d\d|bad gateway|gateway time-?out|service (temporarily )?unavailable|upstream";
+
+pub fn is_unknown_outcome_value<V: UnknownOutcomeValue>(error: &V) -> Result<bool, V::Error> {
+    if !error.outcome_object() {
         return Ok(false);
     }
-    let string = |value: Option<&Value>| {
-        js_string(
-            value
-                .filter(|value| !value.is_null())
-                .or(Some(&Value::String(String::new()))),
-        )
-        .map_err(|error| format!("{error:?}"))
-    };
-    let message = string(error.get("message"))?;
-    if is_unsent_signing_failure(Some(&message)) {
+    // Source destructuring gets all four properties before any coercion.
+    let code = error.outcome_get("code")?;
+    let message = error.outcome_get("message")?;
+    let name = error.outcome_get("name")?;
+    let response = error.outcome_get("response")?;
+    if message.outcome_test(NOT_SENT_PATTERN, false)? {
         return Ok(false);
     }
-    if let Some(response) = error
-        .get("response")
-        .filter(|response| js_truthy(Some(response)))
-    {
-        let status = response.get("status").filter(|value| !value.is_null());
-        let status = match status {
-            Some(status) => js_number(Some(status)),
-            None => Ok(0.0),
-        }
-        .map_err(|error| format!("{error:?}"))?;
-        if status >= 500.0 {
+    if response.outcome_truthy() {
+        let status = response.outcome_get("status")?;
+        if !status.outcome_nullish() && status.outcome_number()? >= 500.0 {
             return Ok(true);
         }
-        let code = response.get("data").and_then(|data| data.get("code"));
-        return Ok(js_number(code).map_err(|error| format!("{error:?}"))? == -1007.0);
+        let data = response.outcome_get("data")?;
+        return Ok(
+            !data.outcome_nullish() && data.outcome_get("code")?.outcome_number()? == -1007.0
+        );
     }
-    if error
-        .get("code")
-        .and_then(Value::as_str)
-        .is_some_and(|code| {
+    Ok(code.outcome_network_code()
+        || message.outcome_test(UNKNOWN_OUTCOME_PATTERN, true)?
+        || name.outcome_test("tradetunnel", true)?)
+}
+
+struct JsonOutcome<'a>(Option<&'a Value>);
+impl UnknownOutcomeValue for JsonOutcome<'_> {
+    type Error = String;
+    fn outcome_object(&self) -> bool {
+        self.0
+            .is_some_and(|value| value.is_object() || value.is_array())
+    }
+    fn outcome_get(&self, key: &str) -> Result<Self, String> {
+        Ok(Self(self.0.and_then(|value| value.get(key))))
+    }
+    fn outcome_nullish(&self) -> bool {
+        self.0.is_none_or(Value::is_null)
+    }
+    fn outcome_truthy(&self) -> bool {
+        js_truthy(self.0)
+    }
+    fn outcome_number(&self) -> Result<f64, String> {
+        js_number(self.0).map_err(|error| format!("{error:?}"))
+    }
+    fn outcome_network_code(&self) -> bool {
+        self.0.and_then(Value::as_str).is_some_and(|code| {
             ["ECONNRESET", "ECONNABORTED", "ETIMEDOUT", "ERR_NETWORK"].contains(&code)
         })
-    {
-        return Ok(true);
     }
-    let unknown = Regex::new(r"(?i-u:timeout|timed out|socket hang up|network error|network (connection|request) failed|tradetunnel|connection (lost|closed|reset)|failed to fetch|send status unknown|econnreset|econnaborted|etimedout|status code 5[0-9][0-9]|bad gateway|gateway time-?out|service (temporarily )?unavailable|upstream)").expect("source regex");
-    if unknown.is_match(&message) {
-        return Ok(true);
+    fn outcome_test(&self, pattern: &str, ignore_case: bool) -> Result<bool, String> {
+        let text = js_string(
+            self.0
+                .filter(|v| !v.is_null())
+                .or(Some(&Value::String(String::new()))),
+        )
+        .map_err(|error| format!("{error:?}"))?;
+        // Match JS's non-Unicode case folding and exact whitespace set.
+        let pattern = pattern.replace(r"\d", "[0-9]").replace(r"\S", r"[^\t\n\v\f\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]");
+        let pattern = if ignore_case {
+            format!("(?i-u:{pattern})")
+        } else {
+            pattern
+        };
+        Ok(regex::Regex::new(&pattern)
+            .expect("source regex")
+            .is_match(&text))
     }
-    Ok(Regex::new("(?i-u:tradetunnel)")
-        .expect("source regex")
-        .is_match(&string(error.get("name"))?))
+}
+
+pub fn is_unknown_outcome(error: &Value) -> Result<bool, String> {
+    is_unknown_outcome_value(&JsonOutcome(Some(error)))
 }

@@ -160,16 +160,7 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
     def(
         "isUnknownOutcome",
         Js::function("isUnknownOutcome", |_, args| {
-            let value = arg(&args, 0);
-            if !value.is_object() && !value.is_array() {
-                return Ok(Js::Bool(false));
-            }
-            Ok(Js::Bool(
-                safe_cex_store::remaining_utils::is_unknown_outcome(&super::value::to_json(
-                    &value,
-                )?)
-                .map_err(|message| super::value::Thrown::error("TypeError", &message))?,
-            ))
+            safe_cex_store::remaining_utils::is_unknown_outcome_value(&arg(&args, 0)).map(Js::Bool)
         }),
     );
     // ts: bybitFeeOverlay — null when no rate was returned, else (markets) => markets.

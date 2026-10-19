@@ -12,7 +12,7 @@ if (process.argv.includes('--unknown-outcome')) {
     '\nclass Subject { ' + method.getText(ast).replace(/^protected /, '') + ' }',
     {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
   const {mapSeries} = require('p-iteration');
-  const Subject = new Function('mapSeries', 'ENDPOINTS', code + ';return Subject;')(mapSeries, {CREATE_ORDER:'/v5/order/create'});
+  const {Subject,isUnknownOutcome} = new Function('mapSeries', 'ENDPOINTS', code + ';return {Subject,isUnknownOutcome};')(mapSeries, {CREATE_ORDER:'/v5/order/create'});
   (async () => {
     const outputs = [];
     for (let profile = 0; profile < 12; profile++) {
@@ -37,7 +37,23 @@ if (process.argv.includes('--unknown-outcome')) {
       assert.equal(sends,1);assert.equal(reports,1);
       outputs.push({rejected,original,sends,reports});
     }
-    assert.equal(outputs.length,12);process.stdout.write(JSON.stringify(outputs));
+    for (let profile=12;profile<22;profile++) {
+      const events=[], marker={marker:73}, error={message:'timeout'};
+      if(profile===12) for(const [key,value] of Object.entries({code:undefined,message:'timeout',name:undefined,response:undefined})) Object.defineProperty(error,key,{configurable:true,get(){events.push(key);return value;}});
+      if(profile===13) Object.defineProperty(error,'name',{get(){throw marker;}});
+      if(profile===14) error.message={toString(){events.push('string');return 'timeout';}};
+      if(profile===15) error.message={toString(){throw marker;}};
+      if(profile===16) error.response={status:503,get data(){throw marker;}};
+      if(profile===17) error.response={status:400,get data(){throw marker;}};
+      let input=error;
+      if(profile===18) {input=function(){};input.message='timeout';}
+      if(profile===19) {input=[];Object.setPrototypeOf(input,{message:'timeout'});}
+      if(profile===20) error.message=null;
+      if(profile===21) error.response={status:{valueOf(){events.push('status');return 400;}},data:{code:{valueOf(){events.push('venue');return -1007;}}}};
+      let value=null,original=false;try{value=isUnknownOutcome(input);}catch(e){assert.equal(e,marker);original=true;}
+      outputs.push({value,original,events});
+    }
+    assert.equal(outputs.length,22);process.stdout.write(JSON.stringify(outputs));
   })().catch(e=>{console.error(e);process.exitCode=1;});
 } else {
 // Maintained class bodies run together; scripted I/O supplies the same envelopes
