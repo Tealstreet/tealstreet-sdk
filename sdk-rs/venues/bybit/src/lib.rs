@@ -198,6 +198,7 @@ pub struct BybitLinear {
     public: Connection,
     private: Connection,
     books: HashMap<String, BookState>,
+    book_levels: BookLevels,
     /// Kline subscriptions by (symbol, interval), counted.
     candles: HashMap<(String, String), u32>,
     startup: Startup,
@@ -287,6 +288,7 @@ impl BybitLinear {
             public: Connection::new(),
             private: Connection::new(),
             books: HashMap::new(),
+            book_levels: BookLevels::default(),
             candles: HashMap::new(),
             startup: Startup {
                 retry_ms: STARTUP_RETRY_MIN_MS,
@@ -680,7 +682,7 @@ impl BybitLinear {
                 on_ticker(cx, &event.data, self.variant);
             }
         } else if topic.starts_with("orderbook.") {
-            if let Ok(event) = serde_json::from_str::<BookEvent>(text) {
+            if let Ok(event) = self.book_levels.decode(text) {
                 self.on_book(cx, event);
             }
         } else if topic.starts_with("kline.")
@@ -690,49 +692,52 @@ impl BybitLinear {
         }
     }
 
-    fn on_book(&mut self, cx: &mut Cx<'_, Pending>, event: BookEvent<'_>) {
-        let BookEvent { kind, data } = event;
-        let Some(state) = self.books.get_mut(data.s.as_ref()) else {
+    fn on_book(&mut self, cx: &mut Cx<'_, Pending>, event: BookMessage<'_>) {
+        let BookMessage {
+            kind,
+            symbol,
+            update,
+        } = event;
+        let Some(state) = self.books.get_mut(symbol.as_ref()) else {
             return;
-        };
-        let levels = |side: &[[Str<'_>; 2]]| {
-            side.iter()
-                .map(|l| (float(&l[0]), float(&l[1])))
-                .collect::<Vec<_>>()
         };
         match (kind.as_ref(), &state.sync) {
             (_, Sync::Resubscribing(_)) => {}
             ("snapshot", _) => {
-                state.book.load_sorted(BookSide::Bids, levels(&data.b));
-                state.book.load_sorted(BookSide::Asks, levels(&data.a));
+                state
+                    .book
+                    .load_sorted(BookSide::Bids, self.book_levels.bids.iter().copied());
+                state
+                    .book
+                    .load_sorted(BookSide::Asks, self.book_levels.asks.iter().copied());
                 state.sync = Sync::Synced {
-                    last_update: data.u,
+                    last_update: update,
                 };
-                cx.book_changed(&data.s);
+                cx.book_changed(&symbol);
             }
             ("delta", Sync::Synced { last_update }) => {
                 let last = *last_update;
-                if data.u <= last {
+                if update <= last {
                     return;
                 }
-                if data.u > last + 1 {
+                if update > last + 1 {
                     // A skipped update: drop the book and subscribe again for a snapshot.
                     state.book.clear();
                     state.sync = Sync::Resubscribing(cx.set_timer(RESUBSCRIBE_DELAY_MS));
-                    let topic = Self::book_topic(self.paths.book_depth, &data.s);
+                    let topic = Self::book_topic(self.paths.book_depth, &symbol);
                     self.subscribe(cx, "unsubscribe", &[topic]);
                     return;
                 }
-                for (price, amount) in levels(&data.b) {
+                for (price, amount) in self.book_levels.bids.iter().copied() {
                     state.book.apply(BookSide::Bids, price, amount);
                 }
-                for (price, amount) in levels(&data.a) {
+                for (price, amount) in self.book_levels.asks.iter().copied() {
                     state.book.apply(BookSide::Asks, price, amount);
                 }
                 state.sync = Sync::Synced {
-                    last_update: data.u,
+                    last_update: update,
                 };
-                cx.book_changed(&data.s);
+                cx.book_changed(&symbol);
             }
             _ => {}
         }
@@ -1273,5 +1278,44 @@ impl Venue for BybitLinear {
                 .filter(|(_, state)| matches!(state.sync, Sync::Synced { .. }))
                 .map(|(symbol, state)| (symbol.as_str(), &state.book)),
         )
+    }
+}
+
+#[cfg(test)]
+mod public_decoder_tests {
+    use super::*;
+    use safe_cex_engine::{Engine, Event};
+
+    #[test]
+    fn malformed_book_data_cannot_partially_change_the_book_or_advance_its_sequence() {
+        let socket = SocketId(1);
+        let mut venue = BybitLinear::new(Options {
+            public_data_only: true,
+            ..Options::default()
+        });
+        venue.public.socket = Some(socket);
+        venue.books.insert(
+            "BTCUSDT".into(),
+            BookState {
+                subscribers: 1,
+                book: Book::default(),
+                sync: Sync::Waiting,
+            },
+        );
+        let mut engine = Engine::new(venue);
+        engine.handle(0.0, Event::WsMessage { socket, text: r#"{"topic":"orderbook.1000.BTCUSDT","type":"snapshot","data":{"s":"BTCUSDT","b":[["100","1"]],"a":[["101","2"]],"u":1}}"# });
+        for text in [
+            r#"{"topic":"orderbook.1000.BTCUSDT","type":"delta","data":{"s":"BTCUSDT","b":[["100","99"]],"a":[["101",3]],"u":2}}"#,
+            r#"{"topic":"orderbook.1000.BTCUSDT","type":"delta","data":{"s":"BTCUSDT","b":[["100","99"]],"a":[],"u":2}} {}"#,
+        ] {
+            engine.handle(1.0, Event::WsMessage { socket, text });
+            let book = engine.book("BTCUSDT").unwrap();
+            assert_eq!(book.bids(), [(100.0, 1.0)]);
+            assert_eq!(book.asks(), [(101.0, 2.0)]);
+        }
+        engine.handle(2.0, Event::WsMessage { socket, text: r#"{"topic":"orderbook.1000.BTCUSDT","type":"delta","data":{"s":"BTCUSDT","b":[["100","3"]],"u":2}}"# });
+        let book = engine.book("BTCUSDT").unwrap();
+        assert_eq!(book.bids(), [(100.0, 3.0)]);
+        assert_eq!(book.asks(), [(101.0, 2.0)]);
     }
 }
