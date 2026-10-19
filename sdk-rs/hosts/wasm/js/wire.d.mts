@@ -81,7 +81,7 @@ export type OrderTable = { count: number; market: Uint32Array; enums: Uint32Arra
   clientOrderId(i: number): string | undefined;
   parentId(i: number): string | undefined;
 };
-export type PositionTable = { count: number; market: Uint32Array; enums: Uint32Array } & Columns<PositionColumn>;
+export type PositionTable = { count: number; market: Uint32Array; enums: Uint32Array; id(i: number): string | undefined } & Columns<PositionColumn>;
 export interface Balance {
   used: number;
   free: number;

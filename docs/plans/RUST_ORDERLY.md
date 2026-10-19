@@ -84,3 +84,43 @@ Re-review found no phase blockers; also tightened null timestamps and missing
 depth data. Native tests: 11 passing; fmt/clippy/bans passed. SDK wiring and
 record/replay performance checks remain in the integration phase. Genuine TS
 book continuity/public snapshot fixes will be declared in gate/PR.
+
+### Private phase
+
+Implemented normalized base58 ED25519 credentials with zeroized seeds and
+URL-safe padded signatures over exact REST/WS bytes; validation before private
+bootstrap, margin defaults, per-mode leverage caches, positions/collateral and
+paged normal/algo orders; authenticated subscriptions, heartbeat, reconnect,
+periodic 2s positions and every-fourth-tick orders. Failed reads preserve state.
+Private sequences/IDs remain exact integers; executions deduplicate independently
+from order-state updates. Fills invalidate pending positions/collateral reads.
+
+Optional appended position-ID references preserve simultaneous Cross/Isolated
+identity across frames without changing legacy venue payloads. Reader, types,
+FrameApplier and store/spec docs updated; transferred/legacy frame tests pass.
+
+Independent review found/fixed dual status/algoStatus decoding, documented
+root lifecycle and average-price aliases, REST freshness stamps, fill-vs-held
+positions, root terminal-before-any-child-vs-held-algo-snapshot, and leverage
+cache mutation before snapshot validation. Parent tombstones filter subsequent
+REST/WS children. Re-review found no remaining phase blockers.
+
+Verification: 22 venue tests (2 signing, 9 account, 11 public); engine44;
+host26; crate fmt/Clippy and bans; safe-cex typecheck/lint all pass. SDK constructor
+wiring, end-to-end WASM account tests, strict independent signing tape audit,
+and account deactivation signal integration remain for the gates phase.
+
+### Trading plan audit
+
+Use sequenced typed jobs with complete batch preflight before writes. Preserve
+caller IDs on exactly one regular native order; reject conditional/bracket/split
+IDs and duplicate IDs as a batch. All writes carry explicit mode and correct
+broker UUID/order tag; plain TIF maps to native LIMIT/POST_ONLY/IOC/FOK.
+Native amendments require complete REST proof and one precision-aligned real
+change, with EDIT_SENT success and stable ID. Positional replacement cancels
+its parent directly and posts one pair preserving only the opposite sibling;
+child cancellation groups selected siblings by root before rebuilding survivors.
+Bulk normal+algo cancellation attempts both independently and never repairs.
+Margin selector writes affect defaults only; leverage targets selected mode;
+position mode is fixed OneWay. No write retries; retain partial accepted IDs
+if later sequenced steps fail. Review after native command/error/race tests.

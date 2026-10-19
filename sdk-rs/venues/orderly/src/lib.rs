@@ -1,4 +1,6 @@
 //! Orderly perpetuals, shared by its six broker frontends.
+mod account;
+mod sign;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
@@ -43,6 +45,7 @@ pub struct Options {
 }
 
 pub enum Pending {
+    Account(account::Request),
     Markets {
         rows: Vec<Market>,
         invalid: bool,
@@ -98,6 +101,7 @@ pub struct Orderly {
     seed_retry: Option<(TimerId, Seed)>,
     seed_attempts: u32,
     generation: u64,
+    account: account::Account,
 }
 impl Orderly {
     pub fn new(options: Options) -> Self {
@@ -110,6 +114,7 @@ impl Orderly {
             seed_retry: None,
             seed_attempts: 0,
             generation: 0,
+            account: account::Account::default(),
         }
     }
     fn rest(&self) -> &'static str {
@@ -450,9 +455,13 @@ fn interval_valid(i: &str) -> bool {
 impl Venue for Orderly {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.seed(cx, Seed::Markets);
+        self.initialize_account(cx);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        if self.account.socket.socket == Some(socket) {
+            self.private_open(cx, socket);
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -488,6 +497,12 @@ impl Venue for Orderly {
         }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        if self.account.socket.socket == Some(socket) {
+            if let Err(e) = self.private_message(cx, text) {
+                cx.log(LogLevel::Error, e);
+            }
+            return;
+        }
         if self.public.socket != Some(socket) || !self.public.open {
             return;
         }
@@ -498,6 +513,10 @@ impl Venue for Orderly {
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
+        if self.account.socket.socket == Some(socket) {
+            self.private_close(cx, socket);
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -523,8 +542,13 @@ impl Venue for Orderly {
         );
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
+        if let Pending::Account(request) = pending {
+            self.account_item(cx, request, item);
+            return;
+        }
         let result: Result<(), String> = (|| {
             match pending {
+                Pending::Account(_) => unreachable!(),
                 Pending::Markets { rows, .. } => {
                     let r: MarketRow<'_> = serde_json::from_str(item).map_err(|e| e.to_string())?;
                     let Some(s) = symbol(&r.symbol) else {
@@ -631,11 +655,16 @@ impl Venue for Orderly {
                 Pending::Markets { invalid, .. }
                 | Pending::Tickers { invalid, .. }
                 | Pending::Candles { invalid, .. } => *invalid = true,
+                Pending::Account(_) => unreachable!(),
             }
             cx.log(LogLevel::Error, e);
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account(request) = pending {
+            self.account_response(cx, request, response);
+            return;
+        }
         if let Err(e) = checked(response) {
             self.on_request_failed(cx, pending, &e);
             return;
@@ -660,11 +689,7 @@ impl Venue for Orderly {
                 cx.store.set_tickers(rows);
                 self.seed_attempts = 0;
                 self.public.socket = Some(cx.connect(self.public_url()));
-                if self.options.public_data_only {
-                    cx.store.set_orders(vec![]);
-                    cx.store.set_positions(vec![]);
-                    cx.store.set_balance(Default::default());
-                }
+                self.account_start(cx);
             }
             Pending::Candles {
                 command,
@@ -680,12 +705,16 @@ impl Venue for Orderly {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Markets { .. } => self.retry_seed(cx, Seed::Markets, error),
             Pending::Tickers { .. } => self.retry_seed(cx, Seed::Tickers, error),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account_timer(cx, timer) {
+            return;
+        }
         if let Some((t, kind)) = self.seed_retry
             && t == timer
         {

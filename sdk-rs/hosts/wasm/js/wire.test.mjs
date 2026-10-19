@@ -94,3 +94,37 @@ test('legacy settings fall back to scalar without reading the following section'
     assert.equal(frame.status().loaded, 31);
   }
 });
+
+function positionFrame(withIds) {
+  const strings = stringFrame(['BTCUSDC', 'BTCUSDC:isolated']).buffer;
+  const prefix = (strings.byteLength + 7) & ~7;
+  const count = 2, data = 24, length = data + 9 * count * 8 + (withIds ? 8 : 0);
+  const buffer = new ArrayBuffer(prefix + 8 + length + 24);
+  new Uint8Array(buffer).set(new Uint8Array(strings));
+  const view = new DataView(buffer);
+  view.setUint16(6, 3, true);
+  view.setUint32(20, prefix - 24, true);
+  view.setUint16(prefix, SECTION.POSITIONS, true);
+  view.setUint32(prefix + 4, length, true);
+  view.setUint32(prefix + 8, count, true);
+  if (withIds) {
+    view.setUint32(prefix + 8 + data + 144, 0, true);
+    view.setUint32(prefix + 8 + data + 148, 1, true);
+  }
+  const status = prefix + 8 + length;
+  view.setUint16(status, SECTION.STATUS, true);
+  view.setUint32(status + 4, 16, true);
+  view.setUint32(status + 8, 31, true);
+  return new Frame(structuredClone(buffer));
+}
+
+test('position IDs survive transfer and legacy frames never read the next section as IDs', () => {
+  const frame = positionFrame(true);
+  assert.equal(frame.positions().id(0), 'BTCUSDC');
+  assert.equal(frame.positions().id(1), 'BTCUSDC:isolated');
+  assert.equal(frame.status().loaded, 31);
+  const legacy = positionFrame(false);
+  assert.equal(legacy.positions().id(0), undefined);
+  assert.equal(legacy.positions().id(1), undefined);
+  assert.equal(legacy.status().loaded, 31);
+});

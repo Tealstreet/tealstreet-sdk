@@ -133,7 +133,7 @@ export class FrameApplier {
         const symbol = this.symbol(positions.market[i]);
         const mode = enums.positionMode as PositionMode | undefined;
         rows.push({
-          id: mode === PositionMode.Hedged ? `${symbol}:${enums.side}` : symbol,
+          id: positions.id(i) ?? (mode === PositionMode.Hedged ? `${symbol}:${enums.side}` : symbol),
           symbol,
           side: enums.side as Position['side'],
           entryPrice: positions.entryPrice[i],
