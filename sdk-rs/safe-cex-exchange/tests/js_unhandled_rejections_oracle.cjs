@@ -25,6 +25,9 @@ const first = Promise.reject(new Error('handled-all-first'));
 const later = Promise.reject(new Error('handled-all-later'));
 Promise.all([first, later]).catch(() => {});
 Promise.allSettled([new Promise(resolve => setTimeout(resolve, 5)), Promise.reject(new Error('handled-allSettled-later'))]);
+void Promise.race([Promise.reject(new Error('unhandled-race-first')), Promise.reject(new Error('handled-race-loser'))]);
+Promise.race([Promise.reject(new Error('handled-race-sync'))]).catch(() => {});
+void Promise.race([1, new Promise((_, reject) => setTimeout(() => reject(new Error('handled-race-late-loser')), 5))]);
 setTimeout(() => {
   if (!live) throw Error('retain original promise');
   console.log(JSON.stringify(unhandled.sort()));

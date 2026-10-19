@@ -4993,8 +4993,8 @@
         }
       }
     },
-    "evidence": "Reviewed the actual private websocket PrivateValue<H> declaration, the compiler-resolved WsPingHost trait path and production Realm implementation. Source and expanded targets are the exact H::Value associated projection, with unbounded H and no default/where predicates. The finite reviewed host is Realm, whose Value binding is the actual realm::value::Value enum. The named native private_value_realm_is_the_native_value test uses both invariant mutable-reference equalities and TypeId, preserves native slots, undefined, negative-zero/infinity bits, lone UTF-16 surrogate units and object/thrown identity, and mutates the original object through the alias. Source/compiler/artifact evidence is exported separately; decoder and alternate-route traits must still be probed by the ordinary maintained runner.",
-    "reason": "For the reviewed actual Realm instantiation, this private websocket value alias forwards the host's native value handle without parsing, validation or JSON conversion. It declares no decoder body or alternate input route. Runtime JSON/property/signing operations remain separate owner obligations. This classifies only one exact production host instantiation; it does not classify arbitrary H, any other associated projection or all realm APIs."
+    "evidence": "Reviewed the unchanged exact H associated projection and the concrete production host::Host implementation of WsPingHost. Its output is the canonical safe_cex_exchange::js_runtime::value::Js, authenticated by the selected compiler dependency path and artifact. The preserved six native associated-alias tests assert invariant mutable-reference equality, TypeId, original native referent identity, undefined, exact negative-zero/infinity bits and lone UTF-16 units. Error projections wrap the same values in Thrown. Ordinary decoder and alternate-route probes remain required.",
+    "reason": "Only this fixed Host instantiation is classified: its associated output forwards shared Js without parsing, copying or JSON conversion. It has no alias-local decoder or alternate-input route; property, JSON and signing boundaries keep their separate owners."
   },
   "safe_cex_venue_hyperliquid::private_class::PrivateError": {
     "category": "non-decoder",
@@ -5039,8 +5039,8 @@
         }
       }
     },
-    "evidence": "Reviewed the actual private websocket PrivateError<H> declaration, the compiler-resolved WsPingHost trait path and production Realm implementation. Source and expanded targets are the exact H::Error associated projection, with unbounded H and no default/where predicates. The finite reviewed host is Realm, whose Error binding is the actual realm::value::Value enum. The named native private_error_realm_is_the_native_value test uses both invariant mutable-reference equalities and TypeId, preserves native slots, undefined, negative-zero/infinity bits, lone UTF-16 surrogate units and object/thrown identity, and mutates the original object through the alias. Source/compiler/artifact evidence is exported separately; decoder and alternate-route traits must still be probed by the ordinary maintained runner.",
-    "reason": "For the reviewed actual Realm instantiation, this private websocket error alias forwards the host's native value handle without parsing, validation or JSON conversion. It declares no decoder body or alternate input route. Runtime JSON/property/signing operations remain separate owner obligations. This classifies only one exact production host instantiation; it does not classify arbitrary H, any other associated projection or all realm APIs."
+    "evidence": "Reviewed the unchanged exact H associated projection and the concrete production host::Host implementation of WsPingHost. Its output is the canonical safe_cex_exchange::js_runtime::value::Thrown, authenticated by the selected compiler dependency path and artifact. The preserved six native associated-alias tests assert invariant mutable-reference equality, TypeId, original native referent identity, undefined, exact negative-zero/infinity bits and lone UTF-16 units. Error projections wrap the same values in Thrown. Ordinary decoder and alternate-route probes remain required.",
+    "reason": "Only this fixed Host instantiation is classified: its associated output forwards shared Thrown without parsing, copying or JSON conversion. It has no alias-local decoder or alternate-input route; property, JSON and signing boundaries keep their separate owners."
   },
   "safe_cex_venue_hyperliquid::public_class::PublicValue": {
     "category": "non-decoder",
@@ -5085,8 +5085,8 @@
         }
       }
     },
-    "evidence": "Reviewed the actual public websocket PublicValue<H> declaration, the compiler-resolved WsPingHost trait path and production Realm implementation. Source and expanded targets are the exact H::Value associated projection, with unbounded H and no default/where predicates. The finite reviewed host is Realm, whose Value binding is the actual realm::value::Value enum. The named native public_value_realm_is_the_native_value test uses both invariant mutable-reference equalities and TypeId, preserves native slots, undefined, negative-zero/infinity bits, lone UTF-16 surrogate units and object/thrown identity, and mutates the original object through the alias. Source/compiler/artifact evidence is exported separately; decoder and alternate-route traits must still be probed by the ordinary maintained runner.",
-    "reason": "For the reviewed actual Realm instantiation, this public websocket value alias forwards the host's native value handle without parsing, validation or JSON conversion. It declares no decoder body or alternate input route. Runtime JSON/property/signing operations remain separate owner obligations. This classifies only one exact production host instantiation; it does not classify arbitrary H, any other associated projection or all realm APIs."
+    "evidence": "Reviewed the unchanged exact H associated projection and the concrete production host::Host implementation of WsPingHost. Its output is the canonical safe_cex_exchange::js_runtime::value::Js, authenticated by the selected compiler dependency path and artifact. The preserved six native associated-alias tests assert invariant mutable-reference equality, TypeId, original native referent identity, undefined, exact negative-zero/infinity bits and lone UTF-16 units. Error projections wrap the same values in Thrown. Ordinary decoder and alternate-route probes remain required.",
+    "reason": "Only this fixed Host instantiation is classified: its associated output forwards shared Js without parsing, copying or JSON conversion. It has no alias-local decoder or alternate-input route; property, JSON and signing boundaries keep their separate owners."
   },
   "safe_cex_venue_hyperliquid::public_class::PublicError": {
     "category": "non-decoder",
@@ -5131,8 +5131,8 @@
         }
       }
     },
-    "evidence": "Reviewed the actual public websocket PublicError<H> declaration, the compiler-resolved WsPingHost trait path and production Realm implementation. Source and expanded targets are the exact H::Error associated projection, with unbounded H and no default/where predicates. The finite reviewed host is Realm, whose Error binding is the actual realm::value::Value enum. The named native public_error_realm_is_the_native_value test uses both invariant mutable-reference equalities and TypeId, preserves native slots, undefined, negative-zero/infinity bits, lone UTF-16 surrogate units and object/thrown identity, and mutates the original object through the alias. Source/compiler/artifact evidence is exported separately; decoder and alternate-route traits must still be probed by the ordinary maintained runner.",
-    "reason": "For the reviewed actual Realm instantiation, this public websocket error alias forwards the host's native value handle without parsing, validation or JSON conversion. It declares no decoder body or alternate input route. Runtime JSON/property/signing operations remain separate owner obligations. This classifies only one exact production host instantiation; it does not classify arbitrary H, any other associated projection or all realm APIs."
+    "evidence": "Reviewed the unchanged exact H associated projection and the concrete production host::Host implementation of WsPingHost. Its output is the canonical safe_cex_exchange::js_runtime::value::Thrown, authenticated by the selected compiler dependency path and artifact. The preserved six native associated-alias tests assert invariant mutable-reference equality, TypeId, original native referent identity, undefined, exact negative-zero/infinity bits and lone UTF-16 units. Error projections wrap the same values in Thrown. Ordinary decoder and alternate-route probes remain required.",
+    "reason": "Only this fixed Host instantiation is classified: its associated output forwards shared Thrown without parsing, copying or JSON conversion. It has no alias-local decoder or alternate-input route; property, JSON and signing boundaries keep their separate owners."
   },
   "safe_cex_venue_hyperliquid::core_exchange_class::ExchangeValue": {
     "category": "non-decoder",
@@ -5177,8 +5177,8 @@
         }
       }
     },
-    "evidence": "Reviewed the actual perpetual exchange ExchangeValue<H> declaration, the compiler-resolved WsPingHost trait path and production Realm implementation. Source and expanded targets are the exact H::Value associated projection, with unbounded H and no default/where predicates. The finite reviewed host is Realm, whose Value binding is the actual realm::value::Value enum. The named native exchange_value_realm_is_the_native_value test uses both invariant mutable-reference equalities and TypeId, preserves native slots, undefined, negative-zero/infinity bits, lone UTF-16 surrogate units and object/thrown identity, and mutates the original object through the alias. Source/compiler/artifact evidence is exported separately; decoder and alternate-route traits must still be probed by the ordinary maintained runner.",
-    "reason": "For the reviewed actual Realm instantiation, this perpetual exchange value alias forwards the host's native value handle without parsing, validation or JSON conversion. It declares no decoder body or alternate input route. Runtime JSON/property/signing operations remain separate owner obligations. This classifies only one exact production host instantiation; it does not classify arbitrary H, any other associated projection or all realm APIs."
+    "evidence": "Reviewed the unchanged exact H associated projection and the concrete production host::Host implementation of WsPingHost. Its output is the canonical safe_cex_exchange::js_runtime::value::Js, authenticated by the selected compiler dependency path and artifact. The preserved six native associated-alias tests assert invariant mutable-reference equality, TypeId, original native referent identity, undefined, exact negative-zero/infinity bits and lone UTF-16 units. Error projections wrap the same values in Thrown. Ordinary decoder and alternate-route probes remain required.",
+    "reason": "Only this fixed Host instantiation is classified: its associated output forwards shared Js without parsing, copying or JSON conversion. It has no alias-local decoder or alternate-input route; property, JSON and signing boundaries keep their separate owners."
   },
   "safe_cex_venue_hyperliquid::core_exchange_class::ExchangeError": {
     "category": "non-decoder",
@@ -5223,8 +5223,8 @@
         }
       }
     },
-    "evidence": "Reviewed the actual perpetual exchange ExchangeError<H> declaration, the compiler-resolved WsPingHost trait path and production Realm implementation. Source and expanded targets are the exact H::Error associated projection, with unbounded H and no default/where predicates. The finite reviewed host is Realm, whose Error binding is the actual realm::value::Value enum. The named native exchange_error_realm_is_the_native_value test uses both invariant mutable-reference equalities and TypeId, preserves native slots, undefined, negative-zero/infinity bits, lone UTF-16 surrogate units and object/thrown identity, and mutates the original object through the alias. Source/compiler/artifact evidence is exported separately; decoder and alternate-route traits must still be probed by the ordinary maintained runner.",
-    "reason": "For the reviewed actual Realm instantiation, this perpetual exchange error alias forwards the host's native value handle without parsing, validation or JSON conversion. It declares no decoder body or alternate input route. Runtime JSON/property/signing operations remain separate owner obligations. This classifies only one exact production host instantiation; it does not classify arbitrary H, any other associated projection or all realm APIs."
+    "evidence": "Reviewed the unchanged exact H associated projection and the concrete production host::Host implementation of WsPingHost. Its output is the canonical safe_cex_exchange::js_runtime::value::Thrown, authenticated by the selected compiler dependency path and artifact. The preserved six native associated-alias tests assert invariant mutable-reference equality, TypeId, original native referent identity, undefined, exact negative-zero/infinity bits and lone UTF-16 units. Error projections wrap the same values in Thrown. Ordinary decoder and alternate-route probes remain required.",
+    "reason": "Only this fixed Host instantiation is classified: its associated output forwards shared Thrown without parsing, copying or JSON conversion. It has no alias-local decoder or alternate-input route; property, JSON and signing boundaries keep their separate owners."
   },
   "safe_cex_venue_hyperliquid::types::ClearinghouseStateAssetPositionsItemPositionCumFunding": {
     "shape": "map",
@@ -11011,8 +11011,8 @@
         }
       }
     },
-    "evidence": "Reviewed the actual owned spot account task future declaration, exact raw/expanded compiler target and parameter order. The fixed generic arguments are the actual production realm::value::Value for both success and error; native trait bounds authenticate the production Realm host Value/Error bindings. tests/support/accepted_future_aliases.rs::account_future_fixed_value_preserves_poll_result_and_drop proves invariant mutable-reference equality and TypeId against the independently authored std container type. It executes Pending then wake then Ready for distinct native fulfilled/rejected values, negative-zero/infinity bits, lone UTF-16 units, object/error identity, two polls, one wake, one drop and unpolled cancellation ownership. Fresh actual native and target-specific Wasm compiler capability probes remain mandatory and separate from these runtime witnesses.",
-    "reason": "For this one fixed production Value/Value instantiation, the owned spot account task future is an opaque executable container, with no decoder body, input parser or conversion route. Host operations invoked by its body remain separate obligations. This review grants no other generic arguments, lifetimes, aliases or package clearance."
+    "evidence": "Reviewed the actual owned spot account task future declaration, exact raw/expanded compiler target and parameter order. The fixed generic arguments are the canonical Js success value and Thrown error; native trait bounds authenticate the production Host Value/Error bindings. tests/support/accepted_future_aliases.rs::account_future_fixed_value_preserves_poll_result_and_drop proves invariant mutable-reference equality and TypeId against the independently authored std container type. It executes Pending then wake then Ready for distinct native fulfilled/rejected values, negative-zero/infinity bits, lone UTF-16 units, object/error identity, two polls, one wake, one drop and unpolled cancellation ownership. Fresh actual native and target-specific Wasm compiler capability probes remain mandatory and separate from these runtime witnesses.",
+    "reason": "For this one fixed production Js/Thrown instantiation, the owned spot account task future is an opaque executable container, with no decoder body, input parser or conversion route. Host operations invoked by its body remain separate obligations. This review grants no other generic arguments, lifetimes, aliases or package clearance."
   },
   "safe_cex_venue_hyperliquid::income::IncomeFuture": {
     "category": "non-decoder",
@@ -11205,8 +11205,8 @@
         }
       }
     },
-    "evidence": "Reviewed the actual borrow-capable income task future at the reviewed static lifetime declaration, exact raw/expanded compiler target and parameter order. The fixed generic arguments are the actual production realm::value::Value for both success and error; native trait bounds authenticate the production Realm host Value/Error bindings. tests/support/accepted_future_aliases.rs::income_future_static_fixed_value_preserves_poll_result_and_drop proves invariant mutable-reference equality and TypeId against the independently authored std container type. It executes Pending then wake then Ready for distinct native fulfilled/rejected values, negative-zero/infinity bits, lone UTF-16 units, object/error identity, two polls, one wake, one drop and unpolled cancellation ownership. Fresh actual native and target-specific Wasm compiler capability probes remain mandatory and separate from these runtime witnesses.",
-    "reason": "For this one fixed production Value/Value instantiation, the borrow-capable income task future at the reviewed static lifetime is an opaque executable container, with no decoder body, input parser or conversion route. Host operations invoked by its body remain separate obligations. This review grants no other generic arguments, lifetimes, aliases or package clearance."
+    "evidence": "Reviewed the actual borrow-capable income task future at the reviewed static lifetime declaration, exact raw/expanded compiler target and parameter order. The fixed generic arguments are the canonical Js success value and Thrown error; native trait bounds authenticate the production Host Value/Error bindings. tests/support/accepted_future_aliases.rs::income_future_static_fixed_value_preserves_poll_result_and_drop proves invariant mutable-reference equality and TypeId against the independently authored std container type. It executes Pending then wake then Ready for distinct native fulfilled/rejected values, negative-zero/infinity bits, lone UTF-16 units, object/error identity, two polls, one wake, one drop and unpolled cancellation ownership. Fresh actual native and target-specific Wasm compiler capability probes remain mandatory and separate from these runtime witnesses.",
+    "reason": "For this one fixed production Js/Thrown instantiation, the borrow-capable income task future at the reviewed static lifetime is an opaque executable container, with no decoder body, input parser or conversion route. Host operations invoked by its body remain separate obligations. This review grants no other generic arguments, lifetimes, aliases or package clearance."
   },
   "safe_cex_venue_hyperliquid::startup_timeout::TimeoutCallback": {
     "category": "non-decoder",
@@ -11379,8 +11379,8 @@
         }
       }
     },
-    "evidence": "Reviewed the actual reference-counted startup timeout callback declaration, exact raw/expanded compiler target and parameter order. The fixed generic arguments are the actual production realm::value::Value for both success and error; native trait bounds authenticate the production Realm host Value/Error bindings. tests/support/accepted_future_aliases.rs::timeout_callback_fixed_value_preserves_arguments_result_and_identity proves invariant mutable-reference equality and TypeId against the independently authored std container type. It preserves Rc allocation identity, clone sharing, ordered distinct native arguments, negative-zero/infinity bits, lone UTF-16 units, returned object and thrown error identities. Fresh actual native and target-specific Wasm compiler capability probes remain mandatory and separate from these runtime witnesses.",
-    "reason": "For this one fixed production Value/Value instantiation, the reference-counted startup timeout callback is an opaque executable container, with no decoder body, input parser or conversion route. Host operations invoked by its body remain separate obligations. This review grants no other generic arguments, lifetimes, aliases or package clearance."
+    "evidence": "Reviewed the actual reference-counted startup timeout callback declaration, exact raw/expanded compiler target and parameter order. The fixed generic arguments are the canonical Js success value and Thrown error; native trait bounds authenticate the production Host Value/Error bindings. tests/support/accepted_future_aliases.rs::timeout_callback_fixed_value_preserves_arguments_result_and_identity proves invariant mutable-reference equality and TypeId against the independently authored std container type. It preserves Rc allocation identity, clone sharing, ordered distinct native arguments, negative-zero/infinity bits, lone UTF-16 units, returned object and thrown error identities. Fresh actual native and target-specific Wasm compiler capability probes remain mandatory and separate from these runtime witnesses.",
+    "reason": "For this one fixed production Js/Thrown instantiation, the reference-counted startup timeout callback is an opaque executable container, with no decoder body, input parser or conversion route. Host operations invoked by its body remain separate obligations. This review grants no other generic arguments, lifetimes, aliases or package clearance."
   },
   "safe_cex_venue_hyperliquid::types::UserFills": {
     "shape": "map",
@@ -61086,7 +61086,6 @@
     },
     "evidence": "Reviewed maintained hyperliquid.rateLimiter.ts request parsing, endpoint/batch/base/extra weights and JavaScript Number/array coercion, plus the exact current compiler function API. Actual native observations invoke this production caller through raw_request_weight -> raw_number -> nested text, directly reading returned f64 decimal text and binary64 bits or error name/message. Independently authored raw and typed JSON cases exercise scalar, array, nested array, own-toString errors, signed/overflow inputs, batch boundaries and endpoint choice. Mutating only the nested text comma separator must fail the named comma-join native witness; exact restoration must pass. This is the concrete native/default API with JSON payloads; live getters/prototypes and limiter scheduling are separate obligations."
   },
-
   "safe_cex_venue_hyperliquid::spot_types::CancelOrderRequests": {
     "category": "decoder",
     "shape": "union",
@@ -61372,7 +61371,7 @@
       "",
       "0xABC",
       "arbitrary identifier",
-      "Cloid-\ud83d\ude42"
+      "Cloid-🙂"
     ],
     "negative": [
       null,
@@ -61387,7 +61386,7 @@
         "reason": "Actual String trait conversion keeps the complete supplied UTF8 spelling; its string-typed adapter refuses non-string carrier values. Direct native units/bytes cover every declared positive input.",
         "positive": [
           "",
-          "Cloid-\ud83d\ude42"
+          "Cloid-🙂"
         ],
         "negative": [
           null,
@@ -61405,7 +61404,7 @@
             }
           },
           {
-            "input": "Cloid-\ud83d\ude42",
+            "input": "Cloid-🙂",
             "output": {
               "units": [
                 67,
@@ -61427,7 +61426,7 @@
         "reason": "Actual String trait conversion keeps the complete supplied UTF8 spelling; its string-typed adapter refuses non-string carrier values. Direct native units/bytes cover every declared positive input.",
         "positive": [
           "",
-          "Cloid-\ud83d\ude42"
+          "Cloid-🙂"
         ],
         "negative": [
           null,
@@ -61445,7 +61444,7 @@
             }
           },
           {
-            "input": "Cloid-\ud83d\ude42",
+            "input": "Cloid-🙂",
             "output": {
               "units": [
                 67,
@@ -61467,7 +61466,7 @@
         "reason": "Actual String trait conversion keeps the complete supplied UTF8 spelling; its string-typed adapter refuses non-string carrier values. Direct native units/bytes cover every declared positive input.",
         "positive": [
           "",
-          "Cloid-\ud83d\ude42"
+          "Cloid-🙂"
         ],
         "negative": [
           null,
@@ -61485,7 +61484,7 @@
             }
           },
           {
-            "input": "Cloid-\ud83d\ude42",
+            "input": "Cloid-🙂",
             "output": {
               "units": [
                 67,
@@ -61507,7 +61506,7 @@
         "reason": "Actual String trait conversion keeps the complete supplied UTF8 spelling; its string-typed adapter refuses non-string carrier values. Direct native units/bytes cover every declared positive input.",
         "positive": [
           "",
-          "Cloid-\ud83d\ude42"
+          "Cloid-🙂"
         ],
         "negative": [
           null,
@@ -61525,7 +61524,7 @@
             }
           },
           {
-            "input": "Cloid-\ud83d\ude42",
+            "input": "Cloid-🙂",
             "output": {
               "units": [
                 67,
@@ -61547,7 +61546,7 @@
         "reason": "Actual String trait conversion keeps the complete supplied UTF8 spelling; its string-typed adapter refuses non-string carrier values. Direct native units/bytes cover every declared positive input.",
         "positive": [
           "",
-          "Cloid-\ud83d\ude42"
+          "Cloid-🙂"
         ],
         "negative": [
           null,
@@ -61565,7 +61564,7 @@
             }
           },
           {
-            "input": "Cloid-\ud83d\ude42",
+            "input": "Cloid-🙂",
             "output": {
               "units": [
                 67,
@@ -61652,7 +61651,7 @@
           }
         },
         {
-          "input": "Cloid-\ud83d\ude42",
+          "input": "Cloid-🙂",
           "output": {
             "units": [
               67,

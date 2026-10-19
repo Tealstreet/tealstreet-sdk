@@ -388,6 +388,12 @@ pub(super) fn install(g: &Js) -> Result<(), Thrown> {
         Js::function("numberToString", |_, a| number_to_string(&arg(&a, 0))),
     )?;
     g.define(
+        "precisionFromString",
+        Js::function("precisionFromString", |_, a| {
+            precision_from_string(&arg(&a, 0)).map(num)
+        }),
+    )?;
+    g.define(
         "parsePrecision",
         Js::function("parsePrecision", |_, a| parse_precision(&arg(&a, 0))),
     )?;

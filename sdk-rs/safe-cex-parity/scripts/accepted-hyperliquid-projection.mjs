@@ -5,8 +5,11 @@ import path from 'node:path';
 const crate = 'safe_cex_venue_hyperliquid';
 const packageName = 'safe-cex-venue-hyperliquid';
 const trait = `${crate}::ws_ping_lifecycle::WsPingHost`;
-const host = `${crate}::realm::Realm`;
-const output = `${crate}::realm::value::Value`;
+const host = `${crate}::host::Host`;
+const outputs = {
+  Value: { canonical: 'safe_cex_exchange::js_runtime::value::Js', kind: 'enum', crate: 'safe_cex_exchange' },
+  Error: { canonical: 'safe_cex_exchange::js_runtime::value::Thrown', kind: 'struct', crate: 'safe_cex_exchange' },
+};
 const emptyGenerics = { params: [], where_predicates: [] };
 const generics = { params: [{ name: 'H', kind: { type: { bounds: [], default: null, is_synthetic: false } } }], where_predicates: [] };
 const declarations = Object.fromEntries([
@@ -19,11 +22,11 @@ const callerFields = ['instantiation', 'aliasProbeExpected', 'aliasProbeKind', '
 function expectedIdentity(member) {
   return {
     trait: { canonical: trait, kind: 'trait', file: `${packageName}/src/ws_ping_lifecycle.rs`, generics: emptyGenerics },
-    host: { canonical: host, kind: 'struct', file: `${packageName}/src/realm/mod.rs`, generics: emptyGenerics },
-    output: { canonical: output, kind: 'enum', file: `${packageName}/src/realm/value.rs`, generics: emptyGenerics },
-    implementation: { file: `${packageName}/src/realm/host_core.rs`, generics: emptyGenerics,
+    host: { canonical: host, kind: 'struct', file: `${packageName}/src/host/mod.rs`, generics: emptyGenerics },
+    output: outputs[member],
+    implementation: { file: `${packageName}/src/host/host_core.rs`, generics: emptyGenerics,
       is_unsafe: false, is_negative: false, is_synthetic: false, blanket_impl: null },
-    binding: { name: member, generics: emptyGenerics, bounds: [], file: `${packageName}/src/realm/host_core.rs` },
+    binding: { name: member, generics: emptyGenerics, bounds: [], file: `${packageName}/src/host/host_core.rs` },
   };
 }
 
@@ -47,17 +50,17 @@ export function hyperliquidProjectionCompilerIdentity(doc, item, paths) {
   assert.equal(traitRoot.canonical, trait, `${label}: actual WsPingHost root required`);
   const realm = Object.values(doc.index).filter(value => value.crate_id === 0 && value.inner.struct
     && paths.get(String(value.id))?.join('::') === host);
-  assert.equal(realm.length, 1, `${label}: unique Realm declaration required`);
+  assert.equal(realm.length, 1, `${label}: unique Host declaration required`);
   const hostRoot = root(realm[0].id, 'struct');
   const implementations = Object.values(doc.index).filter(value => value.crate_id === 0 && value.inner.impl
     && String(value.inner.impl.trait?.id) === String(projection.trait.id)
     && String(value.inner.impl.for.resolved_path?.id) === String(realm[0].id));
-  assert.equal(implementations.length, 1, `${label}: unique actual Realm implementation required`);
+  assert.equal(implementations.length, 1, `${label}: unique actual Host implementation required`);
   const implementation = implementations[0], impl = implementation.inner.impl;
   assert.ok(realm[0].inner.struct.impls.map(String).includes(String(implementation.id))
     && get(projection.trait.id).inner.trait.implementations.map(String).includes(String(implementation.id)), `${label}: compiler implementation ownership required`);
   assert.equal(impl.trait.args, null, `${label}: plain host trait required`);
-  assert.equal(impl.for.resolved_path.args, null, `${label}: concrete Realm required`);
+  assert.equal(impl.for.resolved_path.args, null, `${label}: concrete Host required`);
   const declaredMembers = get(projection.trait.id).inner.trait.items.map(get)
     .filter(value => value?.name === declaration.member && value.inner.assoc_type);
   const bindings = impl.items.map(get).filter(value => value?.name === declaration.member && value.inner.assoc_type);
@@ -67,13 +70,24 @@ export function hyperliquidProjectionCompilerIdentity(doc, item, paths) {
   assert.equal(binding.crate_id, 0, `${label}: same-crate associated binding required`);
   assert.deepEqual(Object.keys(associated.type), ['resolved_path'], `${label}: direct associated output required`);
   assert.equal(associated.type.resolved_path.args, null, `${label}: concrete output required`);
+  function outputRoot(id) {
+    const actual = doc.paths[String(id)];
+    const dependency = doc.external_crates?.[String(actual?.crate_id)];
+    const expected = outputs[declaration.member];
+    assert.ok(actual && actual.crate_id !== 0 && dependency?.name === expected.crate
+      && actual.path.join('::') === expected.canonical && actual.kind === expected.kind
+      && typeof dependency.path === 'string' && dependency.path.length > 0
+      && !paths.has(String(id)),
+      `${label}: exact shared compiler output root required`);
+    return { canonical: actual.path.join('::'), kind: actual.kind, crate: dependency.name };
+  }
   const identity = {
-    trait: traitRoot, host: hostRoot, output: root(associated.type.resolved_path.id, 'enum'),
+    trait: traitRoot, host: hostRoot, output: outputRoot(associated.type.resolved_path.id),
     implementation: { file: implementation.span?.filename, generics: impl.generics,
       is_unsafe: impl.is_unsafe, is_negative: impl.is_negative, is_synthetic: impl.is_synthetic, blanket_impl: impl.blanket_impl },
     binding: { name: binding.name, generics: associated.generics, bounds: associated.bounds, file: binding.span?.filename },
   };
-  assert.deepEqual(identity, expectedIdentity(declaration.member), `${label}: reviewed Realm associated identity changed`);
+  assert.deepEqual(identity, expectedIdentity(declaration.member), `${label}: reviewed Host associated identity changed`);
   return identity;
 }
 
@@ -88,14 +102,14 @@ export function reviewedHyperliquidProjectionProbe(alias, contract, context, spe
   assert.deepEqual(alias.rawTarget, target, `${label}: exact raw associated projection required`);
   assert.deepEqual(alias.target, target, `${label}: exact expanded associated projection required`);
   assert.deepEqual(alias.projectionIdentity, expectedIdentity(declaration.member), `${label}: actual compiler associated identity required`);
-  assert.equal(spec.canonical, output, `${label}: reviewed concrete output root required`);
-  assert.equal(spec.expectedType, 'crate::realm::value::Value', `${label}: policy-owned native expected type required`);
-  assert.equal(spec.suffix, '<crate::realm::Realm>', `${label}: only the fixed Realm host is reviewed`);
+  assert.equal(spec.canonical, outputs[declaration.member].canonical, `${label}: reviewed concrete output root required`);
+  assert.equal(spec.expectedType, outputs[declaration.member].canonical, `${label}: policy-owned native expected type required`);
+  assert.equal(spec.suffix, '<crate::host::Host>', `${label}: only the fixed Host host is reviewed`);
   assert.equal(spec.unsized, false, `${label}: concrete output is sized`);
   for (const key of callerFields) assert.equal(contract?.[key], undefined, `${label}: caller cannot supply ${key}`);
   assert.ok(context?.macroOrigins?.includes('serde_json') && Array.isArray(context.externalTypeAliases), `${label}: actual compiler dependency context required`);
   assert.equal(context.packageMetadata?.name, packageName, `${label}: actual selected package required`);
   assert.equal(fs.realpathSync(context.packageMetadata.manifest_path), fs.realpathSync(path.join(context.workspace, packageName, 'Cargo.toml')), `${label}: selected workspace source required`);
   return { suffix: spec.suffix, canonical: spec.canonical, expectedType: spec.expectedType, probeKind: 'reviewed-fixed',
-    monomorphization: `one reviewed ${alias.name}<Realm> associated projection; ordinary decoder and conversion probes remain required` };
+    monomorphization: `one reviewed ${alias.name}<Host> associated projection; ordinary decoder and conversion probes remain required` };
 }

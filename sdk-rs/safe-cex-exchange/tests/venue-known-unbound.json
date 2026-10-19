@@ -14,13 +14,6 @@
   "safe-cex-venue-cryptocom": [],
   "safe-cex-venue-grvt": [],
   "safe-cex-venue-hyperliquid": [
-    "global DEFAULT_BUILDER_FEE_RATE",
-    "global DEFAULT_BUILDER_FEE_TENTHS_BPS",
-    "global TEALSTREET_BUILDER_FEE",
-    "global ethers",
-    "global generateAgentWalletName",
-    "global hasEthereumWallet",
-    "global reportEvent",
     "global switchToCorrectNetwork",
     "global window"
   ],

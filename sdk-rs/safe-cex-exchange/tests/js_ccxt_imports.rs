@@ -395,3 +395,44 @@ fn ccxt_owner_receipts_match_maintained_source_expectations() {
         );
     }
 }
+
+#[test]
+fn installed_precision_from_string_matches_the_source_import() {
+    let output = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_ccxt_imports_source.cjs"
+        ))
+        .arg("precision")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    let shared = installed();
+    assert_eq!(cases.len(), 12);
+    for case in cases {
+        let value = shared
+            .globals
+            .call_method("precisionFromString", vec![from_json(&case["input"])])
+            .unwrap();
+        let number = value.as_f64().unwrap();
+        assert_eq!(number.is_nan(), case["nan"].as_bool().unwrap());
+        if !number.is_nan() {
+            assert_eq!(
+                format!("{:016x}", number.to_bits()),
+                case["bits"].as_str().unwrap(),
+                "precision native bits {case}"
+            );
+        }
+        let serialized = globals::stringify_json(&value).unwrap().unwrap();
+        assert_eq!(
+            String::from_utf16(&serialized).unwrap(),
+            case["json"].as_str().unwrap(),
+            "precision JSON {case}"
+        );
+    }
+}
