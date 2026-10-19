@@ -395,7 +395,11 @@ fn secondary_is_default_off_and_only_get_uses_secondary_credentials() {
 #[test]
 fn limiter_counts_failed_requests_and_secondary_limits_are_independent() {
     let venue = Arc::new(Venue::default());
-    let clock = Arc::new(HeldClock(Mutex::new(0)));
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "scheduler callbacks are local-thread; the limiter API takes Arc"
+    )]
+    let clock = Arc::new(HeldClock::default());
     let limited = RateLimitedAdapter::new(venue.clone(), clock.clone(), 2, 1000);
     venue.replies.lock().unwrap().push_back(Err(reset()));
     assert!(run(limited.execute(req("POST", "/orders"))).is_err());
@@ -408,7 +412,7 @@ fn limiter_counts_failed_requests_and_secondary_limits_are_independent() {
             .poll(&mut Context::from_waker(Waker::noop()))
             .is_pending()
     );
-    *clock.0.lock().unwrap() = 1000;
+    clock.advance(1000);
     run(balance).unwrap();
     assert_eq!(clock.now_ms(), 1000);
     // Exhaust the primary's current window before using the fresh secondary.
@@ -441,7 +445,48 @@ fn polling_override_replaces_clamps_and_preserves_wildcard_fallthrough() {
     assert_eq!(get_tick_interval_multiplier("bybit"), 1.0);
 }
 
-struct HeldClock(Mutex<u64>);
+#[derive(Default)]
+struct HeldClock(Mutex<u64>, std::cell::RefCell<Vec<std::rc::Rc<Scheduled>>>);
+struct Scheduled {
+    at: u64,
+    callback: std::cell::RefCell<Option<Box<dyn FnOnce(Result<(), TransportError>)>>>,
+}
+struct ScheduledHandle(std::rc::Rc<Scheduled>);
+impl RateLimitTimer for ScheduledHandle {
+    fn cancel(&self) {
+        self.0.callback.borrow_mut().take();
+    }
+}
+impl HeldClock {
+    fn advance(&self, time: u64) {
+        *self.0.lock().unwrap() = time;
+        let pending = std::mem::take(&mut *self.1.borrow_mut());
+        for timer in pending {
+            if timer.at <= time {
+                let callback = timer.callback.borrow_mut().take();
+                if let Some(callback) = callback {
+                    callback(Ok(()));
+                }
+            } else {
+                self.1.borrow_mut().push(timer);
+            }
+        }
+    }
+}
+impl RateLimitScheduler for HeldClock {
+    fn schedule_reset(
+        &self,
+        delay: u64,
+        callback: Box<dyn FnOnce(Result<(), TransportError>)>,
+    ) -> Result<Box<dyn RateLimitTimer>, TransportError> {
+        let timer = std::rc::Rc::new(Scheduled {
+            at: self.now_ms() + delay,
+            callback: std::cell::RefCell::new(Some(callback)),
+        });
+        self.1.borrow_mut().push(timer.clone());
+        Ok(Box::new(ScheduledHandle(timer)))
+    }
+}
 impl RateLimitClock for HeldClock {
     fn now_ms(&self) -> u64 {
         *self.0.lock().unwrap()
@@ -460,7 +505,11 @@ impl RateLimitClock for HeldClock {
 #[test]
 fn limiter_fifo_and_cancelled_waiters_do_not_consume_capacity() {
     let venue = Arc::new(Venue::default());
-    let clock = Arc::new(HeldClock(Mutex::new(0)));
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "scheduler callbacks are local-thread; the limiter API takes Arc"
+    )]
+    let clock = Arc::new(HeldClock::default());
     let limited = RateLimitedAdapter::new(venue.clone(), clock.clone(), 1, 1000);
     run(limited.execute(req("GET", "/first"))).unwrap();
     let waker = Waker::noop();
@@ -472,11 +521,11 @@ fn limiter_fifo_and_cancelled_waiters_do_not_consume_capacity() {
     assert!(second.as_mut().poll(&mut cx).is_pending());
     assert!(third.as_mut().poll(&mut cx).is_pending());
     drop(cancelled);
-    *clock.0.lock().unwrap() = 1000;
+    clock.advance(1000);
     assert!(third.as_mut().poll(&mut cx).is_pending());
     assert!(second.as_mut().poll(&mut cx).is_ready());
     assert!(third.as_mut().poll(&mut cx).is_pending());
-    *clock.0.lock().unwrap() = 2000;
+    clock.advance(2000);
     assert!(third.as_mut().poll(&mut cx).is_ready());
     let accepted = venue.accepted.lock().unwrap();
     assert_eq!(
@@ -1512,7 +1561,11 @@ fn limiter_preserves_inner_effective_receipt_and_admission() {
         requests: Mutex::new(Vec::new()),
         fail_first: false,
     });
-    let clock = Arc::new(HeldClock(Mutex::new(0)));
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "scheduler callbacks are local-thread; the limiter API takes Arc"
+    )]
+    let clock = Arc::new(HeldClock::default());
     let limiter = RateLimitedAdapter::new(venue.clone(), clock.clone(), 1, 1000);
     for expected_time in [0, 1000] {
         let mut request = limiter.execute_with_receipt(req("GET", "/input"));
@@ -1523,7 +1576,7 @@ fn limiter_preserves_inner_effective_receipt_and_admission() {
                     .poll(&mut Context::from_waker(Waker::noop()))
                     .is_pending()
             );
-            *clock.0.lock().unwrap() = expected_time;
+            clock.advance(expected_time);
         }
         let execution = run(request).unwrap();
         assert_eq!(
@@ -1853,7 +1906,11 @@ fn zero_delay_retry_invokes_scheduler_for_each_retried_attempt() {
 
 #[test]
 fn signing_rate_slots_release_cancelled_waiters_without_spending_capacity() {
-    let clock = Arc::new(HeldClock(Mutex::new(0)));
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "scheduler callbacks are local-thread; the limiter API takes Arc"
+    )]
+    let clock = Arc::new(HeldClock::default());
     let limiter = RateLimiter::new(clock.clone(), 1, 1000);
     drop(limiter.acquire()); // An unpolled reservation has no queue side effects.
     run(limiter.acquire()).unwrap();
@@ -1863,11 +1920,11 @@ fn signing_rate_slots_release_cancelled_waiters_without_spending_capacity() {
     assert!(cancelled.as_mut().poll(&mut cx).is_pending());
     assert!(next.as_mut().poll(&mut cx).is_pending());
     drop(cancelled);
-    *clock.0.lock().unwrap() = 1000;
+    clock.advance(1000);
     assert!(matches!(next.as_mut().poll(&mut cx), Poll::Ready(Ok(()))));
     let mut later = Box::pin(limiter.acquire());
     assert!(later.as_mut().poll(&mut cx).is_pending());
-    *clock.0.lock().unwrap() = 2000;
+    clock.advance(2000);
     assert!(matches!(later.as_mut().poll(&mut cx), Poll::Ready(Ok(()))));
 }
 
@@ -1884,27 +1941,29 @@ fn try_parse_json(value: Value) -> Value {
 
 #[test]
 fn limiter_resets_from_timer_completion_with_frozen_now_and_idle_windows() {
-    struct Clock {
-        elapsed: Mutex<u64>,
-    }
+    struct Clock(HeldClock);
     impl RateLimitClock for Clock {
         fn now_ms(&self) -> u64 {
             0
         }
         fn sleep_ms(&self, ms: u64) -> TransportFuture<'_, ()> {
-            let deadline = *self.elapsed.lock().unwrap() + ms;
-            Box::pin(std::future::poll_fn(move |_| {
-                if *self.elapsed.lock().unwrap() >= deadline {
-                    Poll::Ready(Ok(()))
-                } else {
-                    Poll::Pending
-                }
-            }))
+            self.0.sleep_ms(ms)
         }
     }
-    let clock = Arc::new(Clock {
-        elapsed: Mutex::new(0),
-    });
+    impl RateLimitScheduler for Clock {
+        fn schedule_reset(
+            &self,
+            delay: u64,
+            callback: Box<dyn FnOnce(Result<(), TransportError>)>,
+        ) -> Result<Box<dyn RateLimitTimer>, TransportError> {
+            self.0.schedule_reset(delay, callback)
+        }
+    }
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "scheduler callbacks are local-thread; the limiter API takes Arc"
+    )]
+    let clock = Arc::new(Clock(HeldClock::default()));
     let limiter = RateLimiter::new(clock.clone(), 3, 1000);
     for _ in 0..3 {
         run(limiter.acquire()).unwrap();
@@ -1915,14 +1974,14 @@ fn limiter_resets_from_timer_completion_with_frozen_now_and_idle_windows() {
     assert!(cancelled.as_mut().poll(&mut cx).is_pending());
     assert!(pending.as_mut().poll(&mut cx).is_pending());
     drop(cancelled);
-    *clock.elapsed.lock().unwrap() = 1000;
+    clock.0.advance(1000);
     run(pending).unwrap();
     run(limiter.acquire()).unwrap();
     run(limiter.acquire()).unwrap();
     let mut blocked = Box::pin(limiter.acquire());
     assert!(blocked.as_mut().poll(&mut cx).is_pending());
     drop(blocked);
-    *clock.elapsed.lock().unwrap() = 4000;
+    clock.0.advance(4000);
     for _ in 0..3 {
         run(limiter.acquire()).unwrap();
     }
@@ -1931,4 +1990,23 @@ fn limiter_resets_from_timer_completion_with_frozen_now_and_idle_windows() {
         0,
         "timer completion does not advance Date/performance"
     );
+}
+
+#[test]
+fn limiter_reset_failure_rejects_the_queued_request_visibly() {
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "scheduler callbacks are local-thread; the limiter API takes Arc"
+    )]
+    let clock = Arc::new(HeldClock::default());
+    let limiter = RateLimiter::new(clock.clone(), 1, 1000);
+    run(limiter.acquire()).unwrap();
+    let mut queued = Box::pin(limiter.acquire());
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(queued.as_mut().poll(&mut cx).is_pending());
+    let timer = clock.1.borrow_mut().pop().unwrap();
+    let callback = timer.callback.borrow_mut().take().unwrap();
+    let error = TransportError::Host("timer host failed".into());
+    callback(Err(error.clone()));
+    assert!(matches!(queued.as_mut().poll(&mut cx), Poll::Ready(Err(actual)) if actual == error));
 }

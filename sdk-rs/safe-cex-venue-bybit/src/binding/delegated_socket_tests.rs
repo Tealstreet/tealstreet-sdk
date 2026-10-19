@@ -51,7 +51,6 @@ fn venue_with_signer(
             remote_signer: signer,
             wire: Arc::new(NoWire),
             http_host: Rc::new(NativeHttpHost::default()),
-            rate_limit_clock: Arc::new(Clock),
             retry_clock: Rc::new(Clock),
             clock,
             external_public_data: None,

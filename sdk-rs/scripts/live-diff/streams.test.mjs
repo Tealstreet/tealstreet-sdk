@@ -6,7 +6,7 @@ import tls from 'node:tls';
 import http from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
 import { makeCA, recordingProxy } from './recorder.mjs';
-import { streamRelay, streamKey } from './stream-relay.mjs';
+import { streamRelay, streamKey, verifyMappedDrain, verifyMappedTransportDrain } from './stream-relay.mjs';
 import { compareSequences, qualifyComparisons } from './stream-compare.mjs';
 import { differences } from './compare.mjs';
 
@@ -202,4 +202,143 @@ test('cross-side attribution requires repeatable output and complete inputs/barr
   );
   assert.equal(qualifyComparisons(parity(), repeats, { inputDiff: true }).candles.qualifiedStatus, 'INPUT_DIFF');
   assert.equal(qualifyComparisons(parity(), repeats, { incomplete: true }).candles.qualifiedStatus, 'INCOMPLETE');
+});
+
+test('duplicate URLs bind by exact subscription rather than network accept order', { timeout: 15000 }, async (t) => {
+  const directory = mkdtempSync(`${tmpdir()}/duplicate-dial-test-`),
+    ca = makeCA(directory, undefined);
+  const key = 'wss://same.public.test/feed';
+  const tape = {
+    connections: [0, 1].map((id) => ({ id, key, url: key, occurrence: id, openedAtMs: 0 })),
+    frames: [0, 1].map((connection) => ({
+      connection,
+      atMs: connection,
+      kind: 'message',
+      binary: false,
+      base64: Buffer.from(`frame-${connection}`).toString('base64'),
+    })),
+    durationMs: 2,
+  };
+  const capturedSockets = [0, 1].map((occurrence) => ({
+    key,
+    occurrence,
+    sent: [{ binary: false, base64: Buffer.from(`subscribe-${occurrence}`).toString('base64') }],
+  }));
+  const clients = [],
+    counters = [],
+    got = [],
+    records = [];
+  const relay = await streamRelay({
+    directory,
+    ca,
+    hosts: ['same.public.test'],
+    mode: 'replay',
+    tape,
+    records,
+    capturedSockets,
+  });
+  t.after(async () => {
+    for (const client of clients) client.terminate();
+    await relay.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  // Construct and accept the logical second socket first.
+  for (const logical of [1, 0]) {
+    const counter = { url: key, consumed: 0, processed: 0, errors: 0, closeConsumed: 0, closeProcessed: 0 };
+    counters.push(counter);
+    const client = new WebSocket(key, {
+      createConnection: () =>
+        tls.connect({
+          host: '127.0.0.1',
+          port: relay.ports.v4,
+          servername: 'same.public.test',
+          ca: readFileSync(ca.cert),
+        }),
+    });
+    clients.push(client);
+    client.on('message', (bytes) => {
+      counter.consumed++;
+      got.push({ logical, body: bytes.toString() });
+      counter.processed++;
+    });
+    await new Promise((resolve, reject) => {
+      client.once('open', resolve);
+      client.once('error', reject);
+    });
+    client.send(`subscribe-${logical}`);
+  }
+  assert.equal(await relay.ready(3000), true);
+  const receipt = await relay.playControlled({
+    advance: async () => {},
+    receipt: async () => ({ sockets: counters, pendingJobs: 0 }),
+    timeoutMs: 3000,
+  });
+  assert.deepEqual(got, [
+    { logical: 0, body: 'frame-0' },
+    { logical: 1, body: 'frame-1' },
+  ]);
+  assert.equal(receipt.applicationDrainVerified, true);
+  assert.equal(receipt.inputHash, receipt.expectedInputHash);
+  assert.equal(receipt.dialBindings.parser[`${key}#0`].index, 1);
+  assert.equal(receipt.dialBindings.parser[`${key}#1`].index, 0);
+  assert.deepEqual(
+    records.map((r) => [r.networkOccurrence, r.occurrence]),
+    [
+      [0, 1],
+      [1, 0],
+    ],
+  );
+});
+
+test('duplicate-dial bindings reject extra work, ambiguous vectors and later counter migration', () => {
+  const key = 'wss://same.public.test/feed',
+    tape = { connections: [0, 1].map((occurrence) => ({ id: occurrence, key, occurrence })) };
+  const row = (processed) => ({
+    url: key,
+    consumed: processed,
+    processed,
+    errors: 0,
+    closeConsumed: 0,
+    closeProcessed: 0,
+  });
+  const expected = new Map([[`${key}#0`, 1]]),
+    bindings = new Map();
+  assert.equal(
+    verifyMappedDrain(tape, expected, { sockets: [row(0), row(1)], pendingJobs: 0 }, new Map(), bindings),
+    true,
+  );
+  assert.equal(bindings.get(`${key}#0`).index, 1);
+  assert.equal(
+    verifyMappedDrain(tape, expected, { sockets: [row(1), row(0)], pendingJobs: 0 }, new Map(), bindings),
+    false,
+    'identity never migrates to another receipt index',
+  );
+  assert.equal(
+    verifyMappedDrain(tape, expected, { sockets: [row(1), row(1)], pendingJobs: 0 }, new Map(), bindings),
+    false,
+    'extra work cannot be hidden in URL totals',
+  );
+  const ambiguous = new Map();
+  assert.equal(
+    verifyMappedDrain(
+      tape,
+      new Map([
+        [`${key}#0`, 1],
+        [`${key}#1`, 1],
+      ]),
+      { sockets: [row(1), row(1)], pendingJobs: 0 },
+      new Map(),
+      ambiguous,
+    ),
+    false,
+  );
+  assert.equal(ambiguous.size, 0, 'failed observations do not commit guessed identities');
+  const physical = new Map(),
+    counts = new Map([
+      [`${key}#0`, { message: 1, ping: 0, pong: 0, close: 0 }],
+      [`${key}#1`, { message: 0, ping: 0, pong: 0, close: 0 }],
+    ]);
+  const transport = (n) => ({ url: key, counts: { message: n, ping: 0, pong: 0, close: 0 } });
+  assert.equal(verifyMappedTransportDrain(tape, { transport: [transport(0), transport(1)] }, counts, physical), true);
+  assert.equal(verifyMappedTransportDrain(tape, { transport: [transport(1), transport(0)] }, counts, physical), false);
 });
