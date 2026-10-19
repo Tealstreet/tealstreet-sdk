@@ -317,3 +317,17 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   independent repeat audit is clear. All22 harness tests pass. Rebuilt aggregate
   wasm2,114,189bytes (CI allowance2.125MiB), SDK18/host5 tests pass, workspace
   clippy passes. Full native tests and fresh replay gates remain in progress.
+
+### Stable replay memory baseline
+
+- New landing checks exposed112bytes of late TS loader buffer release during
+  private replay. Import tracing confirms cleanup can continue across15/33/57ms;
+  immediate-turn equality was insufficient. Both implementations/endpoints now
+  require100ms unchanged backing-buffer counts with1s fail-closed deadline.
+  Exact subtraction and negative-component checks remain; CPU is sampled before
+  final settling. Three injected-timing checks and independent repeat review pass.
+- BingX private38frames passes after this correction. Final five-venue public
+  gates so far pass for BingX/Binance/Bybit; CI exposed asynchronous Bybit
+  subscription batches finishing after accelerated replay, so adding explicit
+  subscription readiness before delivering its frames. No subscription mismatch
+  is normalized away. Native326tests and wasm clippy pass; SDK18/host5 are green.

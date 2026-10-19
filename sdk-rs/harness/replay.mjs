@@ -269,14 +269,19 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
 
 /** Loaded code is excluded; collect before I/O and after replay state settles. */
 const baseline = async () => {
+  const deadline = performance.now() + 1000;
   let previous;
-  let stable = 0;
-  for (let i = 0; i < 8; i++) {
+  let stableSince;
+  while (performance.now() < deadline) {
     globalThis.gc?.();
-    await new Promise(setImmediate);
+    // Loader/native cleanup can outlive several immediate turns. Require real
+    // elapsed quiescence so imported transient buffers cannot inflate baseline.
+    await new Promise((resolve) => setTimeout(resolve, 10));
     const memory = process.memoryUsage();
-    stable = memory.arrayBuffers === previous ? stable + 1 : 0;
-    if (stable >= 2) return memory;
+    const now = performance.now();
+    if (now >= deadline) break;
+    if (memory.arrayBuffers !== previous) stableSince = now;
+    if (now - stableSince >= 100) return memory;
     previous = memory.arrayBuffers;
   }
   throw new Error('Backing-buffer memory did not settle');
