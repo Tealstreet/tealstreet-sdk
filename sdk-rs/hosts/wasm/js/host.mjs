@@ -23,15 +23,18 @@ export class EngineHost {
     this.timers = new Map();
     this.commands = new Map();
     this.nextCommand = 1;
+    this.disposed = false;
   }
 
   start() {
+    if (this.disposed) return;
     this.run(this.engine.start(this.transport.now()));
   }
 
   /** Send a command; resolves with its result for commands that report one. */
   command(command) {
-    const reply = command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
+    if (this.disposed) return Promise.reject(new Error('engine disposed'));
+    const reply = command.op === 'setTickerSymbols' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;
@@ -60,6 +63,9 @@ export class EngineHost {
   }
 
   dispose() {
+    this.disposed = true;
+    for (const pending of this.commands.values()) pending.reject(new Error('engine disposed'));
+    this.commands.clear();
     for (const socket of this.sockets.values()) socket.close();
     for (const handle of this.timers.values()) this.transport.clearTimeout(handle);
     this.sockets.clear();
@@ -68,37 +74,51 @@ export class EngineHost {
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
   async receive(id, { status, headers = '', body }) {
+    if (this.disposed) return;
     const { engine, transport } = this;
     this.run(engine.httpStart(id, status, headers, transport.now()));
     try {
       if (body instanceof Uint8Array) {
         for (let at = 0; at < body.length; at += CHUNK_BYTES) {
+          if (this.disposed) return;
           this.run(engine.httpChunk(id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
         }
       } else {
-        for await (const chunk of body) this.run(engine.httpChunk(id, chunk, transport.now()));
+        for await (const chunk of body) {
+          if (this.disposed) return;
+          this.run(engine.httpChunk(id, chunk, transport.now()));
+        }
       }
     } catch (error) {
+      if (this.disposed) return;
       this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));
       return;
     }
-    this.run(engine.httpEnd(id, transport.now()));
+    if (!this.disposed) this.run(engine.httpEnd(id, transport.now()));
   }
 
   run(actionsJson) {
-    if (!actionsJson) return;
+    if (this.disposed || !actionsJson) return;
     for (const action of JSON.parse(actionsJson)) this.execute(action);
   }
 
   execute(action) {
+    if (this.disposed) return;
     const { engine, transport } = this;
     switch (action.op) {
       case 'wsConnect': {
         const id = action.socket;
+        if (action.headers?.length && !transport.webSocketHeaders) {
+          this.handlers.onLog?.('warning', 'WebSocket upgrade headers unavailable; continuing REST reconciliation');
+          transport.setTimeout(() => { if (!this.disposed) this.run(engine.wsClose(id, 1006, transport.now())); }, 0);
+          break;
+        }
         const socket = transport.connect(action.url, {
-          onOpen: () => this.run(engine.wsOpen(id, transport.now())),
-          onMessage: (text) => this.run(engine.wsMessage(id, text, transport.now())),
+          headers: action.headers && Object.fromEntries(action.headers),
+          onOpen: () => { if (!this.disposed) this.run(engine.wsOpen(id, transport.now())); },
+          onMessage: (text) => { if (!this.disposed) this.run(engine.wsMessage(id, text, transport.now())); },
           onClose: (code) => {
+            if (this.disposed) return;
             this.sockets.delete(id);
             this.run(engine.wsClose(id, code ?? 1006, transport.now()));
           },
@@ -124,7 +144,7 @@ export class EngineHost {
           })
           .then(
             (response) => this.receive(id, response),
-            (error) => this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now())),
+            (error) => { if (!this.disposed) this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now())); },
           );
         break;
       }
@@ -132,6 +152,7 @@ export class EngineHost {
         const id = action.timer;
         const handle = transport.setTimeout(() => {
           this.timers.delete(id);
+          if (this.disposed) return;
           this.run(engine.timer(id, transport.now()));
         }, Math.max(0, action.at - transport.now()));
         this.timers.set(id, handle);
@@ -228,21 +249,42 @@ export const bindSocketMessages = (socket, { onMessage, onClose }) => {
 };
 
 /** Transport over the runtime's own WebSocket, fetch and timers. */
-export const nativeTransport = () => ({
+export const nativeTransport = () => {
+  let Socket = globalThis.WebSocket;
+  let webSocketHeaders = false;
+  try {
+    const module = globalThis.process?.getBuiltinModule?.('module');
+    if (module?.createRequire) {
+      Socket = module.createRequire(import.meta.url)('ws');
+      webSocketHeaders = true;
+    }
+  } catch { /* Browser and restricted renderer transports keep REST fallback. */ }
+  return {
+  webSocketHeaders,
   now: () => Date.now(),
-  connect(url, { onOpen, onMessage, onClose }) {
-    const ws = new WebSocket(url);
+  connect(url, { headers = {}, onOpen, onMessage, onClose }) {
+    if (Object.keys(headers).length && !webSocketHeaders) throw new Error('WebSocket upgrade headers unavailable');
+    const ws = webSocketHeaders ? new Socket(url, { headers: { 'User-Agent': 'Tealstreet', ...headers } }) : new Socket(url);
     let closed = false;
+    let reported = false;
+    const reportClose = (code) => { if (!reported) { reported = true; closed = true; onClose(code); } };
     ws.addEventListener('open', () => { if (!closed) onOpen(); });
-    const dispose = bindSocketMessages(ws, { onMessage, onClose });
+    const dispose = bindSocketMessages(ws, {
+      onMessage: (text) => { if (!closed) onMessage(text); },
+      onClose: reportClose,
+    });
+    // Local close disposes queued decoding, but still acknowledges closure once.
+    ws.addEventListener('error', () => { if (closed) reportClose(1006); });
+    ws.addEventListener('close', (event) => { if (closed) reportClose(event.code); });
     return { send: (text) => ws.send(text), close: () => { closed = true; dispose(); ws.close(); } };
   },
   async request({ method, url, headers, body }) {
-    const response = await fetch(url, { method, headers, body });
+    const response = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(20_000) });
     const lines = [];
     response.headers.forEach((value, name) => lines.push(`${name}: ${value}`));
     return { status: response.status, headers: lines.join('\n'), body: chunks(response.body) };
   },
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (handle) => clearTimeout(handle),
-});
+};
+};

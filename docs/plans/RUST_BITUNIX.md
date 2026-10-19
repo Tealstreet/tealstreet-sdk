@@ -266,3 +266,19 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   outside both CPU windows. Timed snapshots remain ineligible until their time.
 - WEEX landed at 4046db3826 while this merge ran. Integrate it before the final
   combined replay run and PR, avoiding repeat measurements on a superseded build.
+
+### WEEX landing integration checkpoint
+
+- Merging landing 4046db3826, preserving its upgrade-header/disposal guards,
+  strict streaming JSON, WEEX protocol/oracle checks and bounded OKX startup
+  subscriptions. Native reviewers own disjoint engine, harness and host merge
+  scopes. Final integrated checks use the resulting six-venue artifact.
+- Adapter audit also found WEEX's registered Rust venue lacked its client-ID
+  helper rule; copied the existing TS venue's validation and mint contract.
+- Six-venue core checks PASS: workspace bans/fmt/clippy/tests, wasm clippy/build,
+  root typecheck 44/lint 28/test 27 tasks, adapter 17 and JS host 20 tests.
+  Engine 31 tests and harness 19 tests PASS. Binary 2,518,643 bytes; aggregate
+  cap 2.5 MiB. Performance thresholds unchanged.
+- Host review additionally fixed disposed-engine calls from delayed HTTP/timer
+  callbacks, retaining ordered binary decoding and fail-closed upgrade headers.
+  Final combined public/private replays are next, then PR review and green CI.

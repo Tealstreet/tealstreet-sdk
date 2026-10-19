@@ -42,6 +42,7 @@ const recording = {
       write({ type: 'close', url, connection, code, local });
     };
     const socket = live.connect(url, {
+      headers: handlers.headers,
       onOpen: () => {
         write({ type: 'open', url, connection });
         handlers.onOpen();

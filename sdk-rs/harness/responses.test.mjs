@@ -69,3 +69,35 @@ test('legacy body fallback cannot bypass request validation', () => {
   assert.equal(responses.respond('POST', '/legacy', 'different body').body, 'ok');
   assert.equal(responses.respond('POST', '/legacy', 'invalid').status, 599);
 });
+
+test('effectiveAt reads never expose future snapshots and remain reusable at their stage', () => {
+  const read = { type: 'http', method: 'POST', url: '/income', status: 200 };
+  const responses = new Responses([
+    { ...read, body: 'first', effectiveAt: 100 },
+    { ...read, body: 'next', effectiveAt: 200 },
+    { ...read, body: 'command', effectiveAt: 250, afterCommand: 2 },
+  ], (method, url) => method + url, undefined, () => false);
+  assert.equal(responses.respond('POST', '/income', undefined, 0, 99).status, 599);
+  assert.equal(responses.respond('POST', '/income', undefined, 0, 100).body, 'first');
+  assert.equal(responses.respond('POST', '/income', undefined, 0, 199).body, 'first');
+  assert.equal(responses.respond('POST', '/income', undefined, 0, 200).body, 'next');
+  assert.equal(responses.respond('POST', '/income', undefined, 1, 300).body, 'next');
+  assert.equal(responses.respond('POST', '/income', undefined, 2, 249).body, 'next');
+  assert.equal(responses.respond('POST', '/income', undefined, 2, 250).body, 'command');
+  assert.equal(responses.respond('POST', '/income', undefined, 2, 251).body, 'command');
+});
+
+test('timed writes consume in tape order and generated response IDs reflect each request', () => {
+  const write = { type: 'http', method: 'POST', url: '/algo', status: 200, effectiveAt: 0 };
+  const responses = new Responses([
+    { ...write, body: '{"orderId":"1","clientOrderId":"$clientAlgoId"}' },
+    { ...write, body: '{"orderId":"2","clientOrderId":"$newClientOrderId"}' },
+  ], (method, url) => method + url);
+  assert.equal(responses.unusedWrites(), 2);
+  assert.deepEqual(JSON.parse(responses.respond('POST', '/algo', '{"clientAlgoId":"a\\\"b"}').body),
+    { orderId: '1', clientOrderId: 'a"b' });
+  assert.deepEqual(JSON.parse(responses.respond('POST', '/algo', { newClientOrderId: 'c' }).body),
+    { orderId: '2', clientOrderId: 'c' });
+  assert.equal(responses.respond('POST', '/algo').status, 599);
+  assert.equal(responses.unusedWrites(), 0);
+});

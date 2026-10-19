@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
+import { fixWeexConditionals } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 
 const { values } = parseArgs({
@@ -77,6 +78,14 @@ const isPrivate = Boolean(results.ts[0].account);
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
+  if (values.venue === 'weex') {
+    // Opening STOP/TP rows are entries and their trigger is not execution price.
+    fixWeexConditionals(account, tape);
+    // Native regressions also cover failed read retention, stale private/depth
+    // rejection, fill ID deduplication, missing placement IDs, rejected cancels,
+    // per-symbol margin mode, safe replacement, and incomplete income cursors.
+    return;
+  }
   if (values.venue === 'bitunix') {
     // Bitunix fixes: failed reconciliation preserves state; live cumulative fills
     // emit once; history dedupes by tradeId rather than collapsing equal fills;
@@ -152,7 +161,7 @@ const fixHistoricalFills = (commands) => {
       commands[index].ok = executions.sort((a, b) => b.timestamp - a.timestamp);
   });
 };
-const fixCryptocomAccount = (account) => {
+function fixCryptocomAccount(account) {
     // TS never sets the hedged store flag despite mapping positions as hedged.
     account.hedged = true;
     // TS omits user.trade entirely. Derive the execution oracle from documented
@@ -178,8 +187,8 @@ const fixCryptocomAccount = (account) => {
     // ignored brackets/opening triggers reject before writes; caller ids use a
     // conservative 36-byte ceiling without JS string emulation.
     // Public throttle and public-only subscription corrections are the
-    // afterTsFrame and prepareTs hooks in venues.mjs.
-};
+    // afterTsFrame and prepareTsReady hooks in venues.mjs.
+}
 for (let run = 0; run < runs; run++) {
   const result = { ts: results.ts[run], rust: results.rust[run] };
   const { ts, rust } = result;
@@ -197,7 +206,14 @@ for (let run = 0; run < runs; run++) {
   if (!equal(ts.commands, rust.commands)) differences.push(`command results: ts=${JSON.stringify(ts.commands)} rust=${JSON.stringify(rust.commands)}`);
   for (const impl of ['ts', 'rust']) {
     const output = result[impl];
-    if (output.metrics.retainedBytes < 0 || output.metrics.bufferRetainedBytes < 0) differences.push(`${impl}: negative retained memory component; baseline is invalid`);
+    for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
+      if (!Number.isFinite(output.metrics[field]) || output.metrics[field] < 0) {
+        differences.push(`${impl}: invalid ${field} (${output.metrics[field]}); baseline is invalid`);
+      }
+    }
+    for (const symbol of values.books.split(',').filter(Boolean)) {
+      if (!output.books[symbol]) differences.push(`${impl}: requested book ${symbol} is missing`);
+    }
     if (output.unusedWrites) differences.push(`${impl}: ${output.unusedWrites} taped mutation(s) never sent`);
     for (const error of output.protocolErrors ?? []) differences.push(`${impl}: ${error}`);
     if (!result[impl].markets.length || !result[impl].tickers.length) differences.push(`${impl}: empty public seed`);

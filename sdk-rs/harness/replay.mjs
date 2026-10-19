@@ -55,6 +55,7 @@ const isPrivate = records.some((r) =>
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 const PASSPHRASE = 'replay-passphrase';
+
 const callerIds = new Set(records.flatMap((r) => r.type === 'command' ? (r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean) : []));
 
 /** Per-request clocks, signatures, connection IDs and generated client IDs. */
@@ -99,11 +100,13 @@ const apiSupported = (value) => value == null || value === '' ? true
   : typeof value === 'boolean' ? value
   : !['false', '0', 'no', 'n', 'disabled', 'unsupported'].includes(String(value).trim().toLowerCase());
 
+const isWriteRequest = (method, url) => venue.isWrite?.(method, url) ?? method !== 'GET';
+
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
   constructor(impl) {
     this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records) });
-    this.responses = new Responses(records, requestKey, venue.checkRequest, venue.isWrite,
+    this.responses = new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
       venue.matchRequestBody ? undefined : (method, url) => requestKey(method, url));
     this.frames = records.filter((r) => ['ws', 'command', 'open', 'close'].includes(r.type)).map((r) => {
       if (r.url) r = { ...r, url: canonicalUrl(r.url) };
@@ -186,12 +189,13 @@ class Tape {
   }
 
   respond(method, url, body, headers = {}) {
+    venue.validateRequest?.({ method, url, body, headers });
     if (values.venue === 'bitunix' && !new URL(url).pathname.includes('/market/')) {
       const query = [...new URL(url).searchParams].sort(([a], [b]) => a.localeCompare(b))
         .map(([key, value]) => `${key}${value}`).join('').replace(/[=&]/g, '');
       this.verifySignature(headers, query, body);
     }
-    if (venue.isWrite?.(method, url) ?? method !== 'GET') this.outbound.push(requestKey(method, url, body));
+    if (isWriteRequest(method, url)) this.outbound.push(requestKey(method, url, body));
     return this.responses.respond(method, url, body, this.commandIndex, this.time);
   }
 
@@ -469,7 +473,9 @@ async function runRust() {
   const candleUpdates = [];
   const transport = {
     now: () => Date.now(),
-    connect: (url, { onOpen, onMessage, onClose }) => {
+    webSocketHeaders: true,
+    connect: (url, { headers, onOpen, onMessage, onClose }) => {
+      venue.validateSocket?.(url, headers);
       const socket = tape.connect(url, onOpen, (text) => { tape.audit?.received(url, text); onMessage(text); }, onClose);
       return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
@@ -616,7 +622,8 @@ async function runTs() {
     static OPEN = 1;
     static CLOSING = 2;
     static CLOSED = 3;
-    constructor(url) {
+    constructor(url, _protocols, options = {}) {
+      venue.validateSocket?.(url, options.headers);
       this.url = url;
       this.readyState = 0;
       this.listeners = { open: [], message: [], close: [], error: [] };
@@ -657,9 +664,9 @@ async function runTs() {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data, config.headers);
+    const { status, body, headers: responseHeaders } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data, config.headers?.toJSON?.() ?? config.headers);
     // The raw body: the client's own transformResponse parses it, big ids included.
-    const response = { data: body, status, statusText: String(status), headers: {}, config, request: {} };
+    const response = { data: body, status, statusText: String(status), headers: Object.fromEntries((responseHeaders ?? '').split('\n').filter(Boolean).map((line) => { const colon = line.indexOf(':'); return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()]; })), config, request: {} };
     if (status >= 400) {
       const error = new Error(`Request failed with status code ${status}`);
       error.response = response;
@@ -693,12 +700,13 @@ async function runTs() {
   const options = { ...venue.options, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { key: '', secret: '', publicDataOnly: true }) };
   const exchange = new Exchange(venue.ts.name, options, store);
   venue.configureTs?.(exchange);
+  venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
   const sampling = setInterval(() => { tape.peakBytes = Math.max(tape.peakBytes ?? 0, tape.sampleMemory()); }, 5);
   const started = exchange.start();
-  const prepared = started.then(() => venue.prepareTs?.(exchange, { isPrivate }));
+  const prepared = started.then(() => venue.prepareTsReady?.(exchange, { isPrivate }));
   const subscribed = (async () => {
     while (!store.markets.length) await new Promise((r) => setTimeout(r, 1));
     for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => (finalBooks[symbol] = book));
@@ -746,7 +754,7 @@ async function runTs() {
         // Zero-size placeholders carry each market's leverage and margin type.
         positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
         settings: [...new Map(store.positions.filter((p) => p.leverage > 0).sort((a, b) => a.contracts - b.contracts).map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }])).values()],
-        fills: executions.map((f) => ({ id: f.id, symbol: f.symbol, side: f.side, amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
+        fills: executions.map((f) => ({ id: f.orderId ?? f.id, symbol: f.symbol, side: f.side, amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
       }
     : undefined;
   exchange.dispose();

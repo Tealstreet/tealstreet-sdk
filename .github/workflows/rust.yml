@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Five venues: measured 2,058,973 bytes; allow 2.1 MiB.
-      WASM_BUDGET_BYTES: 2202010
+      # Six venues: measured 2,518,643 bytes locally; allow 2.5 MiB.
+      WASM_BUDGET_BYTES: 2621440
     defaults:
       run:
         working-directory: .
@@ -135,6 +135,8 @@ jobs:
         run: yarn workspace @tealstreet/safe-cex test-wasm
       - name: The Cloudflare Workers host
         run: yarn workspace @tealstreet/safe-cex-wasm test
+      - name: Harness oracle regressions
+        run: corepack yarn -s rust:test-harness
       - name: Check the wasm size budget
         run: |
           size=$(stat -c%s sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm)
@@ -174,3 +176,9 @@ jobs:
             yarn rust:private-tape-okx --venue "$venue"
             yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
           done
+      - name: WEEX public data (correctness, CPU and memory)
+        run: corepack yarn -s rust:gate --venue weex --tape sdk-rs/harness/fixtures/weex-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: WEEX account and trading (correctness)
+        run: |
+          corepack yarn -s rust:private-tape:weex
+          corepack yarn -s rust:gate --venue weex --tape sdk-rs/harness/tapes/weex-private.jsonl --runs 1 --books ''

@@ -1,3 +1,5 @@
+import { parseRequestJson } from './request-json.mjs';
+
 // Reads may reuse their last snapshot; a mutation response is consumed once.
 export class Responses {
   constructor(records, key, check, isWrite, fallbackKey) {
@@ -21,23 +23,30 @@ export class Responses {
       this.unserved++;
       return { status: 599, body: '' };
     }
-    const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= commandIndex && (r.after ?? 0) <= time);
+    const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= commandIndex && (r.after ?? 0) <= time && (r.effectiveAt ?? 0) <= time);
     if (!eligible.length) {
       this.unserved++;
       return { status: 599, body: '' };
     }
     const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
     let current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
-    const timed = queue.some((r) => r.after !== undefined);
+    const write = this.isWrite?.(method, url) ?? method !== 'GET';
+    const timed = !write && queue.some((r) => r.after !== undefined || r.effectiveAt !== undefined);
     if (timed) {
-      const after = Math.max(...current.map((r) => r.after ?? 0));
-      current = current.filter((r) => (r.after ?? 0) === after);
+      const after = Math.max(...current.map((r) => Math.max(r.after ?? 0, r.effectiveAt ?? 0)));
+      current = current.filter((r) => Math.max(r.after ?? 0, r.effectiveAt ?? 0) === after);
     }
     const record = timed ? current.at(-1) : current[0];
-    if ((!timed && current.length > 1) || this.isWrite?.(method, url)) queue.splice(queue.indexOf(record), 1);
-    return { status: record.status, headers: record.headers ?? '', body: record.body };
+    if ((!timed && current.length > 1) || write) queue.splice(queue.indexOf(record), 1);
+    let responseBody = record.body;
+    if (/"\$(clientAlgoId|newClientOrderId)"/.test(responseBody)) {
+      const sent = typeof body === 'string' ? parseRequestJson(body) : body ?? {};
+      responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId)"/g,
+        (_, field) => JSON.stringify(sent[field] ?? null));
+    }
+    return { status: record.status, headers: record.headers ?? '', body: responseBody };
   }
   unusedWrites() {
-    return [...this.queues.values()].flat().filter((r) => this.isWrite?.(r.method, r.url)).length;
+    return [...this.queues.values()].flat().filter((r) => (this.isWrite?.(r.method, r.url) ?? r.method !== 'GET')).length;
   }
 }

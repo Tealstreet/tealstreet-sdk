@@ -75,17 +75,39 @@ pub struct Fill {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
-    WsConnect { socket: SocketId, url: String },
-    WsSend { socket: SocketId, text: String },
-    WsClose { socket: SocketId },
+    WsConnect {
+        socket: SocketId,
+        url: String,
+    },
+    /// Upgrade authentication; hosts must fail closed if headers are unsupported.
+    WsConnectWithHeaders {
+        socket: SocketId,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+    },
+    WsSend {
+        socket: SocketId,
+        text: String,
+    },
+    WsClose {
+        socket: SocketId,
+    },
     Http(HttpRequest),
-    SetTimer { timer: TimerId, at_ms: f64 },
-    ClearTimer { timer: TimerId },
+    SetTimer {
+        timer: TimerId,
+        at_ms: f64,
+    },
+    ClearTimer {
+        timer: TimerId,
+    },
     Notice(Notice),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    SetTickerSymbols {
+        symbols: Vec<String>,
+    },
     SubscribeOrderBook {
         symbol: String,
     },
@@ -252,7 +274,6 @@ struct Incoming {
     headers: String,
     /// Splits a streamed array out of a successful body.
     splitter: Option<ArraySplitter>,
-    envelope: bool,
     /// Everything not streamed: error bodies and unstreamed requests. A
     /// streamed body's envelope is kept by its splitter.
     body: Vec<u8>,
@@ -311,6 +332,20 @@ impl<P> Cx<'_, P> {
         socket
     }
 
+    pub fn connect_with_headers(
+        &mut self,
+        url: impl Into<String>,
+        headers: Vec<(&'static str, String)>,
+    ) -> SocketId {
+        let socket = SocketId(self.io.next());
+        self.io.actions.push(Action::WsConnectWithHeaders {
+            socket,
+            url: url.into(),
+            headers,
+        });
+        socket
+    }
+
     pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
         self.io.actions.push(Action::WsSend {
             socket,
@@ -345,8 +380,7 @@ impl<P> Cx<'_, P> {
 
     /// Issue a request whose successful body holds a large array: each element
     /// goes to [`Venue::on_item`] as it arrives, then [`Venue::on_response`]
-    /// runs with the envelope for metadata modes (array emptied),
-    /// or an empty body for legacy `Root`/`Field`. Error bodies arrive whole.
+    /// receives the envelope with its array emptied. Error bodies arrive whole.
     pub fn request_streamed(
         &mut self,
         method: Method,
@@ -355,7 +389,19 @@ impl<P> Cx<'_, P> {
         at: ArrayAt,
         pending: P,
     ) -> RequestId {
-        let id = self.request(method, url, headers, None, pending);
+        self.request_streamed_body(method, url, headers, None, at, pending)
+    }
+
+    pub fn request_streamed_body(
+        &mut self,
+        method: Method,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        body: Option<String>,
+        at: ArrayAt,
+        pending: P,
+    ) -> RequestId {
+        let id = self.request(method, url, headers, body, pending);
         self.io.streams.insert(id, at);
         id
     }
@@ -552,7 +598,6 @@ impl<V: Venue> Engine<V> {
                 status,
                 headers: headers.to_owned(),
                 splitter,
-                envelope: at.is_some_and(ArrayAt::retains_envelope),
                 body: Vec::new(),
             },
         );
@@ -607,21 +652,14 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_request_failed(&mut cx, pending, &message);
                 return;
             }
-            let body = if incoming.envelope {
-                let Some(body) = splitter
-                    .envelope()
-                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
-                else {
-                    self.venue.on_request_failed(
-                        &mut cx,
-                        pending,
-                        "invalid streamed response envelope",
-                    );
-                    return;
-                };
-                body
-            } else {
-                ""
+            // `finished` validates the complete document and every streamed item.
+            let Ok(body) = std::str::from_utf8(outside) else {
+                self.venue.on_request_failed(
+                    &mut cx,
+                    pending,
+                    "invalid streamed response envelope",
+                );
+                return;
             };
             let response = Response {
                 status: incoming.status,
