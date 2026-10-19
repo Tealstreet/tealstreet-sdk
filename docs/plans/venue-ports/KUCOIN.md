@@ -320,3 +320,29 @@ typecheck/lint PASS; root typecheck 44/lint 28 tasks PASS and root tests continu
 Ten-venue wasm is 3,131,044 bytes, below the unchanged 3,145,728-byte budget.
 No new P1/P2 findings in the independently reviewed shared harness, TS bridge
 or gate/CI resolution. Required replay gates run next against this artifact.
+
+### Final ten-venue brief gates (before final-head CI)
+
+All required brief gates PASS after the Backpack integration: KuCoin and
+Binance public/private, plus Backpack public/private compatibility. Three-run
+public medians (TS / Rust), all with exact output and protocol/request audits:
+
+| Venue | CPU ms | Steady CPU ms | Retained MB |
+| --- | ---: | ---: | ---: |
+| KuCoin | 1265.4 / 1005.2 | 860.2 / 639.9 | 6.6 / 2.8 |
+| Binance | 314.0 / 163.1 | 188.6 / 79.3 | 4.2 / 2.3 |
+| Backpack | 219.3 / 127.8 | 122.6 / 68.8 | 3.2 / 1.6 |
+
+KuCoin private: 32 frames / 17 commands, PASS, zero unserved requests or
+protocol/signature errors. Public: 16,157 frames, 692 markets/tickers, two books.
+Native workspace 684 tests (KuCoin 96), fmt/bans and both clippy targets,
+harness 88, wire 4, wasm integration 22, host 25 PASS; wasm 3,131,044 bytes.
+Root typecheck 44 and lint 28 tasks PASS. Root test command under Node22 failed
+only six dynamic-import timeouts in two unchanged Hyro/metadata files (6,559
+other tests pass). Node24 and isolated diagnostics reproduce the Hyro timeout;
+a serial full-root retry and module-loader investigation continue. Assertions
+and timeouts remain unchanged. Final-head CI must be green before merge.
+
+Adversarial findings R1–R11 repaired and independently cross-reviewed; no new
+P1/P2 after final query fix and shared merge review. Publish this checkpoint so
+the full ten-venue CI matrix runs while the local import failure is diagnosed.
