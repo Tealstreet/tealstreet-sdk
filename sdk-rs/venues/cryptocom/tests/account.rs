@@ -288,3 +288,39 @@ fn authoritative_empty_snapshot_fences_duplicate_live_position() {
     h.ws("user.positions", &short.replace(":10", ":11"));
     assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
 }
+
+fn next_tick(h: &mut Harness) {
+    let timer = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 10000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    h.now += 10000.0;
+    h.event(Event::TimerFired { timer });
+}
+#[test]
+fn cached_rest_after_reopen_keeps_newer_live_exposure() {
+    let mut h = Harness::new();
+    h.load();
+    let short = r#"{"instrument_name":"BTCUSD-PERP","quantity":"-2","cost":"200","update_timestamp_ms":10}"#;
+    h.ws("user.positions", short);
+    next_tick(&mut h);
+    h.reply("get-positions", EMPTY);
+    h.reply("user-balance", BALANCE);
+    h.ws("user.positions", &short.replace(":10", ":11"));
+    assert_eq!(h.engine.store().positions()[0].last_update, Some(11.0));
+    next_tick(&mut h);
+    h.reply(
+        "get-positions",
+        &format!(r#"{{"code":0,"result":{{"data":[{short}]}}}}"#),
+    );
+    assert_eq!(
+        h.engine.store().positions().len(),
+        1,
+        "cached closed row must not erase newer reopened exposure"
+    );
+    assert_eq!(h.engine.store().positions()[0].last_update, Some(11.0));
+}

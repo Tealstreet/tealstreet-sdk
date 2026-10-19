@@ -53,6 +53,10 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
+for (const impl of ['ts', 'rust']) for (const result of results[impl]) {
+  if (result.metrics.retainedBytes < 0) differences.push(impl + ': negative retained memory; baseline is invalid');
+}
+
 
 if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
 // Every request must match a taped one: an unserved request sent different parameters.

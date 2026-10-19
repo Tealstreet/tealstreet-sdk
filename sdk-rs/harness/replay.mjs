@@ -137,12 +137,11 @@ const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
 };
 
-const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
-  globalThis.gc?.();
+const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
+  const memory = await baseline();
   const cpu = process.cpuUsage(cpuStart.process);
   const thread = process.threadCpuUsage(cpuStart.thread);
   const steady = warmMark ? process.threadCpuUsage(warmMark.thread) : { user: 0, system: 0 };
-  const memory = process.memoryUsage();
   return {
     // The worker's own thread: what competes with its message handling.
     cpuMs: (thread.user + thread.system) / 1000,
@@ -153,6 +152,8 @@ const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
     wallMs: performance.now() - wallStart,
     rssBytes: memory.rss,
     heapUsedBytes: memory.heapUsed,
+    heapRetainedBytes: memory.heapUsed - heapBefore.heapUsed,
+    bufferRetainedBytes: memory.arrayBuffers - heapBefore.arrayBuffers,
     wasmBytes,
     // What the implementation keeps alive beyond the harness and loaded code.
     retainedBytes: retainedMemory(heapBefore, memory, wasmBytes),
@@ -160,7 +161,12 @@ const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
 };
 
 /** Heap retained before the implementation loads, so both start from zero. */
-const baseline = () => {
+const baseline = async () => {
+  // Module loaders and transferred buffers release backing stores after a turn.
+  for (let i = 0; i < 2; i++) {
+    globalThis.gc?.();
+    await new Promise(setImmediate);
+  }
   globalThis.gc?.();
   return process.memoryUsage();
 };
@@ -231,7 +237,7 @@ async function runRust() {
       }
     },
   });
-  const heapBefore = baseline();
+  const heapBefore = await baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   host.start();
@@ -257,7 +263,7 @@ async function runRust() {
   await settle();
   clearInterval(flushTimer);
   host.flush();
-  const metrics = measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
+  const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
   host.dispose();
 
   // Rebuild comparable records outside the measured window.
@@ -400,7 +406,7 @@ async function runTs() {
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
   const finalBooks = {};
-  const heapBefore = baseline();
+  const heapBefore = await baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   const started = exchange.start();
@@ -457,7 +463,7 @@ async function runTs() {
   await settle();
   postStore();
   if (!values['no-egress']) for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
-  const metrics = measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark);
+  const metrics = await measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark);
   const snapshot = {
     markets: (values['no-egress'] ? store : mainStore).markets.map((m) => ({ ...m })),
     tickers: (values['no-egress'] ? store : mainStore).tickers.map((t) => ({ ...t })),

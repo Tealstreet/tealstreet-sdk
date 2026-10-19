@@ -379,6 +379,15 @@ impl Cryptocom {
         match request.rows {
             Rows::Positions(rows) => {
                 let mut rows = rows;
+                // Resolve cached rows before applying closure fences: a newer live
+                // reopen must survive an old snapshot row from before the closure.
+                for row in &mut rows {
+                    if let Some(live) = cx.store.position(&row.id)
+                        && live.last_update > row.last_update
+                    {
+                        *row = live.clone();
+                    }
+                }
                 rows.retain(|p| {
                     if self
                         .account

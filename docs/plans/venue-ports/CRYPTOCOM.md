@@ -255,3 +255,20 @@ memory numbers above predate buffer accounting and are superseded by next result
 Initial PR Rust CI (all six jobs) PASS. First-branch push scan found an inherited
 synthetic Binance signing vector in old commit 879fdc7461, not a lane credential;
 PR-range secret scan PASS. Subsequent pushes scan only their new commits.
+
+### Adversarial review, round 2 / follow-on fixes
+
+Public/harness and trading/history reviewers passed round 2. Private reviewer
+reproduced a valid reopen being erased by a pre-closure cached REST row. Resolve
+newer same-ID live positions before closure filtering; the extended regression
+now passes (13 account tests; 42 venue tests total). Private reviewer rechecked
+and reports passing with no further concrete P1/P2 findings.
+
+Buffer accounting exposed delayed release of the wasm loader's input buffer,
+causing an invalid negative retained-memory delta. Baseline/final memory now
+collects across event-loop turns and reports heap/buffer components; the gate
+rejects negative retention. Fresh one-run public probe PASS with positive valid
+retention: TS/Rust CPU171.4/113.2 ms, steady106.4/59.3 ms, memory1.8/1.5 MB.
+Full repeated gates follow. Current combined wasm1,625,486 bytes (<1.6MiB).
+Findings posted at
+https://github.com/Tealstreet/tealstreet-sdk/pull/1303#issuecomment-6272649386.
