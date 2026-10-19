@@ -94,6 +94,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "bingx",
     feature = "mexc",
     feature = "bitget",
+    feature = "bitrue",
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
@@ -119,7 +120,7 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
-    #[cfg(feature = "backpack")]
+    #[cfg(any(feature = "backpack", feature = "bitrue"))]
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
@@ -548,6 +549,7 @@ impl WasmEngine {
         feature = "bingx",
         feature = "mexc",
         feature = "bitget",
+        feature = "bitrue",
         feature = "backpack",
         feature = "weex",
         feature = "hyperliquid",

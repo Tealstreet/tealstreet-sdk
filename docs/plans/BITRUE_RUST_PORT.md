@@ -178,3 +178,20 @@ create a clean follow-up branch. Never stash, rebase, force-push or touch master
 - Both independent conflict-resolution reviews PASS, plus focused new-query
   review PASS. Typecheck44/lint28 tasks PASS. Native, combined SDK boundary,
   standalone artifact and public/private gates rerun before the next push.
+
+### Standalone artifact final checkpoint
+
+- Verification caught and fixed lost Bitrue recvWindow forwarding and two
+  outer host feature gates. Existing SDK regression proves header12345;
+  Bitrue-only clippy/build prove the constructor exists. Re-review audited
+  every host cfg and PASS. All findings will be posted on PR1314.
+- Workspace792 tests (Bitrue58), SDK WASM26, host25, harness153 PASS;
+  fmt/bans, native/wasm clippy and Bitrue-only clippy PASS. Typecheck44 and
+  lint28 tasks PASS, plus package reruns after recvWindow fix PASS.
+- Final Bitrue-only artifact709,861bytes < unchanged1,258,291-byte budget.
+  Public3,287 frames/776 markets/two books, three-run TS/Rust medians:
+  CPU255.4/188.5ms, steady153.5/115.8ms, retained3.7/2.4MB PASS.
+  Private20 frames PASS. Binance public873 frames CPU261.4/115.3ms,
+  steady147.2/49.3ms, retained4.2/2.2MB PASS; private14 frames PASS.
+- Push this reviewed integrated head for all matrix/repository CI checks;
+  merge only green, into feat/rust-rewrite, then create fresh follow-up.

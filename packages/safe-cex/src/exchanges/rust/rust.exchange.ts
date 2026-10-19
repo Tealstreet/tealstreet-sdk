@@ -177,7 +177,7 @@ export class RustEngineExchange extends BaseExchange {
         passphrase,
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
-        ...(this.name === 'backpack' ? { recvWindow: this.options.extra?.recvWindow } : {}),
+        ...(['backpack', 'bitrue'].includes(this.name) ? { recvWindow: this.options.extra?.recvWindow } : {}),
         applicationId,
         vault,
         hyperliquidBuilder,
