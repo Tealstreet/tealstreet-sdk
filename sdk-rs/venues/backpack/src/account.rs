@@ -264,9 +264,9 @@ impl Backpack {
                     if let Some(window) = self
                         .options
                         .recv_window
-                        .filter(|n| n.is_finite() && *n >= 1.0 && *n <= u32::MAX as f64)
+                        .filter(|n| n.is_finite() && *n > 0.0)
                     {
-                        c.window = window as u32;
+                        c.window = window.min(60000.0) as u32;
                     }
                     Some(c)
                 }

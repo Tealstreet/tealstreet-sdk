@@ -110,3 +110,8 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
 - Native tests and harness tests pass at this checkpoint; final gate suite is
   still running. First release wasm build is compiling the crypto dependencies.
   Live public recording awaits that build. No performance claim yet.
+- Late integration review complete after clamping receive windows exactly as
+  the TS auth helper does. Added actual private-header checks for fractional,
+  oversized and invalid values. All 42 native tests pass. Harness re-review
+  confirms no remaining blockers after the five regression tests.
+- Repository typecheck passes (44 tasks); lint/tests and final wasm checks run.

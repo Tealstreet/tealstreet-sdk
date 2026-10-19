@@ -44,6 +44,13 @@ pub fn ready() -> (Driver, SocketId) {
     ready_position(200, POSITIONS)
 }
 pub fn ready_position(position_status: u16, position_body: &str) -> (Driver, SocketId) {
+    ready_window(position_status, position_body, None)
+}
+pub fn ready_window(
+    position_status: u16,
+    position_body: &str,
+    auth_window: Option<(f64, u32)>,
+) -> (Driver, SocketId) {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     // Public deterministic test seed; never a real exchange account.
     let secret = STANDARD.encode([7u8; 32]);
@@ -51,7 +58,7 @@ pub fn ready_position(position_status: u16, position_body: &str) -> (Driver, Soc
         public_data_only: false,
         key: Some("test-public-key".into()),
         secret: Some(secret),
-        recv_window: None,
+        recv_window: auth_window.map(|w| w.0),
     }));
     e.start(1000.0);
     let r = requests(&mut e).pop().unwrap();
@@ -89,6 +96,12 @@ pub fn ready_position(position_status: u16, position_body: &str) -> (Driver, Soc
                         "[]"
                     };
                     assert!(r.headers.iter().any(|(n, _)| *n == "X-Signature"));
+                    let expected = auth_window.map(|w| w.1).unwrap_or(60000);
+                    assert!(
+                        r.headers
+                            .iter()
+                            .any(|(n, v)| *n == "X-Window" && v == &expected.to_string())
+                    );
                     reply(
                         &mut e,
                         &r,

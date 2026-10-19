@@ -267,3 +267,17 @@ fn rejected_authentication_reconnects_despite_later_pong_replies() {
             .any(|a| matches!(a, Action::WsConnect { .. }))
     );
 }
+
+#[test]
+fn auth_window_clamps_before_signing_private_requests() {
+    for (input, expected) in [
+        (5000.9, 5000),
+        (120000.0, 60000),
+        (f64::MAX, 60000),
+        (0.0, 60000),
+        (-1.0, 60000),
+        (0.5, 0),
+    ] {
+        ready_window(200, POSITIONS, Some((input, expected)));
+    }
+}
