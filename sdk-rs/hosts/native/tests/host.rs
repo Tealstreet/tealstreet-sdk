@@ -10,7 +10,7 @@ use safe_cex_venue_binance::{BinanceFutures, Options};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 
 const EXCHANGE_INFO: &str = r#"{"symbols":[{"symbol":"BTCUSDT","status":"TRADING","baseAsset":"BTC","quoteAsset":"USDT","marginAsset":"USDT","contractType":"PERPETUAL","filters":[{"filterType":"PRICE_FILTER","tickSize":"0.10"},{"filterType":"LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"1000"},{"filterType":"MARKET_LOT_SIZE","stepSize":"0.001","minQty":"0.001","maxQty":"120"}]}]}"#;
 
@@ -33,6 +33,8 @@ fn response(url: &str) -> &'static str {
 #[derive(Clone, Default)]
 struct Tape {
     sockets: Arc<Mutex<HashMap<String, (SocketId, Events)>>>,
+    book_subscribed: Arc<Notify>,
+    depth_responded: Arc<Notify>,
 }
 
 impl Transport for Tape {
@@ -44,7 +46,16 @@ impl Transport for Tape {
     ) -> mpsc::UnboundedSender<String> {
         let _ = events.send(HostEvent::WsOpened(socket));
         self.sockets.lock().unwrap().insert(url, (socket, events));
-        mpsc::unbounded_channel().0
+        let (sender, mut receiver) = mpsc::unbounded_channel::<String>();
+        let book_subscribed = self.book_subscribed.clone();
+        tokio::spawn(async move {
+            while let Some(text) = receiver.recv().await {
+                if text.contains(r#""SUBSCRIBE""#) && text.contains(r#""btcusdt@depth""#) {
+                    book_subscribed.notify_one();
+                }
+            }
+        });
+        sender
     }
 
     fn request(&self, request: HttpRequest, events: Events) {
@@ -59,6 +70,9 @@ impl Transport for Tape {
             let _ = events.send(HostEvent::HttpChunk(id, chunk.to_vec()));
         }
         let _ = events.send(HostEvent::HttpEnd(id));
+        if request.url.contains("/depth?") {
+            self.depth_responded.notify_one();
+        }
     }
 }
 
@@ -79,34 +93,36 @@ async fn the_native_loop_streams_startup_and_publishes_books() {
         |_| {},
     ));
 
-    let public = loop {
-        if let Some(socket) = tape
-            .sockets
-            .lock()
-            .unwrap()
-            .get("wss://fstream.binance.com/public/ws")
-            .cloned()
-        {
-            break socket;
-        }
-        tokio::time::sleep(Duration::from_millis(1)).await;
-    };
     commands
         .send(Command::SubscribeOrderBook {
             symbol: "BTCUSDT".into(),
         })
         .unwrap();
-    tokio::time::sleep(Duration::from_millis(5)).await;
-    let (socket, events) = public;
-    for (first, last, bid) in [(90, 105, "98.5"), (106, 110, "98.7")] {
+    // Observe the command's actual transport action before sending its feed.
+    tape.book_subscribed.notified().await;
+    let (socket, events) = tape
+        .sockets
+        .lock()
+        .unwrap()
+        .get("wss://fstream.binance.com/public/ws")
+        .cloned()
+        .unwrap();
+    for (index, (first, last, bid)) in [(90, 105, "98.5"), (106, 110, "98.7")]
+        .into_iter()
+        .enumerate()
+    {
         let text = format!(
             r#"{{"e":"depthUpdate","E":1,"T":1,"s":"BTCUSDT","U":{first},"u":{last},"pu":{},"b":[["{bid}","1"]],"a":[]}}"#,
             first - 1
         );
         events.send(HostEvent::WsMessage(socket, text)).unwrap();
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        if index == 0 {
+            // The first diff requests a snapshot; enqueue it before the next
+            // diff, without depending on how quickly the host task runs.
+            tape.depth_responded.notified().await;
+        }
     }
-    tokio::time::sleep(Duration::from_millis(30)).await;
+    // Closing commands drains ready traffic and publishes the final frame.
     drop(commands);
     let engine = host.await.unwrap();
 

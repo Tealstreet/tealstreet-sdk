@@ -258,3 +258,12 @@ one 64KiB Crypto.com page. JS now partitions bursts at 64KiB, one oversized mess
 alone, processing all original partitions before any returned transport actions.
 This avoids grouped-book peak growth and preserves synchronous callback ordering;
 22 host tests pass. Final seven-family builds and comparisons remain in progress.
+
+Under heavy shared-host load, the native integration test exposed an existing
+5ms subscription race. Replaced polling and fixed sleeps with observed outbound
+subscription/depth-response notifications; shutdown's finite-prefix barrier now
+makes the final assertion deterministic. Native unit/integration/clippy pass.
+A comparison attempt also exhausted the one-second memory settling timeout.
+Only its deadline expands to ten seconds; the identical-readings-for-100ms rule,
+hard failure, accounting and CPU-before-GC cutoff are unchanged on both sides.
+That failed/aborted comparison attempt is not a final gate measurement.

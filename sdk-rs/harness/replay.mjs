@@ -276,7 +276,7 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
 
 /** Loaded code is excluded; collect before I/O and after replay state settles. */
 const baseline = async () => {
-  const deadline = performance.now() + 1000;
+  const deadline = performance.now() + 10_000;
   let previous;
   let stableSince;
   while (performance.now() < deadline) {
