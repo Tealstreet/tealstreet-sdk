@@ -160,6 +160,23 @@ impl BackpackPublicWebSocket {
                 tasks: RefCell::new(vec![]),
             }
         });
+        let listeners = Rc::downgrade(&owner.listeners);
+        safe_cex_exchange::websocket::install_native_handler_stats(
+            &owner.base,
+            Rc::new(move |topic| {
+                let listeners = listeners
+                    .upgrade()
+                    .ok_or_else(|| ExchangeError::new("Backpack public registry owner released"))?;
+                let units: Vec<u16> = topic.encode_utf16().collect();
+                let count = listeners
+                    .handlers
+                    .borrow()
+                    .iter()
+                    .find(|(key, _)| key.as_slice() == units.as_slice())
+                    .map(|(_, handlers)| handlers.borrow().len());
+                Ok(count)
+            }),
+        );
         Ok(owner)
     }
     pub fn parent(&self) -> Result<Rc<BackpackExchange>, ExchangeError> {
@@ -742,32 +759,7 @@ impl socket_events::HandlerHost<Value> for PublicFrame {
         Ok(list.borrow().get(i).cloned())
     }
     fn record_stats(&mut self, topic: &[u16]) -> Result<(), ExchangeError> {
-        let count = self
-            .owner
-            .listeners
-            .handlers
-            .borrow()
-            .iter()
-            .find(|(k, _)| k == topic)
-            .map(|(_, v)| v.borrow().len());
-        let key = text(topic)?;
-        self.owner
-            .base
-            .message_handlers_stats
-            .borrow_mut()
-            .entry(key)
-            .and_modify(|s| {
-                s.last_message_timestamp = self.owner.runtime.now_ms();
-                s.last_callbacks_count = count.into();
-                s.had_handlers = Some(count.is_some_and(|n| n > 0));
-            })
-            .or_insert(safe_cex_exchange::websocket::MessageHandlerStat {
-                last_message_timestamp: self.owner.runtime.now_ms(),
-                last_callbacks_count: count.into(),
-                had_handlers: Some(count.is_some_and(|n| n > 0)),
-                had_handlers_undefined: false,
-            });
-        Ok(())
+        self.owner.base.record_message_handler_stats(&text(topic)?)
     }
     fn invoke_handler(
         &mut self,
