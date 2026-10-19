@@ -1136,3 +1136,8 @@ Public-only business sockets subscribe candles directly without sending an
 empty-credential login or private order topics. Private accounts authenticate
 before subscribing account-order channels. This also corrects the TS replay
 oracle's previous unconditional keyless login.
+
+Rust oracle audit: historical fill windows compare native millisecond timestamps
+before truncating public execution timestamps to seconds. Positive protective
+dust must not become close-all; ambiguous standalone protective limit amends
+fail before cancellation in Rust, preserving the existing execution price.

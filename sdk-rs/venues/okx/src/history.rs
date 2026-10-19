@@ -483,9 +483,14 @@ impl Okx {
                 ) else {
                     return;
                 };
+                let time_ms = if time > 1_000_000_000_000.0 {
+                    time
+                } else {
+                    time * 1000.0
+                };
                 if r.symbol.as_deref() != Some(m.symbol.as_str())
                     || !matches!(row.side, "buy" | "sell")
-                    || !r.within(fill_seconds(time) * 1000.0)
+                    || !r.within(time_ms)
                     || r.order_id
                         .as_deref()
                         .is_some_and(|id| !order_id.is_empty() && id != order_id)

@@ -800,7 +800,9 @@ export class OKXExchange extends BaseExchange {
     const market = this.store.marketsBySymbol[symbol];
     if (!market) return [];
     try {
-      const { data: { data } } = await this.xhr.get<{ data: Array<Record<string, string>> }>('/api/v5/market/trades', {
+      const {
+        data: { data },
+      } = await this.xhr.get<{ data: Array<Record<string, string>> }>('/api/v5/market/trades', {
         params: { instId: market.id, limit: Math.min(Math.max(limit, 1), 500) },
       });
       const trades = new Map<string, PublicTrade>();
@@ -808,9 +810,23 @@ export class OKXExchange extends BaseExchange {
         const price = Number(row.px);
         const native = Number(row.sz);
         const timestamp = Number(row.ts);
-        if (row.instId !== market.id || !row.tradeId || !['buy', 'sell'].includes(row.side) || ![price, native, timestamp].every((n) => Number.isFinite(n) && n > 0)) continue;
+        if (
+          row.instId !== market.id ||
+          !row.tradeId ||
+          !['buy', 'sell'].includes(row.side) ||
+          ![price, native, timestamp].every((n) => Number.isFinite(n) && n > 0)
+        )
+          continue;
         const qty = this.contractsToBase(native, market, price);
-        trades.set(row.tradeId, { id: row.tradeId, symbol, price, qty, quoteQty: price * qty, timestamp, side: ORDER_SIDE[row.side] });
+        trades.set(row.tradeId, {
+          id: row.tradeId,
+          symbol,
+          price,
+          qty,
+          quoteQty: price * qty,
+          timestamp,
+          side: ORDER_SIDE[row.side],
+        });
       }
       return [...trades.values()];
     } catch (err: any) {
@@ -871,8 +887,15 @@ export class OKXExchange extends BaseExchange {
           return acc;
         }
 
-        const timestamp = normalizeToSeconds(row.fillTime || row.ts || row.uTime || row.cTime);
-        if (!timestamp) {
+        const nativeTime = Number.parseInt(String(row.fillTime || row.ts || row.uTime || row.cTime || '0'), 10);
+        const timestamp = normalizeToSeconds(nativeTime);
+        const timeMilliseconds = normalizeToMilliseconds(nativeTime);
+        if (
+          !timestamp ||
+          timeMilliseconds === undefined ||
+          (fromMilliseconds !== undefined && timeMilliseconds < fromMilliseconds) ||
+          (toMilliseconds !== undefined && timeMilliseconds > toMilliseconds)
+        ) {
           return acc;
         }
 
@@ -942,12 +965,6 @@ export class OKXExchange extends BaseExchange {
       const dedupe = new Map<string, Execution>();
 
       for (const execution of [...mapExecutions(recentRows), ...mapExecutions(historicalRows)]) {
-        if (fromMilliseconds && execution.timestamp * 1000 < fromMilliseconds) {
-          continue;
-        }
-        if (toMilliseconds && execution.timestamp * 1000 > toMilliseconds) {
-          continue;
-        }
         // Without the fill id, two genuine fills of one order at the same timestamp,
         // price and size collapse into one — the exact data loss the id exists to stop.
         const key = execution.id
@@ -1358,7 +1375,9 @@ export class OKXExchange extends BaseExchange {
 
     const end = opts.to ? dayjs.utc(opts.to) : dayjs.utc(virtualClock.getCurrentTimeMs());
     const start =
-      !opts.limit && opts.from ? dayjs.utc(opts.from) : end.subtract(parseFloat(amount) * limit, unit as ManipulateType);
+      !opts.limit && opts.from
+        ? dayjs.utc(opts.from)
+        : end.subtract(parseFloat(amount) * limit, unit as ManipulateType);
 
     const market = this.store.marketsBySymbol[opts.symbol];
 
@@ -1381,10 +1400,9 @@ export class OKXExchange extends BaseExchange {
         };
 
         const recentRows = await fetchCandles(ENDPOINTS.KLINE, limit);
-        const recentWindowStart = dayjs.utc(virtualClock.getCurrentTimeMs()).subtract(
-          parseFloat(amount) * 1_440,
-          unit as ManipulateType,
-        );
+        const recentWindowStart = dayjs
+          .utc(virtualClock.getCurrentTimeMs())
+          .subtract(parseFloat(amount) * 1_440, unit as ManipulateType);
         const needsHistoricalEndpoint = Boolean(opts.to && end.isBefore(recentWindowStart));
         const data =
           needsHistoricalEndpoint || recentRows.length === 0

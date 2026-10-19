@@ -385,3 +385,133 @@ fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
     assert_eq!(e.store().orders().len(), 1);
 }
+
+fn fill_count(frame: &[u8]) -> u32 {
+    let mut at = 16;
+    while at < frame.len() {
+        let kind = u16::from_le_bytes(frame[at..at + 2].try_into().unwrap());
+        let len = u32::from_le_bytes(frame[at + 4..at + 8].try_into().unwrap()) as usize;
+        if kind == 11 {
+            return u32::from_le_bytes(frame[at + 8..at + 12].try_into().unwrap());
+        }
+        at += 8 + len;
+    }
+    0
+}
+
+#[test]
+fn distinct_earlier_fill_survives_terminal_order_guard_and_deduplicates() {
+    let (mut e, private, _, pending) = startup();
+    complete(&mut e, pending, ORDER);
+    let filled = ORDER.replace("\"live\"", "\"filled\"").replace(
+        "\"accFillSz\":\"1\"",
+        "\"accFillSz\":\"4\",\"fillSz\":\"2\",\"fillPx\":\"38000\",\"tradeId\":\"last\"",
+    );
+    let partial = ORDER.replace("\"live\"", "\"partially_filled\"").replace(
+        "\"accFillSz\":\"1\"",
+        "\"accFillSz\":\"2\",\"fillSz\":\"1\",\"fillPx\":\"37900\",\"tradeId\":\"earlier\"",
+    );
+    for row in [&filled, &filled, &partial, &partial] {
+        ws(
+            &mut e,
+            private,
+            &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{row}]}}"#),
+        );
+    }
+    assert_eq!(
+        e.store().orders()[0].status,
+        safe_cex_engine::model::OrderStatus::Closed
+    );
+    assert_eq!(fill_count(e.take_frame(10.0).unwrap()), 2);
+}
+
+#[test]
+fn invalid_execution_does_not_emit_or_consume_the_execution_identity() {
+    let (mut e, private, _, pending) = startup();
+    complete(&mut e, pending, ORDER);
+    let valid = ORDER.replace("\"live\"", "\"filled\"").replace(
+        "\"accFillSz\":\"1\"",
+        "\"accFillSz\":\"4\",\"fillSz\":\"3\",\"fillPx\":\"38000\",\"tradeId\":\"987\"",
+    );
+    let invalid = valid.replace("\"fillPx\":\"38000\"", "\"fillPx\":\"bad\"");
+    ws(
+        &mut e,
+        private,
+        &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{invalid}]}}"#),
+    );
+    assert_eq!(fill_count(e.take_frame(9.0).unwrap()), 0);
+    ws(
+        &mut e,
+        private,
+        &format!(r#"{{"arg":{{"channel":"orders"}},"data":[{valid}]}}"#),
+    );
+    assert_eq!(fill_count(e.take_frame(10.0).unwrap()), 1);
+}
+
+#[test]
+fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
+    for body in [
+        envelope(""),
+        envelope("{}"),
+        envelope(r#"{"balData":null}"#),
+        envelope(r#"{"balData":[]},{"balData":[]}"#),
+        envelope(r#"{"balData":[{"ccy":"","eq":"5000"}]}"#),
+    ] {
+        let (mut e, _, _, pending) = startup();
+        complete(&mut e, pending, ORDER);
+        let balance = e.store().balance().clone();
+        let positions = e.store().positions().to_vec();
+        e.handle(
+            6.0,
+            Event::Command(safe_cex_engine::Command::SetLeverage {
+                command: 901,
+                symbol: "BTCUSDT".into(),
+                leverage: 12.0,
+            }),
+        );
+        let request = actions(&mut e)
+            .into_iter()
+            .find(|a| matches!(a, Action::Http(_)))
+            .unwrap();
+        reply(
+            &mut e,
+            &request,
+            &envelope(r#"{"instId":"BTC-USDT-SWAP","lever":"12","mgnMode":"cross"}"#),
+            7.0,
+        );
+        let requests = actions(&mut e);
+        for a in requests
+            .iter()
+            .filter(|a| is_get(a, "/api/v5/account/positions?instType=SWAP"))
+        {
+            reply(
+                &mut e,
+                a,
+                &envelope(&POSITION.replace("\"pos\":\"5\"", "\"pos\":\"6\"")),
+                8.0,
+            );
+        }
+        for a in requests
+            .iter()
+            .filter(|a| is_get(a, "/api/v5/account/account-position-risk?instType=SWAP"))
+        {
+            reply(&mut e, a, &body, 9.0);
+        }
+        assert_eq!(e.store().balance(), &balance);
+        assert_eq!(e.store().positions(), positions);
+    }
+}
+
+#[test]
+fn documented_empty_bal_data_is_a_valid_zero_balance() {
+    let (mut e, _, _, pending) = startup();
+    for a in pending {
+        if is_get(&a, "/api/v5/account/positions?instType=SWAP") {
+            reply(&mut e, &a, &envelope(""), 5.0);
+        } else if is_get(&a, "/api/v5/account/account-position-risk?instType=SWAP") {
+            reply(&mut e, &a, &envelope(r#"{"balData":[]}"#), 5.0);
+        }
+    }
+    assert!(e.store().loaded().balance && e.store().loaded().positions);
+    assert_eq!(e.store().balance().total, 0.0);
+}

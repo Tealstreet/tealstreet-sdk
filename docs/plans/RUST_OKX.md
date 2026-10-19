@@ -159,3 +159,33 @@ Never touch master, rebase, or force-push.
   signature and stale/millisecond timestamps all fail instead of passing parity.
 - Next: finish repository test retry, push PR into feat/rust-rewrite, adversarial
   review/fix loop, merge and create a clean follow-up branch.
+
+### PR adversarial review, round 1
+
+- PR: https://github.com/Tealstreet/tealstreet-sdk/pull/1302, into feat/rust-rewrite.
+  Three independent reviews ran against the PR diff; findings are posted there.
+- Root repository tests finished: 27 tasks PASS, including 453 safe-cex suites /
+  6,493 tests through each of test-ci and test-unit. Used two Vitest workers and
+  20-second per-test timeout under machine contention; no code/test changes to
+  HyroTrader were needed.
+- Trading audit reproduced two inherited TS safety defects: positive protective
+  dust became close-all after rounding, and standalone protective limit amends
+  replaced the limit execution price with market. Dust now rejects the whole
+  batch; ambiguous standalone protective limit amends fail before cancellation.
+  Explicit zero close-all and native OCO amendment retain their semantics. Both
+  corrections are listed in KNOWN_TS_FIXES; 20 trading tests PASS.
+- Adapter audit found missing OKX caller-ID helper rule and dropped size in
+  combined price/size updates. Account audit found lost out-of-order executions
+  and missing outer risk rows incorrectly committed as empty equity. Fixes and
+  targeted regressions are underway before another replay/build/review round.
+
+### Review fixes verification checkpoint
+
+- All seven reproduced round-1 findings are fixed. Native tests: 75 PASS
+  (64 OKX + 11 engine); WASM adapter: 14 PASS; TS oracle/depth: 5 PASS.
+  Bans, fmt, native/WASM clippy and package typecheck/lint PASS.
+- Account/history cross-review PASS. Adapter cross-review PASS after replacing
+  an overstrict random minted-ID length assertion with the actual allowed
+  broker-prefixed alphanumeric range. Trading cross-review is finishing.
+- Rebuilt release binary: 1,074,930 bytes; full replay gates are running again.
+  No change to release optimization, binary budget or secret-scanning policy.

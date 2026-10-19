@@ -14,6 +14,7 @@ pub enum Request {
         generation: u64,
         version: u64,
         equity: Vec<(String, f64)>,
+        risk_rows: usize,
         invalid: bool,
     },
     Positions {
@@ -130,6 +131,7 @@ impl Okx {
                     generation,
                     version,
                     equity: Vec::new(),
+                    risk_rows: 0,
                     invalid: false,
                 }),
             );
@@ -274,12 +276,20 @@ impl Okx {
         match request {
             Request::Config => {}
             Request::Balance {
-                equity, invalid, ..
+                equity,
+                risk_rows,
+                invalid,
+                ..
             } => match serde_json::from_str::<Risk<'_>>(item) {
                 Ok(r) => {
+                    *risk_rows += 1;
+                    if *risk_rows != 1 {
+                        *invalid = true;
+                    }
                     for e in r.bal_data {
                         if let Ok(eq) = e.eq.parse::<f64>()
                             && eq.is_finite()
+                            && !e.ccy.is_empty()
                         {
                             equity.push((e.ccy.into(), eq));
                         } else {
@@ -375,6 +385,7 @@ impl Okx {
                 generation,
                 version,
                 equity,
+                risk_rows: 1,
                 invalid: false,
             } => {
                 if let Some(join) = &mut self.account.join
@@ -654,6 +665,51 @@ impl Okx {
         });
     }
 
+    fn execution(&mut self, cx: &mut Cx<'_, Pending>, row: &OrderRow<'_>) {
+        if !matches!(row.state, "filled" | "partially_filled") {
+            return;
+        }
+        let (Ok(size), Ok(price)) = (row.fill_sz.parse::<f64>(), row.fill_px.parse::<f64>()) else {
+            return;
+        };
+        if !size.is_finite() || size <= 0.0 || !price.is_finite() || price <= 0.0 {
+            return;
+        }
+        let Some(m) = cx.store.market_by_id(row.inst_id) else {
+            return;
+        };
+        let amount = scaled(size, m.contract_size.unwrap_or(1.0));
+        if !amount.is_finite() || amount <= 0.0 {
+            return;
+        }
+        let key = if !row.trade_id.is_empty() && row.trade_id != "0" {
+            format!("{}:{}:{}", row.inst_id, row.ord_id, row.trade_id)
+        } else {
+            format!(
+                "{}:{}:{}:{}:{}",
+                row.inst_id,
+                row.ord_id,
+                if row.fill_time.is_empty() {
+                    row.u_time
+                } else {
+                    row.fill_time
+                },
+                row.fill_px,
+                row.fill_sz
+            )
+        };
+        if let std::collections::hash_map::Entry::Vacant(entry) = self.account.fills.entry(key) {
+            entry.insert(cx.now);
+            cx.fill(Fill {
+                order_id: row.ord_id.into(),
+                symbol: m.symbol.clone(),
+                side: side(row.side),
+                price,
+                amount,
+            });
+        }
+    }
+
     pub(crate) fn private_message(
         &mut self,
         cx: &mut Cx<'_, Pending>,
@@ -702,6 +758,8 @@ impl Okx {
                     if !valid_order(&row) {
                         return;
                     }
+                    // Finality protects order state, not execution delivery order.
+                    self.execution(cx, &row);
                     let terminal = matches!(
                         row.state,
                         "filled" | "canceled" | "mmp_canceled" | "order_failed"
@@ -751,42 +809,6 @@ impl Okx {
                                 .order_leverage
                                 .insert(order.id.clone(), num::parse(row.lever).max(1.0));
                             cx.store.upsert_order(order);
-                        }
-                    }
-                    if matches!(row.state, "filled" | "partially_filled")
-                        && num::parse(row.fill_sz) > 0.0
-                        && let Some(m) = cx.store.market_by_id(row.inst_id)
-                    {
-                        let key = if !row.trade_id.is_empty() && row.trade_id != "0" {
-                            format!("{}:{}:{}", row.inst_id, row.ord_id, row.trade_id)
-                        } else {
-                            format!(
-                                "{}:{}:{}:{}:{}",
-                                row.inst_id,
-                                row.ord_id,
-                                if row.fill_time.is_empty() {
-                                    row.u_time
-                                } else {
-                                    row.fill_time
-                                },
-                                row.fill_px,
-                                row.fill_sz
-                            )
-                        };
-                        if let std::collections::hash_map::Entry::Vacant(entry) =
-                            self.account.fills.entry(key)
-                        {
-                            entry.insert(cx.now);
-                            cx.fill(Fill {
-                                order_id: row.ord_id.into(),
-                                symbol: m.symbol.clone(),
-                                side: side(row.side),
-                                price: num::parse(row.fill_px),
-                                amount: scaled(
-                                    num::parse(row.fill_sz),
-                                    m.contract_size.unwrap_or(1.0),
-                                ),
-                            });
                         }
                     }
                 });

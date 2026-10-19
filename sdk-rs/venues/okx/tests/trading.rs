@@ -558,3 +558,69 @@ fn http_error_cannot_mutate_settings_even_with_success_body() {
             .is_some_and(|s| s.leverage == 20.0 || s.margin_type == Some(MarginType::Cross))
     );
 }
+
+#[test]
+fn positive_dust_protection_rejects_the_whole_batch_before_writes() {
+    for kind in ["stop_market", "take_profit_market"] {
+        let mut e = trading_engine();
+        let protective = format!(
+            r#"{{"symbol":"BTCUSDT","type":"{kind}","side":"sell","amount":0.001,"price":36000}}"#
+        );
+        let out = place(
+            &mut e,
+            vec![
+                order(r#"{"symbol":"BTCUSDT","type":"market","side":"buy","amount":2}"#),
+                order(&protective),
+            ],
+        );
+        assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.contains("too small"))));
+    }
+}
+
+#[test]
+fn explicit_zero_sl_and_tp_still_close_the_whole_position() {
+    for kind in ["stop_market", "take_profit_market"] {
+        let mut e = trading_engine();
+        let protective = format!(
+            r#"{{"symbol":"BTCUSDT","type":"{kind}","side":"sell","amount":0,"price":36000}}"#
+        );
+        let out = place(&mut e, vec![order(&protective)]);
+        let request = http(&out);
+        assert!(matches!(request, Action::Http(r) if r.url.ends_with("/order-algo")));
+        assert!(body(request).contains("\"closeFraction\":\"1\""));
+        assert!(!body(request).contains("\"sz\""));
+    }
+}
+
+#[test]
+fn standalone_protective_limit_amend_preserves_original_by_rejecting_before_cancel() {
+    use safe_cex_engine::model::*;
+    for kind in [OrderType::StopLoss, OrderType::TakeProfit] {
+        let mut e = trading_engine();
+        let id = if kind == OrderType::StopLoss {
+            "91_sl"
+        } else {
+            "91_tp"
+        };
+        let mut original = stored(id, kind);
+        original.extra = Some(OrderExtra {
+            conditional_order_price: Some(35900.0),
+            ..OrderExtra::default()
+        });
+        e.store_mut().upsert_order(original.clone());
+        e.handle(
+            5.0,
+            Event::Command(Command::AmendOrder {
+                command: 2,
+                id: id.into(),
+                price: Some(36500.0),
+                amount: None,
+            }),
+        );
+        let out = actions(&mut e);
+        assert!(!out.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(error), .. }) if error.contains("execution price"))));
+        assert_eq!(e.store().order(id), Some(&original));
+    }
+}

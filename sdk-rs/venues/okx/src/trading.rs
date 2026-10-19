@@ -581,6 +581,15 @@ impl Okx {
                     && native_id(&other.id) == native_id(id)
                     && matches!(other.kind, OrderType::StopLoss | OrderType::TakeProfit)
             });
+        if !oco
+            && matches!(o.kind, OrderType::StopLoss | OrderType::TakeProfit)
+            && o.extra
+                .as_ref()
+                .and_then(|e| e.conditional_order_price)
+                .is_some_and(|p| p > 0.0)
+        {
+            return Err("Cannot amend a standalone protective limit order without preserving its execution price".into());
+        }
         let mut a = Amend {
             inst_id: &m.id,
             ord_id: None,
@@ -921,7 +930,7 @@ fn adjusted(value: f64, precision: f64, allow_zero: bool) -> Result<f64, String>
         return Err("order amount/price must be finite".into());
     }
     let result = num::adjust(value, precision);
-    if result < 0.0 || (!allow_zero && result == 0.0) {
+    if result < 0.0 || (result == 0.0 && (!allow_zero || value > 0.0)) {
         Err("Order amount or price is too small".into())
     } else {
         Ok(result)

@@ -444,3 +444,41 @@ fn block_trade_fills_omit_missing_order_id_and_invalid_commission_like_ts() {
     assert!(!json.contains("\"orderId\":"));
     assert!(!json.contains("\"commission\":"));
 }
+
+#[test]
+fn fills_apply_bounds_to_native_milliseconds_before_output_seconds_are_truncated() {
+    for (from, to) in [
+        (1_710_000_001_500.0, 1_710_000_002_500.0),
+        (1_710_000_001.5, 1_710_000_002.5),
+    ] {
+        let mut e = trading_engine();
+        let a = query(
+            &mut e,
+            Query::Fills {
+                symbol: Some("BTCUSDT".into()),
+                order_id: None,
+                from_ms: Some(from),
+                to_ms: Some(to),
+                limit: Some(3),
+            },
+        );
+        assert!(url(&a).contains("begin=1710000001500&end=1710000002500&limit=3"));
+        let valid = FILL.replace("1710000000123", "1710000001600");
+        let before = FILL
+            .replace("1710000000123", "1710000001400")
+            .replace("\"200\"", "\"201\"");
+        let after = FILL
+            .replace("1710000000123", "1710000002600")
+            .replace("\"200\"", "\"202\"");
+        reply(
+            &mut e,
+            &a,
+            &envelope(&format!("{valid},{before},{after}")),
+            10.0,
+        );
+        let rows: Vec<Execution> = serde_json::from_str(&result(&mut e)).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "200");
+        assert_eq!(rows[0].timestamp, 1_710_000_001.0);
+    }
+}

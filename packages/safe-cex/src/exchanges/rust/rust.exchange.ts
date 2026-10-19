@@ -18,13 +18,17 @@ import type {
   UpdateOrderOpts,
   ValidateAccountResult,
 } from '../../types';
+import type { ClientOrderIdRule } from '../clientOrderId';
 
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
 import { LogSeverity } from '../../types';
+import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
+import { BROKER_ID } from '../okx/okx.types';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
@@ -37,6 +41,16 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
+
+const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
+  mint: () => `${BROKER_ID}${uuid()}`.slice(0, 32),
+});
+const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  okx: okxClientOrderIdRule,
+  okxeu: okxClientOrderIdRule,
+  okxdemo: okxClientOrderIdRule,
+  okxeudemo: okxClientOrderIdRule,
+};
 
 export type WasmEngineModule = {
   WasmEngine: new (venue: string, optionsJson: string) => WasmEngineLike;
@@ -68,6 +82,7 @@ const STORE_FLUSH_MS = 250;
  * reads the same store it always has. Trading methods are engine commands.
  */
 export class RustEngineExchange extends BaseExchange {
+  protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private host?: EngineHostType;
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
@@ -188,12 +203,22 @@ export class RustEngineExchange extends BaseExchange {
 
   placeOrder = (opts: PlaceOrderOpts) => this.placeOrders([opts]);
 
-  updateOrder = ({ order, update }: UpdateOrderOpts) =>
-    this.command<string[]>({
+  updateOrder = ({ order, update }: UpdateOrderOpts): Promise<string[]> => {
+    const price = 'price' in update ? update.price : undefined;
+    const amount = 'amount' in update ? update.amount : undefined;
+    if (price === undefined && amount === undefined) {
+      return Promise.reject(new Error('Order amendment requires a price or amount'));
+    }
+    if ([price, amount].some((value) => value !== undefined && !Number.isFinite(value))) {
+      return Promise.reject(new Error('Order amendment price and amount must be finite numbers'));
+    }
+    return this.command<string[]>({
       op: 'amendOrder',
       id: order.id,
-      ...('price' in update ? { price: update.price } : { amount: update.amount }),
+      ...(price !== undefined && { price }),
+      ...(amount !== undefined && { amount }),
     });
+  };
 
   cancelOrders = async (orders: Order[]) => {
     await this.command({ op: 'cancelOrders', ids: orders.map((order) => order.id) });

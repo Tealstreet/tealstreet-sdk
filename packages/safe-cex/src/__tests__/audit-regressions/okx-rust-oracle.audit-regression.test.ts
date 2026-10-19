@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 import { OKXExchange } from '../../exchanges/okx/okx.exchange';
 import { DefaultStore } from '../../store/store.base';
 
-const setup = () => {
+const setup = (publicDataOnly = true) => {
   const store = new DefaultStore();
   store.update({
     markets: [
@@ -19,7 +19,16 @@ const setup = () => {
       } as Market,
     ],
   });
-  return new OKXExchange('okx', { key: '', secret: '', passphrase: 'fixture', publicDataOnly: true }, store);
+  return new OKXExchange(
+    'okx',
+    {
+      key: publicDataOnly ? '' : 'fixture-key',
+      secret: publicDataOnly ? '' : 'fixture-secret',
+      passphrase: 'fixture',
+      publicDataOnly,
+    },
+    store,
+  );
 };
 
 it('reads public trade contract quantities as base with millisecond time', async () => {
@@ -64,5 +73,26 @@ it('subscribes keyless business candles without login or private topics', async 
     JSON.stringify({ op: 'subscribe', args: [{ channel: 'candle1m', instId: 'BTC-USDT-SWAP' }] }),
     'ping',
   ]);
+  exchange.dispose();
+});
+
+it('filters historical fills using native milliseconds before truncating output seconds', async () => {
+  const exchange = setup(false);
+  const rows = [
+    ['before', 1760880001400],
+    ['inside', 1760880001600],
+    ['after', 1760880002600],
+  ].map(([tradeId, fillTime]) => ({
+    instId: 'BTC-USDT-SWAP',
+    tradeId,
+    fillTime: String(fillTime),
+    ordId: '42',
+    side: 'buy',
+    fillPx: '40000',
+    fillSz: '1',
+  }));
+  vi.spyOn(exchange.xhr, 'get').mockResolvedValue({ data: { data: rows } });
+  const fills = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT', from: 1760880001500, to: 1760880002500 });
+  expect(fills.map(({ id, timestamp }) => ({ id, timestamp }))).toEqual([{ id: 'inside', timestamp: 1760880001 }]);
   exchange.dispose();
 });
