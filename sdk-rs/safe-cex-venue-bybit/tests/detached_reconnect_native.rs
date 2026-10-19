@@ -46,7 +46,6 @@ async fn observe(name: ExchangeName) {
             remote_signer: None,
             wire: Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()),
             http_host: Rc::new(NativeHttpHost::default()),
-            rate_limit_clock: Arc::new(RuntimeClock(runtime.clone())),
             retry_clock: Rc::new(RuntimeClock(runtime.clone())),
             clock: VIRTUAL_CLOCK.clone(),
             external_public_data: None,

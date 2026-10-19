@@ -45,8 +45,6 @@ pub struct BybitDependencies {
     /// The physical wire under every signed client the venue creates.
     pub wire: Arc<dyn RestAdapter>,
     pub http_host: Rc<dyn HttpHost>,
-    /// Clock behind the 5 req/s client limiter.
-    pub rate_limit_clock: Arc<dyn RateLimitClock>,
     /// Clock behind the signed clients' retry delays.
     pub retry_clock: Rc<dyn RateLimitClock>,
     /// utils/virtualClock: signing timestamps and the private socket's time sync.
@@ -466,10 +464,11 @@ impl BybitExchange {
         let relay_enabled = deps.relay_enabled;
         let public_base = core.clone();
         let private_shared = shared.clone();
+        let rate_scheduler = safe_cex_exchange::runtime::rate_limit_scheduler(&core);
         let venue = BybitExchange::new(
             core,
             runtime.clone(),
-            deps.rate_limit_clock.clone(),
+            rate_scheduler,
             move |options, base, owner| {
                 let next_id = api_runtime.clone();
                 let signing_clock = api_clock.clone();

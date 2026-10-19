@@ -171,7 +171,6 @@ impl RustVenueHost for NativeVenueHost {
             http_host: Rc::new(safe_cex_exchange::native::NativeHttpHost {
                 events: self.http_events.clone(),
             }),
-            rate_limit_clock: Arc::new(BybitClock(self.runtime.clone())),
             retry_clock: Rc::new(BybitClock(self.runtime.clone())),
             clock: safe_cex_store::virtual_clock::VIRTUAL_CLOCK.clone(),
             external_public_data: Some(gateway_factory(self.runtime.clone())),

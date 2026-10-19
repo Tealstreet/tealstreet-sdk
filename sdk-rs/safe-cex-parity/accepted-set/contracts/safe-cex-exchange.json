@@ -35755,5 +35755,66 @@
     },
     "reason": "Terminal Error presentation selector over existing native data descriptors. It returns only stored strings, stops on accessor or non-string shadows, walks prototype references with cycle detection, and renders UTF-16 lossily only for the terminal sink. It does not parse input or admit a domain model; no getter or coercion hook is executed.",
     "evidence": "tests/native_console_default.rs::native_error_diagnostics_read_data_without_executing_user_hooks executes the production NativeRuntime console sink in a subprocess: inherited hidden data and malformed UTF-16 render, own getter/non-string shadows suppress inherited messages without executing user code, empty names preserve message-only output, and a cyclic chain terminates with the Error fallback."
+  },
+  "safe_cex_exchange::runtime::rate_limit_scheduler": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "rate_limit_scheduler",
+      "signature": {
+        "inputs": [
+          [
+            "owner",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::exchange::BaseExchange",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::sync::Arc",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "dyn_trait": {
+                        "traits": [
+                          {
+                            "trait": {
+                              "path": "safe_cex_transport::rate_limit::RateLimitScheduler",
+                              "args": null
+                            },
+                            "generic_params": []
+                          }
+                        ],
+                        "lifetime": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Constructs only a native scheduler capability over an existing ExchangeRuntime. Its reset runs as one independently owned Timer operation; no serialized input or model decoding occurs. Limiter Drop cancels the registration. The scheduler holds only a weak reference to the existing BaseExchange task registry; dispose cancels its timers even while JS clients are retained.",
+    "evidence": "The actual constructed Bybit fetchTickers route reproduces master failure and restored controlled-clock advance, subsequent HTTP and timer cancellation in ticker_prototype_native::constructed_public_reads_do_not_strand_idle_limiter_replay_deadlines. Maintained installed axios-rate-limit executes the frozen-Date timer profile in the same test."
   }
 }
