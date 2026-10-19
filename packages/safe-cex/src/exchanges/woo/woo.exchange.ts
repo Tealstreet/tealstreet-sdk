@@ -2134,7 +2134,7 @@ export class WOOXExchange extends BaseExchange {
         } else {
           await this.xhr.delete(ENDPOINTS.CANCEL_ORDER, {
             data: omitUndefined({
-              order_id: parseInt(order.id, 10),
+              order_id: order.id,
               symbol: reverseSymbol(order.symbol),
             }),
           });

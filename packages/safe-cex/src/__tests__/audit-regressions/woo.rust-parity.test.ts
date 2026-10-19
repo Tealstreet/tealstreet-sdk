@@ -315,6 +315,17 @@ describe('WOO active protocol Rust parity repairs', () => {
     ]);
   });
 
+  it('keeps a native order ID above the safe-integer range exact during V1 cancellation', async () => {
+    const { exchange } = make();
+    const del = vi.fn().mockResolvedValue({ data: { success: true } });
+    exchange.xhr = { delete: del } as any;
+    const order = exchange.mapLimitOrder(ordinary({ orderId: '9007199254740993' }))!;
+    await exchange.cancelOrders([order]);
+    expect(del).toHaveBeenCalledWith('/v1/order', {
+      data: { order_id: '9007199254740993', symbol: 'PERP_BTC_USDT' },
+    });
+  });
+
   it('attempts algo cancellation even when regular cancel-all fails', async () => {
     const { exchange } = make();
     const del = vi.fn().mockRejectedValueOnce(new Error('busy')).mockResolvedValueOnce({});
