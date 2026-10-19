@@ -41,7 +41,8 @@ all samples, medians and ranges, with wall time and shared-load bounds separatel
 
 `tests/book-state-throughput.mjs` requires all six reports, verified complete
 physical/application drains, identical input hashes and complete observable
-native graph identity across every control and candidate output. It imports the
+native graph identity across every control and candidate output, plus complete
+TypeScript repeatability across all reports. It imports the
 shared comparator, including its signed-zero and alias negative controls. Raw
 V8 SHA values prove artifact integrity, not JavaScript semantic equality. No
 field normalization, report projection or partial-drain comparison is allowed.

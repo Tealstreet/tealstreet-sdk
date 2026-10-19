@@ -54,8 +54,24 @@ for (const run of [...baseline, ...candidate]) {
   const actualBytes = readFileSync(run.fixture);
   const sha256 = createHash('sha256').update(actualBytes).digest('hex');
   assert.equal(run.outputHash, sha256, 'Fixture bytes must match the reported integrity hash');
-  fixtureSha256s.push({ label: run.label, sha256 });
+  fixtureSha256s.push({ label: run.label, fixture: run.fixture, sha256 });
   identityObservations.push(assertOutputIdentity(expected, deserialize(actualBytes)));
+}
+const nativeFixtureSha256s = [...fixtureSha256s];
+const tsRuns = runs(reports, 'ts');
+const expectedTs = deserialize(readFileSync(tsRuns[0].fixture));
+const tsIdentityObservations = [];
+for (const run of tsRuns) {
+  assert.equal(run.receipt.delivered, 285713);
+  assert.equal(run.receipt.dropped, 0);
+  assert.equal(run.receipt.inputHash, baseline[0].receipt.inputHash);
+  assert.equal(run.receipt.inputHash, run.receipt.expectedInputHash);
+  assert.equal(run.receipt.applicationDrainVerified, true);
+  const bytes = readFileSync(run.fixture);
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  assert.equal(run.outputHash, sha256, 'TS fixture integrity');
+  tsIdentityObservations.push(assertOutputIdentity(expectedTs, deserialize(bytes)));
+  fixtureSha256s.push({ label: run.label, fixture: run.fixture, sha256 });
 }
 for (const report of reports) {
   for (const run of report.runs) {
@@ -97,11 +113,13 @@ console.log(
       nativeSamplesPerSide: baseline.length,
       sampleCountQualification: 'Three full interleaved pairs; two independent native repeats per report and six native samples per side.',
       identicalCompleteNativeOutput: true,
+      identicalCompleteTsOutput: true,
       identicalObservableNativeGraph: true,
-      identicalSerializedNativeOutput: fixtureSha256s.every(fixture => fixture.sha256 === fixtureSha256s[0].sha256),
+      identicalSerializedNativeOutput: nativeFixtureSha256s.every(fixture => fixture.sha256 === nativeFixtureSha256s[0].sha256),
       representationFinding: 'Unchanged OKX control can encode identical positive zero as Smi or HeapNumber; full observable graph remains exact, without normalization.',
       identityGuardControls,
       identityObservations,
+      tsIdentityObservations,
       fixtureSha256s,
       inputHash: baseline[0].receipt.inputHash,
       interleavedReportPaths: paths,
