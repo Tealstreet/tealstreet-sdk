@@ -31,13 +31,18 @@ pub fn clean_candles(candles: Vec<Candle>) -> Vec<Candle> {
             unique.push(candle);
         }
     }
-    // ts-bug: cleanCandles subtraction is non-transitive for NaN; intentionally order NaN last.
-    unique.sort_by(|a, b| {
-        a.timestamp
-            .is_nan()
-            .cmp(&b.timestamp.is_nan())
-            .then_with(|| a.timestamp.total_cmp(&b.timestamp))
-    });
+    let sorted = safe_cex_num::sorting::stable_sort::<_, std::convert::Infallible>(
+        &mut unique,
+        |left, right| {
+            Ok((left.timestamp - right.timestamp)
+                .partial_cmp(&0.0)
+                .unwrap_or(std::cmp::Ordering::Equal))
+        },
+    );
+    match sorted {
+        Ok(()) => {}
+        Err(never) => match never {},
+    }
     unique
 }
 /// Testnet is a per-account flag, not a different exchange name: omitting it

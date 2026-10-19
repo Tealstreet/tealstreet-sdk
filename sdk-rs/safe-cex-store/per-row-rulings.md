@@ -113,5 +113,42 @@ Each must fail this actual socket assertion; byte-exact restoration must pass.
 This verdict covers the compressed binary input boundary, not arbitrary Blob
 subclasses, malformed-stream error wording or other socket handler policies.
 
-Twelve of the 27 Store rows are reconciled here. The other 15 Store rows and the
+## Proxy and signing config markers
+
+| Census row | Verdict | Production observation and reason |
+| --- | --- | --- |
+| 453 `markRestProxyHeader` | FIX | The actual native Tealstreet host discarded the proxy marker before returning its authorized config. It now retains `present`/`empty` as a config extension, separate from HTTP headers. Applying that telemetry extension to a read-only native property is best-effort, so a refused diagnostic write cannot reject HTTP. |
+| 456 `markRestSigned` | FIX | Remote signing retained an internal duration but omitted the source's returned config properties. Both signing profiles now publish duration and signed-at milliseconds after the signed-header merge, and publish signature age only for a finite positive venue timestamp. Skipped or refused signing never fabricates these properties. |
+| 457 `stampSigned` | FIX | The same native signing path preserves an existing age property when the merged timestamp is absent, invalid, zero or infinite; a valid future timestamp produces a negative age. Stamps reach the selected terminal adapter and survive both successful response and network-rejection configs. The lower typed helper's existing per-field sealed-write/partial-write tests remain unchanged. |
+
+The existing `safe-cex-exchange/tests/js_runtime.rs` target runs
+`audit_native_proxy_marker_survives_authorization_and_header_replacement`
+and `audit_native_remote_signing_stamps_terminal_and_rejected_configs`.
+They execute the real native transport/factory, canonical Store, native Promise
+queue and remote signing adapter. Only token/signing/terminal hosts are injected;
+no requests leave the process. The maintained TS transport and signing adapter
+run with installed Axios in `js_http_factory_source.cjs`.
+
+The 36 proxy profiles cover OKX/GRVT/MEXC, empty/present tokens, replacement of
+all outgoing headers, and ordinary/read-only/read-only-undefined marker slots.
+Observations inspect exact marker presence and binary64 bits before JSON, actual
+authorization headers, one terminal call and absence of marker headers. The 48
+signing profiles cover six timestamp values, zero/17ms signer latency, ordinary
+success, skipped signing, network rejection and signer refusal. They inspect
+terminal and returned config presence/bits, preserved negative zero, signer-call
+counts and original success/failure settlement.
+
+Both named native tests first compiled RED on the omitted properties. The
+read-only proxy profile separately compiled RED because its diagnostic write
+rejected HTTP; the repaired path preserves source settlement. The final source
+comparison passes after the production repairs. Compiled controls separately
+remove proxy stamping, propagate read-only marker failures, and omit signing
+stamps; each must fail its named binding assertion and pass after exact restore.
+
+This batch does not classify the separate `readConfigNumber` and `proxyHeaderOf`
+rows or claim arbitrary executable config properties can cross the owned REST
+transport boundary. The public lower typed diagnostics API keeps its explicit
+admission profile; live request config markers are not projected through it.
+
+Fifteen of the 27 Store rows are reconciled here. The other 12 Store rows and the
 separate num row remain assigned for later batches.

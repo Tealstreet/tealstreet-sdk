@@ -340,6 +340,10 @@ fn apply_changes(config: &Js, before: &Js, after: &Js) -> Result<(), Thrown> {
                     super::set_header(&headers, Js::utf16(&name), value, Js::Undefined)?;
                 }
             }
+        } else if key.as_ref() == super::super::value::utf16("safeCexRestDiagProxyHeader").as_ref()
+        {
+            // Proxy telemetry is best-effort even when the live config is read-only.
+            drop(config.set_key(&key, value));
         } else {
             config.set_key(&key, value)?;
         }

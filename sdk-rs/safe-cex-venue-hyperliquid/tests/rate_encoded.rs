@@ -81,7 +81,7 @@ fn encoded_rate_classifier_parses_once_at_the_actual_prepare_callsite() {
             .build_request(if i == 2 { "/exchange" } else { "/info" }, &Value::Null)
             .unwrap();
         request.body = Some(RestBody::Encoded(raw.as_bytes().to_vec()));
-        let prepared = ready(api.prepare_request(request, i == 8)).unwrap();
+        let prepared = ready(api.prepare_request(request, i == 8, &|_| Ok(()))).unwrap();
         ready(limiter.wait_for_token(1.)).unwrap();
         assert_eq!(
             clock.now.load(Ordering::SeqCst),
@@ -286,7 +286,12 @@ fn cancel_by_cloid_weight_reaches_real_http_prepare_for_raw_and_value_bodies() {
         } else {
             action
         };
-        ready(api.prepare_request(api.build_request("/exchange", &body).unwrap(), false)).unwrap();
+        ready(api.prepare_request(
+            api.build_request("/exchange", &body).unwrap(),
+            false,
+            &|_| Ok(()),
+        ))
+        .unwrap();
         ready(limiter.wait_for_token(1.0)).unwrap();
         assert_eq!(
             clock.now.load(Ordering::SeqCst),
