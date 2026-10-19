@@ -30,9 +30,9 @@ note = "MIXED: the native response model read now retains literal reserved-looki
 ts = "addSigningInterceptor"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/api.rs::ApiClient::prepare_request"
+rs = [ "safe-cex-venue-hyperliquid/src/api.rs::ApiClient::prepare_request", "safe-cex-venue-hyperliquid/src/api.rs::ApiClient::execute_with_signing_emitter" ]
 status = "divergent"
-note = "CHOSEN: safe-cex-venue-hyperliquid/CLAUDE.md#api-execution-contract. The repaired action.type conversion throws typed TypeError before unknown-action emission or wallet validation. Capture/public-only/secret/signed-body guards and local raw-key L1 signing remain separate from remote signer and host adapter ownership; transformed or opaque encoded inputs cannot receive an invented local signature. Targets: safe-cex-venue-hyperliquid/src/api.rs::ApiClient::prepare_request . Opaque Encoded signable JSON keeps the separately priced provenance refusal at the API contract anchor; a proven Transformed String skips signing. Incoming invalid-wallet-first and zero-adapter evidence is retained."
+note = "FIX: the constructor-installed signing callback propagates error-listener failure before transport, retaining the exact local cause through a request-owned completion receipt. Source Axios/tiny-emitter and constructed NativeRuntime probes cover unknown string/number/array action types. Low-level preparation and execution require an explicit fallible hook; the unused infallible request API is removed. CHOSEN: safe-cex-venue-hyperliquid/CLAUDE.md#api-execution-contract. The repaired action.type conversion throws typed TypeError before unknown-action emission or wallet validation. Capture/public-only/secret/signed-body guards and local raw-key L1 signing remain separate from remote signer and host adapter ownership; transformed or opaque encoded inputs cannot receive an invented local signature. Targets: safe-cex-venue-hyperliquid/src/api.rs::ApiClient::prepare_request . Opaque Encoded signable JSON keeps the separately priced provenance refusal at the API contract anchor; a proven Transformed String skips signing. Incoming invalid-wallet-first and zero-adapter evidence is retained."
 
 [[symbol]]
 ts = "addRateLimitInterceptor"

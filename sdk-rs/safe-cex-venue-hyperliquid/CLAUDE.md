@@ -493,3 +493,7 @@ constructor/prototype identity and the unreadable-only reconciliation branch.
 source/native consumer profiles and three compiled semantic controls. The
 portable typed Result adapter is distinct from the production exception object.
 
+
+The signing interceptor supplies a fallible request-emission hook through
+`prepare_request`/`execute`; the native factory returns its execution-local
+original listener error before transport. See `FIX_AUDIT_API_SIGNING.md`.
