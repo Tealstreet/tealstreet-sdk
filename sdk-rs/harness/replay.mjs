@@ -261,6 +261,7 @@ class Tape {
           return { error: String(error?.message ?? error) };
         }));
       } else {
+        if (frame.type === 'close' && venue.socketMatches && this.connections.filter((s) => !s.closed && canonicalUrl(s.url) === canonicalUrl(frame.url)).length > 1) throw new Error('Ambiguous close on a shared public/private endpoint');
         const socket = await this.socketFor(frame.url, frame.text);
         if (frame.type === 'close') { socket.closed = true; socket.onClose?.(frame.code ?? 1006); }
         else {
