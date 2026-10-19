@@ -409,14 +409,14 @@ fn uta_entry_and_strategy_use_v3_shapes_and_actual_execution_side() {
 #[test]
 fn uta_client_only_cancel_omits_native_id_and_strategy_absence_is_idempotent() {
     let mut h = uta();
-    h.private_message(r#"{"arg":{"topic":"order"},"data":[{"category":"usdt-futures","clientOid":"only-client","symbol":"BTCUSDT","qty":"1","price":"90","side":"buy","orderType":"limit","orderStatus":"new"}]}"#);
+    h.private_message(r#"{"arg":{"topic":"order"},"data":[{"category":"usdt-futures","clientOid":"strategy__close","symbol":"BTCUSDT","qty":"1","price":"90","side":"buy","orderType":"limit","orderStatus":"new"}]}"#);
     h.command(Command::CancelOrders {
         command: 1,
-        ids: vec!["only-client".into()],
+        ids: vec!["strategy__close".into()],
     });
     let (request, p) = body(&mut h, "/api/v3/trade/cancel-order");
     assert!(p.get("orderId").is_none());
-    assert_eq!(p["clientOid"], "only-client");
+    assert_eq!(p["clientOid"], "strategy__close");
     h.reply(request, 200, r#"{"code":"00000","data":{}}"#);
     h.private_message(r#"{"arg":{"topic":"strategy-order"},"data":[{"category":"usdt-futures","orderId":"stop","symbol":"BTCUSDT","qty":"1","stopLoss":"80","side":"sell","status":"pending"}]}"#);
     h.command(Command::CancelOrders {
@@ -665,4 +665,38 @@ fn late_uta_write_wait_has_a_deadline_after_probe_failure() {
             .unwrap_err()
             .contains("account detection")
     );
+}
+
+#[test]
+fn isolated_hedge_leverage_ack_only_updates_the_requested_long_side() {
+    for uta_account in [false, true] {
+        let mut h = if uta_account {
+            uta()
+        } else {
+            Harness::classic()
+        };
+        h.engine.store_mut().set_hedged(true);
+        h.engine
+            .store_mut()
+            .update_setting("BTCUSDT", |s| s.margin_type = Some(MarginType::Isolated));
+        let mut long = h.engine.store().positions()[0].clone();
+        long.id = "long".into();
+        long.side = PositionSide::Long;
+        long.leverage = 10.0;
+        long.margin_type = Some(MarginType::Isolated);
+        let mut short = long.clone();
+        short.id = "short".into();
+        short.side = PositionSide::Short;
+        h.engine.store_mut().set_positions(vec![long, short]);
+        h.command(Command::SetLeverage {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            leverage: 20.0,
+        });
+        let (request, p) = body(&mut h, "/set-leverage");
+        assert_eq!(p[if uta_account { "posSide" } else { "holdSide" }], "long");
+        h.reply(request, 200, r#"{"code":"00000","data":{}}"#);
+        assert_eq!(h.engine.store().position("long").unwrap().leverage, 20.0);
+        assert_eq!(h.engine.store().position("short").unwrap().leverage, 10.0);
+    }
 }

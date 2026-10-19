@@ -257,3 +257,36 @@ lanes changed absolute timings; all comparisons retain the original thresholds.
 - Post-merge safe-cex suite: 453 files / 6,494 tests PASS with one worker and
   30s cold-import timeout; WASM adapter 16 and Worker host 2 PASS.
 - Remaining: review findings, green PR CI, merge into landing and fresh branch.
+
+
+## Adversarial PR review, round 1
+
+Eight findings posted on PR #1308; seven fixed and one rejected after venue-contract review:
+
+- Hedge closes retain reduce-only intent through cancel-replace, including native
+  close aliases and absent/NO reduceOnly (24 payload combinations).
+- Rejected the proposed absent-algo removal: Bitget CLAUDE.md explicitly requires
+  retaining WS TPSL because orders-plan-pending can omit live place-tpsl-order
+  stops. Restored preservation and added regression coverage for this behavior.
+- Default long-side isolated hedge leverage acknowledgement leaves short alone,
+  including when an older REST positions snapshot completes afterward.
+- Parentless client-only IDs containing `__` remain verbatim; virtual children
+  resolve through explicit parent_id.
+- Known UTA survives transient settings failures, retries at most three times,
+  then reaches the existing detection deadline without falling back to Classic.
+- Repeated/cyclic nonempty account cursors fail without committing partial state.
+- Harness matches existing clientOid identities exactly, normalizes only minted
+  fields, and binds generated aliases for later cancel/modify identities.
+- Bitget/USDC private key+secret without a passphrase fails construction early;
+  public-only and keyless construction retain their prior behavior.
+
+Added native regression files for independently authored trading/account cases;
+all focused tests pass. Final rebuild, replay and repeat audit in progress.
+
+- Second adversarial review is clear after extending side-specific leverage
+  through the stale REST guard and preserving the documented TPSL omission rule.
+  Independently authored account 4 and trading 3 regression cases pass, including
+  Classic/UTA delayed REST and 24 close-order payload combinations.
+- Rebuilt WASM adapter 20 tests, harness 7, private replay and repository
+  typecheck/lint PASS. Pre-fix PR CI is entirely green; the corrected commit
+  requires its own green CI. Final public rerun remains in progress.

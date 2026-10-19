@@ -39,6 +39,14 @@ export const createTape = (records, venue, isPrivate) => {
     return key;
   };
 
+  const generatedAliases = new Map();
+  const mintedField = (key, url) => {
+    const path = new URL(url).pathname;
+    return key === 'newClientOid'
+      ? /\/modify-order$/.test(path)
+      : key === 'clientOid' &&
+          /\/(?:batch-place-order|place-order|place-tpsl-order|place-plan-order|place-strategy-order)$/.test(path);
+  };
   const canonicalBody = (body, url) => {
     const classicBatch = bitget && new URL(url).pathname === '/api/v2/mix/order/batch-place-order';
     if (body === undefined || body === null || body === '') return '';
@@ -59,16 +67,15 @@ export const createTape = (records, venue, isPrivate) => {
       return Object.fromEntries(
         keys.map((key) => [
           key,
-          ((bitget &&
-            (key === 'newClientOid' || key === 'clientOid') &&
-            typeof value[key] === 'string' &&
-            value[key].length) ||
+          ((bitget && mintedField(key, url) && typeof value[key] === 'string' && value[key].length) ||
             venue.generatedBodyId?.(key, value[key])) &&
           !callerIds.has(value[key])
             ? '<generated>'
             : classicBatch && key === 'marginMode' && value[key] === 'cross'
               ? 'crossed'
-              : sorted(value[key]),
+              : bitget && key === 'clientOid' && typeof value[key] === 'string'
+                ? (generatedAliases.get(value[key]) ?? value[key])
+                : sorted(value[key]),
         ]),
       );
     };
@@ -113,14 +120,14 @@ export const createTape = (records, venue, isPrivate) => {
       const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
       const current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
       const record = current[0];
-      // Reads may reconcile repeatedly; every opted-in write needs its own row.
+      // Reads may reconcile repeatedly; every write needs its own row.
       if (current.length > 1 || method !== 'GET') queue.splice(queue.indexOf(record), 1);
       if (method !== 'GET' && venue.rust.startsWith('bitget') && /(?:place|modify)-/.test(new URL(url).pathname)) {
         const ids = [];
         const visit = (value) => {
           if (!value || typeof value !== 'object') return;
           for (const [key, item] of Object.entries(value)) {
-            if (key === 'newClientOid' || (key === 'clientOid' && !callerIds.has(item))) {
+            if (mintedField(key, url) && (key === 'newClientOid' || !callerIds.has(item))) {
               if (
                 typeof item !== 'string' ||
                 !/^[.A-Za-z0-9:/_-]{1,32}$/.test(item) ||
@@ -139,6 +146,23 @@ export const createTape = (records, venue, isPrivate) => {
             if (this.generated.has(id)) throw new Error(`generated client ID reused: ${id}`);
             this.generated.add(id);
           }
+      }
+      if (bitget && method !== 'GET') {
+        const decode = (value) => (typeof value === 'string' ? JSON.parse(value) : value);
+        const bind = (expected, actual) => {
+          if (!expected || !actual || typeof expected !== 'object' || typeof actual !== 'object') return;
+          for (const key of Object.keys(expected)) {
+            if (
+              mintedField(key, url) &&
+              typeof expected[key] === 'string' &&
+              typeof actual[key] === 'string' &&
+              !callerIds.has(actual[key])
+            )
+              generatedAliases.set(actual[key], expected[key]);
+            else bind(expected[key], actual[key]);
+          }
+        };
+        bind(decode(record.requestBody), decode(body));
       }
       return { status: record.status, headers: record.headers ?? '', body: record.body };
     }

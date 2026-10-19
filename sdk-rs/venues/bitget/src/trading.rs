@@ -69,6 +69,7 @@ enum Effect {
     Leverage {
         symbol: String,
         leverage: f64,
+        side: Option<PositionSide>,
     },
     Margin {
         symbol: String,
@@ -549,6 +550,7 @@ impl BitgetFutures {
                     effect: Effect::Leverage {
                         symbol: symbol.clone(),
                         leverage,
+                        side: isolated_hedge.then_some(PositionSide::Long),
                     },
                 });
             }
@@ -1536,11 +1538,15 @@ impl BitgetFutures {
                     return;
                 }
             }
-            Effect::Leverage { symbol, leverage } => {
+            Effect::Leverage {
+                symbol,
+                leverage,
+                side,
+            } => {
                 self.account.config_at = Some(cx.now);
                 cx.store.update_setting(&symbol, |s| s.leverage = leverage);
                 cx.store.update_positions(|p| {
-                    if p.symbol == symbol {
+                    if p.symbol == symbol && side.is_none_or(|side| p.side == side) {
                         p.leverage = leverage;
                     }
                 });
@@ -1783,10 +1789,7 @@ fn floor_lot(v: f64, step: f64) -> f64 {
     }
 }
 fn native_id(order: &Order) -> String {
-    order
-        .parent_id
-        .clone()
-        .unwrap_or_else(|| order.id.split("__").next().unwrap_or(&order.id).to_owned())
+    order.parent_id.clone().unwrap_or_else(|| order.id.clone())
 }
 fn related(orders: &[Order], order: &Order) -> Vec<Order> {
     let id = native_id(order);

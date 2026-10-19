@@ -34,6 +34,7 @@ pub enum Request {
 pub struct OrderSnapshot {
     source: OrderSource,
     cursor: Option<String>,
+    cursors: HashSet<String>,
     pages: u32,
     page_count: usize,
     rows: Vec<Order>,
@@ -64,6 +65,8 @@ pub struct Account {
     pub authenticated: bool,
     pub fallback: bool,
     poll: Option<TimerId>,
+    probe_retry: Option<TimerId>,
+    probe_retries: u8,
     tick: u32,
     positions_in_flight: bool,
     balance_in_flight: bool,
@@ -180,6 +183,10 @@ impl BitgetFutures {
 
     fn private_detected(&mut self, cx: &mut Cx<'_, Pending>) {
         self.account.detected = true;
+        self.account.probe_retries = 0;
+        if let Some(timer) = self.account.probe_retry.take() {
+            cx.clear_timer(timer);
+        }
         self.connect(cx, 3);
         self.refresh_positions(cx);
         self.refresh_balance(cx);
@@ -367,6 +374,7 @@ impl BitgetFutures {
             OrderSnapshot {
                 source: OrderSource::Normal,
                 cursor: None,
+                cursors: HashSet::new(),
                 pages: 0,
                 page_count: 0,
                 rows: vec![],
@@ -522,8 +530,11 @@ impl BitgetFutures {
                     &format!("Bitget {}: {}", header.code.get(), header.msg),
                 ),
                 Err(_) if response.status >= 500 => {
-                    self.account.uta = false;
-                    self.private_detected(cx);
+                    self.account_transport_failed(
+                        cx,
+                        Request::Probe,
+                        "Bitget settings transport failure",
+                    );
                 }
                 Err(error) => self.account_failed(cx, Request::Probe, &error.to_string()),
             }
@@ -610,7 +621,17 @@ impl BitgetFutures {
                     None => None,
                 }
                 .filter(|cursor| !cursor.is_empty());
-                if snapshot.page_count > 0 && cursor.is_some() && cursor != snapshot.cursor {
+                if snapshot.page_count > 0
+                    && let Some(cursor) = cursor
+                {
+                    if !snapshot.cursors.insert(cursor.clone()) {
+                        self.account_failed(
+                            cx,
+                            Request::Orders(snapshot),
+                            "Bitget open-order cursor repeated; incomplete snapshot",
+                        );
+                        return;
+                    }
                     snapshot.pages += 1;
                     if snapshot.pages >= 20 {
                         self.account_failed(
@@ -620,7 +641,7 @@ impl BitgetFutures {
                         );
                         return;
                     }
-                    snapshot.cursor = cursor;
+                    snapshot.cursor = Some(cursor);
                     self.order_page(cx, snapshot);
                     return;
                 }
@@ -633,6 +654,7 @@ impl BitgetFutures {
                     snapshot.source = next;
                     snapshot.pages = 0;
                     snapshot.cursor = None;
+                    snapshot.cursors.clear();
                     self.order_page(cx, snapshot);
                 } else {
                     self.account.orders_in_flight = false;
@@ -674,9 +696,13 @@ impl BitgetFutures {
         request: Request,
         error: &str,
     ) {
-        if matches!(request, Request::Probe) {
-            self.account.uta = false;
+        if matches!(request, Request::Probe) && !self.account.uta {
             self.private_detected(cx);
+        } else if matches!(request, Request::Probe) && self.account.probe_retries < 3 {
+            self.account.probe_retries += 1;
+            self.account.probe_retry =
+                Some(cx.set_timer(250.0 * f64::from(self.account.probe_retries)));
+            cx.log(LogLevel::Warning, error);
         } else {
             self.account_failed(cx, request, error);
         }
@@ -741,39 +767,47 @@ impl BitgetFutures {
             .account
             .full_positions_at
             .is_some_and(|at| started - at <= 5_000.0);
-        let mut rows: Vec<_> = rows
-            .into_iter()
-            .filter_map(|mut p| {
-                if self.account.config_at.is_some_and(|at| started <= at) {
-                    if let Some(settings) = cx.store.setting(&p.symbol) {
-                        p.leverage = settings.leverage;
-                        p.margin_type = settings.margin_type;
+        let mut rows: Vec<_> =
+            rows.into_iter()
+                .filter_map(|mut p| {
+                    if self.account.config_at.is_some_and(|at| started <= at) {
+                        if let Some(settings) = cx.store.setting(&p.symbol) {
+                            if let Some(current) = cx.store.positions().iter().find(|current| {
+                                current.symbol == p.symbol && current.side == p.side
+                            }) {
+                                p.leverage = current.leverage;
+                            } else if !cx.store.hedged()
+                                || settings.margin_type != Some(MarginType::Isolated)
+                            {
+                                p.leverage = settings.leverage;
+                            }
+                            p.margin_type = settings.margin_type;
+                        }
+                        p.position_mode = Some(if cx.store.hedged() {
+                            PositionMode::Hedged
+                        } else {
+                            PositionMode::Oneway
+                        });
                     }
-                    p.position_mode = Some(if cx.store.hedged() {
-                        PositionMode::Hedged
-                    } else {
-                        PositionMode::Oneway
-                    });
-                }
-                if full_fresh && !self.account.full_position_ids.contains(&p.id) {
-                    return None;
-                }
-                if let Some(mark) = self.account.ws_positions.get(&p.id)
-                    && started - mark.at <= 5_000.0
-                {
-                    let current = cx.store.position(&p.id);
-                    if mark.at >= started
-                        || p.last_update.is_none()
-                        || mark
-                            .update
-                            .is_some_and(|t| p.last_update.is_some_and(|r| t > r))
+                    if full_fresh && !self.account.full_position_ids.contains(&p.id) {
+                        return None;
+                    }
+                    if let Some(mark) = self.account.ws_positions.get(&p.id)
+                        && started - mark.at <= 5_000.0
                     {
-                        return current.cloned();
+                        let current = cx.store.position(&p.id);
+                        if mark.at >= started
+                            || p.last_update.is_none()
+                            || mark
+                                .update
+                                .is_some_and(|t| p.last_update.is_some_and(|r| t > r))
+                        {
+                            return current.cloned();
+                        }
                     }
-                }
-                Some(p)
-            })
-            .collect();
+                    Some(p)
+                })
+                .collect();
         for current in cx.store.positions() {
             if !rows.iter().any(|p| p.id == current.id)
                 && self
@@ -1226,6 +1260,10 @@ impl BitgetFutures {
     }
 
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account.probe_retry == Some(timer) {
+            self.account.probe_retry = None;
+            self.account_request(cx, paths::SETTINGS.to_owned(), None, Request::Probe);
+        }
         if self.account.write_check.is_some_and(|(t, _)| t == timer) {
             let (_, since) = self.account.write_check.take().expect("write check");
             if self.account.last_payload <= since {
@@ -1405,7 +1443,7 @@ impl BitgetFutures {
             };
         } else if !self.account.uta
             && is_hedged(first_text(&[&raw.pos_mode, &raw.hold_mode]))
-            && (raw.reduce_only.0 || raw.trade_side == "close")
+            && (raw.reduce_only.0 || side_wire == "close")
             && matches!(side_wire, "buy" | "sell" | "close")
         {
             side = side.opposite();
@@ -1447,7 +1485,24 @@ impl BitgetFutures {
             amount,
             filled,
             remaining: clean((amount - filled).max(0.0)),
-            reduce_only: raw.reduce_only.0 || !raw.plan_type.is_empty(),
+            reduce_only: raw.reduce_only.0
+                || !raw.plan_type.is_empty()
+                || [&raw.trade_side, &raw.t_s, &raw.side].iter().any(|value| {
+                    matches!(
+                        value.as_ref(),
+                        "close"
+                            | "close_long"
+                            | "close_short"
+                            | "reduce_close_long"
+                            | "reduce_close_short"
+                            | "offset_close_long"
+                            | "offset_close_short"
+                            | "burst_close_long"
+                            | "burst_close_short"
+                            | "delivery_close_long"
+                            | "delivery_close_short"
+                    )
+                }),
             close: None,
             client_order_id: Some(raw.client_oid.text().into_owned()).filter(|s| !s.is_empty()),
             time_in_force: Some(

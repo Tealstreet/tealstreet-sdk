@@ -103,3 +103,34 @@ test('same-URL sockets receive only exact product/topic subscriptions', async ()
     /no subscribed/,
   );
 });
+
+test('existing client IDs are exact identities; only created aliases can translate', () => {
+  const cancel = 'https://api.bitget.com/api/v3/trade/cancel-strategy-order';
+  const tape = createTape([response({ clientOid: 'resting-client' }, { url: cancel })], venue, true);
+  assert.equal(tape.respond('POST', cancel, { clientOid: 'wrong-order' }).status, 599);
+  assert.equal(tape.unusedWrites, 1);
+  assert.equal(tape.respond('POST', cancel, { clientOid: 'resting-client' }).status, 200);
+  const place = 'https://api.bitget.com/api/v3/trade/place-order';
+  const linked = createTape(
+    [response({ clientOid: 'taped-minted' }, { url: place }), response({ clientOid: 'taped-minted' }, { url: cancel })],
+    venue,
+    true,
+  );
+  assert.equal(linked.respond('POST', place, { clientOid: 'actual-minted' }).status, 200);
+  assert.equal(linked.respond('POST', cancel, { clientOid: 'unrelated' }).status, 599);
+  assert.equal(linked.respond('POST', cancel, { clientOid: 'actual-minted' }).status, 200);
+});
+
+test('modify-by-client-id preserves an existing generated identity', () => {
+  const place = 'https://api.bitget.com/api/v3/trade/place-order';
+  const tape = createTape(
+    [
+      response({ clientOid: 'taped-old' }, { url: place }),
+      response({ clientOid: 'taped-old', newClientOid: 'taped-new' }),
+    ],
+    venue,
+    true,
+  );
+  assert.equal(tape.respond('POST', place, { clientOid: 'actual-old' }).status, 200);
+  assert.equal(tape.respond('POST', url, { clientOid: 'actual-old', newClientOid: 'actual-new' }).status, 200);
+});

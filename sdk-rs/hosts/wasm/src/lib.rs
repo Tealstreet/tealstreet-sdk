@@ -428,18 +428,27 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
             }))),
-            "bitget" | "bitgetusdc" => Box::new(Engine::new(BitgetFutures::new(BitgetOptions {
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                passphrase: options.passphrase,
-                product: if venue == "bitgetusdc" {
-                    Product::Usdc
-                } else {
-                    Product::Usdt
-                },
-            }))),
+            "bitget" | "bitgetusdc" => {
+                if !options.public_data_only
+                    && options.key.as_ref().is_some_and(|s| !s.is_empty())
+                    && options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                    && options.passphrase.as_ref().is_none_or(|s| s.is_empty())
+                {
+                    return Err(JsError::new("Bitget requires a passphrase"));
+                }
+                Box::new(Engine::new(BitgetFutures::new(BitgetOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    passphrase: options.passphrase,
+                    product: if venue == "bitgetusdc" {
+                        Product::Usdc
+                    } else {
+                        Product::Usdt
+                    },
+                })))
+            }
             "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
                 if !options.public_data_only
                     && options.key.as_ref().is_some_and(|s| !s.is_empty())
