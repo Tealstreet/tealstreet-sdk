@@ -499,6 +499,23 @@ pub trait Venue {
         _item: &str,
     ) {
     }
+    /// A complete envelope arrived without its expected streamed list. Venues
+    /// may recognize business errors; successful missing lists still fail.
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        response: Response<'_>,
+    ) {
+        self.on_request_failed(
+            cx,
+            pending,
+            &format!(
+                "response did not contain the expected list: {}",
+                response.body
+            ),
+        );
+    }
     fn on_request_failed(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -653,6 +670,18 @@ impl<V: Venue> Engine<V> {
         if let Some(splitter) = &incoming.splitter {
             let outside = splitter.outside();
             if !splitter.finished() {
+                if let Some(body) = splitter.error_envelope() {
+                    self.venue.on_stream_error(
+                        &mut cx,
+                        pending,
+                        Response {
+                            status: incoming.status,
+                            headers: &incoming.headers,
+                            body,
+                        },
+                    );
+                    return;
+                }
                 let preview = &outside[..outside.len().min(STREAM_PREVIEW_BYTES)];
                 let preview = String::from_utf8_lossy(preview);
                 let message = format!("response did not contain the expected list: {preview}");

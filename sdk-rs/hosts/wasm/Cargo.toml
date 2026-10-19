@@ -15,6 +15,7 @@ safe-cex-venue-backpack = { path = "../../venues/backpack" }
 safe-cex-venue-blofin.workspace = true
 safe-cex-venue-mexc.workspace = true
 safe-cex-venue-bingx.workspace = true
+safe-cex-venue-bitget = { path = "../../venues/bitget" }
 safe-cex-venue-bybit.workspace = true
 safe-cex-venue-cryptocom.workspace = true
 safe-cex-venue-okx.workspace = true

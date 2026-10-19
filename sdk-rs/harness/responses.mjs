@@ -6,7 +6,7 @@ export class Responses {
   constructor(records, key, check, isWrite = (method, url) => !isRead(method, new URL(url, 'https://replay.invalid').href), fallbackKey) {
     this.key = key;
     this.check = check;
-    this.isWrite = isWrite;
+    this.isWrite = typeof isWrite === 'function' ? isWrite : (method, url) => !isRead(method, new URL(url, 'https://replay.invalid').href);
     this.fallbackKey = fallbackKey;
     this.unserved = 0;
     this.queues = new Map();
@@ -16,7 +16,7 @@ export class Responses {
       this.queues.get(id).push(record);
     }
   }
-  respond(method, url, body, commandIndex = 0, time = 0) {
+  respond(method, url, body, commandIndex = 0, time = 0, onMatch) {
     const queue = this.check?.(method, url, body) === false ? undefined :
       this.queues.get(this.key(method, url, body)) ??
       (this.fallbackKey && this.queues.get(this.fallbackKey(method, url, body)));
@@ -38,6 +38,7 @@ export class Responses {
       current = current.filter((r) => Math.max(r.after ?? 0, r.effectiveAt ?? 0, r.availableAfter ?? 0) === after);
     }
     const record = timed ? current.at(-1) : current[0];
+    onMatch?.(record);
     if ((!timed && current.length > 1) || write) queue.splice(queue.indexOf(record), 1);
     let responseBody = record.body;
     if (/"\$(clientAlgoId|newClientOrderId)"/.test(responseBody)) {

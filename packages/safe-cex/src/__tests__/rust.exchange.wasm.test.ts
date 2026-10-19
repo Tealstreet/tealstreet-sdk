@@ -414,6 +414,55 @@ describe('RustEngineExchange', () => {
     expect(tape.requests).toEqual([]);
   });
 
+  it.each(['bitget', 'bitgetusdc'] as const)('honors %s caller IDs through inherited SDK helpers', async (venue) => {
+    const store = new DefaultStore();
+    store.update({ markets: [{
+      id: 'BTCUSDT', symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', active: true,
+      precision: { amount: 0.001, price: 0.1 },
+      limits: { amount: { min: 0.001, max: 120 }, leverage: { min: 1, max: 100 } },
+    }] });
+    exchange = new RustEngineExchange(venue, { key: '', secret: '' }, store);
+    const place = vi.spyOn(exchange, 'placeOrder').mockResolvedValue(['native-order']);
+    const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 60000 };
+    expect(exchange.mintClientOrderId(opts)).toMatch(/^[.A-Z:/a-z0-9_-]{1,32}$/);
+    const clientOrderId = '.AZ:/az09_-';
+    await expect(exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId })).resolves.toEqual({
+      orderIds: ['native-order'], clientOrderId,
+    });
+    expect(place).toHaveBeenCalledWith({ ...opts, clientOrderId });
+    for (const invalid of ['', 'has space', 'é', 'a'.repeat(33)]) {
+      await expect(exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: invalid })).rejects.toThrow('clientOrderId');
+    }
+    expect(place).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['bitget', 'bitgetusdc'] as const)('rejects private %s without a nonempty passphrase', async (venue) => {
+    const { WasmEngine } = await loadNodeEngine();
+    for (const passphrase of [undefined, '']) {
+      expect(() => new WasmEngine(venue, JSON.stringify({ key: 'k', secret: 's', passphrase }))).toThrow(
+        'Bitget requires a passphrase',
+      );
+    }
+  });
+
+  it.each(['bitget', 'bitgetusdc'] as const)(
+    'accepts %s with its passphrase or public-only credentials',
+    async (venue) => {
+      const { WasmEngine } = await loadNodeEngine();
+      const options: Partial<ExchangeOptions>[] = [
+        { key: 'k', secret: 's', passphrase: 'p' },
+        { key: 'k', secret: 's', publicDataOnly: true },
+        { key: 'k', secret: 's', passphrase: '', publicDataOnly: true },
+        {},
+        { key: 'k' },
+        { secret: 's' },
+      ];
+      for (const value of options) {
+        expect(() => new WasmEngine(venue, JSON.stringify(value))).not.toThrow();
+      }
+    },
+  );
+
   it('rejects payload-only private signing before transport starts', async () => {
     const tape = recordedTransport();
     setWasmEngineLoader(loadNodeEngine);

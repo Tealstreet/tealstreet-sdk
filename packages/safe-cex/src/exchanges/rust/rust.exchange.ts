@@ -38,6 +38,8 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   backpack: 'backpack',
   binancepm: 'binancepm',
+  bitget: 'bitget',
+  bitgetusdc: 'bitgetusdc',
   blofin: 'blofin',
   mexc: 'mexc',
   bingx: 'bingx',
@@ -57,6 +59,8 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
   mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
 });
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  bitget: patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/),
+  bitgetusdc: patternClientOrderIdRule('Bitget', /^[.A-Z:/a-z0-9_-]{1,32}$/),
   backpack: {
     label: 'Backpack',
     requirement: 'be a canonical decimal uint32 between 1 and 4294967295',

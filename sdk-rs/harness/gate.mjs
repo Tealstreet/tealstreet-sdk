@@ -298,6 +298,26 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
   }
 
 };
+KNOWN_TS_FIXES.bitget = {
+  // Each correction is covered by documented-payload Rust tests. Normal
+  // tapes still compare unchanged; these notes do not rewrite mismatches.
+  notes: [
+    'Reject book sequence gaps and legacy checksum failures.',
+    'Preserve account state on failed business-error reads.',
+    'Filter all-product UTA streams to this futures product.',
+    'Use UTA execution IDs, quantities and prices from the fill topic.',
+    'Keep both TP/SL legs of status-less UTA strategy rows.',
+    'Include UTA totalFundingFee in realized PnL.',
+    'Use cumulative executed size for orders and deduplicate executions.',
+    'Do not emit an execution for an algo trigger acknowledgement.',
+    'Split normal orders at floored max lots without losing requested volume.',
+    'Send native crossed marginMode for Classic batches rather than cross.',
+    'Resolve native modify identity using the fresh newClientOid.',
+    'Never cancel-replace an amendment after an ambiguous transport/server result.',
+    'Report incomplete or malformed financial history as a failed read.',
+  ],
+};
+
 KNOWN_TS_FIXES.okx = [
   'full books retain levels past a stale last trade',
   'public trades implement the inherited Not implemented method',

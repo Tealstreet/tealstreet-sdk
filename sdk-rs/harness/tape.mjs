@@ -68,7 +68,7 @@ export const canonicalBody = (body, callerIds = new Set(), venue = {}) => {
                 ((!venue.matchRequestBody || venue.volatileBodyFields) &&
                   VOLATILE.has(k) &&
                   !callerIds.has(String(v))) ||
-                (k === 'clientId' && !callerIds.has(String(v))) ||
+                (k === 'clientId' && !venue.preserveClientId && !callerIds.has(String(v))) ||
                 (venue.ignoredBodyFields?.includes(k) && !callerIds.has(String(v)))
               ),
           )
@@ -234,6 +234,109 @@ export class ReplayClock {
   }
 }
 
+const bitgetTopic = (arg) => `${arg.instType ?? ''}|${arg.channel ?? arg.topic}|${arg.instId ?? arg.symbol ?? ''}`;
+
+// Bitget mints client identities only on specific placement/modify routes.
+const bitgetContract = (callerIds, venue) => {
+  const generatedAliases = new Map();
+  const mintedField = (key, url) => {
+    const path = new URL(url).pathname;
+    return key === 'newClientOid'
+      ? /\/modify-order$/.test(path)
+      : key === 'clientOid' &&
+          /\/(?:batch-place-order|place-order|place-tpsl-order|place-plan-order|place-strategy-order)$/.test(path);
+  };
+  const canonicalBody = (body, url) => {
+    const classicBatch = new URL(url).pathname === '/api/v2/mix/order/batch-place-order';
+    if (body === undefined || body === null || body === '') return '';
+    let parsed = body;
+    try {
+      if (typeof body === 'string') parsed = parseRequestJson(body);
+      else if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer)
+        parsed = parseRequestJson(new TextDecoder().decode(body));
+    } catch {
+      return String(body);
+    }
+    if (venue.requestBody) parsed = venue.requestBody(parsed);
+    const sorted = (value) => {
+      if (Array.isArray(value)) return value.map(sorted);
+      if (value === null || typeof value !== 'object') return value;
+      const keys = Object.keys(value)
+        .filter(
+          (key) =>
+            value[key] !== undefined &&
+            !(venue.volatileBodyFields && VOLATILE.has(key) && !callerIds.has(String(value[key]))),
+        )
+        .sort();
+      return Object.fromEntries(
+        keys.map((key) => [
+          key,
+          ((mintedField(key, url) && typeof value[key] === 'string' && value[key].length) ||
+            venue.generatedBodyId?.(key, value[key])) &&
+          !callerIds.has(value[key])
+            ? '<generated>'
+            : classicBatch && key === 'marginMode' && value[key] === 'cross'
+              ? 'crossed'
+              : key === 'clientOid' && typeof value[key] === 'string'
+                ? (generatedAliases.get(value[key]) ?? value[key])
+                : sorted(value[key]),
+        ]),
+      );
+    };
+    return JSON.stringify(sorted(parsed), (_key, value) =>
+      typeof value === 'bigint' ? { integer: String(value) } : value,
+    );
+  };
+  const generated = new Set();
+  return {
+    requestKey: (method, url, body) => `${method} ${canonicalUrl(url, callerIds, venue)}${method !== 'GET' ? ` ${canonicalBody(body, url)}` : ''}`,
+    match: (record, method, url, body) => {
+      if (method !== 'GET' && /(?:place|modify)-/.test(new URL(url).pathname)) {
+        const ids = [];
+        const visit = (value) => {
+          if (!value || typeof value !== 'object') return;
+          for (const [key, item] of Object.entries(value)) {
+            if (mintedField(key, url) && (key === 'newClientOid' || !callerIds.has(item))) {
+              if (
+                typeof item !== 'string' ||
+                !/^[.A-Za-z0-9:/_-]{1,32}$/.test(item) ||
+                (key === 'newClientOid' && callerIds.has(item))
+              )
+                throw new Error(`invalid generated ${key}`);
+              ids.push(item);
+            } else visit(item);
+          }
+        };
+        visit(typeof body === 'string' ? parseRequestJson(body) : body);
+        const reply = JSON.parse(record.body);
+        // A rejected signature may be re-signed once with the same identity.
+        if (String(reply.code) !== '40009')
+          for (const id of ids) {
+            if (generated.has(id)) throw new Error(`generated client ID reused: ${id}`);
+            generated.add(id);
+          }
+      }
+      if (method !== 'GET') {
+        const decode = (value) => (typeof value === 'string' ? parseRequestJson(value) : value);
+        const bind = (expected, actual) => {
+          if (!expected || !actual || typeof expected !== 'object' || typeof actual !== 'object') return;
+          for (const key of Object.keys(expected)) {
+            if (
+              mintedField(key, url) &&
+              typeof expected[key] === 'string' &&
+              typeof actual[key] === 'string' &&
+              !callerIds.has(actual[key])
+            )
+              generatedAliases.set(actual[key], expected[key]);
+            else bind(expected[key], actual[key]);
+          }
+        };
+        bind(decode(record.requestBody), decode(body));
+      }
+    },
+  };
+};
+
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 export class Tape {
   constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = venue.timeoutMs ?? 30000, impl = venue.impl, books = venue.books ?? []) {
@@ -261,19 +364,27 @@ export class Tape {
       for (const nested of Object.values(value)) collectCallerIds(nested);
     };
     for (const record of records) if (record.type === 'command') collectCallerIds(record);
+    this.bitget = venue.rust?.startsWith('bitget') ?? false;
+    this.contract = this.bitget ? bitgetContract(this.callerIds, venue) : undefined;
+    this.requestKey = this.contract?.requestKey ?? venue.requestKey;
+    this.bodyKey = (body, url, method) => canonicalBody(body, this.callerIds, {
+      ...venue,
+      preserveClientId: venue.preserveClientId || (venue.rust === 'backpack' &&
+        (method !== 'POST' || !/\/api\/v1\/orders?$/.test(new URL(url).pathname))),
+    });
     this.responses = venue.responses ?? new Map();
     this.writeOrder = [];
     if (!venue.responses) for (const record of records.filter((r) => r.type === 'http')) {
       // Per-fixture KNOWN_TS_FIXES exception; never a fallback for Rust.
       const expectedBody = impl === 'ts' ? (record.tsRequestBody ?? record.requestBody) : record.requestBody;
-      const key = `${record.method} ${canonicalUrl(record.url, this.callerIds, this.venue)}${expectedBody === undefined ? '' : ` BODY ${canonicalBody(expectedBody, this.callerIds, this.venue)}`}`;
+      const key = `${record.method} ${canonicalUrl(record.url, this.callerIds, this.venue)}${expectedBody === undefined ? '' : ` BODY ${this.bodyKey(expectedBody, record.url, record.method)}`}`;
       if (!this.responses.has(key)) this.responses.set(key, []);
       this.responses.get(key).push(record);
       if (this.isWrite(record.method, record.url)) this.writeOrder.push(record);
     }
-    if (!venue.responses && (venue.checkRequest || venue.requestKey || venue.requestBodies)) {
+    if (!venue.responses && (this.contract || venue.checkRequest || venue.requestKey || venue.requestBodies)) {
       const responseKey = (method, url, body) => {
-        if (venue.requestKey) return venue.requestKey(method, url, body, this.callerIds);
+        if (this.requestKey) return this.requestKey(method, url, body, this.callerIds);
         if (venue.requestBodies) return typedRequestKey(method, url, body, this.callerIds, venue);
         const base = `${method} ${canonicalUrl(url, this.callerIds, this.venue)}`;
         const exact = `${base} BODY ${canonicalBody(body, this.callerIds, venue)}`;
@@ -334,7 +445,7 @@ export class Tape {
     this.activeCommands++;
     try {
       const result = Promise.resolve().then(() => runCommand(frame));
-      return await (this.replayClock?.active ? this.replayClock.wait(result, `command ${frame.op}`, this.timeoutMs) : withTimeout(result, `command ${frame.op}`, this.timeoutMs));
+      return await (this.replayClock?.active ? this.replayClock.wait(result, `command ${frame.op}`, this.venue.commandTimeoutMs ?? this.timeoutMs) : withTimeout(result, `command ${frame.op}`, this.venue.commandTimeoutMs ?? this.timeoutMs));
     }
     finally { this.activeCommands--; }
   }
@@ -374,6 +485,7 @@ export class Tape {
   isWrite(method, url) {
     return this.venue.isWrite?.(method, url) ?? !isRead(method, url);
   }
+  get unusedWrites() { return this.missingWrites; }
   get missingWrites() {
     if (typeof this.responses.unusedWrites === 'function') return this.responses.unusedWrites();
     if (this.responseStore) return this.responseStore.unusedWrites();
@@ -388,13 +500,14 @@ export class Tape {
     if (typeof this.responses.respond === 'function') return this.responses.respond(method, url, body, this.commandIndex, this.responseTime);
     const now = this.responseTime;
     if (this.responseStore) {
-      const response = this.responseStore.respond(method, url, body, this.commandIndex, now);
+      const response = this.responseStore.respond(method, url, body, this.commandIndex, now,
+        this.contract ? (record) => this.contract.match(record, method, url, body) : undefined);
       this._unserved = this.responseStore.unserved;
       return response;
     }
     const key = `${method} ${canonicalUrl(url, this.callerIds, this.venue)}`;
     const queue =
-      this.responses.get(`${key} BODY ${canonicalBody(body, this.callerIds, this.venue)}`) ?? this.responses.get(key);
+      this.responses.get(`${key} BODY ${this.bodyKey(body, url, method)}`) ?? this.responses.get(key);
     if (!queue?.length) {
       if (this.unserved < 10)
         console.error(`unserved ${method} ${url} ${canonicalBody(body, this.callerIds, this.venue)}`);
@@ -473,8 +586,14 @@ export class Tape {
   }
 
   send(socket, text) {
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { /* Literal heartbeat. */ }
+    if (parsed && this.isPrivate && this.venue.verifySubscribe && !this.venue.verifySubscribe(parsed)) {
+      this.invalidSignatures++;
+      throw new Error('invalid replay websocket signature');
+    }
     this.sent(socket.url, text);
-    for (const key of subscriptionKeys(socket.url, text)) {
+    for (const key of subscriptionKeys(socket.rawUrl ?? socket.url, text)) {
       this.protocolSubscriptions.add(`${socket.generation} ${key}`);
       if (this.startupSubscriptions.get(key) === false) {
         this.startupSubscriptions.set(key, true);
@@ -490,10 +609,6 @@ export class Tape {
     }
     try {
       const message = JSON.parse(text);
-      if (this.isPrivate && this.venue.verifySubscribe && !this.venue.verifySubscribe(message)) {
-        this.invalidSignatures++;
-        throw new Error('invalid replay websocket signature');
-      }
       for (const topic of Array.isArray(message.params) ? message.params : []) {
         if (message.method === 'SUBSCRIBE') {
           socket.subscriptions.add(topic);
@@ -502,21 +617,21 @@ export class Tape {
             topic.startsWith('account.') ||
             this.venue.marketFilter({ symbol: topic.split('.').at(-1) })
           )
-            { this.nativeSubscriptions.add(`${message.method} ${topic}`); if (this.subscriptions instanceof Set) this.subscriptions.add(`${message.method} ${topic}`); }
+            { this.nativeSubscriptions.add(`${message.method} ${topic}`); if (this.subscriptions instanceof Set && this.subscriptions !== this.protocolSubscriptions) this.subscriptions.add(`${message.method} ${topic}`); }
         }
         if (message.method === 'UNSUBSCRIBE') socket.subscriptions.delete(topic);
       }
       for (const waiter of [...this.waiters]) waiter();
       // OKX's opt-in auth validation also uses its v5 subscription argument model.
-      const validateTopics = this.venue.validateSubscriptions ?? this.venue.validateLogin;
+      const validateTopics = this.bitget || (this.venue.validateSubscriptions ?? this.venue.validateLogin);
       if (validateTopics && ['subscribe', 'unsubscribe'].includes(message.op)) {
         if (!Array.isArray(message.args)) throw new Error(`Invalid subscription on ${socket.url}`);
         for (const topic of message.args) {
-          if (!topic || typeof topic.channel !== 'string' || !topic.channel)
+          if (!topic || typeof (topic.channel ?? topic.topic) !== 'string' || !(topic.channel ?? topic.topic))
             throw new Error(`Invalid subscription topic on ${socket.url}`);
           const key = JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
-          if (message.op === 'subscribe') socket.subscriptionArgs.set(key, topic);
-          else socket.subscriptionArgs.delete(key);
+          if (message.op === 'subscribe') { socket.subscriptionArgs.set(key, topic); socket.topics.add(this.bitget ? bitgetTopic(topic) : key); }
+          else { socket.subscriptionArgs.delete(key); socket.topics.delete(this.bitget ? bitgetTopic(topic) : key); }
         }
         return;
       }
@@ -598,6 +713,8 @@ export class Tape {
         (!socket.closed || frame.type === 'close') && (socket.opened || ['open', 'close'].includes(frame.type)) &&
         (frame.connection === undefined || socket.connection === frame.connection));
       if (stream) return candidates.find((socket) => socket.opened && [...socket.subscriptions].some((topic) => stream === topic || stream.startsWith(`${topic}.`)));
+      if (this.bitget && !frame.text && frame.connection === undefined)
+        return (frame.type === 'open' && candidates.find((socket) => !socket.opened)) || candidates[0];
       if (frame.connection !== undefined || candidates.length === 1) return candidates[0];
       if (this.legacyLatest) return candidates.at(-1);
       if (candidates.length > 1 && frame.topic) {
@@ -615,7 +732,7 @@ export class Tape {
         this.waiters.add(waiter);
         waiter();
       });
-      const label = `socket ${frame.url} ${stream ?? 'open'}`;
+      const label = `socket did not open: ${frame.url} ${stream ?? 'open'}`;
       return await (this.replayClock?.active ? this.replayClock.wait(pending, label, this.timeoutMs) : withTimeout(pending, label, this.timeoutMs));
     } finally { this.waiters.delete(waiter); }
   }
@@ -628,6 +745,43 @@ export class Tape {
       if (!frame.local && socket.closed) throw new Error('socket closed before recorded remote close');
       socket.closed = true;
       if (!frame.local) socket.onClose?.(frame.code ?? 1006);
+    }
+  }
+
+  async deliver(frame, prepared = false) {
+    if (!prepared) frame = { ...frame, url: this.canonicalize(frame.url), connection: frame.connection ?? frame.socket };
+    if (this.bitget && frame.connection === undefined && frame.type !== 'open') {
+      let arg;
+      try { arg = JSON.parse(frame.text)?.arg; } catch { /* Literal heartbeat. */ }
+      const key = arg && bitgetTopic(arg);
+      await this.socketFor({ ...frame, text: undefined });
+      const matching = this.sockets.filter((socket) => socket.url === frame.url && socket.opened && !socket.closed && (!key || socket.topics.has(key)));
+      if (key && !matching.length) throw new Error(`frame has no subscribed socket: ${frame.url} ${key}`);
+      for (const socket of matching) await this.deliver({ ...frame, connection: socket.connection }, true);
+      return;
+    }
+    const socket = await this.socketFor(frame);
+    if (this.bitget && frame.text) {
+      let arg;
+      try { arg = JSON.parse(frame.text)?.arg; } catch { /* Literal heartbeat. */ }
+      if (arg && !socket.topics.has(bitgetTopic(arg))) throw new Error(`frame has no subscribed socket: ${frame.url} ${bitgetTopic(arg)}`);
+    }
+    if (frame.type === 'open' || frame.type === 'close') await this.lifecycle(frame);
+    else {
+      if (!socket.opened) throw new Error('frame before recorded socket open');
+      if (this.venue.rust === 'bitunix' && frame.topic && !socket.url.includes(this.venue.privateSocket)) {
+        const deadline = performance.now() + 10_000;
+        while (!socket.topics.has(frame.topic) && !socket.closed && performance.now() < deadline)
+          await new Promise((r) => realTimeout(r, 5));
+      }
+      if ((this.venue.validateLogin || this.venue.validateSubscriptions) && frame.text.trimStart().startsWith('{')) {
+        const message = JSON.parse(frame.text);
+        if (this.venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified)
+          throw new Error(`Taped login success preceded a valid login on ${frame.url}`);
+        this.assertSubscribed(socket, message, frame.subscriptionKey);
+      }
+      this.validateTopic?.(socket, frame);
+      socket.onMessage(frame.text);
     }
   }
 
@@ -689,24 +843,7 @@ export class Tape {
           return { error: String(error?.message ?? error) };
         }));
       } else {
-        const socket = await this.socketFor(frame);
-        if (frame.type === 'open' || frame.type === 'close') await this.lifecycle(frame);
-        else {
-          if (!socket.opened) throw new Error('frame before recorded socket open');
-          if (this.venue.rust === 'bitunix' && frame.topic && !socket.url.includes(this.venue.privateSocket)) {
-            const deadline = performance.now() + 10_000;
-            while (!socket.topics.has(frame.topic) && !socket.closed && performance.now() < deadline)
-              await new Promise((r) => realTimeout(r, 5));
-          }
-          if ((this.venue.validateLogin || this.venue.validateSubscriptions) && frame.text.trimStart().startsWith('{')) {
-            const message = JSON.parse(frame.text);
-            if (this.venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified)
-              throw new Error(`Taped login success preceded a valid login on ${frame.url}`);
-            this.assertSubscribed(socket, message, frame.subscriptionKey);
-          }
-          this.validateTopic?.(socket, frame);
-          socket.onMessage(frame.text);
-        }
+        await this.deliver(frame, true);
       }
       delivered++;
       if (delivered % 64 === 0) this.peakBytes = Math.max(this.peakBytes, this.sampleMemory?.() ?? 0);
@@ -722,6 +859,7 @@ export class Tape {
   results = [];
   sentRequests = new Set();
   sent(url, text) {
+    if (typeof url !== 'string') return this.send(url, text);
     if (!this.venue.requestBodies || text === 'ping' || text === 'pong') return;
     let message;
     try {
@@ -738,3 +876,16 @@ export class Tape {
     }
   }
 }
+
+// Factory compatibility uses the production transport, with venue defaults.
+export const createTape = (records, venue = {}, isPrivate = venue.isPrivate ?? false, {
+  impl, books = [], socketTimeoutMs = 30_000, commandTimeoutMs = 15_000, credentials = venue.replayCredentials,
+} = {}) => {
+  const defaults = venue.rust === 'mexc' ? { canonicalIntegerStrings: true, ignoredBodyFields: ['externalOid', 'requestId'], rollingListWindows: true, matchRequestBody: true }
+    : venue.rust === 'cryptocom' ? { requestBodyParams: true }
+    : ['bingx', 'blofin'].includes(venue.rust) ? { requestBodies: true } : {};
+  const tape = new Tape(records, { ...defaults, ...venue, replayCredentials: credentials, commandTimeoutMs }, isPrivate, socketTimeoutMs, impl, books);
+  tape.subscriptions = tape.protocolSubscriptions;
+  tape.normalizedSubscriptions = tape.nativeSubscriptions;
+  return tape;
+};

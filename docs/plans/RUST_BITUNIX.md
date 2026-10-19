@@ -537,3 +537,30 @@ Independent re-review and new-head CI are tracked on PR #1309 before merge.
 Independent final re-review PASS: 91 helpers plus actual production callbacks
 prove wrong-symbol books keep startup waiting and delayed initialized-empty
 books satisfy readiness while the clock remains inactive. No open findings.
+
+### Bitget landing integration checkpoint
+
+The complete ten-venue gates/reviews are committed in 2ffc8ddad4. Bitget then
+landed at 3a7b46407d and made PR #1309 conflicting before corrected replay CI
+could run. Merge the pinned landing with disjoint engine, host and harness
+reviews, retaining all prior timing/oracle/initial-seed regressions. The
+landing raises the combined module budget to 3.5 MiB and optimizes engine,
+dispatch and Bitget throughput; retain those profiles and verify actual size
+and all per-venue CPU/memory gates. Preserve Backpack's package size profile.
+
+Eleven-venue integration reviews PASS: 58 engine tests, 132 combined harness
+helpers, 2 new Bitget SDK-helper regressions and 31 focused host tests. The
+shared production Tape retains all prior controls; incoming signed preconsume
+validation, typed generated-ID checks and exact product/topic routing are
+integrated without a duplicate transport. Independent review prompted a fix
+for untagged reconnect opens choosing an active sibling instead of the newly
+constructed replacement; original reproduction now opens the replacement
+exactly once. Actual Bitget TS smoke passes 36,634 frames and both books.
+
+The initial eleven-factory artifact was 3,766,929 bytes, above landing's
+3,670,016-byte cap. Extending existing package size profiles to Bitunix,
+BloFin, MEXC and OKX yields 3,656,290 bytes. Preserve engine/dispatch/Bitget
+throughput profiles; all eleven public CPU/memory gates verify these flags.
+Full workspace Rust/wasm checks, root typecheck/lint/full27 tasks PASS. The
+new artifact's 28 adapter tests and 38 host tests pass. Eleven public and
+fourteen private gates plus updated-head CI remain tracked on PR #1309.
