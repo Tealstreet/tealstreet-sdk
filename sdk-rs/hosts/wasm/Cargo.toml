@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 safe-cex-engine.workspace = true
 safe-cex-venue-binance.workspace = true
 safe-cex-venue-bybit.workspace = true
+safe-cex-venue-okx.workspace = true
 safe-cex-venue-weex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

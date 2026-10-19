@@ -104,6 +104,9 @@ pub enum ArrayAt {
     Root,
     /// The array is this field of the top-level object.
     Field(&'static str),
+    /// Like `Field`, explicitly requesting the surrounding response metadata.
+    /// All modes retain metadata; this alias supports venues that opt in.
+    EnvelopeField(&'static str),
     /// The array sits under these nested object fields (`result.list`).
     Path(&'static [&'static str]),
 }
@@ -112,7 +115,7 @@ impl ArrayAt {
     fn len(self) -> usize {
         match self {
             Self::Root => 0,
-            Self::Field(_) => 1,
+            Self::Field(_) | Self::EnvelopeField(_) => 1,
             Self::Path(path) => path.len(),
         }
     }
@@ -120,7 +123,7 @@ impl ArrayAt {
     fn segment(self, index: usize) -> Option<&'static str> {
         match self {
             Self::Root => None,
-            Self::Field(name) => (index == 0).then_some(name),
+            Self::Field(name) | Self::EnvelopeField(name) => (index == 0).then_some(name),
             Self::Path(path) => path.get(index).copied(),
         }
     }
@@ -533,5 +536,70 @@ mod tests {
         assert_eq!(seen, [3]);
         assert!(!each_in_field::<Row>(r#"{"other":[]}"#, "symbols", |_| {}).unwrap());
         assert!(each::<Row>("[1]", |_| {}).is_err());
+    }
+}
+
+#[cfg(test)]
+mod envelope_tests {
+    use super::*;
+    #[test]
+    fn preserves_metadata_with_every_chunk_boundary() {
+        let body = br#"{"code":"0","data":[{"s":"a"},{"s":"b"}],"msg":"ok"}"#;
+        for size in 1..body.len() {
+            let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
+            let mut items = Vec::new();
+            for bytes in body.chunks(size) {
+                splitter.feed(bytes, |s| items.push(s.to_owned()));
+            }
+            assert!(splitter.finished());
+            assert_eq!(items, [r#"{"s":"a"}"#, r#"{"s":"b"}"#]);
+            assert_eq!(splitter.outside(), br#"{"code":"0","data":[],"msg":"ok"}"#);
+        }
+    }
+    #[test]
+    fn root_and_field_modes_preserve_bounded_response_metadata() {
+        for (at, body) in [
+            (ArrayAt::Root, b"[]".as_slice()),
+            (ArrayAt::Field("data"), br#"{"data":[]}"#.as_slice()),
+        ] {
+            let mut splitter = ArraySplitter::new(at);
+            splitter.feed(body, |_| {});
+            splitter.feed(&[b' '; 16_384], |_| {});
+            assert!(splitter.finished());
+            assert!(splitter.outside().starts_with(body));
+            assert!(serde_json::from_slice::<IgnoredAny>(splitter.outside()).is_ok());
+        }
+    }
+
+    #[test]
+    fn nested_metadata_modes_keep_array_validation_and_overflow_guards() {
+        for body in [
+            br#"{"result":{"list":[, ]}}"#.as_slice(),
+            br#"{"result":{"list":[1,]}}"#,
+            b"{\"result\":{\"list\":[\xff]}}",
+        ] {
+            let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
+            for byte in body.chunks(1) {
+                splitter.feed(byte, |_| {});
+            }
+            assert!(!splitter.finished());
+        }
+        let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
+        splitter.feed(br#"{"result":{"list":[]}}"#, |_| {});
+        splitter.feed(&vec![b' '; METADATA_LIMIT], |_| {});
+        assert!(!splitter.finished());
+    }
+
+    #[test]
+    fn rejects_array_grammar_invalid_utf8_and_metadata_overflow() {
+        for body in [b"[, ]".as_slice(), b"[1,]", b"[\xff]"] {
+            let mut splitter = ArraySplitter::new(ArrayAt::Root);
+            splitter.feed(body, |_| {});
+            assert!(!splitter.finished());
+        }
+        let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
+        splitter.feed(br#"{"data":[]}"#, |_| {});
+        splitter.feed(&vec![b' '; METADATA_LIMIT], |_| {});
+        assert!(!splitter.finished());
     }
 }

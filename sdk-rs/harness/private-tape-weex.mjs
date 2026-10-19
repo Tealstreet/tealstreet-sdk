@@ -47,6 +47,7 @@ ws(2800, PRIVATE, { e: 'orders', E: 1773298805123, d: [placedBtc, placedEth] });
 command(3200, { op: 'placeOrders', orders: [{ symbol: 'BTCUSDT', type: 'conditional', side: 'buy', amount: 0.001, triggerPrice: 70000 }] });
 http('POST', '/capi/v3/algoOrder', { orderId: algo.algoId, clientOrderId: '$clientAlgoId', success: true }, { symbol: 'BTCUSDT', side: 'BUY', positionSide: 'LONG', type: 'STOP_MARKET', quantity: '0.001', triggerPrice: '70000' });
 ws(3600, PUBLIC, { event: 'ping', time: '1773298805000' });
+ws(3600, PRIVATE, { e: 'orders', E: streamTime, d: [{ id: algo.algoId, symbol: 'BTCUSDT', orderSide: 'BUY', type: 'STOP_MARKET', status: 'UNTRIGGERED', size: '0.001', price: '0', triggerPrice: '70000', updatedTime: String(streamTime) }] });
 command(4000, { op: 'cancelOrders', ids: [placedBtc.orderId, algo.algoId] });
 http('DELETE', '/capi/v3/batchOrders', [{ orderId: placedBtc.orderId, success: true }], { orderIdList: [placedBtc.orderId] });
 http('DELETE', `/capi/v3/algoOrder?orderId=${algo.algoId}`, { orderId: algo.algoId, success: true });

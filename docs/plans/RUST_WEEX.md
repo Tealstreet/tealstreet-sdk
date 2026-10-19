@@ -146,3 +146,20 @@ variance. CPU/memory thresholds stay Rust<TS for every public tape.
 PR merge waits for green final-head CI, then the lane cuts a fresh follow-up
 branch from the updated `feat/rust-rewrite`. TS retirement/client adoption and
 live private-account validation remain outside this opt-in phase8 lane.
+
+## Landing update: OKX
+
+The landing branch advanced to OKX merge `2b37754970` while final CI ran; the
+lane merged that base too. Its EnvelopeField metadata API, public-only credential
+rules, aliases, signed body/subscription validation, staged snapshots and write
+consumption checks are preserved alongside WEEX/Bybit. Independent merge audit
+is clean. Shared engine tests19, SDK wasm17, workspace tests/clippy, wasm clippy,
+root typecheck44 and lint28 pass. Combined artifact is1,913,238 bytes locally,
+under the existing2MiB cap. Final replay matrix now includes four public venues
+and seven private variants, including all four OKX aliases.
+
+WEEX private tape now has20 frames: a stream event exposes its opening algorithmic
+order before cancel, avoiding dependence on safety-read timing. It passes strict
+request-body/signature matching and requires every expected write to be consumed.
+No optional-write exception remains. Final matrix results are posted on PR#1301;
+landing still waits for green CI on this merged head.

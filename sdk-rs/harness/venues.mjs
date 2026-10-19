@@ -4,11 +4,52 @@ import { createHmac } from 'node:crypto';
 
 const root = '../../packages/safe-cex/src/exchanges';
 
+const okx = (name) => ({
+  rust: name,
+  ts: {
+    module: `${root}/okx/${name.startsWith('okxeu') ? 'okxeu' : 'okx'}.exchange.ts`,
+    className: name.startsWith('okxeu') ? 'OKXEUExchange' : 'OKXExchange',
+    name,
+  },
+  options: { testnet: name.endsWith('demo') },
+  configureTs: (exchange) => {
+    // The Rust lane covers linear stablecoin swaps, including on the EEA class.
+    exchange.getInstrumentTypes = () => ['SWAP'];
+    exchange.isSupportedMarketInstrument = (m) =>
+      m.instType === 'SWAP' && m.ctType === 'linear' && ['USDT', 'USDC'].includes(m.settleCcy);
+  },
+  tsBooksSubscribed: (exchange, count) =>
+    Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('books.')).length >= count,
+  isPrivateRecord: (record) => {
+    if (record.type !== 'ws') return false;
+    const path = new URL(record.url).pathname;
+    if (path.endsWith('/private')) return true;
+    if (!path.endsWith('/business')) return false;
+    try {
+      const message = JSON.parse(record.text);
+      return message.event === 'login' || ['orders', 'orders-algo', 'algo-advance'].includes(message.arg?.channel);
+    } catch {
+      return false;
+    }
+  },
+  matchRequestBody: true,
+  // Caller IDs remain exact, even when the caller chooses a broker-prefixed ID.
+  generatedBodyId: (key, value) =>
+    ['clOrdId', 'algoClOrdId'].includes(key) && typeof value === 'string' && value.startsWith('e847386590ce4dBC'),
+  respondToPing: true,
+  validateLogin: true,
+  compareFillPrices: true,
+});
+
 export const VENUES = {
   weex: {
     rust: 'weex',
     ts: { module: `${root}/weex/weex.exchange.ts`, className: 'WeexExchange', name: 'weex' },
     privateSocket: '/v3/ws/private',
+    matchRequestBody: true,
+    volatileBodyFields: true,
+    // WEEX's income history is a read despite using POST.
+    isReadRequest: (method, url) => method === 'POST' && new URL(url).pathname === '/capi/v3/account/income',
     options: { passphrase: 'replay-passphrase', privateWsHeaders: true },
     tsBooksSubscribed: (exchange, count) => [...exchange.publicWebsocket.topics].filter((t) => t.endsWith('@depth200')).length >= count,
     prepareTs(exchange, WebSocket) {
@@ -44,6 +85,7 @@ export const VENUES = {
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >= count,
     privateSocket: '/private/ws',
+    volatileBodyFields: true,
   },
   bybit: {
     rust: 'bybit',
@@ -52,7 +94,10 @@ export const VENUES = {
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >= count,
     privateSocket: '/v5/private',
+    matchRequestBody: true,
+    volatileBodyFields: true,
   },
+  ...Object.fromEntries(['okx', 'okxeu', 'okxdemo', 'okxeudemo'].map((name) => [name, okx(name)])),
 };
 
 export const venueOf = (name) => {
