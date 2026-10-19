@@ -1747,7 +1747,12 @@ impl MexcExchange {
             params: Some(params),
             ..Default::default()
         };
-        let response = self.xhr.execute(request.clone()).await?;
+        let xhr = self.xhr.clone();
+        let wire_request = request.clone();
+        let response = start_eager(&self.base.runtime, async move {
+            Ok(xhr.execute(wire_request).await)
+        });
+        let response = response.await??;
         let data: Value = parse_response_json(&response.body)
             .map_err(|e| RestFailure::pre_transmit(e.to_string(), request.clone()))?;
         let mut orders = vec![];

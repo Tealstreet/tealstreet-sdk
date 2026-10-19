@@ -128,12 +128,20 @@ impl MexcPublicSocket {
         let owner = self.clone();
         let selected = symbol.clone();
         let subscription = param.clone();
+        // The source invokes fetchOrderBook before attaching its reaction.
+        // Keep the existing owned callback/disposal guard, but start its
+        // independent request Promise before returning the listener.
+        let request_parent = parent.clone();
+        let request_symbol = selected.clone();
+        let snapshot = safe_cex_exchange::eager::start_eager(&parent.base().runtime, async move {
+            Ok(request_parent
+                .fetch_order_book(request_symbol, Some(100.))
+                .await)
+        });
         let lease = parent.clone();
         parent.base().start_owned_operation(async move {
             let result = async {
-                let (snapshot, _) =
-                    crate::sockets::reaction(lease.fetch_order_book(selected.clone(), Some(100.)))
-                        .await?;
+                let (snapshot, _) = crate::sockets::reaction(snapshot).await??;
                 if owner.base.is_disposed() {
                     return Ok(());
                 }
