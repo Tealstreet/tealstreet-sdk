@@ -16,7 +16,7 @@ separate UTF-16, typed-output or raw-alias decisions.
 | `MexcPublicWebsocket.onMessage` | ACCEPT | Real registered ticker dispatch commits native price 29 before the first original subscriber error; later subscribers do not run. Candle frames also reach the captured handler arrays above. The maintained parser, class methods and DefaultStore confirm the same effects. Separate ingress/string-domain choices remain separate. |
 | `MexcPublicWebsocket#subscribe` | ACCEPT | Send-time registration through the real candle listener adds Min5 while Min1 is being re-subscribed. The live registry visits Min5 again, matching maintained Map iteration. Six exact wire frames are compared; a compiled early-termination fault fails this assertion. |
 | `MexcPublicWebsocket#unsubscribe` | ACCEPT | Real candle cleanups send the original symbol/interval unsubscribe and remove tracked subscriptions. The actual active-symbol event also sends ticker unsubscribe; disposal prevents later sends. Source uses the same tracking-before-send and method replacement order. |
-| `MexcPrivateWebsocket` | FIX | NativeRuntime master completed the actual debounce timer callback with zero asset HTTP calls; TS async callback starts fetchBalance before returning. Eager request entry repairs this; Store update remains after await, disposed sockets stay guarded, fetch failures remain swallowed. The already-canonical remote signer starts before reconnected and emits no login while signing is held. Registered private fill/market/Store dispatch remains covered. |
+| `MexcPrivateWebsocket` | FIX | NativeRuntime master completed the actual debounce timer callback with zero asset HTTP calls; TS async callback starts fetchBalance before returning. Eager request entry repairs this; Store update remains after await, disposed sockets stay guarded, fetch failures remain swallowed. Reconnect also starts its discarded snapshot eagerly before reconnected, with a canonical eager HTTP waiter so a ready response cannot commit Store inline. The already-canonical remote signer starts before reconnected and emits no login while signing is held. Registered private fill/market/Store dispatch remains covered. |
 
 ## Executable evidence
 
@@ -35,12 +35,14 @@ and diagnostic capabilities. The existing socket target runs all three profiles.
 No source body is replaced with an expected-result stub.
 
 `socket-entry-controls.py` independently compiles delayed book startup, delayed
-balance startup and prematurely terminated live subscription iteration. Each
+balance startup, prematurely terminated live subscription iteration, delayed
+reconnect snapshot entry, and a removed canonical HTTP waiter. Each
 must fail its named native assertion (not compilation), then pass after exact
 source-byte restoration. `MEXC_BOOK_SOURCE_CONTROL=defer` independently delays
 the maintained TypeScript request and must fail its synchronous request-count
-assertion. Master also produced both named NativeRuntime prefix failures before
-the production repair.
+assertion. Master produced the named book, balance and reconnect-prefix failures before
+the production repairs; an intermediate eager snapshot also failed the independent
+ready-response Store assertion until the HTTP await boundary was preserved.
 
 The eager helpers carry the request's `Result` as their successful payload until
 the existing catch runs. An immediately rejected request therefore retains the

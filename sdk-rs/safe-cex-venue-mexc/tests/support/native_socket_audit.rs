@@ -11,6 +11,7 @@ struct Observed {
     next: Cell<usize>,
     completed: Rc<RefCell<Vec<(usize, usize)>>>,
     reads: Rc<Cell<usize>>,
+    requests: Rc<RefCell<Vec<String>>>,
     sent: Rc<RefCell<Vec<String>>>,
 }
 impl Observed {
@@ -20,6 +21,7 @@ impl Observed {
             next: Cell::new(0),
             completed: Rc::default(),
             reads: Rc::default(),
+            requests: Rc::default(),
             sent: Rc::default(),
         })
     }
@@ -124,9 +126,10 @@ impl WsRuntime for Observed {
         false
     }
 }
-struct Assets(Rc<Cell<usize>>);
+struct Assets(Rc<Cell<usize>>, Rc<RefCell<Vec<String>>>);
 impl RestAdapter for Assets {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+        self.1.borrow_mut().push(request.url.clone());
         let bytes = if request.url.contains("/account/assets") {
             self.0.set(self.0.get() + 1);
             br#"{"success":true,"data":[{"currency":"USDT","availableBalance":17,"equity":23,"frozenBalance":5,"unrealized":3}]}"#.to_vec()
@@ -156,7 +159,7 @@ fn constructed(runtime: Rc<Observed>, signer: Option<Rc<dyn RuntimeSigner>>) -> 
     let clock = runtime.clone();
     MexcExchange::new(
         base,
-        Rc::new(Assets(runtime.reads.clone())),
+        Rc::new(Assets(runtime.reads.clone(), runtime.requests.clone())),
         Rc::new(|n| n),
         MexcSocketDependencies {
             runtime,
@@ -289,6 +292,71 @@ fn private_remote_signer_prefix_precedes_reconnected_on_native_runtime() {
             "held signer cannot send login"
         );
         drop(calls);
+        venue.dispose().unwrap();
+    });
+}
+
+#[test]
+fn private_snapshot_http_prefix_precedes_reconnected_on_native_runtime() {
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&executor, async {
+        let runtime = Observed::new();
+        let venue = constructed(runtime.clone(), None);
+        let seen = Rc::new(RefCell::new(None));
+        let mark = seen.clone();
+        let requests = runtime.requests.clone();
+        let store = venue.base().store.clone();
+        venue.base().on(
+            "ws-reconnected",
+            Rc::new(move |_, _| {
+                *mark.borrow_mut() = Some((requests.borrow().clone(), store.loaded()?.orders));
+                Ok(())
+            }),
+        );
+        venue
+            .base()
+            .get_socket(SocketSlot::Private)
+            .unwrap()
+            .connect_and_subscribe(false)
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while seen.borrow().is_none() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let (requests, loaded) = seen.borrow_mut().take().unwrap();
+        assert!(
+            requests
+                .iter()
+                .any(|url| url.contains("/order/list/open_orders")),
+            "MEXC SNAPSHOT ENTRY starts actual orders HTTP before reconnected"
+        );
+        assert!(
+            !loaded,
+            "MEXC SNAPSHOT ENTRY keeps ready HTTP Store work after the source await"
+        );
+        assert_eq!(
+            requests.len(),
+            1,
+            "MEXC snapshot starts exactly its first request before reconnect"
+        );
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !venue.base().store.loaded().unwrap().orders {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            runtime.requests.borrow().len(),
+            3,
+            "MEXC snapshot completes regular/plan/stop request sequence"
+        );
         venue.dispose().unwrap();
     });
 }

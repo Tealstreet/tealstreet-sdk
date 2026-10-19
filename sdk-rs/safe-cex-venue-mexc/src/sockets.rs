@@ -220,14 +220,17 @@ impl WsProtocol for PrivateProtocol {
                 .upgrade()
                 .ok_or_else(|| ExchangeError::new("MEXC private parent was dropped"))?;
             let owner = parent.clone();
-            parent.base().start_owned_operation(async move {
-                if let Err(error) = owner.fetch_and_set_private_snapshot(10).await {
-                    owner.base().runtime.report_exception(
-                        &error,
-                        &json!({"operation":"MEXC private snapshot"}).into(),
-                    );
-                }
-            });
+            let snapshot =
+                safe_cex_exchange::eager::start_eager(&parent.base().runtime, async move {
+                    if let Err(error) = owner.fetch_and_set_private_snapshot(10).await {
+                        owner.base().runtime.report_exception(
+                            &error,
+                            &json!({"operation":"MEXC private snapshot"}).into(),
+                        );
+                    }
+                    Ok(())
+                });
+            drop(snapshot);
             socket.emit_ws_reconnected()
         })();
         Box::pin(async move { result })

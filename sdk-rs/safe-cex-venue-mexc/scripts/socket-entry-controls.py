@@ -24,6 +24,16 @@ controls = [
      'cursor = u64::MAX;',
      'registered_public_resubscribe_visits_send_time_insertions',
      'MEXC constructed resubscribe traverses live registry after send-time insertion'),
+    ('snapshot-prefix', 'sockets.rs',
+     'if let Err(error) = owner.fetch_and_set_private_snapshot(10).await {',
+     'std::future::pending::<()>().await; if let Err(error) = owner.fetch_and_set_private_snapshot(10).await {',
+     'native_socket_audit::private_snapshot_http_prefix_precedes_reconnected_on_native_runtime',
+     'MEXC SNAPSHOT ENTRY starts actual orders HTTP before reconnected'),
+    ('snapshot-await', 'exchange.rs',
+     'let xhr = self.xhr.clone();\n        let wire_request = request.clone();\n        let response = start_eager(&self.base.runtime, async move {\n            Ok(xhr.execute(wire_request).await)\n        });\n        let response = response.await??;',
+     'let response = self.xhr.execute(request.clone()).await?;',
+     'native_socket_audit::private_snapshot_http_prefix_precedes_reconnected_on_native_runtime',
+     'MEXC SNAPSHOT ENTRY keeps ready HTTP Store work after the source await'),
 ]
 command = ['cargo', 'test', '--locked', '--jobs', '1', '-p', 'safe-cex-venue-mexc', '--test', 'socket_assembly']
 for name, file, before, after, test, assertion in controls:

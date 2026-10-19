@@ -430,3 +430,9 @@ fixture queues spawn bodies without first-polling them. NativeRuntime prefix
 witnesses and independent compiled controls prevent that fixture from hiding a
 regression; the maintained public-class oracle also pins live re-subscription
 iteration and captured handler arrays through the registered binding.
+
+Private reconnect's discarded snapshot also enters through canonical eager
+startup before reconnected. The order-row reader starts its terminal HTTP eagerly
+and awaits its canonical Promise waiter before mapping/Store continuations; even ready HTTP cannot
+commit loaded.orders inline. The native reconnect probe and maintained Base/MEXC
+snapshot bodies pin both sides of this boundary.
