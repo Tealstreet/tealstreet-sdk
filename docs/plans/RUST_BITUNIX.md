@@ -1,0 +1,49 @@
+# Bitunix Rust futures port
+
+Branch: `feat/rust-bitunix`; target: `feat/rust-rewrite`.
+The venue brief and `RUST_REWRITE.md` are the acceptance contract. Full auto;
+review each phase with a sub-agent. Never touch master, rebase, or force-push.
+
+## Phases
+
+1. Public data: borrowed wire records, streamed market/ticker startup,
+   sharded ticker/price sockets, legacy full snapshot books and candles,
+   ping/watchdog/reconnect state. Register crate and wasm factory. Verify
+   bans, fmt, clippy and documented-payload public tests, then agent audit.
+2. Private data: double SHA256 signing, private login, account object/array
+   handling, position aliases, settings, debounced reads and tick resync.
+   Guard snapshots by generation so in-flight reads cannot undo events.
+   `realizedPNL` is already net of fees AND funding: carry verbatim.
+   Verify scripted startup, rejection, race and reconnect tests; agent audit.
+3. Trading: sequenced jobs for place/batch/brackets/TP-SL, native amend,
+   cancel/cancel-all and account settings. Caller IDs must survive exactly
+   once or reject the whole batch before writes; never retry unknown writes.
+   Preserve sibling protections and raw identities. Verify payloads, batch
+   pacing, failure and ID contracts; agent audit.
+4. Queries: fills, order history, income, public trades and candle reads in
+   engine JSON shapes; time-window paging/dedupe and fee conventions.
+   Verify documented payloads and page boundaries; agent audit.
+5. Harness/gates: venue adapter, deterministic private tape, live 20-second
+   two-book public recording and gzipped fixture; compare TS/Rust including
+   outbound requests. List intentional TS bug fixes explicitly. Run all
+   brief gates, Binance regressions and repository checks; agent audit.
+6. Integrate: merge origin/feat/rust-rewrite into lane, rerun gates affected
+   by integration, push, PR into feat/rust-rewrite, adversarial local agent
+   reviews posted as PR comments, fix/repeat, merge PR, fresh follow-up branch.
+
+## Audit notes
+
+- Legacy `depthop` is a full book, not a diff sequence; replace both sides.
+- Futures socket binary frames are gzip; host must deliver decoded text once.
+- Public sockets share URLs: replay must distinguish connection instances.
+- TS order reconciliation returns empty on failures; Rust must preserve state
+  and document that correction. Streamed envelopes need success validation.
+- TS private orders lack per-execution notifications; investigate cumulative
+  fill quantities and record any intentional improvement as a known TS fix.
+- Read contracts first; do not transliterate the TS class structure.
+
+## Progress
+
+- Planning: repository/engine/venue contracts inspected; official signing docs
+  checked. No implementation yet. User's revised process authorizes integration
+  after all gates pass and overrides initial never-push/merge instruction.
