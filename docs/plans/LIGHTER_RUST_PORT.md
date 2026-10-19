@@ -58,3 +58,18 @@ rebase, force-push, or touch master. Keep incoming landing layout on integration
 Pending verification: duplicate order-total/execution fill notifications;
 partial successful order snapshots committed after a failed per-market read;
 runtime integrator approval check does not validate fee caps required by docs.
+
+### Public checkpoint
+
+- Implemented typed streamed metadata/fallback, tickers, books, candles and
+  engine timer watchdog/reconnect. Official WS contract confirms nonce chains
+  use begin_nonce == prior nonce, never consecutive API-server offsets:
+  https://apidocs.lighter.xyz/docs/websocket-reference#order-book.
+- Public sub-agent review found nested stats, per-market ticker snapshot races,
+  invalid book responses and pre-gap REST races; fixed each in root integration.
+- Seven public tests and four signer tests pass; signer test covers 88 tx and
+  four auth cases against independent TS/Go-WASM preimages/signatures/wire.
+  Native library Clippy, format and bans pass. Independent review regressions
+  continue alongside private phase.
+- No Lighter/Poseidon/Goldilocks helper is unused: create/grouped/builder signing
+  consumes every hash primitive. No speculative deletion of other lanes' crypto.
