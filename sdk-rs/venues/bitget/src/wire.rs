@@ -909,6 +909,7 @@ mod numeric_tests {
 #[serde(default, rename_all = "camelCase")]
 pub struct TrailingRow {
     pub activation_price: Number,
+    pub activation_type: String,
     pub trail_type: String,
     pub trail_variance: Number,
 }

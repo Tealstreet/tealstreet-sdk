@@ -121,6 +121,21 @@ impl BitgetFutures {
         if self.inverse() { "USD" } else { self.coin() }
     }
 
+    pub(crate) fn margin_coin<'a>(
+        &self,
+        cx: &'a Cx<'_, Pending>,
+        symbol: &str,
+    ) -> Result<&'a str, String> {
+        if self.inverse() {
+            cx.store
+                .market(symbol)
+                .map(|m| m.base.as_str())
+                .ok_or_else(|| format!("unknown Bitget market {symbol}"))
+        } else {
+            Ok(self.coin())
+        }
+    }
+
     fn get(&self, cx: &mut Cx<'_, Pending>, path: String, pending: Pending) {
         cx.request_streamed(
             Method::Get,
@@ -510,7 +525,9 @@ impl Venue for BitgetFutures {
                     } else {
                         let mut mapped = market(&row);
                         if self.inverse() {
-                            if row.min_lever.get() == 0.0 { mapped.limits.leverage.min = 1.0; }
+                            if row.min_lever.get() == 0.0 {
+                                mapped.limits.leverage.min = 1.0;
+                            }
                             mapped.is_inverse = Some(true);
                             mapped.limits.amount.max = row
                                 .max_trade_num

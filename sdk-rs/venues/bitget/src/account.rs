@@ -1744,8 +1744,8 @@ impl BitgetFutures {
             ),
             last_update: first(&[raw.u_time, raw.updated_time, raw.c_time, raw.created_time])
                 .unwrap_or(cx.now),
-            trigger_type: (!raw.plan_type.is_empty()).then_some(
-                if raw.trigger_type == "fill_price" {
+            trigger_type: (!raw.plan_type.is_empty() || raw.strategy_type == "trailing_stop").then_some(
+                if raw.trigger_type == "fill_price" || raw.trailing_stop_params.as_ref().is_some_and(|p| p.activation_type == "market") {
                     StopTriggerType::LastPrice
                 } else {
                     StopTriggerType::MarkPrice

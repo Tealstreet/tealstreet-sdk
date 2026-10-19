@@ -383,3 +383,50 @@ fn inverse_empty_rest_balance_keeps_current_account_and_bad_ws_batch_is_atomic()
     assert_eq!(h.engine.store().coin_balances().unwrap(), coins);
 }
 
+#[test]
+fn inverse_native_amend_keeps_remaining_in_display_units_and_native_extra_current() {
+    for resolve_identity in [false, true] {
+        let mut h = ready();
+        h.login();
+        ws_order(&mut h, order("old-amend", "50000"));
+        h.command(Command::AmendOrder {
+            command: 99,
+            id: "old-amend".into(),
+            price: Some(40000.0),
+            amount: Some(1200.0),
+        });
+        let request = h.take("/modify-order");
+        let payload: Value = serde_json::from_str(request.body.as_deref().unwrap()).unwrap();
+        assert_eq!(payload["newSize"], "1200");
+        assert_eq!(payload["newPrice"], "40000");
+        assert_ne!(payload["newClientOid"], "native-sizing");
+        if resolve_identity {
+            h.reply(
+                request.id,
+                200,
+                r#"{"code":"00000","data":{"orderId":"old-amend"}}"#,
+            );
+            let lookup = h.take("/order/detail");
+            h.reply(lookup.id, 200, r#"{"code":"00000","data":{"orderId":"new-amend","baseVolume":"200","status":"live"}}"#);
+        } else {
+            h.reply(
+                request.id,
+                200,
+                r#"{"code":"00000","data":{"orderId":"new-amend"}}"#,
+            );
+        }
+        let order = h.engine.store().order("new-amend").unwrap();
+        let native_remaining = if resolve_identity { 1000.0 } else { 1100.0 };
+        assert_eq!(order.amount, 1200.0);
+        assert_eq!(order.remaining, native_remaining / 40000.0);
+        assert_eq!(
+            order.extra.as_ref().unwrap().remaining_native,
+            Some(native_remaining)
+        );
+        assert!(
+            h.done
+                .iter()
+                .any(|(id, result)| *id == 99 && result.is_ok())
+        );
+    }
+}

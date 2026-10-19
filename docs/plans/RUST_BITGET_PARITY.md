@@ -75,3 +75,20 @@ green final-head CI. No stash, rebase, force push or master changes.
   26 tests, TS frame4 tests PASS. Native amend regression reserved for trading.
 - TS defects explicitly listed in gate notes: inverse WS conversion/aggregate
   balance, native stop clamp and sized amend. No parity output normalization.
+
+## Trading checkpoint
+
+- All Classic inverse writes resolve collateral by symbol, preserve native
+  quantities, clamp protective sizes against native position notional and retain
+  fresh native modify client IDs. Direct and resolved amend acknowledgements both
+  restore display remaining and native metadata.
+- Classic trailing uses documented plan modify/cancel payloads; UTA uses strategy
+  placement, distance parameters and no unsupported client ID. Amend and known
+  rejection rollback retain callback settings, trigger basis and activation price.
+  Ambiguous writes never retry or recreate protection.
+- Independent trading review found callback drift and stale REST cache overwrite;
+  corrected with staged native metadata, freshness guards and exact preservation.
+  A second review found UTA activation basis loss; now parsed from native params.
+- Native trading20 tests plus inverse amend regression and strict clippy PASS.
+  Intentional TS fixes are listed in gate notes, including invalid callback
+  preflight, documented Classic hedge side and native trailing amend/cancel.
