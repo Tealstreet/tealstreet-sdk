@@ -314,3 +314,15 @@ all focused tests pass. Final rebuild, replay and repeat audit in progress.
   consumption, socket audits run once, write and ID contracts remain strict,
   real worker transfer and memory accounting survive extraction. PR mergeability
   restored; five-venue local replay regressions and current-head CI running.
+
+## Memory baseline settling
+
+- Incoming stable-memory guard rejected cold first TS runs: an already-loaded
+  module's transient 240-byte buffer was released after two immediate turns,
+  producing negative buffer retention despite identical output and lower Rust
+  CPU/memory. Negative components still fail the gate.
+- Baselines now require five stable samples across 10ms timer turns (bounded to
+  50 attempts), equally for TS/Rust. Startup baseline is outside measured CPU;
+  end CPU counters are captured before settling. No clamping/sample selection.
+- Independent sub-agent review passes. Fresh cold TS sample retains +32 buffer
+  bytes, rather than -208. Complete replay reruns are in progress.

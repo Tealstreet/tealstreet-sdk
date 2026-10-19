@@ -80,12 +80,13 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
 const baseline = async () => {
   let previous;
   let stable = 0;
-  for (let i = 0; i < 8; i++) {
+  // Module/native cleanup may finish on timer turns after immediate callbacks.
+  for (let i = 0; i < 50; i++) {
     globalThis.gc?.();
-    await new Promise(setImmediate);
+    await new Promise((resolve) => setTimeout(resolve, 10));
     const memory = process.memoryUsage();
     stable = memory.arrayBuffers === previous ? stable + 1 : 0;
-    if (stable >= 2) return memory;
+    if (stable >= 5) return memory;
     previous = memory.arrayBuffers;
   }
   throw new Error('Backing-buffer memory did not settle');
