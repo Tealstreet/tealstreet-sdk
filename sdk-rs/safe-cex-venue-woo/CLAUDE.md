@@ -532,3 +532,8 @@ regression; strict typed historical output/option boundaries remain separate.
 History options follow source coercion before the typed request. Selected output
 assets use one row-admission pass after slicing; one malformed asset is reported
 and omitted while good rows survive. See HISTORY_OUTPUT_REVIEW.md.
+
+
+The constructed public socket stats regression verifies tickers, BBOs, mark prices
+and the original 260-frame tape's pong bytes through the shared live-table reader.
+WOO uses `SocketCore`, so #1218 covers its registration without a venue mirror.

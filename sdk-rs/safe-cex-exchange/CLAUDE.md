@@ -2188,3 +2188,9 @@ Native sockets with a separate callback owner use `install_native_handler_stats`
 to bind selected-key live counts into Base's record/pong/cleanup/reconciliation
 algorithm. They never copy callbacks into Base's registry or bypass the shared
 statistics writes. See [the owner census](NATIVE_HANDLER_STATS_REVIEW.md).
+
+
+JS-backed socket bridges use `js_runtime::sockets::install_js_handler_stats` with
+an existing receiver's weak handle. The core reads only the live selected table
+entry for record, pong, cleanup and reconciliation; it never mirrors callbacks or
+retains the socket owner. `SocketCore` and Hyperliquid's custom bridge share it.

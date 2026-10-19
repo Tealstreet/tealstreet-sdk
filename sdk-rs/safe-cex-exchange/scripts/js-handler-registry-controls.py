@@ -16,8 +16,8 @@ args.logs.mkdir(parents=True, exist_ok=True)
 env = dict(os.environ, CARGO_INCREMENTAL='0', CARGO_BUILD_JOBS='2')
 faults = [
     ('statistics', workspace / 'safe-cex-exchange/src/js_runtime/sockets.rs',
-     'read_handler_stats(&core, topic, missing).map_err(core_error)',
-     'read_handler_stats(&core, topic, missing).map(|(_, count)| (false, count)).map_err(core_error)',
+     'read_handler_stats(&this, topic, missing).map_err(core_error)',
+     'read_handler_stats(&this, topic, missing).map(|(_, count)| (false, count)).map_err(core_error)',
      ['--test', 'exchange_binding'],
      'recorded_business_candle_tracks_registered_handlers_and_unsubscribe',
      'recorded candle has the source handler registration'),
