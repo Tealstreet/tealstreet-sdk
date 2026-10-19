@@ -263,6 +263,16 @@ impl ExchangeRuntime for LocalDial {
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
         self.inner.spawn_local(future)
     }
+    fn spawn_classified(
+        &self,
+        kind: safe_cex_exchange::runtime::RuntimeTaskKind,
+        future: Pin<Box<dyn Future<Output = ()>>>,
+    ) -> Box<dyn ExchangeTask> {
+        self.inner.spawn_classified(kind, future)
+    }
+    fn task_work_started(&self) {
+        self.inner.task_work_started();
+    }
     fn console_values(&self, severity: &str, message: &[safe_cex_exchange::js_runtime::value::Js]) {
         self.inner.console_values(severity, message)
     }

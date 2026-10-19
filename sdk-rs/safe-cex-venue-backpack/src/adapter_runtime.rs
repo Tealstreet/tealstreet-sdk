@@ -289,11 +289,10 @@ impl source::RuntimeHost for Frame {
         cb: source::Callback<ExchangeError>,
         d: f64,
     ) -> Result<(), ExchangeError> {
-        let sleep = self.owner.runtime.sleep(d as u64);
-        self.owner.spawn(Box::pin(async move {
-            sleep.await?;
-            cb()
-        }));
+        let mut callback = Some(cb);
+        self.owner.base.start_timeout((d as u64).max(1), move || {
+            callback.take().expect("one-shot callback")()
+        })?;
         Ok(())
     }
     fn market_at(&mut self, m: &Data, i: usize) -> Result<Market, ExchangeError> {
