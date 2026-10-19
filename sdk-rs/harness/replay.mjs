@@ -52,9 +52,10 @@ const isPrivate = metadata?.private ?? records.some((r) =>
     ? venue.isPrivateRecord(r)
     : Boolean(venue.privateSocket && r.url?.includes(venue.privateSocket)),
 );
-const KEY = 'replay-key';
-const SECRET = 'replay-secret';
-const PASSPHRASE = 'replay-passphrase';
+const credentials = venue.replayCredentials ?? { key: 'replay-key', secret: 'replay-secret' };
+const KEY = credentials.key;
+const SECRET = credentials.secret;
+const PASSPHRASE = credentials.passphrase ?? 'replay-passphrase';
 const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
 };
@@ -141,7 +142,7 @@ async function runRust() {
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine();
-  const tape = createTape(records, venue, isPrivate, { impl: 'rust', books: bookSymbols });
+  const tape = createTape(records, venue, isPrivate, { impl: 'rust', books: bookSymbols, credentials });
   const encoder = new TextEncoder();
   const heapBefore = await baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
@@ -166,13 +167,15 @@ async function runRust() {
       const socket = tape.connect(url, onOpen, onMessage, onClose);
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
     },
-    request: async ({ method, url, body: requestBody, headers }) => {
+    request: async ({ method, url, body: requestBody, headers, signal }) => {
+      signal?.throwIfAborted();
       const { status, headers: responseHeaders = '', body } = tape.respond(method, url, requestBody, headers);
       // Model nativeTransport's chunks so streamed lists do not allocate a whole
       // response in wasm before the venue sees the first item.
       const chunks = async function* () {
         const bytes = encoder.encode(body);
         for (let offset = 0; offset < bytes.length; offset += 16 * 1024) {
+          signal?.throwIfAborted();
           yield bytes.subarray(offset, offset + 16 * 1024);
         }
       };
@@ -292,8 +295,10 @@ async function runRust() {
     frames,
     metrics,
     unserved: tape.unserved,
-    subscriptions: [...tape.subscriptions].sort(),
+    subscriptions: [...(venue.compareSubscriptions ? tape.normalizedSubscriptions : tape.subscriptions)].sort(),
     unusedWrites: tape.unusedWrites,
+    missingWrites: tape.unusedWrites,
+    invalidSignatures: tape.invalidSignatures,
     protocolErrors: tape.audit?.errors() ?? [],
     wsRequests: [...tape.sentRequests].sort(),
     store: { markets: marketRows, tickers: tickerRows },
@@ -310,7 +315,12 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   const symbol = (i) => markets.symbol(i);
   const orderRows = [];
   for (let i = 0; i < (orders?.count ?? 0); i++) {
-    const row = { id: orders.id(i), symbol: symbol(orders.market[i]), ...orderEnums(orders.enums[i]) };
+    const row = {
+      id: orders.id(i),
+      ...(venue.compareClientIds ? { clientOrderId: orders.clientOrderId(i) ?? null } : {}),
+      symbol: symbol(orders.market[i]),
+      ...orderEnums(orders.enums[i]),
+    };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
     orderRows.push(row);
   }
@@ -349,7 +359,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 }
 
 async function runTs() {
-  const tape = createTape(records, venue, isPrivate, { impl: 'ts', books: bookSymbols });
+  const tape = createTape(records, venue, isPrivate, { impl: 'ts', books: bookSymbols, credentials });
   class TapeWebSocket {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -554,8 +564,10 @@ async function runTs() {
     frames,
     metrics,
     unserved: tape.unserved,
-    subscriptions: [...tape.subscriptions].sort(),
+    subscriptions: [...(venue.compareSubscriptions ? tape.normalizedSubscriptions : tape.subscriptions)].sort(),
     unusedWrites: tape.unusedWrites,
+    missingWrites: tape.unusedWrites,
+    invalidSignatures: tape.invalidSignatures,
     protocolErrors: tape.audit?.errors() ?? [],
     wsRequests: [...tape.sentRequests].sort(),
     store: snapshot,
@@ -616,6 +628,7 @@ async function runTsCommand(exchange, store, record) {
 function normalizeAccount(account) {
   const order = (o) => ({
     id: String(o.id),
+    ...(venue.compareClientIds ? { clientOrderId: o.clientOrderId ?? null } : {}),
     symbol: o.symbol,
     status: o.status,
     type: o.type,
@@ -624,6 +637,7 @@ function normalizeAccount(account) {
     amount: o.amount,
     filled: o.filled,
     remaining: o.remaining,
+    ...(venue.compareClientIds && o.type === 'limit' ? { timeInForce: o.timeInForce ?? null } : {}),
     reduceOnly: Boolean(o.reduceOnly),
     close: Boolean(o.close),
     trigger: o.tpTriggerType ?? o.slTriggerType ?? o.triggerType ?? null,
@@ -669,11 +683,13 @@ writeFileSync(
     unserved: result.unserved,
     subscriptions: result.subscriptions,
     unusedWrites: result.unusedWrites,
+    missingWrites: result.missingWrites,
+    invalidSignatures: result.invalidSignatures,
     protocolErrors: result.protocolErrors,
     wsRequests: result.wsRequests,
     metrics: result.metrics,
-    markets: result.store.markets.map(marketFields),
-    tickers: result.store.tickers.map((t) =>
+    markets: result.store.markets.filter(venue.marketFilter ?? (() => true)).map(marketFields),
+    tickers: result.store.tickers.filter(venue.marketFilter ?? (() => true)).map((t) =>
       Object.fromEntries([
         ['symbol', t.symbol],
         ...tickerFields.map((f) => [f, f === 'openInterest' ? (t[f] ?? 0) : t[f]]),

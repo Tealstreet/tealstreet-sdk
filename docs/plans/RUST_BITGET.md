@@ -501,3 +501,23 @@ weex: main-thread cpu  ts    120.1 ms   rust     79.9 ms   1.50x; steady cpu    
   Bitget, Crypto.com and Binance three-run public gates PASS. Bitget TS/Rust
   CPU713.4/632.4ms, steady458.7/440.8ms, retained5.9/2.5MB; remaining
   public regressions and final-head CI required before merge.
+
+## Backpack landing integration
+
+- All nine public and private gates passed before merging Backpack landing
+  b265a0bab0. Preserve incoming host abort handling, subscription/signature
+  verification, typed candle/time units and independent execution checks.
+- Kept one strict shared transport. Added credential injection, pre-consumption
+  signature and global write-order checks, Backpack stream routing, exact
+  decimal/ID matching and monotonic virtual timer pumping. All113harness
+  tests PASS; an earlier run hit the known unrelated live-GC memory unit test
+  sensitivity before the final run passed without changing memory checks.
+- Sub-agent merge audit found missing Backpack client-ID/time-in-force and
+  perpetual-market-filter comparisons. Restored both exactly as incoming;
+  follow-up parent and frozen cross-file reviews are clear. Registration and
+  factory reviews are clear. Bitget path-scoped generated aliases, identities,
+  same-URL subscriptions, stronger constructor baselines and compiler-worker
+  exclusion remain. No CPU or memory threshold change.
+- Ten-venue WASM3,497,553bytes (Backpack adds295,024bytes); fixed aggregate
+  budget becomes3.5MiB(3,670,016bytes) to cover the added crate. Ten-venue
+  native/replay checks and final-head GitHub CI are required before merge.

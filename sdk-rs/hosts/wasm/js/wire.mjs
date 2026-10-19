@@ -80,16 +80,16 @@ class Strings {
     const count = new Uint32Array(buffer, offset, 1)[0];
     this.offsets = new Uint32Array(buffer, offset + 4, count + 1);
     this.bytes = new Uint8Array(buffer, offset + 4 + 4 * (count + 1));
-    this.cache = undefined;
+    // Numeric-only readers never need slots for the frame's string table.
+    this.cache = [];
   }
 
   get(index) {
     if (index === NONE) return undefined;
-    const cache = this.cache ??= new Array(this.offsets.length - 1);
-    let value = cache[index];
+    let value = this.cache[index];
     if (value === undefined) {
       value = utf8.decode(this.bytes.subarray(this.offsets[index], this.offsets[index + 1]));
-      cache[index] = value;
+      this.cache[index] = value;
     }
     return value;
   }
