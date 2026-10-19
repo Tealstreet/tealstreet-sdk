@@ -210,6 +210,39 @@ impl<'a> FrameWriter<'a> {
     }
 }
 
+/// The `(kind, payload)` sections of a frame, for native consumers; the
+/// browser reads frames with `safe-cex-wasm/js/wire.mjs`.
+pub fn sections(frame: &[u8]) -> impl Iterator<Item = (u16, &[u8])> {
+    let count = if frame.len() >= 16 && frame[..4] == MAGIC {
+        u16::from_le_bytes([frame[6], frame[7]])
+    } else {
+        0
+    };
+    let mut at = 16;
+    (0..count).map_while(move |_| {
+        let header = frame.get(at..at + 8)?;
+        let kind = u16::from_le_bytes([header[0], header[1]]);
+        let length = u32::from_le_bytes(header[4..8].try_into().ok()?) as usize;
+        let payload = frame.get(at + 8..at + 8 + length)?;
+        at += 8 + length;
+        Some((kind, payload))
+    })
+}
+
+/// A `BOOK` section's market and best bid and ask, if both sides have levels.
+pub fn book_top(payload: &[u8]) -> Option<(u32, f64, f64)> {
+    let word = |i: usize| u32::from_le_bytes(payload[i * 4..i * 4 + 4].try_into().unwrap());
+    let float = |at: usize| f64::from_le_bytes(payload[at..at + 8].try_into().unwrap());
+    if payload.len() < 16 {
+        return None;
+    }
+    let (market, bids, asks) = (word(0), word(1) as usize, word(2) as usize);
+    if bids == 0 || asks == 0 || payload.len() < 16 + (bids + asks) * 24 {
+        return None;
+    }
+    Some((market, float(16), float(16 + bids * 24)))
+}
+
 /// Number of f64 ticker columns in `TICKERS` and fields in `TICKER_DELTAS`.
 pub const TICKER_COLUMNS: usize = TICKER_FIELDS.len();
 

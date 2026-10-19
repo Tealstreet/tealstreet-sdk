@@ -177,7 +177,7 @@ kept current in this section.
   performance gate. On a 5-minute, 10-book tape: identical output, 15.2x less
   worker CPU, 1.4x less retained memory.
 
-### 3. Binance USD-M private data and trading — next
+### 3. Binance USD-M private data and trading — done (live testnet tape pending keys)
 
 Engine side, all inside `safe-cex-venue-binance`:
 
@@ -198,21 +198,29 @@ Engine side, all inside `safe-cex-venue-binance`:
 - Reconciliation: a periodic REST resync of orders and positions, paused
   under rate limits exactly like depth snapshots.
 
-Correctness: a private tape built from Binance's documented payloads (REST
-responses and stream events, including partial fills, amend, cancel, algo
-triggers and liquidation) is replayed through TS and Rust and must produce the
-same orders, positions, balance and fills. A live private tape is recorded on
-Binance testnet once test keys are available.
+Correctness: a private tape built from Binance's documented payloads
+(`harness/private-tape.mjs`: startup reads, order, algo and account events,
+place, cancel and cancel-all commands) replays through TS and Rust with real
+signing and must produce the same orders, positions, balance, settings, fills
+and command results, with every request matching a taped one. A live private
+tape is recorded on Binance testnet once test keys are available.
+
+Large REST lists stream into the engine element by element
+(`Cx::request_streamed`), so a startup response never sits whole in wasm
+memory.
 
 ### 4. Hosts
 
-- Browser worker: `safe-cex-wasm` + `host.mjs` (exists).
-- Native: `safe-cex-native`, tokio + tokio-tungstenite + reqwest, driving the
-  same engine; used by exchange-server and the CLI.
-- Cloudflare: `safe-cex-workers`, workers-rs in a Durable Object (Workers
-  `WebSocket`, `fetch`, alarms as timers).
-- Host conformance test: the same tape through every host's event loop
-  yields byte-identical frames.
+- Browser worker: `safe-cex-wasm` + `host.mjs` — done.
+- Native: `safe-cex-native`, tokio + tokio-tungstenite + reqwest over a
+  pluggable transport, driving the same engine — done (`examples/watch.rs`
+  runs it live; `tests/host.rs` drives the loop from a tape).
+- Cloudflare: the same wasm build and `host.mjs` inside a Durable Object, with
+  a Workers transport (`fetch` streaming, outbound `WebSocket`, alarms for
+  hibernation). One JS host serves browser and Workers instead of a second
+  Rust host.
+- Host tests: each host runs recorded traffic through its own loop and must
+  reach the engine state a direct replay reaches.
 
 ### 5. Worker shell integration
 
@@ -233,17 +241,21 @@ Binance testnet once test keys are available.
 - Components read columns by market index; strings are decoded only for
   display.
 - exchange-server switches to the native host and streams the same frames
-  over its socket, so hosted and local clients share one reader.
+  over its socket, so hosted and local clients share one reader. Over a
+  network, full books every flush are too heavy (two 1,000-level books are
+  ~450 KB/s); networked consumers get `BOOK_DELTA` sections (changed levels
+  since the last flush) and a full `BOOK` on subscribe.
 - Developed on a `feat/rust-rewrite` branch in tealstreet-next against a
   locally built SDK; it merges only after the SDK reaches master and Copybara
   mirrors it.
 
-### 7. CI
+### 7. CI — done for Binance
 
-- Existing: bans, fmt, clippy, native tests, wasm32 build and clippy.
-- Add: wasm-bindgen build plus the replay gate on small committed tapes
-  (public and private, compressed), failing on any output difference or a CPU
-  or memory loss against TS; a wasm size budget; host conformance.
+- Bans, fmt, clippy, native tests, wasm32 build and clippy.
+- Replay gate (`rust.yml`, job "replay gate"): release wasm with the pinned
+  wasm-bindgen, a 1.2 MB size budget, the committed public fixture
+  (`harness/fixtures/`) gated on identical output and lower CPU and memory,
+  and the generated private tape gated on identical account state.
 
 ### 8. Remaining venues
 
