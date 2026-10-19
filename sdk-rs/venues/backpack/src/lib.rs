@@ -1,5 +1,6 @@
 //! Backpack perpetuals on the sans-I/O engine.
 mod account;
+mod history;
 mod sign;
 mod trading;
 mod wire;
@@ -27,6 +28,7 @@ pub struct Options {
 pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
+    History(history::Request),
     Markets {
         rows: Vec<Market>,
         invalid: bool,
@@ -470,6 +472,10 @@ impl Venue for Backpack {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         let result = match pending {
+            Pending::History(request) => {
+                self.history_item(cx, request, item);
+                return;
+            }
             Pending::Account(request) => {
                 self.account_item(cx, request, item);
                 return;
@@ -591,6 +597,10 @@ impl Venue for Backpack {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::History(request) = pending {
+            self.history_response(cx, request, response);
+            return;
+        }
         if let Pending::Trade(request) = pending {
             self.trade_response(cx, request, response);
             return;
@@ -720,6 +730,7 @@ impl Venue for Backpack {
         match pending {
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request, error),
+            Pending::History(request) => cx.done(request.command, Err(error.into())),
             Pending::Depth { symbol, generation }
                 if self
                     .books
@@ -843,6 +854,7 @@ impl Venue for Backpack {
                     true,
                 );
             }
+            Command::Query { command, query } => self.history_command(cx, command, query),
             command => self.trade_command(cx, command),
         }
     }

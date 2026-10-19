@@ -209,8 +209,26 @@ pub fn timestamp(text: &str) -> Result<f64, String> {
         }
         return Ok(if n < 1e12 { n * 1000.0 } else { n });
     }
-    let text = text.trim_end_matches('Z');
-    if text.len() < 19 || !text.is_ascii() {
+    let text = text
+        .strip_suffix('Z')
+        .or_else(|| text.strip_suffix("+00:00"))
+        .unwrap_or(text);
+    if text.len() < 19
+        || !text.is_ascii()
+        || &text[4..5] != "-"
+        || &text[7..8] != "-"
+        || !matches!(&text[10..11], "T" | " ")
+        || &text[13..14] != ":"
+        || &text[16..17] != ":"
+    {
+        return Err("invalid timestamp".into());
+    }
+    let suffix = &text[19..];
+    if !suffix.is_empty()
+        && !(suffix.starts_with('.')
+            && suffix.len() > 1
+            && suffix[1..].bytes().all(|b| b.is_ascii_digit()))
+    {
         return Err("invalid timestamp".into());
     }
     let part = |a: usize, b: usize| {
@@ -220,11 +238,18 @@ pub fn timestamp(text: &str) -> Result<f64, String> {
     };
     let (year, month, day) = (part(0, 4)?, part(5, 7)?, part(8, 10)?);
     let (hour, minute, second) = (part(11, 13)?, part(14, 16)?, part(17, 19)?);
-    if !(1..=12).contains(&month)
-        || !(1..=31).contains(&day)
-        || hour > 23
-        || minute > 59
-        || second > 59
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => 0,
+    };
+    if !(1..=days_in_month).contains(&day)
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&minute)
+        || !(0..=59).contains(&second)
     {
         return Err("invalid timestamp".into());
     }
@@ -327,11 +352,12 @@ pub struct OrderRow<'a> {
     pub trigger_quantity: Option<Number>,
     #[serde(default, deserialize_with = "number")]
     pub executed_quantity: f64,
+    pub executed_quote_quantity: Option<Number>,
     #[serde(borrow, default)]
     pub time_in_force: Str<'a>,
     #[serde(borrow)]
     pub status: Str<'a>,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "datetime")]
     pub created_at: f64,
     pub reduce_only: Option<bool>,
 }
@@ -403,4 +429,64 @@ pub struct PositionEvent<'a> {
     pub f: f64,
     #[serde(rename = "E", deserialize_with = "number")]
     pub event_time: f64,
+}
+
+pub fn datetime<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Date<'a> {
+        Bare(f64),
+        Text(#[serde(borrow)] Str<'a>),
+    }
+    match Date::deserialize(d)? {
+        Date::Bare(n) if n.is_finite() => Ok(n),
+        Date::Bare(_) => Err(serde::de::Error::custom("invalid timestamp")),
+        Date::Text(s) => timestamp(&s).map_err(serde::de::Error::custom),
+    }
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FillRow<'a> {
+    #[serde(borrow)]
+    pub order_id: Str<'a>,
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(borrow)]
+    pub side: Str<'a>,
+    #[serde(deserialize_with = "number")]
+    pub price: f64,
+    #[serde(deserialize_with = "number")]
+    pub quantity: f64,
+    #[serde(deserialize_with = "number")]
+    pub fee: f64,
+    #[serde(borrow)]
+    pub fee_symbol: Str<'a>,
+    pub trade_id: u64,
+    #[serde(borrow)]
+    pub timestamp: Str<'a>,
+    pub is_maker: Option<bool>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FundingRow<'a> {
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(deserialize_with = "number")]
+    pub quantity: f64,
+    #[serde(borrow)]
+    pub interval_end_timestamp: Str<'a>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicTrade {
+    pub id: u64,
+    #[serde(deserialize_with = "number")]
+    pub price: f64,
+    #[serde(deserialize_with = "number")]
+    pub quantity: f64,
+    #[serde(deserialize_with = "number")]
+    pub quote_quantity: f64,
+    #[serde(deserialize_with = "number")]
+    pub timestamp: f64,
+    pub is_buyer_maker: bool,
 }

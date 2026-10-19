@@ -85,3 +85,14 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   Internal repair jobs have a separate u64 namespace; never retry a write.
 - Repository typecheck passed all 44 tasks. Root lint/tests are running.
 - Next: streaming rare queries, then wasm registration/tapes/performance gates.
+
+- Query phase verified: 8 history regressions, crate clippy, final sub-agent
+  review clean (39 total tests). Fills/order/funding/public trades stream typed
+  rows; offset paging is capped at 50 pages and rejects repeated pages or
+  malformed/error payloads. Fractional fill ranges broaden integer API bounds
+  while preserving exact local filters; account-wide fills page past spot rows.
+  Income supports the documented funding ledger and rejects other ledger kinds.
+- Root lint passed all 28 tasks. Root tests exposed pre-existing runtime-tree
+  violation rust/rust.exchange.wasm.test.ts (6,488 passed / 1 failed); move that
+  test to audit-regressions during harness integration and rerun checks.
+- Harness integration started: wasm and SDK registration, relocation script fix.
