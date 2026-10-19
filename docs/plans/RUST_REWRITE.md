@@ -215,10 +215,12 @@ memory.
 - Native: `safe-cex-native`, tokio + tokio-tungstenite + reqwest over a
   pluggable transport, driving the same engine — done (`examples/watch.rs`
   runs it live; `tests/host.rs` drives the loop from a tape).
-- Cloudflare: the same wasm build and `host.mjs` inside a Durable Object, with
-  a Workers transport (`fetch` streaming, outbound `WebSocket`, alarms for
-  hibernation). One JS host serves browser and Workers instead of a second
-  Rust host.
+- Cloudflare: the same wasm build and `host.mjs` inside a Durable Object —
+  done (`js/workers.mjs`: a Workers transport over upgrade `fetch` and
+  streaming bodies, and `createEngineObject`, which runs one account's engine
+  for its connected clients, streams frames to them as binary messages and
+  drops the engine and its credentials when the last client leaves). Tested
+  against fake Workers primitives; a deployed Worker is not set up yet.
 - Host tests: each host runs recorded traffic through its own loop and must
   reach the engine state a direct replay reaches.
 
