@@ -2074,6 +2074,18 @@
       "reason": "Clones its explicit owning runtime, then resolves the input through canonical Promise::resolve and awaits one owned PromiseWait. Dropping this future releases its waiter through the unchanged PromiseWait Drop; thenable jobs remain runtime-owned. Scalar/native-Promise FIFO and observer/host-discard witnesses pass."
     },
     {
+      "owner": "src/js_runtime/promise.rs::race_iterable",
+      "boundaries": [
+        "async-block",
+        "await",
+        "poll-fn"
+      ],
+      "producer_sha256": "92e4c9ffd06ea919d6b1cb1de48373adb7452248e5aff402ca947aff7da261c5",
+      "classification": "delegated",
+      "reason": "Each iterator input resolves through canonical Promise::resolve before advancing. Promise::spawn and the existing Jobs/OwnedTasks driver own each observation; the observation waits on the input and output settlement using existing PromiseWait registrations. Once the race settles, losing observations drop only their registrations while source operations remain runtime-owned. No separate timer, reservation or waiter registry is installed. Constructed native startup winner/timeout and original-cause tests exercise settlement and clearTimeout cleanup; existing PromiseWait/Driver discard witnesses retain the shared cancellation proof.",
+      "delegate": "js_runtime Jobs queue / Promise::spawn / OwnedTasks driver"
+    },
+    {
       "owner": "src/js_runtime/promise.rs::combine",
       "boundaries": [
         "async-block",
