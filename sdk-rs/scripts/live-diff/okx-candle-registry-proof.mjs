@@ -33,7 +33,20 @@ if (mode === 'prefix') {
     const rows = report.runs.map((run) => deserialize(readFileSync(run.fixture)));
     assert.deepEqual(rows[0], rows[1], 'complete TS repeat');
     assert.deepEqual(rows[2], rows[3], 'complete native repeat');
-    assert.ok(report.runs.every((run) => run.receipt.delivered === 105));
+    for (const run of report.runs) {
+      assert.equal(run.receipt.delivered,105);
+      assert.equal(run.receipt.dropped,0);
+      assert.equal(run.receipt.inputHash,'e185651088a29adead92d1287d924e3fe41d8ccb4113c28e0ea9b279f574e9f5');
+      assert.equal(run.receipt.applicationDrainVerified,true);
+      assert.equal(run.requests.length,2);
+      assert(run.requests.every((request) => request.cacheHit && request.status === 200));
+      if (run.implementation === 'rust') {
+        assert.equal(run.receipt.nativeTransportVerified,true);
+        assert.equal(run.receipt.processed.pendingJobs,0);
+        assert.equal(run.receipt.processed.rawTasks.version,1);
+        for (const key of ['unknown','finite','ready','blocking']) assert.equal(run.receipt.processed.rawTasks[key],0);
+      }
+    }
     return { report, rows };
   }
   const red = load(first);
