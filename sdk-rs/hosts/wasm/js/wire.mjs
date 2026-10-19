@@ -254,11 +254,11 @@ export class Frame {
     const count = new Uint32Array(buffer, section.offset, 1)[0];
     const market = new Uint32Array(buffer, section.offset + 4, count);
     const margin = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
-    const leverage = new Float64Array(buffer, align8(section.offset + 4 + count * 8), count);
-    const rails = leverage.byteOffset + count * 8;
-    const independent = rails + count * 16 <= section.offset + section.length;
-    const buyLeverage = independent ? new Float64Array(buffer, rails, count) : leverage;
-    const sellLeverage = independent ? new Float64Array(buffer, rails + count * 8, count) : leverage;
+    const data = align8(section.offset + 4 + count * 8);
+    const leverage = new Float64Array(buffer, data, count);
+    const end = section.offset + section.length;
+    const buyLeverage = data + count * 16 <= end ? new Float64Array(buffer, data + count * 8, count) : leverage;
+    const sellLeverage = data + count * 24 <= end ? new Float64Array(buffer, data + count * 16, count) : leverage;
     return { count, market, leverage, buyLeverage, sellLeverage, marginType: (i) => MARGIN_TYPE[margin[i]] };
   }
 

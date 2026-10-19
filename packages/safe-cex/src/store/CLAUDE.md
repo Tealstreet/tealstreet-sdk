@@ -4,9 +4,11 @@ The Tealstreet exchange store. One `DefaultStore` per exchange
 account; mirrored across worker → main thread via the worker's
 throttled postMessage.
 
-Rust frames keep quantities in published base units. For MEXC, `FrameApplier`
-also derives native placement-unit order extras from `contractSize` so chaser
-arithmetic retains its native-volume contract. `SETTINGS` optionally carries
+Rust frames keep quantities in published base units. For MEXC and BloFin,
+`FrameApplier` also retains native placement-unit order extras in both worker
+and main stores. Prefer the exact native remaining column when present; legacy
+frames reconstruct placement quantities from `contractSize` so chaser arithmetic
+retains its native-volume contract. `SETTINGS` optionally carries
 separate buy/sell leverage columns; do not collapse these hedge rails to the
 single representative leverage value when applying frames.
 
@@ -231,7 +233,7 @@ in, or the row is dropped if the order already left.
 and rely on them coming back) or from `updateOrdersStatus` (Bybit and Phemex map
 a non-final "Triggered" to Closed; Binance sends `EXPIRED` when a stop
 triggers). Only a venue whose stream event is FINAL calls it — OKX's `filled` /
-`canceled` today. `fromWorker` is skipped because the worker's store has already
+`canceled`, and BloFin's `filled` / `canceled` / `effective` / `order_failed`. `fromWorker` is skipped because the worker's store has already
 applied it. Proven by the gap-4 cases in `__tests__/faultBench/badLink.scenarios.test.ts`.
 
 ## Rust frame native units
@@ -243,8 +245,8 @@ keeps the native PnL. Copier closes consume the native size rather than the
 rounded base-coin `contracts` field.
 
 An optional trailing `ORDERS.remainingNative` frame column carries the venue's
-exact native leaves quantity into `extra.remainingNative` and
-`extra.remainingNotional`. Do not infer it by multiplying rounded base remainder
+exact native leaves quantity into `extra.remainingNative`; inverse markets also
+publish `extra.remainingNotional`. Do not infer it by multiplying rounded base remainder
 by price, or from an amount-zero Full position stop. Legacy seven-column frames
 remain readable and leave those extras absent. Order rejection metadata must
 survive alongside the native sizing fields.

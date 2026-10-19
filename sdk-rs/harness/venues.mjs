@@ -49,6 +49,19 @@ const bybit = (name, className) => ({
     order.status === 'canceled' && order.info?.rejectReason === 'EC_PostOnlyWillTakeLiquidity' ? 'PostOnly' : undefined,
   privateSocket: '/v5/private',
   bootstrapPrivateFromTape: name === 'hyrotrader',
+  requestUrl:
+    name === 'bybitspot'
+      ? (url) => {
+          const parsed = new URL(url);
+          // Spot instruments are unpaginated; TS's limit/cursor fields are invalid.
+          if (parsed.pathname === '/v5/market/instruments-info' && parsed.searchParams.get('category') === 'spot') {
+            parsed.searchParams.delete('limit');
+            parsed.searchParams.delete('cursor');
+          }
+          return parsed.toString();
+        }
+      : undefined,
+  generatedId: name === 'hyrotrader' ? (key) => key === 'orderLinkId' : undefined,
   isWrite: (method) => method === 'POST',
   matchRequestBody: true,
   volatileBodyFields: true,
@@ -93,6 +106,21 @@ const okx = (name) => ({
 });
 
 export const VENUES = {
+  blofin: {
+    rust: 'blofin',
+    ts: { module: `${root}/blofin/blofin.exchange.ts`, className: 'BlofinExchange', name: 'blofin' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('books.')).length >= count,
+    privateSocket: '/ws/private',
+    compareFillPrices: true,
+    options: { passphrase: 'replay-passphrase' },
+    cacheBustPaths: ['/api/v1/market/instruments'],
+    requestBodies: true,
+    volatileBodyFields: true,
+    isWrite: (method) => method !== 'GET',
+    defaultBodyValues: { tpTriggerPriceType: 'last', slTriggerPriceType: 'last', triggerPriceType: 'last' },
+    generatedId: (key, value) => key === 'clientOrderId' && value.startsWith('b3cdedc0a20880ba'),
+  },
   mexc: {
     rust: 'mexc',
     matchRequestBody: true,

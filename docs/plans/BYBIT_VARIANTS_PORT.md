@@ -313,3 +313,28 @@ registries, inverse/MEXC units, leverage rails, native execution-control guards,
 client-identity serialization and keyless metadata guard. Findings and resolutions
 are posted on PR #1307. Final-head CI remains required before merge. Live Hyro
 connectivity is still unverified; no credentials or endpoints are configured here.
+
+## BloFin landing integration checkpoint
+
+All checks on `5ba51ec854` passed: both full repository CI jobs (8m59s and
+5m52s), replay CI (7m22s), native fmt/Clippy/tests, wasm32, bans and secret scans.
+Hyro's unchanged CI fixture passed total CPU TS 14.6 / Rust 10.6 ms and a narrow
+steady-CPU comparison (rounded 2.8 / 2.8 ms, ratio 1.01x). No failing run was
+retried to obtain this result; the source allocation fixes were tested as a new
+candidate.
+
+BloFin landed at `d9db55921c` while CI ran, creating conflicts. Integrate its
+typed request hooks, authenticated socket audit, native settings and fixed
+MEXC parity tape. All 53 merged harness helper tests pass; native workspace
+tests pass (Bybit 105, engine 45, BloFin 68, MEXC 54 plus the prior venues).
+BloFin's planner now rejects an entire batch with Bybit-only controls before
+writes, with a reproduced regression. Its native order extras also need both
+worker and main frame appliers enabled; the real wasm boundary regression
+reproduced missing extras before that fix.
+
+The combined artifact at the inherited `s` optimization was 2,689,402 bytes,
+above the unchanged 2.5 MiB budget. The build script now selects LLVM `z`
+optimization for wasm only, using the existing pinned toolchain and no new
+dependency. The resulting artifact is 2,582,022 bytes. Full functional and
+27 replay gates must pass on that artifact before pushing the integrated head,
+followed by green final-head CI again. Fixtures and thresholds remain unchanged.

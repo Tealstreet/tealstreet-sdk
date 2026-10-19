@@ -156,6 +156,13 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
+  blofin(account, rustAccount) {
+    binanceFixes(account, rustAccount);
+    if (account.positions.length === 0) {
+      account.balance.used = 0;
+      account.balance.upnl = 0;
+    }
+  },
   bingx: (account, rustAccount) => {
     if (values.venue === 'bingx') {
       // BingX TS emits a terminal cumulative fill, ignores partial executions,
@@ -386,6 +393,10 @@ for (let run = 0; run < runs; run++) {
     if (!output.markets.length || !output.tickers.length) differences.push(`${impl}: empty public seed`);
     if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
   }
+  if (JSON.stringify(ts.wsRequests) !== JSON.stringify(rust.wsRequests))
+    differences.push(
+      `websocket requests differ: ts=${JSON.stringify(ts.wsRequests)} rust=${JSON.stringify(rust.wsRequests)}`,
+    );
   if (values.venue === 'bybitspot') {
     for (const market of ts.markets) {
       const lot = instruments.get(market.symbol)?.lotSizeFilter;
@@ -398,12 +409,12 @@ for (let run = 0; run < runs; run++) {
     }
   }
   if (isPrivate && ts.account && rust.account) {
-    if (values.venue === 'bingx') KNOWN_TS_FIXES.bingx(ts.account, rust.account);
-    if (values.venue === 'weex') KNOWN_TS_FIXES.weex(ts.account);
-    if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
-    if (['binance', 'binancepm'].includes(values.venue)) KNOWN_TS_FIXES.account(ts.account, rust.account);
-    if (['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue))
-      KNOWN_TS_FIXES.bybit(ts.account, rust.account, ts);
+    const fix =
+      KNOWN_TS_FIXES[values.venue] ??
+      (['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue)
+        ? KNOWN_TS_FIXES.bybit
+        : undefined);
+    if (typeof fix === 'function') fix(ts.account, rust.account, ts);
     if (values.venue === 'bybitinverse') {
       const upnl = ts.account.positions.reduce(
         (sum, p) => sum + (p.contracts > 0 ? (p.unrealizedPnl * p.notional) / p.contracts : 0),
