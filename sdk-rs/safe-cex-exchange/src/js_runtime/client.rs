@@ -271,8 +271,7 @@ fn normalized_header(name: &Js) -> Result<Vec<u16>, Thrown> {
     if !name.truthy() {
         return Ok(vec![]);
     }
-    Ok(name
-        .call_method("toString", vec![])?
+    Ok(Js::String(name.to_js_string()?)
         .call_method("trim", vec![])?
         .call_method("toLowerCase", vec![])?
         .to_js_string()?

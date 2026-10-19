@@ -295,7 +295,8 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::client::normalized_header",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: use canonical string-hint ToString before trim/lowercase, preserving primitive results, valueOf fallback and original throws. Real AxiosHeaders get/has compiled RED -> GREEN covers twelve installed-Axios cases; nine source-derived direct helper cases accompany the ordinary canonical contract. This classification does not claim complete Axios header-overload or HTTP adapter conformance."
     },
     {
       "package": "safe-cex-exchange",
@@ -345,17 +346,20 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::collections::collection_iterator",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: the directly observed native behavior matches the independent Node protocol profiles; no production change is needed. Native raw-input classification with direct observations: Reads the original native Map/Set storage at each iterator step. Direct native and independent Node cases cover keys/values/entries, live clear/delete/reinsert, sticky exhaustion, signed zero, lone UTF-16 units and original object identity; it does not project through JSON. Fixtures: safe-cex-exchange/scripts/collection-input-observers.rs and tests/iterator_contract_oracle.cjs; src/js_runtime/collection_contract_tests.rs executes the same direct helpers. Bounded native default-feature profile only."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::collections::iterator_method",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: the directly observed native behavior matches the independent Node protocol profiles; no production change is needed. Native raw-input classification with direct observations: Acquires Symbol.iterator from the original native input. Direct native and independent Node cases distinguish data and absent accessors, preserve inherited getter receiver identity and propagate the exact thrown referent; this is executed raw-input behavior, not a non-decoder exemption. Fixtures: safe-cex-exchange/scripts/collection-input-observers.rs and tests/iterator_contract_oracle.cjs; src/js_runtime/collection_contract_tests.rs executes the same direct helpers. Bounded native default-feature profile only."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::collections::iterator_method_receiver",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: the directly observed native behavior matches the independent Node protocol profiles; no production change is needed. Native raw-input classification with direct observations: Resolves the iterator capability through the native prototype chain while preserving the original receiver. Direct probes execute own and inherited data/getter/absent/throw cases and inspect the original thrown referent and getter effects. Fixtures: safe-cex-exchange/scripts/collection-input-observers.rs and tests/iterator_contract_oracle.cjs; src/js_runtime/collection_contract_tests.rs executes the same direct helpers. Bounded native default-feature profile only."
     },
     {
       "package": "safe-cex-exchange",
@@ -765,26 +769,26 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::structured_clone::structured_clone",
-      "state": "pending",
+      "state": "classified",
       "introduced": "introduced on master by #1238",
       "owner": "codex-0xekzz",
-      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+      "ruling": "ACCEPT reviewed existing recorder clone scope; STRUCTURED_CLONE_REVIEW.md records Node graph, UTF16, native number/presence/identity and Error descriptor observations. Ordinary exact-API graph-reader decoder contracts execute actual native values; hidden is only the internal descriptor writer with no decode/validation. Only V8 lazy stack accessor representation is accepted; stack values/read/write/flags and message/cause data descriptors stay pinned. No pending-ledger measurement exemption."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::structured_clone::copy",
-      "state": "pending",
+      "state": "classified",
       "introduced": "introduced on master by #1238",
       "owner": "codex-0xekzz",
-      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+      "ruling": "ACCEPT reviewed existing recorder clone scope; STRUCTURED_CLONE_REVIEW.md records Node graph, UTF16, native number/presence/identity and Error descriptor observations. Ordinary exact-API graph-reader decoder contracts execute actual native values; hidden is only the internal descriptor writer with no decode/validation. Only V8 lazy stack accessor representation is accepted; stack values/read/write/flags and message/cause data descriptors stay pinned. No pending-ledger measurement exemption."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::structured_clone::hidden",
-      "state": "pending",
+      "state": "classified",
       "introduced": "introduced on master by #1238",
       "owner": "codex-0xekzz",
-      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+      "ruling": "ACCEPT reviewed existing recorder clone scope; STRUCTURED_CLONE_REVIEW.md records Node graph, UTF16, native number/presence/identity and Error descriptor observations. Ordinary exact-API graph-reader decoder contracts execute actual native values; hidden is only the internal descriptor writer with no decode/validation. Only V8 lazy stack accessor representation is accepted; stack values/read/write/flags and message/cause data descriptors stay pinned. No pending-ledger measurement exemption."
     },
     {
       "package": "safe-cex-venue-apexomni",
