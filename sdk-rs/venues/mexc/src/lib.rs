@@ -1,6 +1,7 @@
 //! MEXC USDT/USDC perpetual futures, driven by the sans-I/O engine.
 mod account;
 mod sign;
+mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
@@ -25,6 +26,7 @@ pub struct Options {
 }
 
 pub enum Pending {
+    Trade(trading::Request),
     Account(account::Request),
     Markets { rows: Vec<Market>, failed: bool },
     Tickers { rows: Vec<Ticker>, failed: bool },
@@ -56,8 +58,10 @@ pub struct MexcFutures {
     options: Options,
     credentials: Option<sign::Credentials>,
     account: account::Account,
+    trading: trading::Trading,
     public: Connection,
     books: HashMap<String, BookState>,
+    volume_units: HashMap<String, f64>,
     candles: HashMap<(String, String), u32>,
     next_book_generation: u32,
     startup_retry: Option<TimerId>,
@@ -80,8 +84,10 @@ impl MexcFutures {
             options,
             credentials,
             account: account::Account::default(),
+            trading: trading::Trading::default(),
             public: Connection::default(),
             books: HashMap::new(),
+            volume_units: HashMap::new(),
             candles: HashMap::new(),
             next_book_generation: 0,
             startup_retry: None,
@@ -354,6 +360,7 @@ impl MexcFutures {
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Account(request) => self.account_failed(cx, request, error),
+            Pending::Trade(request) => self.trade_failed(cx, request.command, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
                 cx.log(LogLevel::Error, error);
                 self.retry_startup(cx);
@@ -490,7 +497,9 @@ impl Venue for MexcFutures {
             }
             Pending::Markets { rows, failed } => match serde_json::from_str::<Contract<'_>>(item) {
                 Ok(raw) => {
+                    let unit = raw.vol_unit;
                     if let Some(m) = Self::market(raw) {
+                        self.volume_units.insert(m.symbol.clone(), unit);
                         rows.push(m);
                     }
                 }
@@ -508,6 +517,10 @@ impl Venue for MexcFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Trade(request) = pending {
+            self.trade_response(cx, request, response);
+            return;
+        }
         if matches!(&pending, Pending::Markets { .. } | Pending::Tickers { .. })
             && let Err(error) = Envelope::checked(response.body)
         {
@@ -530,6 +543,7 @@ impl Venue for MexcFutures {
         }
         match pending {
             Pending::Account(request) => self.account_response(cx, request, response),
+            Pending::Trade(_) => unreachable!(),
             Pending::Markets { rows, failed } => {
                 if failed {
                     cx.log(LogLevel::Error, "Malformed MEXC market list");
@@ -626,6 +640,7 @@ impl Venue for MexcFutures {
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.account_timer(cx, timer);
+        self.trade_timer(cx, timer);
         if self.startup_retry == Some(timer) {
             self.startup_retry = None;
             if cx.store.loaded().markets {
@@ -777,7 +792,7 @@ impl Venue for MexcFutures {
                     },
                 );
             }
-            _ => {}
+            trade => self.trade_command(cx, trade),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {

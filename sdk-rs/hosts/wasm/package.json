@@ -24,8 +24,9 @@
     }
   },
   "scripts": {
-    "build-wasm": "bash ../harness/build.sh",
-    "test": "node --test js/*.test.mjs"
+    "build-wasm": "bash ../../harness/build.sh",
+    "test": "node --test js/*.test.mjs",
+    "test-host": "node --test js/host.test.mjs"
   },
   "license": "MIT"
 }

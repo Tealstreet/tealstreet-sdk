@@ -296,8 +296,14 @@ pub struct PlaceOrderOpts {
     pub tp_trigger_type: Option<StopTriggerType>,
     #[serde(default)]
     pub sl_trigger_type: Option<StopTriggerType>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "caller_client_order_id")]
     pub client_order_id: Option<String>,
     #[serde(default)]
     pub close: Option<bool>,
+}
+
+fn caller_client_order_id<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
 }

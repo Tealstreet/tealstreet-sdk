@@ -38,7 +38,14 @@ export class EngineHost {
     const promise = reply === undefined
       ? Promise.resolve()
       : new Promise((resolve, reject) => this.commands.set(reply, { resolve, reject }));
-    this.run(this.engine.command(JSON.stringify(reply === undefined ? command : { ...command, command: reply }), this.transport.now()));
+    try {
+      this.run(this.engine.command(JSON.stringify(reply === undefined ? command : { ...command, command: reply }), this.transport.now()));
+    } catch (error) {
+      if (reply === undefined) return Promise.reject(error);
+      const pending = this.commands.get(reply);
+      this.commands.delete(reply);
+      pending?.reject(error);
+    }
     return promise;
   }
 
@@ -148,7 +155,21 @@ export class EngineHost {
         const pending = this.commands.get(action.command);
         this.commands.delete(action.command);
         if (!pending) break;
-        if (action.error !== undefined) pending.reject(new Error(action.error));
+        if (action.error !== undefined) {
+          const error = new Error(action.error);
+          try {
+            const details = JSON.parse(action.error);
+            if (typeof details.message === 'string' && Array.isArray(details.partialOrderIds) &&
+                details.partialOrderIds.every((id) => typeof id === 'string')) {
+              error.message = details.message;
+              error.partialOrderIds = details.partialOrderIds;
+              error.partialOrderCount = details.partialOrderCount;
+              error.totalOrderCount = details.totalOrderCount;
+              error.failedOrderIndex = details.failedOrderIndex;
+            }
+          } catch { /* Plain venue errors carry only their message. */ }
+          pending.reject(error);
+        }
         else pending.resolve(action.result === undefined ? undefined : JSON.parse(action.result));
         break;
       }

@@ -57,6 +57,7 @@ pub struct Account {
     pub private: Connection,
     pub native_ids: HashMap<String, String>,
     pub settings_revision: HashMap<String, u64>,
+    pub rail_revision: HashMap<(String, PositionSide), u64>,
     pub revision: u64,
     pub order_updates: HashMap<String, u64>,
     pub position_updates: HashMap<String, u64>,
@@ -161,6 +162,8 @@ impl MexcFutures {
                 .insert(m.symbol.clone(), Rails::initial());
             cx.store.update_setting(&m.symbol, |s| {
                 s.leverage = 20.0;
+                s.buy_leverage = Some(20.0);
+                s.sell_leverage = Some(20.0);
                 s.margin_type = Some(MarginType::Cross);
             });
         }
@@ -420,6 +423,9 @@ impl MexcFutures {
         self.account
             .settings_revision
             .insert(p.symbol.clone(), self.account.revision);
+        self.account
+            .rail_revision
+            .insert((p.symbol.clone(), p.side), self.account.revision);
         let r = self
             .account
             .rails
@@ -433,6 +439,8 @@ impl MexcFutures {
         r.isolated = p.margin_type == Some(MarginType::Isolated);
         cx.store.update_setting(&p.symbol, |s| {
             s.leverage = p.leverage;
+            s.buy_leverage = Some(r.long);
+            s.sell_leverage = Some(r.short);
             s.margin_type = p.margin_type;
         });
     }
@@ -723,6 +731,8 @@ impl MexcFutures {
                     self.account.rails.insert(symbol.clone(), rails);
                     cx.store.update_setting(&symbol, |s| {
                         s.leverage = rails.long;
+                        s.buy_leverage = Some(rails.long);
+                        s.sell_leverage = Some(rails.short);
                         s.margin_type = Some(if rails.isolated {
                             MarginType::Isolated
                         } else {

@@ -63,14 +63,28 @@ const isPrivate = Boolean(ts.account);
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
-const KNOWN_TS_FIXES = (account, rustAccount) => {
+const binanceFixes = (account, rustAccount) => {
   for (const position of account.positions) {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
     if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
   }
 };
+// The MEXC reference will receive these same repairs: this entry documents
+// deliberate corrections without replacing the TS result with Rust output.
+const KNOWN_TS_FIXES = {
+  binance: binanceFixes,
+  binancepm: binanceFixes,
+  mexc: () => {
+    // Full incremental depth, rather than replacing a 20-level snapshot.
+    // Sized stops choose the closing leverage rail even without reduceOnly.
+    // Bracket prices reach the native entry; unsupported opening triggers reject.
+    // Cancel-all reaches regular, plan and position-stop endpoints.
+    // Cancel/replace recomputes remaining size after racing fills; Closed wins
+    // over a late cancellation acknowledgement. Failed reads preserve state.
+  },
+};
 if (isPrivate) {
-  KNOWN_TS_FIXES(ts.account, rust.account);
+  KNOWN_TS_FIXES[values.venue]?.(ts.account, rust.account);
   for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
     const left = JSON.stringify(ts.account[field]);
     const right = JSON.stringify(rust.account[field]);

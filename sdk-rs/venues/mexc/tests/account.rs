@@ -186,6 +186,14 @@ fn flat_symbol_metadata_fetches_both_rails_and_authenticated_cap() {
     );
     assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 10.0);
     assert_eq!(
+        e.store().setting("BTCUSDT").unwrap().buy_leverage,
+        Some(10.0)
+    );
+    assert_eq!(
+        e.store().setting("BTCUSDT").unwrap().sell_leverage,
+        Some(15.0)
+    );
+    assert_eq!(
         e.store().market("BTCUSDT").unwrap().limits.leverage.max,
         100.0
     );

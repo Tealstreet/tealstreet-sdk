@@ -112,3 +112,22 @@ Public REST contract detail, ticker, depth, and kline endpoints were probed succ
 ## Client order ID
 
 This venue does not honor `PlaceOrderOpts.clientOrderId`: `placeOrder` / `placeOrders` reject any caller ID before a write (`packages/safe-cex/CLAUDE.md` → "Client order ID contract"). Keep that guard as the first statement of any new placement override.
+
+## Rust engine
+
+`sdk-rs/venues/mexc` uses native placement volume and base-sized store rows.
+The frame applier reconstructs `remainingNative` and
+`filledInPlacementUnits` from the contract-size column for MEXC on both
+sides of the worker boundary. Optional buy/sell leverage columns in
+`SETTINGS` preserve different hedge rails even when flat.
+
+Regular cancel/replace reads `/api/v1/private/order/get/{orderId}` after
+cancel acceptance before replacing. An unconfirmed cancellation or failed
+read withholds the replacement; a definitive completed row updates local
+fills and stops replacement. This avoids replacing fills whose WS frames
+arrive after the cancellation response. Newer WS settings win over delayed
+mutation acknowledgements, with revisions tracked separately per hedge rail.
+
+The Rust gate's `KNOWN_TS_FIXES.mexc` lists intentional corrections to the TS
+reference, including full-depth sequencing, closing leverage for sized stops,
+native attached brackets, and cancel-all across all three order surfaces.

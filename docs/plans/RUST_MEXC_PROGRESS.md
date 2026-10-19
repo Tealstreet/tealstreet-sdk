@@ -75,3 +75,27 @@ and cut a follow-up branch. Never touch master or force-push.
   use typed sequenced jobs and exact serialized bodies; never retry a write
   after transport failure; check per-row cancel results; retain stop routing
   and native position IDs; reconcile settings only after accepted mutations.
+- Trading phase implemented and reviewed by `trading_review` through fixes
+  for queued settings intent, per-side mutation revisions, delayed amend fills,
+  closing stop leverage, terminal cancel races, and snapped optimistic volume.
+  Regular amend now reads definitive order state after cancel and retries only
+  inconclusive reads (bounded); it never replaces uncertain/filled quantities.
+- Trading verification: 36 MEXC Rust tests + 11 engine tests pass; crate clippy,
+  safe-cex typecheck/lint, 5 wasm host tests and 3 frame bridge tests pass.
+  Bans pass. A first wasm clippy and release build passed; final gates must
+  rebuild/rerun after subsequent changes.
+- Added optional buy/sell SETTINGS columns, preserving older frame decoding
+  and unchanged Binance payloads. Both native placement extras and hedge
+  leverage survive worker/main frame application. Host command failures retain
+  partial-placement metadata and release failed command parsing completions.
+- Intentional TS corrections declared in `KNOWN_TS_FIXES.mexc`: full depth,
+  closing stop rail, attached brackets, reject unsupported opening triggers,
+  cancel all order surfaces, amend final quantity/Closed status, failed-read
+  preservation. The TS reference still needs corresponding repairs in phase 5
+  so gates compare independent implementations without hiding differences.
+- Public live recording started (`mexc-smoke.jsonl`, BTCUSDT/ETHUSDT, 20s).
+- Queries plan: typed JSON results in Binance's shapes; stream and page fills,
+  orders and funding ledger rows; verify official response schemas before
+  choosing pagination; reject unsupported income kinds explicitly. Queries
+  must not mutate account state. Then build private tape, generic socket-role
+  and request-body matching, fix TS reference bugs, and run every replay gate.
