@@ -178,3 +178,10 @@ per-venue builds keep the original 1,258,291-byte browser budget. The replay
 now consumes each economic-write response once and compares write counts.
 Seventeen harness tests and 269 TS bridge/guard checks pass after resolution;
 OKX-only host compilation passes. Re-run all gates after review fixes.
+
+PR review checkpoint: the Hyperliquid wrapper now preserves identity-based
+private reads for watch-only applicationId/vault accounts and legacy key-role
+resolution. Explicit public-only mode still wins; local signing remains in the
+native trading path. Five regressions added; 278 targeted wrapper/client-ID/OKX
+oracle checks pass. First full test run overlapped the wrapper edit and observed
+its pre-fix module; rerunning the settled source along with typecheck/lint.

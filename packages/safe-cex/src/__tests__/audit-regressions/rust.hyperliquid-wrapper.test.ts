@@ -121,6 +121,25 @@ describe('Rust Hyperliquid wrapper', () => {
     });
   });
 
+  it.each([
+    { applicationId: 'master-wallet', key: '', secret: '' },
+    { applicationId: 'master-wallet', key: '', secret: 'private-key' },
+    { vault: 'vault-wallet', key: '', secret: '' },
+    { key: 'legacy-wallet', secret: '' },
+  ])('starts identity-based account reads without signing credentials: %j', async (options) => {
+    const { exchange, construct } = setup(options);
+    await exchange.start();
+    expect(exchange.isPublicDataOnly).toBe(false);
+    expect(JSON.parse(construct.mock.calls[0][1]).publicDataOnly).toBe(false);
+  });
+
+  it('honors explicit public-only mode even with a wallet identity', async () => {
+    const { exchange, construct } = setup({ applicationId: 'master-wallet', publicDataOnly: true });
+    await exchange.start();
+    expect(exchange.isPublicDataOnly).toBe(true);
+    expect(JSON.parse(construct.mock.calls[0][1]).publicDataOnly).toBe(true);
+  });
+
   it('rejects spot opt-in before loading or starting an engine', async () => {
     const { exchange, load, construct } = setup({ enableSpotMarkets: true });
     await expect(exchange.start()).rejects.toThrow('supports perpetual markets only');

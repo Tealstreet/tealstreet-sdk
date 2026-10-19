@@ -110,11 +110,19 @@ export class RustEngineExchange extends BaseExchange {
     this.applier = new FrameApplier(store);
   }
 
+  get isPublicDataOnly(): boolean {
+    if (this.name !== 'hyperliquid') return super.isPublicDataOnly;
+    return (
+      this.options.publicDataOnly === true ||
+      !Boolean(this.options.vault || this.options.applicationId || this.options.key)
+    );
+  }
+
   start = async () => {
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
       throw new Error('Rust Hyperliquid currently supports perpetual markets only');
     }
-    if (!this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
+    if (this.name !== 'hyperliquid' && !this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
     if (!loadWasmEngine) throw new Error('No wasm engine loader registered (setWasmEngineLoader)');
