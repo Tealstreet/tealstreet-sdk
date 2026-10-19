@@ -200,6 +200,10 @@ struct Startup {
     tickers: Option<Vec<Ticker>>,
     markets_loaded: bool,
     tickers_loaded: bool,
+    trading_in_flight: bool,
+    prelaunch_in_flight: bool,
+    fees_in_flight: bool,
+    tickers_in_flight: bool,
     account_info: bool,
     retry_ms: f64,
     retry: Option<TimerId>,
@@ -491,13 +495,25 @@ impl BybitLinear {
 
     fn request_startup(&mut self, cx: &mut Cx<'_, Pending>) {
         self.startup.retry = None;
-        if self.startup.trading.is_none() {
+        if !self.startup.markets_loaded
+            && self.startup.trading.is_none()
+            && !self.startup.trading_in_flight
+        {
+            self.startup.trading_in_flight = true;
             self.request_markets(cx, false, None);
         }
-        if self.startup.prelaunch.is_none() {
+        if !self.startup.markets_loaded
+            && self.startup.prelaunch.is_none()
+            && !self.startup.prelaunch_in_flight
+        {
+            self.startup.prelaunch_in_flight = true;
             self.request_markets(cx, true, None);
         }
-        if self.startup.tickers.is_none() {
+        if !self.startup.tickers_loaded
+            && self.startup.tickers.is_none()
+            && !self.startup.tickers_in_flight
+        {
+            self.startup.tickers_in_flight = true;
             let query = Query::new().str("category", "linear");
             self.send(
                 cx,
@@ -505,7 +521,12 @@ impl BybitLinear {
                 Then::Tickers(Vec::new()),
             );
         }
-        if self.credentials.is_some() && self.startup.fees.is_none() {
+        if !self.startup.markets_loaded
+            && self.credentials.is_some()
+            && self.startup.fees.is_none()
+            && !self.startup.fees_in_flight
+        {
+            self.startup.fees_in_flight = true;
             let query = Query::new().str("category", "linear");
             self.send(
                 cx,
@@ -559,8 +580,10 @@ impl BybitLinear {
         }
         let list = std::mem::take(pages);
         if prelaunch {
+            self.startup.prelaunch_in_flight = false;
             self.startup.prelaunch = Some(list);
         } else {
+            self.startup.trading_in_flight = false;
             self.startup.trading = Some(list);
         }
         self.try_load_markets(cx);
@@ -569,6 +592,7 @@ impl BybitLinear {
     /// Trading markets are required; PreLaunch markets are optional.
     fn markets_failed(&mut self, cx: &mut Cx<'_, Pending>, prelaunch: bool, error: &str) {
         if prelaunch {
+            self.startup.prelaunch_in_flight = false;
             self.startup.prelaunch_pages.clear();
             cx.log(
                 LogLevel::Warning,
@@ -577,6 +601,7 @@ impl BybitLinear {
             self.startup.prelaunch = Some(Vec::new());
             self.try_load_markets(cx);
         } else {
+            self.startup.trading_in_flight = false;
             self.startup.trading_pages.clear();
             self.retry_startup(cx, "Trading markets", error);
         }
@@ -607,7 +632,6 @@ impl BybitLinear {
             format!("Loaded {} Bybit markets", markets.len()),
         );
         cx.store.set_markets(markets);
-        self.connect(cx, Channel::Public);
         self.try_load_tickers(cx);
     }
 
@@ -632,6 +656,8 @@ impl BybitLinear {
             })
             .collect();
         cx.store.set_tickers(tickers);
+        // Subscribe only after the seed exists: ticker deltas omit unchanged fields.
+        self.connect(cx, Channel::Public);
         if self.credentials.is_none() {
             cx.store.set_orders(Vec::new());
             cx.store.set_positions(Vec::new());
@@ -890,19 +916,23 @@ impl BybitLinear {
                 self.on_markets(cx, prelaunch, markets, response)
             }
             Then::Fees(fees) => {
+                self.startup.fees_in_flight = false;
                 if let Some(error) = failure {
                     cx.log(LogLevel::Warning, format!("Bybit fee rates: {error}"));
                 }
                 self.startup.fees = Some(fees);
                 self.try_load_markets(cx);
             }
-            Then::Tickers(tickers) => match failure {
-                Some(error) => self.retry_startup(cx, "tickers", &error),
-                None => {
-                    self.startup.tickers = Some(tickers);
-                    self.try_load_tickers(cx);
+            Then::Tickers(tickers) => {
+                self.startup.tickers_in_flight = false;
+                match failure {
+                    Some(error) => self.retry_startup(cx, "tickers", &error),
+                    None => {
+                        self.startup.tickers = Some(tickers);
+                        self.try_load_tickers(cx);
+                    }
                 }
-            },
+            }
             Then::Klines {
                 command,
                 mut candles,

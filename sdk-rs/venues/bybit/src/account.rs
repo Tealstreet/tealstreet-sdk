@@ -43,8 +43,8 @@ pub enum Request {
 /// stop-loss and take-profit, which Bybit keeps on the order itself.
 pub struct Mapped {
     pub orders: Vec<Order>,
-    /// A position TP/SL (`tpslMode` Full or Partial), amended through
-    /// `/v5/position/trading-stop` rather than `/v5/order/amend`.
+    /// A position TP/SL (`tpslMode` Full or Partial), rather than an
+    /// opening trigger. Full stops have zero amount in the store.
     pub position_bound: bool,
 }
 
@@ -91,7 +91,6 @@ pub struct Wallet {
 pub struct AccountState {
     started: bool,
     pub authed: bool,
-    has_authed: bool,
     pub margin_type: Option<MarginType>,
     /// `unifiedMarginStatus` 1 is a classic account: USDT only, CONTRACT wallet.
     classic: bool,
@@ -99,12 +98,17 @@ pub struct AccountState {
     position_version: u32,
     positions_generation: u32,
     positions: Option<PositionsJoin>,
+    positions_follow_up: bool,
     orders_generation: u32,
     orders: Option<OrdersJoin>,
+    orders_follow_up: bool,
     orders_stale: bool,
     last_orders_retry_at: f64,
     wallet_in_flight: bool,
+    wallet_follow_up: bool,
     wallet: Option<Wallet>,
+    /// Bybit permits different position modes on different symbols.
+    pub position_modes: HashMap<String, bool>,
     pub position_bound: HashSet<String>,
 }
 
@@ -717,12 +721,15 @@ impl BybitLinear {
                         r#"{"op":"subscribe","args":["order","execution","position","wallet"]}"#,
                     );
                 }
-                // Events while no socket was authenticated were never delivered.
-                if std::mem::replace(&mut self.account.has_authed, true) {
-                    self.fetch_orders(cx);
-                    self.fetch_positions(cx);
-                    self.fetch_wallet(cx);
-                }
+            }
+            ("subscribe", Some(true)) if self.account.authed => {
+                // Cover the gap before topics became live, including the first connection.
+                self.account.orders_follow_up = self.account.orders.is_some();
+                self.account.positions_follow_up = self.account.positions.is_some();
+                self.account.wallet_follow_up = self.account.wallet_in_flight;
+                self.fetch_orders(cx);
+                self.fetch_positions(cx);
+                self.fetch_wallet(cx);
             }
             (_, Some(false)) => {
                 let message = frame.ret_msg.as_deref().unwrap_or_default();
@@ -793,6 +800,11 @@ impl BybitLinear {
         for row in rows.iter().filter(|r| is_linear(&r.category, &r.symbol)) {
             let mapped = map_position(row, cx.store, margin_type, cx.now);
             let position = mapped.position;
+            if let Some(mode) = position.position_mode {
+                self.account
+                    .position_modes
+                    .insert(position.symbol.clone(), mode == PositionMode::Hedged);
+            }
             if position.leverage > 0.0 {
                 let leverage = position.leverage;
                 cx.store.update_setting(&position.symbol, |s| {
@@ -806,6 +818,8 @@ impl BybitLinear {
         if !changed {
             return;
         }
+        cx.store
+            .set_hedged(self.account.position_modes.values().any(|hedged| *hedged));
         self.account.position_version += 1;
         // Only the PnL follows the stream; the total waits for the wallet.
         if cx.store.loaded().balance {
@@ -954,6 +968,9 @@ impl BybitLinear {
             }
             Request::Wallet => {
                 self.account.wallet_in_flight = false;
+                if std::mem::take(&mut self.account.wallet_follow_up) {
+                    self.fetch_wallet(cx);
+                }
                 let account = outcome.and_then(|body| {
                     serde_json::from_str::<WalletEnvelope>(body)
                         .ok()
@@ -983,6 +1000,9 @@ impl BybitLinear {
             return;
         }
         let join = self.account.orders.take().expect("checked above");
+        if std::mem::take(&mut self.account.orders_follow_up) {
+            self.fetch_orders(cx);
+        }
         if join.failed {
             self.account.orders_stale = true;
             return;
@@ -1031,6 +1051,9 @@ impl BybitLinear {
             return;
         }
         let join = self.account.positions.take().expect("checked above");
+        if std::mem::take(&mut self.account.positions_follow_up) {
+            self.fetch_positions(cx);
+        }
         if join.failed {
             return;
         }
@@ -1052,10 +1075,15 @@ impl BybitLinear {
             }
         }
         if !best.is_empty() {
-            cx.store.set_hedged(
-                best.iter()
-                    .any(|r| r.position.position_mode == Some(PositionMode::Hedged)),
-            );
+            for row in &best {
+                if let Some(mode) = row.position.position_mode {
+                    self.account
+                        .position_modes
+                        .insert(row.position.symbol.clone(), mode == PositionMode::Hedged);
+                }
+            }
+            cx.store
+                .set_hedged(self.account.position_modes.values().any(|hedged| *hedged));
         }
         let settings: Vec<(u32, MarketSetting)> = best
             .iter()

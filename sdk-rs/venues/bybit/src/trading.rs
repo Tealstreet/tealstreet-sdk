@@ -31,6 +31,11 @@ pub struct Request {
 
 /// What a response means for its job.
 enum Call {
+    ResolveMode {
+        symbol: String,
+        command: Box<Command>,
+        version: u64,
+    },
     PlaceOne,
     /// Single-order bodies to place one by one if the venue refuses the
     /// whole batch (a refusal places nothing, so this cannot double-place).
@@ -83,6 +88,7 @@ struct Job {
 #[derive(Default)]
 pub struct TradingState {
     jobs: HashMap<CommandId, Job>,
+    mode_version: u64,
 }
 
 fn side_text(side: OrderSide) -> &'static str {
@@ -185,6 +191,51 @@ struct Lot {
 
 impl BybitLinear {
     pub(crate) fn on_trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        // A settle-coin snapshot omits flat symbols. Resolve their mode before
+        // planning any writes, since Bybit modes can differ by symbol.
+        let unresolved = match &command {
+            Command::PlaceOrders { command, orders } => orders
+                .iter()
+                .find(|o| !self.account.position_modes.contains_key(&o.symbol))
+                .map(|o| (*command, o.symbol.clone())),
+            Command::AmendOrder { command, id, .. } => cx
+                .store
+                .order(id)
+                .filter(|o| !self.account.position_modes.contains_key(&o.symbol))
+                .map(|o| (*command, o.symbol.clone())),
+            _ => None,
+        };
+        if let Some((id, symbol)) = unresolved {
+            if self.credentials.is_none() {
+                cx.done(id, Err("Bybit trading needs an API key".into()));
+                return;
+            }
+            if let Command::PlaceOrders { orders, .. } = &command
+                && let Err(message) = check_client_order_ids(cx, orders)
+            {
+                cx.done(id, Err(message));
+                return;
+            }
+            self.send(
+                cx,
+                Rest::get(
+                    "/v5/position/list",
+                    crate::sign::Query::new()
+                        .str("category", "linear")
+                        .str("symbol", &symbol),
+                )
+                .signed(),
+                Then::Trade(Request {
+                    command: id,
+                    call: Call::ResolveMode {
+                        symbol,
+                        command: Box::new(command),
+                        version: self.trading.mode_version,
+                    },
+                }),
+            );
+            return;
+        }
         let (id, plan) = match command {
             Command::PlaceOrders { command, orders } => (command, self.plan_place(cx, &orders)),
             Command::CancelOrders { command, ids } => {
@@ -325,6 +376,61 @@ impl BybitLinear {
         response: Result<Response<'_>, &str>,
     ) {
         let Request { command, call } = request;
+        let call = match call {
+            Call::ResolveMode {
+                symbol,
+                command: deferred,
+                version,
+            } => {
+                if version != self.trading.mode_version {
+                    self.on_trade_command(cx, *deferred);
+                    return;
+                }
+                let mode = response
+                    .as_ref()
+                    .map_err(|e| (*e).to_owned())
+                    .and_then(|response| {
+                        if let Some(error) = venue_error(response) {
+                            return Err(describe(error));
+                        }
+                        let page: Listed<PositionRow<'_>> =
+                            serde_json::from_str(response.body).map_err(|e| e.to_string())?;
+                        let rows = page.result.ok_or("Missing position mode result")?.list;
+                        let mut mode = None;
+                        for row in rows.iter().filter(|row| row.symbol == symbol) {
+                            let next = match row.position_idx {
+                                Some(0) => false,
+                                Some(1 | 2) => true,
+                                _ => return Err("Invalid position mode".into()),
+                            };
+                            if mode.is_some_and(|current| current != next) {
+                                return Err("Conflicting position modes".into());
+                            }
+                            mode = Some(next);
+                        }
+                        mode.ok_or_else(|| format!("Position mode missing for {symbol}"))
+                    });
+                match mode {
+                    Ok(mode) => {
+                        self.account.position_modes.entry(symbol).or_insert(mode);
+                        self.on_trade_command(cx, *deferred);
+                    }
+                    Err(message) => {
+                        cx.log(LogLevel::Error, message.clone());
+                        cx.done(command, Err(message));
+                    }
+                }
+                return;
+            }
+            call => call,
+        };
+        let rejected_before_acceptance = response.as_ref().ok().is_some_and(|response| {
+            (200..300).contains(&response.status)
+                && serde_json::from_str::<Status>(response.body)
+                    .ok()
+                    .and_then(|s| s.ret_code)
+                    .is_some_and(|code| code == 10001)
+        });
         let outcome = match &response {
             Ok(response) => match venue_error(response) {
                 None => Ok(response.body),
@@ -379,7 +485,7 @@ impl BybitLinear {
                         .map(|id| id.into_owned()),
                 );
             }
-            (Call::PlaceBatch { fallback }, Err(error)) if error.0 != 0 => {
+            (Call::PlaceBatch { fallback }, Err(error)) if rejected_before_acceptance => {
                 // Refused whole: nothing was placed, so each order may go alone.
                 errors.push(format!("Failed to place batch orders: {}", describe(error)));
                 fallback_steps = fallback;
@@ -467,6 +573,12 @@ impl BybitLinear {
                     .map_or_else(|(code, _)| *code == POSITION_MODE_NOT_MODIFIED, |_| true) =>
             {
                 cx.store.set_hedged(hedged);
+                self.trading.mode_version += 1;
+                self.account.position_modes.retain(|symbol, _| {
+                    cx.store
+                        .market(symbol)
+                        .is_some_and(|market| market.quote != "USDT")
+                });
                 self.fetch_positions(cx);
             }
             (_, Err(error)) => errors.push(describe(error)),
@@ -503,8 +615,20 @@ impl BybitLinear {
 
     /// `0` in one-way mode; in hedge mode the leg the order opens, or for a
     /// reducing order the leg it closes.
-    fn position_idx(&self, cx: &Cx<'_, Pending>, side: OrderSide, reduce: bool) -> i64 {
-        if !cx.store.hedged() {
+    fn position_idx(
+        &self,
+        _cx: &Cx<'_, Pending>,
+        symbol: &str,
+        side: OrderSide,
+        reduce: bool,
+    ) -> i64 {
+        if !self
+            .account
+            .position_modes
+            .get(symbol)
+            .copied()
+            .unwrap_or(false)
+        {
             return 0;
         }
         match (side, reduce) {
@@ -514,8 +638,8 @@ impl BybitLinear {
     }
 
     /// A position stop sits on the leg its order side closes.
-    fn stop_position_idx(&self, cx: &Cx<'_, Pending>, side: OrderSide) -> i64 {
-        self.position_idx(cx, side, true)
+    fn stop_position_idx(&self, cx: &Cx<'_, Pending>, symbol: &str, side: OrderSide) -> i64 {
+        self.position_idx(cx, symbol, side, true)
     }
 
     fn full_position_opposite(cx: &Cx<'_, Pending>, opts: &PlaceOrderOpts) -> bool {
@@ -583,6 +707,9 @@ impl BybitLinear {
         let p_amount = market.precision.amount;
         let adjust_price = |p: f64| num::adjust(p, p_price);
         let amount = num::adjust(opts.amount, p_amount);
+        if !amount.is_finite() || amount <= 0.0 {
+            return Err("Order quantity must be finite and positive".into());
+        }
         let stop = matches!(opts.kind, OrderType::StopLoss | OrderType::TakeProfit);
         if stop && amount == 0.0 {
             return Err(
@@ -628,26 +755,20 @@ impl BybitLinear {
             None => None,
         };
         let reduce_only = !conditional && opts.reduce_only == Some(true);
-        let position_idx = self.position_idx(cx, opts.side, reduce_only);
+        let position_idx = self.position_idx(cx, &opts.symbol, opts.side, reduce_only);
         let stop_loss = opts.stop_loss.filter(|p| *p != 0.0).map(adjust_price);
         let take_profit = opts.take_profit.filter(|p| *p != 0.0).map(adjust_price);
         let tif = (limit_price.is_some())
             .then(|| tif_text(opts.time_in_force.unwrap_or(TimeInForce::GoodTillCancel)));
 
         let max = market.limits.amount.max;
-        let (count, rest) = if amount > max && max > 0.0 {
-            (
-                (amount / max).ceil() as usize,
-                num::adjust(amount % max, p_amount),
-            )
-        } else {
-            (1, 0.0)
-        };
-        let lot_size = num::adjust((amount - rest) / count as f64, p_amount);
-        let mut sizes = vec![lot_size; count];
-        if rest != 0.0 {
-            sizes.push(rest);
+        let mut sizes = Vec::new();
+        let mut remaining = amount;
+        while max > 0.0 && remaining > max {
+            sizes.push(max);
+            remaining = num::adjust(remaining - max, p_amount);
         }
+        sizes.push(remaining);
         let lot = |qty: f64, brackets: bool, category: bool| {
             let mut body = Body::new();
             if category {
@@ -699,7 +820,10 @@ impl BybitLinear {
         let mut body = Body::new()
             .str("category", "linear")
             .str("symbol", &opts.symbol)
-            .int("positionIdx", self.stop_position_idx(cx, opts.side))
+            .int(
+                "positionIdx",
+                self.stop_position_idx(cx, &opts.symbol, opts.side),
+            )
             .str("tpslMode", if partial { "Partial" } else { "Full" });
         body = if opts.kind == OrderType::StopLoss {
             body.str("stopLoss", &number(price))
@@ -730,7 +854,10 @@ impl BybitLinear {
         Ok(Body::new()
             .str("category", "linear")
             .str("symbol", &opts.symbol)
-            .int("positionIdx", self.stop_position_idx(cx, opts.side))
+            .int(
+                "positionIdx",
+                self.stop_position_idx(cx, &opts.symbol, opts.side),
+            )
             .str("trailingStop", &number(distance))
             .finish())
     }
@@ -792,14 +919,16 @@ impl BybitLinear {
             };
             return Ok(trading_stop_job(self.trailing_stop(cx, &opts)?));
         }
-        if stop && self.account.position_bound.contains(id) {
-            // A position TP/SL is the position's own stop, set again in place.
-            let size = amount.unwrap_or(order.amount);
-            let partial = order.amount != 0.0;
-            let (level, by, size_field) = if order.kind == OrderType::StopLoss {
-                ("stopLoss", "slTriggerBy", "slSize")
+        if stop && self.account.position_bound.contains(id) && order.amount == 0.0 {
+            // Full stops modify the position; Partial stops amend by order ID.
+            if amount.is_some() {
+                return Err("A full-position stop has no adjustable quantity".into());
+            }
+            let price = price.ok_or("A full-position stop moves by price")?;
+            let (level, by) = if order.kind == OrderType::StopLoss {
+                ("stopLoss", "slTriggerBy")
             } else {
-                ("takeProfit", "tpTriggerBy", "tpSize")
+                ("takeProfit", "tpTriggerBy")
             };
             let by_value = match order.trigger_type {
                 Some(StopTriggerType::MarkPrice) => Some("MarkPrice"),
@@ -810,11 +939,13 @@ impl BybitLinear {
             let body = Body::new()
                 .str("category", "linear")
                 .str("symbol", &order.symbol)
-                .int("positionIdx", self.stop_position_idx(cx, order.side))
-                .str("tpslMode", if partial { "Partial" } else { "Full" })
-                .opt_str(level, price.map(number).as_deref())
-                .opt_str(by, price.and(by_value))
-                .opt_str(size_field, partial.then(|| number(size)).as_deref());
+                .int(
+                    "positionIdx",
+                    self.stop_position_idx(cx, &order.symbol, order.side),
+                )
+                .str("tpslMode", "Full")
+                .str(level, &number(price))
+                .opt_str(by, by_value);
             return Ok(trading_stop_job(body.finish()));
         }
         let conditional = stop || order.kind == OrderType::Conditional;

@@ -37,14 +37,27 @@ Target: `feat/rust-rewrite`; lane: `feat/rust-bybit`. Original port: `332622a5ff
 - Root typecheck/lint passed. Root tests found an existing wasm test in
   the forbidden exchange runtime tree; moved it into `src/__tests__/`
   and reran its boundary and integration checks. Full root gates rerunning.
-- PR and adversarial review evidence follow.
+- PR: https://github.com/Tealstreet/tealstreet-sdk/pull/1298 into
+  `feat/rust-rewrite`. Layout review and adversarial findings posted there.
+- Root gates now pass: typecheck 44 tasks, lint 28 tasks, tests 27 tasks
+  (safe-cex 451 test files / 6,489 tests).
+- Adversarial fixes: subscription-ack snapshot refresh with in-flight followup;
+  per-symbol position modes and a signed read before writes for unknown flat
+  symbols; Partial stop native amendments; no retry after ambiguous batch
+  responses; exact split totals; guarded startup pagination/retries; socket
+  connection after REST ticker seed; Bybit shell client-ID helpers.
+- Targeted tests after fixes: 3 unit + 26 account + 13 public pass; clippy
+  passes. Shell wasm regressions: 6 tests pass. Final gates and re-review follow.
 
 ## Intentional TS fixes
 
 The `gate.mjs` `KNOWN_TS_FIXES` list records the pre-existing Binance fixes
 (position margin size from a zero-size placeholder; execution price rather than
-order average price), plus this Bybit fix: preserve `PostOnly` rejection for a
-cancelled `EC_PostOnlyWillTakeLiquidity` order.
+order average price), plus these Bybit fixes: preserve `PostOnly` rejection for a
+cancelled `EC_PostOnlyWillTakeLiquidity` order; preserve exact split quantity;
+never resend an ambiguously failed batch as single creates; install the ticker
+seed before its socket snapshot; amend Partial stops by ID even without a mark
+price (the TS fallback could create a duplicate).
 
 ## Scope
 

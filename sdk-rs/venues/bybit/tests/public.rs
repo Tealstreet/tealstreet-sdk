@@ -223,6 +223,75 @@ fn an_error_envelope_in_place_of_the_market_list_is_retried() {
 }
 
 #[test]
+fn a_ticker_retry_does_not_restart_in_flight_market_pagination() {
+    let mut h = Harness::started(Default::default());
+    h.respond("status=PreLaunch", 200, support::PRELAUNCH);
+    h.respond("/v5/market/tickers", 503, "unavailable");
+    let page = support::INSTRUMENTS.replace(
+        r#""nextPageCursor":"""#,
+        r#""nextPageCursor":"second-page""#,
+    );
+    h.respond("/v5/market/instruments-info", 200, &page);
+    h.advance(1_000.0);
+    let requests: Vec<_> = h
+        .requests
+        .iter()
+        .filter(|request| request.url.contains("/v5/market/instruments-info"))
+        .collect();
+    assert_eq!(
+        requests.len(),
+        1,
+        "the existing second page stays in flight"
+    );
+    assert!(requests[0].url.contains("cursor=second-page"));
+    let second = support::INSTRUMENTS
+        .replace("BTCUSDT", "SOLUSDT")
+        .replace("ETHUSDT", "DOGEUSDT");
+    h.respond("cursor=second-page", 200, &second);
+    h.respond("/v5/market/tickers", 200, support::TICKERS);
+    assert_eq!(h.engine.store().markets().len(), 4);
+}
+
+#[test]
+fn a_ticker_retry_does_not_refetch_loaded_markets() {
+    let mut h = Harness::started(Default::default());
+    h.respond("status=PreLaunch", 200, support::PRELAUNCH);
+    h.respond("/v5/market/instruments-info", 200, support::INSTRUMENTS);
+    h.respond("/v5/market/tickers", 503, "unavailable");
+    h.advance(1_000.0);
+    assert_eq!(h.requests.len(), 1);
+    assert!(h.requests[0].url.contains("/v5/market/tickers"));
+    h.respond("/v5/market/tickers", 200, support::TICKERS);
+    assert!(h.engine.store().loaded().tickers);
+}
+
+#[test]
+fn ticker_stream_starts_after_a_slow_rest_seed() {
+    let mut h = Harness::started(Default::default());
+    h.respond("status=PreLaunch", 200, support::PRELAUNCH);
+    h.respond("/v5/market/instruments-info", 200, support::INSTRUMENTS);
+    h.advance(1_000.0);
+    assert!(h.engine.store().loaded().markets);
+    assert!(!h.engine.store().loaded().tickers);
+    assert!(h.socket("/v5/public/linear").is_none());
+    h.respond("/v5/market/tickers", 200, support::TICKERS);
+    let socket = h.socket("/v5/public/linear").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "/v5/public/linear",
+        r#"{"topic":"tickers.BTCUSDT","type":"snapshot","data":{"symbol":"BTCUSDT","markPrice":"70000","openInterest":"123"}}"#,
+    );
+    h.message(
+        "/v5/public/linear",
+        r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","lastPrice":"70001"}}"#,
+    );
+    let ticker = h.engine.store().ticker("BTCUSDT").unwrap();
+    assert_eq!(ticker.mark, 70000.0);
+    assert_eq!(ticker.open_interest, 123.0);
+    assert_eq!(ticker.last, 70001.0);
+}
+
+#[test]
 fn streamed_lists_arrive_in_chunks() {
     let mut h = Harness::started(Default::default());
     h.respond("status=PreLaunch", 200, support::PRELAUNCH);

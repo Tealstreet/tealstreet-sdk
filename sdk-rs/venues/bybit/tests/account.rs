@@ -266,6 +266,53 @@ fn a_refused_auth_closes_the_socket_and_reconnects() {
     assert_ne!(h.socket("/v5/private"), Some(socket));
 }
 
+#[test]
+fn the_first_subscription_resyncs_orders_changed_before_the_stream_was_live() {
+    let mut h = ready();
+    assert!(h.engine.store().order(ORDER_ID).is_some());
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe"}"#,
+    );
+    assert!(h.has_request("/v5/position/list"));
+    assert!(h.has_request("/v5/account/wallet-balance"));
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDT",
+        200,
+        EMPTY_LIST,
+    );
+    h.respond(
+        "/v5/order/realtime?category=linear&settleCoin=USDC",
+        200,
+        EMPTY_LIST,
+    );
+    assert!(h.engine.store().orders().is_empty());
+}
+
+#[test]
+fn subscribing_during_startup_queues_fresh_snapshots_after_the_in_flight_reads() {
+    let mut h = Harness::started(credentials());
+    respond_startup(&mut h);
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsOpened { socket });
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"auth"}"#,
+    );
+    h.message(
+        "/v5/private",
+        r#"{"success":true,"ret_msg":"","op":"subscribe"}"#,
+    );
+    respond_snapshot(&mut h);
+    assert!(h.has_request("/v5/order/realtime?category=linear&settleCoin=USDT"));
+    assert!(h.has_request("/v5/order/realtime?category=linear&settleCoin=USDC"));
+    assert!(h.has_request("/v5/position/list?category=linear&settleCoin=USDT"));
+    assert!(h.has_request("/v5/position/list?category=linear&settleCoin=USDC"));
+    assert!(h.has_request("/v5/account/wallet-balance"));
+    respond_snapshot(&mut h);
+    assert!(h.requests.is_empty(), "the queued refresh ran exactly once");
+}
+
 /// "Order", the documented frame, as a linear one-way order.
 fn order_frame(status: &str, cum: &str, leaves: &str, reject: &str) -> String {
     format!(
@@ -392,6 +439,66 @@ fn a_stale_position_snapshot_cannot_overwrite_a_newer_stream_event() {
 
     h.message("/v5/private", &position_frame("0"));
     assert!(h.engine.store().positions().is_empty());
+}
+
+#[test]
+fn mixed_symbol_modes_include_flat_rows_and_survive_a_stale_snapshot() {
+    let mut h = ready();
+    h.message("/v5/private", &position_frame("0"));
+    h.advance(5_000.0);
+    let usdt = h.take("/v5/position/list?category=linear&settleCoin=USDT");
+    let usdc = h.take("/v5/position/list?category=linear&settleCoin=USDC");
+    h.message(
+        "/v5/private",
+        &position_frame("0").replace(r#""positionIdx":0"#, r#""positionIdx":1"#),
+    );
+    h.reply(usdt.id, 200, POSITIONS);
+    h.reply(usdc.id, 200, EMPTY_LIST);
+    assert!(h.engine.store().hedged());
+    assert!(h.engine.store().positions().is_empty());
+
+    place(
+        &mut h,
+        71,
+        vec![
+            limit("BTCUSDT", OrderSide::Buy, 0.001, 90_000.0),
+            limit("ETHUSDT", OrderSide::Sell, 0.01, 3_100.0),
+        ],
+    );
+    let request = h.take("/v5/order/create-batch");
+    let body = body(&request);
+    let (btc, eth) = body.split_once(r#""symbol":"ETHUSDT""#).unwrap();
+    assert!(btc.contains(r#""positionIdx":1"#));
+    assert!(eth.contains(r#""positionIdx":0"#));
+}
+
+#[test]
+fn a_snapshot_retains_the_mode_of_a_flat_hedged_symbol() {
+    let mut h = Harness::started(credentials());
+    respond_startup(&mut h);
+    let hedged_flat = POSITIONS.replace(
+        r#""positionIdx":0,"symbol":"ETHUSDT""#,
+        r#""positionIdx":2,"symbol":"ETHUSDT""#,
+    );
+    h.respond(
+        "/v5/position/list?category=linear&settleCoin=USDT",
+        200,
+        &hedged_flat,
+    );
+    h.respond(
+        "/v5/position/list?category=linear&settleCoin=USDC",
+        200,
+        EMPTY_LIST,
+    );
+    assert!(h.engine.store().hedged());
+    assert_eq!(h.engine.store().positions().len(), 1);
+    place(
+        &mut h,
+        72,
+        vec![limit("ETHUSDT", OrderSide::Sell, 0.01, 3_100.0)],
+    );
+    let request = h.take("/v5/order/create-batch");
+    assert!(body(&request).contains(r#""positionIdx":2"#));
 }
 
 #[test]
@@ -816,4 +923,150 @@ fn queries_return_history_in_the_shared_shapes() {
     assert!(h.result(23).unwrap().as_ref().unwrap().starts_with(
         r#"[{"id":"2100000000007764263","symbol":"BTCUSDT","price":16618.49,"qty":0.00012"#
     ));
+}
+
+#[test]
+fn ambiguous_batch_responses_never_resend_creates() {
+    for (status, response) in [
+        (502, "upstream connection reset"),
+        (500, r#"{"retCode":10016,"retMsg":"Server error"}"#),
+        (200, "not json"),
+        (200, r#"{"retCode":10016,"retMsg":"Server error"}"#),
+    ] {
+        let mut h = ready();
+        place(
+            &mut h,
+            50,
+            vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+        );
+        let batch = h.take("/v5/order/create-batch");
+        h.reply(batch.id, status, response);
+        assert!(
+            h.requests.is_empty(),
+            "an accepted batch may be hidden: {status} {response}"
+        );
+        assert!(matches!(h.result(50), Some(Err(_))));
+    }
+}
+
+#[test]
+fn a_split_preserves_quantity_and_only_the_first_lot_has_brackets() {
+    #[derive(serde::Deserialize)]
+    struct Batch {
+        request: Vec<Item>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Item {
+        qty: String,
+        stop_loss: Option<String>,
+    }
+    let mut h = ready();
+    let mut markets = h.engine.store().markets().to_vec();
+    markets[0].limits.amount.max = 10.0;
+    markets[0].precision.amount = 1.0;
+    h.engine.store_mut().set_markets(markets);
+    let mut order = limit("BTCUSDT", OrderSide::Buy, 25.0, 90000.0);
+    order.stop_loss = Some(85000.0);
+    place(&mut h, 51, vec![order]);
+    let request = h.take("/v5/order/create-batch");
+    let batch: Batch = serde_json::from_str(body(&request)).unwrap();
+    assert_eq!(
+        batch
+            .request
+            .iter()
+            .map(|row| row.qty.as_str())
+            .collect::<Vec<_>>(),
+        ["10", "10", "5"]
+    );
+    let total: f64 = batch
+        .request
+        .iter()
+        .map(|row| row.qty.parse::<f64>().unwrap())
+        .sum();
+    assert_eq!(total, 25.0);
+    assert_eq!(batch.request[0].stop_loss.as_deref(), Some("85000"));
+    assert!(batch.request[1..].iter().all(|row| row.stop_loss.is_none()));
+}
+
+#[test]
+fn partial_stops_amend_the_native_order_and_full_stops_modify_the_position() {
+    for mode in ["Partial", "Full"] {
+        let mut h = ready();
+        let stop = format!(
+            r#"{{"topic":"order","data":[{{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","side":"Sell","orderType":"Market","orderStatus":"Untriggered","stopOrderType":"StopLoss","tpslMode":"{mode}","qty":"0.005","triggerPrice":"86000","triggerBy":"MarkPrice","reduceOnly":true,"closeOnTrigger":true,"positionIdx":0}}]}}"#
+        );
+        h.message("/v5/private", &stop);
+        h.command(Command::AmendOrder {
+            command: 52,
+            id: "position-stop".into(),
+            price: Some(87000.0),
+            amount: None,
+        });
+        if mode == "Partial" {
+            let amend = h.take("/v5/order/amend");
+            assert_eq!(
+                body(&amend),
+                r#"{"category":"linear","symbol":"BTCUSDT","orderId":"position-stop","triggerPrice":"87000"}"#
+            );
+            assert!(
+                !h.has_request("/v5/position/trading-stop"),
+                "Partial trading-stop adds another order"
+            );
+        } else {
+            let amend = h.take("/v5/position/trading-stop");
+            assert_eq!(
+                body(&amend),
+                r#"{"category":"linear","symbol":"BTCUSDT","positionIdx":0,"tpslMode":"Full","stopLoss":"87000","slTriggerBy":"MarkPrice"}"#
+            );
+            assert!(!h.has_request("/v5/order/amend"));
+        }
+    }
+}
+
+#[test]
+fn unknown_symbol_modes_are_read_before_any_batch_write() {
+    let mut h = Harness::started(credentials());
+    respond_startup(&mut h);
+    // No position snapshots have answered; a settle-coin read would omit flat rows.
+    h.requests.clear();
+    place(
+        &mut h,
+        53,
+        vec![
+            limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0),
+            limit("ETHUSDT", OrderSide::Sell, 1.0, 3000.0),
+        ],
+    );
+    let btc = h.take("/v5/position/list?category=linear&symbol=BTCUSDT");
+    assert!(!h.has_request("/v5/order/create-batch"));
+    h.reply(
+        btc.id,
+        200,
+        r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":0,"size":"0"}]}}"#,
+    );
+    let eth = h.take("/v5/position/list?category=linear&symbol=ETHUSDT");
+    assert!(!h.has_request("/v5/order/create-batch"));
+    h.reply(eth.id, 200, r#"{"retCode":0,"result":{"list":[{"symbol":"ETHUSDT","positionIdx":1,"size":"0"},{"symbol":"ETHUSDT","positionIdx":2,"size":"0"}]}}"#);
+    let batch = h.take("/v5/order/create-batch");
+    assert!(body(&batch).contains(r#""positionIdx":0}"#));
+    assert!(body(&batch).contains(r#""positionIdx":2}"#));
+}
+
+#[test]
+fn a_missing_or_failed_mode_read_cannot_guess_and_place() {
+    for (status, response) in [(503, "unavailable"), (200, EMPTY_LIST)] {
+        let mut h = Harness::started(credentials());
+        respond_startup(&mut h);
+        h.requests.clear();
+        place(
+            &mut h,
+            54,
+            vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+        );
+        let mode = h.take("/v5/position/list?category=linear&symbol=BTCUSDT");
+        h.reply(mode.id, status, response);
+        assert!(h.requests.is_empty());
+        assert!(matches!(h.result(54), Some(Err(_))));
+    }
 }
