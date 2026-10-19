@@ -238,3 +238,14 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
 - Four-factory aggregate wasm is 1,816,352 bytes. Set CI's bundle cap to 1.8 MiB;
   CPU and memory acceptance thresholds remain unchanged. Remaining checks: Bybit
   private, OKX public/all private aliases, then PR adversarial review + green CI.
+
+### Second landing integration checkpoint
+
+- Bybit private PASS; the subscription oracle explicitly requires Rust's existing
+  execution/wallet additions on each private connection, rather than ignoring
+  subscription differences. Exact OKX arg lookup removes repeated full-market
+  subscription scans while preserving row-scope validation. One-run OKX public
+  PASS: CPU 503.9/413.9 ms, retained 2.4/2.3 MB, peak 31.3/16.7 MB (TS/Rust).
+- Fetch found Crypto.com newly landed at e6e410146e. Commit this checkpoint before
+  merging it; preserve the new response/protocol audits and worker transport
+  measurement. Rerun integrated checks before publishing the Bitunix PR.

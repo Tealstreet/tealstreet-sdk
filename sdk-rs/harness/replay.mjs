@@ -109,7 +109,7 @@ class Tape {
       if (r.type !== 'ws') return r;
       const m = r.text.trimStart().startsWith('{') ? JSON.parse(r.text) : {};
       const topic = m.channel ? { channel: m.channel } : m.ch ? (m.symbol ? { ch: m.ch, symbol: m.symbol } : { ch: m.ch }) : undefined;
-      return { ...r, topic: topic && JSON.stringify(canonicalObject(topic)), channel: m.ch };
+      return { ...r, topic: topic && JSON.stringify(canonicalObject(topic)), channel: m.ch, subscriptionKey: m.arg && JSON.stringify(canonicalObject(m.arg)) };
     });
     this.sockets = [];
     this.connectionCounts = new Map();
@@ -238,8 +238,20 @@ class Tape {
     socket.onOpen();
   }
 
-  assertSubscribed(socket, message) {
+  assertSubscribed(socket, message, subscriptionKey) {
     if (!(venue.validateSubscriptions ?? venue.validateLogin) || !message.arg?.channel || !Array.isArray(message.data)) return;
+    // Public arg objects usually identify one exact subscription. Avoid an
+    // order-dependent scan through every market's topics on each replay frame.
+    const exact = subscriptionKey && socket.subscriptionArgs.get(subscriptionKey);
+    if (exact) {
+      const covered = message.data.every((row) => {
+        const object = row && !Array.isArray(row) && typeof row === 'object' ? row : {};
+        return Object.entries(exact).every(([key, value]) => key === 'channel' ||
+          (key === 'instType' && value === 'ANY') || object[key] === undefined || object[key] === '' || object[key] === value);
+      });
+      if (!covered) throw new Error(`Mismatched subscription row on ${socket.url}: ${JSON.stringify(message.arg)}`);
+      return;
+    }
     const topics = [...socket.subscriptionArgs.values()].filter((topic) => topic.channel === message.arg.channel);
     // Some documented messages put instId only on each data row, not arg.
     const rows = message.data.length ? message.data : [null];
@@ -367,7 +379,7 @@ class Tape {
             const message = JSON.parse(frame.text);
             if (venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified)
               throw new Error(`Taped login success preceded a valid login on ${frame.url}`);
-            this.assertSubscribed(socket, message);
+            this.assertSubscribed(socket, message, frame.subscriptionKey);
           }
           this.validateTopic(socket, frame);
           socket.onMessage(frame.text);

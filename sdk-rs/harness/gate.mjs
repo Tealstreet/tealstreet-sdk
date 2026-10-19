@@ -171,6 +171,19 @@ for (let run = 0; run < runs; run++) {
     if (result[impl].socketErrors?.length) differences.push(`${impl}: ${result[impl].socketErrors.join('; ')}`);
     if (result[impl].unserved) differences.push(`${impl}: ${result[impl].unserved} unserved requests`);
   }
+  // KNOWN_TS_FIXES: the existing Bybit Rust port also subscribes to execution
+  // and wallet for execution IDs and live balances. TS subscribes only to
+  // order/position. Require those two exact extra topics on every private
+  // connection rather than dropping them from the comparison.
+  if (values.venue === 'bybit' && ts.account) {
+    for (const row of [...ts.subscriptions]) {
+      const [url, connection, op, topic] = JSON.parse(row);
+      if (new URL(url).pathname === '/v5/private' && op === 'subscribe' && topic === 'order') {
+        for (const extra of ['execution', 'wallet']) ts.subscriptions.push(JSON.stringify([url, connection, op, extra]));
+      }
+    }
+    ts.subscriptions.sort();
+  }
   for (const field of ['outbound', 'subscriptions', 'candles', 'bookEvents']) {
     if (!equal(ts[field], rust[field])) {
       const left = ts[field] ?? [];
