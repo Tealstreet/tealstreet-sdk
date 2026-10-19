@@ -211,3 +211,13 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   gate-integrity review has no blocker. Bybit private18-frame Node22 gate PASS.
 - All merged Node24 venue gates PASS after this declaration: BingX188/38frames,
   Binance871/14frames, Bybit8742/18frames. Workspace clippy --all-targets passes.
+
+### CI runtime replay proof
+
+- Node22.23.3 BingX public3-run gate PASS:188frames,1268markets,1260tickers,
+  2books; TS/Rust CPU128.086/93.359ms, steady65.575/45.326ms, median retained
+  1,808,648/1,701,880bytes. All required gate numbers now pass post-sync.
+- Wasm bridge verification exposed an old local workspace symlink; refreshing
+  Yarn fixes its target. Final API audit also found inherited BingX client-ID
+  helpers lacked the native rule. Adding the rule and real-wasm contract tests
+  before opening the PR; native trading semantics and replay remain green.
