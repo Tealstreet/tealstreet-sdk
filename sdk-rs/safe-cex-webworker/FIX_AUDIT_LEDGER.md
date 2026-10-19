@@ -16,7 +16,7 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 | 8 | UpdatePositionsHandler.handle | FIX | Same operation invoked during dispatch, without an extra spawn. |
 | 17 | StoreWorkerPayload | OPEN | Whole worker carrier and report boundary. |
 | 18 | WorkerConfig | ACCEPT | Unreachable strict codec removed; actual config/listener preserves the original native values. |
-| 19 | splitWorkerLogExtra | OPEN | Retained carrier across callers; no isolated JSON shim. |
+| 19 | splitWorkerLogExtra | FIX | Native Get/Object.entries plus retained worker/FFI logging delivery; source getter/graph/cooldown profiles below. |
 | 20 | start | FIX | Native Js ingress/config/dispatch, module-owned listeners and deterministic context teardown below. |
 | 21 | ChaserOrderState | OPEN | Native state and output boundary. |
 | 22 | defaultChaserState | FIX | Shared shallow-frozen native template; actual constructor snapshots and compiled old-constructor refusal below. |
@@ -401,3 +401,40 @@ scalar ingress checks retain 18 fields/378 comparisons, and the separate
 terminate/state numeric matrix retains its three fields/270 comparisons with
 unchanged inputs/routes. Source inventories keep the retired event declarations
 as output evidence. The cohort now has 13 FIX, 4 ACCEPT and 10 OPEN rows.
+
+## Native logging and report delivery: row 19
+
+The maintained ExchangeWorker helpers read inherited/hidden controls with ordinary
+Get, evaluate reserved fields again for each source read, and capture the original
+sentry tags/extra objects. Error materialization can mutate those objects before
+the report spreads them. Object.entries reads every enumerable value before its
+reserved-key filter. JSON input and cloned control fields lost these effects.
+
+The shared native Js carrier now runs from both helpers through forward_log and
+forward_error to WorkerDataPayload and the actual worker/FFI startup posts. The
+FFI caller no longer builds a JSON scaffold and patches text/error fields later.
+Cooldowns use the canonical native Map: a changing report-key getter may return
+an object after validation, and must never be coerced to a String key.
+The source try covers tag/extra spreading as well as the post; earlier control
+and materialization errors still propagate before that catch. Existing typed
+worker constructor identity and caught-error host capabilities stay explicit.
+
+Compiled master403459ad2d fails the existing source live-tag assertion: reporting
+uses before while maintained TypeScript reports after following coercion. The
+actual ExchangeWorker/DefaultStore/runtime binding independently checks the real
+post's aliases, cycles, own undefined, native UTF-16 key/value units, Infinity and
+negative-zero bits, unread depth150 referent, and raw overflow operation values.
+Its graph profile is compared to the maintained logError method. A separately
+compiled own-undefined omission control must fail that real worker assertion,
+then exact production bytes are restored before positive replay. No depth limit
+is accepted.
+
+The original 72 source reporting sequences/360 calls, six clock bit profiles,
+810 log profiles and helper corpus remain; getter-throw cases now compare the
+real source outcomes instead of a plain-object substitute. Three original text
+profiles include native D800, and hidden/inherited controls plus repeated getter
+counts/order are compared directly. Materialization/post/fallback error identity,
+clock reentry and cooldown mutation order remain separate assertions.
+Row 17 stays OPEN for the other StoreWorkerPayload consumers.
+
+After rows 25 and 19, the cohort has 14 FIX, 4 ACCEPT and 9 OPEN rows.
