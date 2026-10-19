@@ -2,6 +2,7 @@
 mod runtime;
 use safe_cex_exchange::delivery_timers::WorkerPortTimers;
 use safe_cex_exchange::js_runtime::value::{Js, from_typed};
+use safe_cex_exchange::runtime::ExchangeRuntime;
 use safe_cex_exchange::store_delivery::StoreFrame;
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
@@ -16,6 +17,7 @@ use safe_cex_webworker::exchange_worker::*;
 use safe_cex_webworker::exchange_worker_start::*;
 use safe_cex_webworker::payload::StoreWorkerOp;
 use safe_cex_webworker::payload::StoreWorkerPayload;
+use safe_cex_webworker::perf_fixture::{PerfFixture, PerfFixtureHost};
 use safe_cex_webworker::postprocessor_registry::ImportedPostprocessors;
 use safe_cex_webworker::postprocessor_registry::PostprocessorRegistry;
 use safe_cex_webworker::telegram::TelegramHost;
@@ -44,7 +46,6 @@ struct State {
     knob_inputs: RefCell<Vec<(&'static str, Js)>>,
     config_error: RefCell<Option<ExchangeError>>,
     console_args: RefCell<Vec<Js>>,
-    fixture_dump: RefCell<Option<Js>>,
     stores: RefCell<Vec<RecordedStoreMessage>>,
     tasks: RefCell<Vec<ExchangeFuture<'static, ()>>>,
     runtime: Rc<runtime::Runtime>,
@@ -62,7 +63,6 @@ struct State {
     start_waker: RefCell<Option<Waker>>,
     load_missing: Cell<bool>,
     completed_starts: Rc<Cell<u32>>,
-    replay: Cell<bool>,
     config: Rc<RefCell<Vec<WorkerConfigHandler<Js>>>>,
     replace_handlers: Cell<bool>,
     fail_handler_dispose: Cell<bool>,
@@ -70,7 +70,12 @@ struct State {
 struct Host {
     state: Rc<State>,
     self_ref: Weak<Host>,
-    proxy: Option<(bool, Rc<RefCell<String>>, Rc<WorkerPorts<Js, Host, Host>>)>,
+    proxy: Option<(
+        bool,
+        Rc<RefCell<String>>,
+        Rc<WorkerPorts<Js, Host, Host>>,
+        Rc<PerfFixture<Host>>,
+    )>,
 }
 impl Host {
     fn new() -> Rc<Self> {
@@ -129,20 +134,25 @@ impl Host {
         cb(from_typed(&payload).unwrap())
     }
     fn forward(&self, p: StoreWorkerPayload) -> Result<(), ExchangeError> {
-        if let Some((shared, key, ports)) = &self.proxy {
-            self.event(format!("record:{}", op(p.op)));
+        self.state.posts.borrow_mut().push(p.clone());
+        self.forward_native(from_typed(&p)?)
+    }
+    fn forward_native(&self, value: Js) -> Result<(), ExchangeError> {
+        let name = String::from_utf16_lossy(&value.get("op")?.to_js_string()?);
+        if let Some((shared, key, ports, perf)) = &self.proxy {
+            self.event(format!("record:{name}"));
+            perf.record(&value)?;
             if *shared {
-                ports.broadcast_with_throttle(&key.borrow(), Rc::new(from_typed(&p)?), None);
+                ports.broadcast_with_throttle(&key.borrow(), Rc::new(value), None);
                 return Ok(());
             }
         }
-        self.event(format!("post:{}", op(p.op)));
-        self.state.posts.borrow_mut().push(p);
+        if name != "store" {
+            self.event(format!("post:{name}"));
+        }
+        self.state.native_posts.borrow_mut().push(value.clone());
         Ok(())
     }
-}
-fn op(op: StoreWorkerOp) -> String {
-    serde_json::to_value(op).unwrap().as_str().unwrap().into()
 }
 fn kind(k: WorkerHandlerKind) -> &'static str {
     match k {
@@ -333,6 +343,10 @@ struct RecordedStoreMessage {
 }
 impl ExchangeWorkerHost for Host {
     fn post_store(&self, m: WorkerStoreMessage) -> Result<(), ExchangeError> {
+        self.forward_native(Js::object(vec![
+            ("op", from_typed(&m.op)?),
+            ("data", m.data.clone()),
+        ]))?;
         self.state.stores.borrow_mut().push(RecordedStoreMessage {
             op: m.op,
             data: safe_cex_exchange::js_runtime::value::to_typed_preserving_undefined(&m.data)
@@ -452,14 +466,12 @@ impl WorkerBootstrapHost for Host {
         &self,
         payload: safe_cex_webworker::data_post::WorkerDataPayload,
     ) -> Result<(), ExchangeError> {
-        self.forward(StoreWorkerPayload {
-            op: payload.op,
-            instance_id: None,
-            data: Some(safe_cex_exchange::js_runtime::value::to_json(
-                &payload.data,
-            )?),
-        })
+        self.forward_native(Js::object(vec![
+            ("op", from_typed(&payload.op)?),
+            ("data", payload.data),
+        ]))
     }
+
     fn spawn_start_task(&self, f: ExchangeFuture<'static, ()>) {
         self.state.tasks.borrow_mut().push(f)
     }
@@ -520,6 +532,13 @@ impl WorkerPort<Js> for Host {
         Ok(())
     }
 }
+impl PerfFixtureHost for Host {
+    fn report_perf_timer_error(&self, error: &ExchangeError) {
+        self.state
+            .runtime
+            .report_exception(error, &json!({"source":"perfTimer"}).into());
+    }
+}
 impl WorkerSessionHost for Host {
     fn install_message_listener(
         &self,
@@ -540,34 +559,14 @@ impl WorkerSessionHost for Host {
         shared: bool,
         key: Rc<RefCell<String>>,
         ports: Rc<WorkerPorts<Js, Self, Self>>,
+        perf: Rc<PerfFixture<Self>>,
     ) -> Rc<Self> {
         self.event(format!("proxy:{shared}"));
         Rc::new_cyclic(|w| Self {
             state: self.state.clone(),
             self_ref: w.clone(),
-            proxy: Some((shared, key, ports)),
+            proxy: Some((shared, key, ports, perf)),
         })
-    }
-    fn is_replaying_perf_fixture(&self) -> bool {
-        self.state.replay.get()
-    }
-    fn start_replay(
-        &self,
-        _: Rc<dyn Fn(Js) -> Result<(), ExchangeError>>,
-    ) -> Result<(), ExchangeError> {
-        self.event("replay");
-        Ok(())
-    }
-    fn configure_perf_fixture(&self, value: Js) -> Result<(), ExchangeError> {
-        self.state.knob_inputs.borrow_mut().push(("perf", value));
-        self.event("configure-perf");
-        Ok(())
-    }
-    fn take_perf_fixture(&self) -> Result<Js, ExchangeError> {
-        if let Some(value) = self.state.fixture_dump.borrow().clone() {
-            return Ok(value);
-        }
-        Ok(Js::object(vec![("frames", Js::array(vec![]))]))
     }
     fn set_tick_interval_multipliers(&self, value: Js) -> Result<(), ExchangeError> {
         self.state.knob_inputs.borrow_mut().push(("tick", value));
@@ -952,7 +951,7 @@ fn hosted_factory_selection_and_exact_event_bridge_registration() {
         ("grafana-http-request", StoreWorkerOp::GrafanaHttpRequest),
         ("grafana-http-response", StoreWorkerOp::GrafanaHttpResponse),
     ];
-    let before = h.state.posts.borrow().len();
+    let before = h.state.native_posts.borrow().len();
     for (name, op) in log_events {
         exchange
             .base()
@@ -961,16 +960,21 @@ fn hosted_factory_selection_and_exact_event_bridge_registration() {
                 safe_cex_exchange::js_runtime::value::Js::str("payload"),
             )
             .unwrap();
-        let post = h.state.posts.borrow().last().unwrap().clone();
-        assert_eq!(post.op, op, "BOOT native event op");
+        let post = h.state.native_posts.borrow().last().unwrap().clone();
+        assert!(
+            post.get("op")
+                .unwrap()
+                .strict_equals(&from_typed(&op).unwrap()),
+            "BOOT native event op"
+        );
         assert_eq!(
-            post.data,
-            Some(json!(["payload"])),
+            safe_cex_exchange::js_runtime::value::to_json(&post.get("data").unwrap()).unwrap(),
+            json!(["payload"]),
             "BOOT native single-argument bridge"
         );
     }
     assert_eq!(
-        h.state.posts.borrow().len() - before,
+        h.state.native_posts.borrow().len() - before,
         12,
         "BOOT native independent log-event floor"
     );
@@ -982,7 +986,16 @@ fn hosted_factory_selection_and_exact_event_bridge_registration() {
         )
         .unwrap();
     assert_eq!(
-        h.state.posts.borrow().last().unwrap().op,
+        safe_cex_exchange::js_runtime::value::to_typed::<StoreWorkerOp>(
+            &h.state
+                .native_posts
+                .borrow()
+                .last()
+                .unwrap()
+                .get("op")
+                .unwrap()
+        )
+        .unwrap(),
         StoreWorkerOp::Fill,
         "BOOT native direct fill bridge op"
     );
@@ -993,7 +1006,14 @@ fn hosted_factory_selection_and_exact_event_bridge_registration() {
             safe_cex_exchange::js_runtime::value::Js::Null,
         )
         .unwrap();
-    assert!(h.state.posts.borrow().last().unwrap().data.is_none());
+    assert!(
+        !h.state
+            .native_posts
+            .borrow()
+            .last()
+            .unwrap()
+            .has_own("data")
+    );
     exchange
         .base()
         .emit("deactivate", safe_cex_exchange::js_runtime::value::Js::Null)
@@ -1001,7 +1021,16 @@ fn hosted_factory_selection_and_exact_event_bridge_registration() {
     assert!(w.exchange().is_none());
     assert!(exchange.base().is_disposed());
     assert_eq!(
-        h.state.posts.borrow().last().unwrap().op,
+        safe_cex_exchange::js_runtime::value::to_typed::<StoreWorkerOp>(
+            &h.state
+                .native_posts
+                .borrow()
+                .last()
+                .unwrap()
+                .get("op")
+                .unwrap()
+        )
+        .unwrap(),
         StoreWorkerOp::DeactivateStatus
     );
     assert_eq!(
@@ -1161,24 +1190,24 @@ fn session_registry_seed_reuse_precedence_mismatch_and_dispose() {
         "SESSION native deduplicated shared port"
     );
     let replay = Host::new();
-    replay.state.replay.set(true);
     let module = WorkerModule::new(replay.clone());
+    module
+        .perf
+        .configure(Js::object(vec![("mode", Js::str("replay"))]))
+        .unwrap();
     let _session = module.start(replay.clone(), false);
     finish(&replay, replay.send(init_payload())).unwrap();
     assert!(module.exchange_workers.borrow().is_empty());
     assert_eq!(
         &*replay.state.events.borrow(),
-        &["listen", "post:start-status", "replay"],
+        &["listen", "post:start-status"],
         "SESSION native replay creates no venue"
     );
     let src = source();
     assert_eq!(src["seededLatency"].as_f64(), Some(7.));
     assert_eq!(src["mismatchWarnings"], 1);
     assert_eq!(src["sharedStarts"].as_f64(), Some(starts as f64));
-    assert_eq!(
-        src["replayEvents"],
-        json!(["listen", "post:start-status", "replay"])
-    );
+    assert_eq!(src["replayEvents"], json!(["listen", "post:start-status"]));
 }
 
 fn startup_timing_source() -> Value {
@@ -1516,8 +1545,11 @@ fn session_raw_dispatch_preserves_unknown_ops_and_buffered_object_identity() {
 fn session_replay_init_skips_unread_constructor_inputs() {
     let source = session_native_source();
     let host = Host::new();
-    host.state.replay.set(true);
     let module = WorkerModule::new(host.clone());
+    module
+        .perf
+        .configure(Js::object(vec![("mode", Js::str("replay"))]))
+        .unwrap();
     let _session = module.start(host.clone(), false);
     let message = Js::object(vec![("op", Js::str("init")), ("data", Js::object(vec![]))]);
     let listener = host.state.listener.borrow().clone().unwrap();
@@ -1569,15 +1601,15 @@ fn session_config_keeps_setter_arguments_live_order_and_original_throw() {
     )
     .unwrap();
     let inputs = host.state.knob_inputs.borrow();
-    assert_eq!(inputs.len(), 2);
+    assert_eq!(inputs.len(), 1);
     assert_eq!(inputs[0].0, "tick");
     assert!(inputs[0].1.strict_equals(&tick));
     assert!(
         matches!(inputs[0].1.get("bybit").unwrap(), Js::Number(value) if value.to_bits()==f64::INFINITY.to_bits())
     );
-    assert_eq!(inputs[1].0, "perf");
-    assert!(inputs[1].1.strict_equals(&replacement));
-    assert!(inputs[1].1.has_own("present"));
+    assert!(!module.perf.is_recording());
+    assert!(!module.perf.is_replaying());
+    assert!(replacement.has_own("present"));
     assert!(
         host.state.console_args.borrow()[0].strict_equals(&cause),
         "SESSION config console keeps original non-Error throw"
@@ -1603,7 +1635,14 @@ fn session_perf_dump_uses_native_port_before_any_json_projection() {
             ])]),
         ),
     ]);
-    *host.state.fixture_dump.borrow_mut() = Some(value.clone());
+    module
+        .perf
+        .take()
+        .unwrap()
+        .get("frames")
+        .unwrap()
+        .set("0", value.get("frames").unwrap().get("0").unwrap())
+        .unwrap();
     let listener = host.state.listener.borrow().clone().unwrap();
     finish(
         &host,
@@ -1611,7 +1650,12 @@ fn session_perf_dump_uses_native_port_before_any_json_projection() {
     )
     .unwrap();
     let posted = host.state.native_posts.borrow()[0].get("data").unwrap();
-    assert!(posted.strict_equals(&value));
+    assert!(
+        posted
+            .get("frames")
+            .unwrap()
+            .strict_equals(&module.perf.take().unwrap().get("frames").unwrap())
+    );
     let frame = posted.get("frames").unwrap().get("0").unwrap();
     assert!(
         matches!(frame.get("atMs").unwrap(),Js::Number(number) if number.to_bits()==(-0f64).to_bits())
@@ -1773,18 +1817,34 @@ fn config_and_fixture_carriers_reach_real_listener_without_legacy_validation() {
             "CONFIG-CARRIER callback identity"
         );
         let inputs = host.state.knob_inputs.borrow();
-        assert_eq!(inputs.len(), (index + 1) * 2);
+        assert_eq!(inputs.len(), index + 1);
         assert!(
-            inputs[index * 2].1.strict_equals(&tick),
+            inputs[index].1.strict_equals(&tick),
             "CONFIG-CARRIER tick identity"
         );
         assert!(
-            inputs[index * 2 + 1].1.strict_equals(&perf),
+            seen.borrow()
+                .last()
+                .unwrap()
+                .get("perfFixture")
+                .unwrap()
+                .strict_equals(&perf),
             "CONFIG-CARRIER perf argument identity"
         );
         drop(inputs);
         configs += 1;
-        *host.state.fixture_dump.borrow_mut() = Some(fixture.clone());
+        module
+            .perf
+            .configure(Js::object(vec![("mode", Js::str("off"))]))
+            .unwrap();
+        module
+            .perf
+            .configure(Js::object(vec![("mode", Js::str("record"))]))
+            .unwrap();
+        host.state.now.set(number);
+        module.perf.record(&Js::Null).unwrap();
+        let frames = module.perf.take().unwrap().get("frames").unwrap();
+        frames.set("0", frame.clone()).unwrap();
         finish(
             &host,
             listener(Js::object(vec![("op", Js::str("__perfFixtureDump"))])),
@@ -1794,8 +1854,8 @@ fn config_and_fixture_carriers_reach_real_listener_without_legacy_validation() {
         assert_eq!(posts.len(), index + 1);
         let actual = posts[index].get("data").unwrap();
         assert!(
-            actual.strict_equals(&fixture),
-            "CONFIG-CARRIER returned fixture identity"
+            actual.get("frames").unwrap().strict_equals(&frames),
+            "CONFIG-CARRIER returned frames identity"
         );
         let actual_frame = actual.get("frames").unwrap().get("0").unwrap();
         assert!(actual_frame.strict_equals(&frame));
@@ -1845,9 +1905,14 @@ fn config_and_fixture_carriers_reach_real_listener_without_legacy_validation() {
         )
         .unwrap();
         let inputs = host.state.knob_inputs.borrow();
-        assert_eq!(inputs.len(), before + 1);
+        assert_eq!(inputs.len(), before);
         assert!(
-            inputs.last().unwrap().1.strict_equals(&value),
+            seen.borrow()
+                .last()
+                .unwrap()
+                .get("perfFixture")
+                .unwrap()
+                .strict_equals(&value),
             "CONFIG-CARRIER native non-record forwarding"
         );
         configs += 1;
@@ -1857,4 +1922,432 @@ fn config_and_fixture_carriers_reach_real_listener_without_legacy_validation() {
     assert_eq!(dumps, 10);
     assert_eq!(source["configs"], json!(configs));
     assert_eq!(source["dumps"], json!(dumps));
+}
+
+#[test]
+fn native_perf_record_dump_replay_matches_maintained_listener_roundtrip() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/worker_bootstrap_oracle.mjs"
+        ))
+        .arg("--perf-service")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "PERF source roundtrip: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let host = Host::new();
+    host.state.next.set(1);
+    let module = WorkerModule::new(host.clone());
+    let session = module.start(host.clone(), false);
+    let listener = host.state.listener.borrow().clone().unwrap();
+    finish(
+        &host,
+        listener(Js::object(vec![
+            ("op", Js::str("__workerConfig")),
+            (
+                "data",
+                Js::object(vec![(
+                    "perfFixture",
+                    Js::object(vec![("mode", Js::str("record"))]),
+                )]),
+            ),
+        ])),
+    )
+    .unwrap();
+    finish(&host, host.send(init_payload())).unwrap();
+    let shared = Js::object(vec![("v", Js::Number(f64::from_bits(0xfff8000000000042)))]);
+    let input = Js::object(vec![
+        ("n", Js::Number(17.)),
+        ("shared", shared.clone()),
+        ("again", shared),
+        ("own", Js::Undefined),
+        ("text", Js::utf16(&[0xd800, 88, 0xdc00])),
+        (
+            "nums",
+            Js::array(vec![
+                Js::Number(f64::INFINITY),
+                Js::Number(f64::NEG_INFINITY),
+                Js::Number(-0.),
+            ]),
+        ),
+    ]);
+    input.set("self", input.clone()).unwrap();
+    session
+        .get_worker()
+        .unwrap()
+        .exchange()
+        .unwrap()
+        .base()
+        .emit("fill", input.clone())
+        .unwrap();
+    input.set("n", Js::Number(42.)).unwrap();
+    finish(
+        &host,
+        listener(Js::object(vec![("op", Js::str("__perfFixtureDump"))])),
+    )
+    .unwrap();
+    let fixture = host
+        .state
+        .native_posts
+        .borrow()
+        .iter()
+        .find(|p| {
+            p.get("op")
+                .unwrap()
+                .strict_equals(&Js::str("__perfFixtureDump"))
+        })
+        .unwrap()
+        .get("data")
+        .unwrap();
+    let frames = fixture.get("frames").unwrap();
+    let count = frames.get("length").unwrap().to_number().unwrap() as usize;
+    assert_eq!(
+        count,
+        source["frames"].as_u64().unwrap() as usize,
+        "PERF listener must record actual outbound frames"
+    );
+    let ops: Vec<_> = (0..count)
+        .map(|i| {
+            frames
+                .get(&i.to_string())
+                .unwrap()
+                .get("msg")
+                .unwrap()
+                .get("op")
+                .unwrap()
+                .to_display()
+        })
+        .collect();
+    assert_eq!(json!(ops), source["ops"]);
+    let fill = (0..count)
+        .map(|i| frames.get(&i.to_string()).unwrap().get("msg").unwrap())
+        .find(|p| p.get("op").unwrap().strict_equals(&Js::str("fill")))
+        .unwrap();
+    assert!(
+        matches!(fill.get("data").unwrap().get("n").unwrap(), Js::Number(n) if n.to_bits()==17_f64.to_bits()),
+        "PERF captured payload cannot follow later Store/event mutation"
+    );
+    let data = fill.get("data").unwrap();
+    assert!(data.get("self").unwrap().strict_equals(&data));
+    assert!(
+        data.get("shared")
+            .unwrap()
+            .strict_equals(&data.get("again").unwrap())
+    );
+    assert!(
+        data.get("shared")
+            .unwrap()
+            .get("v")
+            .unwrap()
+            .as_f64()
+            .unwrap()
+            .is_nan()
+    );
+    assert_eq!(
+        data.get("shared")
+            .unwrap()
+            .get("v")
+            .unwrap()
+            .as_f64()
+            .unwrap()
+            .to_bits(),
+        f64::NAN.to_bits(),
+        "PERF native listener matches Node clone NaN payload canonicalization"
+    );
+    assert!(data.has_own("own"));
+    assert!(data.get("own").unwrap().is_undefined());
+    assert_eq!(
+        data.get("text").unwrap().as_str().unwrap().as_ref(),
+        &[0xd800, 88, 0xdc00]
+    );
+    for (i, expected) in [f64::INFINITY, f64::NEG_INFINITY, -0.].iter().enumerate() {
+        assert_eq!(
+            data.get("nums")
+                .unwrap()
+                .get(&i.to_string())
+                .unwrap()
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            expected.to_bits()
+        );
+    }
+    assert_eq!(
+        fixture.get("recordedAtMs").unwrap().as_f64(),
+        source["recordedAtMs"].as_f64()
+    );
+    assert_eq!(
+        fixture.get("durationMs").unwrap().as_f64(),
+        source["durationMs"].as_f64()
+    );
+    input
+        .delete(&safe_cex_exchange::js_runtime::value::utf16("self"))
+        .unwrap();
+    drop(module);
+    let replay = Host::new();
+    replay.state.next.set(1);
+    let replay_module = WorkerModule::new(replay.clone());
+    let _session = replay_module.start(replay.clone(), false);
+    let receive = replay.state.listener.borrow().clone().unwrap();
+    finish(
+        &replay,
+        receive(Js::object(vec![
+            ("op", Js::str("__workerConfig")),
+            (
+                "data",
+                Js::object(vec![(
+                    "perfFixture",
+                    Js::object(vec![
+                        ("mode", Js::str("replay")),
+                        ("fixture", fixture),
+                        ("intervalMs", Js::Number(7.)),
+                        ("loop", Js::Bool(false)),
+                    ]),
+                )]),
+            ),
+        ])),
+    )
+    .unwrap();
+    finish(
+        &replay,
+        receive(Js::object(vec![
+            ("op", Js::str("init")),
+            ("data", Js::object(vec![])),
+        ])),
+    )
+    .unwrap();
+    assert!(replay_module.exchange_workers.borrow().is_empty());
+    let base = replay.state.native_posts.borrow().len();
+    let mut delays = vec![];
+    for index in 0..count {
+        let timers = replay.state.timers.borrow();
+        assert_eq!(timers.len(), 1, "PERF only one owned metronome timer");
+        let (&id, (delay, _)) = timers.iter().next().unwrap();
+        delays.push(*delay);
+        drop(timers);
+        replay.fire(id, 500. + index as f64 * 7.);
+        let posts = replay.state.native_posts.borrow();
+        assert_eq!(posts.len(), base + index + 1);
+        assert!(
+            posts[base + index]
+                .strict_equals(&frames.get(&index.to_string()).unwrap().get("msg").unwrap()),
+            "PERF replay retains the captured frame reference"
+        );
+    }
+    assert!(replay.state.timers.borrow().is_empty());
+    assert_eq!(
+        delays,
+        source["delays"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n.as_f64().unwrap())
+            .collect::<Vec<_>>()
+    );
+    assert!(!replay.state.events.borrow().contains(&"load".to_string()));
+    data.delete(&safe_cex_exchange::js_runtime::value::utf16("self"))
+        .unwrap();
+}
+
+#[test]
+fn native_perf_cap_loop_and_module_disposal_match_source() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/worker_bootstrap_oracle.mjs"
+        ))
+        .arg("--perf-rules")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let host = Host::new();
+    host.state.next.set(1);
+    let module = WorkerModule::new(host.clone());
+    let session = module.start(host.clone(), false);
+    let receive = host.state.listener.borrow().clone().unwrap();
+    let configure = |cfg| {
+        finish(
+            &host,
+            receive(Js::object(vec![
+                ("op", Js::str("__workerConfig")),
+                ("data", Js::object(vec![("perfFixture", cfg)])),
+            ])),
+        )
+        .unwrap()
+    };
+    configure(Js::object(vec![("mode", Js::str("record"))]));
+    let reads = Rc::new(Cell::new(0));
+    let count = reads.clone();
+    let bad = Js::object(vec![]);
+    bad.define_accessor(
+        "bad",
+        Some(Rc::new(move |_| {
+            count.set(count.get() + 1);
+            Err(safe_cex_exchange::js_runtime::value::Thrown::error(
+                "Error",
+                "uncloneable getter",
+            ))
+        })),
+        None,
+    )
+    .unwrap();
+    module.perf.record(&bad).unwrap();
+    let count = reads.clone();
+    let good = Js::object(vec![]);
+    good.define_accessor(
+        "n",
+        Some(Rc::new(move |_| {
+            count.set(count.get() + 1);
+            Ok(Js::Number(17.))
+        })),
+        None,
+    )
+    .unwrap();
+    module.perf.record(&good).unwrap();
+    let first = module.perf.take().unwrap();
+    let frames = first.get("frames").unwrap();
+    assert_eq!(frames.get("length").unwrap().as_f64(), Some(1.));
+    assert_eq!(
+        frames
+            .get("0")
+            .unwrap()
+            .get("msg")
+            .unwrap()
+            .get("n")
+            .unwrap()
+            .as_f64(),
+        Some(17.)
+    );
+    assert_eq!(reads.get(), source["reads"].as_u64().unwrap() as u32);
+    assert!(frames.strict_equals(&module.perf.take().unwrap().get("frames").unwrap()));
+    assert_eq!(source["alias"], true);
+    frames.set("length", Js::Number(19_999.)).unwrap();
+    frames
+        .set(
+            "19998",
+            Js::object(vec![("atMs", Js::Number(0.)), ("msg", Js::Null)]),
+        )
+        .unwrap();
+    module.perf.record(&Js::Null).unwrap();
+    assert_eq!(frames.get("length").unwrap().as_f64(), Some(20_000.));
+    module.perf.record(&bad).unwrap();
+    assert_eq!(reads.get(), 2);
+    assert_eq!(
+        module
+            .perf
+            .take()
+            .unwrap()
+            .get("frames")
+            .unwrap()
+            .get("length")
+            .unwrap()
+            .as_f64(),
+        source["cap"].as_f64()
+    );
+    configure(Js::object(vec![("mode", Js::str("off"))]));
+    configure(Js::object(vec![("mode", Js::str("record"))]));
+    module.perf.record(&Js::Null).unwrap();
+    assert_eq!(
+        module
+            .perf
+            .take()
+            .unwrap()
+            .get("frames")
+            .unwrap()
+            .get("length")
+            .unwrap()
+            .as_f64(),
+        source["reset"].as_f64()
+    );
+    assert_eq!(frames.get("length").unwrap().as_f64(), Some(20_000.));
+    let fixture = Js::object(vec![(
+        "frames",
+        Js::array(vec![
+            Js::object(vec![
+                ("atMs", Js::Number(900.)),
+                ("msg", Js::object(vec![("id", Js::Number(1.))])),
+            ]),
+            Js::object(vec![
+                ("atMs", Js::Number(-900.)),
+                ("msg", Js::object(vec![("id", Js::Number(2.))])),
+            ]),
+        ]),
+    )]);
+    configure(Js::object(vec![
+        ("mode", Js::str("replay")),
+        ("fixture", fixture),
+        ("intervalMs", Js::Number(0.)),
+        ("loop", Js::Bool(true)),
+    ]));
+    finish(
+        &host,
+        receive(Js::object(vec![
+            ("op", Js::str("init")),
+            ("data", Js::object(vec![])),
+        ])),
+    )
+    .unwrap();
+    let mut ids = vec![];
+    let mut delays = vec![];
+    for i in 0..3 {
+        let (&id, (delay, _)) = host
+            .state
+            .timers
+            .borrow()
+            .iter()
+            .next()
+            .map(|(id, p)| (id, p.clone()))
+            .unwrap();
+        delays.push(delay);
+        host.fire(id, 100. + i as f64);
+        ids.push(
+            host.state
+                .native_posts
+                .borrow()
+                .last()
+                .unwrap()
+                .get("id")
+                .unwrap()
+                .as_f64()
+                .unwrap(),
+        );
+    }
+    assert_eq!(
+        ids,
+        source["ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        delays,
+        source["delays"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect::<Vec<_>>()
+    );
+    let service = module.perf.clone();
+    drop(module);
+    assert!(
+        host.state.timers.borrow().is_empty(),
+        "PERF module disposal releases metronome despite retained session/service"
+    );
+    assert!(host.state.listener.borrow().is_none());
+    assert!(!service.is_replaying());
+    assert!(service.configure(Js::Null).is_err());
+    assert!(session.get_worker().is_none());
 }

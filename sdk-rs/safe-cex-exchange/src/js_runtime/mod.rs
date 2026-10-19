@@ -18,6 +18,7 @@ pub mod regexp;
 pub mod scope;
 pub mod sockets;
 pub mod store;
+pub mod structured_clone;
 mod throttle;
 pub mod value;
 

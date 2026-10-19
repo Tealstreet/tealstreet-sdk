@@ -2124,3 +2124,14 @@ only the packed protocol's eleven fields; that protocol order is independent of
 a ticker object's own-key order. Native post capture owns the resulting graph
 without JSON projection. Typed worker processors convert their existing frame
 once at the preparer's input; there is no second payload algorithm.
+
+## Worker structured clone
+
+js_runtime::structured_clone implements the recorder's platform clone operation
+for native primitives, ordinary objects, sparse arrays, Map/Set and intrinsic
+Errors. It preserves cycles/aliases, non-NaN binary64 bits and UTF16, invokes own
+enumerable getters in source order, and retains original getter failures.
+NaN payloads canonicalize as Node structuredClone does.
+Uncloneable values and unmodeled object kinds produce visible DataCloneError.
+The worker recorder intentionally drops clone failures as perfFixture.ts does;
+other callers receive the error. Node's real structuredClone supplies the oracle.
