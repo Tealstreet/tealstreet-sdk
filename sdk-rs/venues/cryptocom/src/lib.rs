@@ -199,6 +199,15 @@ impl Cryptocom {
     }
 
     fn market_channels(&mut self, cx: &mut Cx<'_, Pending>) {
+        let mut seeded = self
+            .subscriptions
+            .keys()
+            .filter(|channel| {
+                ["ticker.", "mark.", "index.", "funding."]
+                    .iter()
+                    .any(|prefix| channel.starts_with(prefix))
+            })
+            .count();
         let markets = cx.store.markets();
         let channels =
             markets
@@ -215,10 +224,14 @@ impl Cryptocom {
                     .flatten()
                 }));
         for channel in channels {
-            if self.subscriptions.len() >= 350 {
+            if self.subscriptions.contains_key(&channel) {
+                continue;
+            }
+            if seeded >= 350 {
                 break;
             }
-            self.subscriptions.entry(channel).or_insert(1);
+            self.subscriptions.insert(channel, 1);
+            seeded += 1;
         }
     }
 

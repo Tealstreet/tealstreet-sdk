@@ -307,11 +307,23 @@ impl Okx {
         command: CommandId,
         query: Query,
     ) {
-        if self.credentials.is_none() && !matches!(query, Query::PublicTrades { .. }) {
+        if self.credentials.is_none()
+            && !matches!(
+                query,
+                Query::PublicTrades { .. } | Query::OrderByClientId { .. }
+            )
+        {
             cx.done(command, Ok("[]".into()));
             return;
         }
         let (endpoint, symbol, order_id, income_kind, from, to, limit, rows) = match query {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    command,
+                    Err("OKX client order lookup is not supported by the Rust engine".into()),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 order_id,

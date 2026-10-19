@@ -166,6 +166,13 @@ fn compact(s: &str) -> String {
 impl MexcFutures {
     pub fn start_query(&self, cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) {
         let (kind, symbol, order_id, from, to, limit) = match query {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    command,
+                    Err("MEXC client-order-ID lookup is unsupported".into()),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 order_id,

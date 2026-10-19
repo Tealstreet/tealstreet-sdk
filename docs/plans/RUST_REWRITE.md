@@ -279,7 +279,7 @@ are ~450 KB/s for two 1,000-level books).
 
 - Bans, fmt, clippy, native tests, wasm32 build and clippy.
 - Replay gate (`rust.yml`, job "replay gate"): release wasm with the pinned
-  wasm-bindgen, an explicit combined-venue size budget in `rust.yml`, committed public fixtures
+  wasm-bindgen, an explicit per-venue size budget in `rust.yml`, committed public fixtures
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
   and each venue's generated private tape gated on identical account state.
 
@@ -299,11 +299,12 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Crypto.com | done (#1303) |
 | WEEX | done (#1301) |
 | BingX | done (#1305) |
-| MEXC | done (#1304); conditional/trailing parity check pending |
+| MEXC | done (#1304); conditional/trailing parity checked (#1311) |
 | BloFin | done (#1300) |
+| Hyperliquid perps | Rust port [#1306](https://github.com/Tealstreet/tealstreet-sdk/pull/1306); implementation and reviews complete, CI gated |
 | Backpack | done (#1299) |
 | Bitget (USDT-M, USDC) | done (#1308); inverse sizing and UTA ledger/trailing parity next |
-| Hyperliquid, Bitunix | wave 1, PRs in review |
+| Bitunix | wave 1, PR in review |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | Implemented; [PR #1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313) |
 | KuCoin, Phemex | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |

@@ -3,19 +3,48 @@
 //! JavaScript owns sockets, fetch and timers; it forwards each event here and
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none.
+#[cfg(not(any(
+    feature = "binance",
+    feature = "blofin",
+    feature = "bybit",
+    feature = "cryptocom",
+    feature = "bingx",
+    feature = "mexc",
+    feature = "bitget",
+    feature = "backpack",
+    feature = "weex",
+    feature = "hyperliquid",
+    feature = "okx"
+)))]
+compile_error!(
+    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx or weex"
+);
+
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
+#[cfg(feature = "backpack")]
 use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
+#[cfg(feature = "binance")]
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+#[cfg(feature = "bingx")]
 use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
+#[cfg(feature = "bitget")]
 use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
+#[cfg(feature = "blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
+#[cfg(feature = "bybit")]
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
+#[cfg(feature = "cryptocom")]
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
+#[cfg(feature = "hyperliquid")]
+use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
+#[cfg(feature = "mexc")]
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
+#[cfg(feature = "okx")]
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
+#[cfg(feature = "weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -54,9 +83,31 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
 }
 
+#[cfg(any(
+    feature = "binance",
+    feature = "blofin",
+    feature = "bybit",
+    feature = "cryptocom",
+    feature = "bingx",
+    feature = "mexc",
+    feature = "bitget",
+    feature = "backpack",
+    feature = "weex",
+    feature = "hyperliquid",
+    feature = "okx"
+))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[cfg(any(
+        feature = "binance",
+        feature = "blofin",
+        feature = "bybit",
+        feature = "cryptocom",
+        feature = "hyperliquid",
+        feature = "bitget",
+        feature = "okx"
+    ))]
     #[serde(default)]
     testnet: bool,
     #[serde(default)]
@@ -65,12 +116,39 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
+    #[cfg(feature = "backpack")]
     #[serde(default)]
     recv_window: Option<f64>,
+    #[cfg(any(
+        feature = "okx",
+        feature = "weex",
+        feature = "blofin",
+        feature = "bitget"
+    ))]
     #[serde(default)]
     passphrase: Option<String>,
+    #[cfg(feature = "hyperliquid")]
+    #[serde(default)]
+    application_id: Option<String>,
+    #[cfg(feature = "hyperliquid")]
+    #[serde(default)]
+    vault: Option<String>,
+    #[cfg(feature = "hyperliquid")]
+    #[serde(default)]
+    hyperliquid_builder: Option<HyperliquidBuilder>,
+    #[cfg(feature = "hyperliquid")]
+    #[serde(default)]
+    enable_spot_markets: bool,
+    #[cfg(feature = "weex")]
     #[serde(default)]
     private_ws_headers: bool,
+}
+#[cfg(feature = "hyperliquid")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HyperliquidBuilder {
+    address: String,
+    fee_tenths_bps: u32,
 }
 
 #[derive(Serialize)]
@@ -256,6 +334,10 @@ enum CommandIn {
         command: u32,
         hedged: bool,
     },
+    FetchLeverage {
+        command: u32,
+        symbol: String,
+    },
     #[serde(rename_all = "camelCase")]
     FetchFills {
         command: u32,
@@ -295,9 +377,11 @@ enum CommandIn {
         #[serde(default)]
         limit: Option<u32>,
     },
-    FetchLeverage {
+    #[serde(rename_all = "camelCase")]
+    FindOrderByClientOrderId {
         command: u32,
         symbol: String,
+        client_order_id: String,
     },
     FetchPublicTrades {
         command: u32,
@@ -322,6 +406,17 @@ enum CommandIn {
 impl From<CommandIn> for Command {
     fn from(command: CommandIn) -> Self {
         match command {
+            CommandIn::FindOrderByClientOrderId {
+                command,
+                symbol,
+                client_order_id,
+            } => Self::Query {
+                command,
+                query: Query::OrderByClientId {
+                    symbol,
+                    client_order_id,
+                },
+            },
             CommandIn::SetTickerSymbols { symbols } => Self::SetTickerSymbols { symbols },
             CommandIn::SubscribeOrderBook { symbol } => Self::SubscribeOrderBook { symbol },
             CommandIn::UnsubscribeOrderBook { symbol } => Self::UnsubscribeOrderBook { symbol },
@@ -356,6 +451,7 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
+            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
                 command,
                 symbol,
@@ -405,7 +501,6 @@ impl From<CommandIn> for Command {
                     limit,
                 },
             },
-            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchPublicTrades {
                 command,
                 symbol,
@@ -465,9 +560,23 @@ pub struct WasmEngine {
 
 #[wasm_bindgen]
 impl WasmEngine {
+    #[cfg(any(
+        feature = "binance",
+        feature = "blofin",
+        feature = "bybit",
+        feature = "cryptocom",
+        feature = "bingx",
+        feature = "mexc",
+        feature = "bitget",
+        feature = "backpack",
+        feature = "weex",
+        feature = "hyperliquid",
+        feature = "okx"
+    ))]
     #[wasm_bindgen(constructor)]
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: EngineOptions = serde_json::from_str(options_json)?;
+        #[cfg(feature = "weex")]
         if venue == "weex"
             && !options.public_data_only
             && options.passphrase.as_deref().is_none_or(str::is_empty)
@@ -475,24 +584,14 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
-            "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
-                public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-            }))),
-            "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
-                testnet: options.testnet,
-                public_data_only: options.public_data_only,
-                key: options.key,
-                secret: options.secret,
-                portfolio_margin: venue == "binancepm",
-            }))),
+            #[cfg(feature = "backpack")]
             "backpack" => Box::new(Engine::new(Backpack::new(BackpackOptions {
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
                 recv_window: options.recv_window,
             }))),
+            #[cfg(feature = "blofin")]
             "blofin" => Box::new(Engine::new(Blofin::new(BlofinOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
@@ -500,11 +599,27 @@ impl WasmEngine {
                 secret: options.secret,
                 passphrase: options.passphrase,
             }))),
+            #[cfg(feature = "mexc")]
+            "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
+            #[cfg(feature = "binance")]
+            "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                portfolio_margin: venue == "binancepm",
+            }))),
+            #[cfg(feature = "bingx")]
             "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
             }))),
+            #[cfg(feature = "weex")]
             "weex" => Box::new(Engine::new(WeexFutures::new(WeexOptions {
                 public_data_only: options.public_data_only,
                 key: options.key,
@@ -512,12 +627,14 @@ impl WasmEngine {
                 passphrase: options.passphrase,
                 private_ws_headers: options.private_ws_headers,
             }))),
+            #[cfg(feature = "bybit")]
             "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
             }))),
+            #[cfg(feature = "bitget")]
             "bitget" | "bitgetusdc" => {
                 if !options.public_data_only
                     && options.key.as_ref().is_some_and(|s| !s.is_empty())
@@ -539,12 +656,34 @@ impl WasmEngine {
                     },
                 })))
             }
+            #[cfg(feature = "cryptocom")]
             "cryptocom" => Box::new(Engine::new(Cryptocom::new(CryptocomOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
             }))),
+            #[cfg(feature = "hyperliquid")]
+            "hyperliquid" => {
+                if options.enable_spot_markets {
+                    return Err(JsError::new(
+                        "Rust Hyperliquid currently supports perpetual markets only",
+                    ));
+                }
+                Box::new(Engine::new(Hyperliquid::new(HyperliquidOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    application_id: options.application_id,
+                    vault: options.vault,
+                    builder: options.hyperliquid_builder.map(|b| Builder {
+                        b: b.address,
+                        f: b.fee_tenths_bps,
+                    }),
+                })))
+            }
+            #[cfg(feature = "okx")]
             "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
                 if !options.public_data_only
                     && options.key.as_ref().is_some_and(|s| !s.is_empty())
@@ -664,5 +803,21 @@ impl WasmEngine {
         self.inner
             .frame(now, market_only)
             .map(js_sys::Uint8Array::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forwards_leverage_metadata_command() {
+        let wire: CommandIn =
+            serde_json::from_str(r#"{"op":"fetchLeverage","command":17,"symbol":"BTCUSDT"}"#)
+                .unwrap();
+        assert!(matches!(
+            Command::from(wire),
+            Command::FetchLeverage { command: 17, symbol } if symbol == "BTCUSDT"
+        ));
     }
 }

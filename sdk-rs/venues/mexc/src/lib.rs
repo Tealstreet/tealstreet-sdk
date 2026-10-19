@@ -554,7 +554,10 @@ impl Venue for MexcFutures {
             return;
         }
         match pending {
-            Pending::Account(request) => self.account_response(cx, request, response),
+            Pending::Account(request) => {
+                self.account_response(cx, request, response);
+                self.refresh_stop_orders(cx);
+            }
             Pending::Trade(_) => unreachable!(),
             Pending::History(request) => self.query_response(cx, request, response),
             Pending::Markets { rows, failed } => {
