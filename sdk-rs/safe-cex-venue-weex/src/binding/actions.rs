@@ -65,7 +65,7 @@ pub(super) fn runtime() -> a::WeexAccountActionRuntime<Host, Js, Js, Js, Js, Thr
         order_symbol: |_, order| v::units(&order.get("symbol")?),
         orders: |h| {
             h.root("store.orders")?
-                .array_values()
+                .array_values()?
                 .ok_or_else(|| Thrown::type_error("orders is not iterable"))
         },
         update_orders_status: |h, ids, status| {
@@ -113,7 +113,7 @@ pub(super) fn runtime() -> a::WeexAccountActionRuntime<Host, Js, Js, Js, Js, Thr
         isolated_short_leverage: |_, config| config.get("isolatedShortLeverage")?.to_number(),
         position_symbols: |h| {
             h.root("store.positions")?
-                .array_values()
+                .array_values()?
                 .ok_or_else(|| Thrown::type_error("positions is not iterable"))?
                 .into_iter()
                 .map(|row| v::units(&row.get("symbol")?))
@@ -121,7 +121,7 @@ pub(super) fn runtime() -> a::WeexAccountActionRuntime<Host, Js, Js, Js, Js, Thr
         },
         market_symbols: |h| {
             h.root("store.markets")?
-                .array_values()
+                .array_values()?
                 .ok_or_else(|| Thrown::type_error("markets is not iterable"))?
                 .into_iter()
                 .map(|row| v::units(&row.get("symbol")?))

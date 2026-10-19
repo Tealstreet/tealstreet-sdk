@@ -2188,3 +2188,43 @@ fn position_mode_retains_utf16_diagnostic_extra_data_through_the_real_binding() 
         );
     }
 }
+
+#[test]
+fn discarded_sdk_order_waiter_keeps_both_signed_settle_coin_reads() {
+    let h = harness(options(), |wire| {
+        wire.ok(
+            "GET",
+            "/v5/order/realtime",
+            json!({"list":[],"nextPageCursor":""}),
+        );
+    });
+    let release = std::rc::Rc::new(support::release::Release::default());
+    h.wire
+        .response_gates
+        .borrow_mut()
+        .push(("/v5/order/realtime".into(), release.clone()));
+    drop(h.venue().fetch_orders(None));
+    h.runtime.pump();
+    assert_eq!(
+        h.wire.calls("/v5/order/realtime").len(),
+        1,
+        "BYBIT discarded SDK waiter starts real signed HTTP"
+    );
+    release.set(true);
+    h.runtime.pump();
+    let calls = h.wire.calls("/v5/order/realtime");
+    assert_eq!(
+        calls.len(),
+        2,
+        "source continuation reads both settle coins after caller waiter drop"
+    );
+    assert_eq!(calls[0].params["settleCoin"], "USDT");
+    assert_eq!(calls[1].params["settleCoin"], "USDC");
+    assert!(
+        calls
+            .iter()
+            .all(|request| request.headers.to_string().contains("X-BAPI-SIGN")),
+        "both requests pass the production signer"
+    );
+    h.venue().dispose().unwrap();
+}

@@ -169,4 +169,21 @@ const parentHandler=new context.OrderBookSubscriptionsHandler('a','bybit',parent
 parentHandler.handle({op:'subscribeOrderBook',data:{symbol:'BTC',subId:'metadata',metric:NaN}});
 parentCallback({bids:[],asks:[]});parentHandler.handle({op:'unsubscribeOrderBook',data:{subId:'metadata'}});
 assert.equal(parentPosts,1,'BBO source parent metadata post count');
-process.stdout.write(JSON.stringify({rows,leverageSymbols,bboLeaf,bboMetadata,bboNumericMetadata,bboParentMetadata:{kind:'NaN',posts:parentPosts}}));
+const positionTiming=[];
+for(const dispatch of [false,true])for(const scoped of [false,true])for(const outcome of ['success','failure','disposed','ready']){
+ const store=new context.Store();store.update({positions:[{...position,leverage:5}]},true);
+ const posts=[],fetches=[];let release;
+ const exchange={store,isDisposed:false,fetchPositions(symbols){fetches.push(symbols??null);if(outcome==='ready'){release=()=>{};return Promise.resolve([{...position,leverage:8}]);}return new Promise((resolve,reject)=>{release=()=>outcome==='failure'?reject(new Error('held fetch failed')):resolve([{...position,leverage:8}]);});}};
+ const handler=new context.UpdatePositionsHandler('a','bybit',exchange,{postMessage(message){posts.push(structuredClone(message));}},{},{});
+ const symbols=scoped?['BTC']:undefined;
+ const start=requestId=>dispatch?handler.handle({op:'updatePositions',data:{requestId,symbols}}):handler.handleUpdatePositions(requestId,symbols);
+ const waiter=start('first');start('duplicate');
+ assert.equal(fetches.length,1,'POSITION timing fetch before caller polling');
+ assert.equal(posts.length,1,'POSITION timing duplicate lock before caller polling');
+ const before={fetches:structuredClone(fetches),posts:structuredClone(posts),leverage:store.positions[0].leverage};
+ if(outcome==='disposed')exchange.isDisposed=true;
+ release();await waiter;for(let i=0;i<4;i++)await Promise.resolve();
+ positionTiming.push({dispatch,scoped,outcome,before,after:{fetches,posts,leverage:store.positions[0].leverage}});
+}
+assert.equal(positionTiming.length,16);
+process.stdout.write(JSON.stringify({positionTiming,rows,leverageSymbols,bboLeaf,bboMetadata,bboNumericMetadata,bboParentMetadata:{kind:'NaN',posts:parentPosts}}));

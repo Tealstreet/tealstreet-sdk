@@ -15,7 +15,7 @@ use crate::{
     sdk_account_api::AccountValue,
     transaction_signing::{SigningResult, TransactionSigningError},
 };
-use safe_cex_exchange::js_runtime::value::{Js, Prop, Str, Thrown, array_index, utf16};
+use safe_cex_exchange::js_runtime::value::{Js, Prop, Str, Thrown, utf16};
 use std::rc::Rc;
 
 impl PlacementIterator for JsIterator {
@@ -56,9 +56,7 @@ fn strict_put(target: &Js, key: &[u16], value: Js) -> Result<(), Thrown> {
                 target.to_display()
             )))
         }
-        Js::Array(_) if array_index(key).is_some() || key == &*utf16("length") => {
-            target.set_key(key, value)
-        }
+        Js::Array(_) => target.set_key(key, value),
         Js::Object(_) | Js::Function(_) => {
             let getter_only = own_props(target).is_some_and(|p| {
                 matches!(p.borrow().get(key), Some(Prop::Accessor { set: None, .. }))
@@ -109,11 +107,7 @@ impl SinglePlacementHost for Bound {
     ) -> SigningResult<()> {
         let target = to_js(object);
         let key = utf16(key);
-        let storable = match &target {
-            Js::Object(_) | Js::Function(_) => true,
-            Js::Array(_) => array_index(&key).is_some(),
-            _ => false,
-        };
+        let storable = matches!(&target, Js::Object(_) | Js::Function(_) | Js::Array(_));
         if !storable {
             return Err(to_signing(unsupported_store(&target, &key)));
         }

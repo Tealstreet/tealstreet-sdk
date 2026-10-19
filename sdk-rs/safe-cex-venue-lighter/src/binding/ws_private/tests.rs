@@ -294,16 +294,24 @@ fn mapped_order(raw: &Js) -> Js {
     }]))
 }
 
-fn parent(world: &Rc<Runtime>, store_impl: &Rc<DefaultStore>, calls: &Calls, token: Js) -> Js {
+fn parent(
+    world: &Rc<Runtime>,
+    store_impl: &Rc<DefaultStore>,
+    calls: &Calls,
+    token: Js,
+    record_positions: bool,
+) -> Js {
     let runtime: Rc<dyn ExchangeRuntime> = world.clone();
     let settled = move |value: Js| Js::Promise(Promise::settled(&runtime, Ok(value)));
     let store = store::facade(store_impl.clone()).unwrap();
-    store
-        .define(
-            "updatePositions",
-            recorder(calls, "store.updatePositions", |_| Js::Undefined),
-        )
-        .unwrap();
+    if record_positions {
+        store
+            .define(
+                "updatePositions",
+                recorder(calls, "store.updatePositions", |_| Js::Undefined),
+            )
+            .unwrap();
+    }
     let (resolve_orders, resolve_balance) = (settled.clone(), settled.clone());
     Js::object(vec![
         ("name", Js::str("lighter")),
@@ -369,6 +377,13 @@ fn parent(world: &Rc<Runtime>, store_impl: &Rc<DefaultStore>, calls: &Calls, tok
 }
 
 fn world_with_token(token: impl FnOnce(&Rc<dyn ExchangeRuntime>) -> Js) -> World {
+    world_with_store(token, true)
+}
+
+fn world_with_store(
+    token: impl FnOnce(&Rc<dyn ExchangeRuntime>) -> Js,
+    record_positions: bool,
+) -> World {
     let runtime = Rc::new(Runtime::default());
     runtime.now.set(START);
     let store = Rc::new(DefaultStore::new());
@@ -406,7 +421,13 @@ fn world_with_token(token: impl FnOnce(&Rc<dyn ExchangeRuntime>) -> Js) -> World
     });
     *shared.sockets.venue.borrow_mut() = Some(Rc::downgrade(&venue));
     let calls: Calls = Rc::default();
-    let parent = parent(&runtime, &store, &calls, token(&exchange_runtime));
+    let parent = parent(
+        &runtime,
+        &store,
+        &calls,
+        token(&exchange_runtime),
+        record_positions,
+    );
     let class = realm.global("LighterPrivateWebsocket").unwrap();
     let socket = class.construct(vec![parent], None).unwrap();
     World {
@@ -875,18 +896,20 @@ fn production_private_position_loop_closes_only_after_a_body_throw() {
 
 #[test]
 fn production_private_position_close_spread_accepts_iterator_values() {
-    let world = world();
-    // Use the actual Store mutator rather than this fixture's dispatch recorder.
+    // A second facade lookup returns the same object, including any fixture
+    // overrides. Keep the production mutator installed from construction.
+    let world = world_with_store(
+        |runtime| Js::Promise(Promise::settled(runtime, Ok(Js::str("tok-1")))),
+        false,
+    );
     let native_store = store::facade(world.store.clone()).unwrap();
-    world
-        .socket
-        .get("store")
-        .unwrap()
-        .define(
-            "updatePositions",
-            native_store.get("updatePositions").unwrap(),
-        )
-        .unwrap();
+    assert!(
+        world
+            .socket
+            .get("store")
+            .unwrap()
+            .same_reference(&native_store)
+    );
     world
         .store
         .add_or_update_position(
@@ -898,6 +921,7 @@ fn production_private_position_close_spread_accepts_iterator_values() {
             .unwrap(),
         )
         .unwrap();
+    let original_position = native_store.get("positions").unwrap().get("0").unwrap();
     let pair = Js::array(vec![
         Js::object(vec![("id", Js::str("p"))]),
         Js::object(vec![
@@ -941,6 +965,35 @@ fn production_private_position_close_spread_accepts_iterator_values() {
     );
     assert!(positions[0].margin_size.is_undefined());
     assert_eq!(world.store.update_ids().unwrap().positions, revision + 1.0);
+    let position = native_store.get("positions").unwrap().get("0").unwrap();
+    assert!(position.same_reference(&original_position));
+    let Js::Number(contracts) = position.get("contracts").unwrap() else {
+        panic!("native position contracts must remain a number");
+    };
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/ws-state-oracle.cjs"
+        ))
+        .arg("--close-spread")
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        json!({
+            "contractsBits": format!("{:016x}", contracts.to_bits()),
+            "marginOwn": position.has_own("marginSize"),
+            "marginUndefined": position.get("marginSize").unwrap().is_undefined(),
+            "revisionDelta": (world.store.update_ids().unwrap().positions - revision) as u32,
+        }),
+        source,
+        "actual source handler and canonical Store close the same iterator pair"
+    );
 }
 
 #[test]
@@ -996,8 +1049,8 @@ fn orders_flattening_calls_the_live_owner_helper_after_its_type_guard() {
     assert_eq!(
         json!({
             "same":result.same_reference(&expected), "calls":*calls.borrow(),
-            "stringLength":string.array_values().unwrap().len(),
-            "functionLength":function.array_values().unwrap().len(),
+            "stringLength":string.array_values().expect("fixture array property reads").unwrap().len(),
+            "functionLength":function.array_values().expect("fixture array property reads").unwrap().len(),
         }),
         source["flattenOrdersDispatch"]
     );

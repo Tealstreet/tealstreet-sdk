@@ -21,6 +21,15 @@ The shared boundary eagerly polls the typed body to its first real suspension. I
 
 - AsterDEX: `tests/eager_sdk_binding.rs` executes NativeRuntime, the constructed venue, production HTTP host, signing and reqwest against a local HTTP server. The whole maintained TS class proves validation logs before caller polling and discarded getAccount/changePositionMode promises complete their HTTP and Store work. Both native assertions fail on the frozen deferred wrapper. The repaired common invoke/unit helpers call the existing JS member immediately and await that same Promise; no extra spawn is introduced. This measures the SDK boundary, not every deeper socket/error claim.
 
+- Bybit: common `invoke` / `invoke_unit` and the specialized `get_account` path
+  now capture the actual installed member result before boxing its waiter and
+  await the same canonical Promise. Native SDK value/unit/account prefix checks
+  compile RED on the deferred wrapper. A public discarded orders waiter still
+  completes both real signed settle-coin reads after a held first response.
+  Constructed primary/demo/inverse/spot balance probes retain native raw
+  identity and the source disposal guard; existing installed reinit continuations
+  already survive waiter drop. See `safe-cex-venue-bybit/DIVERGENCE_FIX_AUDIT.md`.
+
 - Polymarket: `binding/exchange::eager_tests` drives the actual constructed SDK
   and live API on NativeRuntime. Both shared invoke helpers originally compiled
   RED before observer polling (missing Gamma xhr call / leverage warning). They
@@ -103,3 +112,29 @@ using shared start_eager. Its real held HTTP probes preserve request-start timin
 and verify post-response catch/log and reconciliation after waiter drop. The
 original source timer callback body is shared with the weak native timer binding;
 no duplicate subscription or reconciliation algorithm is introduced.
+
+## Shared journal reader
+
+`safe-cex-exchange/src/build_records.rs::build_folded_position_records` is a
+standalone exported utility rather than another venue `impl Exchange`. Its former
+borrowed async body delayed the first read until polling and lost the remaining
+fold when the waiter was dropped. The direct cutover takes owned options and
+read/settlement callbacks with their existing runtime, and uses shared
+`eager::start_eager`. Each read uses the same boundary to preserve ready-result
+await fences. The native `BuildRecordsError` result and wrapped income cause are
+retained directly; there is no JSON transport or second task driver.
+
+`tests/journal.rs::journal_read_starts_at_call_and_finishes_after_waiter_drop`
+compares both income-first and fills-only paths with the maintained whole TS
+function. The original body compiled RED independently for immediate entry and
+post-drop continuation. A separate ready-read/throwing-settlement probe preserves
+the await fence and original error referent. The original 12 build scenarios,
+192 interval/funding cases and mixed-ID/nonfinite sort profiles remain exercised.
+The closed input/model and host JournalFolder composition choices are separate
+from this measured scheduling repair.
+
+The production Binance NativeImports, Bitget ReceiverFolder, Hyperliquid Realm
+facade and Paradex NativeJournal consumers use that same owned reader API and
+their existing runtime/receiver. The host JournalFolder settlement callback owns
+its Store capture rather than borrowing the awaiting fold. This consumer migration
+does not claim each outer SDK wrapper has independently measured eager timing.

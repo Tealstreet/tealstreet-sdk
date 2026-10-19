@@ -293,7 +293,7 @@ fn normalized_header_value(value: Js) -> Result<Js, Thrown> {
     if value.is_nullish() || value.strict_equals(&Js::Bool(false)) {
         return Ok(value);
     }
-    if let Some(values) = value.array_values() {
+    if let Some(values) = value.array_values()? {
         return values
             .into_iter()
             .map(normalized_header_value)
@@ -548,7 +548,7 @@ fn transform_response(response: &Js, config: &Js) -> Result<(), Thrown> {
         return Ok(());
     }
     let transforms = transforms
-        .array_values()
+        .array_values()?
         .unwrap_or_else(|| vec![transforms]);
     let mut data = response.get("data")?;
     for transform in transforms {
@@ -756,7 +756,7 @@ impl RestAdapter for JsRestAdapter {
                                         let mut config = vec![];
                                         for (name, cell) in cell.own_entries()? {
                                             if cell.is_callable()
-                                                || cell.array_items().is_some_and(|items| {
+                                                || cell.array_items()?.is_some_and(|items| {
                                                     items
                                                         .into_iter()
                                                         .flatten()
@@ -1257,12 +1257,20 @@ impl JsHttpHost for RestHttpHost {
                         error.value.define("config", config)?;
                         return Err(error);
                     }
+                    let network_request = matches!(
+                        failure.transport_error.as_deref(),
+                        Some(safe_cex_transport::TransportError::Network(_))
+                    )
+                    .then(|| Js::host_object(Rc::new((*failure.request).clone())));
                     let config = if remote.is_some() {
                         effective_config(&config, *failure.request)?
                     } else {
                         config
                     };
                     let error = super::value::error_object("AxiosError", &failure.message);
+                    if let Some(request) = network_request {
+                        error.define("request", request)?;
+                    }
                     if let Some(code) = &failure.code {
                         error.define("code", Js::str(code))?;
                     }

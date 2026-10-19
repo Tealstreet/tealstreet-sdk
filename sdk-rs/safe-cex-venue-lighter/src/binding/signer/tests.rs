@@ -245,6 +245,7 @@ fn to_fixture(value: &Js) -> Value {
         Js::Array(_) => Value::Array(
             value
                 .array_values()
+                .expect("fixture array property reads")
                 .unwrap()
                 .iter()
                 .map(to_fixture)
@@ -845,7 +846,12 @@ fn transaction_timing_live_inputs_and_detached_success_match_source() {
                 (
                     "sendRawTxBatch",
                     Js::function("sendRawTxBatch", move |_, args| {
-                        batch.borrow_mut().extend(args[0].array_values().unwrap());
+                        batch.borrow_mut().extend(
+                            args[0]
+                                .array_values()
+                                .expect("fixture array property reads")
+                                .unwrap(),
+                        );
                         Ok(Js::object(vec![("txHashes", hash_array.clone())]))
                     }),
                 ),
@@ -898,7 +904,10 @@ fn transaction_timing_live_inputs_and_detached_success_match_source() {
                     }
                     sent.borrow().clone()
                 } else if is_batch {
-                    value.array_values().unwrap()
+                    value
+                        .array_values()
+                        .expect("fixture array property reads")
+                        .unwrap()
                 } else {
                     vec![value]
                 };

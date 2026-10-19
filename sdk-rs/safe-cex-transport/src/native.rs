@@ -106,6 +106,17 @@ fn axios_default_query(params: &serde_json::Value) -> Result<String, TransportEr
     crate::query::axios_default_query(&params.clone().into())
 }
 fn network_failure(error: &reqwest::Error, request: &RestRequest) -> RestFailure {
+    if error.is_builder()
+        && let Ok(url) = reqwest::Url::parse(&request_url(request))
+        && !matches!(url.scheme(), "http" | "https" | "file" | "data")
+    {
+        let mut failure = RestFailure::pre_transmit(
+            format!("Unsupported protocol {}:", url.scheme()),
+            request.clone(),
+        );
+        failure.code = Some("ERR_BAD_REQUEST".into());
+        return failure;
+    }
     let mut cause = std::error::Error::source(error);
     let mut originating_code = None;
     let mut detail = error.to_string();
@@ -516,6 +527,35 @@ mod network_tests;
 #[cfg(test)]
 mod url_tests {
     use super::*;
+
+    #[test]
+    fn unsupported_protocol_is_a_nonretryable_setup_failure() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let adapter = reqwest_adapter().unwrap();
+            for url in ["unsupported://fixture", "FTP://fixture/orders"] {
+                let failure = adapter
+                    .execute(RestRequest {
+                        method: "GET".into(),
+                        url: url.into(),
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap_err();
+                let scheme = reqwest::Url::parse(url).unwrap();
+                assert_eq!(failure.code.as_deref(), Some("ERR_BAD_REQUEST"));
+                assert_eq!(
+                    failure.message,
+                    format!("Unsupported protocol {}:", scheme.scheme())
+                );
+                assert!(!failure.is_retryable_network());
+                assert!(failure.response.is_none());
+            }
+        });
+    }
 
     #[test]
     fn native_url_joins_base_and_relative_paths_like_axios() {

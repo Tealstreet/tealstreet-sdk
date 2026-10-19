@@ -67,7 +67,10 @@ pub trait Host: 'static {
     fn topics(&mut self) -> Result<Self::Value, Self::Error>;
     fn object_values(&mut self, v: Self::Value) -> Result<Vec<Self::Value>, Self::Error>;
     /// Lodash flattenable arrays/arguments/spreadable values include holes as undefined.
-    fn flattenable_values(&mut self, v: &Self::Value) -> Option<Vec<Self::Value>>;
+    fn flattenable_values(
+        &mut self,
+        v: &Self::Value,
+    ) -> Result<Option<Vec<Self::Value>>, Self::Error>;
     fn track_last_received(&mut self) -> Result<(), Self::Error>;
     fn diagnostic_receive(&mut self, data: &Self::Value) -> Result<(), Self::Error>;
     fn handlers(&mut self, key: &[u16]) -> Result<Self::Value, Self::Error>;
@@ -186,7 +189,7 @@ pub fn public_subscribe<H: Host>(h: &mut H) -> Result<(), H::Error> {
     let values = h.object_values(topics)?;
     let mut flattened = vec![];
     for value in values {
-        if let Some(items) = h.flattenable_values(&value) {
+        if let Some(items) = h.flattenable_values(&value)? {
             flattened.extend(items);
         } else {
             flattened.push(value);

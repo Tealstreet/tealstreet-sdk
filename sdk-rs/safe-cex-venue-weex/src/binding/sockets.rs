@@ -89,7 +89,7 @@ fn frame(h: &Host, method: &str, topics: Option<Js>, id: f64, logged: bool) -> R
 }
 fn strings(value: Js) -> Result<Vec<Vec<u16>>, Thrown> {
     let values = if value.is_array() {
-        value.array_values().unwrap()
+        value.array_values()?.unwrap()
     } else {
         value
             .call_method("values", std::vec![])?
@@ -100,7 +100,7 @@ fn strings(value: Js) -> Result<Vec<Vec<u16>>, Thrown> {
 fn desired(h: &Host) -> Result<Js, Thrown> {
     let markets = h
         .root("store.markets")?
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error("markets is not iterable"))?;
     let available = markets
         .iter()
@@ -128,7 +128,7 @@ fn subscriptions(h: &Host) -> Result<WeexSubscriptionState, Thrown> {
         is_disposed: disposed(h)?,
         operation_timestamps: h
             .root("subscriptionOperationTimestamps")?
-            .array_values()
+            .array_values()?
             .ok_or_else(|| Thrown::type_error("operation times is not iterable"))?
             .iter()
             .map(Js::to_number)
@@ -272,7 +272,7 @@ fn handlers() -> crate::message_handlers::WeexMessageHandlerRuntime<Host, Js, Js
         nullish: Js::is_nullish,
         array: |_, v| Ok(Js::array(v)),
         spread: |_, v| {
-            v.array_values()
+            v.array_values()?
                 .ok_or_else(|| Thrown::type_error("handlers is not iterable"))
         },
         filter: |_, array, callback| v::filter(array, |value, _| Ok(callback(&value))),

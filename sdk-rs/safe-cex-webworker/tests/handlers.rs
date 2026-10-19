@@ -80,35 +80,41 @@ fn venue() -> (Rc<Venue>, Rc<Runtime>, Rc<TestStore>) {
         store,
     )
 }
-fn ready<T>(future: impl Future<Output = T>) -> T {
-    match pin!(future)
-        .as_mut()
-        .poll(&mut Context::from_waker(Waker::noop()))
-    {
-        Poll::Ready(value) => value,
-        Poll::Pending => panic!("expected ready"),
+fn settle<T>(runtime: &Runtime, future: impl Future<Output = T>) -> T {
+    let mut future = pin!(future);
+    for _ in 0..8 {
+        runtime.advance(runtime.now.get());
+        if let Poll::Ready(value) = future
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+        {
+            return value;
+        }
     }
+    panic!("worker call did not settle");
 }
 fn position() -> Position {
     serde_json::from_value(json!({"id":"BTC-long","symbol":"BTC","side":"long","entryPrice":100,"notional":100,"leverage":2,"unrealizedPnl":0,"contracts":1,"liquidationPrice":0})).unwrap()
 }
 #[test]
 fn full_empty_refresh_clears_omitted_positions_but_scoped_empty_is_partial() {
-    let (venue, _, store) = venue();
+    let (venue, runtime, store) = venue();
     let messages = Rc::new(RefCell::new(Vec::new()));
     let sink = messages.clone();
     let handler =
         UpdatePositionsHandler::new(venue, Rc::new(move |msg| sink.borrow_mut().push(msg)));
     store.data.borrow_mut().positions = vec![position()];
-    ready(handler.handle_update_positions("scoped".into(), Some(vec!["BTC".into()])));
+    drop(handler.handle_update_positions("scoped".into(), Some(vec!["BTC".into()])));
+    runtime.advance(100_000);
     assert_eq!(store.data.borrow().positions.len(), 1);
-    ready(handler.handle_update_positions("all".into(), None));
+    drop(handler.handle_update_positions("all".into(), None));
+    runtime.advance(100_000);
     assert!(store.data.borrow().positions.is_empty());
     assert_eq!(messages.borrow().len(), 2);
     assert_eq!(messages.borrow()[1].data.as_ref().unwrap()["success"], true);
 }
 #[test]
-fn position_cancellation_releases_owned_slot_and_settles_only_its_waiter() {
+fn position_waiter_drop_keeps_owned_slot_until_request_finishes() {
     let (venue, runtime, _) = venue();
     venue.delay.set(100);
     let messages = Rc::new(RefCell::new(Vec::new()));
@@ -124,15 +130,16 @@ fn position_cancellation_releases_owned_slot_and_settles_only_its_waiter() {
             .poll(&mut Context::from_waker(Waker::noop()))
             .is_pending()
     );
-    ready(handler.handle_update_positions("joined".into(), None));
+    drop(handler.handle_update_positions("joined".into(), None));
     drop(request);
     venue.delay.set(0);
-    runtime.advance(100_010);
-    ready(handler.handle_update_positions("retry".into(), None));
+    runtime.advance(100_100);
+    drop(handler.handle_update_positions("retry".into(), None));
+    runtime.advance(100_100);
     assert_eq!(venue.fetches.borrow().len(), 2);
     assert_eq!(
-        messages.borrow()[1].data.as_ref().unwrap()["reason"],
-        "Worker request cancelled"
+        messages.borrow()[1].data.as_ref().unwrap()["requestId"],
+        "dropped"
     );
     assert_eq!(messages.borrow()[2].data.as_ref().unwrap()["success"], true);
 }
@@ -294,7 +301,7 @@ fn market_buffer_timeout_cooldown_reset_and_disposal_are_independent() {
 }
 
 #[test]
-fn call_method_replies_preserve_null_undefined_unknown_and_cancellation() {
+fn call_method_replies_preserve_null_undefined_unknown_and_abandonment() {
     use safe_cex_webworker::call_method::CallMethodHandler;
     let (venue, runtime, store) = venue();
     let messages = Rc::new(RefCell::new(Vec::new()));
@@ -304,36 +311,51 @@ fn call_method_replies_preserve_null_undefined_unknown_and_cancellation() {
         data_trace::post(Rc::new(move |message| sink.borrow_mut().push(message))),
         error_post_support::unexpected(),
     );
-    ready(handler.handle_call_method("unknown".into(), "notAMethod".into(), vec![]));
+    settle(
+        &runtime,
+        handler.handle_call_method("unknown".into(), "notAMethod".into(), vec![]),
+    );
     assert_eq!(
         messages.borrow()[0].data.as_ref().unwrap(),
         &json!({"requestId":"unknown","success":false})
     );
-    ready(handler.handle_call_method("reconnect".into(), "reconnect".into(), vec![]));
+    settle(
+        &runtime,
+        handler.handle_call_method("reconnect".into(), "reconnect".into(), vec![]),
+    );
     assert_eq!(
         messages.borrow()[1].data.as_ref().unwrap(),
         &json!({"requestId":"reconnect","success":true,"result":null})
     );
-    ready(handler.handle_call_method("income".into(), "fetchIncomeHistory".into(), vec![]));
+    settle(
+        &runtime,
+        handler.handle_call_method("income".into(), "fetchIncomeHistory".into(), vec![]),
+    );
     assert_eq!(
         messages.borrow()[2].data.as_ref().unwrap()["result"],
         json!([])
     );
-    ready(handler.handle_call_method(
-        "void".into(),
-        "updateSymbolMetadata".into(),
-        vec![json!("BTC")],
-    ));
+    settle(
+        &runtime,
+        handler.handle_call_method(
+            "void".into(),
+            "updateSymbolMetadata".into(),
+            vec![json!("BTC")],
+        ),
+    );
     assert_eq!(
         messages.borrow()[3].data.as_ref().unwrap()["result"],
         Value::Null
     );
     runtime.advance(100_000);
-    ready(handler.handle_call_method(
-        "error".into(),
-        "setLeverage".into(),
-        vec![json!("BTC"), json!(3)],
-    ));
+    settle(
+        &runtime,
+        handler.handle_call_method(
+            "error".into(),
+            "setLeverage".into(),
+            vec![json!("BTC"), json!(3)],
+        ),
+    );
     assert_eq!(
         messages.borrow()[4].data.as_ref().unwrap()["success"],
         false
@@ -344,17 +366,25 @@ fn call_method_replies_preserve_null_undefined_unknown_and_cancellation() {
     );
     let unpolled = handler.handle_call_method("cancel".into(), "fetchOrders".into(), vec![]);
     drop(unpolled);
+    runtime.advance(100_000);
+    assert_eq!(
+        messages.borrow()[5].data.as_ref().unwrap()["success"],
+        false
+    );
     assert_eq!(
         messages.borrow()[5].data.as_ref().unwrap()["result"]["message"],
-        "Worker request cancelled"
+        "Not implemented"
     );
     let order: Order = serde_json::from_value(json!({"id":"o","symbol":"BTC","status":"open","type":"limit","side":"buy","price":1,"amount":1,"filled":0,"remaining":1,"reduceOnly":false,"lastUpdate":0})).unwrap();
     store.data.borrow_mut().orders.push(order);
-    ready(handler.handle_call_method(
-        "remove".into(),
-        "removeOrders".into(),
-        vec![json!([{"id":"o"}])],
-    ));
+    settle(
+        &runtime,
+        handler.handle_call_method(
+            "remove".into(),
+            "removeOrders".into(),
+            vec![json!([{"id":"o"}])],
+        ),
+    );
     assert!(store.data.borrow().orders.is_empty());
     assert_eq!(
         messages.borrow()[6].data.as_ref().unwrap()["result"],
@@ -585,11 +615,14 @@ fn complete_call_method_dispatch_matches_live_typescript_replies() {
             .get("requestId")
             .and_then(Value::as_str)
             .unwrap_or(method);
-        ready(handler.handle_call_method(
-            id.into(),
-            method.into(),
-            record["args"].as_array().unwrap().clone(),
-        ));
+        settle(
+            &runtime,
+            handler.handle_call_method(
+                id.into(),
+                method.into(),
+                record["args"].as_array().unwrap().clone(),
+            ),
+        );
         let actual = serde_json::to_value(messages.borrow_mut().pop().unwrap()).unwrap();
         assert_eq!(actual, record["expected"], "{method}");
         runtime.advance(100_000);
@@ -616,11 +649,14 @@ fn complete_call_method_dispatch_matches_live_typescript_replies() {
         }
     }
     venue.fail_orders.set(true);
-    ready(handler.handle_call_method(
-        "snapshot".into(),
-        "fetchAndSetPrivateSnapshot".into(),
-        vec![],
-    ));
+    settle(
+        &runtime,
+        handler.handle_call_method(
+            "snapshot".into(),
+            "fetchAndSetPrivateSnapshot".into(),
+            vec![],
+        ),
+    );
     assert_eq!(
         messages.borrow().last().unwrap().data.as_ref().unwrap()["result"]["message"],
         "snapshot override failed"
@@ -637,17 +673,25 @@ fn complete_call_method_dispatch_matches_live_typescript_replies() {
             .poll(&mut Context::from_waker(Waker::noop()))
             .is_pending()
     );
+    let before = messages.borrow().len();
     drop(future);
     assert_eq!(
-        messages.borrow().last().unwrap().data.as_ref().unwrap()["result"]["message"],
-        "Worker request cancelled"
+        messages.borrow().len(),
+        before,
+        "dropping waiter cannot cancel operation"
+    );
+    runtime.advance(101_000);
+    assert_eq!(messages.borrow().len(), before + 1);
+    assert_eq!(
+        messages.borrow().last().unwrap().data.as_ref().unwrap()["success"],
+        true
     );
 }
 
 #[test]
 fn offline_recovery_inner_worker_route_is_admitted() {
     use safe_cex_webworker::call_method::CallMethodHandler;
-    let (venue, _, _) = venue();
+    let (venue, runtime, _) = venue();
     let messages = Rc::new(RefCell::new(Vec::new()));
     let sink = messages.clone();
     let handler = CallMethodHandler::new(
@@ -655,7 +699,10 @@ fn offline_recovery_inner_worker_route_is_admitted() {
         data_trace::post(Rc::new(move |message| sink.borrow_mut().push(message))),
         error_post_support::unexpected(),
     );
-    ready(handler.handle_call_method("recover-inner".into(), "recoverAfterOffline".into(), vec![]));
+    settle(
+        &runtime,
+        handler.handle_call_method("recover-inner".into(), "recoverAfterOffline".into(), vec![]),
+    );
     assert_eq!(
         messages.borrow().len(),
         1,
@@ -755,7 +802,10 @@ fn offline_recovery_visits_every_socket_and_preserves_false_policy() {
         data_trace::post(Rc::new(move |message| sink.borrow_mut().push(message))),
         error_post_support::unexpected(),
     );
-    ready(handler.handle_call_method("policy".into(), "recoverAfterOffline".into(), vec![]));
+    settle(
+        &runtime,
+        handler.handle_call_method("policy".into(), "recoverAfterOffline".into(), vec![]),
+    );
     let messages = messages.borrow();
     assert_eq!(messages.len(), 1, "RECOVERY native policy reply count");
     let reply = messages[0].data.as_ref().unwrap();
@@ -789,7 +839,7 @@ fn offline_recovery_visits_every_socket_and_preserves_false_policy() {
 
 #[test]
 fn offline_recovery_reports_exchange_hook_failure() {
-    let (inner, _, _) = venue();
+    let (inner, runtime, _) = venue();
     let venue = Rc::new(MethodVenue {
         inner,
         orders_calls: Cell::new(0),
@@ -803,7 +853,10 @@ fn offline_recovery_reports_exchange_hook_failure() {
         data_trace::post(Rc::new(move |message| sink.borrow_mut().push(message))),
         error_post_support::unexpected(),
     );
-    ready(handler.handle_call_method("error".into(), "recoverAfterOffline".into(), vec![]));
+    settle(
+        &runtime,
+        handler.handle_call_method("error".into(), "recoverAfterOffline".into(), vec![]),
+    );
     let messages = messages.borrow();
     assert_eq!(messages.len(), 1, "RECOVERY native failure reply count");
     let reply = messages[0].data.as_ref().unwrap();
@@ -893,7 +946,7 @@ fn position_failure_reason_uses_javascript_error_string_for_empty_fields() {
         ("", "failed", "failed"),
         ("TypeError", "failed", "TypeError: failed"),
     ] {
-        let (venue, _, _) = venue();
+        let (venue, runtime, _) = venue();
         let mut error = ExchangeError::new(message);
         error.name = name.into();
         *venue.failure.borrow_mut() = Some(error);
@@ -901,7 +954,8 @@ fn position_failure_reason_uses_javascript_error_string_for_empty_fields() {
         let sink = messages.clone();
         let handler =
             UpdatePositionsHandler::new(venue, Rc::new(move |msg| sink.borrow_mut().push(msg)));
-        ready(handler.handle_update_positions("string-error".into(), None));
+        drop(handler.handle_update_positions("string-error".into(), None));
+        runtime.advance(100_000);
         let messages = messages.borrow();
         let data = messages.last().unwrap().data.as_ref().unwrap();
         assert_eq!(data["success"], false);
@@ -935,7 +989,7 @@ fn actual_source_command_admission_and_position_error_strings() {
 
 #[test]
 fn fetch_ohlcv_worker_forwards_every_source_timeframe() {
-    let (inner, _, _) = venue();
+    let (inner, runtime, _) = venue();
     let venue = Rc::new(MethodVenue {
         inner,
         orders_calls: Cell::new(0),
@@ -956,11 +1010,14 @@ fn fetch_ohlcv_worker_forwards_every_source_timeframe() {
     for (i, interval) in intervals.iter().enumerate() {
         let options =
             json!({"symbol":"BTC","interval":interval,"from":123.0,"to":456.0,"limit":7.0});
-        ready(handler.handle_call_method(
-            format!("interval-{i}"),
-            "fetchOHLCV".into(),
-            vec![options.clone()],
-        ));
+        settle(
+            &runtime,
+            handler.handle_call_method(
+                format!("interval-{i}"),
+                "fetchOHLCV".into(),
+                vec![options.clone()],
+            ),
+        );
         let replies = replies.borrow();
         let data = replies.last().unwrap().data.as_ref().unwrap();
         assert_eq!(
@@ -1145,4 +1202,120 @@ fn market_timeout_host_failures_retain_fired_deadline_until_flush() {
         assert_eq!(attempts.borrow().last().unwrap().extra["pendingCount"], 1);
         assert_eq!(runtime.exceptions.borrow().len(), 1);
     }
+}
+
+fn call_timing_profiles(outer: bool, held_only: bool) {
+    use safe_cex_webworker::call_method::CallMethodHandler;
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/call_method_oracle.mjs"
+        ))
+        .arg("timing")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let profiles: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(profiles.len(), 12);
+    for profile in profiles
+        .into_iter()
+        .filter(|p| p["outer"] == outer && (p["mode"] == "held") == held_only)
+    {
+        let (inner, runtime, _) = venue();
+        let mode = profile["mode"].as_str().unwrap();
+        inner.delay.set(if mode == "held" { 1000 } else { 0 });
+        let venue = Rc::new(MethodVenue {
+            inner,
+            orders_calls: Cell::new(0),
+            fail_orders: Cell::new(mode == "error"),
+            calls: RefCell::default(),
+        });
+        let replies = Rc::new(RefCell::new(Vec::new()));
+        let capture = replies.clone();
+        let handler = CallMethodHandler::new(
+            venue.clone(),
+            data_trace::post(Rc::new(move |reply| capture.borrow_mut().push(reply))),
+            error_post_support::unexpected(),
+        );
+        let method = profile["method"].as_str().unwrap();
+        let args = if method == "setLeverage" {
+            vec![
+                json!(if mode == "error" { "FAIL" } else { "BTC" }),
+                json!(3),
+            ]
+        } else {
+            vec![]
+        };
+        let waiter = if outer {
+            handler.handle(StoreWorkerPayload {
+                op: StoreWorkerOp::CallMethod,
+                instance_id: None,
+                data: Some(json!({"requestId":"timing","method":method,"args":args})),
+            });
+            None
+        } else {
+            Some(handler.handle_call_method("timing".into(), method.into(), args))
+        };
+        let calls = venue
+            .calls
+            .borrow()
+            .iter()
+            .map(|c| c["method"].clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            json!({"calls":calls,"replies":replies.borrow().len()}),
+            profile["prefix"],
+            "CALL TIMING prefix {profile}"
+        );
+        if mode == "held" {
+            drop(waiter);
+            runtime.advance(101_000);
+        } else if let Some(mut waiter) = waiter {
+            assert!(
+                waiter
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop()))
+                    .is_pending(),
+                "CALL TIMING caller settlement {profile}"
+            );
+        }
+        runtime.advance(101_000);
+        let replies = replies.borrow();
+        assert_eq!(replies.len(), 1, "CALL TIMING exactly one reply {profile}");
+        let data = replies[0].data.as_ref().unwrap();
+        assert_eq!(
+            data["success"], profile["success"],
+            "CALL TIMING result {profile}"
+        );
+        assert_eq!(
+            data["result"]
+                .get("message")
+                .cloned()
+                .unwrap_or(Value::Null),
+            profile["message"],
+            "CALL TIMING error {profile}"
+        );
+        assert!(runtime.exceptions.borrow().is_empty());
+    }
+}
+#[test]
+fn call_helper_starts_now_and_keeps_abandoned_reply() {
+    call_timing_profiles(false, false);
+}
+#[test]
+fn call_dispatch_starts_now_and_keeps_abandoned_reply() {
+    call_timing_profiles(true, false);
+}
+
+#[test]
+fn call_helper_dropped_waiter_keeps_held_operation() {
+    call_timing_profiles(false, true);
+}
+#[test]
+fn call_dispatch_dropped_waiter_keeps_held_operation() {
+    call_timing_profiles(true, true);
 }

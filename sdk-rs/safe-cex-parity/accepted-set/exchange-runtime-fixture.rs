@@ -14,7 +14,7 @@ use crate::{
         WsSocket,
     },
 };
-use safe_cex_exchange::native_store::DefaultStore;
+use crate::native_store::DefaultStore;
 use safe_cex_store::Store;
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
 use safe_cex_types::ExchangeOptions;

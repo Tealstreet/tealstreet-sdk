@@ -12,7 +12,10 @@ use std::{
     fmt,
     rc::Rc,
 };
+pub(super) mod array;
 mod typed;
+pub use array::ArrayData;
+use array::{freeze_prop, frozen_prop};
 
 pub type Str = Rc<[u16]>;
 pub type NativeFn = Rc<dyn Fn(Js, Vec<Js>) -> Result<Js, Thrown>>;
@@ -73,12 +76,13 @@ pub struct FunctionData {
     pub props: RefCell<IndexMap<Str, Prop>>,
     pub proto: RefCell<Option<Js>>,
     construct: Option<Construct>,
+    bound_target: Option<Js>,
     realm: Rc<safe_cex_num::PrototypeRealm>,
 }
 
 enum Construct {
     Native(NativeFn),
-    Bound { target: Js, args: Vec<Js> },
+    Bound { args: Vec<Js> },
 }
 
 #[derive(Clone)]
@@ -94,7 +98,7 @@ pub enum Js {
     /// Function call/bind/toString and the empty Function prototype execute here.
     Builtin(safe_cex_num::BuiltinReference),
     String(Str),
-    Array(Rc<RefCell<Vec<Option<Js>>>>),
+    Array(Rc<ArrayData>),
     Object(Rc<ObjectData>),
     Function(Rc<FunctionData>),
     Promise(super::promise::Promise),
@@ -519,7 +523,7 @@ impl fmt::Debug for Js {
             Js::BigInt(n) => write!(f, "{n}n"),
             Js::Builtin(reference) => write!(f, "{}", reference.js_string()),
             Js::String(s) => write!(f, "{:?}", String::from_utf16_lossy(s)),
-            Js::Array(a) => f.debug_list().entries(a.borrow().iter()).finish(),
+            Js::Array(a) => f.debug_struct("Array").field("length", &a.len()).finish(),
             Js::Object(o) => {
                 let props = o.props.borrow();
                 let mut map = f.debug_map();
@@ -563,10 +567,10 @@ impl Js {
         Js::String(text.into())
     }
     pub fn array(items: Vec<Js>) -> Js {
-        Js::Array(Rc::new(RefCell::new(items.into_iter().map(Some).collect())))
+        Self::holey_array(items.into_iter().map(Some).collect())
     }
     pub fn holey_array(items: Vec<Option<Js>>) -> Js {
-        Js::Array(Rc::new(RefCell::new(items)))
+        Js::Array(Rc::new(ArrayData::new(items)))
     }
     pub fn object(fields: Vec<(&str, Js)>) -> Js {
         Js::object_with_class("Object", fields)
@@ -640,6 +644,7 @@ impl Js {
                     .map(Js::Builtin),
             ),
             construct: None,
+            bound_target: None,
             realm,
         }))
     }
@@ -668,6 +673,39 @@ impl Js {
         matches!(self, Js::Function(function) if function.construct.is_some())
     }
 
+    /// OrdinaryHasInstance follows bound targets and internal prototypes without reading __proto__.
+    pub fn ordinary_has_instance(&self, value: &Js) -> Result<bool, Thrown> {
+        if !self.is_callable() {
+            return Ok(false);
+        }
+        if let Js::Function(function) = self
+            && let Some(target) = &function.bound_target
+        {
+            return target.ordinary_has_instance(value);
+        }
+        if !value.is_object() && !value.is_array() && !value.is_callable() {
+            return Ok(false);
+        }
+        let prototype = self.get("prototype")?;
+        if !prototype.is_object() && !prototype.is_array() && !prototype.is_callable() {
+            let mut message = utf16("Function has non-object prototype '").to_vec();
+            message.extend_from_slice(&prototype.to_js_string()?);
+            message.extend_from_slice(&utf16("' in instanceof check"));
+            return Err(Thrown::new(make_error_object(
+                "TypeError",
+                Some(message.into()),
+            )));
+        }
+        let mut candidate = value.prototype();
+        while let Some(current) = candidate {
+            if current.strict_equals(&prototype) {
+                return Ok(true);
+            }
+            candidate = current.prototype();
+        }
+        Ok(false)
+    }
+
     /// GetSuperConstructor reads metadata, without the shadowable `__proto__` property.
     pub fn super_constructor(&self) -> Result<Js, Thrown> {
         if !self.is_callable() {
@@ -690,10 +728,11 @@ impl Js {
         }
         let value = match construct {
             Construct::Native(body) => body(new_target.clone(), args)?,
-            Construct::Bound {
-                target,
-                args: prefix,
-            } => {
+            Construct::Bound { args: prefix } => {
+                let target = function
+                    .bound_target
+                    .as_ref()
+                    .expect("bound constructor target");
                 let mut combined = prefix.clone();
                 combined.extend(args);
                 let new_target = if new_target.same_reference(self) {
@@ -863,7 +902,7 @@ impl Js {
 
     /// ToString, with OrdinaryToPrimitive's string hint for live objects.
     pub fn to_js_string(&self) -> Result<Str, Thrown> {
-        if matches!(self, Js::Object(_) | Js::Function(_)) {
+        if matches!(self, Js::Object(_) | Js::Function(_) | Js::Array(_)) {
             return self
                 .ordinary_to_primitive(["toString", "valueOf"])?
                 .to_js_string();
@@ -883,27 +922,7 @@ impl Js {
                             safe_cex_num::ProtoMember::ToString,
                         ) =>
                 {
-                    let tag = match self {
-                        Js::Function(_) => "Function",
-                        Js::Object(object) if object.class == "Buffer" => "Uint8Array",
-                        Js::Object(object)
-                            if matches!(
-                                object.class,
-                                "Error"
-                                    | "Blob"
-                                    | "ArrayBuffer"
-                                    | "Map Iterator"
-                                    | "Set Iterator"
-                                    | "Array Iterator"
-                                    | "String Iterator"
-                            ) =>
-                        {
-                            object.class
-                        }
-                        Js::Object(_) => "Object",
-                        _ => unreachable!(),
-                    };
-                    Js::str(&format!("[object {tag}]"))
+                    Js::String(self.object_tag_string())
                 }
                 Js::Builtin(reference)
                     if reference.member()
@@ -923,6 +942,42 @@ impl Js {
             "Cannot convert object to primitive value",
         ))
     }
+    /// Intrinsic object tag shared by ordinary coercion and Array.toString fallback.
+    fn object_tag_string(&self) -> Str {
+        let tag = match self {
+            Js::Undefined => "Undefined",
+            Js::Null => "Null",
+            Js::Bool(_) => "Boolean",
+            Js::Number(_) => "Number",
+            Js::BigInt(_) => "BigInt",
+            Js::String(_) => "String",
+            Js::SymbolIterator => "Symbol",
+            Js::Array(_) => "Array",
+            Js::Function(_) => "Function",
+            Js::Promise(_) => "Promise",
+            Js::Map(_) => "Map",
+            Js::Set(_) => "Set",
+            Js::Builtin(reference) if reference.is_callable() => "Function",
+            Js::Builtin(_) => "Object",
+            Js::Object(object) if object.class == "Buffer" => "Uint8Array",
+            Js::Object(object)
+                if matches!(
+                    object.class,
+                    "Error"
+                        | "Blob"
+                        | "ArrayBuffer"
+                        | "Map Iterator"
+                        | "Set Iterator"
+                        | "Array Iterator"
+                        | "String Iterator"
+                ) =>
+            {
+                object.class
+            }
+            Js::Object(_) => "Object",
+        };
+        utf16(&format!("[object {tag}]"))
+    }
     /// Stock intrinsic conversion after primitive coercion dispatch.
     fn intrinsic_string(&self) -> Result<Str, Thrown> {
         Ok(match self {
@@ -939,15 +994,14 @@ impl Js {
             Js::Builtin(reference) => utf16(&reference.js_string()),
             Js::String(s) => s.clone(),
             Js::Array(items) => {
-                let items = items.borrow().clone();
-                let mut out: Vec<u16> = vec![];
-                for (i, item) in items.iter().enumerate() {
+                let length = items.len();
+                let mut out = Vec::new();
+                for i in 0..length {
                     if i > 0 {
                         out.push(b',' as u16);
                     }
-                    if let Some(item) = item
-                        && !item.is_nullish()
-                    {
+                    let item = self.get(&i.to_string())?;
+                    if !item.is_nullish() {
                         out.extend_from_slice(&item.to_js_string()?);
                     }
                 }
@@ -1005,10 +1059,9 @@ impl Js {
             }
             Js::String(s) => string_to_number(&String::from_utf16_lossy(s)),
             Js::Builtin(reference) => string_to_number(&reference.js_string()),
-            Js::Object(_) | Js::Function(_) => self
+            Js::Object(_) | Js::Function(_) | Js::Array(_) => self
                 .ordinary_to_primitive(["valueOf", "toString"])?
                 .to_number()?,
-            Js::Array(_) => string_to_number(&String::from_utf16_lossy(&self.to_js_string()?)),
             _ => f64::NAN,
         })
     }
@@ -1022,6 +1075,7 @@ impl Js {
         match self {
             Js::Object(o) => Some(&o.props),
             Js::Function(f) => Some(&f.props),
+            Js::Array(a) => Some(&a.props),
             _ => None,
         }
     }
@@ -1030,6 +1084,7 @@ impl Js {
         match self {
             Js::Object(object) => object.proto.borrow().clone(),
             Js::Function(function) => function.proto.borrow().clone(),
+            Js::Array(array) => array.proto.borrow().clone(),
             Js::Builtin(reference) => reference.prototype().map(Js::Builtin),
             _ => None,
         }
@@ -1055,6 +1110,7 @@ impl Js {
         let target = match self {
             Js::Object(object) => &object.proto,
             Js::Function(function) => &function.proto,
+            Js::Array(array) => &array.proto,
             Js::Builtin(_) if same_optional_value(&self.prototype(), &parent) => {
                 return Ok(self.clone());
             }
@@ -1118,19 +1174,8 @@ impl Js {
                 }
                 return Ok(super::builtins::member(self, key).unwrap_or(Js::Undefined));
             }
-            Js::Array(items) => {
-                if key == utf16("length").as_ref() {
-                    return Ok(Js::Number(items.borrow().len() as f64));
-                }
-                if let Some(i) = array_index(key) {
-                    return Ok(items
-                        .borrow()
-                        .get(i)
-                        .cloned()
-                        .flatten()
-                        .unwrap_or(Js::Undefined));
-                }
-                return Ok(super::builtins::member(self, key).unwrap_or(Js::Undefined));
+            Js::Array(items) if key == utf16("length").as_ref() => {
+                return Ok(Js::Number(items.len() as f64));
             }
             Js::Map(m) if key == utf16("size").as_ref() => {
                 return Ok(Js::Number(m.borrow().len() as f64));
@@ -1178,8 +1223,9 @@ impl Js {
             return reference.own_fields().contains_key(key);
         }
         match self {
-            Js::Array(items) => array_index(&utf16(key))
-                .is_some_and(|i| matches!(items.borrow().get(i), Some(Some(_)))),
+            Js::Array(items) => {
+                key == "length" || items.props.borrow().contains_key(utf16(key).as_ref())
+            }
             _ => self
                 .own_props()
                 .is_some_and(|p| p.borrow().contains_key(utf16(key).as_ref())),
@@ -1235,23 +1281,13 @@ impl Js {
             return Ok(());
         }
         if let Js::Array(items) = self {
-            if let Some(i) = array_index(key) {
-                let mut items = items.borrow_mut();
-                if i >= items.len() {
-                    items.resize(i + 1, None);
-                }
-                items[i] = Some(value);
-                return Ok(());
-            }
             if key == utf16("length").as_ref() {
-                let len = value.to_number()? as usize;
-                items.borrow_mut().resize(len, None);
-                return Ok(());
+                // Ordinary Set rejects readonly length before coercing the RHS.
+                if !items.length_writable.get() {
+                    return Err(Thrown::type_error("Cannot assign to read only length"));
+                }
+                return self.define_property(key, &Js::object(vec![("value", value)]));
             }
-            return Err(Thrown::type_error(&format!(
-                "js_runtime arrays carry no named properties (setting '{}')",
-                String::from_utf16_lossy(key)
-            )));
         }
         let Some(props) = self.own_props() else {
             if self.is_nullish() {
@@ -1285,9 +1321,7 @@ impl Js {
         if existing.is_none() {
             let mut ancestor = self.prototype();
             while let Some(parent) = ancestor {
-                let inherited = parent
-                    .own_props()
-                    .and_then(|p| p.borrow().get(key).cloned());
+                let inherited = parent.own_descriptor(key);
                 match inherited {
                     Some(Prop::Accessor {
                         set: Some(setter), ..
@@ -1328,6 +1362,9 @@ impl Js {
                 "Cannot add a property to a non-extensible object",
             ));
         }
+        if existing.is_none() {
+            self.check_array_growth(key)?;
+        }
         match existing {
             Some(Prop::Accessor {
                 set: Some(setter), ..
@@ -1350,10 +1387,12 @@ impl Js {
                         configurable,
                     },
                 );
+                self.grow_array_length(key);
                 Ok(())
             }
             _ => {
                 props.borrow_mut().insert(key.into(), Prop::Data(value));
+                self.grow_array_length(key);
                 Ok(())
             }
         }
@@ -1363,8 +1402,16 @@ impl Js {
         self.define_key(&utf16(key), value)
     }
     pub fn define_key(&self, key: &[u16], value: Js) -> Result<(), Thrown> {
-        if let Js::Array(_) = self {
-            return self.set_key(key, value);
+        if matches!(self, Js::Array(_)) {
+            return self.define_property(
+                key,
+                &Js::object(vec![
+                    ("value", value),
+                    ("writable", Js::Bool(true)),
+                    ("enumerable", Js::Bool(true)),
+                    ("configurable", Js::Bool(true)),
+                ]),
+            );
         }
         if let Some(props) = self.own_props() {
             if matches!(
@@ -1394,6 +1441,7 @@ impl Js {
         match self {
             Js::Object(object) => Some(&object.extensible),
             Js::Function(function) => Some(&function.extensible),
+            Js::Array(array) => Some(&array.extensible),
             _ => None,
         }
     }
@@ -1451,6 +1499,14 @@ impl Js {
                 }
             }
         }
+        if let Js::Array(array) = self {
+            if frozen {
+                array.length_writable.set(false);
+            }
+            if let Some(property) = array.symbol_iterator.borrow_mut().as_mut() {
+                freeze_prop(property, frozen);
+            }
+        }
         Ok(self.clone())
     }
     pub(super) fn is_frozen(&self) -> Result<bool, Thrown> {
@@ -1459,6 +1515,17 @@ impl Js {
         }
         if self.is_extensible()? {
             return Ok(false);
+        }
+        if let Js::Array(array) = self {
+            if array.length_writable.get()
+                || array
+                    .symbol_iterator
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|p| !frozen_prop(p))
+            {
+                return Ok(false);
+            }
         }
         Ok(self
             .own_props()
@@ -1476,10 +1543,20 @@ impl Js {
             }))
     }
     pub(super) fn own_property_descriptor(&self, key: &[u16]) -> Result<Js, Thrown> {
-        let props = self.own_props().ok_or_else(|| {
-            Thrown::type_error("Descriptor reflection requires an ordinary object or function")
-        })?;
-        Ok(match props.borrow().get(key) {
+        self.own_property_descriptor_for(&Js::utf16(key))
+    }
+    pub(super) fn own_property_descriptor_for(&self, key: &Js) -> Result<Js, Thrown> {
+        if self.own_props().is_none() {
+            return Err(Thrown::type_error(
+                "Descriptor reflection requires native descriptor storage",
+            ));
+        }
+        let property = if matches!(key, Js::SymbolIterator) {
+            self.symbol_iterator_slot().and_then(|s| s.borrow().clone())
+        } else {
+            self.own_descriptor(&key.to_js_string()?)
+        };
+        Ok(match property.as_ref() {
             None => Js::Undefined,
             Some(Prop::Data(value)) => Js::object(vec![
                 ("value", value.clone()),
@@ -1513,6 +1590,21 @@ impl Js {
     }
     /// ToPropertyDescriptor observes fields in order and retains accessor identities.
     pub(super) fn define_property(&self, key: &[u16], descriptor: &Js) -> Result<(), Thrown> {
+        self.define_property_slot(key, descriptor, false)
+    }
+    pub(super) fn define_property_for(&self, key: &Js, descriptor: &Js) -> Result<(), Thrown> {
+        if matches!(key, Js::SymbolIterator) {
+            self.define_property_slot(&[], descriptor, true)
+        } else {
+            self.define_property(&key.to_js_string()?, descriptor)
+        }
+    }
+    fn define_property_slot(
+        &self,
+        key: &[u16],
+        descriptor: &Js,
+        symbol: bool,
+    ) -> Result<(), Thrown> {
         let props = self.own_props().ok_or_else(|| {
             Thrown::type_error(
                 "Object.defineProperty target must be an ordinary object or function",
@@ -1530,7 +1622,7 @@ impl Js {
         };
         let enumerable = read("enumerable")?.map(|value| value.truthy());
         let configurable = read("configurable")?.map(|value| value.truthy());
-        let value = read("value")?;
+        let mut value = read("value")?;
         let writable = read("writable")?.map(|value| value.truthy());
         let get = read("get")?;
         if get
@@ -1553,7 +1645,33 @@ impl Js {
                 "Invalid mixed data and accessor descriptor",
             ));
         }
-        let existing = props.borrow().get(key).cloned();
+        let array_length =
+            !symbol && matches!(self, Js::Array(_)) && key == utf16("length").as_ref();
+        if array_length && let Some(input) = value.as_ref() {
+            // ArraySetLength observes ToUint32 and ToNumber separately; user code may reenter.
+            let first = input.to_number()?;
+            let uint = if first.is_finite() && first != 0.0 {
+                first.trunc().rem_euclid(4294967296.0) as u32
+            } else {
+                0
+            };
+            let second = input.to_number()?;
+            if second != uint as f64 {
+                return Err(Thrown::error("RangeError", "Invalid array length"));
+            }
+            value = Some(Js::Number(uint as f64));
+        }
+        if !symbol {
+            self.check_array_growth(key)?;
+        }
+        let existing = if symbol {
+            self.symbol_iterator_slot()
+                .ok_or_else(|| Thrown::type_error("Unsupported symbol descriptor target"))?
+                .borrow()
+                .clone()
+        } else {
+            self.own_descriptor(key)
+        };
         if existing.is_none() && !self.is_extensible()? {
             return Err(Thrown::type_error(
                 "Cannot define a property on a non-extensible object",
@@ -1644,10 +1762,21 @@ impl Js {
                 configurable: configurable.unwrap_or(old_configurable),
             }
         };
+        if array_length {
+            return self.apply_array_length(next);
+        }
+        if symbol {
+            *self
+                .symbol_iterator_slot()
+                .expect("validated symbol storage")
+                .borrow_mut() = Some(next);
+            return Ok(());
+        }
         props.borrow_mut().insert(key.into(), next);
+        self.grow_array_length(key);
         Ok(())
     }
-    pub(super) fn has_property(&self, key: &[u16]) -> bool {
+    pub fn has_property(&self, key: &[u16]) -> bool {
         if self
             .own_props()
             .is_some_and(|p| p.borrow().contains_key(key))
@@ -1655,11 +1784,7 @@ impl Js {
             return true;
         }
         match self {
-            Js::Array(items) => {
-                key == utf16("length").as_ref()
-                    || array_index(key)
-                        .is_some_and(|i| matches!(items.borrow().get(i), Some(Some(_))))
-            }
+            Js::Array(_) if key == utf16("length").as_ref() => true,
             Js::Builtin(reference) => String::from_utf16(key).is_ok_and(|key| {
                 reference.own_fields().contains_key(&key)
                     || !matches!(reference.get(&key), safe_cex_num::PrototypeValue::Undefined)
@@ -1716,6 +1841,9 @@ impl Js {
                 "Cannot convert undefined or null to object",
             ));
         }
+        if matches!(self, Js::Array(_)) && key == utf16("length").as_ref() {
+            return Ok(false);
+        }
         if let Some(props) = self.own_props() {
             if matches!(
                 props.borrow().get(key),
@@ -1736,16 +1864,6 @@ impl Js {
             return Ok(true);
         }
         match self {
-            Js::Array(items) => {
-                if key == utf16("length").as_ref() {
-                    return Ok(false);
-                }
-                if let Some(i) = array_index(key) {
-                    let removed = items.borrow_mut().get_mut(i).and_then(Option::take);
-                    drop(removed);
-                }
-                Ok(true)
-            }
             Js::String(units) => Ok(key != utf16("length").as_ref()
                 && !array_index(key).is_some_and(|index| index < units.len())),
             Js::Builtin(reference)
@@ -1771,13 +1889,6 @@ impl Js {
                     .map(utf16)
                     .collect()
             }
-            Js::Array(items) => items
-                .borrow()
-                .iter()
-                .enumerate()
-                .filter(|(_, v)| v.is_some())
-                .map(|(i, _)| utf16(&i.to_string()))
-                .collect(),
             Js::String(s) => (0..s.len()).map(|i| utf16(&i.to_string())).collect(),
             _ => {
                 let Some(props) = self.own_props() else {
@@ -1829,12 +1940,12 @@ impl Js {
     /// OrdinaryOwnPropertyKeys order; array and string `length` follows the indices.
     pub fn own_property_names(&self) -> Result<Vec<Str>, Thrown> {
         Ok(match self {
-            Js::Array(_) | Js::String(_) => {
+            Js::String(_) => {
                 let mut keys = self.own_keys();
                 keys.push(utf16("length"));
                 keys
             }
-            Js::Object(_) | Js::Function(_) => {
+            Js::Object(_) | Js::Function(_) | Js::Array(_) => {
                 let keys: Vec<Str> = self
                     .own_props()
                     .expect("ordinary property storage")
@@ -1848,6 +1959,9 @@ impl Js {
                     .collect();
                 indexed.sort_by_key(|(i, _)| *i);
                 let mut out: Vec<Str> = indexed.into_iter().map(|(_, k)| k).collect();
+                if matches!(self, Js::Array(_)) {
+                    out.push(utf16("length"));
+                }
                 out.extend(keys.into_iter().filter(|k| array_index(k).is_none()));
                 out
             }
@@ -1876,7 +1990,7 @@ impl Js {
                 .into_iter()
                 .find(|(name, _)| name.encode_utf16().eq(key.iter().copied()))
                 .map(|(_, enumerable)| enumerable)),
-            Js::Array(_) | Js::String(_) => {
+            Js::String(_) => {
                 if key == utf16("length").as_ref() {
                     return Ok(Some(false));
                 }
@@ -1886,7 +2000,7 @@ impl Js {
                     .any(|name| name.as_ref() == key)
                     .then_some(true))
             }
-            Js::Object(_) | Js::Function(_) => {
+            Js::Object(_) | Js::Function(_) | Js::Array(_) => {
                 let descriptor = self.own_property_descriptor(key)?;
                 if descriptor.is_undefined() {
                     Ok(None)
@@ -1988,28 +2102,38 @@ impl Js {
         }
         Ok(out)
     }
-    pub fn array_items(&self) -> Option<Vec<Option<Js>>> {
-        match self {
-            Js::Array(items) => Some(items.borrow().clone()),
-            _ => None,
+    /// Typed snapshot: capture length once, then HasProperty/Get each live slot.
+    pub fn array_items(&self) -> Result<Option<Vec<Option<Js>>>, Thrown> {
+        let Js::Array(array) = self else {
+            return Ok(None);
+        };
+        let length = array.len();
+        let mut out = Vec::new();
+        for index in 0..length {
+            let key = utf16(&index.to_string());
+            out.push(if self.has_property(&key) {
+                Some(self.get_key(&key)?)
+            } else {
+                None
+            });
         }
+        Ok(Some(out))
     }
-    pub fn array_values(&self) -> Option<Vec<Js>> {
-        self.array_items().map(|items| {
+    pub fn array_values(&self) -> Result<Option<Vec<Js>>, Thrown> {
+        Ok(self.array_items()?.map(|items| {
             items
                 .into_iter()
                 .map(|v| v.unwrap_or(Js::Undefined))
                 .collect()
-        })
+        }))
     }
     pub fn push(&self, value: Js) -> Result<(), Thrown> {
-        match self {
-            Js::Array(items) => {
-                items.borrow_mut().push(Some(value));
-                Ok(())
-            }
-            _ => Err(Thrown::type_error("push is not a function")),
-        }
+        let Js::Array(array) = self else {
+            return Err(Thrown::type_error("push is not a function"));
+        };
+        let length = array.len();
+        self.set(&length.to_string(), value)?;
+        self.set("length", Js::Number(length as f64 + 1.0))
     }
     /// Invoke as a method with `this`; non-callables throw the V8 TypeError.
     pub fn call(&self, this: Js, args: Vec<Js>) -> Result<Js, Thrown> {
@@ -2055,9 +2179,9 @@ impl Js {
                         name.extend_from_slice(&target_name);
                     }
                     let construct = this.is_constructor().then(|| Construct::Bound {
-                        target: this.clone(),
                         args: bound_args.clone(),
                     });
+                    let bound_target = Some(this.clone());
                     let realm = match &this {
                         Js::Function(function) => function.realm.clone(),
                         Js::Builtin(reference) => reference.realm().clone(),
@@ -2095,6 +2219,7 @@ impl Js {
                         props: RefCell::new(props),
                         proto: RefCell::new(proto),
                         construct,
+                        bound_target,
                         realm,
                     })))
                 }
@@ -2197,16 +2322,12 @@ pub fn to_json(value: &Js) -> Result<serde_json::Value, Thrown> {
             String::from_utf16(s)
                 .map_err(|_| Thrown::type_error("lone UTF-16 surrogate at a typed boundary"))?,
         ),
-        Js::Array(items) => serde_json::Value::Array(
-            items
-                .borrow()
+        Js::Array(_) => serde_json::Value::Array(
+            value
+                .array_values()?
+                .expect("array snapshot")
                 .iter()
-                .map(|v| {
-                    v.as_ref()
-                        .map(to_json)
-                        .transpose()
-                        .map(|v| v.unwrap_or(serde_json::Value::Null))
-                })
+                .map(to_json)
                 .collect::<Result<_, _>>()?,
         ),
         Js::Builtin(reference) if reference.is_callable() => serde_json::Value::Null,
@@ -2265,8 +2386,8 @@ pub fn to_js_json(value: &Js) -> Result<safe_cex_num::JsJsonValue, Thrown> {
         Js::String(s) => J::String(String::from_utf16_lossy(s)),
         Js::Array(_) => J::Array(
             value
-                .array_values()
-                .unwrap_or_default()
+                .array_values()?
+                .expect("array snapshot")
                 .iter()
                 .map(to_js_json)
                 .collect::<Result<_, _>>()?,

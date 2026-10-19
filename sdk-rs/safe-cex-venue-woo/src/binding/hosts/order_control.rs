@@ -106,7 +106,7 @@ pub(crate) fn length(value: &Js) -> Result<usize, Thrown> {
 /// The iteration protocol for `...value` over the values this source spreads.
 pub(crate) fn iterate(value: &Js) -> Result<Vec<Js>, Thrown> {
     match value {
-        Js::Array(_) => Ok(value.array_values().unwrap_or_default()),
+        Js::Array(_) => Ok(value.array_values()?.unwrap_or_default()),
         Js::String(s) => Ok(char::decode_utf16(s.iter().copied())
             .map(|c| match c {
                 Ok(c) => Js::str(&c.to_string()),
@@ -323,7 +323,7 @@ fn unit(task: Task<(), Thrown>) -> Task<Js, Thrown> {
 // Keep the original Js row so admitted values and property presence are retained.
 fn admit_order_rows(rt: &Rt, rows: Js) -> Result<Js, Thrown> {
     let rows = rows
-        .array_values()
+        .array_values()?
         .ok_or_else(|| Thrown::type_error("WOO orders must be an array"))?;
     let mut admitted = Vec::with_capacity(rows.len());
     for row in rows {

@@ -673,6 +673,13 @@ and retained-error assertions. `scripts/factory-retry-condition-control.py`
 inverts the production instruments-info exclusion, requires a compiled attempt
 count failure and restores exact source bytes before requiring a passing run.
 
+The original-method retry guard is an approved safety residual. A rewritten
+network-error config must not replay create/cancel/amend POST bodies; the source
+retries those endpoints as signed GETs with the old body retained. The nine
+native factory profiles and six maintained Axios rewrite/control profiles in
+`api_factory` pin this distinction. The mutation script also removes this guard
+and requires the named replay-count refusal before exact restoration.
+
 The Exchange candle-read override reaches the concrete receiver for all four bound
 families. `binding/members/ohlcv.rs` preserves primary validation/errors and the
 dedicated Spot/Inverse optional list mapping over the shared date/tuple mapper.
@@ -962,3 +969,36 @@ Protective-side inference preserves the get-key primitive TypeError without
 embedding the class name in its message. The 242-case maintained-source test
 checks both the constructed native receiver and the typed helper; primitive
 diagnostics are compared directly rather than normalized to a custom string.
+
+The SDK invoke/invoke_unit and get_account wrappers call their installed member
+before returning a waiter and await the same canonical Promise. Preserve this
+boundary when changing the typed facade; do not add a second Promise driver.
+DIVERGENCE_FIX_AUDIT.md records the reconciled rows and remaining module split.
+
+Hyro account/configuration FIX-audit rows 22/28/29/30/31 use constructed native
+production/demo receivers and the 21-profile maintained TS account oracle.
+validateAccount uses shared OrdinaryHasInstance, preserving inherited Error
+messages, UTF16 and raw thrown-message identity. Range no-op and disabled
+option/inverse capabilities remain source-equal; disposal suppresses balance
+publication. See DIVERGENCE_FIX_AUDIT.md and hyro-account-controls.py.
+
+Position-index audit rows 9/10/11/20/21 use constructed native receivers in
+`binding/receiver_tests.rs`. Stop-index dispatch is installed once in batch.rs;
+placement/amendment call the same replaceable members. The existing native omit
+facade uses canonical ForInRecord to preserve inherited enumerable aliases, and
+getter failures reject the original Promise. Position-mode mapping binds the
+mapper once and uses native Array.map with row/index/original-array arguments.
+Run the receiver tests, execution_guards source target and
+`scripts/position-index-controls.py`; the latter restores every compiled fault.
+
+The retained FIX-audit receiver batch covers Spot startup warnings and market
+metadata plus primary/Spot ticker parsing without a whole-input JSON projection.
+`retained_audit_*` observes held startup, original cache/lookup identity, UTF-16,
+nonfinite bits and visible cache rejection. Placement extension refusal stays
+strictly input-only; malformed market strings remain row-only decision3 refusals.
+
+The constructor's rate-window fixture keeps sleeps pending until explicit virtual
+time advancement. Registering or polling a timer must not advance the clock.
+Its five/sixth-request witness matches the real axios-rate-limit dependency with
+the maintained constructor's options, including frozen wall time. Preserve the
+unlimited/secondary routing checks and all 36 existing constructor profiles.

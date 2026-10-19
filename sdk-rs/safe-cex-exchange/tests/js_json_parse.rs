@@ -38,9 +38,11 @@ fn observe(v: &Js) -> Value {
         Js::Bool(v) => json!(["bool", v]),
         Js::Number(v) => json!(["number", format!("{:016x}", v.to_bits())]),
         Js::String(v) => json!(["string", &**v]),
-        Js::Array(v) => json!([
+        Js::Array(_) => json!([
             "array",
-            v.borrow()
+            v.array_items()
+                .unwrap()
+                .unwrap()
                 .iter()
                 .map(|v| observe(v.as_ref().unwrap()))
                 .collect::<Vec<_>>()
@@ -470,7 +472,7 @@ fn native_market_info_decode_does_not_expand_each_utf16_unit_into_a_value() {
             text.len()
         );
         assert!(
-            allocated < text.len() * 11 / 2,
+            allocated < text.len() * 29 / 6,
             "typed capture exceeds its allocation budget: {allocated} allocated bytes for {} input bytes",
             text.len()
         );

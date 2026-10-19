@@ -1201,12 +1201,13 @@ impl ExchangeImports for NativeImports {
         };
         let (from, to) = (bound("from")?, bound("to")?);
         let now = self.runtime.now_ms();
+        let runtime = self.runtime.clone();
         Ok(Box::pin(async move {
             let to = to.unwrap_or(now);
             let from = from.unwrap_or(to - 30.0 * 24.0 * 60.0 * 60.0 * 1000.0);
             let (fills_owner, income_owner) = (owner.clone(), owner.clone());
             let store = owner.base.store.clone();
-            let mut settle = move |symbol: &str| {
+            let settle = move |symbol: &str| {
                 Ok(store
                     .markets_by_symbol()?
                     .get(symbol)
@@ -1214,8 +1215,9 @@ impl ExchangeImports for NativeImports {
                     .filter(|quote| !quote.is_empty())
                     .unwrap_or_else(|| "USDT".into()))
             };
-            let mut exchange = FoldableExchange {
-                fetch_historical_fills: &mut move |options: ExecutionsOptions| {
+            let exchange = FoldableExchange {
+                runtime,
+                fetch_historical_fills: Rc::new(move |options: ExecutionsOptions| {
                     let owner = fills_owner.clone();
                     Box::pin(async move {
                         let args = vec![to_event(&options).map_err(into_exchange)?];
@@ -1227,8 +1229,8 @@ impl ExchangeImports for NativeImports {
                         crate::class_decode::decode::<Vec<Execution>>(rows)
                             .map_err(|e| ExchangeError::new(e.to_string()))
                     })
-                },
-                fetch_income_history_range: Some(&mut move |from: f64, to: f64| {
+                }),
+                fetch_income_history_range: Some(Rc::new(move |from: f64, to: f64| {
                     let owner = income_owner.clone();
                     Box::pin(async move {
                         let args = vec![number(from), number(to), EventValue::Undefined];
@@ -1238,16 +1240,16 @@ impl ExchangeImports for NativeImports {
                                 .map_err(into_exchange)?;
                         crate::exchange_classes::income_records(&rows).map_err(into_exchange)
                     })
-                }),
+                })),
             };
-            let mut options = BuildRecordsOptions {
-                account: &account,
+            let options = BuildRecordsOptions {
+                account,
                 from,
                 to,
                 symbol_scoped,
-                resolve_settle_currency: &mut settle,
+                resolve_settle_currency: Rc::new(settle),
             };
-            let result = build_folded_position_records(&mut exchange, &mut options)
+            let result = build_folded_position_records(exchange, options)
                 .await
                 .map_err(|e| Rc::new(e.error))?;
             serde_json::to_value(&result.records)
@@ -1448,7 +1450,7 @@ impl ListenerHost for NativeListenerOperations {
             let EventValue::Array(levels) = data.get(key)? else {
                 return Ok(vec![]);
             };
-            let levels = array_values(&levels);
+            let levels = array_values(&levels)?;
             levels
                 .iter()
                 .map(|row| Ok(vec![row.read("0")?.text()?, row.read("1")?.text()?]))

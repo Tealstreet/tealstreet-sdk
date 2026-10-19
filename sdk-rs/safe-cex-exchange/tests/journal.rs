@@ -10,7 +10,7 @@ use safe_cex_types::{
     PositionSide, PositionSourceAxis,
 };
 use serde_json::Value;
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 fn numeric(actual: f64, expected: &Value, label: &str) {
     let bits = if actual.is_nan() {
         "nan".into()
@@ -162,6 +162,79 @@ fn interval(actual: &PositionInterval, expected: &Value) {
     );
 }
 #[test]
+fn interval_mixed_optional_ids_never_panic_or_lose_positions() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/journal-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = source["orderingCases"].as_array().unwrap();
+    assert_eq!(cases.len(), 128);
+    for (index, case) in cases.iter().enumerate() {
+        let fills: Vec<Execution> = serde_json::from_value(case["fills"].clone()).unwrap();
+        let actual =
+            reconstruct_position_intervals(&fills, &mut PositionIntervalOptions::default())
+                .expect("INTERVAL mixed optional IDs complete without a host panic");
+        let expected = case["intervals"].as_array().unwrap();
+        assert_eq!(
+            actual.len(),
+            expected.len(),
+            "INTERVAL mixed ID count {index}"
+        );
+        for row in &actual {
+            let expected = expected
+                .iter()
+                .find(|value| value["symbol"] == row.symbol)
+                .unwrap();
+            interval(row, expected);
+        }
+    }
+}
+#[test]
+fn interval_nonfinite_close_times_never_panic_or_lose_positions() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/journal-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = source["nonfiniteCases"].as_array().unwrap();
+    assert_eq!(cases.len(), 128);
+    for case in cases {
+        let mut fills: Vec<Execution> = serde_json::from_value(case["fills"].clone()).unwrap();
+        for (fill, timestamp) in fills.iter_mut().zip(case["timestamps"].as_array().unwrap()) {
+            fill.timestamp = decoded(timestamp);
+        }
+        let actual =
+            reconstruct_position_intervals(&fills, &mut PositionIntervalOptions::default())
+                .expect("INTERVAL nonfinite close times complete without a host panic");
+        let expected = case["intervals"].as_array().unwrap();
+        assert_eq!(actual.len(), expected.len());
+        for row in &actual {
+            let expected = expected
+                .iter()
+                .find(|value| value["symbol"] == row.symbol)
+                .unwrap();
+            interval(row, expected);
+        }
+    }
+}
+#[test]
 #[ignore = "requires installed live TypeScript"]
 fn journal_interval_native_source_parity() {
     let output = std::process::Command::new("node")
@@ -310,13 +383,16 @@ fn journal_interval_native_source_parity() {
     }
 }
 
-fn ready<F: std::future::Future>(future: F) -> F::Output {
+fn ready<F: std::future::Future>(runtime: &runtime::Runtime, future: F) -> F::Output {
     let mut future = std::pin::pin!(future);
     let mut context = std::task::Context::from_waker(std::task::Waker::noop());
-    match future.as_mut().poll(&mut context) {
-        std::task::Poll::Ready(value) => value,
-        std::task::Poll::Pending => panic!("BUILD fixture unexpectedly pending"),
+    for _ in 0..128 {
+        if let std::task::Poll::Ready(value) = future.as_mut().poll(&mut context) {
+            return value;
+        }
+        runtime.advance(0);
     }
+    panic!("BUILD fixture unexpectedly pending");
 }
 fn trace_value(actual: &Value, expected: &Value) {
     if expected.get("number").is_some() {
@@ -373,8 +449,10 @@ fn journal_build_native_source_parity() {
         let rows = serde_json::from_value::<Vec<Execution>>(case["rows"].clone()).unwrap();
         let income_rows =
             serde_json::from_value::<Vec<IncomeRecord>>(case["income"].clone()).unwrap();
-        let trace = RefCell::new(Vec::<Value>::new());
-        let mut read_fills = |opts: ExecutionsOptions| -> ExchangeFuture<'_, Vec<Execution>> {
+        let trace = Rc::new(RefCell::new(Vec::<Value>::new()));
+        let runtime = Rc::new(runtime::Runtime::default());
+        let fills_trace = trace.clone();
+        let read_fills = move |opts: ExecutionsOptions| -> ExchangeFuture<'static, Vec<Execution>> {
             assert_eq!(
                 opts.from,
                 Some(1500. - 1209600000.),
@@ -383,9 +461,9 @@ fn journal_build_native_source_parity() {
             assert_eq!(opts.to, Some(2500.), "BUILD native upper bound");
             assert_eq!(opts.limit, Some(1000.), "BUILD native limit");
             assert!(opts.order_id.is_none());
-            trace.borrow_mut().push(serde_json::json!(["fills",{"from":opts.from.unwrap(),"to":opts.to.unwrap(),"limit":opts.limit.unwrap()}]));
+            fills_trace.borrow_mut().push(serde_json::json!(["fills",{"from":opts.from.unwrap(),"to":opts.to.unwrap(),"limit":opts.limit.unwrap()}]));
             if let Some(symbol) = &opts.symbol {
-                trace.borrow_mut().last_mut().unwrap()[1]["symbol"] = symbol.clone().into();
+                fills_trace.borrow_mut().last_mut().unwrap()[1]["symbol"] = symbol.clone().into();
             }
             let rows = rows
                 .iter()
@@ -403,14 +481,16 @@ fn journal_build_native_source_parity() {
                 }
             })
         };
-        let mut read_income = |from: f64, to: f64| -> ExchangeFuture<'_, Vec<IncomeRecord>> {
+        let income_trace = trace.clone();
+        let fail_income = mode == "failure";
+        let read_income = move |from: f64, to: f64| -> ExchangeFuture<'static, Vec<IncomeRecord>> {
             assert_eq!(from, 1500. - 1209600000., "BUILD native income lookback");
             assert_eq!(to, 2500., "BUILD native income upper bound");
-            trace
+            income_trace
                 .borrow_mut()
                 .push(serde_json::json!(["income", from, to]));
             let rows = income_rows.clone();
-            let fail = mode == "failure";
+            let fail = fail_income;
             Box::pin(async move {
                 if fail {
                     let mut e = ExchangeError::new("income failed");
@@ -421,29 +501,34 @@ fn journal_build_native_source_parity() {
                 }
             })
         };
-        let mut currency = |symbol: &str| {
-            trace
+        let currency_trace = trace.clone();
+        let currency = move |symbol: &str| {
+            currency_trace
                 .borrow_mut()
                 .push(serde_json::json!(["currency", symbol]));
             Ok(format!("settle:{symbol}"))
         };
-        let result = ready(build_folded_position_records(
-            &mut FoldableExchange {
-                fetch_historical_fills: &mut read_fills,
-                fetch_income_history_range: if mode == "absent" {
-                    None
-                } else {
-                    Some(&mut read_income)
+        let result = ready(
+            &runtime,
+            build_folded_position_records(
+                FoldableExchange {
+                    runtime: runtime.clone(),
+                    fetch_historical_fills: Rc::new(read_fills),
+                    fetch_income_history_range: if mode == "absent" {
+                        None
+                    } else {
+                        Some(Rc::new(read_income))
+                    },
                 },
-            },
-            &mut BuildRecordsOptions {
-                account: "acct",
-                from: 1500.,
-                to: 2500.,
-                symbol_scoped: (index / 2) % 2 == 1,
-                resolve_settle_currency: &mut currency,
-            },
-        ));
+                BuildRecordsOptions {
+                    account: "acct".into(),
+                    from: 1500.,
+                    to: 2500.,
+                    symbol_scoped: (index / 2) % 2 == 1,
+                    resolve_settle_currency: Rc::new(currency),
+                },
+            ),
+        );
         compared += 1;
         let expected = &case["result"];
         if expected.get("error").is_some() {
@@ -500,7 +585,7 @@ fn journal_build_native_source_parity() {
                 record(a, e);
             }
         }
-        trace_value(&Value::Array(trace.into_inner()), &case["trace"]);
+        trace_value(&Value::Array(trace.borrow().clone()), &case["trace"]);
     }
     assert_eq!(compared, 12, "BUILD native comparison floor");
 }
@@ -561,4 +646,190 @@ fn position_interval_native_bridge_retains_numbers_and_absence() {
     ]);
     assert!(serde_json::from_value::<PositionInterval>(positional.clone()).is_err());
     assert!(<PositionInterval as serde::Deserialize>::deserialize(&positional).is_err());
+}
+
+#[path = "support/runtime.rs"]
+mod runtime;
+
+#[test]
+fn journal_read_starts_at_call_and_finishes_after_waiter_drop() {
+    use safe_cex_exchange::{
+        build_records::{BuildRecordsOptions, FoldableExchange, build_folded_position_records},
+        runtime::{ExchangeFuture, ExchangeRuntime},
+    };
+    use std::{cell::Cell, future::poll_fn, rc::Rc, task::Poll};
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/journal-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    for case in source["buildTiming"]["timing"].as_array().unwrap() {
+        let runtime = Rc::new(runtime::Runtime::default());
+        let host: Rc<dyn ExchangeRuntime> = runtime.clone();
+        let released = Rc::new(Cell::new(false));
+        let wake = Rc::new(RefCell::new(None::<std::task::Waker>));
+        let trace = Rc::new(RefCell::new(Vec::<String>::new()));
+        let fills: Vec<Execution> = serde_json::from_value(serde_json::json!([
+            {"side":"buy","qty":3,"price":11.25,"timestamp":1,"id":"100","symbol":"BTC","commission":0.125,"commissionAsset":"USDT","realizedPnl":0},
+            {"side":"sell","qty":3,"price":12.75,"timestamp":2,"id":"101","symbol":"BTC","commission":0.125,"commissionAsset":"USDT","realizedPnl":2.25}
+        ])).unwrap();
+        let income = case["income"].as_bool().unwrap();
+        let read_trace = trace.clone();
+        let read_gate = released.clone();
+        let read_wake = wake.clone();
+        let read_fills = move |_| -> ExchangeFuture<'_, Vec<Execution>> {
+            read_trace.borrow_mut().push("fills".into());
+            let released = read_gate.clone();
+            let wake = read_wake.clone();
+            let fills = fills.clone();
+            Box::pin(poll_fn(move |cx| {
+                if income || released.get() {
+                    Poll::Ready(Ok(fills.clone()))
+                } else {
+                    *wake.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending
+                }
+            }))
+        };
+        let read_trace = trace.clone();
+        let read_gate = released.clone();
+        let read_wake = wake.clone();
+        let read_income = move |_, _| -> ExchangeFuture<'_, Vec<safe_cex_types::IncomeRecord>> {
+            read_trace.borrow_mut().push("income".into());
+            let released = read_gate.clone();
+            let wake = read_wake.clone();
+            Box::pin(poll_fn(move |cx| {
+                if released.get() {
+                    Poll::Ready(Ok(vec![]))
+                } else {
+                    *wake.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending
+                }
+            }))
+        };
+        let currency_trace = trace.clone();
+        let currency = move |symbol: &str| {
+            currency_trace
+                .borrow_mut()
+                .push(format!("currency:{symbol}"));
+            Ok("USDT".into())
+        };
+        let exchange = FoldableExchange {
+            runtime: host,
+            fetch_historical_fills: Rc::new(read_fills),
+            fetch_income_history_range: if income {
+                Some(Rc::new(read_income))
+            } else {
+                None
+            },
+        };
+        let options = BuildRecordsOptions {
+            account: "acct".into(),
+            from: 0.,
+            to: 3.,
+            symbol_scoped: false,
+            resolve_settle_currency: Rc::new(currency),
+        };
+        let pending = build_folded_position_records(exchange, options);
+        assert_eq!(
+            serde_json::json!(*trace.borrow()),
+            case["before"],
+            "BUILD eager first read before caller polling"
+        );
+        drop(pending);
+        released.set(true);
+        wake.borrow_mut()
+            .take()
+            .expect("held read registered its waker")
+            .wake();
+        runtime.advance(0);
+        assert_eq!(
+            serde_json::json!(*trace.borrow()),
+            case["after"],
+            "BUILD discarded waiter retains fold continuation"
+        );
+        assert!(runtime.exceptions.borrow().is_empty());
+        assert!(
+            runtime.tasks.borrow().is_empty(),
+            "BUILD completed drivers are released"
+        );
+    }
+}
+
+#[test]
+fn journal_ready_reads_defer_fold_and_preserve_settlement_rejection() {
+    use safe_cex_exchange::{
+        build_records::{BuildRecordsOptions, FoldableExchange, build_folded_position_records},
+        js_runtime::value::{Thrown, error_object},
+    };
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/journal-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let expected = &source["buildTiming"]["settlement"];
+    assert_eq!(expected["same"], true);
+    assert_eq!(expected["before"], serde_json::json!([]));
+    let runtime = Rc::new(runtime::Runtime::default());
+    let rows: Vec<Execution> =
+        serde_json::from_value(source["buildCases"][0]["rows"].clone()).unwrap();
+    let rows: Vec<_> = rows.into_iter().filter(|r| r.symbol == "BTC").collect();
+    let trace = Rc::new(RefCell::new(Vec::<String>::new()));
+    let calls = trace.clone();
+    let original = error_object("SettlementDenied", "settlement lookup failed");
+    let rejection = original.clone();
+    let pending = build_folded_position_records(
+        FoldableExchange {
+            runtime: runtime.clone(),
+            fetch_historical_fills: Rc::new(move |_| {
+                let rows = rows.clone();
+                Box::pin(async move { Ok(rows) })
+            }),
+            fetch_income_history_range: None,
+        },
+        BuildRecordsOptions {
+            account: "acct".into(),
+            from: 0.,
+            to: 3.,
+            symbol_scoped: false,
+            resolve_settle_currency: Rc::new(move |symbol| {
+                calls.borrow_mut().push(symbol.into());
+                Err(Thrown::new(rejection.clone()).to_exchange_error())
+            }),
+        },
+    );
+    assert!(
+        trace.borrow().is_empty(),
+        "BUILD ready read still crosses source await before folding"
+    );
+    let error = ready(&runtime, pending).unwrap_err();
+    assert_eq!(error.error.name, "SettlementDenied");
+    assert_eq!(error.error.message, "settlement lookup failed");
+    assert!(error.cause.is_none());
+    assert!(
+        Thrown::from(error.error).value.same_reference(&original),
+        "BUILD original settlement error referent"
+    );
+    assert_eq!(serde_json::json!(*trace.borrow()), expected["trace"]);
+    assert!(runtime.exceptions.borrow().is_empty());
+    assert!(
+        runtime.tasks.borrow().is_empty(),
+        "BUILD completed drivers are released"
+    );
 }

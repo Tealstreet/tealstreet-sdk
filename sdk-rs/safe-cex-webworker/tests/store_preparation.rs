@@ -106,12 +106,24 @@ fn store_payload_preparation_matches_live_full_snapshots_and_incremental_transit
     let held = sanitize_for_post_message(&input, false, false);
     input.update_ids.orders = 99.0;
     input.loaded.orders = true;
-    input.socket_health.as_mut().unwrap()["publicHealthy"] = json!(true);
+    *input
+        .socket_health
+        .as_mut()
+        .unwrap()
+        .get_mut("publicHealthy")
+        .unwrap() = json!(true).into();
     input.balance.total = 99.0;
     input.orders[1].amount = 99.0;
     assert_eq!(held.update_ids.unwrap().orders, Some(0.0));
     assert!(!held.loaded.unwrap().orders);
-    assert_eq!(held.socket_health.unwrap()["publicHealthy"], false);
+    assert!(
+        !held
+            .socket_health
+            .unwrap()
+            .get("publicHealthy")
+            .and_then(safe_cex_types::retained_json::RetainedJsonInput::as_bool)
+            .unwrap()
+    );
     assert_eq!(
         held.balance.unwrap().total,
         0.0,

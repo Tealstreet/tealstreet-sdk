@@ -40,7 +40,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/signing.rs::sign_l1_action"
 status = "divergent"
-note = "CHOSEN: raw-key/Result ownership in safe-cex-venue-hyperliquid/CLAUDE.md#signing-adapter-contract remains distinct from ethers Wallet/Promise object identity. Invalid vault BytesLike errors now preserve the source TypeError and all diagnostic fields through canonical OwnedCallbackError, actual Realm rejection and native API transport. Real NativeRuntime signatures for five vault forms and three independent invalid-vault envelopes match the maintained source and installed ethers. Prepared SigningInput encoding metadata survives signing."
+note = "FIX-audit: the actual constructor-installed signer and native API retain the owned BytesLike cause, and numeric BigInt nonce rejections now keep RangeError instead of generic Error through rejected Promise and transport boundaries. Ten native signatures across both networks and four fractional nonce rejections match the complete maintained TS module, including native r/s/v, exact messages, Error subtype and Promise return. Two API preparation cases retain the canonical owned cause. Existing five valid/three invalid vault profiles remain independent. The separate raw-key/Result interface in safe-cex-venue-hyperliquid/CLAUDE.md#signing-adapter-contract remains distinct from arbitrary ethers Wallet callbacks and JS heap identity; this bounded audit does not claim nonfinite nonce conversion or Promise microtask equivalence. See FIX_AUDIT_SIGNING.md and scripts/signing-audit-controls.py for original-body/network compiled failures and exact restoration. Renamed target: safe-cex-venue-hyperliquid/src/signing.rs::sign_l1_action."
 
 [[symbol]]
 ts = "signUserSignedAction"

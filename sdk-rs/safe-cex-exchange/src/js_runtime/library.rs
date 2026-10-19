@@ -23,10 +23,8 @@ fn func(name: &str, f: impl Fn(Vec<Js>) -> Result<Js, Thrown> + 'static) -> Js {
     Js::function(name, move |_, a| f(a))
 }
 
-fn list(v: &Js) -> Vec<Js> {
-    v.array_items()
-        .map(|xs| xs.into_iter().map(|x| x.unwrap_or(Js::Undefined)).collect())
-        .unwrap_or_default()
+fn list(v: &Js) -> Result<Vec<Js>, Thrown> {
+    Ok(v.array_values()?.unwrap_or_default())
 }
 
 fn call(f: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
@@ -157,7 +155,7 @@ pub(super) fn uniq_by(values: &Js, by: &Js) -> Result<Js, Thrown> {
 
 fn order_by(collection: &Js, iteratees: &Js, orders: &Js) -> Result<Js, Thrown> {
     let values = if collection.is_array() {
-        list(collection)
+        list(collection)?
     } else if collection.is_nullish() {
         vec![]
     } else {
@@ -168,7 +166,7 @@ fn order_by(collection: &Js, iteratees: &Js, orders: &Js) -> Result<Js, Thrown> 
             .collect()
     };
     let keys = match iteratees {
-        Js::Array(_) => list(iteratees),
+        Js::Array(_) => list(iteratees)?,
         Js::Undefined | Js::Null => vec![],
         other => vec![other.clone()],
     };
@@ -178,7 +176,7 @@ fn order_by(collection: &Js, iteratees: &Js, orders: &Js) -> Result<Js, Thrown> 
         keys
     };
     let descending = match orders {
-        Js::Array(_) => list(orders),
+        Js::Array(_) => list(orders)?,
         Js::Undefined | Js::Null => vec![],
         other => vec![other.clone()],
     }
@@ -196,7 +194,7 @@ fn order_by(collection: &Js, iteratees: &Js, orders: &Js) -> Result<Js, Thrown> 
             .collect::<Result<Vec<_>, _>>()?;
         rows.push((criteria, index, value));
     }
-    super::sorting::stable_sort(&mut rows, |(a, ai, _), (b, bi, _)| {
+    safe_cex_num::sorting::stable_sort::<_, Thrown>(&mut rows, |(a, ai, _), (b, bi, _)| {
         for (i, (x, y)) in a.iter().zip(b).enumerate() {
             match compare_ascending(x, y)? {
                 Ordering::Equal => continue,
@@ -1153,7 +1151,7 @@ fn qs_pairs(
         Js::Undefined => {}
         Js::Null => out.push(format!("{}=", options.encode(prefix))),
         Js::Array(_) if options.arrays == "comma" => {
-            if !list(value).is_empty() {
+            if !list(value)?.is_empty() {
                 out.push(format!(
                     "{}={}",
                     options.encode(prefix),
@@ -1291,25 +1289,18 @@ fn update_order_book(book: &Js, side: &Js, update: Js, upsert: bool) -> Result<J
             if !upsert || update.get("amount")?.strict_equals(&Js::Number(0.0)) {
                 return Ok(Js::Number(-1.0));
             }
-            let Js::Array(rows) = &levels else {
-                return Err(Thrown::type_error("orderBook side is not an array"));
-            };
-            let mut rows = rows.borrow_mut();
-            // splice clamps against the current length, after callback effects.
-            let insert_at = (left as usize).min(rows.len());
-            rows.insert(insert_at, Some(update));
+            let length = levels.get("length")?.to_number()? as usize;
+            levels.splice_array(length, (left as usize).min(length), 0, vec![update])?;
             left
         }
         Some(index) => {
             if update.get("amount")?.strict_equals(&Js::Number(0.0)) {
-                let Js::Array(rows) = &levels else {
-                    return Err(Thrown::type_error("orderBook side is not an array"));
-                };
-                let removed = {
-                    let mut rows = rows.borrow_mut();
-                    (index < rows.len() as f64).then(|| rows.remove(index as usize))
-                };
-                drop(removed);
+                levels.splice_array(
+                    levels.get("length")?.to_number()? as usize,
+                    index as usize,
+                    1,
+                    vec![],
+                )?;
                 return Ok(Js::Number(-1.0));
             }
             let level = levels.get(&Js::Number(index).to_display())?;
@@ -1404,7 +1395,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     );
 
     let chunk = func("chunk", |a| {
-        let values = list(&arg(&a, 0));
+        let values = list(&arg(&a, 0))?;
         let size = arg(&a, 1);
         let size = if size.is_undefined() {
             1.0
@@ -1423,9 +1414,9 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     });
     let flatten = func("flatten", |a| {
         let mut out = vec![];
-        for v in list(&arg(&a, 0)) {
+        for v in list(&arg(&a, 0))? {
             match v {
-                Js::Array(_) => out.extend(list(&v)),
+                Js::Array(_) => out.extend(list(&v)?),
                 other => out.push(other),
             }
         }
@@ -1434,7 +1425,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let partition = func("partition", |a| {
         let (mut yes, mut no) = (vec![], vec![]);
         let by = arg(&a, 1);
-        for v in list(&arg(&a, 0)) {
+        for v in list(&arg(&a, 0))? {
             if iteratee(&by, v.clone())?.truthy() {
                 yes.push(v);
             } else {
@@ -1444,7 +1435,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         Ok(Js::array(vec![Js::array(yes), Js::array(no)]))
     });
     let sum_by = func("sumBy", |a| {
-        let values = list(&arg(&a, 0));
+        let values = list(&arg(&a, 0))?;
         if values.is_empty() {
             return Ok(Js::Number(0.0));
         }
@@ -1484,7 +1475,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
 
     let p_map = scoped("map", |s, a| {
         let f = arg(&a, 1);
-        let values = list(&arg(&a, 0));
+        let values = list(&arg(&a, 0))?;
         let array = arg(&a, 0);
         let started: Vec<Result<Js, Thrown>> = values
             .into_iter()
@@ -1601,7 +1592,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         func("oldestCursorId", |a| {
             let field = text(&arg(&a, 1))?;
             let mut ids = vec![];
-            for row in list(&arg(&a, 0)) {
+            for row in list(&arg(&a, 0))? {
                 let raw = if row.is_nullish() {
                     Js::Undefined
                 } else {
@@ -1739,7 +1730,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         "mergeUpdatesUsingLastUpdate",
         scoped("mergeUpdatesUsingLastUpdate", |s, a| {
             let now = s.now();
-            let existing = list(&arg(&a, 1));
+            let existing = list(&arg(&a, 1))?;
             let cutoff = arg(&a, 2);
             let cutoff = if cutoff.is_undefined() {
                 1000.0
@@ -1747,7 +1738,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 cutoff.to_number()?
             };
             let mut merged = vec![];
-            for update in list(&arg(&a, 0)) {
+            for update in list(&arg(&a, 0))? {
                 let id = update.get("id")?;
                 let mut found = Js::Undefined;
                 for e in &existing {

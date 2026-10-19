@@ -50,9 +50,21 @@ fn event_from_json_retains_native_fields_bits_and_captured_prototype() {
         let EventValue::Array(items) = value.read("items").unwrap() else {
             panic!("native array")
         };
-        assert_eq!(items.borrow().len(), 2);
-        assert!(matches!(items.borrow()[0], Some(EventValue::Null)));
-        assert!(matches!(items.borrow()[1], Some(EventValue::Number(3.0))));
+        assert_eq!(items.len(), 2);
+        assert!(matches!(
+            EventValue::Array(items.clone())
+                .array_items()
+                .unwrap()
+                .unwrap()[0],
+            Some(EventValue::Null)
+        ));
+        assert!(matches!(
+            EventValue::Array(items.clone())
+                .array_items()
+                .unwrap()
+                .unwrap()[1],
+            Some(EventValue::Number(3.0))
+        ));
     }
     assert!(matches!(
         <EventValue as EventOps>::from_json(json!(null)),
@@ -178,7 +190,6 @@ fn event_stock_reads_keep_current_realm_referents_and_later_properties() {
         EventValue::Number(-0.0),
         EventValue::Bool(false),
         EventValue::str("literal"),
-        EventValue::array(vec![]),
     ] {
         for (key, member) in [
             ("constructor", ProtoMember::Constructor),
@@ -211,4 +222,96 @@ fn event_stock_reads_keep_current_realm_referents_and_later_properties() {
             EventValue::Undefined
         ));
     }
+    // Arrays now have the canonical Array.prototype, distinct from the
+    // Object stock members observed above. Keep identity/native-value checks.
+    let profile = array_stock_read_profile();
+    for (key, actual) in profile.as_object().unwrap() {
+        if key == "rendered" {
+            assert_eq!(actual.as_str(), Some("0"));
+        } else {
+            assert_eq!(
+                actual.as_bool(),
+                Some(true),
+                "actual EventOps array stock read: {key}"
+            );
+        }
+    }
+}
+
+fn array_stock_read_profile() -> serde_json::Value {
+    use std::rc::Rc;
+    let realm = Rc::new(PrototypeRealm::default());
+    let _binding = realm.bind();
+    let value = EventValue::array(vec![EventValue::Number(-0.0)]);
+    let sibling = EventValue::array(vec![]);
+    let proto = value.read("__proto__").unwrap();
+    let method = value.read("toString").unwrap();
+    let object_proto = EventValue::Builtin(realm.reference(ProtoMember::Prototype));
+    let object_method = EventValue::Builtin(realm.reference(ProtoMember::ToString));
+    let (other, captured_proto, captured_method) = {
+        let other_realm = Rc::new(PrototypeRealm::default());
+        let _other_binding = other_realm.bind();
+        (
+            EventValue::array(vec![]),
+            value.read("__proto__").unwrap(),
+            value.read("toString").unwrap(),
+        )
+    };
+    assert!(matches!(
+        value.read("absent-stock-key").unwrap(),
+        EventValue::Undefined
+    ));
+    proto.define("marker", EventValue::Number(13.5)).unwrap();
+    let proto_marker = sibling.read("__proto__").unwrap().get("marker").unwrap();
+    assert!(matches!(proto_marker, EventValue::Number(n) if n.to_bits() == 13.5_f64.to_bits()));
+    proto.set("marker", EventValue::Bool(true)).unwrap();
+    assert!(matches!(
+        sibling.read("__proto__").unwrap().get("marker").unwrap(),
+        EventValue::Bool(true)
+    ));
+    method.define("marker", EventValue::Number(-0.0)).unwrap();
+    let marker = sibling.read("toString").unwrap().get("marker").unwrap();
+    let marker_bits =
+        matches!(marker, EventValue::Number(n) if n.to_bits() == (-0.0_f64).to_bits());
+    method.set("marker", EventValue::Bool(false)).unwrap();
+    let element = value.read("0").unwrap();
+    let rendered = text(method.call(value.clone(), vec![]).unwrap());
+    json!({
+        "arrayPrototype": matches!(proto, EventValue::Array(_)),
+        "ownToString": proto.has_own("toString"),
+        "distinctFromObject": !method.same(&object_method) && !proto.same(&object_proto),
+        "sharedPrototype": sibling.read("__proto__").unwrap().same(&proto),
+        "sharedMethod": sibling.read("toString").unwrap().same(&method),
+        "differentRealmPrototype": !other.read("__proto__").unwrap().same(&proto),
+        "differentRealmMethod": !other.read("toString").unwrap().same(&method),
+        "capturedPrototype": captured_proto.same(&proto),
+        "capturedMethod": captured_method.same(&method),
+        "markerBits": marker_bits,
+        "laterProperty": matches!(sibling.read("toString").unwrap().get("marker").unwrap(), EventValue::Bool(false)),
+        "elementBits": matches!(element, EventValue::Number(n) if n.to_bits() == (-0.0_f64).to_bits()),
+        "rendered": String::from_utf16(&rendered).unwrap(),
+    })
+}
+
+#[test]
+#[ignore = "requires Node for the stock array prototype oracle; mandatory venue oracle includes ignored tests"]
+fn event_array_stock_reads_match_javascript_realm_identity() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/array-prototype-source.cjs"
+        ))
+        .output()
+        .expect("run Node array property-read oracle");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        array_stock_read_profile(),
+        source,
+        "actual EventOps array reads match Node before projection"
+    );
 }

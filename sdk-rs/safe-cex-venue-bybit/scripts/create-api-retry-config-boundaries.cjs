@@ -284,9 +284,9 @@ async function run(input, expected) {
     assert.equal(rejection.config, failureConfig, 'source original failure config identity');
     assert.equal(rejection.code, 'ERR_NETWORK');
   }
-  if (input.id === 'private-post-error-method-get') {
-    assert.deepEqual(physical.map(value => value.data), ['{"x":1}', '{"x":1}'], 'transformed POST body survives GET retry');
-    assert.deepEqual(payloads, ['1000key20000{"x":1}', '1000key20000requestId=id-2']);
+  if (input.method === 'post') {
+    assert.deepEqual(physical.map(value => value.data), Array(expected.attempts).fill('{"x":1}'), 'transformed POST body survives GET retry');
+    assert.deepEqual(payloads, expected.attempts === 2 ? ['1000key20000{"x":1}', '1000key20000requestId=id-2'] : ['1000key20000{"x":1}']);
   } else {
     assert.ok(physical.every(value => !value.bodyPresent));
     assert.deepEqual(payloads, expected.attempts === 2
@@ -321,9 +321,22 @@ async function run(input, expected) {
   assert.deepEqual(cases.map(value => value.source.predicate), [false, true, true, false, true, true], 'fresh helper independent profile inventory');
   assert.equal(cases.filter(value => value.source.predicate === true).length, 4, 'fresh helper true floor');
   assert.equal(cases.filter(value => value.source.predicate === false).length, 2, 'fresh helper false floor');
+  const safetyCases = [];
+  for (const action of ['create', 'cancel', 'amend']) {
+    const url = `/v5/order/${action}`;
+    for (const rewritten of [true, false]) {
+      const input = { id: `mutation-${action}-${rewritten ? 'rewritten-get' : 'unchanged-post'}`,
+        method: 'post', url, data: { x: 1 }, ...(rewritten ? { failureMethod: 'get' } : {}) };
+      const expected = { attempts: rewritten ? 2 : 1, resolved: rewritten, retryCondition: rewritten,
+        methods: rewritten ? ['post', 'get'] : ['post'], urls: Array(rewritten ? 2 : 1).fill(url),
+        successes: rewritten ? 2 : 0 };
+      safetyCases.push({ ...input, source: await run(input, expected) });
+    }
+  }
+  assert.equal(safetyCases.length, 6);
   process.stdout.write(JSON.stringify({
     scope: 'source-only; actual Axios/axios-retry/qs and unchanged maintained API/response/read-retry/remote-tag bodies; scripted constructor/physical adapter and recording signer; no common HTTP wrapper, native factory/crypto or network execution',
     sourceCallbacks: callbacks, sourceModuleFunctions: moduleFunctions, assembledAstDiagnostics: 0,
-    declaredCases: 6, cases, declaredHelperCases: 4, helperCases: optionalConfigHelpers,
+    declaredCases: 6, cases, declaredSafetyCases: 6, safetyCases, declaredHelperCases: 4, helperCases: optionalConfigHelpers,
   }) + '\n');
 })().catch(error => { console.error(error); process.exitCode = 1; });

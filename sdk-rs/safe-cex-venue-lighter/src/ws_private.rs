@@ -102,7 +102,7 @@ pub fn flatten_by_market_payload(
     let entries = payload.own_entries()?;
     let mut flattened = Vec::new();
     for (_, entry) in entries {
-        if let Some(values) = entry.array_items() {
+        if let Some(values) = entry.array_items()? {
             flattened.extend(values.into_iter().flatten());
         } else if include_single_objects && entry.truthy() && entry.type_of() == "object" {
             flattened.push(entry);

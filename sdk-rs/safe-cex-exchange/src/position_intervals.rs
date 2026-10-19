@@ -1,5 +1,6 @@
 //! Path-dependent fills reconstruction; missing/opening-window data remains explicit.
 use indexmap::IndexMap;
+use safe_cex_num::sorting::stable_sort;
 use safe_cex_types::{
     Execution, ExecutionPositionSide, OrderSide, PositionRecordLeg, PositionSide,
 };
@@ -209,7 +210,10 @@ pub fn reconstruct_position_intervals(
     options: &mut PositionIntervalOptions<'_>,
 ) -> Result<Vec<PositionInterval>, String> {
     let mut ordered = executions.iter().collect::<Vec<_>>();
-    ordered.sort_by(|a, b| compare_execution_order(a, b));
+    stable_sort::<_, crate::js_runtime::value::Thrown>(&mut ordered, |a, b| {
+        Ok(compare_execution_order(a, b))
+    })
+    .map_err(|error| error.to_exchange_error().message)?;
     let mut running = IndexMap::<String, RunningPosition>::new();
     let mut intervals = vec![];
     for (key, signed) in &options.opening_size {
@@ -354,11 +358,14 @@ pub fn reconstruct_position_intervals(
         };
         intervals.push(finish(current, symbol, leg, None));
     }
-    intervals.sort_by(|a, b| {
-        (a.closed_at.unwrap_or(9007199254740991.) - b.closed_at.unwrap_or(9007199254740991.))
-            .partial_cmp(&0.)
-            .unwrap_or(Ordering::Equal)
-    });
+    stable_sort::<_, crate::js_runtime::value::Thrown>(&mut intervals, |a, b| {
+        Ok(
+            (a.closed_at.unwrap_or(9007199254740991.) - b.closed_at.unwrap_or(9007199254740991.))
+                .partial_cmp(&0.)
+                .unwrap_or(Ordering::Equal),
+        )
+    })
+    .map_err(|error| error.to_exchange_error().message)?;
     Ok(intervals)
 }
 

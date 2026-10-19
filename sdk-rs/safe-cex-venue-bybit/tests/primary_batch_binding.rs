@@ -428,3 +428,31 @@ fn disposal_cancels_the_pending_inter_batch_delay() {
         "disposal cancels remaining batches"
     );
 }
+
+#[test]
+fn retained_audit_placement_extensions_refuse_before_signed_writes() {
+    for extension in [
+        json!({"bybitBbo":null}),
+        json!({"bybitBbo":{"sideType":"Queue","level":0}}),
+        json!({"bybitBbo":{"sideType":"Queue","level":6}}),
+        json!({"bybitBbo":{"sideType":"Other","level":1}}),
+        json!({"bybitSlippageToleranceTicks":null}),
+        json!({"bybitBbo":{"sideType":"Queue","level":1},"bybitSlippageToleranceTicks":2}),
+    ] {
+        let h = support::harness(support::options(), |_| {});
+        seed(&h, &[market("BTCUSDT")], false);
+        let mut input = order(0);
+        input
+            .as_object_mut()
+            .unwrap()
+            .extend(extension.as_object().unwrap().clone());
+        let venue = h.venue();
+        let result = h.drive(Box::pin(venue.base().place_orders_json(venue, vec![input])));
+        assert!(result.is_err(), "placement_closed_extensions {extension}");
+        assert!(
+            h.wire.requests.borrow().is_empty(),
+            "strict placement refuses before signing/HTTP"
+        );
+        venue.dispose().unwrap();
+    }
+}

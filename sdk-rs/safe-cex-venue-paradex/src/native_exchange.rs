@@ -273,17 +273,15 @@ impl Exchange for ParadexExchange {
         &self,
         options: safe_cex_exchange::journal::HistoricalPositionOptions,
     ) -> ExchangeFuture<'_, Vec<serde_json::Value>> {
-        Box::pin(crate::state_operations::fetch_historical_positions(
-            options,
-            |options, scoped| {
+        Box::pin(async move {
+            let folder = NativeJournal(self.rt.clone());
+            crate::state_operations::fetch_historical_positions(options, |options, scoped| {
                 Ok(safe_cex_exchange::journal::fold_closed_position_records(
-                    self,
-                    &NativeJournal,
-                    options,
-                    scoped,
+                    self, &folder, options, scoped,
                 ))
-            },
-        ))
+            })
+            .await
+        })
     }
     fn dispose(&self) -> Result<(), ExchangeError> {
         self.rt.this.call_method("dispose", vec![])?;
@@ -308,35 +306,55 @@ impl Drop for ParadexExchange {
 }
 
 // Bind the existing core journal reader to this constructed Exchange's real reads.
-struct NativeJournal;
+struct NativeJournal(Rt);
 impl safe_cex_exchange::journal::JournalFolder for NativeJournal {
     fn build_folded_position_records<'a>(
         &'a self,
-        exchange: &'a dyn Exchange,
+        _exchange: &'a dyn Exchange,
         account: &'a str,
         from: f64,
         to: f64,
         symbol_scoped: bool,
-        resolve_settle_currency: Box<dyn Fn(&str) -> Result<String, ExchangeError> + 'a>,
+        resolve_settle_currency: Box<dyn Fn(&str) -> Result<String, ExchangeError>>,
     ) -> ExchangeFuture<'a, Vec<serde_json::Value>> {
+        let runtime = self.0.exchange_runtime();
+        let owner = self
+            .0
+            .shared
+            .sockets
+            .venue
+            .borrow()
+            .as_ref()
+            .and_then(std::rc::Weak::upgrade);
+        let account = account.to_owned();
         Box::pin(async move {
             use safe_cex_exchange::build_records::{
                 BuildRecordsOptions, FoldableExchange, build_folded_position_records,
             };
-            let mut fills = |opts| exchange.fetch_historical_fills(opts);
-            let mut income = |start, end| exchange.fetch_income_history_range(start, end, None);
-            let mut settle = |symbol: &str| resolve_settle_currency(symbol);
+            let owner =
+                owner.ok_or_else(|| ExchangeError::new("journal with no live exchange bound"))?;
+            let fills_owner = owner.clone();
+            let income_owner = owner.clone();
+            let fills = move |opts| -> ExchangeFuture<'static, Vec<Execution>> {
+                let owner = fills_owner.clone();
+                Box::pin(async move { owner.fetch_historical_fills(opts).await })
+            };
+            let income = move |start, end| -> ExchangeFuture<'static, Vec<IncomeRecord>> {
+                let owner = income_owner.clone();
+                Box::pin(async move { owner.fetch_income_history_range(start, end, None).await })
+            };
             let result = build_folded_position_records(
-                &mut FoldableExchange {
-                    fetch_historical_fills: &mut fills,
-                    fetch_income_history_range: Some(&mut income),
+                FoldableExchange {
+                    runtime,
+                    fetch_historical_fills: Rc::new(fills),
+                    fetch_income_history_range: Some(Rc::new(income)),
                 },
-                &mut BuildRecordsOptions {
+                BuildRecordsOptions {
                     account,
                     from,
                     to,
                     symbol_scoped,
-                    resolve_settle_currency: &mut settle,
+                    resolve_settle_currency: Rc::from(resolve_settle_currency),
                 },
             )
             .await
@@ -371,3 +389,7 @@ mod retained_order_info_binding;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "../tests/support/payload_signer_binding.rs"]
 mod payload_signer_binding;
+
+#[cfg(test)]
+#[path = "../tests/support/sort_binding.rs"]
+mod sort_binding;

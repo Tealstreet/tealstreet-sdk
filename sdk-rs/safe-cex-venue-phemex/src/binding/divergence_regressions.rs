@@ -155,6 +155,7 @@ fn reconciliation_retains_original_receiver_and_pending_store_commit() {
             .unwrap()
             .array_values()
             .unwrap()
+            .expect("native symbol array")
             .len(),
         0
     );
@@ -287,6 +288,7 @@ fn reconciliation_clears_queued_symbols_even_when_disposed() {
             .unwrap()
             .array_values()
             .unwrap()
+            .expect("native symbol array")
             .is_empty(),
         "PHEMEX source pre-try symbol clearing survives disposal"
     );

@@ -21,6 +21,7 @@ enum NativeMode {
     ModelRecord,
     InfoRecord,
     StoreRecord,
+    Key,
 }
 impl NativeMode {
     fn child(self) -> Self {
@@ -81,7 +82,7 @@ impl<'de> Deserializer<'de> for NativeInput {
                     })
                     .map(|(key, value)| {
                         (
-                            String::from_utf16_lossy(&key),
+                            NativeInput(Input::Text(key), NativeMode::Key),
                             NativeInput(value, self.1.child()),
                         )
                     }),
@@ -90,6 +91,9 @@ impl<'de> Deserializer<'de> for NativeInput {
         }
     }
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        if self.1 == NativeMode::Key {
+            return self.deserialize_any(visitor);
+        }
         if matches!(self.0, Input::Null | Input::Undefined) {
             visitor.visit_none()
         } else {
@@ -101,6 +105,9 @@ impl<'de> Deserializer<'de> for NativeInput {
         name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Error> {
+        if self.1 == NativeMode::Key {
+            return self.deserialize_any(visitor);
+        }
         if name == crate::retained_json::RETAINED_NATIVE {
             return self.0.into_native_payload().deserialize_seq(visitor);
         }
@@ -131,7 +138,7 @@ impl<'de> Deserializer<'de> for NativeInput {
             Input::Object(values) if values.len() == 1 => de::value::MapAccessDeserializer::new(
                 de::value::MapDeserializer::new(values.into_iter().map(|(key, value)| {
                     (
-                        String::from_utf16_lossy(&key),
+                        NativeInput(Input::Text(key), NativeMode::Key),
                         NativeInput(value, self.1.child()),
                     )
                 })),
@@ -242,8 +249,25 @@ impl<'de> Deserializer<'de> for NativeInput {
         }
         self.deserialize_any(visitor)
     }
+    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        if let Input::Text(units) = &self.0
+            && units.len() <= 64
+            && units.iter().all(|unit| *unit < 128)
+        {
+            let mut bytes = [0u8; 64];
+            for (byte, unit) in bytes.iter_mut().zip(units) {
+                *byte = *unit as u8;
+            }
+            return visitor
+                .visit_str(std::str::from_utf8(&bytes[..units.len()]).expect("ASCII identifier"));
+        }
+        self.deserialize_any(visitor)
+    }
     serde::forward_to_deserialize_any! {
         bool f32 f64 char str string bytes byte_buf
-        unit unit_struct seq tuple tuple_struct map struct identifier ignored_any
+        unit unit_struct seq tuple tuple_struct map struct ignored_any
     }
 }

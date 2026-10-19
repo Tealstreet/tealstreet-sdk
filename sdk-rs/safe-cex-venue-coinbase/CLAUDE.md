@@ -383,3 +383,7 @@ blocked results still borrow the exact typed caller. Before activation, revisit
 caller-only own fields/order. `scripts/divergence-binding-controls.py` requires
 compiled production failures, exact restoration and the live inert-builder
 reachability control; existing source corpora and identity assertions stay intact.
+
+The PEM signing oracle executes the maintained Coinbase API and shared Axios
+factory: REST rejection messages include the venue's request-setup prefix, while
+direct WS signing retains the unprefixed decoder message and error name.

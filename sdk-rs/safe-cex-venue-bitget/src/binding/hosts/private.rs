@@ -17,7 +17,6 @@ use crate::stream_timers::{
     self, ForcedWarningOptions, ReasonHealthUpdate, StreamTimerCallback, StreamTimerHost,
 };
 use safe_cex_exchange::runtime::LogSeverity;
-use safe_cex_store::StoreUpdate;
 use safe_cex_transport::{DirectTransport, RoutingOptions, TransportProvider};
 use safe_cex_types::{ExchangeName, ExchangeOptions};
 use std::rc::{Rc, Weak};
@@ -130,7 +129,7 @@ impl PrivateTopicsHost for Rt {
     }
     fn length(&self, array: &Js) -> Result<usize, Thrown> {
         match array {
-            Js::Array(items) => Ok(items.borrow().len()),
+            Js::Array(items) => Ok(items.len()),
             other => Err(Thrown::type_error(&format!(
                 "{} is not an array",
                 other.to_display()
@@ -139,7 +138,7 @@ impl PrivateTopicsHost for Rt {
     }
     fn has_index(&self, array: &Js, index: usize) -> Result<bool, Thrown> {
         match array {
-            Js::Array(items) => Ok(matches!(items.borrow().get(index), Some(Some(_)))),
+            Js::Array(_) => Ok(array.has_index(index)),
             other => Err(Thrown::type_error(&format!(
                 "{} is not an array",
                 other.to_display()
@@ -446,31 +445,20 @@ impl StreamLifecycleHost for Rt {
         self.this
             .set("hasWarnedPrivateStreamDegraded", Js::Bool(value))
     }
-    // ts: this.store.updateSocketHealth({ privateDegradedReason: undefined }) — an own
-    // undefined property drops the serialized field, so the key is removed.
+    // ts: this.store.updateSocketHealth({ privateDegradedReason: undefined })
     fn update_socket_health(&self, update: PrivateStreamHealthUpdate) -> Result<(), Thrown> {
-        let store = self.shared.store.clone();
-        match update.private_degraded_reason {
-            UndefinedProperty::Absent => store
-                .update_socket_health(&serde_json::Map::new())
-                .map_err(store_error),
-            UndefinedProperty::PresentUndefined => {
-                let mut health = store
-                    .socket_health()?
-                    .and_then(|current| current.as_object().cloned())
-                    .unwrap_or_default();
-                health.shift_remove("privateDegradedReason");
-                store
-                    .update(
-                        StoreUpdate {
-                            socket_health: Some(serde_json::Value::Object(health)),
-                            ..StoreUpdate::default()
-                        },
-                        false,
-                    )
-                    .map_err(store_error)
-            }
-        }
+        use safe_cex_types::retained_json::RetainedJsonInput;
+        let fields = match update.private_degraded_reason {
+            UndefinedProperty::Absent => vec![],
+            UndefinedProperty::PresentUndefined => vec![(
+                "privateDegradedReason".encode_utf16().collect(),
+                RetainedJsonInput::Undefined,
+            )],
+        };
+        self.shared
+            .store
+            .update_socket_health(&RetainedJsonInput::Object(fields))
+            .map_err(store_error)
     }
     fn stop_reconcile(&self) -> Result<(), Thrown> {
         self.call_path("stopPrivateStreamDegradedReconcile", vec![])
@@ -537,7 +525,7 @@ impl StreamTimerHost for Rt {
         );
         self.shared
             .store
-            .update_socket_health(&patch)
+            .update_socket_health(&serde_json::Value::Object(patch).into())
             .map_err(store_error)
     }
     fn log_warning(&self, reason: &Js) -> Result<(), Thrown> {

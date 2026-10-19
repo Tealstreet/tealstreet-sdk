@@ -21,7 +21,9 @@ fn put(v: &V, k: &str, value: V) {
     v.set(k, value).expect("fixture Set");
 }
 fn items(v: &V) -> Vec<V> {
-    v.array_values().expect("fixture array")
+    v.array_values()
+        .expect("fixture array property reads")
+        .expect("fixture array")
 }
 fn text(v: &V) -> String {
     String::from_utf16_lossy(&v.to_js_string().expect("fixture String"))
@@ -322,7 +324,7 @@ fn host(t: Rc<State>) -> Rc<SocketEventOps<V, E>> {
                 _ => production::named(name),
             })
         }),
-        member: Rc::new(|v, k| v.get(k)),
+        member: Rc::new(|v, k| safe_cex_exchange::js_runtime::scope::bound_member(&v, k)),
         invoke: Rc::new(move |f, args| invoke(call.clone(), f, args)),
         intrinsic: Rc::new(move |name, args| {
             production::intrinsic(intrinsic.receiver.clone(), name, args)
@@ -728,7 +730,8 @@ fn fixture(method: &str, case: &str) -> Value {
         Err(e) => {
             assert!(
                 e.value.same_reference(&t.err.value),
-                "SOCKET native original error identity"
+                "SOCKET native original error identity in {method}/{case}: {}",
+                e.message()
             );
             assert_eq!(text(&get(&e.value, "name")), "TypeError");
             assert_eq!(e.message(), "boom");

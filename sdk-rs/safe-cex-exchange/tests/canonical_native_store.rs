@@ -30,6 +30,109 @@ fn source() -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+#[test]
+fn facade_reuses_identity_descriptors_and_releases_its_graph() {
+    use safe_cex_exchange::js_runtime::store::facade;
+    use safe_cex_store::Store;
+    use std::sync::Arc;
+
+    let lifetime = Arc::new(());
+    let weak_graph = Arc::downgrade(&lifetime);
+    let mut store = DefaultStore::new();
+    store.now = Arc::new(move || {
+        let _keep_graph_alive = &lifetime;
+        42.0
+    });
+    let store = Rc::new(store);
+    let first = facade(store.clone()).unwrap();
+    let method = first.get("updateTicker").unwrap();
+    let runtime = Js::object(vec![]);
+    globals::install_builtins::<()>(&runtime, Weak::new());
+    runtime
+        .get("Object")
+        .unwrap()
+        .call_method(
+            "defineProperty",
+            vec![
+                first.clone(),
+                Js::str("custom"),
+                Js::object(vec![
+                    ("value", Js::utf16(&[0xd800])),
+                    ("writable", Js::Bool(false)),
+                    ("enumerable", Js::Bool(false)),
+                    ("configurable", Js::Bool(false)),
+                ]),
+            ],
+        )
+        .unwrap();
+    let custom_key: Vec<u16> = "custom".encode_utf16().collect();
+    for _ in 0..3 {
+        let again = facade(store.clone()).unwrap();
+        assert!(
+            first.same_reference(&again),
+            "facade allocation must be reused"
+        );
+        assert!(method.same_reference(&again.get("updateTicker").unwrap()));
+        assert!(
+            again
+                .get("custom")
+                .unwrap()
+                .strict_equals(&Js::utf16(&[0xd800]))
+        );
+        assert!(store.facade().unwrap().same_reference(&first));
+        assert!(
+            !again
+                .own_keys()
+                .iter()
+                .any(|key| key.as_ref() == custom_key.as_slice())
+        );
+        assert!(again.set("custom", Js::Undefined).is_err());
+    }
+    let old_map = first.get("marketsById").unwrap();
+    first.call_method("reset", vec![]).unwrap();
+    assert!(first.same_reference(&facade(store.clone()).unwrap()));
+    assert!(!old_map.same_reference(&first.get("marketsById").unwrap()));
+    assert!(
+        first
+            .get("custom")
+            .unwrap()
+            .strict_equals(&Js::utf16(&[0xd800]))
+    );
+    let owner = store.native_owner();
+    let weak_owner = Rc::downgrade(&owner);
+    drop(owner);
+    drop(store);
+    assert!(
+        weak_owner.upgrade().is_none(),
+        "facade must not retain its cache owner"
+    );
+    first
+        .call_method("setSetting", vec![Js::str("isHedged"), Js::Bool(true)])
+        .unwrap();
+    assert!(
+        first
+            .get("options")
+            .unwrap()
+            .get("isHedged")
+            .unwrap()
+            .truthy()
+    );
+    assert!(
+        weak_graph.upgrade().is_some(),
+        "retained facade must keep graph alive"
+    );
+    drop(first);
+    assert!(
+        weak_graph.upgrade().is_some(),
+        "retained method must keep graph alive"
+    );
+    drop(method);
+    assert!(
+        weak_graph.upgrade().is_none(),
+        "no graph/facade ownership cycle"
+    );
+}
+
 fn fixture() -> (Rc<DefaultStore>, Js) {
     let native = Rc::new(DefaultStore::new());
     let facade = safe_cex_exchange::js_runtime::store::facade(native.clone()).unwrap();
@@ -1343,5 +1446,282 @@ fn position_deduplication_normalizes_returned_zero_like_lodash() {
     assert_eq!(
         positions.get("0").unwrap().as_f64().unwrap().to_bits(),
         0.0_f64.to_bits()
+    );
+}
+
+#[test]
+fn audit_mutation_rows_preserve_open_fields_identity_and_partial_writes() {
+    let expected = source();
+    let mut actual = Vec::new();
+    let methods = [
+        ("updateOrder", "orders"),
+        ("updatePosition", "positions"),
+        ("updatePositions", "positions"),
+        ("updateTicker", "tickers"),
+        ("updateMarket", "markets"),
+    ];
+    let bits = |value: &Js| {
+        let value = value.as_f64().unwrap();
+        format!(
+            "{:016x}",
+            if value.is_nan() {
+                f64::NAN.to_bits()
+            } else {
+                value.to_bits()
+            }
+        )
+    };
+    for (method, key) in methods {
+        for number in [-0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 7.25] {
+            let store = DefaultStore::new();
+            let facade = store.facade().unwrap();
+            facade
+                .call_method(
+                    "update",
+                    vec![Js::object(vec![(
+                        key,
+                        Js::array(vec![Js::object(vec![
+                            ("id", Js::str("a")),
+                            ("symbol", Js::str("A")),
+                            ("contracts", Js::Number(1.0)),
+                            ("keep", Js::Number(7.0)),
+                        ])]),
+                    )])],
+                )
+                .unwrap();
+            let rows = facade.get(key).unwrap();
+            let row = rows.get("0").unwrap();
+            let extension = Js::object(vec![
+                ("text", Js::utf16(&[0xd800])),
+                (
+                    "values",
+                    Js::array(vec![
+                        Js::Undefined,
+                        Js::Number(f64::NAN),
+                        Js::Number(f64::INFINITY),
+                        Js::Number(-0.0),
+                    ]),
+                ),
+            ]);
+            let changes = Js::object(vec![
+                ("probeNumber", Js::Number(number)),
+                ("probeUndefined", Js::Undefined),
+                ("probeText", Js::utf16(&[0xd800])),
+                ("extension", extension.clone()),
+                ("info", extension.clone()),
+            ]);
+            let notices = Rc::new(Cell::new(0));
+            let count = notices.clone();
+            facade
+                .call_method(
+                    "subscribe",
+                    vec![Js::function("notice", move |_, _| {
+                        count.set(count.get() + 1);
+                        Ok(Js::Undefined)
+                    })],
+                )
+                .unwrap();
+            let selector = Js::object(vec![("id", Js::str("a"))]);
+            let args = if method == "updatePositions" {
+                vec![Js::array(vec![Js::array(vec![selector, changes])])]
+            } else {
+                vec![selector, changes]
+            };
+            facade.call_method(method, args).unwrap();
+            let map = match key {
+                "markets" => Some(facade.get("marketsById").unwrap()),
+                "tickers" => Some(facade.get("tickersById").unwrap()),
+                _ => None,
+            };
+            let revision = if matches!(key, "orders" | "positions") {
+                json!(
+                    facade
+                        .get("updateIds")
+                        .unwrap()
+                        .get(key)
+                        .unwrap()
+                        .as_f64()
+                        .unwrap() as u64
+                )
+            } else {
+                Value::Null
+            };
+            actual.push(json!({"kind":"patch", "method":method,
+                "bits":bits(&row.get("probeNumber").unwrap()),
+                "keys":row.own_keys().iter().map(|key| String::from_utf16(key).unwrap()).collect::<Vec<_>>(),
+                "text":row.get("probeText").unwrap().to_js_string().unwrap().to_vec(),
+                "undefinedOwn":row.has_own("probeUndefined") && row.get("probeUndefined").unwrap().is_undefined(),
+                "extensionSame":row.get("extension").unwrap().same_reference(&extension),
+                "rowSame":facade.get(key).unwrap().get("0").unwrap().same_reference(&row),
+                "arraySame":facade.get(key).unwrap().same_reference(&rows),
+                "infoSame":row.get("info").unwrap().same_reference(&extension),
+                "keep":row.get("keep").unwrap().as_f64().unwrap() as u64,
+                "notices":notices.get(),"revision":revision,
+                "mapSame":map.map(|map|map.get("a").unwrap().same_reference(&row))}));
+        }
+        let store = DefaultStore::new();
+        let facade = store.facade().unwrap();
+        facade
+            .call_method(
+                "update",
+                vec![Js::object(vec![(
+                    key,
+                    Js::array(vec![Js::object(vec![
+                        ("id", Js::str("a")),
+                        ("symbol", Js::str("A")),
+                        ("contracts", Js::Number(1.0)),
+                    ])]),
+                )])],
+            )
+            .unwrap();
+        let row = facade.get(key).unwrap().get("0").unwrap();
+        let cause = Js::object(vec![("text", Js::utf16(&[0xd800]))]);
+        let events = Rc::new(RefCell::new(Vec::<String>::new()));
+        let notices = Rc::new(Cell::new(0));
+        let count = notices.clone();
+        facade
+            .call_method(
+                "subscribe",
+                vec![Js::function("notice", move |_, _| {
+                    count.set(count.get() + 1);
+                    Ok(Js::Undefined)
+                })],
+            )
+            .unwrap();
+        let changes = Js::object(vec![]);
+        for name in ["first", "second", "third"] {
+            let events = events.clone();
+            let cause = cause.clone();
+            changes
+                .define_accessor(
+                    name,
+                    Some(Rc::new(move |_| {
+                        events.borrow_mut().push(name.into());
+                        if name == "second" {
+                            Err(Thrown::new(cause.clone()))
+                        } else {
+                            Ok(Js::Number(if name == "first" { -0.0 } else { 3.0 }))
+                        }
+                    })),
+                    None,
+                )
+                .unwrap();
+        }
+        let selector = Js::object(vec![("id", Js::str("a"))]);
+        let args = if method == "updatePositions" {
+            vec![Js::array(vec![Js::array(vec![selector, changes])])]
+        } else {
+            vec![selector, changes]
+        };
+        let error = facade.call_method(method, args).unwrap_err();
+        assert_eq!(
+            row.get("first").unwrap().as_f64().map(f64::to_bits),
+            Some((-0.0_f64).to_bits()),
+            "STORE_AUDIT partial write precedes throwing getter"
+        );
+        actual.push(json!({"kind":"throw","method":method,"events":*events.borrow(),
+            "bits":bits(&row.get("first").unwrap()),"sameCause":error.value.same_reference(&cause),
+            "thirdOwn":row.has_own("third"),"notices":notices.get(),
+            "revision":if matches!(key,"orders"|"positions"){json!(facade.get("updateIds").unwrap().get(key).unwrap().as_f64().unwrap() as u64)}else{Value::Null}}));
+    }
+    for method in ["addOrUpdateOrders", "updatePositions"] {
+        for stored in [1, 2] {
+            for incoming in [1, 2] {
+                let key = if method == "addOrUpdateOrders" {
+                    "orders"
+                } else {
+                    "positions"
+                };
+                let store = DefaultStore::new();
+                let facade = store.facade().unwrap();
+                let rows = Js::array(vec![Js::object(vec![
+                    ("id", Js::str("a")),
+                    ("symbol", Js::str("A")),
+                    ("contracts", Js::Number(1.0)),
+                    ("probeNumber", Js::Number(1.0)),
+                ])]);
+                facade
+                    .call_method("update", vec![Js::object(vec![(key, rows)])])
+                    .unwrap();
+                let rows = facade.get(key).unwrap();
+                if stored == 2 {
+                    rows.call_method(
+                        "push",
+                        vec![Js::object(vec![
+                            ("id", Js::str("a")),
+                            ("symbol", Js::str("A")),
+                            ("contracts", Js::Number(1.0)),
+                            ("probeNumber", Js::Number(2.0)),
+                        ])],
+                    )
+                    .unwrap();
+                }
+                let selected = rows
+                    .get(if stored > 1 && incoming > 1 { "1" } else { "0" })
+                    .unwrap();
+                let extension = Js::object(vec![("text", Js::utf16(&[0xd800]))]);
+                let changes = Js::object(vec![
+                    ("probeNumber", Js::Number(-0.0)),
+                    ("probeUndefined", Js::Undefined),
+                    ("extension", extension.clone()),
+                ]);
+                let notices = Rc::new(Cell::new(0));
+                let count = notices.clone();
+                facade
+                    .call_method(
+                        "subscribe",
+                        vec![Js::function("notice", move |_, _| {
+                            count.set(count.get() + 1);
+                            Ok(Js::Undefined)
+                        })],
+                    )
+                    .unwrap();
+                let values = Js::array(
+                    (0..incoming)
+                        .map(|i| {
+                            let id = if i == 0 { "a" } else { "miss" };
+                            let patch = if i == 0 {
+                                changes.clone()
+                            } else {
+                                Js::object(vec![("probeNumber", Js::Number(9.0))])
+                            };
+                            let selector = Js::object(vec![("id", Js::str(id))]);
+                            if method == "updatePositions" {
+                                Js::array(vec![selector, patch])
+                            } else {
+                                for k in patch.own_keys() {
+                                    selector.set_key(&k, patch.get_key(&k).unwrap()).unwrap();
+                                }
+                                selector
+                            }
+                        })
+                        .collect(),
+                );
+                facade.call_method(method, vec![values.clone()]).unwrap();
+                if method == "addOrUpdateOrders" && incoming > 1 {
+                    assert!(
+                        rows.get(&stored.to_string())
+                            .unwrap()
+                            .same_reference(&values.get("1").unwrap()),
+                        "STORE_AUDIT inserted order retains incoming reference"
+                    );
+                }
+                actual.push(json!({"kind":"threshold","method":method,"stored":stored,"incoming":incoming,
+                "bits":rows.array_values().unwrap().unwrap().iter().map(|row|bits(&row.get("probeNumber").unwrap())).collect::<Vec<_>>(),
+                "selectedSame":selected.get("extension").unwrap().same_reference(&extension),
+                "arraySame":rows.same_reference(&facade.get(key).unwrap()),
+                "undefinedOwn":selected.has_own("probeUndefined"),"notices":notices.get()}));
+            }
+        }
+    }
+    assert_eq!(
+        actual.len(),
+        38,
+        "STORE_AUDIT complete native mutation profiles"
+    );
+    assert_eq!(
+        json!(actual),
+        expected["patchAudit"],
+        "STORE_AUDIT actual native facade matches source mutation profiles"
     );
 }
