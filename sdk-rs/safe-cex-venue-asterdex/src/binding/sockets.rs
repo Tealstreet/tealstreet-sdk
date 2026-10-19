@@ -246,7 +246,7 @@ impl crate::private_stream::PrivateStreamParent for Parent {
                 ),
                 (
                     "symbol",
-                    fill.symbol.as_deref().map_or(Js::Undefined, Js::str),
+                    safe_cex_exchange::js_runtime::value::from_retained_input(fill.symbol.clone()),
                 ),
                 ("side", from_typed(&fill.side)?),
                 ("price", Js::Number(fill.price)),

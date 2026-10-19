@@ -913,7 +913,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "fc3800178a0eac60691cb170adc47c921aa8100e65961f0f8c77b36af93e07c1"
+          "sha256": "5086f8a11ef78101e2f4b7ffd27aabc7da8200f53f7140e6863d95853612fb9a"
         }
       ],
       "guards": [
@@ -2457,7 +2457,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "fc3800178a0eac60691cb170adc47c921aa8100e65961f0f8c77b36af93e07c1"
+          "sha256": "5086f8a11ef78101e2f4b7ffd27aabc7da8200f53f7140e6863d95853612fb9a"
         }
       ],
       "guards": [

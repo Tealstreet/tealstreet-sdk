@@ -400,7 +400,7 @@ impl public::RoutingHost for Host {
         Ok(())
     }
     fn now(&mut self) -> Result<f64, Thrown> {
-        Ok(self.rt.now())
+        self.global("performance.now", vec![])?.to_number()
     }
     fn set_ping_at(&mut self, n: f64) -> Result<(), Thrown> {
         self.rt.this.set("pingAt", Js::Number(n))

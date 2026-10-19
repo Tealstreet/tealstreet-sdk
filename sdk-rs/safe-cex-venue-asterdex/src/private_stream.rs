@@ -16,6 +16,7 @@ use safe_cex_exchange::{
 use safe_cex_num::TableHit;
 use safe_cex_store::{StoreUpdate, model_patch::ModelPatch};
 use safe_cex_transport::socket::SocketFrame;
+use safe_cex_types::retained_json::RetainedJsonInput;
 use safe_cex_types::{Balance, Order, OrderSide, OrderStatus, Position, PositionSide};
 use serde_json::Value;
 use std::{
@@ -41,7 +42,7 @@ pub trait PrivateStreamParent: WsParent + RepairParent {
 pub struct PrivateFill {
     pub id: Option<String>,
     pub order_id: Option<String>,
-    pub symbol: Option<String>,
+    pub symbol: RetainedJsonInput,
     pub side: OrderSide,
     pub price: f64,
     pub amount: f64,
@@ -515,7 +516,7 @@ impl PrivateStream {
                 self.parent.emit_fill(&PrivateFill {
                     id: id.clone(),
                     order_id: id.clone(),
-                    symbol: utf8(d.get("s")?),
+                    symbol: to_typed(&d.get("s")?)?,
                     side: if d.get("S")?.strict_equals(&Js::str("BUY")) {
                         OrderSide::Buy
                     } else {

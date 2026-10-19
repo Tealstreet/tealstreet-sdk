@@ -264,6 +264,21 @@ impl Exchange for PhemexExchange {
         options: OHLCVOptions,
         callback: Rc<dyn Fn(Candle)>,
     ) -> Result<ListenerCleanup, ExchangeError> {
+        self.listen_ohlcv_retained(
+            options,
+            Rc::new(move |value| {
+                callback(to_typed(value).map_err(err)?);
+                Ok(())
+            }),
+        )
+    }
+    fn listen_ohlcv_retained(
+        &self,
+        options: OHLCVOptions,
+        callback: Rc<dyn Fn(&Js) -> Result<(), ExchangeError>>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        let socket = self.rt.this.get("publicWebsocket").map_err(err)?;
+        let member = socket.get("listenOHLCV").map_err(err)?;
         let options = js(&options)?;
         let symbol = self
             .rt
@@ -271,7 +286,15 @@ impl Exchange for PhemexExchange {
             .call_method("formatSymbolOut", vec![options.get("symbol").map_err(err)?])
             .map_err(err)?;
         options.define("symbol", symbol).map_err(err)?;
-        self.listen("listenOHLCV", options, callback)
+        let listener = Js::function("callback", move |_, args| {
+            callback(&safe_cex_exchange::js_runtime::value::arg(&args, 0)).map_err(Thrown::from)?;
+            Ok(Js::Undefined)
+        });
+        let cleanup = member.call(socket, vec![options, listener]).map_err(err)?;
+        Ok(Box::new(move || {
+            cleanup.call(Js::Undefined, vec![]).map_err(err)?;
+            Ok(())
+        }))
     }
     fn listen_order_book(
         &self,

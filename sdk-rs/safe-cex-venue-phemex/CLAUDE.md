@@ -263,3 +263,14 @@ Private reconciliation already retains its eager prefix, detached continuation
 and source silent catch. Keep the original receiver/Store identities and both
 disposal guards; generic helper diagnostics must not become public rejections.
 Run tests/divergence_timing_controls.py and the full parity/cancellation gates.
+
+The recorded public-feed witness retains all 906 socket frames from bundle
+69847e02ed3622d2081f8b667af8fee0910b7ad1780d853ad958b2bf816f62fa.
+The actual maintained listener delivers 19 candles whose OHLCV fields are strings.
+Exchange::listen_ohlcv_retained preserves those values through native account
+delivery; listen_ohlcv remains the explicit typed Candle projection. The registry
+child test checks native string units and timestamp bits before JSON, actual
+unsubscribe cleanup, and 12 recorded pong payloads with controlled elapsed times.
+Public pingAt and the base pong comparison both use the canonical performance
+clock; snapshot throttling continues to use the wall clock. HTTP telemetry and
+the shared JS-facade handler-stats reader are separately assigned work.
