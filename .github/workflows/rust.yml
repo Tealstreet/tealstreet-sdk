@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Ten venues, size-optimized wasm: measured 3,127,710 bytes; allow 3 MiB.
-      WASM_BUDGET_BYTES: 3145728
+      # Ten venues: measured 3,497,553 bytes; fixed 3.5 MiB aggregate budget.
+      WASM_BUDGET_BYTES: 3670016
     defaults:
       run:
         working-directory: .
@@ -159,6 +159,12 @@ jobs:
           yarn rust:private-tape-bybit
           yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''
 
+      - name: Bitget public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue bitget --tape sdk-rs/harness/fixtures/bitget-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: Bitget account and trading (correctness)
+        run: |
+          yarn rust:private-tape-bitget
+          yarn rust:gate --venue bitget --tape sdk-rs/harness/tapes/bitget-private.jsonl --runs 1 --books ''
       - name: Backpack public data (correctness, CPU and memory)
         run: corepack yarn -s rust:gate --venue backpack --tape sdk-rs/harness/fixtures/backpack-public.jsonl.gz --books SOL_USDC_PERP,BTC_USDC_PERP
       - name: Backpack private account and trading
