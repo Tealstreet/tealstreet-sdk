@@ -1,6 +1,5 @@
 //! Shared Ethereum primitives, without venue payload construction or entropy.
-use alloy_dyn_abi::DynSolValue;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 
@@ -59,41 +58,12 @@ pub fn get_address(value: &str) -> Result<String, String> {
     Err("invalid address".into())
 }
 
-/// ethers.isAddress: invalid shapes or checksums are false, without throwing.
-pub fn is_address(value: &serde_json::Value) -> bool {
-    value
-        .as_str()
-        .is_some_and(|value| get_address(value).is_ok())
-}
-
-/// Address of a private signing key, for non-fatal account diagnostics.
+/// Derive the Ethereum address of a local signing key.
 pub fn private_key_address(private_key: &str) -> Result<String, String> {
     let signer: PrivateKeySigner = private_key
         .parse()
         .map_err(|error: alloy_signer_local::LocalSignerError| error.to_string())?;
     Ok(signer.address().to_checksum(None))
-}
-
-/// ABI encode four parameters; nonce is an unsigned 256-bit big-endian word.
-pub fn encode_string_address_address_uint256(
-    payload: &str,
-    user: &str,
-    signer: &str,
-    nonce: &[u8; 32],
-) -> Result<Vec<u8>, String> {
-    let user: Address = get_address(user)?
-        .parse()
-        .map_err(|_| "invalid address width")?;
-    let signer: Address = get_address(signer)?
-        .parse()
-        .map_err(|_| "invalid address width")?;
-    Ok(DynSolValue::Tuple(vec![
-        DynSolValue::String(payload.into()),
-        DynSolValue::Address(user),
-        DynSolValue::Address(signer),
-        DynSolValue::Uint(U256::from_be_bytes(*nonce), 256),
-    ])
-    .abi_encode_params())
 }
 
 /// Keccak-256 over exact bytes.
@@ -139,7 +109,7 @@ mod tests {
             .collect()
     }
     #[test]
-    fn ethers_abi_hash_and_recoverable_signature_raw_vectors() {
+    fn hash_and_recoverable_signature_raw_vectors() {
         let corpus = corpus();
         let cases = corpus["cases"].as_array().unwrap();
         for name in [
@@ -156,22 +126,7 @@ mod tests {
             );
         }
         for case in cases {
-            let nonce: [u8; 32] = bytes(case["nonceHex"].as_str().unwrap())
-                .try_into()
-                .unwrap();
-            let abi = encode_string_address_address_uint256(
-                case["payload"].as_str().unwrap(),
-                case["user"].as_str().unwrap(),
-                case["signer"].as_str().unwrap(),
-                &nonce,
-            )
-            .unwrap();
-            assert_eq!(
-                abi,
-                bytes(case["abi"].as_str().unwrap()),
-                "ABI bytes {}",
-                case["name"]
-            );
+            let abi = bytes(case["abi"].as_str().unwrap());
             let hash = keccak256(&abi);
             assert_eq!(
                 hash.to_vec(),
@@ -211,61 +166,7 @@ mod tests {
         assert!(sign_digest(&[0; 32], "invalid").is_err(), "key refusal");
     }
     #[test]
-    fn actual_typescript_aster_signing_preimages() {
-        let corpus: Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/ethereum/aster-preimages.json"
-        ))
-        .unwrap();
-        let cases = corpus["cases"].as_array().unwrap();
-        for name in ["complete", "omitted", "unicode", "keys"] {
-            assert!(
-                cases.iter().any(|case| case["name"] == name),
-                "missing live Aster TS preimage property {name}"
-            );
-        }
-        for case in cases {
-            let values = case["values"].as_array().unwrap();
-            let nonce = U256::from_str_radix(values[3].as_str().unwrap(), 10)
-                .unwrap()
-                .to_be_bytes::<32>();
-            let abi = encode_string_address_address_uint256(
-                values[0].as_str().unwrap(),
-                values[1].as_str().unwrap(),
-                values[2].as_str().unwrap(),
-                &nonce,
-            )
-            .unwrap();
-            assert_eq!(
-                abi,
-                bytes(case["abi"].as_str().unwrap()),
-                "live TS ABI preimage {}",
-                case["name"]
-            );
-            let hash = keccak256(&abi);
-            assert_eq!(
-                hash.to_vec(),
-                bytes(case["keccak"].as_str().unwrap()),
-                "live TS Keccak {}",
-                case["name"]
-            );
-            let digest = ethereum_message_hash(&hash);
-            assert_eq!(
-                digest.to_vec(),
-                bytes(case["signDigest"].as_str().unwrap()),
-                "live TS digest preimage {}",
-                case["name"]
-            );
-            assert_eq!(
-                sign_digest(&digest, case["key"].as_str().unwrap()).unwrap(),
-                case["signature"].as_str().unwrap(),
-                "live TS signature {}",
-                case["name"]
-            );
-        }
-    }
-
-    #[test]
-    fn ethers_exact_byte_hashes() {
+    fn exact_byte_hashes() {
         for case in corpus()["bytesCases"].as_array().unwrap() {
             let payload = bytes(case["bytes"].as_str().unwrap());
             assert_eq!(
@@ -281,26 +182,6 @@ mod tests {
                 case["name"]
             );
         }
-    }
-    #[test]
-    fn ethers_oversized_icap_reference_bug_is_preserved() {
-        let case: Value =
-            serde_json::from_str(include_str!("../tests/fixtures/ethereum/icap-maximum.json"))
-                .unwrap();
-        assert!(
-            case["address"].as_str().unwrap().len() > 42,
-            "oversized reference case required"
-        );
-        assert_eq!(
-            get_address(case["input"].as_str().unwrap()).unwrap(),
-            case["address"].as_str().unwrap(),
-            "ethers oversized ICAP spelling"
-        );
-        assert_eq!(
-            is_address(&case["input"]),
-            case["isAddress"].as_bool().unwrap(),
-            "ethers oversized ICAP predicate"
-        );
     }
 
     #[test]
@@ -346,18 +227,6 @@ mod tests {
                     case["name"]
                 );
             }
-            assert_eq!(
-                is_address(&case["input"]),
-                case.get("address").is_some(),
-                "isAddress {}",
-                case["name"]
-            );
-        }
-        for raw in ["null", "123", "true", "{}", "[]"] {
-            assert!(
-                !is_address(&serde_json::from_str(raw).unwrap()),
-                "non-string isAddress refusal {raw}"
-            );
         }
     }
 }

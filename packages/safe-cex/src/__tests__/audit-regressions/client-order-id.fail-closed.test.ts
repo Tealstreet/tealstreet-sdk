@@ -73,6 +73,7 @@ const HONORING: Array<[string, ExchangeCtor]> = [
   ['bybitspot', BybitSpotExchange],
   ['coinbase', CoinbaseExchange],
   ['cryptocom', CryptocomExchange],
+  ['cryptocom', RustEngineExchange],
   ['grvt', GrvtExchange],
   ['kucoin', KucoinExchange],
   ['kucoinspot', KucoinSpotExchange],
@@ -232,30 +233,38 @@ describe('clientOrderId fails closed before any write', () => {
 });
 
 describe('clientOrderId on venues that honor every shape', () => {
-  it.each(HONORING_EVERY_SHAPE)('%s rejects a caller ID that breaks the venue charset before any transport', async (name, Ctor) => {
-    const { exchange, transportCalls, emitted } = setup(name, Ctor);
+  it.each(HONORING_EVERY_SHAPE)(
+    '%s rejects a caller ID that breaks the venue charset before any transport',
+    async (name, Ctor) => {
+      const { exchange, transportCalls, emitted } = setup(name, Ctor);
 
-    await expect(exchange.placeOrder(order({ clientOrderId: '12345' }))).rejects.toThrow(/clientOrderId must /);
-    await expect(exchange.placeOrder(order({ clientOrderId: '0x0123456789ABCDEF0123456789ABCDEF' }))).rejects.toThrow(
-      /clientOrderId must /,
-    );
-    expect(emitted).toHaveLength(2);
-    expect(transportCalls).not.toHaveBeenCalled();
-  });
+      await expect(exchange.placeOrder(order({ clientOrderId: '12345' }))).rejects.toThrow(/clientOrderId must /);
+      await expect(exchange.placeOrder(order({ clientOrderId: '0x0123456789ABCDEF0123456789ABCDEF' }))).rejects.toThrow(
+        /clientOrderId must /,
+      );
+      expect(emitted).toHaveLength(2);
+      expect(transportCalls).not.toHaveBeenCalled();
+    },
+  );
 
-  it.each(HONORING_EVERY_SHAPE)('%s rejects a caller ID on an order above the max size for one order', async (name, Ctor) => {
-    const { exchange, transportCalls } = setup(name, Ctor);
+  it.each(HONORING_EVERY_SHAPE)(
+    '%s rejects a caller ID on an order above the max size for one order',
+    async (name, Ctor) => {
+      const { exchange, transportCalls } = setup(name, Ctor);
 
-    await expect(exchange.placeOrder(order({ amount: 25, clientOrderId: HYPERLIQUID_CLOID }))).rejects.toThrow(
-      /exceeds the market's max size for one order/,
-    );
-    expect(transportCalls).not.toHaveBeenCalled();
-  });
+      await expect(exchange.placeOrder(order({ amount: 25, clientOrderId: HYPERLIQUID_CLOID }))).rejects.toThrow(
+        /exceeds the market's max size for one order/,
+      );
+      expect(transportCalls).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(HONORING_EVERY_SHAPE)('%s rejects a whole batch with one bad or repeated caller ID', async (name, Ctor) => {
     const { exchange, transportCalls } = setup(name, Ctor);
 
-    await expect(exchange.placeOrders([order(), order({ clientOrderId: 'nope' })])).rejects.toThrow(/clientOrderId must /);
+    await expect(exchange.placeOrders([order(), order({ clientOrderId: 'nope' })])).rejects.toThrow(
+      /clientOrderId must /,
+    );
     await expect(
       exchange.placeOrders([order({ clientOrderId: HYPERLIQUID_CLOID }), order({ clientOrderId: HYPERLIQUID_CLOID })]),
     ).rejects.toThrow(/duplicated in one batch/);
@@ -269,18 +278,21 @@ describe('clientOrderId on venues that honor every shape', () => {
     expect(transportCalls).not.toHaveBeenCalled();
   });
 
-  it.each(HONORING_EVERY_SHAPE)('%s mints a cloid for every shape it places, and none it would refuse', (name, Ctor) => {
-    const { exchange, emitted } = setup(name, Ctor);
-    const cloid = /^0x[0-9a-f]{32}$/;
+  it.each(HONORING_EVERY_SHAPE)(
+    '%s mints a cloid for every shape it places, and none it would refuse',
+    (name, Ctor) => {
+      const { exchange, emitted } = setup(name, Ctor);
+      const cloid = /^0x[0-9a-f]{32}$/;
 
-    expect(exchange.mintClientOrderId(order())).toMatch(cloid);
-    expect(exchange.mintClientOrderId(order({ stopLoss: 49_000, takeProfit: 51_000 }))).toMatch(cloid);
-    expect(exchange.mintClientOrderId(order({ type: OrderType.StopLoss, triggerPrice: 49_000 }))).toMatch(cloid);
-    expect(exchange.mintClientOrderId(order({ type: OrderType.TrailingStopLoss }))).toBeUndefined();
-    expect(exchange.mintClientOrderId(order({ amount: 11 }))).toBeUndefined();
-    expect(exchange.mintClientOrderId(order({ symbol: 'UNKNOWN' }))).toBeUndefined();
-    expect(emitted).toEqual([]);
-  });
+      expect(exchange.mintClientOrderId(order())).toMatch(cloid);
+      expect(exchange.mintClientOrderId(order({ stopLoss: 49_000, takeProfit: 51_000 }))).toMatch(cloid);
+      expect(exchange.mintClientOrderId(order({ type: OrderType.StopLoss, triggerPrice: 49_000 }))).toMatch(cloid);
+      expect(exchange.mintClientOrderId(order({ type: OrderType.TrailingStopLoss }))).toBeUndefined();
+      expect(exchange.mintClientOrderId(order({ amount: 11 }))).toBeUndefined();
+      expect(exchange.mintClientOrderId(order({ symbol: 'UNKNOWN' }))).toBeUndefined();
+      expect(emitted).toEqual([]);
+    },
+  );
 });
 
 describe('placeOrderWithClientOrderId', () => {

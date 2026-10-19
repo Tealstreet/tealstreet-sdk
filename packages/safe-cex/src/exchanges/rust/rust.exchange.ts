@@ -36,6 +36,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   binancepm: 'binancepm',
   bybit: 'bybit',
+  cryptocom: 'cryptocom',
   hyperliquid: 'hyperliquid',
   okx: 'okx',
   okxeu: 'okxeu',
@@ -51,6 +52,7 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   hyperliquid: hyperliquidClientOrderIdRule,
   bybit: patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/),
+  cryptocom: patternClientOrderIdRule('Crypto.com', /^.{1,36}$/),
   okx: okxClientOrderIdRule,
   okxeu: okxClientOrderIdRule,
   okxdemo: okxClientOrderIdRule,

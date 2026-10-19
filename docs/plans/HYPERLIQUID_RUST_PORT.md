@@ -229,3 +229,20 @@ Origin now includes Crypto.com at e6e410146e. Merge its venue, harness memory an
 protocol improvements, and provably unused crypto deletions while retaining the
 Hyperliquid helpers used by production signing. Re-run affected gates before
 pushing the final PR head; adversarial findings/resolutions are posted on #1306.
+
+Crypto.com merge resolution: retain all five default constructors and optional
+single-venue features at the unchanged budget; union TS registrations and CI
+matrix. Adopt incoming unused crypto deletions, retaining only the production
+Hyperliquid prehashed EIP-712 digest, vault-address validation and private-key address helpers plus the
+prehashed/dynamic oracle equivalence test. Crypto.com explicitly rejects the
+Hyperliquid-only client-ID query variant. Harness resolution combines incoming
+memory/protocol audits with strict write identity, timing and multiplicity.
+
+Five-venue merge review: independent harness audit found no P1/P2 blockers and
+accepted HTTP write consumption/count/order, timed reads, socket fanout, exact
+identities, protocol validation and retained-memory accounting. Independent host/
+crypto/CI audit accepted the five-feature union; it found the incoming Crypto.com
+wrapper's missing client-ID rule. Added its existing TS rule and common guard
+regressions. Full native workspace tests and native/wasm Clippy pass; Crypto.com-
+only host compilation passes. Isolated unchanged Hyro configuration tests pass
+10/10, confirming the full-suite import timeouts are resource-sensitive.

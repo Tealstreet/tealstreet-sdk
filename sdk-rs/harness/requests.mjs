@@ -92,19 +92,26 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
     return `${prefix} ${typeof body === 'string' && body.includes('=')
       ? canonicalParams(new URLSearchParams(body), callerIds) : body}`;
   }
+  parsed = options.requestBody?.(parsed) ?? parsed;
   return `${prefix} ${JSON.stringify(normalize(parsed, callerIds, true, options))}`;
 };
 
-export const subscriptionKey = (url, text, callerIds = new Set()) => {
+export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) => {
   let message;
   try { message = typeof text === 'string' ? JSON.parse(text) : text; }
   catch { return `WS ${canonicalUrl(url, callerIds)} ${text}`; }
   const method = String(message?.method ?? message?.op ?? '').toLowerCase();
+  if (options.cryptoProtocol && method === 'public/respond-heartbeat') return undefined;
   if (['ping', 'pong', 'heartbeat'].includes(method)) return undefined;
   if (message && typeof message === 'object') {
     message = { ...message };
     delete message.id;
     delete message.req_id;
+    // Crypto.com's audit validates auth and heartbeat identity before capture.
+    if (options.cryptoProtocol) {
+      delete message.nonce;
+      if (method === 'public/auth') message.sig = '<signature>';
+    }
     // OKX login signatures and clocks are checked against credentials by Tape;
     // the outbound identity retains API key and passphrase for comparison.
     if (method === 'login' && Array.isArray(message.args)) {
@@ -125,15 +132,19 @@ export const subscriptionKey = (url, text, callerIds = new Set()) => {
 };
 
 // Subscription batches and one-topic sends have the same required feed set.
-export const subscriptionKeys = (url, text, callerIds = new Set()) => {
+export const subscriptionKeys = (url, text, callerIds = new Set(), options = {}) => {
   let message;
   try { message = typeof text === 'string' ? parseJson(text) : text; }
-  catch { return [subscriptionKey(url, text, callerIds)]; }
+  catch { return [subscriptionKey(url, text, callerIds, options)]; }
   const method = String(message?.method ?? message?.op ?? '').toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
+    if (options.cryptoProtocol && Array.isArray(message.params?.channels)) {
+      return message.params.channels.map((channel) => subscriptionKey(url,
+        { ...message, params: { ...message.params, channels: [channel] } }, callerIds, options));
+    }
     const field = Array.isArray(message.params) ? 'params' : Array.isArray(message.args) ? 'args' : undefined;
-    if (field) return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds));
+    if (field) return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds, options));
   }
-  const key = subscriptionKey(url, message, callerIds);
+  const key = subscriptionKey(url, message, callerIds, options);
   return key === undefined ? [] : [key];
 };

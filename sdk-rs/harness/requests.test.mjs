@@ -210,3 +210,28 @@ test('trim keeps body-specific replies, caller cloids and untimed config', () =>
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test('Crypto.com envelope projection keeps exact caller IDs and unsafe nanosecond parameters', () => {
+  const url = 'https://api.crypto.com/exchange/v1/private/get-trades';
+  const options = { requestBody: (body) => body.params };
+  const key = (end, caller = 'caller-a', nonce = 1) => requestKey('POST', url,
+    `{"id":${nonce},"method":"private/get-trades","sig":"generated","params":{"end_time":${end},"client_oid":"${caller}"},"nonce":${nonce}}`, callerIds, options);
+  assert.equal(key('1610000000000000001'), key('1610000000000000001', 'caller-a', 2));
+  assert.notEqual(key('1610000000000000001'), key('1610000000000000002'));
+  assert.notEqual(key('1610000000000000001'), key('1610000000000000001', 'caller-b'));
+});
+
+test('Crypto.com subscriptions compare channels across batches and normalize audited auth', () => {
+  const url = 'wss://stream.crypto.com/exchange/v1/user';
+  const options = { cryptoProtocol: true };
+  const keys = (message) => subscriptionKeys(url, message, new Set(), options);
+  assert.deepEqual(keys({ id: 1, nonce: 100, method: 'subscribe', params: { channels: ['user.order', 'user.trade'] } }), [
+    ...keys({ id: 2, nonce: 200, method: 'subscribe', params: { channels: ['user.order'] } }),
+    ...keys({ id: 3, nonce: 300, method: 'subscribe', params: { channels: ['user.trade'] } }),
+  ]);
+  const auth = (api_key, nonce) => ({ id: nonce, nonce, method: 'public/auth', api_key, sig: String(nonce) });
+  assert.deepEqual(keys(auth('key-a', 1)), keys(auth('key-a', 2)));
+  assert.notDeepEqual(keys(auth('key-a', 1)), keys(auth('key-b', 1)));
+  assert.deepEqual(keys({ id: 1, method: 'public/respond-heartbeat' }), []);
+});

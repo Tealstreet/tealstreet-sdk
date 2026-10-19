@@ -6,11 +6,12 @@
 #[cfg(not(any(
     feature = "binance",
     feature = "bybit",
+    feature = "cryptocom",
     feature = "hyperliquid",
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: binance, bybit, hyperliquid or okx"
+    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, hyperliquid or okx"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -21,6 +22,8 @@ use safe_cex_engine::{
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 #[cfg(feature = "bybit")]
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
+#[cfg(feature = "cryptocom")]
+use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 #[cfg(feature = "hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
 #[cfg(feature = "okx")]
@@ -65,6 +68,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
 #[cfg(any(
     feature = "binance",
     feature = "bybit",
+    feature = "cryptocom",
     feature = "hyperliquid",
     feature = "okx"
 ))]
@@ -471,6 +475,7 @@ impl WasmEngine {
     #[cfg(any(
         feature = "binance",
         feature = "bybit",
+        feature = "cryptocom",
         feature = "hyperliquid",
         feature = "okx"
     ))]
@@ -488,6 +493,13 @@ impl WasmEngine {
             }))),
             #[cfg(feature = "bybit")]
             "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
+            #[cfg(feature = "cryptocom")]
+            "cryptocom" => Box::new(Engine::new(Cryptocom::new(CryptocomOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
