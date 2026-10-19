@@ -152,7 +152,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_request_start"
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Repaired existing sealed request-stamp overwrites, including zero and NaN presence; missing sealed fields remain absent. Evidence: DIAGNOSTICS_CHOICE_GATE_EXITS.md. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_request_start` mirrors markRestRequestStart."
+note = "FIX-audit row 455: both real native Axios factory request interceptors now stamp the native config before dispatch, after request accounting, with source best-effort read-only write isolation. The actual NativeRuntime factory/source witness covers 32 timestamp/presence/descriptor profiles and exact numeric bits; see safe-cex-store/per-row-rulings.md. The separate typed adapter retains its admitted field domain under MANIFEST-SPEC.md#diagnostic-adapter-choice; existing sealed overwrite/absence tests remain. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::mark_rest_request_start` mirrors markRestRequestStart."
 
 [[symbol]]
 ts = "markRestSigned"

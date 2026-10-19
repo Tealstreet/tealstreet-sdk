@@ -8,7 +8,14 @@ Executable config capabilities retain the owned-data boundary. Constructed Aster
 and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
 The typed REST host recovers owned callback errors through the canonical
 ExchangeError-to-Thrown conversion and attaches the effective request config.
+Both JS factory request interceptors stamp the live config with integer
+request-start time after accounting. Read-only telemetry fields do not fail HTTP;
+the maintained-source comparison observes both prepared and terminal configs.
+Socket diagnostics reuse the shared auth-operation predicate after JSON parsing.
 The Bitget owned-transport regression pins retry eligibility after that boundary.
+Native network rejections retain the actual RestRequest as an opaque request
+capability, so Axios enhancement selects its network branch. Setup refusals have
+no request; the native adapter retains its existing name/code and Axios flag.
 
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
@@ -1146,7 +1153,11 @@ Array and accessor descriptors share this checked property machinery; arrays now
 retain sparse indexed/named slots and a virtual length in one ArrayData owner.
 Existing host define_accessor remains the fallible host accessor seam.
 The engine oracle in tests/js_data_descriptors_oracle.cjs checks the data-flag and
-redefinition matrix; the native error test covers Polymarket's enhanced message.
+redefinition matrix, including empty and sparse array targets. Array observations
+retain holes, own undefined and negative-zero bits before JSON, and check hidden
+readonly properties plus rejected writes, deletes and redefinitions. Malformed
+descriptors still leave targets unchanged. The native error test covers
+Polymarket's enhanced message.
 
 The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
 worker RPC owner. Its eager Promise preserves the core reply listener, deadline,

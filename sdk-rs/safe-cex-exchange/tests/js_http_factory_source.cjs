@@ -59,7 +59,41 @@ async function outcomeAudit() {
  assert.equal(rows.length,98);
  return rows;
 }
+async function requestStartAudit() {
+ const {loadSource}=await import('../../safe-cex-store/tests/source_loader.mjs');
+ Object.assign(imported['./utils/venueRestDiagnostics'],loadSource(path.join(root,'packages/safe-cex/src/utils/venueRestDiagnostics.ts')));
+ const key='safeCexRestDiagStartedAt', rows=[], originalNow=Date.now;
+ const bits=value=>{const bytes=Buffer.alloc(8);bytes.writeDoubleBE(value);return bytes.toString('hex');};
+ provider={rest:({config})=>({baseURL:config.baseURL,proxied:false})};
+ try {
+  for(const factory of ['routed','direct'])for(const epoch of [0,12345.75,-12345.25,1700000000000])
+   for(const mode of ['fresh','overwrite','readonly','readonly-undefined']) {
+    Date.now=()=>Math.floor(epoch);
+    const events=[];let seen,originalConfig,sends=0; const view=value=>{if(typeof value==='number')return {kind:'number',bits:bits(value)};assert.equal(value,undefined);return {kind:'undefined'};};
+    const owner={name:'polymarket',grafanaEndpointsEvery:[],grafanaEndpointsPeriodic:[],emitter:{emit:()=>{}}};
+    const config={baseURL:'https://venue',adapter:async config=>{
+     events.push('send');sends++;
+     seen={own:Object.hasOwn(config,key),value:view(config[key])};
+     return {status:200,data:{},headers:{},config};
+    }};
+    const xhr=moduleValue.exports[factory==='direct'?'safeCexAxiosCreateNoProxy':'safeCexAxiosCreate'](config,{key:'',secret:''},owner);
+    xhr.interceptors.request.use(config=>{
+     events.push('prepare');originalConfig=config;
+     if(mode!=='fresh')Object.defineProperty(config,key,{value:mode==='readonly-undefined'?undefined:-0,writable:!mode.startsWith('readonly'),enumerable:true,configurable:true});
+     return config;
+    });
+    await xhr.get('/diagnostic-start');
+    assert.equal(seen.own,true);
+    const untouched=mode==='readonly';
+    assert.deepEqual(seen.value,mode==='readonly-undefined'?{kind:'undefined'}:{kind:'number',bits:bits(untouched?-0:Math.floor(epoch))});
+    assert.deepEqual(view(originalConfig[key]),seen.value);assert.equal(sends,1);assert.deepEqual(events,['prepare','send']);
+    rows.push({factory,epoch,mode,...seen,prepared:view(originalConfig[key]),sends,events});
+   }
+ } finally { Date.now=originalNow; }
+ assert.equal(rows.length,32);return rows;
+}
 (async()=>{
+ if(process.argv[2]==='request-start'){process.stdout.write(JSON.stringify(await requestStartAudit()));return;}
  if(process.argv[2]==='outcomes'){process.stdout.write(JSON.stringify(await outcomeAudit()));return;}
  const rows=[];
  for(const proxied of [false,true])for(const failAuth of [false,true]){

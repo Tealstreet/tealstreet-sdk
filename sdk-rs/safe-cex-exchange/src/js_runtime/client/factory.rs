@@ -66,7 +66,13 @@ pub fn create(
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .record_request(&stats_exchange, stats_runtime.now_ms());
-        Ok(arg(&args, 0))
+        let config = arg(&args, 0);
+        // Source telemetry catches a sealed/read-only config write without failing HTTP.
+        drop(config.set(
+            "safeCexRestDiagStartedAt",
+            Js::Number(stats_runtime.now_ms().floor()),
+        ));
+        Ok(config)
     });
     client
         .get("interceptors")?
@@ -129,7 +135,13 @@ pub fn create_no_proxy(host: Host, config: Js, owner: &Rc<BaseExchange>) -> Resu
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .record_request(&stats_exchange, stats_runtime.now_ms());
-        Ok(arg(&args, 0))
+        let config = arg(&args, 0);
+        // Source telemetry catches a sealed/read-only config write without failing HTTP.
+        drop(config.set(
+            "safeCexRestDiagStartedAt",
+            Js::Number(stats_runtime.now_ms().floor()),
+        ));
+        Ok(config)
     });
     client
         .get("interceptors")?
