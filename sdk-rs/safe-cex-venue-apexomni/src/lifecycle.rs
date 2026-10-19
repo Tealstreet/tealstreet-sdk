@@ -6,12 +6,16 @@ use crate::{
 };
 use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput,
-    js_runtime::{promise::Promise, value::Js},
+    js_runtime::{
+        promise::Promise,
+        store,
+        value::{Js, from_typed},
+    },
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_num::JsJsonValue as J;
 use safe_cex_store::StoreUpdate;
-use safe_cex_types::{AccountValidationError, Balance, Candle, OHLCVOptions, OrderBook, Ticker};
+use safe_cex_types::{AccountValidationError, Balance, Candle, OHLCVOptions, OrderBook};
 use std::rc::Rc;
 pub type Cleanup = Rc<dyn Fn() -> Result<(), ExchangeError>>;
 pub trait ApexServices {
@@ -146,38 +150,39 @@ impl ApexOmniExchange {
                     &format!("Loaded {} ApeX Pro markets", markets.len()),
                     "info",
                 )?;
-                let tickers = markets
-                    .iter()
-                    .map(|m| Ticker {
-                        id: m.id.clone(),
-                        symbol: m.symbol.clone(),
-                        bid: 0.,
-                        ask: 0.,
-                        last: 0.,
-                        mark: 0.,
-                        index: Some(0.),
-                        mid_price: None,
-                        timestamp: None,
-                        percentage: 0.,
-                        open_interest: 0.,
-                        funding_rate: 0.,
-                        funding_time: 0.,
-                        volume: 0.,
-                        quote_volume: 0.,
-                        info: None,
-                    })
-                    .collect();
-                let mut loaded = self.base.store.loaded()?.clone();
-                loaded.markets = true;
-                loaded.tickers = true;
-                self.base.store.update(
-                    StoreUpdate {
-                        markets: Some(markets),
-                        tickers: Some(tickers),
-                        loaded: Some(loaded),
-                        ..Default::default()
-                    },
-                    false,
+                let tickers = Js::array(
+                    markets
+                        .iter()
+                        .map(|market| {
+                            Js::object(vec![
+                                ("id", Js::str(&market.id)),
+                                ("symbol", Js::str(&market.symbol)),
+                                ("bid", Js::Number(0.0)),
+                                ("ask", Js::Number(0.0)),
+                                ("last", Js::Number(0.0)),
+                                ("volume", Js::Number(0.0)),
+                                ("quoteVolume", Js::Number(0.0)),
+                                ("mark", Js::Number(0.0)),
+                                ("index", Js::Number(0.0)),
+                                ("percentage", Js::Number(0.0)),
+                                ("openInterest", Js::Number(0.0)),
+                                ("fundingRate", Js::Number(0.0)),
+                                ("fundingTime", Js::Number(0.0)),
+                            ])
+                        })
+                        .collect(),
+                );
+                let facade = store::facade(self.base.store.clone())?;
+                let loaded = facade.get("loaded")?.spread_object()?;
+                loaded.set("markets", Js::Bool(true))?;
+                loaded.set("tickers", Js::Bool(true))?;
+                facade.call_method(
+                    "update",
+                    vec![Js::object(vec![
+                        ("markets", from_typed(&markets)?),
+                        ("tickers", tickers),
+                        ("loaded", loaded),
+                    ])],
                 )?;
             }
             if self.base.is_disposed() {
