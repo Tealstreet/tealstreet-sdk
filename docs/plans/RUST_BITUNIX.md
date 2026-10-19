@@ -372,3 +372,14 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   replay results and exact-head CI are tracked on PR #1309. Landing is authorized
   only after those checks are green; then cut a fresh follow-up branch from the
   merged landing.
+
+### Seven-venue integrated checks complete
+
+- All seven three-run public gates and all ten private variants PASS. Rust SDK
+  CI also PASS for the reviewed code commit 4cc7b297c0. Later commits only record
+  documentation; their root CI is in progress.
+- MEXC landed at 0018bba71a and makes the PR conflicting again. Commit this
+  checkpoint, merge the pinned landing, preserve its leverage rails and replay
+  clock/socket core alongside all prior controls, then rerun affected gates.
+  Landing changes browser wasm optimization to `s`; keep that default first and
+  verify its CPU/memory results and actual combined artifact size.
