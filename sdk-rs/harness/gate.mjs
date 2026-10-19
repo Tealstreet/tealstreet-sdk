@@ -103,6 +103,7 @@ const KNOWN_TS_FIXES = {
     // Stale amend reads cannot regress those fills or place a replacement.
     // REST/optimistic rows retain cumulative fills; amendments retain attached
     // brackets and standalone stop sources through venue reconciliation.
+    // Native bracket clears and corrected sources win over delayed placement acks.
     // Repeated private execution IDs emit one fill within the replay window.
   },
 };

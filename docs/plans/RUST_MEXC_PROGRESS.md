@@ -188,3 +188,15 @@ and cut a follow-up branch. Never touch master or force-push.
 - Review-fix build: 1461609 bytes, below retained 1468006-byte target budget.
   Rebuilt MEXC private/public replays pass; final TS reference fixes and remaining
   regression gates/CI are checked before merge.
+
+- Final reference review fixes REST/WS/optimistic monotonic fills, independent
+  attached bracket metadata (omitted keeps known; explicit zero clears), generic
+  trigger reference fallback, standalone stop sources and full-position amount-0
+  amendment routing. 112 focused TS regressions, lint and typecheck pass.
+- Final adversarial counterexample: a native bracket clear before placement HTTP
+  acknowledgement must remain authoritative. Both implementations retain native
+  presence separately from omitted metadata; Rust keeps internal presence flags
+  with the existing order lifetime (not serialized into host frames). Regression
+  also checks an intervening sparse WS update and authoritative corrected source.
+- Target advanced with OKX; preserve this review work in a commit, merge latest
+  landing with standing conflict authorization, then rerun integrated gates/CI.

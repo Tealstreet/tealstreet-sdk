@@ -633,6 +633,40 @@ impl MexcFutures {
             Some(3.0) => Some(StopTriggerType::IndexPrice),
             _ => None,
         };
+        let stop_trend = if scope == Scope::Stop {
+            raw.trend
+        } else {
+            None
+        };
+        let plan_trend = if scope == Scope::Plan {
+            raw.trend
+        } else {
+            None
+        };
+        let tp_reference = trigger(raw.profit_trend.or(stop_trend).or(
+            if kind == OrderType::TakeProfit {
+                plan_trend
+            } else {
+                None
+            },
+        ))
+        .or_else(|| {
+            previous
+                .and_then(|o| o.extra.as_ref())
+                .and_then(|e| e.tp_trigger_type)
+        });
+        let sl_reference = trigger(raw.loss_trend.or(stop_trend).or(
+            if kind == OrderType::StopLoss {
+                plan_trend
+            } else {
+                None
+            },
+        ))
+        .or_else(|| {
+            previous
+                .and_then(|o| o.extra.as_ref())
+                .and_then(|e| e.sl_trigger_type)
+        });
         Some(Order {
             id: id.to_string(),
             parent_id: None,
@@ -661,34 +695,43 @@ impl MexcFutures {
                 raw.create_time
             }),
             trigger_type: match scope {
-                Scope::Plan => trigger(raw.trend),
-                Scope::Stop => trigger(if kind == OrderType::TakeProfit {
-                    raw.profit_trend
-                } else {
-                    raw.loss_trend
-                }),
+                Scope::Plan => trigger(raw.trend).or_else(|| previous.and_then(|o| o.trigger_type)),
+                Scope::Stop => {
+                    if kind == OrderType::TakeProfit {
+                        tp_reference
+                    } else {
+                        sl_reference
+                    }
+                }
                 _ => None,
-            }
-            .or_else(|| previous.and_then(|o| o.trigger_type)),
-            take_profit: match raw.take_profit_price {
-                Some(p) => (p > 0.0).then_some(p),
-                None => previous.and_then(|o| o.take_profit),
             },
-            stop_loss: match raw.stop_loss_price {
-                Some(p) => (p > 0.0).then_some(p),
-                None => previous.and_then(|o| o.stop_loss),
+            take_profit: if scope == Scope::Regular {
+                match raw.take_profit_price {
+                    Some(p) => (p > 0.0).then_some(p),
+                    None => previous.and_then(|o| o.take_profit),
+                }
+            } else {
+                None
+            },
+            stop_loss: if scope == Scope::Regular {
+                match raw.stop_loss_price {
+                    Some(p) => (p > 0.0).then_some(p),
+                    None => previous.and_then(|o| o.stop_loss),
+                }
+            } else {
+                None
             },
             extra: Some(OrderExtra {
-                tp_trigger_type: trigger(raw.profit_trend).or_else(|| {
-                    previous
+                take_profit_known: raw.take_profit_price.is_some()
+                    || previous
                         .and_then(|o| o.extra.as_ref())
-                        .and_then(|e| e.tp_trigger_type)
-                }),
-                sl_trigger_type: trigger(raw.loss_trend).or_else(|| {
-                    previous
+                        .is_some_and(|e| e.take_profit_known),
+                stop_loss_known: raw.stop_loss_price.is_some()
+                    || previous
                         .and_then(|o| o.extra.as_ref())
-                        .and_then(|e| e.sl_trigger_type)
-                }),
+                        .is_some_and(|e| e.stop_loss_known),
+                tp_trigger_type: tp_reference,
+                sl_trigger_type: sl_reference,
                 remaining_native: Some((native - filled_native).max(0.0)),
                 filled_in_placement_units: if scope == Scope::Regular {
                     Some(filled_native)

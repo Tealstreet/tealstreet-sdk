@@ -1091,9 +1091,13 @@ impl MexcFutures {
         if cx.store.order(&id).is_some() {
             if scope == Scope::Regular {
                 cx.store.update_order(&id, |o| {
-                    o.take_profit = o.take_profit.or(opts.take_profit);
-                    o.stop_loss = o.stop_loss.or(opts.stop_loss);
                     let extra = o.extra.get_or_insert_with(OrderExtra::default);
+                    if !extra.take_profit_known {
+                        o.take_profit = o.take_profit.or(opts.take_profit);
+                    }
+                    if !extra.stop_loss_known {
+                        o.stop_loss = o.stop_loss.or(opts.stop_loss);
+                    }
                     extra.tp_trigger_type = extra
                         .tp_trigger_type
                         .or(opts.tp_trigger_type.or(opts.trigger_type));

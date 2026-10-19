@@ -150,3 +150,22 @@ response ordinal and preserve otherwise identical prints.
 Private execution IDs are deduplicated for five minutes. Cumulative regular
 fill volume is monotonic across WS updates, including updates arriving after
 a cancel acknowledgement; terminal status is retained without dropping fills.
+
+The TS reference applies the same cumulative-fill and terminal-status guards
+when committing full or symbol-scoped REST snapshots, private WS frames, and
+optimistic placement acknowledgements. Attached entry TP/SL prices and their independent
+`lossTrend` / `profitTrend` references survive normalization and cancel/replace.
+The definitive post-cancel read supplies updated bracket fields; omitted fields
+retain known metadata, while an explicit zero bracket price clears that leg.
+Standalone plan `trend` and position-stop `lossTrend` / `profitTrend` map to
+the corresponding public trigger references and survive price amendments.
+Full-position stop replacements retain the zero-size sentinel and native
+position-stop route after a WS row supplies the actual native position volume.
+
+Private regular and plan/stop frames share the snapshot metadata merge: omitted
+bracket prices or trigger references preserve known values, including optimistic
+placement sources, while an explicit zero bracket price clears its leg.
+
+When native WS precedes the placement acknowledgement, its explicit bracket
+prices and sources take precedence over the request; the optimistic row only
+supplies metadata omitted from the native snapshot.

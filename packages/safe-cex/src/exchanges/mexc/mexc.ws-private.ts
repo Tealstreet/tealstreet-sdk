@@ -260,18 +260,7 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
       .map((row) => normalizeOrder(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]))
       .filter((order): order is Order => !!order)
       .map((order) => {
-        const current = latest.get(order.id) || this.store.orders.find((existing) => existing.id === order.id);
-        let next = order;
-        if (current) {
-          if (order.filled < current.filled) {
-            const status = order.status === OrderStatus.Canceled || order.status === OrderStatus.Closed ? order.status : current.status;
-            next = { ...current, status };
-          }
-          // A cancel acknowledgement may beat the final cumulative fill frame.
-          if (current.status === OrderStatus.Closed || (current.status === OrderStatus.Canceled && next.status === OrderStatus.Open)) {
-            next = { ...next, status: current.status };
-          }
-        }
+        const next = this.parent.mergeOrderSnapshot(order, latest.get(order.id));
         latest.set(order.id, next);
         return next;
       });
@@ -408,10 +397,15 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     // "sticky" TP/SL / reappearing lines during rapid cancel bursts.
     // Canceled and Closed frames are always honored (they're authoritative
     // regardless of what our local shield thinks).
+    const latest = new Map<string, Order>();
     const orders = parsed.filter((order) => {
       if (order.status !== OrderStatus.Open) return true;
       if (this.parent.isRecentlyCanceledStopLikeOrderId(order.id)) return false;
       return true;
+    }).map((order) => {
+      const next = this.parent.mergeOrderSnapshot(order, latest.get(order.id));
+      latest.set(order.id, next);
+      return next;
     });
 
     if (!orders.length) return;

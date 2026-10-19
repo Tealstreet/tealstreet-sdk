@@ -836,7 +836,7 @@ fn amend_retains_attached_bracket_prices_and_independent_sources_across_lifecycl
 }
 
 #[test]
-fn plan_stop_amend_keeps_mark_source_after_ws() {
+fn plan_stop_amend_keeps_latest_native_source_after_ws() {
     use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, StopTriggerType};
     let (mut e, socket, reads, _) = private_started();
     for r in reads {
@@ -873,7 +873,7 @@ fn plan_stop_amend_keeps_mark_source_after_ws() {
     ws(
         &mut e,
         socket,
-        r#"{"channel":"push.personal.plan.order","data":{"id":"plan","symbol":"BTC_USDT","side":4,"orderType":5,"vol":60,"triggerPrice":55000,"triggerType":2,"trend":2,"state":1}}"#,
+        r#"{"channel":"push.personal.plan.order","data":{"id":"plan","symbol":"BTC_USDT","side":4,"orderType":5,"vol":60,"triggerPrice":55000,"triggerType":2,"trend":3,"state":1}}"#,
     );
     e.drain_actions().for_each(drop);
     e.handle(
@@ -899,8 +899,54 @@ fn plan_stop_amend_keeps_mark_source_after_ws() {
     );
     let replacement = requests(&mut e).remove(0);
     assert!(
-        replacement.body.as_ref().unwrap().contains("\"trend\":2"),
+        replacement.body.as_ref().unwrap().contains("\"trend\":3"),
         "{}",
         replacement.body.unwrap()
+    );
+}
+
+#[test]
+fn native_bracket_clear_before_placement_ack_remains_authoritative() {
+    use safe_cex_engine::model::StopTriggerType;
+    let (mut e, socket, reads, _) = private_started();
+    for r in reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    e.drain_actions().for_each(drop);
+    let mut opts = order();
+    opts.stop_loss = Some(55000.0);
+    opts.take_profit = Some(65000.0);
+    opts.tp_trigger_type = Some(StopTriggerType::IndexPrice);
+    e.handle(
+        200.0,
+        Event::Command(Command::PlaceOrders {
+            command: 1,
+            orders: vec![opts],
+        }),
+    );
+    let place = requests(&mut e).remove(0);
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.order","data":{"orderId":"one","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":0,"price":59000,"state":2,"stopLossPrice":0,"takeProfitPrice":66000,"profitTrend":2}}"#,
+    );
+    // A later sparse update must retain the explicit clear's authority.
+    ws(
+        &mut e,
+        socket,
+        r#"{"channel":"push.personal.order","data":{"orderId":"one","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":0,"price":59000,"state":2}}"#,
+    );
+    reply(
+        &mut e,
+        &place,
+        300.0,
+        r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0}]}"#,
+    );
+    let stored = e.store().order("one").unwrap();
+    assert_eq!(stored.stop_loss, None);
+    assert_eq!(stored.take_profit, Some(66000.0));
+    assert_eq!(
+        stored.extra.as_ref().unwrap().tp_trigger_type,
+        Some(StopTriggerType::MarkPrice)
     );
 }

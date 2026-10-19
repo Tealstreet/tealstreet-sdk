@@ -167,6 +167,10 @@ pub struct Ticker {
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderExtra {
+    #[serde(skip)]
+    pub take_profit_known: bool,
+    #[serde(skip)]
+    pub stop_loss_known: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tp_trigger_type: Option<StopTriggerType>,
     #[serde(skip_serializing_if = "Option::is_none")]
