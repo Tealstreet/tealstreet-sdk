@@ -54,3 +54,13 @@ test('subscription matching ignores request IDs and batching, retaining native t
     'wss://fstream.binance.com/public/ws subscribe ethusdt@depth@100ms',
   ]);
 });
+
+test('Bybit connection IDs vary while body types and subscription topics stay exact', () => {
+  const bytes = new TextEncoder().encode('{"category":"linear","qty":"1","requestId":"fresh"}');
+  assert.equal(requestKey('POST',url,bytes), requestKey('POST',url,{qty:'1',category:'linear',requestId:'other'}));
+  assert.notEqual(requestKey('POST',url,bytes), requestKey('POST',url,{qty:1,category:'linear'}));
+  assert.deepEqual(subscriptionKeys('wss://stream.bybit.com/v5/private?requestId=fresh','{"op":"subscribe","args":["order","execution"]}'),[
+    'wss://stream.bybit.com/v5/private subscribe order',
+    'wss://stream.bybit.com/v5/private subscribe execution',
+  ]);
+});

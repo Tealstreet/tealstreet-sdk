@@ -8,6 +8,8 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
+use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -417,7 +419,13 @@ impl WasmEngine {
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
             }))),
-            "bingx" => Box::new(Engine::new(safe_cex_venue_bingx::Bingx::new(safe_cex_venue_bingx::Options {
+            "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
+            "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
+                testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,

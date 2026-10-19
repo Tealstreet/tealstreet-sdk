@@ -57,6 +57,10 @@ Toolchain: `export PATH="$HOME/.rustup/toolchains/1.99.0-aarch64-apple-darwin/bi
 
 ## Rules
 
+- Never `git stash`; commit work in progress on your branch. Conflicts from
+  merging `origin/feat/rust-rewrite` may be resolved without asking, keeping
+  the landing branch's structure.
+
 - No JS emulation, transliterated TS method bodies, Axios/BaseExchange-shaped
   facades or `serde_json::Value` (`check-bans.sh` enforces). Typed state
   machines.
@@ -83,8 +87,9 @@ Toolchain: `export PATH="$HOME/.rustup/toolchains/1.99.0-aarch64-apple-darwin/bi
 3. **When every gate passes:** push your branch, open a PR **into
    `feat/rust-rewrite`** (never `master`), run adversarial sub-agent reviews
    locally against it and post the findings on the PR. Address them and
-   repeat until you judge it passing or the returns are diminishing. Then
-   merge the PR into `feat/rust-rewrite` and cut a fresh branch from it for
+   repeat until you judge it passing or the returns are diminishing. Wait for
+   the PR's CI to be green (fix anything red), then merge the PR into
+   `feat/rust-rewrite` and cut a fresh branch from it for
    any follow-up.
 
 Report when done: the PR, gate numbers, TS bugs fixed, anything unfinished.

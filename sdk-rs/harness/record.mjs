@@ -44,15 +44,17 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const decoder = new TextDecoder();
-    let body = '';
-    if (response.body instanceof Uint8Array) body = decoder.decode(response.body);
-    else {
-      for await (const chunk of response.body) body += decoder.decode(chunk, { stream: true });
-      body += decoder.decode();
+    // A streamed body is gathered so the tape holds it whole.
+    let bytes = response.body;
+    if (!(bytes instanceof Uint8Array)) {
+      const chunks = [];
+      for await (const chunk of bytes) chunks.push(chunk);
+      bytes = Buffer.concat(chunks);
     }
-    write({ type: 'http', method: request.method, url: request.url, requestBody: request.body, status: response.status, body });
-    return { ...response, body: new TextEncoder().encode(body) };
+    const body = new TextDecoder().decode(bytes);
+    const requestBody = request.body ? { requestBody: request.body } : {};
+    write({ type: 'http', method: request.method, url: request.url, ...requestBody, status: response.status, body });
+    return { ...response, body: bytes };
   },
 };
 

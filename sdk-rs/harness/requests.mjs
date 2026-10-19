@@ -1,6 +1,6 @@
 // Request matching keeps wire types and caller IDs; only clocks/signatures
 // and generated client IDs vary between otherwise equivalent replays.
-const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature']);
+const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'requestId']);
 const CLIENT_IDS = new Set(['clientOrderId', 'newClientOrderId', 'clientAlgoId']);
 const stable = (callerIds) => ([name, value]) =>
   !VOLATILE.has(name) && !(CLIENT_IDS.has(name) && !callerIds.has(value));
@@ -19,6 +19,7 @@ export const requestKey = (method, url, body, callerIds = new Set()) => {
     .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"([^"]*)",?/g,
       (match, _field, id) => callerIds.has(id) ? match : '')])
     .sort(([a], [b]) => a.localeCompare(b));
+  if (body instanceof Uint8Array) body = new TextDecoder().decode(body);
   const payload = typeof body === 'string' && body ? JSON.parse(body, (_key,value,context) =>
     typeof value === 'number' && !Number.isSafeInteger(value) && context?.source && /^-?\d+$/.test(context.source) ? BigInt(context.source) : value) : body ?? {};
   const data = Object.entries(payload).filter(stable(callerIds)).sort(([a], [b]) => a.localeCompare(b)).map(([key,value]) => [key,wireValue(value)]);
@@ -38,10 +39,10 @@ export const takeResponse = (queue, method, url, time = 0) => {
 export const subscriptionKeys = (url, text) => {
   let message;
   try { message = JSON.parse(text); } catch { return []; }
-  const method = String(message.method ?? message.reqType ?? '').toUpperCase();
+  const method = String(message.method ?? message.reqType ?? message.op ?? '').toUpperCase();
   if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return [];
   const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
   const parsed = new URL(url);
-  const topics = message.params ?? (message.dataType ? [message.dataType] : []);
+  const topics = message.params ?? message.args ?? (message.dataType ? [message.dataType] : []);
   return topics.map((topic) => `${parsed.origin}${parsed.pathname} ${op} ${topic}`);
 };

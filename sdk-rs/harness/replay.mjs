@@ -39,6 +39,14 @@ const SECRET = 'replay-secret';
 const callerIds = new Set(records.flatMap((r) => r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean));
 const requestKey = (method,url,body) => keyOf(method,url,body,callerIds);
 
+// Bybit adds a fresh requestId to each connection.
+const canonicalUrl = (url) => {
+  const parsed = new URL(url);
+  parsed.searchParams.delete('requestId');
+  parsed.searchParams.sort();
+  return parsed.toString();
+};
+
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
   constructor() {
@@ -72,19 +80,22 @@ class Tape {
   }
 
   connect(url, onOpen, onMessage, onClose) {
-    const generation = (this.generations.get(url) ?? 0) + 1;
-    this.generations.set(url, generation);
+    const key = canonicalUrl(url);
+    const generation = (this.generations.get(key) ?? 0) + 1;
+    this.generations.set(key, generation);
     const socket = { url, generation, onMessage, onClose, closed: false };
     setImmediate(() => {
       if (socket.closed) return;
-      this.open.set(url, socket);
+      // Keyed without volatile query params (Bybit's per-connection requestId).
+      this.open.set(canonicalUrl(url), socket);
       onOpen();
       this.waiters = this.waiters.filter((waiter) => !waiter());
     });
     return socket;
   }
 
-  async socketFor(url) {
+  async socketFor(rawUrl) {
+    const url = canonicalUrl(rawUrl);
     while (!this.open.get(url) || this.open.get(url).closed) {
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error(`socket did not connect: ${url}`)), 30_000);
@@ -436,6 +447,11 @@ async function runTs() {
       if (record.op === 'cancelOrders') {
         await exchange.cancelOrders(store.orders.filter((order) => record.ids.includes(order.id)));
         return [];
+      }
+      if (record.op === 'amendOrder') {
+        const order = store.orders.find((o) => o.id === record.id);
+        const update = { ...(record.price !== undefined && { price: record.price }), ...(record.amount !== undefined && { amount: record.amount }) };
+        return exchange.updateOrder({ order, update });
       }
       if (record.op === 'cancelSymbolOrders') {
         await exchange.cancelSymbolOrders(record.symbol);

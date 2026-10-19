@@ -253,11 +253,11 @@ struct Incoming {
     /// Splits a streamed array out of a successful body.
     splitter: Option<ArraySplitter>,
     /// Everything not streamed: error bodies and unstreamed requests. A
-    /// streamed body keeps only its start, to explain a missing array.
+    /// streamed body's envelope is kept by its splitter.
     body: Vec<u8>,
 }
 
-/// How much of a streamed body is kept to report a response without its array.
+/// How much of a streamed envelope is quoted to report a response without its array.
 const STREAM_PREVIEW_BYTES: usize = 512;
 
 struct Io<P> {
@@ -344,7 +344,7 @@ impl<P> Cx<'_, P> {
 
     /// Issue a request whose successful body holds a large array: each element
     /// goes to [`Venue::on_item`] as it arrives, then [`Venue::on_response`]
-    /// runs with an empty body. Error bodies arrive whole.
+    /// runs with the envelope, its array emptied. Error bodies arrive whole.
     pub fn request_streamed(
         &mut self,
         method: Method,
@@ -558,10 +558,6 @@ impl<V: Venue> Engine<V> {
             incoming.body.extend_from_slice(data);
             return;
         };
-        let room = STREAM_PREVIEW_BYTES.saturating_sub(incoming.body.len());
-        incoming
-            .body
-            .extend_from_slice(&data[..room.min(data.len())]);
         // The continuation leaves the map while the venue holds it.
         let Some(mut pending) = self.io.pending.remove(&request) else {
             return;
@@ -595,14 +591,16 @@ impl<V: Venue> Engine<V> {
         // A 2xx without the expected array (an error envelope, a truncated
         // body) must never read as an authoritative empty list.
         if let Some(splitter) = &incoming.splitter {
+            let outside = splitter.outside();
             if !splitter.finished() {
-                let preview = String::from_utf8_lossy(&incoming.body);
+                let preview = &outside[..outside.len().min(STREAM_PREVIEW_BYTES)];
+                let preview = String::from_utf8_lossy(preview);
                 let message = format!("response did not contain the expected list: {preview}");
                 self.venue.on_request_failed(&mut cx, pending, &message);
                 return;
             }
-            let envelope = splitter.envelope().unwrap_or_default();
-            let Ok(body) = std::str::from_utf8(envelope) else {
+            // The envelope with the array emptied: page cursors and status fields.
+            let Ok(body) = std::str::from_utf8(outside) else {
                 self.venue
                     .on_request_failed(&mut cx, pending, "stream envelope is not UTF-8");
                 return;
@@ -723,5 +721,145 @@ impl<V: Venue> Engine<V> {
         self.io.candles.clear();
         self.io.frame = frame;
         (!empty).then_some(self.io.frame.as_slice())
+    }
+}
+
+#[cfg(test)]
+mod streaming_tests {
+    use super::*;
+
+    struct StreamVenue {
+        at: ArrayAt,
+        rows: Vec<String>,
+        body: Option<String>,
+        failure: Option<String>,
+    }
+
+    impl Venue for StreamVenue {
+        type Pending = Vec<String>;
+        fn start(&mut self, cx: &mut Cx<'_, Self::Pending>) {
+            cx.request_streamed(
+                Method::Get,
+                "https://example.test/list".into(),
+                Vec::new(),
+                self.at,
+                Vec::new(),
+            );
+        }
+        fn on_open(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId) {}
+        fn on_message(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _text: &str) {}
+        fn on_close(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _code: u16) {}
+        fn on_response(
+            &mut self,
+            _cx: &mut Cx<'_, Self::Pending>,
+            pending: Self::Pending,
+            response: Response<'_>,
+        ) {
+            self.rows = pending;
+            self.body = Some(response.body.to_owned());
+        }
+        fn on_item(
+            &mut self,
+            _cx: &mut Cx<'_, Self::Pending>,
+            pending: &mut Self::Pending,
+            item: &str,
+        ) {
+            pending.push(item.to_owned());
+        }
+        fn on_request_failed(
+            &mut self,
+            _cx: &mut Cx<'_, Self::Pending>,
+            _pending: Self::Pending,
+            error: &str,
+        ) {
+            self.failure = Some(error.to_owned());
+        }
+        fn on_timer(&mut self, _cx: &mut Cx<'_, Self::Pending>, _timer: TimerId) {}
+        fn on_command(&mut self, _cx: &mut Cx<'_, Self::Pending>, _command: Command) {}
+        fn book(&self, _symbol: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    fn stream(at: ArrayAt, body: &[u8]) -> StreamVenue {
+        let mut engine = Engine::new(StreamVenue {
+            at,
+            rows: Vec::new(),
+            body: None,
+            failure: None,
+        });
+        engine.start(0.0);
+        let request = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Http(request) => Some(request.id),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(
+            1.0,
+            Event::HttpStart {
+                request,
+                status: 200,
+                headers: "",
+            },
+        );
+        for data in body.chunks(1) {
+            engine.handle(1.0, Event::HttpChunk { request, data });
+        }
+        engine.handle(1.0, Event::HttpEnd { request });
+        engine.venue
+    }
+
+    #[test]
+    fn streamed_completion_preserves_bybit_cursor_and_bingx_alias_envelopes() {
+        for (at, body) in [
+            (ArrayAt::Root, "[1]"),
+            (ArrayAt::Field("symbols"), r#"{"symbols":[1]}"#),
+            (
+                ArrayAt::Path(&["result", "list"]),
+                r#"{"list":[9],"retCode":0,"result":{"list":[1],"nextPageCursor":"next"}}"#,
+            ),
+            (ArrayAt::EnvelopeField("data"), r#"{"data":[1],"code":0}"#),
+            (
+                ArrayAt::EnvelopeFieldOrNested("data", "orders"),
+                r#"{"data":{"orders":[1]},"code":0}"#,
+            ),
+            (
+                ArrayAt::EnvelopeFieldOrNestedAny("data", &["fill_orders", "fill_history_orders"]),
+                r#"{"data":{"fill_orders":[1]},"code":0}"#,
+            ),
+            (
+                ArrayAt::EnvelopeFieldOrNestedAny("data", &["fill_orders", "fill_history_orders"]),
+                r#"{"data":{"fill_history_orders":[1]},"code":0}"#,
+            ),
+        ] {
+            let venue = stream(at, body.as_bytes());
+            assert_eq!(venue.failure, None, "{at:?}");
+            assert_eq!(venue.rows, ["1"]);
+            assert_eq!(
+                venue.body.as_deref(),
+                Some(body.replace("[1]", "[]").as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_utf8_truncated_lists_and_oversized_metadata_discard_staged_rows() {
+        let oversized = format!(r#"{{"data":[1]}}{}garbage"#, " ".repeat(16 * 1024));
+        for body in [
+            b"{\"data\":[1],\"msg\":\"\xff\"}".as_slice(),
+            b"{\"data\":[1,\"\xff\"]}".as_slice(),
+            br#"{"data":[1,"#,
+            oversized.as_bytes(),
+        ] {
+            let venue = stream(ArrayAt::EnvelopeField("data"), body);
+            assert!(venue.failure.is_some());
+            assert!(venue.rows.is_empty());
+            assert!(venue.body.is_none());
+        }
     }
 }

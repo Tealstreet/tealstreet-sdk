@@ -178,3 +178,15 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   (correctness-only). Bans, fmt, venue/shared-engine clippy and wasm clippy pass.
 - Syncing latest landing branch next; preserve Bybit Path/envelope pagination,
   recheck combined code, then push/PR/adversarial review/green CI/merge.
+
+### Landing sync
+
+- Merged current landing structure and Bybit support; resolved crate registration,
+  retained the landing test destination and request-ID matching. Shared response
+  splitter preserves generic Path cursors and BingX envelope aliases, with strict
+  UTF8 and16KiB overflow failure. Engine21 tests and all three venue suites pass.
+- Typecheck44/44 and lint28/28 pass after sync. Harness7 tests pass, including
+  Bybit binary bodies/connection IDs and native subscription operations.
+- Added BingX public/private gates to CI. Combined wasm measured1,849,367bytes;
+  explicit combined budget2MiB. All venue gates rerun after final hot-path tuning;
+  first merged replay passed output/memory but missed steady CPU, so still WIP.
