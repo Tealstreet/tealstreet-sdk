@@ -2318,7 +2318,7 @@
       ],
       "producer_sha256": "f9002285b942ff83985f8de0d235d4d2ff7450fca9ad2630dd38bd81727ff145",
       "classification": "guarded",
-      "reason": "Per-future Waiters::Registration is created before boxing and releases the exact event waker on waiter drop without cancelling the socket-owned handshake. State reads release their borrow before registration replacement can reenter close. Completion, close and terminate wake registrations after state mutation. Termination suppresses queued or pending events; a receiving future drops its receive/native handle when woken after termination. The existing failed-network Error/Close1006 path has no Open and remains terminal after Close. Reviewed raw-task integration: only an actually pending NativeSocket receive marks SocketReader waiting; CONNECTING remains blocking. No extra task, waiter or cancellation ownership is introduced.",
+      "reason": "Per-future Waiters::Registration is created before boxing and releases the exact event waker on waiter drop without cancelling the socket-owned handshake. State reads release their borrow before registration replacement can reenter close. Completion, close and terminate wake registrations after state mutation. Termination suppresses queued or pending events; a receiving future drops its receive/native handle when woken after termination. The existing failed-network Error/Close1006 path has no Open and remains terminal after Close. Reviewed raw-task integration: only an actually pending NativeSocket receive marks SocketReader waiting; CONNECTING remains blocking. No extra task, waiter or cancellation ownership is introduced. Reviewed proxy-diagnostic marker retention only: NativeTealstreetHost writes a data-only config extension; socket ownership and cancellation bodies are unchanged.",
       "guards": [
         {
           "file": "src/waiters.rs",
@@ -2332,7 +2332,7 @@
       "source_dependencies": [
         {
           "file": "src/native.rs",
-          "sha256": "b26b24eb820c4a2d5055c6f3449c7d7f55d5be9a3998823c72abcd14fa578a2a"
+          "sha256": "5e4cf5e68e230853aadd1efbaa1db2c4717b52b83ead27230a24cb9d8dd75c8c"
         },
         {
           "file": "src/waiters.rs",
@@ -3188,7 +3188,7 @@
       ],
       "producer_sha256": "2342a113514189c08327faef04a85bf150a844d0b3ce30613ca423c9f6c3a0c5",
       "classification": "guarded",
-      "reason": "The native CONNECTING socket owns an OwnedTasks registry before canonical eager start. The registry owns the actual prepared handshake future; its completion holds only Weak state and never the socket/registry. NativeWsSocket Drop/terminate cancels the registry and suppresses queued failure events, while close during CONNECTING cancels I/O and wakes the existing Error/Close1006 path. OwnedTasks Drop is the independent fallback for I/O cancellation. Dropping only an event waiter leaves the handshake alive.",
+      "reason": "The native CONNECTING socket owns an OwnedTasks registry before canonical eager start. The registry owns the actual prepared handshake future; its completion holds only Weak state and never the socket/registry. NativeWsSocket Drop/terminate cancels the registry and suppresses queued failure events, while close during CONNECTING cancels I/O and wakes the existing Error/Close1006 path. OwnedTasks Drop is the independent fallback for I/O cancellation. Dropping only an event waiter leaves the handshake alive. Reviewed proxy-diagnostic marker retention only: NativeTealstreetHost writes a data-only config extension; socket ownership and cancellation bodies are unchanged.",
       "guards": [
         {
           "file": "src/native.rs",
@@ -3206,7 +3206,7 @@
       "source_dependencies": [
         {
           "file": "src/native.rs",
-          "sha256": "b26b24eb820c4a2d5055c6f3449c7d7f55d5be9a3998823c72abcd14fa578a2a"
+          "sha256": "5e4cf5e68e230853aadd1efbaa1db2c4717b52b83ead27230a24cb9d8dd75c8c"
         },
         {
           "file": "src/owned_tasks.rs",
