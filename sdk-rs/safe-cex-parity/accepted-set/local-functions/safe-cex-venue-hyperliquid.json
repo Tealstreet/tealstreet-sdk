@@ -13,6 +13,6 @@
   "safe-cex-venue-hyperliquid/src/host/host_market.rs::LOCAL_FUNCTION:parts": {
     "category": "non-decoder",
     "reason": "Inside compare_decimal: splits a decimal spelling into normalized sign/integer/fraction components solely for exact arithmetic ordering. It constructs no wire/domain record; rejected spellings produce no ordering result.",
-    "sourceSha256": "9eab57e57c61f2e2ff4e6b57eec40409c1335de9b5fc3b1d5cfb2ed51a5b82db"
+    "sourceSha256": "469bca483cab8f6ba450ce5893a1fd0d792d4d178dc7d5850f722c491774e203"
   }
 }

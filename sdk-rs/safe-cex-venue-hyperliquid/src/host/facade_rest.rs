@@ -89,6 +89,8 @@ fn client_object(realm: &Host, client: Client) -> Js {
         let realm = r.clone();
         Ok(r.spawn_value(Box::pin(async move {
             let mut realm = realm;
+            // Axios dispatch follows the promise-tail interceptor checkpoint.
+            realm.await_value(Js::Undefined).await?;
             let request = api
                 .build_request(&url, &body)
                 .map_err(|error| thrown_from(&mut realm, ExchangeError::new(error.to_string())))?;

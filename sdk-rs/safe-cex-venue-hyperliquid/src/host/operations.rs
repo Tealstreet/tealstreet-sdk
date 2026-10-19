@@ -253,14 +253,6 @@ impl Host {
             .map(|(key, value)| (Js::String(key), value))
             .collect())
     }
-    pub(crate) fn own_keys(&mut self, value: &Js, enumerable: bool) -> Result<Vec<Js>, Thrown> {
-        let keys = if enumerable {
-            value.own_keys()
-        } else {
-            value.own_property_names()?
-        };
-        Ok(keys.into_iter().map(Js::String).collect())
-    }
     pub(crate) fn await_value(&self, value: Js) -> JsFuture<'static> {
         Box::pin(await_js(&self.runtime(), value))
     }

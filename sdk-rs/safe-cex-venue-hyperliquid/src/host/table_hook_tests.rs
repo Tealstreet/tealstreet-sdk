@@ -42,7 +42,7 @@ fn table_view_enumerates_native_keys_and_projects_only_its_reached_row() {
     let mut realm = crate::host::test_runtime::host(Rc::new(TestRuntime::default()));
     let legacy = super::facade_store::store_object(&realm, store).unwrap();
     let view = realm.get_str(&legacy, "tickersBySymbol").unwrap();
-    assert_eq!(realm.own_keys(&view, true).unwrap().len(), 2);
+    assert_eq!(view.own_keys().len(), 2);
     assert_eq!(reads.get(), 0, "key enumeration must not read DTO fields");
     let row = realm.get_str(&view, "SELECTED").unwrap();
     assert!(

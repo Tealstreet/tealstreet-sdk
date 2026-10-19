@@ -9,10 +9,11 @@ from pathlib import Path
 import subprocess
 import tempfile
 import sys
+import os
 
 CRATE = Path(__file__).resolve().parents[1]
-ROOT = CRATE.parents[1]
-CARGO = ["cargo", "+1.99.0", "test", "--locked", "--manifest-path", "sdk-rs/Cargo.toml",
+ROOT = CRATE.parent
+CARGO = ["cargo", "test", "--locked", "--jobs", "1",
          "-p", "safe-cex-venue-hyperliquid"]
 CONTROLS = [
     ("native-spot-flag", "src/spot_binding.rs", "spot_binding",
@@ -43,7 +44,7 @@ def main():
         try:
             source.write_text(text.replace(old, new))
             result = subprocess.run(CARGO + ["--test", binary, test, "--", "--exact"],
-                                    cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                                    cwd=ROOT, env={**os.environ, "CARGO_INCREMENTAL": "0"}, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             (logs / f"{label}.log").write_text(result.stdout)
             assert result.returncode == 101 and "error[E" not in result.stdout, result.stdout
             assert f"test {test} ... FAILED" in result.stdout, result.stdout
@@ -57,11 +58,11 @@ def main():
         assert source.read_bytes() == original
     assert executed > 0, "select a known control label"
     result = subprocess.run(CARGO + ["--test", "spot_binding", "--test", "spot_runtime"],
-                            cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                            cwd=ROOT, env={**os.environ, "CARGO_INCREMENTAL": "0"}, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (logs / "restored.log").write_text(result.stdout)
     assert result.returncode == 0, result.stdout
-    assert "21 passed; 0 failed" in result.stdout and "11 passed; 0 failed" in result.stdout, result.stdout
-    print(f"{executed}/{executed} boundary controls failed; restored Spot21 + runtime11 pass", flush=True)
+    assert "27 passed; 0 failed" in result.stdout and "9 passed; 0 failed" in result.stdout, result.stdout
+    print(f"{executed}/{executed} boundary controls failed; restored Spot27 + runtime9 pass", flush=True)
 
 if __name__ == "__main__":
     main()

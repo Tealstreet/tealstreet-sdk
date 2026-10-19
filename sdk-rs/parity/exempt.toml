@@ -7656,3 +7656,7 @@ reason = "Native host callback scheduling capability for the single window timer
 [[exempt]]
 rs = "safe-cex-exchange/src/runtime.rs::rate_limit_scheduler"
 reason = "Native injection adapter from ExchangeRuntime to RateLimitScheduler using the existing OwnedTasks registry and Timer task kind. It introduces no per-request spawn, alternate clock or value carrier. Actual constructed Bybit controlled-clock and limiter drop observations prove timer progress and cancellation."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::copy_data_properties_to"
+reason = "Native embedding entry into the single canonical CopyDataProperties algorithm used by shared object spread and Hyperliquid object literals; no additional TS SDK export. The actual constructed host/source witness checks live descriptors, original aliases and iterator symbols, and the exact API accepted probe reads native UTF-16 and binary64 bits."

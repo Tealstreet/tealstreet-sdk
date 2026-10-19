@@ -11,8 +11,8 @@ use safe_cex_exchange::{
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
 use safe_cex_transport::{
-    DirectTransport, RestAdapter, RestFuture, RestRequest, RestResponse,
-    RestResponseBody, TransportFuture, TransportProvider,
+    DirectTransport, RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    TransportFuture, TransportProvider,
     socket::{SocketCapabilities, TunnelDialOptions, TunnelHost, TunnelSocket, TunnelTask},
 };
 use serde_json::{Value, json};

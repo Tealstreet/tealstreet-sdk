@@ -2117,8 +2117,15 @@ impl Js {
         if self.is_nullish() {
             return Ok(());
         }
-        let mut keys: Vec<Js> = self.for_in_own_names()?.into_iter().map(Js::String).collect();
-        if self.symbol_iterator_slot().is_some_and(|slot| slot.borrow().is_some()) {
+        let mut keys: Vec<Js> = self
+            .for_in_own_names()?
+            .into_iter()
+            .map(Js::String)
+            .collect();
+        if self
+            .symbol_iterator_slot()
+            .is_some_and(|slot| slot.borrow().is_some())
+        {
             keys.push(Js::SymbolIterator);
         }
         for key in keys {
@@ -2130,10 +2137,15 @@ impl Js {
             };
             if enumerable {
                 let value = self.get_property(&key)?;
-                target.define_property_for(&key, &Js::object(vec![
-                    ("value", value), ("writable", Js::Bool(true)),
-                    ("enumerable", Js::Bool(true)), ("configurable", Js::Bool(true)),
-                ]))?;
+                target.define_property_for(
+                    &key,
+                    &Js::object(vec![
+                        ("value", value),
+                        ("writable", Js::Bool(true)),
+                        ("enumerable", Js::Bool(true)),
+                        ("configurable", Js::Bool(true)),
+                    ]),
+                )?;
             }
         }
         Ok(())

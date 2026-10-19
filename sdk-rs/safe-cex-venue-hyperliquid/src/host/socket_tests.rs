@@ -1,6 +1,6 @@
 //! Exercise the source private class through the production realm/socket bridge.
-use safe_cex_exchange::js_runtime::value::Js;
 use crate::binding_test_runtime as host;
+use safe_cex_exchange::js_runtime::value::Js;
 
 use crate::{
     binding::{HyperliquidDependencies, RuntimeClock},
@@ -259,33 +259,78 @@ fn private_no_super_dispose_closes_wire_without_force_closing_base() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn constructed_startup_race_releases_canceled_timeout_reactions() {
-    use safe_cex_exchange::{js_runtime::promise::{Promise, await_js}, native};
-    let executor = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    use safe_cex_exchange::{
+        js_runtime::promise::{Promise, await_js},
+        native,
+    };
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     tokio::task::LocalSet::new().block_on(&executor, async {
         for replay in [false, true] {
-            let runtime = if replay { native::native_replay_runtime(1_700_000_000_000.) } else { native::native_runtime() };
+            let runtime = if replay {
+                native::native_replay_runtime(1_700_000_000_000.)
+            } else {
+                native::native_runtime()
+            };
             let dependencies = HyperliquidDependencies {
-                runtime: runtime.clone(), http: host::Routes::new(vec![]),
-                limiter: Rc::new(RateLimiter::new(Arc::new(RuntimeClock::new(runtime.clone())), 1200., 60_000.)),
-                signers: ExchangeSigners::default(), external_public_data: None,
+                runtime: runtime.clone(),
+                http: host::Routes::new(vec![]),
+                limiter: Rc::new(RateLimiter::new(
+                    Arc::new(RuntimeClock::new(runtime.clone())),
+                    1200.,
+                    60_000.,
+                )),
+                signers: ExchangeSigners::default(),
+                external_public_data: None,
             };
             let exchange = HyperliquidExchange::new(
-                serde_json::from_value(json!({"key":"", "secret":"", "publicDataOnly":true})).unwrap(),
-                Rc::new(DefaultStore::new()), dependencies,
-            ).unwrap();
+                serde_json::from_value(json!({"key":"", "secret":"", "publicDataOnly":true}))
+                    .unwrap(),
+                Rc::new(DefaultStore::new()),
+                dependencies,
+            )
+            .unwrap();
             let binding = exchange.binding.borrow().as_ref().unwrap().clone();
             let runtime_dyn = binding.realm.runtime();
             let operation = Promise::pending(&runtime_dyn);
-            let result = binding.instance.call_method("withStartupTimeout", vec![
-                Js::Promise(operation.clone()), Js::Number(60_000.), Js::str("source startup"), Js::Null,
-            ]).unwrap();
+            let result = binding
+                .instance
+                .call_method(
+                    "withStartupTimeout",
+                    vec![
+                        Js::Promise(operation.clone()),
+                        Js::Number(60_000.),
+                        Js::str("source startup"),
+                        Js::Null,
+                    ],
+                )
+                .unwrap();
             let original = Js::object(vec![("result", Js::Number(-0.))]);
             operation.settle(Ok(original.clone()));
-            let value = tokio::time::timeout(std::time::Duration::from_secs(1), await_js(&runtime_dyn, result)).await.unwrap().unwrap();
+            let value = tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                await_js(&runtime_dyn, result),
+            )
+            .await
+            .unwrap()
+            .unwrap();
             assert!(value.same_reference(&original));
-            for _ in 0..8 { native::replay_checkpoint(&runtime); tokio::task::yield_now().await; }
-            assert_eq!(native::replay_pending_jobs(&runtime), 0, "HL_STARTUP_CANCELED_TIMEOUT replay={replay}");
-            assert_eq!(native::replay_raw_tasks(&runtime)["blocking"], 0, "no unknown producer survives startup");
+            for _ in 0..8 {
+                native::replay_checkpoint(&runtime);
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(
+                native::replay_pending_jobs(&runtime),
+                0,
+                "HL_STARTUP_CANCELED_TIMEOUT replay={replay}"
+            );
+            assert_eq!(
+                native::replay_raw_tasks(&runtime)["blocking"],
+                0,
+                "no unknown producer survives startup"
+            );
             safe_cex_store::virtual_clock::set_thread_host_time(None);
         }
     });

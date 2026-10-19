@@ -98,7 +98,8 @@ pub(crate) fn bind(realm: &Host) {
             Ok((|| {
                 let json = host.global_binding("JSON")?;
                 host.call_method(&json, "parse", &[arg(args, 0)])
-            })().unwrap_or(Js::Null))
+            })()
+            .unwrap_or(Js::Null))
         }),
     );
 

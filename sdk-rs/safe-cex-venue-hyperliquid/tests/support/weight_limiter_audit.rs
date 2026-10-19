@@ -1,7 +1,7 @@
 //! Actual constructor-owned clients, shared weight budget and retained promises.
 use super::{HyperliquidDependencies, HyperliquidExchange};
-use crate::{binding_test_runtime as host, rate_limit::RateLimiter, realm::Value};
-use safe_cex_exchange::native_store::DefaultStore;
+use crate::{binding_test_runtime as host, rate_limit::RateLimiter};
+use safe_cex_exchange::{js_runtime::value::Js, native_store::DefaultStore};
 use safe_cex_transport::{
     RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, TransportError,
     TransportFuture, rate_limit::RateLimitClock,
@@ -142,12 +142,12 @@ fn weight_limiter_audit_constructed_clients_keep_shared_budget_and_discarded_wor
             let client_a = realm_a.get_str(&binding_a.instance, "unlimitedXHR").unwrap();
             let client_b = realm_b.get_str(&binding_b.instance, "unlimitedXHR").unwrap();
             let body = |label, size| json!({"label":label,"action":{"type":"order","orders":vec![Json::Null;size]}});
-            let first_body = realm_a.from_serde(&body("first",80));
-            let first = realm_a.call_method(&client_a,"post",&[Value::str("/exchange"),first_body]).unwrap();
-            let second_body = realm_b.from_serde(&body("second",0));
-            let mut second = Some(realm_b.call_method(&client_b,"post",&[Value::str("/exchange"),second_body]).unwrap());
-            let third_body = realm_a.from_serde(&body("third",40));
-            let third = realm_a.call_method(&client_a,"post",&[Value::str("/exchange"),third_body]).unwrap();
+            let first_body = realm_a.encode_json(&body("first",80));
+            let first = realm_a.call_method(&client_a,"post",&[Js::str("/exchange"),first_body]).unwrap();
+            let second_body = realm_b.encode_json(&body("second",0));
+            let mut second = Some(realm_b.call_method(&client_b,"post",&[Js::str("/exchange"),second_body]).unwrap());
+            let third_body = realm_a.encode_json(&body("third",40));
+            let third = realm_a.call_method(&client_a,"post",&[Js::str("/exchange"),third_body]).unwrap();
             if row["discard"] == true { drop(second.take()); }
             let synchronous = trace.borrow().len();
             flush().await;

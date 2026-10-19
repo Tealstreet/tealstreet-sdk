@@ -1,7 +1,7 @@
 //! Exercise the installed signer from a constructed production exchange.
 use super::{HyperliquidDependencies, HyperliquidExchange, RuntimeClock};
 use crate::{binding_test_runtime as host, rate_limit::RateLimiter};
-use safe_cex_exchange::{native_store::DefaultStore, js_runtime::value::Js};
+use safe_cex_exchange::{js_runtime::value::Js, native_store::DefaultStore};
 use serde_json::{Value as Json, json};
 use std::{
     process::Command,
@@ -32,7 +32,9 @@ fn source() -> &'static Vec<Json> {
 
 #[allow(clippy::arc_with_non_send_sync)]
 fn fixture() -> Rc<HyperliquidExchange> {
-    let runtime = Rc::new(host::Host::default());
+    let runtime = Rc::new(host::Host::with_native(
+        safe_cex_exchange::native::native_runtime(),
+    ));
     HyperliquidExchange::new(
         serde_json::from_value(json!({"key":"","secret":"","applicationId":"0x1111111111111111111111111111111111111111"})).unwrap(),
         Rc::new(DefaultStore::new()),

@@ -1,4 +1,4 @@
-The Realm iterator entrypoint uses its existing property/call/iterator-record
+The shared-Js host iterator entrypoint uses canonical property/call/IteratorRecord
 operations for every value. It honors iterator overrides independently of function
 names and refuses primitive iterator results before reading next.
 
@@ -273,11 +273,12 @@ emit an unexpected-action warning. Proven Transformed String data skips signing.
 The typed telemetry callback maps a missing body to JSON null and owns its JSON
 context; no source undefined/alias/error-object identity is asserted for that ABI.
 
-## Production binding (`binding.rs`, `realm/`)
+## Production binding (`binding.rs`, `spot_binding.rs`, `host/`)
 
 `HyperliquidExchange::new(options, store, HyperliquidDependencies)` builds the
-shared BaseExchange with the required `HyperliquidDependencies.signers`, then runs the ported class constructor inside `realm`, the
-crate-private production JS host for the generic class bodies. Every `Exchange`
+shared BaseExchange with the required `HyperliquidDependencies.signers`, then runs both family constructors through `host`, the crate-private adapter to
+shared `js_runtime::Js`, `Thrown`, Promise, descriptors and native resources.
+There is one value runtime; the former Realm implementation is deleted. Every `Exchange`
 trait method invokes the instance's ported method; six inherit the TS
 BaseExchange `Not implemented` rejection (getAccount, fetchMarkets, fetchTickers,
 fetchSymbolMaxLeverage, changePositionMode, fetchPublicTrades). Facades bind the
@@ -302,15 +303,19 @@ Native identity strings retain the shared scalar-Unicode boundary.
 The native emitter regression keeps shared Js arguments through its observations,
 checks binary64 bits and listener reference identity, then compares the actual
 shared JS stringify output with the maintained BaseExchange emitter/log source.
-Serde's numeric token representation is not a JS wire-output assertion. Original
-Realm object aliases still cross the existing DTO snapshot bridge; the approved
-shared-Js consolidation owns its independent mutation-visibility regression.
+Serde's numeric token representation is not a JS wire-output assertion. The
+frozen original-array mutation probe now reaches the same shared referent through
+perpetual and Spot emitters, callbacks, imports and thrown values.
 
-Declared realm choices: promise reactions run as runtime tasks, not a V8
-microtask queue; store reads are snapshots (writes go through Store methods);
-the cross cache is per realm and memory-only (no BroadcastChannel or
-sessionStorage on native hosts); `close` listeners are not invoked because the
-core socket runs the close/reconnect path. External public data uses the shared
+Both families use canonical shared Promise jobs and cancellable owned timers.
+The real socket startPingLoop/stopPingLoop witness checks timer cancellation
+and task receipts before replay activation and under the controlled clock.
+REST post dispatch crosses the canonical await boundary corresponding to Axios
+interceptor promise tails; synchronous async-function prefixes remain eager.
+Store maps and rows retain their canonical native referents. The cross cache
+remains per module and memory-only (no native BroadcastChannel/sessionStorage);
+`close` listeners are not invoked because the core socket owns reconnect.
+External public data uses the shared
 BaseExchange initialization and host-supplied provider factory, retaining the
 same Store and provider disposal owner. The native host supplies its gateway
 factory; custom embeddings must supply one when the option is configured.
@@ -363,7 +368,7 @@ files; earlier audit documents retain their measured trees and original counts.
 
 The unused `spot_rate_limiter` duplicate and its fake-host fixture/oracle are
 removed. Spot limiter rows now name only the production `spot_client` bodies.
-`realm::spot_limiter_tests` constructs the class with the concrete Realm host and
+`host::spot_limiter_tests` constructs the class with the concrete shared-Js host and
 checks per-instance tokens, default weight, the exact minute refill and recursive
 Promise/timer acquisition. Historical SPOT_LIMITER_BODIES_EVIDENCE.json records
 the removed adapter; it does not establish production binding coverage.
@@ -397,22 +402,22 @@ requires a delayed real response to arrive before method acknowledgement.
 The unused hyperliquidspot.api factory/interceptors and their fake HTTP fixtures
 are removed. Source Spot construction imports the perp API, as does the native
 binding; the Spot API module has only a TS test consumer and no package export.
-Keep the separate RateLimiter class and its real Realm witness. spot_runtime
+Keep the separate RateLimiter class and its real shared-Js witness. spot_runtime
 retains23 source cases across8 files after removing only7 API cases and1 source.
 
 The public socket subscription bodies live only in ws_emission.rs and are installed
-by public_class.rs on the production Realm. The unused ws_public prepared-value
+by public_class.rs on the production Host. The unused ws_public prepared-value
 copy and its standalone tests/oracle were removed; real listener coverage remains.
 
 The concrete resolveHyperliquidBuilder import returns a configured native value
 unchanged and samples testnet only for a nullish fallback. The actual builder
 consumer keeps feeTenthsBps as supplied in the signed action; it lowercases the
 address at the source callsite. Configured identity, lazy default getter reads,
-fresh fallback objects and action fee types have real Realm/source witnesses.
-No shared ExchangeOptions field types or Realm carriers are widened.
+fresh fallback objects and action fee types have real shared-Js/source witnesses.
+No shared ExchangeOptions field types or shared Js carriers are widened.
 
 
-The production orderRequestToOrderWire import reads native Realm fields directly.
+The production orderRequestToOrderWire import reads native shared Js fields directly.
 It formats price, size and trigger price before the HTTP JSON boundary, so NaN
 and infinities become the maintained wire strings rather than null. floatToWire
 uses the installed numeric/string operations, including source exponent-zero
@@ -430,21 +435,15 @@ The shared control runner misroutes midPrice independently in both live socket
 bodies and requires compiled native failures followed by exact-restored passes.
 
 
-## Legacy Realm Store hook failures
+## Canonical Store and error references
 
-Exotic lookup and key hooks return Result; property reads, presence checks,
-enumeration, spread, for-in and JSON propagate the original thrown value.
-Callbacks run outside property borrows. Existing Realm objects may retain one
-opaque canonical ExchangeError origin; native escape recovers it before reading
-message/code/response, and property reflection or serialization never copies it.
-The successful legacy DTO snapshot profile remains until the atomic family
-Realm consolidation. Store table enumeration must read canonical map keys without
-projecting unrelated rows; selected lookup projects only its captured row.
-The native Store-backed poison-row witness checks zero getter reads during keys
-and unrelated lookup, then one reached getter and its exact Projection cause.
-The table_hook_tests target compares 13 real Node operations, checks native cause
-identity/release and reentry, and scripts/realm-table-hook-controls.py proves both
-lookup/key swallowing mutations fail before exact restoration passes.
+The Host returns the existing native Store facade, maps and rows directly. Key
+enumeration and unrelated lookup do not evaluate poisoned row fields; a reached
+getter throws its original shared Js cause. The former TableView/Exotic hooks
+and snapshot conversion are deleted. Error conversion uses canonical Thrown
+origin recovery before diagnostic reads, retaining the opaque cause without
+formatting or invoking its getters. `host::table_hook_tests` keeps the original
+selected-row, getter-count and cause-identity observations on that direct path.
 
 The public Cloid, FundingHistory, UserOpenOrders and perpetual/Spot
 CancelOrderRequests aliases execute their actual native decoder traits through
@@ -455,11 +454,11 @@ unit/byte witnesses. This is wire-alias evidence, not a Realm/HTTP behavior clai
 
 
 The BytesLike signing regression runs the actual bound `signL1Action` on a
-NativeRuntime/Realm and the native ApiClient preparation path. It compares five
+NativeRuntime/shared-Js Host and the native ApiClient preparation path. It compares five
 valid vault byte/hash/signature profiles and three rejected vault envelopes with
 the maintained TS and installed ethers. Both hex prefix cases and empty bytes
 are accepted; short vault right-padding keeps the source behavior. The native
-transport retains the same canonical cause through RestFailure and the Realm
+transport retains the same canonical cause through RestFailure and the Host
 REST rejection.
 `tests/byteslike-signing-controls.py` requires compiled native failures for prefix
 admission and dropped error metadata, then exact restoration and passing tests.

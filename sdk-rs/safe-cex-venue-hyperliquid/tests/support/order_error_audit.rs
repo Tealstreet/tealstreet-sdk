@@ -1,8 +1,8 @@
 //! Observe the actual bound placement consumer, not the standalone Result adapter.
 use super::{HyperliquidDependencies, HyperliquidExchange, RuntimeClock};
 use crate::binding_test_runtime as host;
-use crate::{rate_limit::RateLimiter, host::Host};
-use safe_cex_exchange::{native_store::DefaultStore, js_runtime::value::Js};
+use crate::{host::Host, rate_limit::RateLimiter};
+use safe_cex_exchange::{js_runtime::value::Js, native_store::DefaultStore};
 use serde_json::{Value as Json, json};
 use std::{
     cell::Cell,
@@ -51,28 +51,32 @@ fn profile(r: &mut Host, error: &Js) -> Json {
     let prototype = r.get_str(&class, "prototype").unwrap();
     let base_prototype = r.get_str(&base, "prototype").unwrap();
     let object = r.global_binding("Object").unwrap();
-    let direct = r
-        .call_method(&object, "getPrototypeOf", std::slice::from_ref(error))
-        .unwrap();
-    let parent = r
-        .call_method(&object, "getPrototypeOf", std::slice::from_ref(&prototype))
-        .unwrap();
-    let class_parent = r
-        .call_method(&object, "getPrototypeOf", std::slice::from_ref(&class))
-        .unwrap();
+    let direct = error.prototype().unwrap_or(Js::Null);
+    let parent = prototype.prototype().unwrap_or(Js::Null);
+    let class_parent = class.prototype().unwrap_or(Js::Null);
     let descriptor = |key: &str| {
-        let descriptor = object.call_method("getOwnPropertyDescriptor", vec![error.clone(), Js::str(key)]).unwrap();
-        if matches!(descriptor, Js::Undefined) { return Json::Null; }
-        json!([descriptor.get("enumerable").unwrap().truthy(), descriptor.get("writable").unwrap().truthy(), descriptor.get("configurable").unwrap().truthy()])
+        let descriptor = object
+            .call_method(
+                "getOwnPropertyDescriptor",
+                vec![error.clone(), Js::str(key)],
+            )
+            .unwrap();
+        if matches!(descriptor, Js::Undefined) {
+            return Json::Null;
+        }
+        json!([
+            descriptor.get("enumerable").unwrap().truthy(),
+            descriptor.get("writable").unwrap().truthy(),
+            descriptor.get("configurable").unwrap().truthy()
+        ])
     };
     let name = r.get_str(error, "name").unwrap();
     let message = r.get_str(error, "message").unwrap();
     let constructor = r.get_str(error, "constructor").unwrap();
-    let enumerable_keys: Vec<String> = r
-        .own_keys(error, true)
-        .unwrap()
+    let enumerable_keys: Vec<String> = error
+        .own_keys()
         .iter()
-        .map(|key| String::from_utf16(key.as_str().unwrap()).unwrap())
+        .map(|key| String::from_utf16(key).unwrap())
         .collect();
     json!({
         "name": r.to_string(&name).unwrap().as_ref(), "message": r.to_string(&message).unwrap().as_ref(),
@@ -92,9 +96,7 @@ fn order_error_audit_bound_constructor_retains_error_inheritance_and_units() {
     assert_eq!(source()["constructors"].as_array().unwrap().len(), 4);
     for row in source()["constructors"].as_array().unwrap() {
         let units: Vec<u16> = serde_json::from_value(row["message"].clone()).unwrap();
-        let error = r
-            .construct(&class, &[Js::utf16(&units)], None)
-            .unwrap();
+        let error = r.construct(&class, &[Js::utf16(&units)], None).unwrap();
         assert_eq!(
             profile(&mut r, &error),
             row["observed"],

@@ -372,8 +372,11 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         ("NaN", Js::Number(f64::NAN)),
         ("undefined", Js::Undefined),
     ] {
-        g.define_property(&name.encode_utf16().collect::<Vec<_>>(), &Js::object(vec![("value", value)]))
-            .expect("stock global constant descriptor");
+        g.define_property(
+            &name.encode_utf16().collect::<Vec<_>>(),
+            &Js::object(vec![("value", value)]),
+        )
+        .expect("stock global constant descriptor");
     }
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
@@ -467,6 +470,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     );
     def("Error", error_constructor("Error"));
     def("SyntaxError", error_constructor("SyntaxError"));
+    def("RangeError", error_constructor("RangeError"));
     def(
         "BigInt",
         Js::function("BigInt", |_, a| {
