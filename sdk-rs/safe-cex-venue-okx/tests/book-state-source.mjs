@@ -42,4 +42,10 @@ assert.equal(live.acceptOrderBookSequence('books.BTC',frame('snapshot','10',''))
 assert.equal(calls.length,1);
 assert.equal(calls[0].receiver,live.orderBookSequenceByHandler);
 assert.deepEqual(calls[0].args,['books.BTC','10']);
-process.stdout.write('3 maintained source state observations PASS\n');
+const repeated = scene();
+let reads = 0;
+const row = {get seqId(){return ++reads === 1 ? '10' : '11';}};
+assert.equal(repeated.acceptOrderBookSequence('books.BTC',{action:'snapshot',data:[row]}),true);
+assert.equal(reads,2);
+assert.equal(repeated.orderBookSequenceByHandler.get('books.BTC'),'11');
+process.stdout.write('4 maintained source state observations PASS\n');

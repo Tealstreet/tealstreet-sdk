@@ -258,5 +258,21 @@ fn book_state_maintained_source_access_and_commit_order() {
         .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/book-state-source.mjs"))
         .output().expect("maintained source state oracle");
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), "3 maintained source state observations PASS");
+    assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), "4 maintained source state observations PASS");
+}
+
+#[test]
+fn book_state_sequence_preserves_repeated_property_reads() {
+    let (_h, socket) = book_state_socket();
+    let reads = Rc::new(Cell::new(0));
+    let count = reads.clone();
+    let update = Js::object(vec![]);
+    update.define_accessor("seqId", Some(Rc::new(move |_| {
+        count.set(count.get() + 1);
+        Ok(Js::str(if count.get() == 1 { "10" } else { "11" }))
+    })), None).unwrap();
+    let frame = Js::object(vec![("action", Js::str("snapshot")), ("data", Js::array(vec![update]))]);
+    assert!(socket.call_method("acceptOrderBookSequence", vec![Js::str("books.BTC"), frame]).unwrap().truthy());
+    assert_eq!(reads.get(), 2, "nullish guard and String argument both read the source field");
+    assert!(socket.get("orderBookSequenceByHandler").unwrap().call_method("get", vec![Js::str("books.BTC")]).unwrap().strict_equals(&Js::str("11")));
 }
