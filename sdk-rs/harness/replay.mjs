@@ -77,7 +77,9 @@ class Tape {
     for (const url of urls) await this.socketFor(url);
     await ready();
     let delivered = 0;
+    const warm = Math.floor(this.frames.length / 4);
     for (const frame of this.frames) {
+      if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
       const socket = await this.socketFor(frame.url);
       socket.onMessage(frame.text);
       delivered++;
@@ -92,14 +94,17 @@ const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
 };
 
-const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0) => {
+const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
   globalThis.gc?.();
   const cpu = process.cpuUsage(cpuStart.process);
   const thread = process.threadCpuUsage(cpuStart.thread);
+  const steady = warmMark ? process.threadCpuUsage(warmMark.thread) : { user: 0, system: 0 };
   const memory = process.memoryUsage();
   return {
     // The worker's own thread: what competes with its message handling.
     cpuMs: (thread.user + thread.system) / 1000,
+    // Main thread after the first quarter of frames: startup and JIT excluded.
+    steadyCpuMs: (steady.user + steady.system) / 1000,
     // All threads, including V8 background compilation and GC helpers.
     processCpuMs: (cpu.user + cpu.system) / 1000,
     wallMs: performance.now() - wallStart,
@@ -138,6 +143,7 @@ async function runRust() {
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine();
   const tape = new Tape();
+  const encoder = new TextEncoder();
   const store = { markets: [], tickers: [] };
   const finalBooks = {};
   const transport = {
@@ -146,7 +152,10 @@ async function runRust() {
       const socket = tape.connect(url, onOpen, onMessage);
       return { send: () => {}, close: () => (socket.closed = true) };
     },
-    request: async ({ method, url }) => tape.respond(method, url),
+    request: async ({ method, url }) => {
+      const { status, body } = tape.respond(method, url);
+      return { status, body: encoder.encode(body) };
+    },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
@@ -187,7 +196,7 @@ async function runRust() {
   });
   await settle();
   host.flush();
-  const metrics = measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes());
+  const metrics = measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
   host.dispose();
   return { frames, metrics, unserved: tape.unserved, store, books: finalBooks };
 }
@@ -283,7 +292,7 @@ async function runTs() {
   );
   await Promise.all([started, subscribed]);
   await settle();
-  const metrics = measure(cpuStart, wallStart, heapBefore);
+  const metrics = measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark);
   const snapshot = {
     markets: store.markets.map((m) => ({ ...m })),
     tickers: store.tickers.map((t) => ({ ...t })),

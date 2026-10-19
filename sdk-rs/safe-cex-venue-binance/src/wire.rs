@@ -6,12 +6,6 @@ use std::borrow::Cow;
 type Str<'a> = Cow<'a, str>;
 
 #[derive(Deserialize)]
-pub struct ExchangeInfo<'a> {
-    #[serde(borrow)]
-    pub symbols: Vec<SymbolInfo<'a>>,
-}
-
-#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SymbolInfo<'a> {
     #[serde(borrow)]

@@ -1,6 +1,7 @@
 //! Sans-I/O exchange engine core. See docs/plans/RUST_REWRITE.md.
 pub mod book;
 pub mod engine;
+pub mod json;
 pub mod model;
 pub mod num;
 pub mod store;

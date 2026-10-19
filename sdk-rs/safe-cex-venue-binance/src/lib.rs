@@ -3,7 +3,9 @@ mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, SocketId, TimerId, Venue, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, LogLevel, Method, SocketId, TimerId, Venue, json, num,
+};
 use std::collections::HashMap;
 use wire::*;
 
@@ -228,22 +230,18 @@ impl BinanceFutures {
     }
 
     fn on_markets(&mut self, cx: &mut Cx<'_, Pending>, body: &str) {
-        let info: ExchangeInfo = match serde_json::from_str(body) {
-            Ok(info) => info,
-            Err(error) => {
-                cx.log(LogLevel::Error, format!("Binance exchangeInfo: {error}"));
-                return;
+        let mut markets = Vec::new();
+        let decoded = json::each_in_field::<SymbolInfo>(body, "symbols", |m| {
+            if matches!(&*m.contract_type, "PERPETUAL" | "TRADIFI_PERPETUAL")
+                && matches!(&*m.margin_asset, "USDT" | "USDC")
+            {
+                markets.push(market_from_wire(&m));
             }
-        };
-        let markets = info
-            .symbols
-            .iter()
-            .filter(|m| {
-                matches!(&*m.contract_type, "PERPETUAL" | "TRADIFI_PERPETUAL")
-                    && matches!(&*m.margin_asset, "USDT" | "USDC")
-            })
-            .map(market_from_wire)
-            .collect();
+        });
+        if let Err(error) = decoded {
+            cx.log(LogLevel::Error, format!("Binance exchangeInfo: {error}"));
+            return;
+        }
         cx.store.set_markets(markets);
         self.get(cx, "/fapi/v1/ticker/24hr", Pending::Daily);
         self.get(cx, "/fapi/v1/ticker/bookTicker", Pending::BookTickers);
@@ -703,52 +701,40 @@ impl Venue for BinanceFutures {
         match pending {
             Pending::ExchangeInfo => self.on_markets(cx, body),
             Pending::Daily => {
-                let rows: Vec<Daily> = serde_json::from_str(body).unwrap_or_default();
-                self.ticker_seed.daily = Some(
-                    rows.iter()
-                        .map(|d| {
-                            let values = (
-                                num::parse(&d.last_price),
-                                num::parse(&d.price_change_percent),
-                                num::parse(&d.volume),
-                                num::parse(&d.quote_volume),
-                            );
-                            (d.symbol.to_string(), values)
-                        })
-                        .collect(),
-                );
+                let mut daily = HashMap::new();
+                let _ = json::each::<Daily>(body, |d| {
+                    let values = (
+                        num::parse(&d.last_price),
+                        num::parse(&d.price_change_percent),
+                        num::parse(&d.volume),
+                        num::parse(&d.quote_volume),
+                    );
+                    daily.insert(d.symbol.into_owned(), values);
+                });
+                self.ticker_seed.daily = Some(daily);
                 self.try_seed_tickers(cx);
             }
             Pending::BookTickers => {
-                let rows: Vec<BookTickerRest> = serde_json::from_str(body).unwrap_or_default();
-                self.ticker_seed.books = Some(
-                    rows.iter()
-                        .map(|b| {
-                            (
-                                b.symbol.to_string(),
-                                num::parse(&b.bid_price),
-                                num::parse(&b.ask_price),
-                            )
-                        })
-                        .collect(),
-                );
+                let mut books = Vec::new();
+                let _ = json::each::<BookTickerRest>(body, |b| {
+                    let (bid, ask) = (num::parse(&b.bid_price), num::parse(&b.ask_price));
+                    books.push((b.symbol.into_owned(), bid, ask));
+                });
+                self.ticker_seed.books = Some(books);
                 self.try_seed_tickers(cx);
             }
             Pending::PremiumIndex => {
-                let rows: Vec<PremiumIndex> = serde_json::from_str(body).unwrap_or_default();
-                self.ticker_seed.premium = Some(
-                    rows.iter()
-                        .map(|p| {
-                            let values = (
-                                num::parse(&p.mark_price),
-                                num::parse(&p.index_price),
-                                num::parse(&p.last_funding_rate),
-                                p.next_funding_time,
-                            );
-                            (p.symbol.to_string(), values)
-                        })
-                        .collect(),
-                );
+                let mut premium = HashMap::new();
+                let _ = json::each::<PremiumIndex>(body, |p| {
+                    let values = (
+                        num::parse(&p.mark_price),
+                        num::parse(&p.index_price),
+                        num::parse(&p.last_funding_rate),
+                        p.next_funding_time,
+                    );
+                    premium.insert(p.symbol.into_owned(), values);
+                });
+                self.ticker_seed.premium = Some(premium);
                 self.try_seed_tickers(cx);
             }
             Pending::DepthSnapshot { symbol, generation } => {

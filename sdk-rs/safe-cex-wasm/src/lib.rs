@@ -346,17 +346,27 @@ impl WasmEngine {
         self.flush()
     }
 
+    /// `body` is the raw response bytes; invalid UTF-8 is reported as a failure.
     #[wasm_bindgen(js_name = httpResponse)]
-    pub fn http_response(&mut self, request: u32, status: u16, body: &str, now: f64) -> String {
+    pub fn http_response(&mut self, request: u32, status: u16, body: &[u8], now: f64) -> String {
         let request = RequestId(request);
-        self.inner.handle(
-            now,
-            Event::HttpResponse {
-                request,
-                status,
-                body,
-            },
-        );
+        match std::str::from_utf8(body) {
+            Ok(body) => self.inner.handle(
+                now,
+                Event::HttpResponse {
+                    request,
+                    status,
+                    body,
+                },
+            ),
+            Err(_) => self.inner.handle(
+                now,
+                Event::HttpFailed {
+                    request,
+                    error: "response body is not UTF-8",
+                },
+            ),
+        }
         self.flush()
     }
 

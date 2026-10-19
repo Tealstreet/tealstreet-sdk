@@ -5,7 +5,7 @@
 // transport = {
 //   now(): number,
 //   connect(url, { onOpen, onMessage, onClose }): { send(text), close() },
-//   request({ method, url, headers, body }): Promise<{ status, body }>,
+//   request({ method, url, headers, body }): Promise<{ status, body: Uint8Array }>,
 //   setTimeout(fn, ms), clearTimeout(handle),
 // }
 
@@ -236,7 +236,7 @@ export const nativeTransport = () => ({
   },
   async request({ method, url, headers, body }) {
     const response = await fetch(url, { method, headers, body });
-    return { status: response.status, body: await response.text() };
+    return { status: response.status, body: new Uint8Array(await response.arrayBuffer()) };
   },
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (handle) => clearTimeout(handle),

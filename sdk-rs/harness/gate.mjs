@@ -12,6 +12,7 @@ const { values } = parseArgs({
     tape: { type: 'string' },
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
     runs: { type: 'string', default: '3' },
+    'no-egress': { type: 'boolean', default: false },
   },
 });
 const outDir = 'sdk-rs/harness/out';
@@ -21,6 +22,7 @@ const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
   args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--tape', values.tape, '--books', values.books, '--out', out);
+  if (values['no-egress']) args.push('--no-egress');
   const result = spawnSync(process.execPath, args, { encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`${impl} replay failed:\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
@@ -58,17 +60,25 @@ for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.book
 
 const summary = (impl) => ({
   cpuMs: median(results[impl].map((r) => r.metrics.cpuMs)),
+  steadyCpuMs: median(results[impl].map((r) => r.metrics.steadyCpuMs)),
+  processCpuMs: median(results[impl].map((r) => r.metrics.processCpuMs)),
   retainedMB: median(results[impl].map((r) => r.metrics.retainedBytes)) / 1e6,
   wasmMB: median(results[impl].map((r) => r.metrics.wasmBytes ?? 0)) / 1e6,
 });
 const t = summary('ts');
 const r = summary('rust');
 console.log(`frames ${ts.frames}, markets ${ts.markets.length}, tickers ${ts.tickers.length}, books ${Object.keys(ts.books).length}`);
-console.log(`cpu       ts ${t.cpuMs.toFixed(0)} ms   rust ${r.cpuMs.toFixed(0)} ms   (${(t.cpuMs / r.cpuMs).toFixed(2)}x)`);
-console.log(`retained  ts ${t.retainedMB.toFixed(1)} MB   rust ${r.retainedMB.toFixed(1)} MB (wasm ${r.wasmMB.toFixed(1)} MB)`);
+const row = (label, a, b, unit = 'ms') =>
+  console.log(`${label.padEnd(16)} ts ${a.toFixed(1).padStart(8)} ${unit}   rust ${b.toFixed(1).padStart(8)} ${unit}   ${(a / b).toFixed(2)}x`);
+row('main-thread cpu', t.cpuMs, r.cpuMs);
+row('steady cpu', t.steadyCpuMs, r.steadyCpuMs);
+row('process cpu', t.processCpuMs, r.processCpuMs);
+row('retained memory', t.retainedMB, r.retainedMB, 'MB');
+console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 
 const failures = [...differences];
-if (!(r.cpuMs < t.cpuMs)) failures.push('Rust CPU is not below TS');
+if (!(r.cpuMs < t.cpuMs)) failures.push('Rust main-thread CPU is not below TS');
+if (!(r.steadyCpuMs < t.steadyCpuMs)) failures.push('Rust steady-state CPU is not below TS');
 if (!(r.retainedMB < t.retainedMB)) failures.push('Rust retained memory is not below TS');
 if (failures.length) {
   console.log(`FAIL (${failures.length})`);

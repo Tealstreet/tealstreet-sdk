@@ -1,20 +1,4 @@
-# Incremental compilation is DISABLED for this workspace, on purpose.
-#
-# It is a per-developer build cache that buys a faster second build in one
-# worktree. This repo runs the Rust port across ~20 concurrent agent worktrees,
-# and each one keeps its own `target/`, so the cache is paid for ~20 times over.
-#
-# Measured 2026-10-15: `target/debug/incremental` totalled 193 GB across 20 live
-# worktrees - up to 25 GB in a single lane - on a 926 GB disk that had fallen to
-# 5 GB free. Deleting the caches reclaimed the space with no full rebuild,
-# because `deps/` artifacts stay valid; only the incremental state is discarded.
-#
-# The trade is a slower incremental edit-rebuild cycle in exchange for roughly
-# 40% of every target dir. With this many parallel worktrees that is the right
-# side of the trade, and it is the one change here that does not force any lane
-# to rebuild from scratch.
-#
-# CI is unaffected in practice: its runs are cold, so there was never an
-# incremental cache to reuse.
-[build]
-incremental = false
+# A 128 KiB shadow stack instead of rustc's 1 MiB default: WebAssembly linear
+# memory never shrinks, and nothing in the engine recurses deeply.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=131072"]

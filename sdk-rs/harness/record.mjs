@@ -44,7 +44,8 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    write({ type: 'http', method: request.method, url: request.url, status: response.status, body: response.body });
+    const body = new TextDecoder().decode(response.body);
+    write({ type: 'http', method: request.method, url: request.url, status: response.status, body });
     return response;
   },
 };
@@ -61,8 +62,6 @@ for (const symbol of values.books.split(',').filter(Boolean)) {
   host.command({ op: 'subscribeOrderBook', symbol });
 }
 const flush = setInterval(() => host.flush(), 250);
-const originalWrite = write;
-void originalWrite;
 setTimeout(() => {
   clearInterval(flush);
   host.flush();
