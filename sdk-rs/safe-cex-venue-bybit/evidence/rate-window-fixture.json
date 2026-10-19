@@ -226,5 +226,32 @@
     }
   },
   "production_changes": 0,
-  "scanner_or_policy_changes": 0
+  "scanner_or_policy_changes": 0,
+  "dispatch_assertion_review": {
+    "change": "Assert the sixth dispatch after advancing1000 and before awaiting all request results; every original expected count, time and delay stays unchanged.",
+    "maintained_source_profiles": 36,
+    "original_outputs_unchanged": true,
+    "real_constructor_green": true,
+    "missing_dispatch_assertion_red": true,
+    "Rust_source_unchanged_from": "78e402c41de501e83b4acf15956ab331e659bb47",
+    "source_fixture_sha256": "4cb9bb834394b377fab6be1bf6ec680bc3a06e824f16ad4664b57ca213e01f85",
+    "logs": {
+      "constructor": {
+        "log": "/tmp/venue-window-clock-review-constructor.log",
+        "sha256": "3cc9c75f8310a93b94f6777801b58342f5dd50dd4edd15c246dc84fba6bdd449"
+      },
+      "source36": {
+        "log": "/tmp/venue-window-clock-review-source-green.json",
+        "sha256": "e6321930f806939ebcecd197cf2be16a86d2f54c56cd245637c3438a09288974"
+      },
+      "missing_dispatch_red": {
+        "log": "/tmp/venue-window-clock-review-missing-dispatch-red.log",
+        "sha256": "aa0569f93d336a0f11f5eeb4665e308924464a90397b48f2c2b50fc636f9ba62"
+      },
+      "full_index": {
+        "log": "/tmp/venue-window-clock-review-index.log",
+        "sha256": "531bfb711c0b72eeb798c066aa7f2c9105c3b0d4c5818704ce9d6b91e24e89c5"
+      }
+    }
+  }
 }

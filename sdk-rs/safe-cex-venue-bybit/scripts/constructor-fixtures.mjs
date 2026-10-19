@@ -150,8 +150,8 @@ try {
     await advance(999);
     assert.equal(dispatched.length, 5);
     await advance(1000);
-    await Promise.all(requests);
     assert.deepEqual(dispatched, [...Array.from({length: 5}, (_, i) => [i, 0]), [5, 1000]]);
+    await Promise.all(requests);
     assert.deepEqual(delays, [1000, 1000]);
     windowProfiles++;
   }
