@@ -28,16 +28,38 @@ import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
 import { isRegularClientOrderShape, patternClientOrderIdRule } from '../clientOrderId';
+import { BROKER_ID } from '../okx/okx.types';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   binancepm: 'binancepm',
-  bingx: 'bingx',
   bybit: 'bybit',
+  okx: 'okx',
+  okxeu: 'okxeu',
+  okxdemo: 'okxdemo',
+  okxeudemo: 'okxeudemo',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
+
+const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
+  mint: () => `${BROKER_ID}${uuid()}`.slice(0, 32),
+});
+const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  bingx: {
+    label: 'BingX',
+    isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
+    mint: () => `ts${uuid()}`.toLowerCase().slice(0, 40),
+    requirement: 'be 1-40 characters with no uppercase letters',
+    isValid: (id) => id.length >= 1 && id.length <= 40 && id === id.toLowerCase(),
+  },
+  bybit: patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/),
+  okx: okxClientOrderIdRule,
+  okxeu: okxClientOrderIdRule,
+  okxdemo: okxClientOrderIdRule,
+  okxeudemo: okxClientOrderIdRule,
+};
 
 export type WasmEngineModule = {
   WasmEngine: new (venue: string, optionsJson: string) => WasmEngineLike;
@@ -69,7 +91,7 @@ const STORE_FLUSH_MS = 250;
  * reads the same store it always has. Trading methods are engine commands.
  */
 export class RustEngineExchange extends BaseExchange {
-  protected readonly clientOrderIdRule: ClientOrderIdRule | undefined;
+  protected readonly clientOrderIdRule = clientOrderIdRules[this.name];
   private host?: EngineHostType;
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
@@ -85,30 +107,21 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
-    this.clientOrderIdRule =
-      exchangeName === 'bingx'
-        ? {
-            label: 'BingX',
-            isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
-            mint: () => `ts${uuid()}`.toLowerCase().slice(0, 40),
-            requirement: 'be 1-40 characters with no uppercase letters',
-            isValid: (clientOrderId) =>
-              clientOrderId.length >= 1 && clientOrderId.length <= 40 && clientOrderId === clientOrderId.toLowerCase(),
-          }
-        : exchangeName === 'bybit'
-          ? patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/)
-          : undefined;
     this.applier = new FrameApplier(store);
   }
 
   start = async () => {
+    if (!this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
+      throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
+    }
     if (!loadWasmEngine) throw new Error('No wasm engine loader registered (setWasmEngineLoader)');
     const { WasmEngine } = await loadWasmEngine();
     if (this.isDisposed) return;
-    const { key, secret, testnet, publicDataOnly } = this.options;
+    const { key, secret, passphrase, testnet } = this.options;
+    const publicDataOnly = this.isPublicDataOnly;
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
-      JSON.stringify({ key, secret, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly) }),
+      JSON.stringify({ key, secret, passphrase, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly) }),
     );
     this.host = new EngineHost(engine, engineTransport(), {
       onFrame: this.receiveFrame,
@@ -154,7 +167,7 @@ export class RustEngineExchange extends BaseExchange {
     new Promise<void>((resolve) => {
       const ready = () => {
         const loaded = this.store.loaded;
-        const account = this.options.publicDataOnly || (loaded.balance && loaded.orders && loaded.positions);
+        const account = this.isPublicDataOnly || (loaded.balance && loaded.orders && loaded.positions);
         return loaded.markets && loaded.tickers && account;
       };
       if (ready()) return resolve();
@@ -202,12 +215,22 @@ export class RustEngineExchange extends BaseExchange {
 
   placeOrder = (opts: PlaceOrderOpts) => this.placeOrders([opts]);
 
-  updateOrder = ({ order, update }: UpdateOrderOpts) =>
-    this.command<string[]>({
+  updateOrder = ({ order, update }: UpdateOrderOpts): Promise<string[]> => {
+    const price = 'price' in update ? update.price : undefined;
+    const amount = 'amount' in update ? update.amount : undefined;
+    if (price === undefined && amount === undefined) {
+      return Promise.reject(new Error('Order amendment requires a price or amount'));
+    }
+    if ([price, amount].some((value) => value !== undefined && !Number.isFinite(value))) {
+      return Promise.reject(new Error('Order amendment price and amount must be finite numbers'));
+    }
+    return this.command<string[]>({
       op: 'amendOrder',
       id: order.id,
-      ...('price' in update ? { price: update.price } : { amount: update.amount }),
+      ...(price !== undefined && { price }),
+      ...(amount !== undefined && { amount }),
     });
+  };
 
   cancelOrders = async (orders: Order[]) => {
     await this.command({ op: 'cancelOrders', ids: orders.map((order) => order.id) });

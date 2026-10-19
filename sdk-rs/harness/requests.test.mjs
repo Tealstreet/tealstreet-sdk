@@ -64,3 +64,25 @@ test('Bybit connection IDs vary while body types and subscription topics stay ex
     'wss://stream.bybit.com/v5/private subscribe execution',
   ]);
 });
+
+test('command and time stages cannot serve future snapshots or reuse writes', () => {
+  const initial={method:'GET',url,body:'initial'};
+  const staged={method:'GET',url,body:'next',afterCommand:2,availableAfter:100};
+  const queue=[initial,staged];
+  assert.equal(takeResponse(queue,'GET',url,200,1),initial);
+  assert.equal(takeResponse(queue,'GET',url,99,2),initial);
+  assert.equal(takeResponse(queue,'GET',url,100,2),staged);
+  const write={method:'POST',url,afterCommand:2};
+  const writes=[write];
+  assert.equal(takeResponse(writes,'POST',url,0,1),undefined);
+  assert.equal(takeResponse(writes,'POST',url,0,2),write);
+  assert.equal(takeResponse(writes,'POST',url,0,2),undefined);
+});
+
+test('nested generated OKX IDs vary while caller IDs and body types stay exact', () => {
+  const opts={generatedBodyId:(key,value)=>key==='clOrdId' && value.startsWith('broker')};
+  const body=(id,sz='1')=>[{clOrdId:id,sz}];
+  assert.equal(requestKey('POST',url,body('broker1'),new Set(),opts),requestKey('POST',url,body('broker2'),new Set(),opts));
+  assert.notEqual(requestKey('POST',url,body('broker1'),new Set(['broker1']),opts),requestKey('POST',url,body('broker2'),new Set(['broker1']),opts));
+  assert.notEqual(requestKey('POST',url,body('broker1'),new Set(),opts),requestKey('POST',url,body('broker2',1),new Set(),opts));
+});

@@ -234,3 +234,18 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   refreshed with frozen-lockfile install; no dependency manifest/lock changes.
 - All five implementation phases and gates complete. Opening the PR into
   feat/rust-rewrite, then adversarial local reviews and green CI before merge.
+
+### PR1305 adversarial review and concurrent OKX landing
+
+- PR1305 opened against feat/rust-rewrite. OKX landed concurrently; resolving
+  its base conflicts while preserving its argument/auth/framing validations,
+  every-run correctness checks, passphrases and SDK combined-amend forwarding.
+- Adversarial findings posted as PR comments: two trigger-source defects,
+  a combined-amend bridge defect (fixed by preserved landing behavior), mixed
+  cumulative/no-z execution duplication and stale normalized no-z fill totals.
+- Trigger fixes add five regressions (33trading tests pass); account fixes and
+  independent repeat reviews are underway. Added real-wasm BingX combined-amend
+  no-write regression. Shared engine merge preserves both suites:240 tests pass
+  across engine25/Binance29/BingX79/Bybit43/OKX64 before new review fixes.
+- Replay helper9 tests pass after unifying command/time staging, typed body
+  matching and generated OKX IDs. Rechecking four-venue gates and CI next.

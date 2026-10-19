@@ -7,8 +7,8 @@ import { nanoid } from 'nanoid';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { resolveTransportRouting } from '../../transport/registry';
-import { virtualClock } from '../../utils/virtualClock';
 import { isWsRelayEnabled } from '../../transport/tealstreet/wsRelay';
+import { virtualClock } from '../../utils/virtualClock';
 import { BASE_WS_URLS, INTERVAL } from './okx.types';
 import { OKXPrivateWebsocket } from './okx.ws-private';
 
@@ -64,6 +64,11 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
 
   onOpen = async () => {
     if (this.isDisposed) return;
+    if (this.parent.isPublicDataOnly) {
+      this.subscribe();
+      this.ping();
+      return;
+    }
     let authed = false;
     try {
       authed = await this.auth();
@@ -165,12 +170,13 @@ export class OKXBusinessWebsocket extends OKXPrivateWebsocket {
       { channel: 'algo-advance', instType },
     ]);
 
-    this.sendWithLog(
-      JSON.stringify({
-        op: 'subscribe',
-        args: orderTopics,
-      }),
-    );
+    if (!this.parent.isPublicDataOnly)
+      this.sendWithLog(
+        JSON.stringify({
+          op: 'subscribe',
+          args: orderTopics,
+        }),
+      );
 
     const topics = flatten(Object.values(this.topics));
     const batchSize = 100;

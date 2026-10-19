@@ -6,7 +6,6 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import { gunzipSync } from 'node:zlib';
 
 const { values } = parseArgs({
   options: {
@@ -17,24 +16,27 @@ const { values } = parseArgs({
     'no-egress': { type: 'boolean', default: false },
   },
 });
-const outDir = 'sdk-rs/harness/out';
+const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
-const tapeBytes = readFileSync(values.tape);
-const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
-  .toString().split('\n').filter(Boolean).map(JSON.parse);
 
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
   args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
   if (values['no-egress']) args.push('--no-egress');
-  const result = spawnSync(process.execPath, args, { encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(`${impl} replay failed:\n${result.stderr}`);
+  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125_000 });
+  if (result.status !== 0) throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
 };
 
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 
+// JSON object insertion order is immaterial; array order and values are exact.
+const stable = (value) => {
+  if (Array.isArray(value)) return value.map(stable);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+};
 const differences = [];
 const compare = (label, a, b) => {
   const keyed = (rows) => new Map(rows.map((row) => [row.symbol, row]));
@@ -53,14 +55,8 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
-
-if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
-// Every request must match a taped one: an unserved request sent different parameters.
-for (const impl of ['ts', 'rust']) {
-  const unserved = results[impl][0].unserved;
-  if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
-}
 const isPrivate = Boolean(ts.account);
+
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 // BingX additionally fixes write/read defects covered by native contract tests:
 // - closePosition=true STOP_MARKET/TAKE_PROFIT_MARKET requires quantity.
@@ -68,6 +64,7 @@ const isPrivate = Boolean(ts.account);
 // - fillHistory uses startTs/endTs/pageSize/pageIndex, not TS's ignored params.
 // - Contradictory placement IDs or rejected ACK status must not advance jobs.
 // - Delayed placement/replacement ACKs must not reopen newer private state.
+
 //  - A position first seen on the user stream keeps the margin size of TS's
 //    zero-size placeholder (0); Rust takes the isolated wallet, or notional
 //    over leverage for cross.
@@ -84,14 +81,27 @@ const isPrivate = Boolean(ts.account);
 //    coverage; the committed replay tapes require no normalization for them.
 //  - Bybit: with no mark price, TS can add a second Partial stop on amend;
 //    Rust amends the existing native order ID.
-const KNOWN_TS_FIXES = (account, rustAccount) => {
-  if (values.venue === 'bybit') {
-    // TS infers executions from cumulative orders and waits for REST wallet reads.
-    // Rust uses authoritative execution/wallet streams; require them per connection.
-    const required = ts.subscriptions.filter((key) => key.endsWith('/v5/private subscribe order'))
-      .flatMap((key) => ['execution', 'wallet'].map((topic) => key.replace(/order$/, topic)));
-    ts.subscriptions = [...new Set([...ts.subscriptions, ...required])].sort();
-  }
+// OKX full-depth correction is also applied to the TS oracle: its old
+// last-trade filter permanently deleted valid levels when the trade lagged.
+const KNOWN_TS_FIXES = {
+  // Applied to the TS oracle itself (okx.ws-public.ts / okx.exchange.ts).
+  okx: [
+    'full books retain levels past a stale last trade',
+    'public trades implement the inherited Not implemented method',
+    'candle calendar bounds use UTC independently of host timezone',
+    'fill window filtering retains native milliseconds before output seconds are truncated',
+    'keyless/public-only business socket avoids empty-credential login and private topics',
+    // Rust safety fixes: covered independently by documented-payload tests.
+    'split bracket entries acquire SL/TP before the next entry is placed',
+    'native OCO amend preserves its sibling protective leg',
+    'negative protective sizes and market or terminal amends fail before writes',
+    'positive protective dust cannot round into a close-entire-position order',
+    'standalone protective limit amendment fails before cancel if execution price cannot be retained',
+    'standalone cancellation continues remaining batches after per-row failures',
+    'new account equity survives delayed snapshots and local balance ticks',
+    'acknowledged leverage survives failed post-write snapshots',
+  ],
+  bingx: (account, rustAccount) => {
   if (values.venue === 'bingx') {
     // BingX TS emits a terminal cumulative fill, ignores partial executions,
     // and drops its terminal watermark so TRADE_UPDATE can repeat that fill.
@@ -122,26 +132,26 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
     }
     return;
   }
-  for (const position of account.positions) {
-    const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
-    if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
-  }
-  for (const order of account.orders) {
-    const fixed = rustAccount.orders.find((o) => o.id === order.id);
-    if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled') order.rejectReason = 'PostOnly';
-  }
+  },
+  account: (account, rustAccount) => {
+    for (const position of account.positions) {
+      const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
+      if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+    }
+  },
+  bybit: (account, rustAccount, output) => {
+    // Rust uses execution/wallet feeds instead of cumulative orders and REST-only wallet.
+    const required = output.subscriptions.filter((key) => key.endsWith('/v5/private subscribe order'))
+      .flatMap((key) => ['execution', 'wallet'].map((topic) => key.replace(/order$/, topic)));
+    output.subscriptions = [...new Set([...output.subscriptions, ...required])].sort();
+    KNOWN_TS_FIXES.account(account, rustAccount);
+    for (const order of account.orders) {
+      const fixed = rustAccount.orders.find((o) => o.id === order.id);
+      if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled') order.rejectReason = 'PostOnly';
+    }
+  },
 };
-if (isPrivate) {
-  KNOWN_TS_FIXES(ts.account, rust.account);
-  for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
-    const left = JSON.stringify(ts.account[field]);
-    const right = JSON.stringify(rust.account[field]);
-    if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
-  }
-  const left = JSON.stringify(ts.commands);
-  const right = JSON.stringify(rust.commands);
-  if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
-}
+const normalizeBingxPublic = (ts) => {
 // KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
 // integer step 1. Correct that precision and its synthetic ticker touch only.
 if (values.venue === 'bingx') {
@@ -171,8 +181,6 @@ if (values.venue === 'bingx') {
     ticker.ask = ticker.last + 1;
   }
 }
-compare('market', ts.markets, rust.markets);
-compare('ticker', ts.tickers, rust.tickers);
 // KNOWN_TS_FIXES: BingX's internal feed sends asks descending; TS forwards
 // that order. Consumers require best ask first, so Rust sorts full snapshots.
 if (values.venue === 'bingx') {
@@ -181,10 +189,46 @@ if (values.venue === 'bingx') {
     book.asks.sort((a,b) => a[0]-b[0]);
   }
 }
-if (JSON.stringify(ts.subscriptions) !== JSON.stringify(rust.subscriptions)) differences.push(`websocket subscriptions: ts=${JSON.stringify(ts.subscriptions)} rust=${JSON.stringify(rust.subscriptions)}`);
-for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
-  if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
-    differences.push(`book ${symbol} differs`);
+};
+for (let run = 0; run < runs; run++) {
+  const ts = results.ts[run];
+  const rust = results.rust[run];
+  if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
+  // Every request must match a taped one: an unserved request sent different parameters.
+  for (const impl of ['ts', 'rust']) {
+    const output = impl === 'ts' ? ts : rust;
+    const unserved = output.unserved;
+    for (const symbol of values.books.split(',').filter(Boolean)) {
+      if (!output.books[symbol]) differences.push(`${impl}: requested book ${symbol} is missing`);
+    }
+    if (!output.markets.length || !output.tickers.length) differences.push(`${impl}: empty public seed`);
+    if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
+  }
+  const isPrivate = Boolean(ts.account);
+  if (isPrivate) {
+    if (values.venue === 'bingx') KNOWN_TS_FIXES.bingx(ts.account, rust.account);
+    if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
+    if (values.venue === 'bybit') KNOWN_TS_FIXES.bybit(ts.account, rust.account, ts);
+    for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
+      const left = JSON.stringify(ts.account[field]);
+      const right = JSON.stringify(rust.account[field]);
+      if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
+    }
+  }
+  const left = JSON.stringify(stable(ts.commands));
+  const right = JSON.stringify(stable(rust.commands));
+  if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
+  normalizeBingxPublic(ts);
+  // OKX validates each native argument/wildcard against every delivered frame.
+  if (!values.venue.startsWith('okx') && JSON.stringify(ts.subscriptions) !== JSON.stringify(rust.subscriptions)) {
+    differences.push(`websocket subscriptions: ts=${JSON.stringify(ts.subscriptions)} rust=${JSON.stringify(rust.subscriptions)}`);
+  }
+  compare('market', ts.markets, rust.markets);
+  compare('ticker', ts.tickers, rust.tickers);
+  for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
+    if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
+      differences.push(`book ${symbol} differs`);
+    }
   }
 }
 
@@ -206,6 +250,7 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (ts.account) console.log('(private tape: paced in real time, so it gates correctness only)');
+if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
 
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.
