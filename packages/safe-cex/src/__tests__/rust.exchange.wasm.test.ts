@@ -1,7 +1,7 @@
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, OrderBook, UpdateOrderOpts } from '../types';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { BaseExchange } from '../exchanges/base';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
@@ -341,6 +341,24 @@ const until = async (check: () => boolean) => {
 describe('RustEngineExchange', () => {
   let exchange: RustEngineExchange | undefined;
   afterEach(() => exchange?.dispose());
+
+  it('keeps WOO journal PnL on the order axis when fills have no PnL', async () => {
+    exchange = new RustEngineExchange('woo', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+    const orders = vi.spyOn(exchange, 'fetchHistoricalOrders').mockResolvedValue([
+      { id: 'open', symbol: 'ETHUSDT', side: OrderSide.Buy, type: OrderType.Limit, status: OrderStatus.Closed,
+        price: 99, averagePrice: 100, amount: 1, filled: 1, reduceOnly: false,
+        createdTime: 1_000_000, updatedTime: 1_000_000, realizedPnl: 0, fees: 0.1, feeAsset: 'USDT' },
+      { id: 'close', symbol: 'ETHUSDT', side: OrderSide.Sell, type: OrderType.Limit, status: OrderStatus.Closed,
+        price: 111, averagePrice: 110, amount: 1, filled: 1, reduceOnly: true,
+        createdTime: 2_000_000, updatedTime: 2_000_000, realizedPnl: 10, fees: 0.1, feeAsset: 'USDT' },
+    ]);
+    const fills = vi.spyOn(exchange, 'fetchHistoricalFills').mockRejectedValue(new Error('fills lack PnL'));
+    const records = await exchange.fetchHistoricalPositions({ account: 'woo-account', from: 500_000, to: 3_000_000 });
+    expect(orders).toHaveBeenCalledWith({ from: 500_000, to: 3_000_000 });
+    expect(fills).not.toHaveBeenCalled();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ account: 'woo-account', symbol: 'ETHUSDT', state: 'closed', realizedPnl: 10 });
+  });
 
   it('fills the store from engine frames and serves books to listeners', async () => {
     const tape = recordedTransport();
