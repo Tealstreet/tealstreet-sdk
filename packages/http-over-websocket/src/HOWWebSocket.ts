@@ -16,8 +16,7 @@ if (isNodeOrBun) {
   try {
     // Dynamic import to avoid bundling ws in browser builds
 
-    const nodeModule = globalThis.process?.getBuiltinModule?.('module');
-    NodeWebSocket = typeof require === 'function' ? require('ws') : nodeModule?.createRequire(import.meta.url)('ws');
+    NodeWebSocket = require('ws');
   } catch {
     // ws not available, will fall back to global WebSocket
   }
@@ -85,7 +84,10 @@ export class HOWWebSocket {
 
   private url: string | undefined;
 
-  constructor(url: string, private readonly WebSocketCtor?: typeof WebSocket) {
+  constructor(
+    url: string,
+    private readonly WebSocketCtor?: typeof WebSocket,
+  ) {
     if (!url) {
       throw new Error('No HOW websocket endpoint provided');
     }

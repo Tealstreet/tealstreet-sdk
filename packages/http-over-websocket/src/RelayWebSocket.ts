@@ -41,8 +41,7 @@ const isNodeOrBun = typeof process !== 'undefined' && (process.versions?.node ||
 if (isNodeOrBun) {
   try {
     // Dynamic require so browser bundles never see `ws`.
-    const nodeModule = globalThis.process?.getBuiltinModule?.('module');
-    NodeWebSocket = typeof require === 'function' ? require('ws') : nodeModule?.createRequire(import.meta.url)('ws');
+    NodeWebSocket = require('ws');
   } catch {
     // ws not available: fall back to the global WebSocket below.
   }
@@ -108,7 +107,11 @@ export class RelayWebSocket extends EventTarget {
 
     const Socket = WebSocketCtor ?? NodeWebSocket;
     this.inner = Socket
-      ? new (Socket as new (url: string, protocols?: string | string[], options?: unknown) => WebSocket)(tunnelUrl, protocols ?? [], nodeOptions)
+      ? new (Socket as new (url: string, protocols?: string | string[], options?: unknown) => WebSocket)(
+          tunnelUrl,
+          protocols ?? [],
+          nodeOptions,
+        )
       : new WebSocket(tunnelUrl);
     this.inner.addEventListener('open', this.onInnerOpen);
     this.inner.addEventListener('message', this.onInnerMessage);

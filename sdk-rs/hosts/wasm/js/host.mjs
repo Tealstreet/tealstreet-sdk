@@ -245,6 +245,7 @@ export const nativeTransport = () => {
     }
   } catch { /* Browser and restricted renderer transports keep REST fallback. */ }
   return {
+  WebSocket: webSocketHeaders ? Socket : undefined,
   webSocketHeaders,
   now: () => Date.now(),
   connect(url, { headers = {}, onOpen, onMessage, onClose }) {

@@ -122,9 +122,10 @@ yarn test           # Vitest
   WAF upgrade headers and raw binary frames. An injected HOW adapter owns its
   regional clients; its `dispose()` cancels pending requests and closes those
   clients without touching the default runtime singletons.
-- Pure ESM Node hosts load `ws` through `process.getBuiltinModule('module')` and
-  `createRequire(import.meta.url)` when CommonJS `require` is absent. Both HOW
-  and relay must retain this path so engine hosts keep WAF upgrade headers.
+- Engine Node hosts inject the header-capable constructor from `nativeTransport`
+  into HOW and relay, including in pure ESM. It resolves `ws` beside the host's
+  declared dependency through `createRequire`; do not rely on bundled dynamic
+  `require` shims to load a header-capable socket.
 - Short-lived Node tools that touch HOW should call `disposeHOWWebSockets()`
   before exit. The SG/JA HOW clients are module-singletons, so exchange-level
   disposal alone does not close their sockets/timers.

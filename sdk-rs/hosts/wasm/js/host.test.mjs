@@ -1,7 +1,33 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:net';
+import { once } from 'node:events';
+import { WebSocketServer } from 'ws';
 import { EngineHost, nativeTransport } from './host.mjs';
+
+test('the ESM native raw constructor carries HOW and relay upgrade headers', { timeout: 3000 }, async () => {
+  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  await once(server, 'listening');
+  const connected = once(server, 'connection');
+  const Socket = nativeTransport().WebSocket;
+  const headers = { Origin: 'https://preview.tealstreet.io', 'User-Agent': 'fixture-browser' };
+  const client = new Socket(`ws://127.0.0.1:${server.address().port}/tunnel?v=2&t=1`, [], { headers });
+  client.on('error', () => {});
+  let peer;
+  try {
+    const opened = once(client, 'open');
+    const connection = await connected;
+    peer = connection[0];
+    assert.equal(connection[1].url, '/tunnel?v=2&t=1');
+    assert.equal(connection[1].headers.origin, headers.Origin);
+    assert.equal(connection[1].headers['user-agent'], headers['User-Agent']);
+    await opened;
+  } finally {
+    client.terminate();
+    peer?.terminate();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
 
 test('command failures preserve partial placement metadata', async () => {
   const details = { message: 'second order rejected', partialOrderIds: ['accepted'], partialOrderCount: 1, totalOrderCount: 2, failedOrderIndex: 1 };

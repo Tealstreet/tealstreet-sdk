@@ -107,3 +107,22 @@ nested workspace.
   separate proxy-authorization header. Updated the port brief so future venues
   supply socket roles from their first implementation.
 - Re-running workspace, SDK, host and all seven-venue gates on the merged source.
+
+### Final local gates
+
+- Seven public + ten private replay gates: **17/17 PASS** on the merged build.
+  Public gates retain strict correctness, CPU and retained-memory comparisons;
+  private gates validate account/trading/query/request/subscription correctness.
+- Workspace: **486 Rust tests**; bans, formatting, workspace/all-target Clippy and
+  workspace wasm32 Clippy pass. SDK: **6,621 tests per suite**, repository
+  typecheck **44/44**, lint **28/28**, test tasks **27/27**.
+- Routing: **59 tests**, **3,672 golden socket destinations**, and the shared
+  **25-case** TS/native fixture (**27 HTTP selections / 375 socket transitions**).
+  **46 HOW**, **21 real SDK/wasm**, **21 JS host**, and **40 harness** tests pass.
+- Seven-venue wasm: **2,416,972 bytes**, below the existing **2,621,440-byte**
+  budget. Native Node hosts inject their actual header-capable socket constructor
+  into HOW/relay, avoiding bundled dynamic-require shims; a real ESM loopback
+  upgrade verifies the exact path and headers. Browser global clients remain
+  compatible; Node/Workers engine adapters own and dispose their tunnel clients.
+- Next: push, PR into `feat/rust-rewrite`, post independent adversarial reviews,
+  address findings, wait for green CI, merge and cut a follow-up branch.
