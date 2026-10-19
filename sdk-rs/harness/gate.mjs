@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
+import { fixWeexConditionals } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 
 const { values } = parseArgs({
@@ -128,6 +129,7 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
 const KNOWN_TS_FIXES = {
+  cryptocom: fixCryptocomAccount,
   // Applied to the TS oracle itself (okx.ws-public.ts / okx.exchange.ts).
   okx: [
     'full books retain levels past a stale last trade',
@@ -145,14 +147,26 @@ const KNOWN_TS_FIXES = {
     'new account equity survives delayed snapshots and local balance ticks',
     'acknowledged leverage survives failed post-write snapshots',
   ],
-  account: (account, rustAccount) => {
+  binance(account, rustAccount) {
     for (const position of account.positions) {
       const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
       if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
     }
   },
-  bybit: (account, rustAccount) => {
-    KNOWN_TS_FIXES.account(account, rustAccount);
+  weex(account) {
+    // TS reads opening STOP/TP stream rows as protective orders and displays
+    // the execution price as their trigger, corrupting conditional size amends.
+    fixWeexConditionals(account, tapeRecords);
+    // Additional deliberate fixes, covered by native regressions: failed
+    // normal/algo reads retain the complete last snapshot; stale depth/private
+    // frames cannot undo newer state; repeated fill IDs emit once; missing
+    // placement IDs fail rather than fabricating an ID; rejected cancellations
+    // retain their order; per-symbol margin changes preserve that symbol's mode.
+    // Price-only replacement preserves remaining quantity and refuses uncertain
+    // fill/bracket state; positive income cursors always report INCOMPLETE.
+  },
+  bybit(account, rustAccount) {
+    KNOWN_TS_FIXES.binance(account, rustAccount);
     for (const order of account.orders) {
       const fixed = rustAccount.orders.find((o) => o.id === order.id);
       if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled')
@@ -160,7 +174,7 @@ const KNOWN_TS_FIXES = {
     }
   },
 };
-const fixCryptocomAccount = (account) => {
+function fixCryptocomAccount(account) {
   // TS never sets the hedged store flag despite mapping positions as hedged.
   account.hedged = true;
   // TS omits user.trade entirely. Derive the execution oracle from documented
@@ -191,8 +205,8 @@ const fixCryptocomAccount = (account) => {
   // ignored brackets/opening triggers reject before writes; caller ids use a
   // conservative 36-byte ceiling without JS string emulation.
   // Public throttle and public-only subscription corrections are the
-  // afterTsFrame and prepareTs hooks in venues.mjs.
-};
+  // afterTsFrame and prepareTsReady hooks in venues.mjs.
+}
 for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
@@ -201,8 +215,11 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) {
     const output = impl === 'ts' ? ts : rust;
     const unserved = output.unserved;
-    if (output.metrics.retainedBytes < 0 || output.metrics.bufferRetainedBytes < 0)
-      differences.push(impl + ': negative retained memory component; baseline is invalid');
+    for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
+      if (!Number.isFinite(output.metrics[field]) || output.metrics[field] < 0) {
+        differences.push(`${impl}: invalid ${field} (${output.metrics[field]}); baseline is invalid`);
+      }
+    }
     if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
     for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
     for (const symbol of values.books.split(',').filter(Boolean)) {
@@ -224,10 +241,12 @@ for (let run = 0; run < runs; run++) {
   }
   const isPrivate = Boolean(ts.account);
   if (isPrivate) {
-    if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
-    if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
-    if (['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue))
-      KNOWN_TS_FIXES.bybit(ts.account, rust.account);
+    const fix =
+      KNOWN_TS_FIXES[values.venue] ??
+      (['bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue)
+        ? KNOWN_TS_FIXES.bybit
+        : undefined);
+    if (typeof fix === 'function') fix(ts.account, rust.account);
     if (values.venue === 'bybitinverse') {
       const upnl = ts.account.positions.reduce(
         (sum, p) => sum + (p.contracts > 0 ? (p.unrealizedPnl * p.notional) / p.contracts : 0),

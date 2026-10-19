@@ -50,6 +50,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   okxeu: 'okxeu',
   okxdemo: 'okxdemo',
   okxeudemo: 'okxeudemo',
+  weex: 'weex',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
@@ -60,6 +61,9 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   cryptocom: patternClientOrderIdRule('Crypto.com', /^.{1,36}$/),
+  weex: patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/, {
+    mint: () => `ts${uuid()}`.slice(0, 36),
+  }),
   bybit: bybitClientOrderIdRule,
   bybitinverse: bybitClientOrderIdRule,
   bybitspot: bybitClientOrderIdRule,
@@ -120,7 +124,12 @@ export class RustEngineExchange extends BaseExchange {
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     this.applier = new FrameApplier(store);
+    this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
   }
+
+  private updateTickerSymbols = () => {
+    if (this.host) void this.host.command({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
+  };
 
   start = async () => {
     if (!this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
@@ -132,6 +141,7 @@ export class RustEngineExchange extends BaseExchange {
     const { key, secret, passphrase, testnet } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
     const endpoints = this.name === 'hyrotrader' ? this.hyroEndpoints() : undefined;
+    const transport = engineTransport();
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
       JSON.stringify({
@@ -141,13 +151,15 @@ export class RustEngineExchange extends BaseExchange {
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
         endpoints,
+        privateWsHeaders: Boolean(transport.webSocketHeaders),
       }),
     );
-    this.host = new EngineHost(engine, engineTransport(), {
+    this.host = new EngineHost(engine, transport, {
       onFrame: this.receiveFrame,
       onLog: this.receiveLog,
     });
     this.host.start();
+    this.updateTickerSymbols();
     // Books, candles and fills go out at the venue's book cadence, the rest
     // at the store's, matching what the TS worker posts today.
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;

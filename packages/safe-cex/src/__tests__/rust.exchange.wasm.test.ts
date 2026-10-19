@@ -433,7 +433,7 @@ describe('RustEngineExchange', () => {
     expect(tape.requests.filter((request) => request.method === 'POST')).toHaveLength(1);
   });
 
-  it('honors Crypto.com caller IDs through the inherited shell helpers', async () => {
+  it.each(['cryptocom', 'weex'] as const)('honors %s caller IDs through the inherited shell helpers', async (venue) => {
     // Reuse the existing wasm fixture to seed the shell's market preflight.
     const tape = recordedTransport();
     setWasmEngineLoader(loadNodeEngine);
@@ -443,10 +443,11 @@ describe('RustEngineExchange', () => {
     await exchange.start();
     const market = store.markets[0];
     exchange.dispose();
-    store.update({ markets: [{ ...market, id: 'BTCUSD-PERP', symbol: 'BTCUSD-PERP', quote: 'USD' }] });
-    exchange = new RustEngineExchange('cryptocom', { key: 'k', secret: 's' }, store);
+    const symbol = venue === 'weex' ? 'BTCUSDT' : 'BTCUSD-PERP';
+    store.update({ markets: [{ ...market, id: symbol, symbol }] });
+    exchange = new RustEngineExchange(venue, { key: 'k', secret: 's' }, store);
     const opts = {
-      symbol: 'BTCUSD-PERP',
+      symbol,
       type: OrderType.Limit,
       side: OrderSide.Buy,
       amount: 0.012,
@@ -463,7 +464,7 @@ describe('RustEngineExchange', () => {
       clientOrderId: opts.clientOrderId,
     });
     expect(sent).toEqual([opts.clientOrderId]);
-    expect(exchange.mintClientOrderId(opts)).toMatch(/^.{1,36}$/);
+    expect(exchange.mintClientOrderId(opts)).toMatch(/^ts[A-Za-z0-9]{1,34}$/);
     store.addOrder({
       ...opts,
       id: 'crypto-4242',
@@ -758,4 +759,9 @@ describe('RustEngineExchange', () => {
     const result = await exchange.validateAccount();
     expect(result.error).toContain('Invalid API-key');
   });
+});
+
+it('WEEX private engines require the passphrase before starting I/O', async () => {
+  const { WasmEngine } = await loadNodeEngine();
+  expect(() => new WasmEngine('weex', JSON.stringify({ key: 'replay-key', secret: 'replay-secret' }))).toThrow('WEEX requires a passphrase');
 });

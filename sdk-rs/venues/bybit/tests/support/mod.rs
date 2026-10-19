@@ -74,6 +74,9 @@ impl Harness {
             match action {
                 Action::Http(request) => self.requests.push(request),
                 Action::WsConnect { socket, url } => self.sockets.push((socket, url)),
+                Action::WsConnectWithHeaders { .. } => {
+                    panic!("Bybit authenticates sockets with an auth message")
+                }
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
