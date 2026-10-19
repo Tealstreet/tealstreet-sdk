@@ -63,3 +63,15 @@ Read current TS, cross-venue guidance, official legacy docs and live public
 REST payloads. Public info/futures/orderbook routes work without credentials.
 Independent inventory confirms the scope and protocol decisions above.
 No WOO implementation started before Part 1 merge.
+
+## Public phase
+
+- Implemented borrowed REST seeds, independent ticker topics, deferred funding
+  refresh, buffered full depth with timestamp anchor and generations, candle
+  reads/streams, subscription reference counts and ping/watchdog recovery.
+- Sub-agent review found four defects: delayed snapshots reviving invalidated
+  depth, non-ASCII interval panic, early funding request, and premature price-cap
+  publication. Fixed all four, with regressions; bounded rereview PASS.
+- 15 public tests, native clippy and formatting PASS. Includes 1,501 depth
+  levels, bounded buffering, pre-seed subscriptions, stale snapshots, control
+  precedence and candle output decoding. Registration remains for gate phase.

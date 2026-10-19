@@ -3668,6 +3668,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-woo"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "safe-cex-wasm"
 version = "0.1.0"
 dependencies = [
