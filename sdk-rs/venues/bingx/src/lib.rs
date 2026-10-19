@@ -1,6 +1,7 @@
 //! BingX stablecoin-margined perpetual swaps on the sans-I/O engine.
 pub mod account;
 pub mod account_wire;
+mod history;
 pub mod paths;
 pub mod sign;
 mod trading;
@@ -27,6 +28,7 @@ pub struct Options {
 pub enum Pending {
     Account(account::Request),
     Trade(trading::Request),
+    History(history::Request),
     Markets {
         rows: Vec<Market>,
         valid: bool,
@@ -72,6 +74,7 @@ struct BookState {
 pub struct Bingx {
     account: account::Account,
     trading: trading::Trading,
+    history: history::History,
     credentials: Option<Credentials>,
     public: Connection,
     books: HashMap<String, BookState>,
@@ -98,6 +101,7 @@ impl Bingx {
         Self {
             account: account::Account::default(),
             trading: trading::Trading::default(),
+            history: history::History::default(),
             credentials,
             public: Connection::default(),
             books: HashMap::new(),
@@ -450,6 +454,7 @@ impl Venue for Bingx {
         match pending {
             Pending::Account(request) => self.account.on_item(cx, request, item),
             Pending::Trade(_) => {}
+            Pending::History(request) => self.history.on_item(cx, request, item),
             Pending::Markets { rows, valid } => {
                 if rows.len() == rows.capacity() {
                     rows.reserve_exact(128)
@@ -533,6 +538,11 @@ impl Venue for Bingx {
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         let pending = match pending {
+            Pending::History(request) => {
+                self.history
+                    .on_response(cx, self.credentials.as_ref(), request, response);
+                return;
+            }
             Pending::Trade(request) => {
                 self.account.bump_orders();
                 self.account.bump_positions();
@@ -621,6 +631,10 @@ impl Venue for Bingx {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::History(request) => {
+                self.history.on_failed(cx, request, error);
+                return;
+            }
             Pending::Trade(request) => {
                 self.trading
                     .on_failed(cx, self.credentials.as_ref(), request, error);
@@ -640,6 +654,7 @@ impl Venue for Bingx {
         cx.log(LogLevel::Error, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.history.on_timer(cx, self.credentials.as_ref(), timer);
         if self.account.handles_timer(timer) {
             if let Some(c) = &self.credentials {
                 self.account.on_timer(cx, timer, c);
@@ -686,6 +701,10 @@ impl Venue for Bingx {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            Command::Query { command, query } => {
+                self.history
+                    .query(cx, self.credentials.as_ref(), command, query)
+            }
             Command::SubscribeOrderBook { symbol } => {
                 let state = self.books.entry(symbol.clone()).or_default();
                 state.subscribers += 1;

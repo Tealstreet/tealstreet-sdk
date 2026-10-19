@@ -98,3 +98,14 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   updated nearby guidance and gate declarations. Live public feed also sends
   descending asks and '-' placeholders; Rust sorts snapshots and keeps ticker
   fields finite. Repeat public gate pending final wasm build.
+
+### Queries checkpoint
+
+- Typed fills, order history, income and public trade reads integrated, with
+  streamed arrays and JSON command results matching the shared shapes.
+- Independent review found equal-time truncation, missing native fill paging,
+  empty identifier collapse and oversized ISO-year arithmetic. Fixed with
+  pageIndex walks, explicit incomplete errors and validated IDs/timestamps.
+- 18 query tests pass; independent repeat audit has no remaining query blocker.
+  Crate clippy --all-targets -D warnings passes. Full repository checks and
+  post-optimization replay gates running; no public performance claim yet.
