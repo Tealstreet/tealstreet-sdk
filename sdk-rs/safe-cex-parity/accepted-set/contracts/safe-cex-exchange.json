@@ -24292,6 +24292,417 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "sort_array_with",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "compare",
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnMut",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "core::cmp::Ordering",
+                                              "args": null
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the production comparator entry on sparse native arrays. Independent Node sort pins comparator call order, signed zero, undefined/hole compaction and original comparator failure before writes. Bounded Node 24 corpus; not a claim about all comparators.",
+        "call": "{ #[allow(dead_code)] mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js, Thrown, WriteObserver}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/js-entrypoint-observers.rs\")); } observation::sort($value, |target, compare| $type::sort_array_with(target, compare)) }",
+        "cases": [
+          {
+            "input": "ascending",
+            "output": {
+              "ok": true,
+              "originalError": false,
+              "array": [
+                [
+                  "number",
+                  "8000000000000000"
+                ],
+                [
+                  "number",
+                  "4000000000000000"
+                ],
+                [
+                  "number",
+                  "4008000000000000"
+                ],
+                [
+                  "undefined"
+                ],
+                [
+                  "hole"
+                ]
+              ],
+              "trace": [
+                [
+                  0,
+                  3
+                ],
+                [
+                  2,
+                  0
+                ],
+                [
+                  2,
+                  3
+                ],
+                [
+                  2,
+                  0
+                ]
+              ]
+            }
+          },
+          {
+            "input": "descending",
+            "output": {
+              "ok": true,
+              "originalError": false,
+              "array": [
+                [
+                  "number",
+                  "4008000000000000"
+                ],
+                [
+                  "number",
+                  "4000000000000000"
+                ],
+                [
+                  "number",
+                  "8000000000000000"
+                ],
+                [
+                  "undefined"
+                ],
+                [
+                  "hole"
+                ]
+              ],
+              "trace": [
+                [
+                  0,
+                  3
+                ],
+                [
+                  2,
+                  0
+                ],
+                [
+                  2,
+                  0
+                ],
+                [
+                  2,
+                  3
+                ]
+              ]
+            }
+          },
+          {
+            "input": "throw",
+            "output": {
+              "ok": false,
+              "originalError": true,
+              "array": [
+                [
+                  "number",
+                  "4008000000000000"
+                ],
+                [
+                  "hole"
+                ],
+                [
+                  "undefined"
+                ],
+                [
+                  "number",
+                  "8000000000000000"
+                ],
+                [
+                  "number",
+                  "4000000000000000"
+                ]
+              ],
+              "trace": [
+                [
+                  0,
+                  3
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "splice_array",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "len",
+                {
+                  "primitive": "usize"
+                }
+              ],
+              [
+                "start",
+                {
+                  "primitive": "usize"
+                }
+              ],
+              [
+                "delete_count",
+                {
+                  "primitive": "usize"
+                }
+              ],
+              [
+                "insert",
+                {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Runs the production mutation phase on a native sparse array with an already captured length and normalized bounds. Node splice independently pins left/right moves, holes, own undefined, raw UTF-16, signed zero and original inserted referent. Argument normalization and removed-array construction are outside this helper.",
+        "call": "{ #[allow(dead_code)] mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js, Thrown, WriteObserver}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/js-entrypoint-observers.rs\")); } observation::splice($value, $type::splice_array) }",
+        "cases": [
+          {
+            "input": "grow",
+            "output": [
+              [
+                "number",
+                "8000000000000000"
+              ],
+              [
+                "reference",
+                true
+              ],
+              [
+                "number",
+                "8000000000000000"
+              ],
+              [
+                "hole"
+              ],
+              [
+                "undefined"
+              ],
+              [
+                "string",
+                [
+                  55296
+                ]
+              ],
+              [
+                "reference",
+                true
+              ]
+            ]
+          },
+          {
+            "input": "shrink",
+            "output": [
+              [
+                "number",
+                "8000000000000000"
+              ],
+              [
+                "reference",
+                true
+              ]
+            ]
+          },
+          {
+            "input": "replace",
+            "output": [
+              [
+                "undefined"
+              ],
+              [
+                "undefined"
+              ],
+              [
+                "string",
+                [
+                  55296
+                ]
+              ],
+              [
+                "reference",
+                true
+              ]
+            ]
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "from_prototype",
           "signature": {
             "inputs": [
@@ -24551,8 +24962,49 @@
             "is_c_variadic": false
           }
         },
-        "input": "typed",
-        "reason": "This API accepts only already native Js values, UTF-16 units or native closures, or constructs an empty native collection. It has no raw serialized input; the exact compiler API remains classified independently of the observed string-key constructors and operations."
+        "input": "observed",
+        "reason": "Constructs actual native arrays from original Js values. Direct native bits, UTF-16 and referent identity distinguish the admitted raw carrier from a serialized model; independent Node array literals pin indexed values and own undefined.",
+        "call": "{ #[allow(dead_code)] mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js, Thrown, WriteObserver}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/js-entrypoint-observers.rs\")); } observation::array($value, $type::array) }",
+        "cases": [
+          {
+            "input": "zero",
+            "output": [
+              [
+                "number",
+                "8000000000000000"
+              ],
+              [
+                "undefined"
+              ]
+            ]
+          },
+          {
+            "input": "units",
+            "output": [
+              [
+                "string",
+                [
+                  55296
+                ]
+              ],
+              [
+                "undefined"
+              ]
+            ]
+          },
+          {
+            "input": "reference",
+            "output": [
+              [
+                "reference",
+                true
+              ],
+              [
+                "undefined"
+              ]
+            ]
+          }
+        ]
       },
       {
         "api": {
@@ -24607,8 +25059,58 @@
             "is_c_variadic": false
           }
         },
-        "input": "typed",
-        "reason": "This API accepts only already native Js values, UTF-16 units or native closures, or constructs an empty native collection. It has no raw serialized input; the exact compiler API remains classified independently of the observed string-key constructors and operations."
+        "input": "observed",
+        "reason": "Constructs actual sparse native arrays from original Js values and explicit absent slots. Independent Node sparse literals pin the hole/own-undefined distinction, UTF-16, signed zero and original referent.",
+        "call": "{ #[allow(dead_code)] mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js, Thrown, WriteObserver}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/js-entrypoint-observers.rs\")); } observation::holey($value, $type::holey_array) }",
+        "cases": [
+          {
+            "input": "zero",
+            "output": [
+              [
+                "hole"
+              ],
+              [
+                "number",
+                "8000000000000000"
+              ],
+              [
+                "undefined"
+              ]
+            ]
+          },
+          {
+            "input": "units",
+            "output": [
+              [
+                "hole"
+              ],
+              [
+                "string",
+                [
+                  55296
+                ]
+              ],
+              [
+                "undefined"
+              ]
+            ]
+          },
+          {
+            "input": "reference",
+            "output": [
+              [
+                "hole"
+              ],
+              [
+                "reference",
+                true
+              ],
+              [
+                "undefined"
+              ]
+            ]
+          }
+        ]
       },
       {
         "api": {
@@ -25132,6 +25634,123 @@
               ],
               "resultBits": "4619567317775286272"
             }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "ordinary_has_instance",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "bool"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Calls the actual OrdinaryHasInstance operation for matching and unrelated prototype chains, primitives, noncallables, bound targets and invalid/throwing prototype access. Independent Node Function.prototype[Symbol.hasInstance] pins completions; native error referents are observed directly.",
+        "call": "{ #[allow(dead_code)] mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js, Thrown, WriteObserver}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/js-entrypoint-observers.rs\")); } observation::instance($value, $type::ordinary_has_instance) }",
+        "cases": [
+          {
+            "input": "match",
+            "output": [
+              "ok",
+              true
+            ]
+          },
+          {
+            "input": "miss",
+            "output": [
+              "ok",
+              false
+            ]
+          },
+          {
+            "input": "primitive",
+            "output": [
+              "ok",
+              false
+            ]
+          },
+          {
+            "input": "bound",
+            "output": [
+              "ok",
+              true
+            ]
+          },
+          {
+            "input": "invalid",
+            "output": [
+              "error",
+              false
+            ]
+          },
+          {
+            "input": "throw",
+            "output": [
+              "error",
+              true
+            ]
+          },
+          {
+            "input": "noncallable",
+            "output": [
+              "ok",
+              false
+            ]
           }
         ]
       },
@@ -25699,6 +26318,324 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "strict_equals",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "other",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes strict equality on actual native numeric, UTF-16, nullish and reference pairs; independent Node === pins NaN, signed zero, type distinctions and shared versus distinct objects/arrays/functions. No JSON projection of the native operands.",
+        "call": "{ #[allow(dead_code)] mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js, Thrown, WriteObserver}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/js-entrypoint-observers.rs\")); } observation::equality($value, $type::strict_equals) }",
+        "cases": [
+          {
+            "input": "nan",
+            "output": false
+          },
+          {
+            "input": "zero",
+            "output": true
+          },
+          {
+            "input": "units",
+            "output": true
+          },
+          {
+            "input": "differentUnits",
+            "output": false
+          },
+          {
+            "input": "nullish",
+            "output": false
+          },
+          {
+            "input": "boolean",
+            "output": true
+          },
+          {
+            "input": "numberString",
+            "output": false
+          },
+          {
+            "input": "array",
+            "output": true
+          },
+          {
+            "input": "otherArray",
+            "output": false
+          },
+          {
+            "input": "function",
+            "output": true
+          },
+          {
+            "input": "otherFunction",
+            "output": false
+          },
+          {
+            "input": "map",
+            "output": true
+          },
+          {
+            "input": "set",
+            "output": true
+          },
+          {
+            "input": "object",
+            "output": true
+          },
+          {
+            "input": "otherObject",
+            "output": false
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "same_value_zero",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "other",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Calls SameValueZero on actual native pairs. Node Set.has independently pins NaN equality, signed-zero equivalence, primitive type distinctions, UTF-16 and object identity.",
+        "call": "{ #[allow(dead_code)] mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js, Thrown, WriteObserver}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/js-entrypoint-observers.rs\")); } observation::equality($value, $type::same_value_zero) }",
+        "cases": [
+          {
+            "input": "nan",
+            "output": true
+          },
+          {
+            "input": "zero",
+            "output": true
+          },
+          {
+            "input": "units",
+            "output": true
+          },
+          {
+            "input": "differentUnits",
+            "output": false
+          },
+          {
+            "input": "nullish",
+            "output": false
+          },
+          {
+            "input": "boolean",
+            "output": true
+          },
+          {
+            "input": "numberString",
+            "output": false
+          },
+          {
+            "input": "array",
+            "output": true
+          },
+          {
+            "input": "otherArray",
+            "output": false
+          },
+          {
+            "input": "function",
+            "output": true
+          },
+          {
+            "input": "otherFunction",
+            "output": false
+          },
+          {
+            "input": "map",
+            "output": true
+          },
+          {
+            "input": "set",
+            "output": true
+          },
+          {
+            "input": "object",
+            "output": true
+          },
+          {
+            "input": "otherObject",
+            "output": false
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "same_reference",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "other",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Observes actual shared/distinct Object, Array, Function, Map and Set referents and rejects scalar values even when primitive equality holds. Node reference identity supplies the corresponding object-only oracle; this is a host identity predicate, not JS === for primitives.",
+        "call": "{ #[allow(dead_code)] mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js, Thrown, WriteObserver}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/js-entrypoint-observers.rs\")); } observation::equality($value, $type::same_reference) }",
+        "cases": [
+          {
+            "input": "nan",
+            "output": false
+          },
+          {
+            "input": "zero",
+            "output": false
+          },
+          {
+            "input": "units",
+            "output": false
+          },
+          {
+            "input": "differentUnits",
+            "output": false
+          },
+          {
+            "input": "nullish",
+            "output": false
+          },
+          {
+            "input": "boolean",
+            "output": false
+          },
+          {
+            "input": "numberString",
+            "output": false
+          },
+          {
+            "input": "array",
+            "output": true
+          },
+          {
+            "input": "otherArray",
+            "output": false
+          },
+          {
+            "input": "function",
+            "output": true
+          },
+          {
+            "input": "otherFunction",
+            "output": false
+          },
+          {
+            "input": "map",
+            "output": true
+          },
+          {
+            "input": "set",
+            "output": true
+          },
+          {
+            "input": "object",
+            "output": true
+          },
+          {
+            "input": "otherObject",
+            "output": false
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "get",
           "signature": {
             "inputs": [
@@ -26020,6 +26957,291 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "set_write_observer",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "observer",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::WriteObserver",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Installs and clears the production ordinary-object publication hook, then performs actual raw-key writes. Observes original receiver/value identity, UTF-16 key, completed assignment and original callback failure. Arrays visibly refuse installation. Node Reflect.set plus a post-completion Proxy notification supplies ordering/identity evidence; the native hook itself is a host capability, not a JS API.",
+        "call": "{ #[allow(dead_code)] mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js, Thrown, WriteObserver}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/js-entrypoint-observers.rs\")); } observation::observer($value, $type::set_write_observer) }",
+        "cases": [
+          {
+            "input": "normal",
+            "output": {
+              "install": true,
+              "calls": [
+                [
+                  true,
+                  [
+                    55296
+                  ],
+                  true,
+                  true
+                ]
+              ],
+              "status": [
+                "ok"
+              ]
+            }
+          },
+          {
+            "input": "clear",
+            "output": {
+              "install": true,
+              "calls": [],
+              "status": [
+                "ok"
+              ]
+            }
+          },
+          {
+            "input": "throw",
+            "output": {
+              "install": true,
+              "calls": [
+                [
+                  true,
+                  [
+                    55296
+                  ],
+                  true,
+                  true
+                ]
+              ],
+              "status": [
+                "error",
+                true
+              ]
+            }
+          },
+          {
+            "input": "array",
+            "output": {
+              "install": false,
+              "calls": [],
+              "status": [
+                "none"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "set_key",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "primitive": "u16"
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "value",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes native ordinary Set with an original raw UTF-16 property key, signed zero or original referent; Node strict assignment pins setter receiver/value identity, original failure and readonly refusal.",
+        "call": "{ #[allow(dead_code)] mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js, Thrown, WriteObserver}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/js-entrypoint-observers.rs\")); } observation::property($value, $type::set_key) }",
+        "cases": [
+          {
+            "input": "normal",
+            "output": {
+              "status": [
+                "ok"
+              ],
+              "value": [
+                "reference",
+                true
+              ],
+              "calls": [],
+              "rawKey": true
+            }
+          },
+          {
+            "input": "zero",
+            "output": {
+              "status": [
+                "ok"
+              ],
+              "value": [
+                "number",
+                "8000000000000000"
+              ],
+              "calls": [],
+              "rawKey": true
+            }
+          },
+          {
+            "input": "setter",
+            "output": {
+              "status": [
+                "ok"
+              ],
+              "value": [
+                "undefined"
+              ],
+              "calls": [
+                true
+              ],
+              "rawKey": true
+            }
+          },
+          {
+            "input": "throw",
+            "output": {
+              "status": [
+                "error",
+                true
+              ],
+              "value": [
+                "undefined"
+              ],
+              "calls": [
+                true
+              ],
+              "rawKey": true
+            }
+          },
+          {
+            "input": "readonly",
+            "output": {
+              "status": [
+                "error",
+                false
+              ],
+              "value": [
+                "number",
+                "401c000000000000"
+              ],
+              "calls": [],
+              "rawKey": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "define",
           "signature": {
             "inputs": [
@@ -26134,6 +27356,153 @@
                 ]
               ],
               "numberBits": "4619567317775286272"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "define_key",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "primitive": "u16"
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "value",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes the native CreateDataProperty convenience with original raw UTF-16 keys. Node Object.defineProperty with writable/enumerable/configurable true pins accessor replacement without invocation, original values and nonconfigurable refusal.",
+        "call": "{ #[allow(dead_code)] mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js, Thrown, WriteObserver}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/js-entrypoint-observers.rs\")); } observation::property($value, $type::define_key) }",
+        "cases": [
+          {
+            "input": "normal",
+            "output": {
+              "status": [
+                "ok"
+              ],
+              "value": [
+                "reference",
+                true
+              ],
+              "calls": [],
+              "rawKey": true
+            }
+          },
+          {
+            "input": "zero",
+            "output": {
+              "status": [
+                "ok"
+              ],
+              "value": [
+                "number",
+                "8000000000000000"
+              ],
+              "calls": [],
+              "rawKey": true
+            }
+          },
+          {
+            "input": "setter",
+            "output": {
+              "status": [
+                "ok"
+              ],
+              "value": [
+                "reference",
+                true
+              ],
+              "calls": [],
+              "rawKey": true
+            }
+          },
+          {
+            "input": "throw",
+            "output": {
+              "status": [
+                "ok"
+              ],
+              "value": [
+                "reference",
+                true
+              ],
+              "calls": [],
+              "rawKey": true
+            }
+          },
+          {
+            "input": "readonly",
+            "output": {
+              "status": [
+                "error",
+                false
+              ],
+              "value": [
+                "number",
+                "401c000000000000"
+              ],
+              "calls": [],
+              "rawKey": true
             }
           }
         ]
@@ -26582,6 +27951,125 @@
       {
         "api": {
           "kind": "inherent",
+          "name": "push",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "value",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes actual single-value native push on a sparse array, retaining holes, own undefined, signed-zero bits and original inserted referent. Node Array.push pins readonly-length refusal; the helper rejects non-array receivers by its declared domain.",
+        "call": "{ #[allow(dead_code)] mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js, Thrown, WriteObserver}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/js-entrypoint-observers.rs\")); } observation::push($value, $type::push) }",
+        "cases": [
+          {
+            "input": "normal",
+            "output": {
+              "ok": true,
+              "array": [
+                [
+                  "hole"
+                ],
+                [
+                  "undefined"
+                ],
+                [
+                  "reference",
+                  true
+                ]
+              ]
+            }
+          },
+          {
+            "input": "zero",
+            "output": {
+              "ok": true,
+              "array": [
+                [
+                  "hole"
+                ],
+                [
+                  "undefined"
+                ],
+                [
+                  "number",
+                  "8000000000000000"
+                ]
+              ]
+            }
+          },
+          {
+            "input": "readonly",
+            "output": {
+              "ok": false,
+              "array": [
+                [
+                  "hole"
+                ],
+                [
+                  "undefined"
+                ]
+              ]
+            }
+          },
+          {
+            "input": "notArray",
+            "output": {
+              "ok": false,
+              "array": null
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
           "name": "call",
           "signature": {
             "inputs": [
@@ -26661,8 +28149,40 @@
             "is_c_variadic": false
           }
         },
-        "input": "typed",
-        "reason": "This API accepts only already native Js values, UTF-16 units or native closures, or constructs an empty native collection. It has no raw serialized input; the exact compiler API remains classified independently of the observed string-key constructors and operations."
+        "input": "observed",
+        "reason": "Invokes the actual native callable with original this and argument referents, signed zero and raw UTF-16. Independent Node apply pins completion and original throw identity. No arbitrary source evaluation or serialization is used.",
+        "call": "{ #[allow(dead_code)] mod observation { use crate::js_runtime::globals::install_builtins; use crate::js_runtime::value::{Js, Thrown, WriteObserver}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/js-entrypoint-observers.rs\")); } observation::call($value, $type::call) }",
+        "cases": [
+          {
+            "input": "zero",
+            "output": [
+              "ok",
+              [
+                "number",
+                "8000000000000000"
+              ]
+            ]
+          },
+          {
+            "input": "units",
+            "output": [
+              "ok",
+              [
+                "string",
+                [
+                  55296
+                ]
+              ]
+            ]
+          },
+          {
+            "input": "throw",
+            "output": [
+              "error",
+              true
+            ]
+          }
+        ]
       },
       {
         "api": {
@@ -37815,6 +39335,460 @@
     "category": "non-decoder",
     "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
     "reason": "Defines the nine constant descriptors and four native callable imports on an existing Js globals object. It does not inspect or decode a user payload. All installed CCXT binding tests execute this actual constructor through install_library and check every constant and callable; no decoder permission transfers to the installed callbacks."
+  },
+  "safe_cex_exchange::js_runtime::library::NativeOutcome": {
+    "shape": "observed",
+    "evidence": "Private retained native handle for the single unknown-send algorithm; actual property/RegExp capabilities preserve the one Js referent without model serialization.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::remaining_utils::UnknownOutcomeValue",
+          "name": "outcome_get",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "The actual native property capability delegates canonical Get without enumerating, projecting or narrowing its referent. Keys select UTF16, inherited NaN, a retained child, absence or an original getter rejection.",
+        "call": "{ use safe_cex_store::remaining_utils::UnknownOutcomeValue as _;let child=super::Js::object(vec![]);let marker=super::Js::object(vec![]);let object=super::Js::object(vec![(\"a\",super::Js::utf16(&[0xd800])),(\"child\",child.clone())]);object.set_prototype(super::Js::object(vec![(\"inherited\",super::Js::Number(f64::NAN))])).unwrap();let reason=marker.clone();object.define_accessor(\"throws\",Some(std::rc::Rc::new(move |_| Err(super::Thrown::new(reason.clone())))),None).unwrap();match $type(object).outcome_get($value.as_str().unwrap()){Ok(value)=>match value.0{super::Js::String(units)=>serde_json::json!({\"tag\":\"text\",\"units\":units.as_ref()}),super::Js::Number(n)=>serde_json::json!({\"tag\":\"number\",\"nan\":n.is_nan()}),super::Js::Undefined=>serde_json::json!({\"tag\":\"undefined\"}),other=>serde_json::json!({\"tag\":\"child\",\"same\":other.same_reference(&child)})},Err(e)=>serde_json::json!({\"tag\":\"throw\",\"original\":e.value.same_reference(&marker)})}}",
+        "cases": [
+          {
+            "input": "a",
+            "output": {
+              "tag": "text",
+              "units": [
+                55296
+              ]
+            }
+          },
+          {
+            "input": "absent",
+            "output": {
+              "tag": "undefined"
+            }
+          },
+          {
+            "input": "inherited",
+            "output": {
+              "tag": "number",
+              "nan": true
+            }
+          },
+          {
+            "input": "child",
+            "output": {
+              "tag": "child",
+              "same": true
+            }
+          },
+          {
+            "input": "throws",
+            "output": {
+              "tag": "throw",
+              "original": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::remaining_utils::UnknownOutcomeValue",
+          "name": "outcome_test",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "pattern",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "ignore_case",
+                {
+                  "primitive": "bool"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "bool"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Runs the canonical native RegExp against UTF16 input before any diagnostic presentation. Both matching and nonmatching strings retain the authored lone unit.",
+        "call": "{ use safe_cex_store::remaining_utils::UnknownOutcomeValue as _;let input=$type(super::Js::utf16(&$value.as_array().unwrap().iter().map(|n|n.as_u64().unwrap() as u16).collect::<Vec<_>>()));serde_json::json!(input.outcome_test(\"timeout\",true).unwrap())}",
+        "cases": [
+          {
+            "input": [
+              84,
+              73,
+              77,
+              69,
+              79,
+              85,
+              84,
+              55296
+            ],
+            "output": true
+          },
+          {
+            "input": [
+              110,
+              111,
+              55296
+            ],
+            "output": false
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::library::is_unknown_outcome": {
+    "api": {
+      "kind": "function",
+      "name": "is_unknown_outcome",
+      "signature": {
+        "inputs": [
+          [
+            "error",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "The public native binding delegates to the single lower unknown-send algorithm through a retained handle, with no JSON projection. Constructed primary/demo source comparisons cover live rejection identity and one-send behavior.",
+    "call": "{let marker=super::Js::object(vec![]);let object=super::Js::object(vec![]);if $value[\"throws\"].as_bool().unwrap_or(false){let reason=marker.clone();object.define_accessor(\"message\",Some(std::rc::Rc::new(move |_| Err(super::Thrown::new(reason.clone())))),None).unwrap();}else{object.define(\"message\",super::Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|n|n.as_u64().unwrap() as u16).collect::<Vec<_>>())).unwrap();}match $type(&object){Ok(value)=>serde_json::json!({\"unknown\":value,\"original\":false}),Err(error)=>serde_json::json!({\"unknown\":null,\"original\":error.value.same_reference(&marker)})}}",
+    "cases": [
+      {
+        "input": {
+          "units": [
+            116,
+            105,
+            109,
+            101,
+            111,
+            117,
+            116,
+            55296
+          ]
+        },
+        "output": {
+          "unknown": true,
+          "original": false
+        }
+      },
+      {
+        "input": {
+          "units": [
+            110,
+            111,
+            55296
+          ]
+        },
+        "output": {
+          "unknown": false,
+          "original": false
+        }
+      },
+      {
+        "input": {
+          "throws": true
+        },
+        "output": {
+          "unknown": null,
+          "original": true
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::ops::number": {
+    "api": {
+      "kind": "function",
+      "name": "number",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "The installed Number builtin and retained unknown-outcome adapter share this single canonical Number conversion. Actual constructed Bybit primary/demo bindings compare BigInt response status and venue codes against maintained TS, including valueOf order and overflow.",
+    "call": "{let marker=super::Js::object(vec![]);let primitive=match $value[\"kind\"].as_str().unwrap(){\"negative-zero\"=>super::Js::Number(-0.0),\"nan\"=>super::Js::Number(f64::NAN),\"symbol\"=>super::Js::SymbolIterator,_=>super::Js::BigInt(std::rc::Rc::new($value[\"text\"].as_str().unwrap_or(\"0\").parse().unwrap()))};let trace=std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));let input=if $value[\"object\"].as_bool().unwrap_or(false){let seen=trace.clone();let reason=marker.clone();let throws=$value[\"throws\"].as_bool().unwrap_or(false);super::Js::object(vec![(\"valueOf\",super::Js::function(\"valueOf\",move |_,_|{seen.borrow_mut().push(\"number\");if throws {Err(super::Thrown::new(reason.clone()))}else{Ok(primitive.clone())}}))])}else{primitive};match $type(&input){Ok(number)=>serde_json::json!({\"bits\":format!(\"{:016x}\",number.to_bits()),\"events\":*trace.borrow()}),Err(error)=>serde_json::json!({\"throws\":true,\"original\":error.value.same_reference(&marker),\"events\":*trace.borrow()})}}",
+    "cases": [
+      {
+        "input": {
+          "kind": "bigint",
+          "text": "503"
+        },
+        "output": {
+          "bits": "407f700000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "bigint",
+          "text": "-1007"
+        },
+        "output": {
+          "bits": "c08f780000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "bigint",
+          "text": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "output": {
+          "bits": "7ff0000000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "negative-zero"
+        },
+        "output": {
+          "bits": "8000000000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "nan"
+        },
+        "output": {
+          "bits": "7ff8000000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "bigint",
+          "text": "503",
+          "object": true
+        },
+        "output": {
+          "bits": "407f700000000000",
+          "events": [
+            "number"
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "symbol"
+        },
+        "output": {
+          "throws": true,
+          "original": false,
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "bigint",
+          "object": true,
+          "throws": true
+        },
+        "output": {
+          "throws": true,
+          "original": true,
+          "events": [
+            "number"
+          ]
+        }
+      }
+    ]
   },
   "safe_cex_exchange::js_runtime::base_exchange::text": {
     "api": {

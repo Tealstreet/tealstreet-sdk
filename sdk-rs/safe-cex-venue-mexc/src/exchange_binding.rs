@@ -33,7 +33,7 @@ use safe_cex_exchange::{
         store,
         value::{Js, Thrown, arg, error_object, from_json, from_typed, to_json, to_typed},
     },
-    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
+    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
     socket_lifecycle::SocketSlot,
 };
 use safe_cex_num::JsJsonValue;
@@ -64,7 +64,7 @@ pub(crate) struct Host {
     venue: Weak<MexcExchange>,
     runtime: Rc<dyn ExchangeRuntime>,
     this: OnceCell<Js>,
-    timers: RefCell<Vec<(Js, Box<dyn ExchangeTask>)>>,
+    timers: RefCell<Vec<(Js, safe_cex_exchange::OwnedOperation)>>,
 }
 
 /// A started promise or settled value observed by the host-generic bodies.
@@ -764,22 +764,28 @@ impl Host {
         Js::Promise(Promise::settled(&self.runtime, Ok(Js::Undefined)))
     }
 
-    fn timer(&self, delay_ms: u64, callback: Rc<dyn Fn() -> Result<Js, Thrown>>) -> Js {
+    fn timer(
+        &self,
+        delay_ms: u64,
+        callback: Rc<dyn Fn() -> Result<Js, Thrown>>,
+    ) -> Result<Js, Thrown> {
         let handle = Js::object_with_class("Timeout", vec![]);
         let runtime = self.runtime.clone();
-        let task = self.runtime.spawn_local(Box::pin(async move {
-            if runtime.sleep(delay_ms).await.is_err() {
-                return;
-            }
-            if let Err(error) = callback() {
-                runtime.report_exception(
-                    &error.to_exchange_error(),
-                    &serde_json::json!({"source": "setTimeout"}).into(),
-                );
-            }
-        }));
+        let task = self
+            .venue()?
+            .base
+            .start_timeout(delay_ms.max(1), move || {
+                if let Err(error) = callback() {
+                    runtime.report_exception(
+                        &error.to_exchange_error(),
+                        &serde_json::json!({"source":"setTimeout"}).into(),
+                    );
+                }
+                Ok(())
+            })
+            .map_err(thrown)?;
         self.timers.borrow_mut().push((handle.clone(), task));
-        handle
+        Ok(handle)
     }
 }
 
@@ -1178,7 +1184,7 @@ impl OrderWorkflowHost for Host {
         callback: Rc<dyn Fn() -> Result<Js, Thrown>>,
         delay_ms: Js,
     ) -> Result<Js, Thrown> {
-        Ok(self.timer(delay(&delay_ms)?, callback))
+        self.timer(delay(&delay_ms)?, callback)
     }
 }
 
