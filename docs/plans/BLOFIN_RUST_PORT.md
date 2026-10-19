@@ -375,3 +375,22 @@ and three-run public medians:
   1235.1ms and steady891.0/911.5ms. Restore OKX O3; evaluate Crypto.com size
   profile under the same unchanged aggregate budget. All final gates rerun on
   that artifact before landing. Native266/SDK17/host4/TC44/lint28/clippy pass.
+
+### Five-venue speed profile verification
+
+- Restore OKX O3, retain Crypto.com/Binance/Bybit/host size profiles. Final
+  five-venue artifact1,841,595bytes fits the inherited1,887,436-byte budget.
+  All five public gates pass on explicit Node22; this supersedes the prior
+  mixed-runtime baseline-fix sample. SDK17 and first four private gates pass.
+
+| Public fixture | Frames | TS/Rust CPU ms | TS/Rust steady ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| BloFin | 2,764 | 202.493 /161.006 | 128.535 /101.276 | 2.729528 /1.504672 |
+| Binance | 871 | 238.248 /123.732 | 139.849 /59.735 | 4.129976 /2.243296 |
+| Bybit | 8,742 | 495.644 /404.329 | 302.369 /255.417 | 6.042144 /2.532560 |
+| Crypto.com | 2,177 | 166.659 /129.852 | 107.622 /65.134 | 1.684616 /1.185992 |
+| OKX | 8,902 | 631.662 /553.241 | 484.224 /412.866 | 3.959448 /2.504864 |
+
+- WEEX landed concurrently at `6cd219ce4c`, including shared transport/parser
+  changes and its existing2.25MiB budget. Integrate and review before final CI;
+  the remaining old-artifact aliases are finishing, then affected gates rerun.
