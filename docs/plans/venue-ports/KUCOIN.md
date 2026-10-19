@@ -281,3 +281,17 @@ query review found R11 P2: per-window ns filtering leaves sub-ms fill gaps at
 integer-ms window transitions. Preserve original caller bounds for fill filters
 across every page; regression/repair is in progress, posted on PR #1312 along
 with R10. Rebuild and run integrated gates once that final patch is ready.
+
+### Final query review repair
+
+R11 is fixed and independently cross-reviewed: fill rows retain immutable caller
+bounds for exact native nanosecond filtering across integer-ms REST windows.
+The new regression proves sub-ms boundary rows survive either adjacent page and
+rejects rows one ns outside both global bounds. All other query kinds preserve
+their existing window filters. No new P1/P2 findings remain in the final public,
+private/trading, query, shared replay and native-unit bridge reviews.
+
+Nine-venue fmt/bans, native and wasm clippy with warnings denied, and all 634
+workspace tests PASS (KuCoin 96). Rebuilt wasm integration 21, host 15 and
+harness 57 tests PASS. KuCoin public/private and Binance public replays PASS;
+remaining integrated replays are running before the final gate checkpoint.

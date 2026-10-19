@@ -27,6 +27,7 @@ pub struct Request {
     filter: Option<String>,
     start: u64,
     from: u64,
+    to: u64,
     chunk_end: u64,
     page: u32,
     offset: Option<u64>,
@@ -312,6 +313,7 @@ impl Kucoin {
                 7 * DAY - 1
             })),
             from: start,
+            to: end,
             chunk_end: end,
             page: 1,
             offset: None,
@@ -541,7 +543,13 @@ impl Kucoin {
                     })
                 }
             };
-            if r.kind == Kind::Trades || row.in_range(r.start, r.chunk_end) {
+            // Native trade time can cross a REST window's integer-ms boundary.
+            let (start, end) = if r.kind == Kind::Fills {
+                (r.from, r.to)
+            } else {
+                (r.start, r.chunk_end)
+            };
+            if r.kind == Kind::Trades || row.in_range(start, end) {
                 r.page_rows.push(row);
             }
             Ok(())
@@ -832,6 +840,77 @@ mod tests {
             let rows: Vec<Id> = serde_json::from_str(done(&actions)).unwrap();
             assert_eq!(rows.len(), 1, "nanosecond timestamp: {nanos}");
             assert_eq!(rows[0].id, "0");
+        }
+    }
+    #[test]
+    fn fill_native_time_survives_millisecond_window_boundaries() {
+        const AT: u64 = 1_740_640_088_002;
+        let end = AT + 7 * DAY;
+        for newer_page in [false, true] {
+            let mut e = engine();
+            let r = query(
+                &mut e,
+                Query::Fills {
+                    symbol: Some("BTCUSDT".into()),
+                    order_id: None,
+                    from_ms: Some(AT as f64),
+                    to_ms: Some(end as f64),
+                    limit: Some(1000),
+                },
+            );
+            assert!(r.url.contains(&format!("startAt={}&endAt={end}", AT + 1)));
+            let fill = |id: &str, created: u64, nanos: u128| {
+                format!(
+                    r#"{{"symbol":"XBTUSDTM","tradeId":"{id}","orderId":"order","side":"buy","liquidity":"maker","price":"100","size":1,"fee":"0","feeCurrency":"USDT","createdAt":{created},"tradeTime":{nanos}}}"#
+                )
+            };
+            let row = fill(
+                "boundary",
+                AT + u64::from(newer_page),
+                u128::from(AT) * 1_000_000 + 500_000,
+            );
+            let mut first = vec![
+                fill("before", AT + 1, u128::from(AT) * 1_000_000 - 1),
+                fill("after", end, u128::from(end) * 1_000_000 + 1),
+            ];
+            if newer_page {
+                first.push(row.clone());
+            }
+            let body = format!(
+                r#"{{"code":"200000","data":{{"currentPage":1,"totalPage":1,"totalNum":{},"items":[{}]}}}}"#,
+                first.len(),
+                first.join(",")
+            );
+            let actions = reply(&mut e, r, &body);
+            let (timer, at) = actions
+                .iter()
+                .find_map(|a| match a {
+                    Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                    _ => None,
+                })
+                .unwrap();
+            e.handle(at, Event::TimerFired { timer });
+            let r = e
+                .drain_actions()
+                .find_map(|a| match a {
+                    Action::Http(r) => Some(r),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(r.url.contains(&format!("startAt={AT}&endAt={AT}")));
+            let second = if newer_page { "" } else { &row };
+            let body = format!(
+                r#"{{"code":"200000","data":{{"currentPage":1,"totalPage":1,"totalNum":{},"items":[{second}]}}}}"#,
+                usize::from(!newer_page)
+            );
+            let actions = reply(&mut e, r, &body);
+            #[derive(Deserialize)]
+            struct Id {
+                id: String,
+            }
+            let rows: Vec<Id> = serde_json::from_str(done(&actions)).unwrap();
+            assert_eq!(rows.len(), 1, "createdAt in newer window: {newer_page}");
+            assert_eq!(rows[0].id, "boundary");
         }
     }
     #[test]
