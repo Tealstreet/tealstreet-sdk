@@ -341,3 +341,11 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   without bypassing ordinal/topic checks, plus unrelated-topic then delayed
   required-topic coverage. All 66 harness tests and independent re-review pass;
   restarting the replay gates. Production wasm is unchanged.
+- Required brief gates all PASS on the final eight-venue artifact: Backpack
+  public CPU 200.0/113.3 ms (1.77x), steady 112.9/58.0 ms (1.95x), memory
+  3.3/1.7 MB (1.93x), private 21 frames; Binance public CPU 256.2/128.3 ms
+  (2.00x), steady 154.1/53.9 ms (2.86x), memory 4.3/2.4 MB (1.82x), private
+  14 frames. SDK20/host23, harness66, Backpack49/engine38, both workspace
+  clippy targets, bans/fmt, typecheck44/lint28 and PR-range secrets scan pass.
+  Pushing this reviewed candidate for CI while auxiliary venue replays finish;
+  all nineteen CI gates and repository jobs must be green before landing.
