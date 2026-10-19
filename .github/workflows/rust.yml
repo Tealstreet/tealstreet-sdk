@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # The browser engine's size budget for one venue.
-      WASM_BUDGET_BYTES: 1258291
+      # Binance + Bybit: measured 1,332,666 bytes; allow 1.4 MiB.
+      WASM_BUDGET_BYTES: 1677721
     defaults:
       run:
         working-directory: .
@@ -146,6 +146,12 @@ jobs:
         run: |
           yarn rust:private-tape
           yarn rust:gate --tape sdk-rs/harness/tapes/binance-private.jsonl --runs 1 --books ''
+      - name: Bybit public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue bybit --tape sdk-rs/harness/fixtures/bybit-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: Bybit account and trading (correctness)
+        run: |
+          yarn rust:private-tape-bybit
+          yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''
       - name: Harness protocol regressions
         run: yarn rust:test-harness
       - name: Crypto.com public data (correctness, CPU and memory)

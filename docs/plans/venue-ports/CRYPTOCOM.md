@@ -196,3 +196,17 @@ Crypto.com 35 native tests PASS; protocol harness 5 tests PASS. Gate-phase
 sub-agent review findings (transport, book retention, ticker subscriptions)
 are addressed. Next: merge current landing branch (now includes Bybit), rerun
 combined gates, push/PR, adversarial review and green CI before merge.
+
+### Landing integration
+
+Merged origin/feat/rust-rewrite at 20dd66dddb, preserving nested crates and the
+landing test location src/__tests__/rust.exchange.wasm.test.ts (including Bybit
+coverage). Combined the two ArrayAt::Path implementations by keeping the
+landing bounded-envelope/outside API plus this lane's item/separator validation;
+signed POST response streaming remains additive. Preserved canonical Bybit
+socket URLs, all registrations/gates and streaming recorder tee behavior.
+
+Merged native suites (engine/Binance/Bybit/Crypto.com), venue clippy, wasm clippy,
+bans and 5 harness regressions PASS. Combined three-venue wasm is 1,618,621 bytes;
+size budget advances from 1.4 MiB (two venues) to 1.6 MiB (three venues), following
+the landing branch's per-venue budget increment. Combined replays follow.

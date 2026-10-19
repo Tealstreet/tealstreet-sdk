@@ -35,8 +35,8 @@ const isPrivate = records.some((r) => r.url?.includes(venue.privateSocket));
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 
-/** Per-request values: clocks, signatures and generated client ids. */
-const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId']);
+/** Per-request values: clocks, signatures, request ids and generated client ids. */
+const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams]
@@ -52,7 +52,7 @@ const canonicalBody = (body) => {
   // Authentication metadata varies, but params and caller ids must match.
   const params = value?.method && value?.params ? value.params : value;
   const sorted = (value) => Array.isArray(value) ? value.map(sorted) :
-    value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sorted(value[key])])) : value;
+    value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).filter((key) => !VOLATILE.has(key) && value[key] !== undefined).sort().map((key) => [key, sorted(value[key])])) : value;
   return JSON.stringify(sorted(params), (_key, value) => typeof value === 'bigint' ? { integer: String(value) } : value);
 };
 const requestKey = (method, url, body) => method + ' ' + canonicalUrl(url) + ' ' + canonicalBody(body);
@@ -87,14 +87,16 @@ class Tape {
     const socket = { url, onMessage, closed: false };
     setImmediate(() => {
       if (socket.closed) return;
-      this.open.set(url, socket);
+      // Keyed without volatile query params (Bybit's per-connection requestId).
+      this.open.set(canonicalUrl(url), socket);
       onOpen();
       this.waiters = this.waiters.filter((waiter) => !waiter());
     });
     return socket;
   }
 
-  async socketFor(url) {
+  async socketFor(rawUrl) {
+    const url = canonicalUrl(rawUrl);
     while (!this.open.get(url) || this.open.get(url).closed) {
       await new Promise((resolve) => this.waiters.push(() => (this.open.get(url) ? (resolve(), true) : false)));
     }
@@ -438,6 +440,11 @@ async function runTs() {
       if (record.op === 'cancelOrders') {
         await exchange.cancelOrders(store.orders.filter((order) => record.ids.includes(order.id)));
         return [];
+      }
+      if (record.op === 'amendOrder') {
+        const order = store.orders.find((o) => o.id === record.id);
+        const update = { ...(record.price !== undefined && { price: record.price }), ...(record.amount !== undefined && { amount: record.amount }) };
+        return exchange.updateOrder({ order, update });
       }
       if (record.op === 'cancelSymbolOrders') {
         await exchange.cancelSymbolOrders(record.symbol);

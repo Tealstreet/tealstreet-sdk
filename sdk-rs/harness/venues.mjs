@@ -112,6 +112,14 @@ export const VENUES = {
     privateSocket: '/private/ws',
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
   },
+  bybit: {
+    rust: 'bybit',
+    ts: { module: `${root}/bybit/bybit.exchange.ts`, className: 'BybitExchange', name: 'bybit' },
+    /** Book topics get a message handler once each subscription reaches the socket. */
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >= count,
+    privateSocket: '/v5/private',
+  },
 };
 
 export const venueOf = (name) => {

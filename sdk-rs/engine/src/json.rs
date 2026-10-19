@@ -104,8 +104,26 @@ pub enum ArrayAt {
     Root,
     /// The array is this field of the top-level object.
     Field(&'static str),
-    /// An array nested under object fields; retains its envelope for validation.
+    /// The array sits under these nested object fields (`result.list`).
     Path(&'static [&'static str]),
+}
+
+impl ArrayAt {
+    fn len(self) -> usize {
+        match self {
+            Self::Root => 0,
+            Self::Field(_) => 1,
+            Self::Path(path) => path.len(),
+        }
+    }
+
+    fn segment(self, index: usize) -> Option<&'static str> {
+        match self {
+            Self::Root => None,
+            Self::Field(name) => (index == 0).then_some(name),
+            Self::Path(path) => path.get(index).copied(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -115,25 +133,30 @@ enum Phase {
     Done,
 }
 
+/// The bytes outside the streamed array are kept up to this size, so an
+/// envelope's other fields (a page cursor, an error) stay readable.
+const OUTSIDE_LIMIT: usize = 16 * 1024;
+
 /// Splits an array out of a body that arrives in chunks, handing over each
 /// element's text as soon as it is complete. Only the element in progress is
 /// buffered, so memory stays at the size of one element however large the
-/// body is.
+/// body is. Everything around the array is kept, with the array emptied.
 pub struct ArraySplitter {
     at: ArrayAt,
     phase: Phase,
     depth: u32,
     array_depth: u32,
+    /// Path segments matched so far; the next is sought at depth `matched + 1`.
+    matched: u32,
     in_string: bool,
     escaped: bool,
-    /// The most recent string at depth 1 while seeking a field.
+    /// The most recent string at the seeking depth.
     key: Vec<u8>,
     capturing_key: bool,
     /// The wanted key and its colon were just seen.
     armed: bool,
     item: Vec<u8>,
-    matched: u32,
-    envelope: Vec<u8>,
+    outside: Vec<u8>,
     invalid: bool,
     after_comma: bool,
 }
@@ -145,14 +168,14 @@ impl ArraySplitter {
             phase: Phase::Seeking,
             depth: 0,
             array_depth: 0,
+            matched: 0,
             in_string: false,
             escaped: false,
             key: Vec::new(),
             capturing_key: false,
             armed: false,
             item: Vec::new(),
-            matched: 0,
-            envelope: Vec::new(),
+            outside: Vec::new(),
             invalid: false,
             after_comma: false,
         }
@@ -163,34 +186,32 @@ impl ArraySplitter {
         self.phase == Phase::Done && !self.invalid
     }
 
-    pub fn envelope(&self) -> &str {
-        std::str::from_utf8(&self.envelope).unwrap_or("")
+    /// The body without the array's elements (`"list":[]`), up to 16 KiB.
+    pub fn outside(&self) -> &[u8] {
+        &self.outside
     }
 
-    fn wanted_key(&self) -> Option<&'static str> {
-        match self.at {
-            ArrayAt::Root => None,
-            ArrayAt::Field(name) => (self.depth == 1).then_some(name),
-            ArrayAt::Path(path) => path
-                .get(self.matched as usize)
-                .copied()
-                .filter(|_| self.depth == self.matched + 1),
+    fn keep(&mut self, byte: u8) {
+        if self.outside.len() < OUTSIDE_LIMIT {
+            self.outside.push(byte);
         }
     }
 
     pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
         for &byte in data {
-            if matches!(self.at, ArrayAt::Path(_)) && self.phase != Phase::InArray {
-                self.envelope.push(byte);
-            }
             if self.phase == Phase::Done {
+                self.keep(byte);
                 continue;
             }
+            let seek_depth = self.matched + 1;
             if self.in_string {
                 if self.phase == Phase::InArray {
                     self.item.push(byte);
-                } else if self.capturing_key {
-                    self.key.push(byte);
+                } else {
+                    self.keep(byte);
+                    if self.capturing_key {
+                        self.key.push(byte);
+                    }
                 }
                 if self.escaped {
                     self.escaped = false;
@@ -209,42 +230,40 @@ impl ArraySplitter {
             match byte {
                 b'"' => {
                     self.in_string = true;
-                    if self.phase == Phase::Seeking && self.wanted_key().is_some() {
+                    if self.phase == Phase::Seeking && self.depth == seek_depth {
                         self.key.clear();
                         self.capturing_key = true;
                         self.armed = false;
                     }
                 }
-                b':' if self.phase == Phase::Seeking && self.wanted_key().is_some() => {
+                b':' if self.phase == Phase::Seeking && self.depth == seek_depth => {
                     self.armed = self
-                        .wanted_key()
+                        .at
+                        .segment(self.matched as usize)
                         .is_some_and(|name| name.as_bytes() == self.key);
+                    self.keep(byte);
                     continue;
                 }
                 b'[' | b'{' => {
                     self.depth += 1;
                     if self.phase == Phase::Seeking {
+                        let last = self.matched as usize + 1 == self.at.len();
                         let found = byte == b'['
                             && match self.at {
                                 ArrayAt::Root => self.depth == 1,
-                                ArrayAt::Field(_) => self.armed && self.depth == 2,
-                                ArrayAt::Path(path) => {
-                                    self.armed
-                                        && self.depth == path.len() as u32 + 1
-                                        && self.matched as usize + 1 == path.len()
-                                }
+                                _ => self.armed && last && self.depth == seek_depth + 1,
                             };
-                        if byte == b'{' && self.armed && matches!(self.at, ArrayAt::Path(_)) {
-                            self.matched += 1;
-                        }
+                        let descend =
+                            byte == b'{' && self.armed && !last && self.depth == seek_depth + 1;
                         self.armed = false;
                         if found {
                             self.phase = Phase::InArray;
                             self.array_depth = self.depth;
-                            if matches!(self.at, ArrayAt::Path(_)) {
-                                self.envelope.push(b']');
-                            }
+                            self.keep(byte);
                             continue;
+                        }
+                        if descend {
+                            self.matched += 1;
                         }
                     }
                 }
@@ -255,11 +274,13 @@ impl ArraySplitter {
                         }
                         self.emit(&mut on_item);
                         self.phase = Phase::Done;
+                        self.depth = self.depth.saturating_sub(1);
+                        self.keep(byte);
                         continue;
                     }
                     self.depth = self.depth.saturating_sub(1);
-                    if self.phase == Phase::Seeking {
-                        self.matched = self.matched.min(self.depth.saturating_sub(1));
+                    if self.phase == Phase::Seeking && self.depth < self.matched + 1 {
+                        self.matched = self.depth.saturating_sub(1);
                     }
                 }
                 b',' if at_array_level => {
@@ -272,13 +293,13 @@ impl ArraySplitter {
                 }
                 b' ' | b'\n' | b'\r' | b'\t' if at_array_level => continue,
                 b' ' | b'\n' | b'\r' | b'\t' => {}
-                _ if self.phase == Phase::Seeking && self.wanted_key().is_some() => {
-                    self.armed = false
-                }
+                _ if self.phase == Phase::Seeking && self.depth == seek_depth => self.armed = false,
                 _ => {}
             }
             if self.phase == Phase::InArray {
                 self.item.push(byte);
+            } else {
+                self.keep(byte);
             }
         }
     }
@@ -313,7 +334,7 @@ mod tests {
         assert!(splitter.finished());
         assert_eq!(items, [r#"{"a":1}"#, r#"{"b":[2]}"#]);
         assert_eq!(
-            splitter.envelope(),
+            std::str::from_utf8(splitter.outside()).unwrap(),
             r#"{"unrelated":{"data":[1]},"result":{"data":[]},"code":0}"#
         );
         for body in [
@@ -354,6 +375,29 @@ mod tests {
         assert!(split(ArrayAt::Root, "[]", 1).is_empty());
         let mut splitter = ArraySplitter::new(ArrayAt::Field("symbols"));
         splitter.feed(br#"{"other":[1],"symbolsX":[2]}"#, |_| panic!("no match"));
+        assert!(!splitter.finished());
+    }
+
+    #[test]
+    fn splits_a_nested_array_and_keeps_its_envelope() {
+        let body = r#"{"retCode":0,"list":[9],"result":{"category":"linear","list":[{"s":"a"},{"s":"]"}],"nextPageCursor":"c%3D1"},"time":1}"#;
+        for chunk in [1, 4, 1024] {
+            let at = ArrayAt::Path(&["result", "list"]);
+            assert_eq!(split(at, body, chunk), [r#"{"s":"a"}"#, r#"{"s":"]"}"#]);
+            let mut splitter = ArraySplitter::new(at);
+            for part in body.as_bytes().chunks(chunk) {
+                splitter.feed(part, |_| {});
+            }
+            assert_eq!(
+                std::str::from_utf8(splitter.outside()).unwrap(),
+                r#"{"retCode":0,"list":[9],"result":{"category":"linear","list":[],"nextPageCursor":"c%3D1"},"time":1}"#
+            );
+        }
+        let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
+        splitter.feed(
+            br#"{"retCode":10001,"retMsg":"params error","result":{}}"#,
+            |_| {},
+        );
         assert!(!splitter.finished());
     }
 

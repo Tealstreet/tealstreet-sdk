@@ -253,11 +253,11 @@ struct Incoming {
     /// Splits a streamed array out of a successful body.
     splitter: Option<ArraySplitter>,
     /// Everything not streamed: error bodies and unstreamed requests. A
-    /// streamed body keeps only its start, to explain a missing array.
+    /// streamed body's envelope is kept by its splitter.
     body: Vec<u8>,
 }
 
-/// How much of a streamed body is kept to report a response without its array.
+/// How much of a streamed envelope is quoted to report a response without its array.
 const STREAM_PREVIEW_BYTES: usize = 512;
 
 struct Io<P> {
@@ -344,7 +344,7 @@ impl<P> Cx<'_, P> {
 
     /// Issue a request whose successful body holds a large array: each element
     /// goes to [`Venue::on_item`] as it arrives, then [`Venue::on_response`]
-    /// runs with an empty body. Error bodies arrive whole.
+    /// runs with the envelope, its array emptied. Error bodies arrive whole.
     pub fn request_streamed(
         &mut self,
         method: Method,
@@ -563,10 +563,6 @@ impl<V: Venue> Engine<V> {
             incoming.body.extend_from_slice(data);
             return;
         };
-        let room = STREAM_PREVIEW_BYTES.saturating_sub(incoming.body.len());
-        incoming
-            .body
-            .extend_from_slice(&data[..room.min(data.len())]);
         // The continuation leaves the map while the venue holds it.
         let Some(mut pending) = self.io.pending.remove(&request) else {
             return;
@@ -600,16 +596,19 @@ impl<V: Venue> Engine<V> {
         // A 2xx without the expected array (an error envelope, a truncated
         // body) must never read as an authoritative empty list.
         if let Some(splitter) = &incoming.splitter {
+            let outside = splitter.outside();
             if !splitter.finished() {
-                let preview = String::from_utf8_lossy(&incoming.body);
+                let preview = &outside[..outside.len().min(STREAM_PREVIEW_BYTES)];
+                let preview = String::from_utf8_lossy(preview);
                 let message = format!("response did not contain the expected list: {preview}");
                 self.venue.on_request_failed(&mut cx, pending, &message);
                 return;
             }
+            // The envelope with the array emptied: page cursors and status fields.
             let response = Response {
                 status: incoming.status,
                 headers: &incoming.headers,
-                body: splitter.envelope(),
+                body: std::str::from_utf8(outside).unwrap_or_default(),
             };
             self.venue.on_response(&mut cx, pending, response);
             return;
