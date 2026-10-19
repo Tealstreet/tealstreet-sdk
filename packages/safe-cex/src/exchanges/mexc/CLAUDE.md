@@ -131,3 +131,11 @@ mutation acknowledgements, with revisions tracked separately per hedge rail.
 The Rust gate's `KNOWN_TS_FIXES.mexc` lists intentional corrections to the TS
 reference, including full-depth sequencing, closing leverage for sized stops,
 native attached brackets, and cancel-all across all three order surfaces.
+
+History queries in the Rust adapter use streamed pages of at most 100 rows.
+Executions use floor-seconds timestamps; order history, funding income and
+public trades retain milliseconds to match the engine's query result shapes.
+Only explicit `FUNDING_FEE` income is supported; an all-kind income request
+fails because the funding endpoint cannot supply a complete general ledger.
+The public deals feed exposes no execution ID, so its result keys include the
+response ordinal and preserve otherwise identical prints.

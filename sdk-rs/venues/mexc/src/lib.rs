@@ -1,5 +1,6 @@
 //! MEXC USDT/USDC perpetual futures, driven by the sans-I/O engine.
 mod account;
+mod history;
 mod sign;
 mod trading;
 mod wire;
@@ -26,6 +27,7 @@ pub struct Options {
 }
 
 pub enum Pending {
+    History(history::Request),
     Trade(trading::Request),
     Account(account::Request),
     Markets { rows: Vec<Market>, failed: bool },
@@ -361,6 +363,7 @@ impl MexcFutures {
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Trade(request) => self.trade_failed(cx, request.command, error),
+            Pending::History(request) => self.query_failed(cx, request, error),
             Pending::Markets { .. } | Pending::Tickers { .. } => {
                 cx.log(LogLevel::Error, error);
                 self.retry_startup(cx);
@@ -486,6 +489,7 @@ impl Venue for MexcFutures {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::History(request) => self.query_item(cx, request, item),
             Pending::Account(account::Request::Leverage { rows, bad, .. }) => {
                 match serde_json::from_str::<wire::LeverageRow>(item) {
                     Ok(r) => rows.push(r),
@@ -544,6 +548,7 @@ impl Venue for MexcFutures {
         match pending {
             Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Trade(_) => unreachable!(),
+            Pending::History(request) => self.query_response(cx, request, response),
             Pending::Markets { rows, failed } => {
                 if failed {
                     cx.log(LogLevel::Error, "Malformed MEXC market list");
@@ -692,6 +697,7 @@ impl Venue for MexcFutures {
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            Command::Query { command, query } => self.start_query(cx, command, query),
             Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),
             Command::SubscribeOrderBook { symbol } => {
                 if let Some(s) = self.books.get_mut(&symbol) {

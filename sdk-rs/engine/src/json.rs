@@ -107,6 +107,8 @@ pub enum ArrayAt {
     /// Like `Field`, but return the surrounding object (with an empty array)
     /// to the venue so a 200 error envelope cannot become an empty snapshot.
     EnvelopeField(&'static str),
+    /// Stream an array nested one object below the root, retaining its envelope.
+    EnvelopeNestedField(&'static str, &'static str),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -132,6 +134,7 @@ pub struct ArraySplitter {
     capturing_key: bool,
     /// The wanted key and its colon were just seen.
     armed: bool,
+    nested: bool,
     item: Vec<u8>,
     envelope: Vec<u8>,
     invalid: bool,
@@ -150,6 +153,7 @@ impl ArraySplitter {
             key: Vec::new(),
             capturing_key: false,
             armed: false,
+            nested: false,
             item: Vec::new(),
             envelope: Vec::new(),
             invalid: false,
@@ -163,14 +167,21 @@ impl ArraySplitter {
     }
 
     pub fn envelope(&self) -> Option<&str> {
-        matches!(self.at, ArrayAt::EnvelopeField(_))
-            .then(|| std::str::from_utf8(&self.envelope).ok())
-            .flatten()
+        matches!(
+            self.at,
+            ArrayAt::EnvelopeField(_) | ArrayAt::EnvelopeNestedField(..)
+        )
+        .then(|| std::str::from_utf8(&self.envelope).ok())
+        .flatten()
     }
 
     pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
         for &byte in data {
-            if matches!(self.at, ArrayAt::EnvelopeField(_)) && self.phase != Phase::InArray {
+            if matches!(
+                self.at,
+                ArrayAt::EnvelopeField(_) | ArrayAt::EnvelopeNestedField(..)
+            ) && self.phase != Phase::InArray
+            {
                 if self.envelope.len() < 16_384 {
                     self.envelope.push(byte);
                 } else {
@@ -203,14 +214,25 @@ impl ArraySplitter {
             match byte {
                 b'"' => {
                     self.in_string = true;
-                    if self.phase == Phase::Seeking && self.depth == 1 {
+                    if self.phase == Phase::Seeking
+                        && (self.depth == 1 || (self.nested && self.depth == 2))
+                    {
                         self.key.clear();
                         self.capturing_key = true;
                         self.armed = false;
                     }
                 }
-                b':' if self.phase == Phase::Seeking && self.depth == 1 => {
-                    self.armed = matches!(self.at, ArrayAt::Field(name) | ArrayAt::EnvelopeField(name) if name.as_bytes() == self.key);
+                b':' if self.phase == Phase::Seeking => {
+                    self.armed = match self.at {
+                        ArrayAt::Field(name) | ArrayAt::EnvelopeField(name) => {
+                            self.depth == 1 && name.as_bytes() == self.key
+                        }
+                        ArrayAt::EnvelopeNestedField(parent, field) => {
+                            (self.depth == 1 && parent.as_bytes() == self.key)
+                                || (self.depth == 2 && self.nested && field.as_bytes() == self.key)
+                        }
+                        ArrayAt::Root => false,
+                    };
                     continue;
                 }
                 b'[' | b'{' => {
@@ -219,10 +241,16 @@ impl ArraySplitter {
                         let found = byte == b'['
                             && match self.at {
                                 ArrayAt::Root => self.depth == 1,
+                                ArrayAt::EnvelopeNestedField(..) => {
+                                    self.nested && self.armed && self.depth == 3
+                                }
                                 ArrayAt::Field(_) | ArrayAt::EnvelopeField(_) => {
                                     self.armed && self.depth == 2
                                 }
                             };
+                        if matches!(self.at, ArrayAt::EnvelopeNestedField(..)) && self.depth == 2 {
+                            self.nested = byte == b'{' && self.armed;
+                        }
                         self.armed = false;
                         if found {
                             self.phase = Phase::InArray;
@@ -235,11 +263,17 @@ impl ArraySplitter {
                     if at_array_level && byte == b']' {
                         self.invalid |= self.after_separator;
                         self.emit(&mut on_item);
-                        if matches!(self.at, ArrayAt::EnvelopeField(_)) {
+                        if matches!(
+                            self.at,
+                            ArrayAt::EnvelopeField(_) | ArrayAt::EnvelopeNestedField(..)
+                        ) {
                             self.envelope.push(b']');
                         }
                         self.phase = Phase::Done;
                         continue;
+                    }
+                    if self.depth == 2 {
+                        self.nested = false;
                     }
                     self.depth = self.depth.saturating_sub(1);
                 }
@@ -276,6 +310,26 @@ impl ArraySplitter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_envelope_streaming_matches_only_the_selected_parent() {
+        let body = r#"{"other":{"resultList":[0]},"success":true,"code":0,"data":{"pageSize":2,"resultList":[{"id":1},{"id":2}],"currentPage":1}}"#;
+        for chunk in 1..body.len() {
+            let mut split = ArraySplitter::new(ArrayAt::EnvelopeNestedField("data", "resultList"));
+            let mut rows = vec![];
+            for part in body.as_bytes().chunks(chunk) {
+                split.feed(part, |s| rows.push(s.to_owned()));
+            }
+            assert!(split.finished());
+            assert_eq!(rows, [r#"{"id":1}"#, r#"{"id":2}"#]);
+            assert_eq!(
+                split.envelope(),
+                Some(
+                    r#"{"other":{"resultList":[0]},"success":true,"code":0,"data":{"pageSize":2,"resultList":[],"currentPage":1}}"#
+                )
+            );
+        }
+    }
 
     #[test]
     fn malformed_streamed_lists_are_not_successful_empty_snapshots() {

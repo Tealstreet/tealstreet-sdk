@@ -99,3 +99,16 @@ and cut a follow-up branch. Never touch master or force-push.
   choosing pagination; reject unsupported income kinds explicitly. Queries
   must not mutate account state. Then build private tape, generic socket-role
   and request-body matching, fix TS reference bugs, and run every replay gate.
+- Query phase implemented: streamed 100-row pages for fills/history, nested
+  funding resultList streaming, 90-day disjoint windows, exact snowflake IDs,
+  native/base quantities and Binance JSON timestamp conventions. Queries never
+  write account state; errors reject the command instead of returning partial
+  results. Public prints lack venue execution IDs, so deterministic print keys
+  include the response ordinal to preserve otherwise identical executions.
+- Income supports explicit FUNDING_FEE only: MEXC documents a funding ledger;
+  generic/all-kind income requests reject rather than inventing accounting rows.
+- Query independent review by trading_review found no concrete issue. All 43
+  MEXC Rust tests and 12 engine tests pass, including 7 query regressions and
+  chunk-boundary nested streaming tests. Crate clippy and bans pass.
+- Merged latest landing branch through f036684d26; retained its relocated wasm
+  test path and corrected relative imports in e2d8e7c43b.
