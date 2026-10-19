@@ -105,6 +105,9 @@ pub enum Action {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    SetTickerSymbols {
+        symbols: Vec<String>,
+    },
     SubscribeOrderBook {
         symbol: String,
     },

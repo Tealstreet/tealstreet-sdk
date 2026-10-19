@@ -97,9 +97,10 @@ export const createEngineObject = ({ loadEngine, flush = { store: 250, books: 60
       const message = JSON.parse(data);
       if (message.op === 'start' && !this.host) {
         const { WasmEngine } = await loadEngine();
+        const transport = workersTransport();
         this.host = new EngineHost(
-          new WasmEngine(message.venue, JSON.stringify(message.options ?? {})),
-          workersTransport(),
+          new WasmEngine(message.venue, JSON.stringify({ ...message.options, privateWsHeaders: transport.webSocketHeaders })),
+          transport,
           {
             onFrame: (frame) => this.broadcast(frame),
             onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),

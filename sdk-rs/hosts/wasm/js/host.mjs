@@ -23,6 +23,7 @@ export class EngineHost {
     this.timers = new Map();
     this.commands = new Map();
     this.nextCommand = 1;
+    this.disposed = false;
   }
 
   start() {
@@ -31,7 +32,8 @@ export class EngineHost {
 
   /** Send a command; resolves with its result for commands that report one. */
   command(command) {
-    const reply = command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
+    if (this.disposed) return Promise.reject(new Error('engine disposed'));
+    const reply = command.op === 'setTickerSymbols' || command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
       : this.nextCommand++;
@@ -60,6 +62,9 @@ export class EngineHost {
   }
 
   dispose() {
+    this.disposed = true;
+    for (const pending of this.commands.values()) pending.reject(new Error('engine disposed'));
+    this.commands.clear();
     for (const socket of this.sockets.values()) socket.close();
     for (const handle of this.timers.values()) this.transport.clearTimeout(handle);
     this.sockets.clear();
@@ -68,6 +73,7 @@ export class EngineHost {
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
   async receive(id, { status, headers = '', body }) {
+    if (this.disposed) return;
     const { engine, transport } = this;
     this.run(engine.httpStart(id, status, headers, transport.now()));
     try {
@@ -86,11 +92,12 @@ export class EngineHost {
   }
 
   run(actionsJson) {
-    if (!actionsJson) return;
+    if (this.disposed || !actionsJson) return;
     for (const action of JSON.parse(actionsJson)) this.execute(action);
   }
 
   execute(action) {
+    if (this.disposed) return;
     const { engine, transport } = this;
     switch (action.op) {
       case 'wsConnect': {
@@ -102,9 +109,10 @@ export class EngineHost {
         }
         const socket = transport.connect(action.url, {
           headers: action.headers && Object.fromEntries(action.headers),
-          onOpen: () => this.run(engine.wsOpen(id, transport.now())),
-          onMessage: (text) => this.run(engine.wsMessage(id, text, transport.now())),
+          onOpen: () => { if (!this.disposed) this.run(engine.wsOpen(id, transport.now())); },
+          onMessage: (text) => { if (!this.disposed) this.run(engine.wsMessage(id, text, transport.now())); },
           onClose: (code) => {
+            if (this.disposed) return;
             this.sockets.delete(id);
             this.run(engine.wsClose(id, code ?? 1006, transport.now()));
           },
@@ -192,11 +200,14 @@ export const nativeTransport = () => {
   connect(url, { headers = {}, onOpen, onMessage, onClose }) {
     if (Object.keys(headers).length && !webSocketHeaders) throw new Error('WebSocket upgrade headers unavailable');
     const ws = webSocketHeaders ? new Socket(url, { headers: { 'User-Agent': 'Tealstreet', ...headers } }) : new Socket(url);
-    ws.addEventListener('open', () => onOpen());
+    let closed = false;
+    const reportClose = (code) => { if (!closed) { closed = true; onClose(code); } };
+    ws.addEventListener('error', () => reportClose(1006));
+    ws.addEventListener('open', () => { if (!closed) onOpen(); });
     ws.addEventListener('message', (event) => {
       if (typeof event.data === 'string') onMessage(event.data);
     });
-    ws.addEventListener('close', (event) => onClose(event.code));
+    ws.addEventListener('close', (event) => reportClose(event.code));
     return { send: (text) => ws.send(text), close: () => ws.close() };
   },
   async request({ method, url, headers, body }) {

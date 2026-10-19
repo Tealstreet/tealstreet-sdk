@@ -316,3 +316,116 @@ fn malformed_envelopes_cannot_commit_streamed_markets() {
         assert!(!e.store().loaded().markets, "{body}");
     }
 }
+
+#[test]
+fn requested_candles_decode_variable_length_rows_and_sort_by_open_time() {
+    let (mut e, _) = started();
+    e.handle(
+        1.0,
+        Event::Command(Command::FetchCandles {
+            command: 8,
+            symbol: "BTCUSDT".into(),
+            interval: "1m".into(),
+            limit: Some(200),
+            from_ms: Some(1_700_000_000_000.0),
+            to_ms: Some(1_700_000_120_000.0),
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    let id = request(actions.clone(), "historyKlines");
+    assert!(actions.iter().any(|a| matches!(a, Action::Http(r) if r.url.contains("limit=100") && r.url.contains("priceType=LAST"))));
+    response(
+        &mut e,
+        id,
+        r#"[[1700000060000,"3572.1","3574","3571.8","3573.4","18.2"],[1700000000000,"3571","3573","3570","3572","10",1700000059999,"35720",9,"5","17860"]]"#,
+    );
+    let result = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Notice(safe_cex_engine::Notice::CommandDone {
+                command: 8,
+                result: Ok(s),
+            }) => Some(s),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        result,
+        r#"[{"timestamp":1700000000.0,"open":3571.0,"high":3573.0,"low":3570.0,"close":3572.0,"volume":10.0},{"timestamp":1700000060.0,"open":3572.1,"high":3574.0,"low":3571.8,"close":3573.4,"volume":18.2}]"#
+    );
+}
+
+#[test]
+fn active_tickers_send_incremental_diffs_and_identical_updates_send_nothing() {
+    let (mut e, _) = started();
+    e.handle(
+        1.0,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["ETHUSDT".into()],
+        }),
+    );
+    assert!(e.drain_actions().any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("UNSUBSCRIBE") && text.contains("BTCUSDT@ticker"))));
+    e.handle(
+        2.0,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["BTCUSDT".into()],
+        }),
+    );
+    assert!(e.drain_actions().any(|a| matches!(a, Action::WsSend { text, .. } if text.contains("SUBSCRIBE") && text.contains("BTCUSDT@ticker"))));
+    e.handle(
+        3.0,
+        Event::Command(Command::SetTickerSymbols {
+            symbols: vec!["BTCUSDT".into()],
+        }),
+    );
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::WsSend { .. }))
+    );
+}
+
+#[test]
+fn public_candle_reads_wait_for_the_shared_ip_ban() {
+    let (mut e, _) = started();
+    e.handle(
+        10.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let depth = request(e.drain_actions().collect(), "/depth");
+    e.handle(
+        11.0,
+        Event::HttpResponse {
+            request: depth,
+            response: Response {
+                status: 429,
+                headers: "retry-after: 2\r\n",
+                body: "rate limit",
+            },
+        },
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        12.0,
+        Event::Command(Command::FetchCandles {
+            command: 9,
+            symbol: "BTCUSDT".into(),
+            interval: "1m".into(),
+            limit: None,
+            from_ms: None,
+            to_ms: None,
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    let timer = actions
+        .into_iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(2011.0, Event::TimerFired { timer });
+    request(e.drain_actions().collect(), "/market/klines");
+}

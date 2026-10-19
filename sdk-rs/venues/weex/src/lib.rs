@@ -47,6 +47,14 @@ enum Task {
         rows: Vec<Candle>,
     },
 }
+struct DeferredGet {
+    timer: TimerId,
+    seed_generation: u32,
+    path: String,
+    query: String,
+    task: Task,
+    stream: Option<ArrayAt>,
+}
 struct Connection {
     socket: Option<SocketId>,
     open: bool,
@@ -112,6 +120,8 @@ impl BookState {
 }
 pub struct WeexFutures {
     public: Connection,
+    active_symbols: HashSet<String>,
+    deferred_gets: Vec<DeferredGet>,
     account: account::State,
     trading: trading::State,
     history: history::State,
@@ -144,6 +154,8 @@ impl WeexFutures {
         };
         Self {
             public: Connection::default(),
+            active_symbols: HashSet::new(),
+            deferred_gets: Vec::new(),
             account: account::State::default(),
             trading: trading::State::default(),
             history: history::State::default(),
@@ -159,13 +171,25 @@ impl WeexFutures {
         }
     }
     fn get(
-        &self,
+        &mut self,
         cx: &mut Cx<'_, Pending>,
         path: &str,
         query: &str,
         task: Task,
         stream: Option<ArrayAt>,
     ) {
+        if cx.now < self.paused_until {
+            let timer = cx.set_timer(self.paused_until - cx.now);
+            self.deferred_gets.push(DeferredGet {
+                timer,
+                seed_generation: self.seed_generation,
+                path: path.into(),
+                query: query.into(),
+                task,
+                stream,
+            });
+            return;
+        }
         let url = format!(
             "{}{path}{}",
             paths::REST,
@@ -288,6 +312,9 @@ impl WeexFutures {
             cx.store
                 .markets()
                 .iter()
+                .filter(|m| {
+                    self.active_symbols.is_empty() || self.active_symbols.contains(&m.symbol)
+                })
                 .take(capacity)
                 .map(|m| format!("{}@ticker", m.symbol)),
         );
@@ -725,6 +752,16 @@ impl Venue for WeexFutures {
         self.fail(cx, p.task, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if let Some(i) = self.deferred_gets.iter().position(|r| r.timer == timer) {
+            let r = self.deferred_gets.swap_remove(i);
+            if matches!(r.task, Task::Daily | Task::BookTickers)
+                && r.seed_generation != self.seed_generation
+            {
+                return;
+            }
+            self.get(cx, &r.path, &r.query, r.task, r.stream);
+            return;
+        }
         if self.account_timer(cx, timer) || self.history_timer(cx, timer) {
             return;
         }
@@ -799,6 +836,10 @@ impl Venue for WeexFutures {
             return;
         };
         match command {
+            Command::SetTickerSymbols { symbols } => {
+                self.active_symbols = symbols.into_iter().collect();
+                self.reconcile_topics(cx);
+            }
             Command::Query { command, query } => self.history_query(cx, command, query),
             Command::SubscribeOrderBook { symbol } => {
                 if let Some(b) = self.books.get_mut(&symbol) {

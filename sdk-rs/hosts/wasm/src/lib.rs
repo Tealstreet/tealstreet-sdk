@@ -171,6 +171,9 @@ fn encode(actions: &[Action]) -> String {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
+    SetTickerSymbols {
+        symbols: Vec<String>,
+    },
     SubscribeOrderBook {
         symbol: String,
     },
@@ -282,6 +285,7 @@ enum CommandIn {
 impl From<CommandIn> for Command {
     fn from(command: CommandIn) -> Self {
         match command {
+            CommandIn::SetTickerSymbols { symbols } => Self::SetTickerSymbols { symbols },
             CommandIn::SubscribeOrderBook { symbol } => Self::SubscribeOrderBook { symbol },
             CommandIn::UnsubscribeOrderBook { symbol } => Self::UnsubscribeOrderBook { symbol },
             CommandIn::SubscribeCandles { symbol, interval } => {
@@ -426,6 +430,12 @@ impl WasmEngine {
     #[wasm_bindgen(constructor)]
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: EngineOptions = serde_json::from_str(options_json)?;
+        if venue == "weex"
+            && !options.public_data_only
+            && options.passphrase.as_deref().is_none_or(str::is_empty)
+        {
+            return Err(JsError::new("WEEX requires a passphrase"));
+        }
         let inner: Box<dyn AnyEngine> = match venue {
             "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
                 testnet: options.testnet,

@@ -81,7 +81,12 @@ export class RustEngineExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
     this.applier = new FrameApplier(store);
+    this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
   }
+
+  private updateTickerSymbols = () => {
+    if (this.host) void this.host.command({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
+  };
 
   start = async () => {
     if (!loadWasmEngine) throw new Error('No wasm engine loader registered (setWasmEngineLoader)');
@@ -98,6 +103,7 @@ export class RustEngineExchange extends BaseExchange {
       onLog: this.receiveLog,
     });
     this.host.start();
+    this.updateTickerSymbols();
     // Books, candles and fills go out at the venue's book cadence, the rest
     // at the store's, matching what the TS worker posts today.
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
