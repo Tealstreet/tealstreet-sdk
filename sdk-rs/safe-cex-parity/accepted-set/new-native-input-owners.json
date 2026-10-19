@@ -86,52 +86,62 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::builtins::array_length",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: internal intrinsic-Array length read, whose producer constrains length to u32; not a generic array-like ToLength admission. Installed map/slice/flat exercise the same receiver and captured length."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::builtins::chain_value",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: Promise.finally continuation preserves the original fulfillment/rejection referent after awaited cleanup. Real native host receipt and installed Promise cases cover outcome identity."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::builtins::flatten_into",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: native Array-only recursive flattening. Sparse nested arrays preserve undefined, UTF16, number bits and referents; captured length and thrown access remain fallible."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::builtins::flatten_length",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: captured-length companion to intrinsic Array flat. No claim for externally forged lengths or arbitrary array-like receivers."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::builtins::indexed",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: native HasProperty/Get access retains holes, undefined and original referents. Installed sparse map/slice and flattening exercise this exact helper."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::builtins::is_regexp",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: physical native RegExp brand check, reached by installed String regexp dispatch. This is not general ECMAScript Symbol.match classification for forged objects."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::builtins::items",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: storage view of an intrinsic Array, retaining holes and referents; the typed array selector is the only caller domain. Installed concat/flat reads are covered."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::builtins::map_entries",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: storage capability selected only after Js::Map dispatch. Actual installed set/get and Rc identity prove no value projection. Wrong-brand fallback is unreachable through that selector."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::builtins::member",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: builtin selector over actual intrinsic receiver variants. ASCII method names cannot alias an unknown UTF16 key; installed map preserves the original array values."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::builtins::require_callback",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: installed Array/Map/Set callback validation now preserves the exact Node operand diagnostic without executing user coercion."
     },
     {
       "package": "safe-cex-exchange",
@@ -364,57 +374,68 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::globals::array_from",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: installed Array.from rejects invalid callbacks with exact UTF16 diagnostics; iterable acquisition and original raw values remain canonical."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::globals::construct_promise",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: actual installed constructor now includes raw primitive executor operands in canonical TypeError diagnostics. Existing real NativeRuntime constructor suite covers executor timing and first settlement."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::globals::consume_iterator",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: canonical visitor traversal retains original values and thrown identity. Installed Array.from mapper failure additionally proves iterator close order and original cause."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::globals::install_builtins",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: fresh live namespace composition, not arbitrary frozen-global mutation. Installed callable aliases and raw JSON boundary execute while unrelated sentinel identity survives."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::globals::install_enums",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: maintained types.ts and logging enums installed into a fresh namespace; reinstallation and sentinel identity are observed. No arbitrary frozen receiver claim."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::globals::iterate",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: optional GetIterator acquisition, not a complete noniterable validator. Missing methods return None for the caller to handle; live values and inherited/getter behavior remain covered by installed Array.from controls."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::globals::json_stringify",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: canonical fallible SerializeJSONProperty over live native holders, replacers and ancestor referents. Existing installed JSON tests pin getters, toJSON, cycles and original cause; data never crosses JSON before serialization."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::globals::map_from_entries",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: installed Map invalid-entry errors retain raw UTF16 and original iterable cleanup; native keys/values are not JSON-decoded."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::globals::not_iterable",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: canonical operand diagnostic is UTF16-preserving and does not read object coercion. Real installed constructor/refusal paths agree with Node."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::globals::stringify_json",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: public no-replacer entry delegates the canonical serializer. Raw UTF16, nonfinite numbers, omission and accessor cause identity are observed at the terminal serialization boundary."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::globals::v8_operand",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: one formatter is shared by callback, iterable, Map-entry and Promise-executor diagnostics. Primitive units/messages agree with Node; only V8 object short-print internals are ACCEPT."
     },
     {
       "package": "safe-cex-exchange",

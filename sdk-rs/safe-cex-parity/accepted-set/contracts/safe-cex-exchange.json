@@ -41520,5 +41520,4851 @@
         "output": []
       }
     ]
+  },
+  "safe_cex_exchange::js_runtime::builtins::require_callback": {
+    "api": {
+      "kind": "function",
+      "name": "require_callback",
+      "signature": {
+        "inputs": [
+          [
+            "callback",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. FIX: installed Array/Map/Set callback validation now preserves the exact Node operand diagnostic without executing user coercion.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>=$type(&if p==0{Js::function(\"identity\",|_,_|Ok(Js::Undefined))}else{Js::utf16(&[0xd800])}).map(|()|Js::Undefined);observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": {
+            "undefined": true
+          }
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": false,
+          "same": false,
+          "name": "TypeError",
+          "units": [
+            115,
+            116,
+            114,
+            105,
+            110,
+            103,
+            32,
+            34,
+            55296,
+            34,
+            32,
+            105,
+            115,
+            32,
+            110,
+            111,
+            116,
+            32,
+            97,
+            32,
+            102,
+            117,
+            110,
+            99,
+            116,
+            105,
+            111,
+            110
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::builtins::member": {
+    "api": {
+      "kind": "function",
+      "name": "member",
+      "signature": {
+        "inputs": [
+          [
+            "receiver",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: builtin selector over actual intrinsic receiver variants. ASCII method names cannot alias an unknown UTF16 key; installed map preserves the original array values.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={let key=if p==0{\"map\".encode_utf16().collect::<Vec<_>>()}else{vec![0xd800,109,97,112]};match $type(&raw,&key){None=>Ok(Js::Undefined),Some(f)=>f.call(raw.clone(),vec![Js::function(\"identity\",|_,a|Ok(a[0].clone()))])}};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": [
+            {
+              "hole": true
+            },
+            {
+              "undefined": true
+            },
+            {
+              "reference": true
+            },
+            {
+              "bits": "9223372036854775808"
+            },
+            {
+              "units": [
+                55296
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": true,
+          "value": {
+            "undefined": true
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::builtins::is_regexp": {
+    "api": {
+      "kind": "function",
+      "name": "is_regexp",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: physical native RegExp brand check, reached by installed String regexp dispatch. This is not general ECMAScript Symbol.match classification for forged objects.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={let v=if p==0{crate::js_runtime::regexp::regexp(&[120],&[]).unwrap()}else{Js::object(vec![])};Ok(Js::Bool($type(&v)))};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": true
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": true,
+          "value": false
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::builtins::array_length": {
+    "api": {
+      "kind": "function",
+      "name": "array_length",
+      "signature": {
+        "inputs": [
+          [
+            "this",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "usize"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: internal intrinsic-Array length read, whose producer constrains length to u32; not a generic array-like ToLength admission. Installed map/slice/flat exercise the same receiver and captured length.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>=$type(&if p==0{raw}else{Js::array(vec![])}).map(|n|Js::Number(n as f64));observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": {
+            "bits": "4617315517961601024"
+          }
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": true,
+          "value": {
+            "bits": "0"
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::builtins::indexed": {
+    "api": {
+      "kind": "function",
+      "name": "indexed",
+      "signature": {
+        "inputs": [
+          [
+            "this",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "index",
+            {
+              "primitive": "usize"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: native HasProperty/Get access retains holes, undefined and original referents. Installed sparse map/slice and flattening exercise this exact helper.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>=$type(&raw,if p==0{0}else{2}).map(|v| match v{Some(v)=>Js::array(vec![Js::Bool(true),v]),None=>Js::array(vec![Js::Bool(false)])});observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": [
+            false
+          ]
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": true,
+          "value": [
+            true,
+            {
+              "reference": true
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::builtins::items": {
+    "api": {
+      "kind": "function",
+      "name": "items",
+      "signature": {
+        "inputs": [
+          [
+            "this",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "core::option::Option",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: storage view of an intrinsic Array, retaining holes and referents; the typed array selector is the only caller domain. Installed concat/flat reads are covered.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>=$type(&if p==0{raw}else{Js::array(vec![Js::Undefined,token.clone()])}).map(Js::holey_array);observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": [
+            {
+              "hole": true
+            },
+            {
+              "undefined": true
+            },
+            {
+              "reference": true
+            },
+            {
+              "bits": "9223372036854775808"
+            },
+            {
+              "units": [
+                55296
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": true,
+          "value": [
+            {
+              "undefined": true
+            },
+            {
+              "reference": true
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::builtins::flatten_into": {
+    "api": {
+      "kind": "function",
+      "name": "flatten_into",
+      "signature": {
+        "inputs": [
+          [
+            "source",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "depth",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "out",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::option::Option",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: native Array-only recursive flattening. Sparse nested arrays preserve undefined, UTF16, number bits and referents; captured length and thrown access remain fallible.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={let source=Js::array(vec![Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone())]),Js::array(vec![Js::Number(-0.),Js::utf16(&[0xd800])])]);let mut out=vec![];$type(&source,p as f64,&mut out).map(|()|Js::holey_array(out))};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": [
+            [
+              {
+                "hole": true
+              },
+              {
+                "undefined": true
+              },
+              {
+                "reference": true
+              }
+            ],
+            [
+              {
+                "bits": "9223372036854775808"
+              },
+              {
+                "units": [
+                  55296
+                ]
+              }
+            ]
+          ]
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": true,
+          "value": [
+            {
+              "undefined": true
+            },
+            {
+              "reference": true
+            },
+            {
+              "bits": "9223372036854775808"
+            },
+            {
+              "units": [
+                55296
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::builtins::flatten_length": {
+    "api": {
+      "kind": "function",
+      "name": "flatten_length",
+      "signature": {
+        "inputs": [
+          [
+            "source",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "len",
+            {
+              "primitive": "usize"
+            }
+          ],
+          [
+            "depth",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "out",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "core::option::Option",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: captured-length companion to intrinsic Array flat. No claim for externally forged lengths or arbitrary array-like receivers.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={let source=Js::array(vec![Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone())]),Js::array(vec![Js::Number(-0.),Js::utf16(&[0xd800])])]);let mut out=vec![];$type(&source,2,p as f64,&mut out).map(|()|Js::holey_array(out))};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": [
+            [
+              {
+                "hole": true
+              },
+              {
+                "undefined": true
+              },
+              {
+                "reference": true
+              }
+            ],
+            [
+              {
+                "bits": "9223372036854775808"
+              },
+              {
+                "units": [
+                  55296
+                ]
+              }
+            ]
+          ]
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": true,
+          "value": [
+            {
+              "undefined": true
+            },
+            {
+              "reference": true
+            },
+            {
+              "bits": "9223372036854775808"
+            },
+            {
+              "units": [
+                55296
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::builtins::map_entries": {
+    "api": {
+      "kind": "function",
+      "name": "map_entries",
+      "signature": {
+        "inputs": [
+          [
+            "this",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::rc::Rc",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::cell::RefCell",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::collections::Collection",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "tuple": [
+                                                {
+                                                  "resolved_path": {
+                                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                    "args": null
+                                                  }
+                                                },
+                                                {
+                                                  "resolved_path": {
+                                                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                    "args": null
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: storage capability selected only after Js::Map dispatch. Actual installed set/get and Rc identity prove no value projection. Wrong-brand fallback is unreachable through that selector.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={let map=Js::new_map();map.call_method(\"set\",vec![token.clone(),if p==0{Js::Number(-0.)}else{Js::Undefined}]).unwrap();let actual=$type(&map);let Js::Map(original)=&map else {unreachable!()};Ok(Js::array(vec![Js::Bool(std::rc::Rc::ptr_eq(&actual,original)&&actual.borrow().len()==1&&actual.borrow()[0].0.same_reference(&token)),actual.borrow()[0].1.clone()]))};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": [
+            true,
+            {
+              "bits": "9223372036854775808"
+            }
+          ]
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": true,
+          "value": [
+            true,
+            {
+              "undefined": true
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::builtins::chain_value": {
+    "api": {
+      "kind": "function",
+      "name": "chain_value",
+      "signature": {
+        "inputs": [
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_exchange::runtime::ExchangeRuntime",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "p",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "outcome",
+            {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: Promise.finally continuation preserves the original fulfillment/rejection referent after awaited cleanup. Real native host receipt and installed Promise cases cover outcome identity.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={let host=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();tokio::task::LocalSet::new().block_on(&host,async {let rt:std::rc::Rc<dyn crate::runtime::ExchangeRuntime>=crate::native::native_runtime();let outcome=if p==0{Ok(token.clone())}else{Err(Thrown::new(token.clone()))};let chained=$type(&rt,Js::Promise(crate::js_runtime::promise::Promise::settled(&rt,Ok(Js::Undefined))),outcome);crate::js_runtime::promise::await_js(&rt,chained).await})};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": {
+            "reference": true
+          }
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": false,
+          "same": true,
+          "units": []
+        }
+      }
+    ],
+    "requiredFeatures": [
+      "native"
+    ]
+  },
+  "safe_cex_exchange::js_runtime::globals::stringify_json": {
+    "api": {
+      "kind": "function",
+      "name": "stringify_json",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "primitive": "u16"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: public no-replacer entry delegates the canonical serializer. Raw UTF16, nonfinite numbers, omission and accessor cause identity are observed at the terminal serialization boundary.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={let value=if p==0{Js::object(vec![(\"x\",Js::utf16(&[0xd800])),(\"absent\",Js::Undefined),(\"n\",Js::Number(-0.)),(\"inf\",Js::Number(f64::INFINITY))])}else{let v=Js::object(vec![]);let t=token.clone();v.define_accessor(\"x\",Some(std::rc::Rc::new(move |_|Err(Thrown::new(t.clone())))),None).unwrap();v};$type(&value).map(|v|v.map_or(Js::Undefined,|units|Js::utf16(&units)))};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": {
+            "units": [
+              123,
+              34,
+              120,
+              34,
+              58,
+              34,
+              92,
+              117,
+              100,
+              56,
+              48,
+              48,
+              34,
+              44,
+              34,
+              110,
+              34,
+              58,
+              48,
+              44,
+              34,
+              105,
+              110,
+              102,
+              34,
+              58,
+              110,
+              117,
+              108,
+              108,
+              125
+            ]
+          }
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": false,
+          "same": true,
+          "units": []
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::globals::json_stringify": {
+    "api": {
+      "kind": "function",
+      "name": "json_stringify",
+      "signature": {
+        "inputs": [
+          [
+            "holder",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "replacer",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::globals::Replacer",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "stack",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "primitive": "u16"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: canonical fallible SerializeJSONProperty over live native holders, replacers and ancestor referents. Existing installed JSON tests pin getters, toJSON, cycles and original cause; data never crosses JSON before serialization.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={let value=if p==0{Js::object(vec![(\"x\",Js::utf16(&[0xd800])),(\"absent\",Js::Undefined),(\"n\",Js::Number(-0.)),(\"inf\",Js::Number(f64::INFINITY))])}else{let v=Js::object(vec![]);let t=token.clone();v.define_accessor(\"x\",Some(std::rc::Rc::new(move |_|Err(Thrown::new(t.clone())))),None).unwrap();v};$type(&Js::object(vec![(\"\",value)]),&[],&super::Replacer::None,&mut vec![]).map(|v|v.map_or(Js::Undefined,|units|Js::utf16(&units)))};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": {
+            "units": [
+              123,
+              34,
+              120,
+              34,
+              58,
+              34,
+              92,
+              117,
+              100,
+              56,
+              48,
+              48,
+              34,
+              44,
+              34,
+              110,
+              34,
+              58,
+              48,
+              44,
+              34,
+              105,
+              110,
+              102,
+              34,
+              58,
+              110,
+              117,
+              108,
+              108,
+              125
+            ]
+          }
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": false,
+          "same": true,
+          "units": []
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::globals::iterate": {
+    "api": {
+      "kind": "function",
+      "name": "iterate",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_exchange::js_runtime::iterator::IteratorRecord",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: optional GetIterator acquisition, not a complete noniterable validator. Missing methods return None for the caller to handle; live values and inherited/getter behavior remain covered by installed Array.from controls.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={match $type(&if p==0{raw}else{Js::object(vec![])}){Err(e)=>Err(e),Ok(None)=>Ok(Js::Undefined),Ok(Some(i))=>{let mut out=vec![];while let Some(v)=i.step_value().unwrap(){out.push(v);}Ok(Js::array(out))}}};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": [
+            {
+              "undefined": true
+            },
+            {
+              "undefined": true
+            },
+            {
+              "reference": true
+            },
+            {
+              "bits": "9223372036854775808"
+            },
+            {
+              "units": [
+                55296
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": true,
+          "value": {
+            "undefined": true
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::globals::consume_iterator": {
+    "api": {
+      "kind": "function",
+      "name": "consume_iterator",
+      "signature": {
+        "inputs": [
+          [
+            "iterator",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::iterator::IteratorRecord",
+                "args": null
+              }
+            }
+          ],
+          [
+            "visit",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::js_runtime::value::Js",
+                                "args": null
+                              }
+                            },
+                            {
+                              "primitive": "usize"
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut(Js, usize) -> Result<(), Thrown>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "resolved_path": {
+                                  "path": "safe_cex_exchange::js_runtime::value::Js",
+                                  "args": null
+                                }
+                              },
+                              {
+                                "primitive": "usize"
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: canonical visitor traversal retains original values and thrown identity. Installed Array.from mapper failure additionally proves iterator close order and original cause.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={let i=crate::js_runtime::iterator::IteratorRecord::get(&raw).unwrap();let mut out=vec![];$type(i,|v,index|{if p==1&&index==2{return Err(Thrown::new(token.clone()));}out.push(v);Ok(())}).map(|()|Js::array(out))};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": [
+            {
+              "undefined": true
+            },
+            {
+              "undefined": true
+            },
+            {
+              "reference": true
+            },
+            {
+              "bits": "9223372036854775808"
+            },
+            {
+              "units": [
+                55296
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": false,
+          "same": true,
+          "units": []
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::globals::v8_operand": {
+    "api": {
+      "kind": "function",
+      "name": "v8_operand",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "typed",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Str",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. FIX: one formatter is shared by callback, iterable, Map-entry and Promise-executor diagnostics. Primitive units/messages agree with Node; only V8 object short-print internals are ACCEPT.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>=Ok(Js::String($type(&if p==0{Js::Number(7.)}else{Js::utf16(&[0xd800])},true)));observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": {
+            "units": [
+              110,
+              117,
+              109,
+              98,
+              101,
+              114,
+              32,
+              55
+            ]
+          }
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": true,
+          "value": {
+            "units": [
+              115,
+              116,
+              114,
+              105,
+              110,
+              103,
+              32,
+              34,
+              55296,
+              34
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::globals::not_iterable": {
+    "api": {
+      "kind": "function",
+      "name": "not_iterable",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. FIX: canonical operand diagnostic is UTF16-preserving and does not read object coercion. Real installed constructor/refusal paths agree with Node.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>=Err($type(&if p==0{Js::Number(7.)}else{Js::Null}));observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": false,
+          "same": false,
+          "name": "TypeError",
+          "units": [
+            110,
+            117,
+            109,
+            98,
+            101,
+            114,
+            32,
+            55,
+            32,
+            105,
+            115,
+            32,
+            110,
+            111,
+            116,
+            32,
+            105,
+            116,
+            101,
+            114,
+            97,
+            98,
+            108,
+            101,
+            32,
+            40,
+            99,
+            97,
+            110,
+            110,
+            111,
+            116,
+            32,
+            114,
+            101,
+            97,
+            100,
+            32,
+            112,
+            114,
+            111,
+            112,
+            101,
+            114,
+            116,
+            121,
+            32,
+            83,
+            121,
+            109,
+            98,
+            111,
+            108,
+            40,
+            83,
+            121,
+            109,
+            98,
+            111,
+            108,
+            46,
+            105,
+            116,
+            101,
+            114,
+            97,
+            116,
+            111,
+            114,
+            41,
+            41
+          ]
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": false,
+          "same": false,
+          "name": "TypeError",
+          "units": [
+            111,
+            98,
+            106,
+            101,
+            99,
+            116,
+            32,
+            110,
+            117,
+            108,
+            108,
+            32,
+            105,
+            115,
+            32,
+            110,
+            111,
+            116,
+            32,
+            105,
+            116,
+            101,
+            114,
+            97,
+            98,
+            108,
+            101,
+            32,
+            40,
+            99,
+            97,
+            110,
+            110,
+            111,
+            116,
+            32,
+            114,
+            101,
+            97,
+            100,
+            32,
+            112,
+            114,
+            111,
+            112,
+            101,
+            114,
+            116,
+            121,
+            32,
+            83,
+            121,
+            109,
+            98,
+            111,
+            108,
+            40,
+            83,
+            121,
+            109,
+            98,
+            111,
+            108,
+            46,
+            105,
+            116,
+            101,
+            114,
+            97,
+            116,
+            111,
+            114,
+            41,
+            41
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::globals::map_from_entries": {
+    "api": {
+      "kind": "function",
+      "name": "map_from_entries",
+      "signature": {
+        "inputs": [
+          [
+            "iterable",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. FIX: installed Map invalid-entry errors retain raw UTF16 and original iterable cleanup; native keys/values are not JSON-decoded.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={let entries=if p==0{Js::array(vec![Js::array(vec![token.clone(),Js::utf16(&[0xd800])])])}else{Js::array(vec![Js::utf16(&[0xd800])])};$type(&entries).and_then(|m|m.call_method(\"get\",vec![token.clone()]))};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": {
+            "units": [
+              55296
+            ]
+          }
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": false,
+          "same": false,
+          "name": "TypeError",
+          "units": [
+            73,
+            116,
+            101,
+            114,
+            97,
+            116,
+            111,
+            114,
+            32,
+            118,
+            97,
+            108,
+            117,
+            101,
+            32,
+            55296,
+            32,
+            105,
+            115,
+            32,
+            110,
+            111,
+            116,
+            32,
+            97,
+            110,
+            32,
+            101,
+            110,
+            116,
+            114,
+            121,
+            32,
+            111,
+            98,
+            106,
+            101,
+            99,
+            116
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::globals::array_from": {
+    "api": {
+      "kind": "function",
+      "name": "array_from",
+      "signature": {
+        "inputs": [
+          [
+            "a",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_exchange::js_runtime::value::Js",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. FIX: installed Array.from rejects invalid callbacks with exact UTF16 diagnostics; iterable acquisition and original raw values remain canonical.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>=$type(&[raw,if p==0{Js::function(\"identity\",|_,a|Ok(a[0].clone()))}else{Js::utf16(&[0xd800])}]);observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": [
+            {
+              "undefined": true
+            },
+            {
+              "undefined": true
+            },
+            {
+              "reference": true
+            },
+            {
+              "bits": "9223372036854775808"
+            },
+            {
+              "units": [
+                55296
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": false,
+          "same": false,
+          "name": "TypeError",
+          "units": [
+            115,
+            116,
+            114,
+            105,
+            110,
+            103,
+            32,
+            34,
+            55296,
+            34,
+            32,
+            105,
+            115,
+            32,
+            110,
+            111,
+            116,
+            32,
+            97,
+            32,
+            102,
+            117,
+            110,
+            99,
+            116,
+            105,
+            111,
+            110
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::globals::install_enums": {
+    "api": {
+      "kind": "function",
+      "name": "install_enums",
+      "signature": {
+        "inputs": [
+          [
+            "g",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: maintained types.ts and logging enums installed into a fresh namespace; reinstallation and sentinel identity are observed. No arbitrary frozen receiver claim.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={let g=Js::object(vec![(\"sentinel\",token.clone())]);if p==1{$type(&g);}$type(&g);let mut out=vec![Js::Bool(g.get(\"sentinel\").unwrap().same_reference(&token))];for name in [\"OrderType\",\"OrderStatus\",\"OrderSide\",\"OrderTimeInForce\",\"OrderStopTriggerType\",\"PositionSide\",\"PositionMode\",\"MarginType\",\"LogSeverity\"]{let e=g.get(name).unwrap();for key in e.own_keys(){let k=String::from_utf16(&key).unwrap();let v=e.get_key(&key).unwrap().to_js_string().unwrap();out.push(Js::str(&format!(\"{name}.{k}={}\",String::from_utf16(&v).unwrap())));}}Ok(Js::array(out))};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": [
+            true,
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                77,
+                97,
+                114,
+                107,
+                101,
+                116,
+                61,
+                109,
+                97,
+                114,
+                107,
+                101,
+                116
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                76,
+                105,
+                109,
+                105,
+                116,
+                61,
+                108,
+                105,
+                109,
+                105,
+                116
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                67,
+                111,
+                110,
+                100,
+                105,
+                116,
+                105,
+                111,
+                110,
+                97,
+                108,
+                61,
+                99,
+                111,
+                110,
+                100,
+                105,
+                116,
+                105,
+                111,
+                110,
+                97,
+                108
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                83,
+                116,
+                111,
+                112,
+                76,
+                111,
+                115,
+                115,
+                61,
+                115,
+                116,
+                111,
+                112,
+                95,
+                109,
+                97,
+                114,
+                107,
+                101,
+                116
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                84,
+                97,
+                107,
+                101,
+                80,
+                114,
+                111,
+                102,
+                105,
+                116,
+                61,
+                116,
+                97,
+                107,
+                101,
+                95,
+                112,
+                114,
+                111,
+                102,
+                105,
+                116,
+                95,
+                109,
+                97,
+                114,
+                107,
+                101,
+                116
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                84,
+                114,
+                97,
+                105,
+                108,
+                105,
+                110,
+                103,
+                83,
+                116,
+                111,
+                112,
+                76,
+                111,
+                115,
+                115,
+                61,
+                116,
+                114,
+                97,
+                105,
+                108,
+                105,
+                110,
+                103,
+                95,
+                115,
+                116,
+                111,
+                112,
+                95,
+                109,
+                97,
+                114,
+                107,
+                101,
+                116
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                97,
+                116,
+                117,
+                115,
+                46,
+                79,
+                112,
+                101,
+                110,
+                61,
+                111,
+                112,
+                101,
+                110
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                97,
+                116,
+                117,
+                115,
+                46,
+                67,
+                108,
+                111,
+                115,
+                101,
+                100,
+                61,
+                99,
+                108,
+                111,
+                115,
+                101,
+                100
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                97,
+                116,
+                117,
+                115,
+                46,
+                67,
+                97,
+                110,
+                99,
+                101,
+                108,
+                101,
+                100,
+                61,
+                99,
+                97,
+                110,
+                99,
+                101,
+                108,
+                101,
+                100
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                97,
+                116,
+                117,
+                115,
+                46,
+                67,
+                114,
+                101,
+                97,
+                116,
+                105,
+                110,
+                103,
+                61,
+                99,
+                114,
+                101,
+                97,
+                116,
+                105,
+                110,
+                103
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                97,
+                116,
+                117,
+                115,
+                46,
+                85,
+                112,
+                100,
+                97,
+                116,
+                105,
+                110,
+                103,
+                61,
+                117,
+                112,
+                100,
+                97,
+                116,
+                105,
+                110,
+                103
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                97,
+                116,
+                117,
+                115,
+                46,
+                67,
+                97,
+                110,
+                99,
+                101,
+                108,
+                105,
+                110,
+                103,
+                61,
+                99,
+                97,
+                110,
+                99,
+                101,
+                108,
+                105,
+                110,
+                103
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                105,
+                100,
+                101,
+                46,
+                66,
+                117,
+                121,
+                61,
+                98,
+                117,
+                121
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                105,
+                100,
+                101,
+                46,
+                83,
+                101,
+                108,
+                108,
+                61,
+                115,
+                101,
+                108,
+                108
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                105,
+                109,
+                101,
+                73,
+                110,
+                70,
+                111,
+                114,
+                99,
+                101,
+                46,
+                71,
+                111,
+                111,
+                100,
+                84,
+                105,
+                108,
+                108,
+                67,
+                97,
+                110,
+                99,
+                101,
+                108,
+                61,
+                71,
+                111,
+                111,
+                100,
+                84,
+                105,
+                108,
+                108,
+                67,
+                97,
+                110,
+                99,
+                101,
+                108
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                105,
+                109,
+                101,
+                73,
+                110,
+                70,
+                111,
+                114,
+                99,
+                101,
+                46,
+                73,
+                109,
+                109,
+                101,
+                100,
+                105,
+                97,
+                116,
+                101,
+                79,
+                114,
+                67,
+                97,
+                110,
+                99,
+                101,
+                108,
+                61,
+                73,
+                109,
+                109,
+                101,
+                100,
+                105,
+                97,
+                116,
+                101,
+                79,
+                114,
+                67,
+                97,
+                110,
+                99,
+                101,
+                108
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                105,
+                109,
+                101,
+                73,
+                110,
+                70,
+                111,
+                114,
+                99,
+                101,
+                46,
+                70,
+                105,
+                108,
+                108,
+                79,
+                114,
+                75,
+                105,
+                108,
+                108,
+                61,
+                70,
+                105,
+                108,
+                108,
+                79,
+                114,
+                75,
+                105,
+                108,
+                108
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                105,
+                109,
+                101,
+                73,
+                110,
+                70,
+                111,
+                114,
+                99,
+                101,
+                46,
+                80,
+                111,
+                115,
+                116,
+                79,
+                110,
+                108,
+                121,
+                61,
+                80,
+                111,
+                115,
+                116,
+                79,
+                110,
+                108,
+                121
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                111,
+                112,
+                84,
+                114,
+                105,
+                103,
+                103,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                77,
+                97,
+                114,
+                107,
+                80,
+                114,
+                105,
+                99,
+                101,
+                61,
+                109,
+                97,
+                114,
+                107,
+                95,
+                112,
+                114,
+                105,
+                99,
+                101
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                111,
+                112,
+                84,
+                114,
+                105,
+                103,
+                103,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                76,
+                97,
+                115,
+                116,
+                80,
+                114,
+                105,
+                99,
+                101,
+                61,
+                108,
+                97,
+                115,
+                116,
+                95,
+                112,
+                114,
+                105,
+                99,
+                101
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                111,
+                112,
+                84,
+                114,
+                105,
+                103,
+                103,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                73,
+                110,
+                100,
+                101,
+                120,
+                80,
+                114,
+                105,
+                99,
+                101,
+                61,
+                105,
+                110,
+                100,
+                101,
+                120,
+                95,
+                112,
+                114,
+                105,
+                99,
+                101
+              ]
+            },
+            {
+              "units": [
+                80,
+                111,
+                115,
+                105,
+                116,
+                105,
+                111,
+                110,
+                83,
+                105,
+                100,
+                101,
+                46,
+                76,
+                111,
+                110,
+                103,
+                61,
+                108,
+                111,
+                110,
+                103
+              ]
+            },
+            {
+              "units": [
+                80,
+                111,
+                115,
+                105,
+                116,
+                105,
+                111,
+                110,
+                83,
+                105,
+                100,
+                101,
+                46,
+                83,
+                104,
+                111,
+                114,
+                116,
+                61,
+                115,
+                104,
+                111,
+                114,
+                116
+              ]
+            },
+            {
+              "units": [
+                80,
+                111,
+                115,
+                105,
+                116,
+                105,
+                111,
+                110,
+                77,
+                111,
+                100,
+                101,
+                46,
+                72,
+                101,
+                100,
+                103,
+                101,
+                100,
+                61,
+                104,
+                101,
+                100,
+                103,
+                101,
+                100
+              ]
+            },
+            {
+              "units": [
+                80,
+                111,
+                115,
+                105,
+                116,
+                105,
+                111,
+                110,
+                77,
+                111,
+                100,
+                101,
+                46,
+                79,
+                110,
+                101,
+                87,
+                97,
+                121,
+                61,
+                111,
+                110,
+                101,
+                119,
+                97,
+                121
+              ]
+            },
+            {
+              "units": [
+                77,
+                97,
+                114,
+                103,
+                105,
+                110,
+                84,
+                121,
+                112,
+                101,
+                46,
+                73,
+                115,
+                111,
+                108,
+                97,
+                116,
+                101,
+                100,
+                61,
+                105,
+                115,
+                111,
+                108,
+                97,
+                116,
+                101,
+                100
+              ]
+            },
+            {
+              "units": [
+                77,
+                97,
+                114,
+                103,
+                105,
+                110,
+                84,
+                121,
+                112,
+                101,
+                46,
+                67,
+                114,
+                111,
+                115,
+                115,
+                61,
+                99,
+                114,
+                111,
+                115,
+                115
+              ]
+            },
+            {
+              "units": [
+                76,
+                111,
+                103,
+                83,
+                101,
+                118,
+                101,
+                114,
+                105,
+                116,
+                121,
+                46,
+                68,
+                101,
+                98,
+                117,
+                103,
+                61,
+                100,
+                101,
+                98,
+                117,
+                103
+              ]
+            },
+            {
+              "units": [
+                76,
+                111,
+                103,
+                83,
+                101,
+                118,
+                101,
+                114,
+                105,
+                116,
+                121,
+                46,
+                73,
+                110,
+                102,
+                111,
+                61,
+                105,
+                110,
+                102,
+                111
+              ]
+            },
+            {
+              "units": [
+                76,
+                111,
+                103,
+                83,
+                101,
+                118,
+                101,
+                114,
+                105,
+                116,
+                121,
+                46,
+                87,
+                97,
+                114,
+                110,
+                105,
+                110,
+                103,
+                61,
+                119,
+                97,
+                114,
+                110,
+                105,
+                110,
+                103
+              ]
+            },
+            {
+              "units": [
+                76,
+                111,
+                103,
+                83,
+                101,
+                118,
+                101,
+                114,
+                105,
+                116,
+                121,
+                46,
+                69,
+                114,
+                114,
+                111,
+                114,
+                61,
+                101,
+                114,
+                114,
+                111,
+                114
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": true,
+          "value": [
+            true,
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                77,
+                97,
+                114,
+                107,
+                101,
+                116,
+                61,
+                109,
+                97,
+                114,
+                107,
+                101,
+                116
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                76,
+                105,
+                109,
+                105,
+                116,
+                61,
+                108,
+                105,
+                109,
+                105,
+                116
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                67,
+                111,
+                110,
+                100,
+                105,
+                116,
+                105,
+                111,
+                110,
+                97,
+                108,
+                61,
+                99,
+                111,
+                110,
+                100,
+                105,
+                116,
+                105,
+                111,
+                110,
+                97,
+                108
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                83,
+                116,
+                111,
+                112,
+                76,
+                111,
+                115,
+                115,
+                61,
+                115,
+                116,
+                111,
+                112,
+                95,
+                109,
+                97,
+                114,
+                107,
+                101,
+                116
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                84,
+                97,
+                107,
+                101,
+                80,
+                114,
+                111,
+                102,
+                105,
+                116,
+                61,
+                116,
+                97,
+                107,
+                101,
+                95,
+                112,
+                114,
+                111,
+                102,
+                105,
+                116,
+                95,
+                109,
+                97,
+                114,
+                107,
+                101,
+                116
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                84,
+                114,
+                97,
+                105,
+                108,
+                105,
+                110,
+                103,
+                83,
+                116,
+                111,
+                112,
+                76,
+                111,
+                115,
+                115,
+                61,
+                116,
+                114,
+                97,
+                105,
+                108,
+                105,
+                110,
+                103,
+                95,
+                115,
+                116,
+                111,
+                112,
+                95,
+                109,
+                97,
+                114,
+                107,
+                101,
+                116
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                97,
+                116,
+                117,
+                115,
+                46,
+                79,
+                112,
+                101,
+                110,
+                61,
+                111,
+                112,
+                101,
+                110
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                97,
+                116,
+                117,
+                115,
+                46,
+                67,
+                108,
+                111,
+                115,
+                101,
+                100,
+                61,
+                99,
+                108,
+                111,
+                115,
+                101,
+                100
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                97,
+                116,
+                117,
+                115,
+                46,
+                67,
+                97,
+                110,
+                99,
+                101,
+                108,
+                101,
+                100,
+                61,
+                99,
+                97,
+                110,
+                99,
+                101,
+                108,
+                101,
+                100
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                97,
+                116,
+                117,
+                115,
+                46,
+                67,
+                114,
+                101,
+                97,
+                116,
+                105,
+                110,
+                103,
+                61,
+                99,
+                114,
+                101,
+                97,
+                116,
+                105,
+                110,
+                103
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                97,
+                116,
+                117,
+                115,
+                46,
+                85,
+                112,
+                100,
+                97,
+                116,
+                105,
+                110,
+                103,
+                61,
+                117,
+                112,
+                100,
+                97,
+                116,
+                105,
+                110,
+                103
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                97,
+                116,
+                117,
+                115,
+                46,
+                67,
+                97,
+                110,
+                99,
+                101,
+                108,
+                105,
+                110,
+                103,
+                61,
+                99,
+                97,
+                110,
+                99,
+                101,
+                108,
+                105,
+                110,
+                103
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                105,
+                100,
+                101,
+                46,
+                66,
+                117,
+                121,
+                61,
+                98,
+                117,
+                121
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                105,
+                100,
+                101,
+                46,
+                83,
+                101,
+                108,
+                108,
+                61,
+                115,
+                101,
+                108,
+                108
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                105,
+                109,
+                101,
+                73,
+                110,
+                70,
+                111,
+                114,
+                99,
+                101,
+                46,
+                71,
+                111,
+                111,
+                100,
+                84,
+                105,
+                108,
+                108,
+                67,
+                97,
+                110,
+                99,
+                101,
+                108,
+                61,
+                71,
+                111,
+                111,
+                100,
+                84,
+                105,
+                108,
+                108,
+                67,
+                97,
+                110,
+                99,
+                101,
+                108
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                105,
+                109,
+                101,
+                73,
+                110,
+                70,
+                111,
+                114,
+                99,
+                101,
+                46,
+                73,
+                109,
+                109,
+                101,
+                100,
+                105,
+                97,
+                116,
+                101,
+                79,
+                114,
+                67,
+                97,
+                110,
+                99,
+                101,
+                108,
+                61,
+                73,
+                109,
+                109,
+                101,
+                100,
+                105,
+                97,
+                116,
+                101,
+                79,
+                114,
+                67,
+                97,
+                110,
+                99,
+                101,
+                108
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                105,
+                109,
+                101,
+                73,
+                110,
+                70,
+                111,
+                114,
+                99,
+                101,
+                46,
+                70,
+                105,
+                108,
+                108,
+                79,
+                114,
+                75,
+                105,
+                108,
+                108,
+                61,
+                70,
+                105,
+                108,
+                108,
+                79,
+                114,
+                75,
+                105,
+                108,
+                108
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                84,
+                105,
+                109,
+                101,
+                73,
+                110,
+                70,
+                111,
+                114,
+                99,
+                101,
+                46,
+                80,
+                111,
+                115,
+                116,
+                79,
+                110,
+                108,
+                121,
+                61,
+                80,
+                111,
+                115,
+                116,
+                79,
+                110,
+                108,
+                121
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                111,
+                112,
+                84,
+                114,
+                105,
+                103,
+                103,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                77,
+                97,
+                114,
+                107,
+                80,
+                114,
+                105,
+                99,
+                101,
+                61,
+                109,
+                97,
+                114,
+                107,
+                95,
+                112,
+                114,
+                105,
+                99,
+                101
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                111,
+                112,
+                84,
+                114,
+                105,
+                103,
+                103,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                76,
+                97,
+                115,
+                116,
+                80,
+                114,
+                105,
+                99,
+                101,
+                61,
+                108,
+                97,
+                115,
+                116,
+                95,
+                112,
+                114,
+                105,
+                99,
+                101
+              ]
+            },
+            {
+              "units": [
+                79,
+                114,
+                100,
+                101,
+                114,
+                83,
+                116,
+                111,
+                112,
+                84,
+                114,
+                105,
+                103,
+                103,
+                101,
+                114,
+                84,
+                121,
+                112,
+                101,
+                46,
+                73,
+                110,
+                100,
+                101,
+                120,
+                80,
+                114,
+                105,
+                99,
+                101,
+                61,
+                105,
+                110,
+                100,
+                101,
+                120,
+                95,
+                112,
+                114,
+                105,
+                99,
+                101
+              ]
+            },
+            {
+              "units": [
+                80,
+                111,
+                115,
+                105,
+                116,
+                105,
+                111,
+                110,
+                83,
+                105,
+                100,
+                101,
+                46,
+                76,
+                111,
+                110,
+                103,
+                61,
+                108,
+                111,
+                110,
+                103
+              ]
+            },
+            {
+              "units": [
+                80,
+                111,
+                115,
+                105,
+                116,
+                105,
+                111,
+                110,
+                83,
+                105,
+                100,
+                101,
+                46,
+                83,
+                104,
+                111,
+                114,
+                116,
+                61,
+                115,
+                104,
+                111,
+                114,
+                116
+              ]
+            },
+            {
+              "units": [
+                80,
+                111,
+                115,
+                105,
+                116,
+                105,
+                111,
+                110,
+                77,
+                111,
+                100,
+                101,
+                46,
+                72,
+                101,
+                100,
+                103,
+                101,
+                100,
+                61,
+                104,
+                101,
+                100,
+                103,
+                101,
+                100
+              ]
+            },
+            {
+              "units": [
+                80,
+                111,
+                115,
+                105,
+                116,
+                105,
+                111,
+                110,
+                77,
+                111,
+                100,
+                101,
+                46,
+                79,
+                110,
+                101,
+                87,
+                97,
+                121,
+                61,
+                111,
+                110,
+                101,
+                119,
+                97,
+                121
+              ]
+            },
+            {
+              "units": [
+                77,
+                97,
+                114,
+                103,
+                105,
+                110,
+                84,
+                121,
+                112,
+                101,
+                46,
+                73,
+                115,
+                111,
+                108,
+                97,
+                116,
+                101,
+                100,
+                61,
+                105,
+                115,
+                111,
+                108,
+                97,
+                116,
+                101,
+                100
+              ]
+            },
+            {
+              "units": [
+                77,
+                97,
+                114,
+                103,
+                105,
+                110,
+                84,
+                121,
+                112,
+                101,
+                46,
+                67,
+                114,
+                111,
+                115,
+                115,
+                61,
+                99,
+                114,
+                111,
+                115,
+                115
+              ]
+            },
+            {
+              "units": [
+                76,
+                111,
+                103,
+                83,
+                101,
+                118,
+                101,
+                114,
+                105,
+                116,
+                121,
+                46,
+                68,
+                101,
+                98,
+                117,
+                103,
+                61,
+                100,
+                101,
+                98,
+                117,
+                103
+              ]
+            },
+            {
+              "units": [
+                76,
+                111,
+                103,
+                83,
+                101,
+                118,
+                101,
+                114,
+                105,
+                116,
+                121,
+                46,
+                73,
+                110,
+                102,
+                111,
+                61,
+                105,
+                110,
+                102,
+                111
+              ]
+            },
+            {
+              "units": [
+                76,
+                111,
+                103,
+                83,
+                101,
+                118,
+                101,
+                114,
+                105,
+                116,
+                121,
+                46,
+                87,
+                97,
+                114,
+                110,
+                105,
+                110,
+                103,
+                61,
+                119,
+                97,
+                114,
+                110,
+                105,
+                110,
+                103
+              ]
+            },
+            {
+              "units": [
+                76,
+                111,
+                103,
+                83,
+                101,
+                118,
+                101,
+                114,
+                105,
+                116,
+                121,
+                46,
+                69,
+                114,
+                114,
+                111,
+                114,
+                61,
+                101,
+                114,
+                114,
+                111,
+                114
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::globals::construct_promise": {
+    "api": {
+      "kind": "function",
+      "name": "construct_promise",
+      "signature": {
+        "inputs": [
+          [
+            "runtime",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_exchange::runtime::ExchangeRuntime",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "executor",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. FIX: actual installed constructor now includes raw primitive executor operands in canonical TypeError diagnostics. Existing real NativeRuntime constructor suite covers executor timing and first settlement.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={let rt:std::rc::Rc<dyn crate::runtime::ExchangeRuntime>=crate::native::native_runtime();$type(&rt,if p==0{Js::Number(7.)}else{Js::utf16(&[0xd800])})};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": false,
+          "same": false,
+          "name": "TypeError",
+          "units": [
+            80,
+            114,
+            111,
+            109,
+            105,
+            115,
+            101,
+            32,
+            114,
+            101,
+            115,
+            111,
+            108,
+            118,
+            101,
+            114,
+            32,
+            55,
+            32,
+            105,
+            115,
+            32,
+            110,
+            111,
+            116,
+            32,
+            97,
+            32,
+            102,
+            117,
+            110,
+            99,
+            116,
+            105,
+            111,
+            110
+          ]
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": false,
+          "same": false,
+          "name": "TypeError",
+          "units": [
+            80,
+            114,
+            111,
+            109,
+            105,
+            115,
+            101,
+            32,
+            114,
+            101,
+            115,
+            111,
+            108,
+            118,
+            101,
+            114,
+            32,
+            55296,
+            32,
+            105,
+            115,
+            32,
+            110,
+            111,
+            116,
+            32,
+            97,
+            32,
+            102,
+            117,
+            110,
+            99,
+            116,
+            105,
+            111,
+            110
+          ]
+        }
+      }
+    ],
+    "requiredFeatures": [
+      "native"
+    ]
+  },
+  "safe_cex_exchange::js_runtime::globals::install_builtins": {
+    "api": {
+      "kind": "function",
+      "name": "install_builtins",
+      "signature": {
+        "inputs": [
+          [
+            "g",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "rt",
+            {
+              "resolved_path": {
+                "path": "alloc::rc::Weak",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::scope::ScopeShared",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "generic": "X"
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "X",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "outlives": "'static"
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "safe-cex-exchange/BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md; tests/js_runtime.rs installed builtin_global_input_contracts and existing sparse/collection/JSON bindings; tests/builtin_global_input_oracle.cjs independently executes Node and maintained enum declarations. ACCEPT: fresh live namespace composition, not arbitrary frozen-global mutation. Installed callable aliases and raw JSON boundary execute while unrelated sentinel identity survives.",
+    "call": "{use crate::js_runtime::value::{Js,Thrown};\nfn view(v:&Js,t:&Js)->serde_json::Value { if v.same_reference(t) {return serde_json::json!({\"reference\":true});} match v {Js::Undefined=>serde_json::json!({\"undefined\":true}),Js::Number(n)=>serde_json::json!({\"bits\":n.to_bits().to_string()}),Js::String(s)=>serde_json::json!({\"units\":s.as_ref()}),Js::Array(_)=>serde_json::Value::Array(v.array_items().unwrap().unwrap().iter().map(|v|match v{Some(v)=>view(v,t),None=>serde_json::json!({\"hole\":true})}).collect()),Js::Bool(b)=>serde_json::json!(b),Js::Null=>serde_json::Value::Null,_=>panic!(\"unexpected native observation\")}}\nfn observed(r:Result<Js,Thrown>,t:&Js)->serde_json::Value{match r{Ok(v)=>serde_json::json!({\"ok\":true,\"value\":view(&v,t)}),Err(e)=>{let mut o=serde_json::json!({\"ok\":false,\"same\":e.value.same_reference(t),\"units\":if e.value.get(\"message\").unwrap().is_undefined(){vec![]}else{e.value.get(\"message\").unwrap().to_js_string().unwrap().to_vec()}});let n=e.value.get(\"name\").unwrap();if !n.is_undefined(){o[\"name\"]=serde_json::json!(n.to_display());}o}}}\nlet p=$value.as_u64().unwrap();let token=Js::object(vec![]);let raw=Js::holey_array(vec![None,Some(Js::Undefined),Some(token.clone()),Some(Js::Number(-0.)),Some(Js::utf16(&[0xd800]))]);\nlet _=(&p,&raw);let result:Result<Js,Thrown>={let g=Js::object(vec![(\"sentinel\",token.clone())]);$type(&g,std::rc::Weak::<crate::js_runtime::scope::ScopeShared<()>>::new());Ok(Js::array(vec![Js::Bool(g.get(\"sentinel\").unwrap().same_reference(&token)),Js::str(g.get(\"Array\").unwrap().get(\"from\").unwrap().type_of()),Js::str(g.get(\"Map\").unwrap().type_of()),g.get(\"JSON\").unwrap().call_method(\"stringify\",vec![if p==0{Js::utf16(&[0xd800])}else{Js::Undefined}]).unwrap()]))};observed(result,&token)}",
+    "cases": [
+      {
+        "input": 0,
+        "output": {
+          "ok": true,
+          "value": [
+            true,
+            {
+              "units": [
+                102,
+                117,
+                110,
+                99,
+                116,
+                105,
+                111,
+                110
+              ]
+            },
+            {
+              "units": [
+                102,
+                117,
+                110,
+                99,
+                116,
+                105,
+                111,
+                110
+              ]
+            },
+            {
+              "units": [
+                34,
+                92,
+                117,
+                100,
+                56,
+                48,
+                48,
+                34
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": 1,
+        "output": {
+          "ok": true,
+          "value": [
+            true,
+            {
+              "units": [
+                102,
+                117,
+                110,
+                99,
+                116,
+                105,
+                111,
+                110
+              ]
+            },
+            {
+              "units": [
+                102,
+                117,
+                110,
+                99,
+                116,
+                105,
+                111,
+                110
+              ]
+            },
+            {
+              "undefined": true
+            }
+          ]
+        }
+      }
+    ]
   }
 }

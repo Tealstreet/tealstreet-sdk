@@ -5273,7 +5273,6 @@ mod builtin_global_input_contracts {
             );
             let mut actual = error(result);
             actual["reads"] = json!(reads.get());
-            actual["reads"] = json!(reads.get());
             actual["tag"] = row["tag"].clone();
             actual["kind"] = row["kind"].clone();
             rows.push(actual);
@@ -5364,5 +5363,165 @@ mod builtin_global_input_contracts {
             expected["executors"],
             "SOURCE_PROMISE_EXECUTOR_DIAGNOSTICS"
         );
+    }
+    fn raw_view(value: &Js, token: &Js) -> Value {
+        if value.same_reference(token) {
+            return json!({"reference":true});
+        }
+        match value {
+            Js::Undefined => json!({"undefined":true}),
+            Js::Number(number) => json!({"bits":number.to_bits().to_string()}),
+            Js::String(units) => json!({"units":units.as_ref()}),
+            Js::Array(_) => json!(
+                value
+                    .array_items()
+                    .unwrap()
+                    .unwrap()
+                    .iter()
+                    .map(|slot| match slot {
+                        Some(value) => raw_view(value, token),
+                        None => json!({"hole":true}),
+                    })
+                    .collect::<Vec<_>>()
+            ),
+            _ => panic!("unexpected raw result"),
+        }
+    }
+    #[test]
+    fn installed_owner_bindings_preserve_sparse_native_values() {
+        let source = oracle();
+        let globals = library();
+        let token = Js::object(vec![]);
+        let raw = Js::holey_array(vec![
+            None,
+            Some(Js::Undefined),
+            Some(token.clone()),
+            Some(Js::Number(-0.)),
+            Some(Js::utf16(&[0xd800])),
+        ]);
+        for (owner, method, args) in [
+            ("items", "concat", vec![]),
+            (
+                "member",
+                "map",
+                vec![Js::function("identity", |_, a| Ok(arg(&a, 0)))],
+            ),
+        ] {
+            let actual = raw.call_method(method, args).unwrap();
+            assert_eq!(
+                raw_view(&actual, &token),
+                source["owners"][owner][0]["output"]["value"],
+                "{owner} installed receiver"
+            );
+        }
+        for depth in [0, 1] {
+            let nested = Js::array(vec![
+                Js::holey_array(vec![None, Some(Js::Undefined), Some(token.clone())]),
+                Js::array(vec![Js::Number(-0.), Js::utf16(&[0xd800])]),
+            ]);
+            let actual = nested
+                .call_method("flat", vec![Js::Number(depth as f64)])
+                .unwrap();
+            assert_eq!(
+                raw_view(&actual, &token),
+                source["owners"]["flatten_into"][depth]["output"]["value"]
+            );
+        }
+        let actual = globals
+            .get("Array")
+            .unwrap()
+            .call_method("from", vec![raw])
+            .unwrap();
+        assert_eq!(
+            raw_view(&actual, &token),
+            source["owners"]["array_from"][0]["output"]["value"]
+        );
+        let value = Js::object(vec![
+            ("x", Js::utf16(&[0xd800])),
+            ("absent", Js::Undefined),
+            ("n", Js::Number(-0.)),
+            ("inf", Js::Number(f64::INFINITY)),
+        ]);
+        let text = globals
+            .get("JSON")
+            .unwrap()
+            .call_method("stringify", vec![value])
+            .unwrap();
+        assert_eq!(
+            raw_view(&text, &token),
+            source["owners"]["stringify_json"][0]["output"]["value"]
+        );
+    }
+    #[test]
+    fn owner_receipts_match_independently_executed_source_profiles() {
+        let source = oracle();
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../safe-cex-parity/accepted-set/contracts/safe-cex-exchange.json");
+        let contracts: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        for (owner, cases) in source["owners"].as_object().unwrap() {
+            let module = if [
+                "array_length",
+                "chain_value",
+                "flatten_into",
+                "flatten_length",
+                "indexed",
+                "is_regexp",
+                "items",
+                "map_entries",
+                "member",
+                "require_callback",
+            ]
+            .contains(&owner.as_str())
+            {
+                "builtins"
+            } else {
+                "globals"
+            };
+            let name = format!("safe_cex_exchange::js_runtime::{module}::{owner}");
+            assert_eq!(
+                contracts[&name]["cases"], *cases,
+                "independent source receipts for {name}"
+            );
+        }
+    }
+    #[test]
+    fn executor_object_short_print_residual_never_runs_user_coercion() {
+        let source = oracle();
+        let (_runtime, shared) = scoped_globals();
+        for row in source["executorObjects"].as_array().unwrap() {
+            let reads = Rc::new(std::cell::Cell::new(0));
+            let tag = row["tag"].as_str().unwrap();
+            let actual = error(
+                shared
+                    .globals
+                    .get("Promise")
+                    .unwrap()
+                    .construct(vec![input(tag, &reads)], None),
+            );
+            let message = if tag == "array" {
+                "Promise resolver [object Array] is not a function"
+            } else {
+                "Promise resolver #<Object> is not a function"
+            };
+            assert_eq!(actual["name"], "TypeError");
+            assert_eq!(
+                actual["units"],
+                json!(message.encode_utf16().collect::<Vec<_>>())
+            );
+            assert_eq!(reads.get(), 0);
+            if tag == "poison" {
+                assert_eq!(
+                    row["units"],
+                    json!(
+                        "Promise resolver [object Object] is not a function"
+                            .encode_utf16()
+                            .collect::<Vec<_>>()
+                    )
+                );
+            } else {
+                assert_eq!(actual["units"], row["units"]);
+            }
+            assert_eq!(row["reads"], 0);
+        }
     }
 }

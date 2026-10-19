@@ -13,10 +13,13 @@ fn method(name: &str, f: impl Fn(Vec<Js>) -> Result<Js, Thrown> + 'static) -> Js
 
 fn require_callback(callback: &Js) -> Result<(), Thrown> {
     if !callback.is_callable() {
-        return Err(Thrown::type_error(&format!(
-            "{} is not a function",
-            callback.to_display()
-        )));
+        let mut message = super::globals::v8_operand(callback, true).to_vec();
+        message.extend(" is not a function".encode_utf16());
+        return Err(Thrown::new(
+            super::value::error_constructor("TypeError")
+                .call(Js::Undefined, vec![Js::utf16(&message)])
+                .expect("TypeError receives a primitive message"),
+        ));
     }
     Ok(())
 }

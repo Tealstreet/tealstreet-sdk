@@ -167,28 +167,44 @@ fn consume_iterator(
     Ok(())
 }
 
-/// How V8 names an operand in a TypeError (`number 5`, `string "x"`, `object null`).
-fn v8_operand(value: &Js) -> String {
-    match value {
+/// Format diagnostic operands without invoking user coercion or getters.
+pub(super) fn v8_operand(value: &Js, typed: bool) -> Str {
+    if !typed {
+        return match value {
+            Js::String(units) => units.clone(),
+            Js::Array(_) => super::value::utf16("[object Array]"),
+            Js::Map(_) => super::value::utf16("#<Map>"),
+            Js::Set(_) => super::value::utf16("#<Set>"),
+            Js::Promise(_) => super::value::utf16("#<Promise>"),
+            Js::Object(_) | Js::Function(_) | Js::Builtin(_) => super::value::utf16("#<Object>"),
+            Js::SymbolIterator => super::value::utf16("Symbol(Symbol.iterator)"),
+            _ => super::value::utf16(&value.to_display()),
+        };
+    }
+    let text = match value {
+        Js::String(units) => {
+            let mut text = "string \"".encode_utf16().collect::<Vec<_>>();
+            text.extend_from_slice(units);
+            text.push(b'"' as u16);
+            return text.into();
+        }
         Js::Undefined => "undefined".to_owned(),
         Js::Null => "object null".to_owned(),
-        Js::String(_) => format!("string \"{}\"", value.to_display()),
-        Js::Bool(_) | Js::Number(_) | Js::BigInt(_) => {
-            format!("{} {}", value.type_of(), value.to_display())
-        }
+        Js::Bool(_) | Js::Number(_) => format!("{} {}", value.type_of(), value.to_display()),
         _ => value.type_of().to_owned(),
-    }
+    };
+    super::value::utf16(&text)
 }
 
 pub(super) fn not_iterable(value: &Js) -> Thrown {
-    let operand = if matches!(value, Js::BigInt(_)) {
-        value.type_of().to_owned()
-    } else {
-        v8_operand(value)
-    };
-    Thrown::type_error(&format!(
-        "{operand} is not iterable (cannot read property Symbol(Symbol.iterator))"
-    ))
+    let mut message = v8_operand(value, true).to_vec();
+    message
+        .extend(" is not iterable (cannot read property Symbol(Symbol.iterator))".encode_utf16());
+    Thrown::new(
+        error_constructor("TypeError")
+            .call(Js::Undefined, vec![Js::utf16(&message)])
+            .expect("TypeError receives a primitive message"),
+    )
 }
 
 /// `new Map(iterable)`: AddEntriesFromIterable through Map.prototype.set.
@@ -201,10 +217,15 @@ fn map_from_entries(iterable: &Js) -> Result<Js, Thrown> {
     let set = map.get("set")?;
     consume_iterator(iterator, |entry, _| {
         if !entry.is_object() {
-            return Err(Thrown::type_error(&format!(
-                "Iterator value {} is not an entry object",
-                entry.to_display()
-            )));
+            let text = v8_operand(&entry, false);
+            let mut message = "Iterator value ".encode_utf16().collect::<Vec<_>>();
+            message.extend_from_slice(&text);
+            message.extend(" is not an entry object".encode_utf16());
+            return Err(Thrown::new(
+                error_constructor("TypeError")
+                    .call(Js::Undefined, vec![Js::utf16(&message)])
+                    .expect("TypeError receives a primitive message"),
+            ));
         }
         let key = entry.get("0")?;
         let value = entry.get("1")?;
@@ -220,10 +241,13 @@ fn array_from(a: &[Js]) -> Result<Js, Thrown> {
     let map_fn = arg(a, 1);
     let mapping = !map_fn.is_undefined();
     if mapping && !map_fn.is_callable() {
-        return Err(Thrown::type_error(&format!(
-            "{} is not a function",
-            v8_operand(&map_fn)
-        )));
+        let mut message = v8_operand(&map_fn, true).to_vec();
+        message.extend(" is not a function".encode_utf16());
+        return Err(Thrown::new(
+            error_constructor("TypeError")
+                .call(Js::Undefined, vec![Js::utf16(&message)])
+                .expect("TypeError receives a primitive message"),
+        ));
     }
     let this = arg(a, 2);
     let mut out = vec![];
@@ -352,7 +376,14 @@ fn construct_promise(
     executor: Js,
 ) -> Result<Js, Thrown> {
     if !executor.is_callable() {
-        return Err(Thrown::type_error("Promise resolver is not a function"));
+        let mut message = "Promise resolver ".encode_utf16().collect::<Vec<_>>();
+        message.extend_from_slice(&v8_operand(&executor, false));
+        message.extend(" is not a function".encode_utf16());
+        return Err(Thrown::new(
+            error_constructor("TypeError")
+                .call(Js::Undefined, vec![Js::utf16(&message)])
+                .expect("TypeError receives a primitive message"),
+        ));
     }
     let promise = promise::Promise::pending(runtime);
     let (resolve, reject, called) = promise::resolving_functions(promise.clone());
