@@ -10,6 +10,7 @@ use safe_cex_engine::{
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
+use safe_cex_venue_kucoin::{Kucoin, Options as KucoinOptions};
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -50,6 +51,12 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct KucoinExtra {
+    #[serde(default)]
+    kucoin_broker: Option<safe_cex_venue_kucoin::sign::BrokerOptions>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct EngineOptions {
     #[serde(default)]
     testnet: bool,
@@ -61,6 +68,8 @@ struct EngineOptions {
     secret: Option<String>,
     #[serde(default)]
     passphrase: Option<String>,
+    #[serde(default)]
+    extra: Option<KucoinExtra>,
 }
 
 #[derive(Serialize)]
@@ -427,6 +436,14 @@ impl WasmEngine {
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
+            }))),
+            "kucoin" => Box::new(Engine::new(Kucoin::new(KucoinOptions {
+                broker: options.extra.and_then(|e| e.kucoin_broker),
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
             }))),
             "cryptocom" => Box::new(Engine::new(Cryptocom::new(CryptocomOptions {
                 testnet: options.testnet,

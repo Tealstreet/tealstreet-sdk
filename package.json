@@ -20,6 +20,7 @@
     "rust:private-tape": "node sdk-rs/harness/private-tape.mjs",
     "rust:private-tape-bybit": "node sdk-rs/harness/private-tape-bybit.mjs",
     "rust:private-tape-cryptocom": "node sdk-rs/harness/private-tape-cryptocom.mjs",
+    "rust:private-tape-kucoin": "node sdk-rs/harness/private-tape-kucoin.mjs",
     "rust:private-tape-okx": "node sdk-rs/harness/private-tape-okx.mjs",
     "rust:trim-tape": "node sdk-rs/harness/trim-tape.mjs",
     "rust:gate": "node sdk-rs/harness/gate.mjs",

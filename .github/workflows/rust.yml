@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Four venues: measured 1,687,019 bytes; allow 1.8 MiB.
-      WASM_BUDGET_BYTES: 1887436
+      # Five venues: measured 1,970,518 bytes before final fixes; allow 2 MiB.
+      WASM_BUDGET_BYTES: 2097152
     defaults:
       run:
         working-directory: .
@@ -168,3 +168,9 @@ jobs:
             yarn rust:private-tape-okx --venue "$venue"
             yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
           done
+      - name: KuCoin public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue kucoin --tape sdk-rs/harness/fixtures/kucoin-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: KuCoin account and trading (correctness)
+        run: |
+          yarn rust:private-tape-kucoin
+          yarn rust:gate --venue kucoin --tape sdk-rs/harness/tapes/kucoin-private.jsonl --runs 1 --books ''

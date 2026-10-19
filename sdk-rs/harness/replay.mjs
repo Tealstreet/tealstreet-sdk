@@ -62,7 +62,7 @@ const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrde
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams]
-    .filter(([name]) => !VOLATILE.has(name))
+    .filter(([name]) => !VOLATILE.has(name) && !venue.volatileQueryFields?.includes(name))
     .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"[^"]*",?/g, '')])
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
@@ -92,7 +92,7 @@ const requestKey = (method, url, body) =>
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
   constructor(impl) {
-    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records) });
+    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records), records });
     this.responses = new Responses(records, requestKey, venue.checkRequest, venue.isWrite);
     this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
     this.open = new Map();
@@ -102,8 +102,8 @@ class Tape {
 
   get unserved() { return this.responses.unserved; }
 
-  respond(method, url, body) {
-    return this.responses.respond(method, url, body, this.commandIndex);
+  respond(method, url, body, headers) {
+    return this.responses.respond(method, url, body, this.commandIndex, headers);
   }
 
   connect(url, onOpen, onMessage) {
@@ -123,6 +123,13 @@ class Tape {
     if (venue.respondToPing && text === 'ping') {
       setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
       return;
+    }
+    if (venue.respondToJsonPing) {
+      const message = JSON.parse(text);
+      if (message.type === 'ping') {
+        setImmediate(() => { if (!socket.closed) socket.onMessage(JSON.stringify({ type: 'pong', id: message.id })); });
+        return;
+      }
     }
     // OKX's opt-in auth validation also uses its v5 subscription argument model.
     const validateTopics = venue.validateSubscriptions ?? venue.validateLogin;
@@ -180,7 +187,10 @@ class Tape {
 
   assertWritesConsumed() {
     const missing = this.responses.unusedWrites();
-    if (missing) throw new Error(`${missing} taped write(s) were not sent`);
+    if (missing) {
+      const routes = [...this.responses.queues.values()].flat().filter((r) => venue.isWrite?.(r.method, r.url)).map((r) => `${r.method} ${r.url}`);
+      throw new Error(`${missing} taped write(s) were not sent: ${routes.join(', ')}`);
+    }
   }
 
   async socketFor(rawUrl) {
@@ -327,8 +337,8 @@ async function runRust() {
       const socket = tape.connect(url, onOpen, (text) => { tape.audit?.received(url, text); onMessage(text); });
       return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
-    request: async ({ method, url, body: requestBody }) => {
-      const { status, headers = '', body } = tape.respond(method, url, requestBody);
+    request: async ({ method, url, body: requestBody, headers: requestHeaders }) => {
+      const { status, headers = '', body } = tape.respond(method, url, requestBody, requestHeaders);
       // Model nativeTransport's chunks so streamed lists do not allocate a whole
       // response in wasm before the venue sees the first item.
       const chunks = async function* () {
@@ -425,7 +435,7 @@ async function runRust() {
   return { frames, metrics, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
 }
 
-const commandArgs = ({ t, type, ...args }) => args;
+const commandArgs = ({ t, type, expected, ...args }) => args;
 
 
 /** Main-thread view of the account, rebuilt from the latest frame tables. */
@@ -504,7 +514,7 @@ async function runTs() {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data);
+    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data, config.headers);
     // The raw body: the client's own transformResponse parses it, big ids included.
     const response = { data: body, status, statusText: String(status), headers: {}, config, request: {} };
     if (status >= 400) {

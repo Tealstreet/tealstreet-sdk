@@ -12,8 +12,8 @@ export class Responses {
       this.queues.get(id).push(record);
     }
   }
-  respond(method, url, body, commandIndex = 0) {
-    const queue = this.check?.(method, url, body) === false ? undefined : this.queues.get(this.key(method, url, body));
+  respond(method, url, body, commandIndex = 0, headers) {
+    const queue = this.check?.(method, url, body, headers) === false ? undefined : this.queues.get(this.key(method, url, body));
     if (!queue?.length) {
       this.unserved++;
       return { status: 599, body: '' };

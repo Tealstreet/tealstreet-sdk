@@ -90,3 +90,27 @@ explicit incomplete/same-ms saturation errors, failed-page rollback, and shared
 before parsing completed ledger cursors. Lot-to-base boundaries quantize to the
 contract multiplier so 3 lots at 0.1 remain exactly 0.3, matching TS safe math.
 Native crate: 67 tests pass; clippy all-targets with warnings denied passes.
+
+### Harness gates before latest landing merge
+
+- Captured a real 20-second public session, both books; committed compressed
+  first-20-second fixture has 16,154 frames, 692 markets/tickers, two full books.
+  Trimmer `--http-limit 0` retains all cached snapshots needed for gap recovery.
+- Three-run public medians TS/Rust: CPU 907.3/722.1 ms, steady CPU 663.0/487.9 ms,
+  retained 6.2/2.4 MB. Correctness/protocol/request gates PASS.
+- Private fixture: 76 records, 17 commands including native bracket/stops,
+  cancel/replace/both cancel books, leverage/margin, blocked mode switch, candles,
+  all history surfaces and dedicated funding. Independent JSON oracles only
+  replace the four missing TS query methods; no mutation result overrides.
+- Independent phase-5 review passes. HMAC/passphrase, token URLs/private topics,
+  subscription caps and detail channels are independently audited. Node 24
+  harness 13/13; wasm integration 17/17. Root typecheck (44 tasks), lint (28),
+  tests (27 tasks, safe-cex 6,495 tests per run) pass. Bans/wasm clippy pass.
+- Binance public/private, Bybit public/private, Crypto.com public/private and
+  OKX public regression gates PASS before merging the newly landed WEEX lane.
+- Fixed a flaky existing memory unit oracle: a retained ArrayBuffer can coexist
+  with a negative heap delta after GC. Deterministic negative-heap coverage keeps
+  the runtime Wasm counting test; production metric and gate remain unchanged.
+
+Next: merge latest landing (WEEX), rebuild and run all landing replay gates,
+then PR, adversarial reviews posted on PR, green CI, merge and follow-up branch.

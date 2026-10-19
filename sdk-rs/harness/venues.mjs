@@ -2,6 +2,7 @@
 // against, and the name the Rust engine is built with.
 import { createHmac } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
+import { kucoin } from './kucoin.mjs';
 
 const root = '../../packages/safe-cex/src/exchanges';
 
@@ -44,6 +45,7 @@ const okx = (name) => ({
 });
 
 export const VENUES = {
+  kucoin,
   cryptocom: {
     rust: 'cryptocom',
     ts: { module: root + '/cryptocom/cryptocom.exchange.ts', className: 'CryptocomExchange', name: 'cryptocom' },

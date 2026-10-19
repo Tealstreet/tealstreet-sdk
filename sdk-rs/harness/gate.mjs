@@ -81,6 +81,16 @@ const isPrivate = Boolean(ts.account);
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
 const KNOWN_TS_FIXES = {
+  kucoin: [
+    'futures inherits empty fills/orders/income and unsupported public trades; query results use explicit documented tape oracles',
+    'stops classify with side and direction, retain trigger basis and closeOrder',
+    'match executions deduplicate trade IDs and require their execution price',
+    'failed and delayed REST snapshots preserve newer account state and terminal orders',
+    'conditional orders and mixed bracket trigger references fail before writes instead of dropping fields',
+    'cancelSymbolOrders cancels the stop book too (reference signed transport fills this omission)',
+    'open orders walk every numbered page; TS reads only its default first page',
+    'cached book snapshot gaps retain the entire contiguous buffered suffix (TS reference fixed with a regression)',
+  ],
   // Applied to the TS oracle itself (okx.ws-public.ts / okx.exchange.ts).
   okx: [
     'full books retain levels past a stale last trade',
@@ -168,6 +178,15 @@ for (let run = 0; run < runs; run++) {
       if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
     }
   }
+  // KNOWN_TS_FIXES: KuCoin TS has no futures history implementations. The
+  // synthetic tape declares independent documented query expectations; never
+  // derive this reference from the Rust result.
+  if (values.venue === 'kucoin') tapeRecords.filter((r) => r.type === 'command').forEach((record, index) => {
+    if (record.expected !== undefined) {
+      if (!['fetchFills', 'fetchOrderHistory', 'fetchIncome', 'fetchPublicTrades'].includes(record.op)) throw new Error('KuCoin expected oracle is restricted to missing TS query methods');
+      ts.commands[index] = { ok: record.expected };
+    }
+  });
   const left = JSON.stringify(stable(ts.commands));
   const right = JSON.stringify(stable(rust.commands));
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);

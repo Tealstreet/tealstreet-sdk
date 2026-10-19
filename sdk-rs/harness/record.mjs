@@ -70,7 +70,7 @@ const recording = {
 const { WasmEngine } = await loadEngine();
 let frames = 0;
 const seenBooks = new Set();
-const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: false })), recording, {
+const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: true })), recording, {
   onFrame: (buffer) => { for (const book of new Frame(buffer).books()) seenBooks.add(book.market); },
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });

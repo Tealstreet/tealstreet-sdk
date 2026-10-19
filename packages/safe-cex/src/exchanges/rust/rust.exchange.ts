@@ -36,6 +36,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binancepm: 'binancepm',
   bybit: 'bybit',
   cryptocom: 'cryptocom',
+  kucoin: 'kucoin',
   okx: 'okx',
   okxeu: 'okxeu',
   okxdemo: 'okxdemo',
@@ -49,6 +50,7 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 });
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   bybit: patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/),
+  kucoin: patternClientOrderIdRule('KuCoin', /^[A-Za-z0-9_-]{1,40}$/),
   okx: okxClientOrderIdRule,
   okxeu: okxClientOrderIdRule,
   okxdemo: okxClientOrderIdRule,
@@ -115,7 +117,10 @@ export class RustEngineExchange extends BaseExchange {
     const publicDataOnly = this.isPublicDataOnly;
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
-      JSON.stringify({ key, secret, passphrase, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly) }),
+      JSON.stringify({
+        key, secret, passphrase, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly),
+        extra: this.name === 'kucoin' ? { kucoinBroker: this.options.extra?.kucoinBroker } : undefined,
+      }),
     );
     this.host = new EngineHost(engine, engineTransport(), {
       onFrame: this.receiveFrame,
