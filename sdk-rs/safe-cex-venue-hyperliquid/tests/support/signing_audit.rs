@@ -148,7 +148,10 @@ fn signing_audit_api_nonce_error_retains_transport_cause() {
             let body =
                 json!({"action":{"type":"cancel","cancels":[{"a":1,"o":1234}]},"nonce":nonce});
             let request = client.build_request("/exchange", &body).unwrap();
-            let error = client.prepare_request(request, true).await.unwrap_err();
+            let error = client
+                .prepare_request(request, true, &|_| Ok(()))
+                .await
+                .unwrap_err();
             let TransportError::Rejected(origin) = error else {
                 panic!("HL_SIGNING typed transport cause missing: {error:?}")
             };

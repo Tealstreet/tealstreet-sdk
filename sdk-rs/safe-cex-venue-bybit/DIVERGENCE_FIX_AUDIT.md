@@ -2,8 +2,8 @@
 
 Authority: the 37 exact rows in `assignments/codex-0w5ohi.json`, linked from
 `non-utf8-assignment-index.json`, and the async ruling in
-`divergence-cluster-rulings.md`. Twenty-seven rows are reconciled below. History rows6/16 are reconciled
-separately in PR #1198; the other eight delegated rows remain open.
+`divergence-cluster-rulings.md`. Twenty-nine rows are reconciled below, including history rows6/16 from
+PR #1198 and socket rows25/35. The other eight delegated rows remain open.
 
 | Assignment rows | Source owner | Verdict | Production observation |
 | --- | --- | --- | --- |
@@ -71,14 +71,14 @@ compiles early-copy and nonzero-Spot-return faults, requires named runtime
 failures, restores exact bytes and requires GREEN. No WebSocket bodies change.
 
 The position batch reconciles five rows. With the seven rows in PR #1182,
-row 37 ACCEPT-safety in PR #1188 and the five Hyro rows below, 18 of 37
-are reconciled and 19 remain.
+row 37 ACCEPT-safety in PR #1188, the five Hyro rows below and delegated
+history rows 6/16 in PR #1198, plus the seven retained rows in PR #1212,
+29 of 37 are reconciled and eight remain after socket rows25/35 below.
 
-The former 19-row remainder was split by module: codex-0efu4x owns rows
-1/2/3/6/7/8/12/13/16/23/25/35 (public/private socket lifecycle, history mapping
-and position controls); codex-0w5ohi retained rows
-18/24/26/27/32/33/36 (reconciled in the retained batch below) (Spot, placement options, account,
-market and startup/facade work). Existing WS carrier owners retain their separate
+The remaining eight rows belong to codex-0efu4x:
+1/2/3/7/8/12/13/23 (public/private socket lifecycle and position controls).
+The seven rows retained by codex-0w5ohi, 18/24/26/27/32/33/36, are reconciled
+in the retained batch below. Existing WS carrier owners retain their separate
 body changes; the socket audit owner coordinates those boundaries first.
 
 ## Original-method retry guard: row 37 ACCEPT-safety
@@ -137,6 +137,15 @@ and prove that shadowed `__proto__` accessors are not read.
 `scripts/hyro-account-controls.py` mutates each accepted guard/result and the
 Error classification separately, requires compiled named native failures, then
 restores exact source bytes and replays the receiver.
+
+## Delegated history: rows 6 and 16
+
+Both primary and inverse history mapper rows are FIX in PR #1198. The live
+historical-fills reader visibly refuses malformed strict output fields after
+source paging and recovery, preserving valid neighbors and source error priority.
+The synchronous raw mapper and its original identity/alias guards are unchanged.
+See `DELEGATED_HISTORY_FIX_AUDIT.md` for the real-binding RED/GREEN, six compiled
+production controls and the ten remaining delegated rows.
 
 ## Retained startup, markets, tickers and placement: rows 18/24/26/27/32/33/36
 
@@ -208,7 +217,7 @@ execute three native-Node profiles with real Date.now and the original offset
 reset. A compiled null-expiry production fault must fail this witness before an
 exact restored GREEN. No auth/signing carrier or production body changes here.
 
-This socket batch reconciles rows25 and35. History rows6/16 remain in #1198;
+This socket batch reconciles rows25 and35. History rows6/16 are merged from #1198;
 the eight other delegated rows remain open.
 
 

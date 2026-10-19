@@ -854,9 +854,9 @@ note = "Renamed Rust target: safe-cex-venue-bybit/src/binding/members/ohlcv.rs::
 ts = "BybitExchange#mapOrderHistoryRowsToExecutions"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/history_mapping.rs::map_order_history_rows_to_executions"
+rs = [ "safe-cex-venue-bybit/src/history_mapping.rs::map_order_history_rows_to_executions", "safe-cex-venue-bybit/src/rest_fills.rs::admit_execution_rows" ]
 status = "divergent"
-note = "CHOSEN Native fallback mapper on the live receiver at safe-cex-venue-bybit/src/history_mapping.rs::map_order_history_rows_to_executions, independently checked against linear and inverse sources. CHOSEN typed Execution boundary rejects truthy non-string symbol or commissionAsset values which TypeScript preserves without validation. The actual shared JSON parser retains fee-detail siblings beside lone surrogate strings, with both maintained mapper variants witnessed. ts-bug: status filtering uses the source filled substring test and also accepts unfilled. Retains lazy fallible coercion, first-row dedupe and descending timestamp order. Production receiver/HTTP composition is covered by fill_history_binding; the mapper also retains its maintained source corpus."
+note = "FIX-audit rows 6/16: the synchronous native mapper remains source-equal, retaining raw symbol/fee-asset aliases, fallible coercion, source filled-substring bug, first-row deduplication, fee detail and descending order. Renamed Rust target: safe-cex-venue-bybit/src/history_mapping.rs::map_order_history_rows_to_executions. Split output admission: safe-cex-venue-bybit/src/rest_fills.rs::admit_execution_rows applies shared-type-decisions-final.md decision 3 only after the real fetchHistoricalFills Promise settles its entire source read. A malformed strict symbol or commissionAsset visibly refuses that row with exact field/value; valid neighbors survive without coercing fields or relaxing typed identity guards. Genuine later source errors keep their original catch/discard priority. The unchanged 380-source corpus and 16 direct typed-refusal controls remain, alongside live primary/demo/inverse signed-HTTP tests and compiled production controls. No async prefix change is needed for this synchronous mapper."
 
 [[symbol]]
 ts = "BybitExchange#fetchExecutionsFallbackFromOrderHistory"

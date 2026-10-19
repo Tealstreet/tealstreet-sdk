@@ -973,7 +973,16 @@ diagnostics are compared directly rather than normalized to a custom string.
 The SDK invoke/invoke_unit and get_account wrappers call their installed member
 before returning a waiter and await the same canonical Promise. Preserve this
 boundary when changing the typed facade; do not add a second Promise driver.
-DIVERGENCE_FIX_AUDIT.md records the reconciled rows and remaining module split.
+DIVERGENCE_FIX_AUDIT.md records 29 reconciled rows and eight remaining delegated rows.
+
+Delegated history audit rows 6/16: keep the order-history mapper synchronous and
+raw/source-equal. At the final live historical-fills result, shared strict-output
+policy refuses each malformed symbol/commissionAsset row visibly with its field
+and value, preserving good neighbors. Run admission only after all source paging,
+recovery decisions and catches; a later source failure must still discard the
+recovery prefix before any new refusal diagnostic. Keep the original 380 mapper
+cases and 16 typed-refusal guards. `DELEGATED_HISTORY_FIX_AUDIT.md` and the compiled
+production controls document this boundary.
 
 Hyro account/configuration FIX-audit rows 22/28/29/30/31 use constructed native
 production/demo receivers and the 21-profile maintained TS account oracle.
