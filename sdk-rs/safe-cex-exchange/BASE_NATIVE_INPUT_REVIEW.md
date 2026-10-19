@@ -24,3 +24,9 @@ parser. Native observations inspect references, units and fields before any JSON
 observation output. Existing `tests/js_runtime.rs` constructor, client routing and
 worker completion tests remain intact. These are bounded observations, not proof
 of all JavaScript programs or an authorization to weaken any decoder policy.
+
+Cancellation review retains every classification and guard. The two creator
+fingerprints change only for synchronous Result propagation/callback construction;
+the snapshots.rs and exchange.rs guard-file references change only because the
+callback alias and synchronous adaptation share those files. All guard, waiter,
+task, Drop and future-boundary code is unchanged.
