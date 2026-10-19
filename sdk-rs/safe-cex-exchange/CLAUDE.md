@@ -30,6 +30,10 @@ Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
 Rust composition boundary, not a second exchange specification.
 
+Native candle commands use `Exchange::fetch_ohlcv_native` and retain its `Js`
+result. KuCoin and Bitrue supply their actual receiver values; other families'
+typed projection requires the proofs in the registry's REST_RETURN_ORDER_REVIEW.md.
+
 ## Canonical Store owner
 
 `native_store::DefaultStore` owns one material `Js` graph. State arrays, rows and
