@@ -486,3 +486,19 @@ matching heap/backing-buffer sample time; both baseline10 and current helpers
 will be refreshed identically before comparisons. This changes accounting only,
 with no threshold relaxation. Final ten-family artifacts and13 private gates
 remain in progress.
+
+All ten fixed release modules and isolated wasm clippys pass, with68 host/
+socket/Workers/loader and29 SDK WASM checks. The incoming2be2dfad38 host3 profile
+adds throughput-oriented glue. Recalibrate only four exceeded caps using
+ceil(actual*1.03/1024)*1024: Backpack779539/803840 (old763904), BloFin799218/823296
+(old783360), Crypto665498/686080 (old661504), OKX759146/782336 (old757760).
+Five existing caps remain fixed; Bitget904390 gets931840. No aggregate browser
+module or blanket cap increase. Baseline10 final helper closure matches04a0b956fe,
+including post-collection linear-memory sampling.
+
+Final ten-family comparison protocol before collecting results: nine families
+use official three-run public before/after pairs; MEXC directly uses the already
+audited fixed ten-valid-pair AB/BA crossover, without a preliminary favorable-
+search cohort. Same upper-middle medians, quality-only entire-pair exclusions,
+max15 attempts and no result-directed extension. All public/state/egress/auth
+checks stay unchanged on both sides. Private13 run against rebuilt modules.
