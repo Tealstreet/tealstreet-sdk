@@ -241,3 +241,22 @@ and cut a follow-up branch. Never touch master or force-push.
   typecheck44/lint28 pass. Incoming landing budget is2359296, retained exactly;
   opt3 aggregate2481675 exceeds it, so wasm-only size optimization is remeasured
   (native remains3). Final combined replay evidence/CI follows this merge.
+
+- Final six-venue acceptance: all FIFTEEN gates PASS (6 public, 9 private).
+  Public medians TS -> Rust (CPU ms / steady ms / retained MB):
+  MEXC450.3->212.3 /268.7->115.4 /10.1->3.1 (14701 frames);
+  Binance175.5->76.1 /96.1->25.3 /4.3->2.4 (873 frames);
+  Bybit196.6->132.9 /129.7->70.5 /6.0->2.6 (8743 frames);
+  OKX635.2->598.5 /499.3->465.9 /4.2->2.6 (8904 frames);
+  Crypto.com145.3->90.7 /63.7->36.7 /2.0->1.4 (2178 frames);
+  WEEX119.0->83.5 /58.7->33.9 /5.1->2.6 (2029 frames).
+  Every run matches output, every request matches, protocol audits pass. Private
+  frame counts: MEXC21, Binance14, Bybit18, each OKX29, Crypto.com21, WEEX20.
+- Wasm-only opt-level s produces2065878 bytes < inherited2359296 budget;
+  native release remains3. Final native359/shell17/host10/harness26 tests pass;
+  root typecheck44/lint28 pass. All adversarial fixes and integration adjustments
+  pass independent rereview. Last full SDK6562 passed with local15s timeout;
+  fresh CI must pass default timeouts before merge. Latest target through
+  6cd219ce4c adds documentation only and merges cleanly without code changes.
+- Push final evidence, wait for fresh CI green, merge PR1304 into feat/rust-rewrite
+  and cut a fresh follow-up branch. No implementation work remains pending.
