@@ -34,7 +34,7 @@ struct Job {
 pub struct Request {
     command: CommandId,
     call: Planned,
-    started: f64,
+    stream_revision: u64,
     signature_retry: bool,
     read_retries: u8,
 }
@@ -494,7 +494,7 @@ impl BitgetFutures {
             Pending::Trade(Box::new(Request {
                 command,
                 call,
-                started: cx.now,
+                stream_revision: self.order_revision_clock(),
                 signature_retry,
                 read_retries,
             })),
@@ -1594,11 +1594,7 @@ impl BitgetFutures {
                         });
                     if let Some(trailing) = trailing {
                         for id in &ids {
-                            if !cx
-                                .store
-                                .order(id)
-                                .is_some_and(|o| o.last_update > request.started)
-                            {
+                            if self.order_revision(id) <= request.stream_revision {
                                 self.account.trailing.insert(id.clone(), trailing.clone());
                             }
                         }
@@ -1660,9 +1656,8 @@ impl BitgetFutures {
                         cx,
                         &id,
                         &next,
-                        (price, amount, job.original.clone()),
+                        (price, amount, job.original.clone(), request.stream_revision),
                         &client,
-                        request.started,
                     );
                     job.ids.push(next);
                 } else {
@@ -1695,22 +1690,21 @@ impl BitgetFutures {
                     .map(|d| d.order_id.text().into_owned())
                     .filter(|s| !s.is_empty() && s != &id);
                 if let Some(next) = next {
+                    let newer_stream = self.order_revision(&next) > request.stream_revision;
                     self.commit_amend(
                         cx,
                         &id,
                         &next,
-                        (price, amount, job.original.clone()),
+                        (price, amount, job.original.clone(), request.stream_revision),
                         &client,
-                        request.started,
                     );
                     if !self.order_terminal(&next)
+                        && !newer_stream
                         && let Some(data) = parsed.as_ref().ok().and_then(|(_, r)| r.data.as_ref())
                     {
                         let inverse = self.inverse();
                         cx.store.update_order(&next, |o| {
-                            if !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
-                                && o.last_update <= request.started
-                            {
+                            if !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled) {
                                 if let Some(filled) = data.base_volume.0 {
                                     o.filled = filled;
                                     amend_remaining(o, inverse);
@@ -1780,12 +1774,12 @@ impl BitgetFutures {
         cx: &mut Cx<'_, Pending>,
         old: &str,
         next: &str,
-        values: (f64, f64, Option<Order>),
+        values: (f64, f64, Option<Order>, u64),
         client: &str,
-        started: f64,
     ) {
-        let (price, amount, fallback) = values;
+        let (price, amount, fallback, stream_revision) = values;
         let original = cx.store.order(old).cloned().or(fallback);
+        let newer_stream = self.order_revision(old) > stream_revision;
         if self.order_terminal(next)
             || (old == next
                 && original.as_ref().is_some_and(|o| {
@@ -1801,7 +1795,7 @@ impl BitgetFutures {
             if old != next && cx.store.order(next).is_some() {
                 return;
             }
-            if order.last_update <= started {
+            if !newer_stream {
                 order.price = price;
                 order.amount = amount;
                 amend_remaining(&mut order, self.inverse());

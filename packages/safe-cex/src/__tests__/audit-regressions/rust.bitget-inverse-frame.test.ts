@@ -33,4 +33,8 @@ it('preserves inverse native quantities and collateral after worker frame hydrat
   expect(store.positions[0]).toMatchObject({ contracts: 0.02, notional: 1000,
     extra: { contractsNative: 1000, unrealizedPnlNative: 0.002 } });
   expect(store.balance.coins).toEqual(coins);
+  const originalOrders = frame.orders();
+  frame.orders = () => ({ ...originalOrders!, enums: Uint32Array.of((5 << 8) | (2 << 28)) });
+  new FrameApplier(store).apply(frame);
+  expect(store.orders[0].slTriggerType).toBe('last_price');
 });

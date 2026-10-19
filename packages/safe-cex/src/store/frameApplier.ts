@@ -111,7 +111,7 @@ export class FrameApplier {
           ...(orders.parentId(i) !== undefined && { parentId: orders.parentId(i) }),
           ...(enums.timeInForce !== undefined && { timeInForce: enums.timeInForce as Order['timeInForce'] }),
           ...(enums.type === 'take_profit_market' && trigger && { tpTriggerType: trigger }),
-          ...(enums.type === 'stop_market' && trigger && { slTriggerType: trigger }),
+          ...((enums.type === 'stop_market' || enums.type === 'trailing_stop_market') && trigger && { slTriggerType: trigger }),
           ...(finite(orders.takeProfit[i]) !== undefined && { takeProfit: orders.takeProfit[i] }),
           ...(finite(orders.stopLoss[i]) !== undefined && { stopLoss: orders.stopLoss[i] }),
           ...((enums.rejectReason || this.nativePlacementAmounts || this.inverseNativeAmounts) && { extra: {

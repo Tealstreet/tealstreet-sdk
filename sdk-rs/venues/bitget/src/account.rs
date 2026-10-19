@@ -95,6 +95,8 @@ pub struct Account {
     opened: HashMap<String, f64>,
     pub plans: HashMap<String, String>,
     pub trailing: HashMap<String, (String, f64)>,
+    ws_order_clock: u64,
+    ws_order_revisions: HashMap<String, u64>,
     executed: HashSet<String>,
     executed_order: std::collections::VecDeque<String>,
     filled: HashMap<String, (f64, f64)>,
@@ -1199,6 +1201,10 @@ impl BitgetFutures {
                         self.emit_execution(cx, &raw, order);
                     }
                     for order in orders {
+                        self.account.ws_order_clock = self.account.ws_order_clock.saturating_add(1);
+                        self.account
+                            .ws_order_revisions
+                            .insert(order.id.clone(), self.account.ws_order_clock);
                         if let Some(state) = trailing_state(&raw) {
                             self.account.trailing.insert(order.id.clone(), state);
                         }
@@ -1419,6 +1425,18 @@ impl BitgetFutures {
         true
     }
 
+    pub(crate) fn order_revision_clock(&self) -> u64 {
+        self.account.ws_order_clock
+    }
+
+    pub(crate) fn order_revision(&self, id: &str) -> u64 {
+        self.account
+            .ws_order_revisions
+            .get(id)
+            .copied()
+            .unwrap_or(0)
+    }
+
     pub(crate) fn mark_opened(&mut self, now: f64, id: &str) {
         self.account.opened.insert(id.to_owned(), now + 5_000.0);
     }
@@ -1489,6 +1507,9 @@ impl BitgetFutures {
             self.account
                 .trailing
                 .retain(|id, _| cx.store.order(id).is_some());
+            self.account.ws_order_revisions.retain(|id, _| {
+                cx.store.order(id).is_some() || self.account.terminal.contains_key(id)
+            });
             self.account
                 .plans
                 .retain(|id, _| cx.store.order(id).is_some());
@@ -1744,13 +1765,19 @@ impl BitgetFutures {
             ),
             last_update: first(&[raw.u_time, raw.updated_time, raw.c_time, raw.created_time])
                 .unwrap_or(cx.now),
-            trigger_type: (!raw.plan_type.is_empty() || raw.strategy_type == "trailing_stop").then_some(
-                if raw.trigger_type == "fill_price" || raw.trailing_stop_params.as_ref().is_some_and(|p| p.activation_type == "market") {
-                    StopTriggerType::LastPrice
-                } else {
-                    StopTriggerType::MarkPrice
-                },
-            ),
+            trigger_type: (!raw.plan_type.is_empty() || raw.strategy_type == "trailing_stop")
+                .then_some(
+                    if raw.trigger_type == "fill_price"
+                        || raw
+                            .trailing_stop_params
+                            .as_ref()
+                            .is_some_and(|p| p.activation_type == "market")
+                    {
+                        StopTriggerType::LastPrice
+                    } else {
+                        StopTriggerType::MarkPrice
+                    },
+                ),
             take_profit: tp,
             stop_loss: sl,
             extra: self.inverse().then_some(OrderExtra {
@@ -1927,6 +1954,12 @@ fn round8(value: f64) -> f64 {
 fn trailing_state(raw: &OrderRow<'_>) -> Option<(String, f64)> {
     if let Some(params) = &raw.trailing_stop_params {
         let value = params.trail_variance.0.filter(|v| *v > 0.0)?;
+        if (!params.pre_order_type.is_empty() && params.pre_order_type != "market")
+            || (!params.activation_type.is_empty()
+                && !matches!(params.activation_type.as_str(), "mark" | "market"))
+        {
+            return Some(("unsupported".into(), value));
+        }
         if !matches!(params.trail_type.as_str(), "distance" | "ratio") {
             return None;
         }

@@ -117,6 +117,10 @@ fn uta_native_trailing(h: &mut Harness, kind: &str, variance: &str) {
         h.engine.store().order("trail-1").unwrap().kind,
         OrderType::TrailingStopLoss
     );
+    assert_eq!(
+        h.engine.store().order("trail-1").unwrap().trigger_type,
+        Some(StopTriggerType::LastPrice)
+    );
 }
 
 #[test]
@@ -537,6 +541,7 @@ fn uta_size_only_edit_and_rejection_rollback_preserve_native_distance_or_ratio()
         assert_eq!(p["qty"], "0.02");
         assert_eq!(p["trailingStopParams"][0]["trailType"], kind);
         assert_eq!(p["trailingStopParams"][0]["trailVariance"], variance);
+        assert_eq!(p["trailingStopParams"][0]["activationType"], "market");
         h.reply(
             replace,
             200,
@@ -546,6 +551,7 @@ fn uta_size_only_edit_and_rejection_rollback_preserve_native_distance_or_ratio()
         assert_eq!(p["qty"], "0.01");
         assert_eq!(p["trailingStopParams"][0]["trailType"], kind);
         assert_eq!(p["trailingStopParams"][0]["trailVariance"], variance);
+        assert_eq!(p["trailingStopParams"][0]["activationType"], "market");
         success(&mut h, rollback, "restored-trailing");
         assert!(h.done.last().unwrap().1.is_err());
     }
@@ -656,8 +662,7 @@ fn stale_trailing_amend_ack_cannot_overwrite_newer_stream_callback() {
         amount: None,
     });
     let (id, _) = body(&mut h, "/modify-plan-order");
-    h.now += 1.0;
-    h.private_message(r#"{"arg":{"channel":"orders-algo"},"data":[{"orderId":"trail-1","symbol":"BTCUSDT","planType":"track_plan","size":"0.01","triggerPrice":"95","callbackRatio":"9","side":"sell","reduceOnly":"yes","posMode":"one_way_mode","planStatus":"not_trigger"}]}"#);
+    h.private_message(r#"{"arg":{"channel":"orders-algo"},"data":[{"orderId":"trail-1","symbol":"BTCUSDT","planType":"track_plan","size":"0.01","triggerPrice":"95","callbackRatio":"9","uTime":"100","side":"sell","reduceOnly":"yes","posMode":"one_way_mode","planStatus":"not_trigger"}]}"#);
     success(&mut h, id, "trail-1");
     h.command(Command::AmendOrder {
         command: 98,
@@ -667,4 +672,53 @@ fn stale_trailing_amend_ack_cannot_overwrite_newer_stream_callback() {
     });
     let (_, p) = body(&mut h, "/modify-plan-order");
     assert_eq!(p["newCallbackRatio"], "9");
+}
+
+#[test]
+fn external_uta_limit_execution_and_index_activation_stay_visible_and_cancelable_but_not_editable()
+{
+    for (execution, activation) in [("limit", "market"), ("market", "index")] {
+        let mut h = uta(false);
+        h.private_message(&json!({"arg":{"instType":"UTA","topic":"strategy-order"},"data":[{
+            "category":"USDT-FUTURES","type":"trailing_stop","orderId":"external-trail","symbol":"BTCUSDT",
+            "qty":"0.01","side":"sell","status":"pending","reduceOnly":"yes",
+            "trailingStopParams":{"activationPrice":"95","activationType":activation,"trailType":"distance",
+                "trailVariance":"5","preOrderType":execution,"preOrderPrice":"94"}
+        }]}).to_string());
+        let order = h.engine.store().order("external-trail").unwrap();
+        assert_eq!(order.kind, OrderType::TrailingStopLoss);
+        assert_eq!(order.price, 95.0);
+        assert_eq!(order.status, OrderStatus::Open);
+        for (command, price, amount) in [(101, Some(96.0), None), (102, None, Some(0.02))] {
+            h.command(Command::AmendOrder {
+                command,
+                id: "external-trail".into(),
+                price,
+                amount,
+            });
+            ready(&mut h);
+            assert!(
+                h.done
+                    .last()
+                    .unwrap()
+                    .1
+                    .as_ref()
+                    .unwrap_err()
+                    .contains("native trailing parameters")
+            );
+            assert!(h.requests.iter().all(|r| r.method == Method::Get));
+            assert_eq!(
+                h.engine.store().order("external-trail").unwrap().status,
+                OrderStatus::Open
+            );
+        }
+        h.command(Command::CancelOrders {
+            command: 103,
+            ids: vec!["external-trail".into()],
+        });
+        let (id, p) = body(&mut h, "/cancel-strategy-order");
+        assert_eq!(p, json!({"orderId":"external-trail"}));
+        h.reply(id, 200, r#"{"code":"00000","data":null}"#);
+        assert!(h.done.last().unwrap().1.is_ok());
+    }
 }

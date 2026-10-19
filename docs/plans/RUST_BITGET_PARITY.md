@@ -104,3 +104,17 @@ green final-head CI. No stash, rebase, force push or master changes.
 - Independent query review clear. Existing history13 + new UTA ledger10 tests and
   strict clippy PASS; tests include byte-wise streamed decoding, late UTA signal,
   malformed lists, failed later pages, repeated cursors and nonoverlapping windows.
+
+## Final boundary review
+
+- Independent review found stale venue timestamps can make HTTP acknowledgements
+  overwrite a later WS callback. Captured monotonic WS revisions now protect
+  same-clock arrivals as well as old exchange timestamps; regression passes.
+- Real Worker hydration now retains the trailing SL trigger basis. Native replay
+  already exposed that field, so an adapter regression pins the production path.
+- External limit/index trailing configurations remain visible/cancelable, and
+  unsupported edits fail before cancel. Supported market-triggered trailing paths
+  retain their exact native parameters across size edits and rollback.
+- Native trailing21 + existing trading25 PASS, inverse amend direct/resolved paths
+  PASS, strict clippy PASS. Flat ETH metadata test clears positions first and
+  verifies ETH collateral in metadata, leverage, margin and cancellation.

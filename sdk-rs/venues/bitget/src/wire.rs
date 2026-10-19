@@ -911,5 +911,6 @@ pub struct TrailingRow {
     pub activation_price: Number,
     pub activation_type: String,
     pub trail_type: String,
+    pub pre_order_type: String,
     pub trail_variance: Number,
 }
