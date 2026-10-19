@@ -221,3 +221,20 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
 - Integrated root typecheck 44 tasks and lint 28 tasks PASS. First root tests hit
   an unrelated WEEX reconnect timeout; its 11 targeted tests and full 27-task
   retry PASS. Workspace Rust checks/build and integrated replays in progress.
+
+### Integrated core checks PASS
+
+- Full workspace bans/fmt/clippy/tests and wasm clippy/build PASS after the merge.
+  Adapter tests 16 and JS host tests 12 PASS after reifying Yarn workspace links;
+  the old local symlink had loaded the pre-nesting bundle.
+- Bitunix integrated three-run public TS/Rust medians: CPU 429.9/333.6 ms,
+  steady 260.5/198.9 ms, retained 2.5/2.2 MB, sampled peak 29.7/29.2 MB. Private
+  42 records PASS. Binance public CPU 254.3/143.0 ms, retained 3.2/2.3 MB, peak
+  19.0/10.9 MB; private PASS.
+- Expanded subscription checks revealed the old Bybit replay stopped while its
+  paced subscription queues were still draining. Both implementations now wait
+  for the expected taped startup topics. Three-run Bybit public PASS: CPU
+  495.4/403.6 ms, retained 3.1/1.8 MB, sampled peak 30.2/10.6 MB.
+- Four-factory aggregate wasm is 1,816,352 bytes. Set CI's bundle cap to 1.8 MiB;
+  CPU and memory acceptance thresholds remain unchanged. Remaining checks: Bybit
+  private, OKX public/all private aliases, then PR adversarial review + green CI.

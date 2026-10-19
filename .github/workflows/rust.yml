@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # The browser engine's aggregate size budget (1.4 MiB).
-      WASM_BUDGET_BYTES: 1468006
+      # Four venue engines: measured 1,816,352 bytes; cap the bundle at 1.8 MiB.
+      WASM_BUDGET_BYTES: 1887436
     defaults:
       run:
         working-directory: .

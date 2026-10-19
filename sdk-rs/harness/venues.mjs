@@ -63,6 +63,11 @@ export const VENUES = {
     /** Book topics get a message handler once each subscription reaches the socket. */
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >= count,
+    startupTopics: (records, books) => {
+      const symbols = new Set(records.filter((r) => r.type === 'http' && r.status === 200 && new URL(r.url).pathname === '/v5/market/instruments-info')
+        .flatMap((r) => { try { const body = JSON.parse(r.body); return body.retCode === 0 ? body.result?.list ?? [] : []; } catch { return []; } }).map((row) => row.symbol));
+      return [...symbols].map((symbol) => `tickers.${symbol}`).concat(books.map((symbol) => `orderbook.1000.${symbol}`));
+    },
     privateSocket: '/v5/private',
     matchRequestBody: true,
     volatileBodyFields: true,

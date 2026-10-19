@@ -318,6 +318,11 @@ class Tape {
     let initialized;
     const ensureReady = () => initialized ??= within((async () => {
       await ready();
+      if (venue.startupTopics) {
+        const expected = venue.startupTopics(records, bookSymbols).map((arg) => JSON.stringify(canonicalObject(arg)));
+        const complete = () => expected.every((topic) => this.sockets.some((socket) => socket.opened && !socket.closed && socket.topics.has(topic)));
+        while (!complete()) await new Promise((r) => setTimeout(r, 10));
+      }
       if (values.venue !== 'bitunix') return;
       const symbols = JSON.parse(records.find((r) => r.type === 'http' && r.url.includes('/market/trading_pairs')).body).data
         .filter((m) => apiSupported(m.isApiSupported) && m.symbolStatus === 'OPEN' && m.quote === 'USDT').length;

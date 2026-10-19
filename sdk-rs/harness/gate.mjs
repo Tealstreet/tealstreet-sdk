@@ -172,7 +172,12 @@ for (let run = 0; run < runs; run++) {
     if (result[impl].unserved) differences.push(`${impl}: ${result[impl].unserved} unserved requests`);
   }
   for (const field of ['outbound', 'subscriptions', 'candles', 'bookEvents']) {
-    if (!equal(ts[field], rust[field])) differences.push(`${field}: ts=${JSON.stringify(ts[field])} rust=${JSON.stringify(rust[field])}`);
+    if (!equal(ts[field], rust[field])) {
+      const left = ts[field] ?? [];
+      const right = rust[field] ?? [];
+      const first = left.findIndex((row, index) => !equal(row, right[index]));
+      differences.push(`${field}: ts count=${left.length} rust count=${right.length}, first difference ${first}: ts=${JSON.stringify(left[first])} rust=${JSON.stringify(right[first])}`);
+    }
   }
   // KNOWN_TS_FIXES: Bitunix parses ISO ft with parseFloat (the year) and ignores
   // nft. The ticker contract uses the next funding timestamp in milliseconds.
