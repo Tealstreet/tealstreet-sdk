@@ -222,32 +222,46 @@ memory.
 - Host tests: each host runs recorded traffic through its own loop and must
   reach the engine state a direct replay reaches.
 
-### 5. Worker shell integration
+### 5. Worker shell integration — done in the SDK
 
-- `ExchangeWorker` gets a per-venue switch. A Rust venue posts each frame with
-  the buffer in the transfer list as `op: 'frame'`; it replaces `store`,
-  `store:delta`, `listenOrderBook*`, `listenOHLCV` and `fill` for that venue.
-- Shell features that read state in the worker (chasers, TWAP, CLI,
-  position updates) query the engine through small wasm calls (best bid/ask,
-  order by id, position by symbol) instead of a JS store copy.
-- Shell commands map one-to-one to engine commands.
+- `ExchangeOptions.engine: 'rust'` plus a venue in `RUST_VENUES` makes
+  `ExchangeWorker` build a `RustEngineExchange` (`exchanges/rust/`) instead of
+  the TS venue. Every flush frame updates its `DefaultStore` through
+  `FrameApplier` (`store/frameApplier.ts`), so chasers, TWAP, the CLI and
+  post-processors read the store they always have; trading, history and
+  subscriptions are engine commands.
+- Realms register how to load the wasm engine (`loadWebEngine`,
+  `loadNodeEngine`), as they register the transport.
+- With `__workerConfig.acceptsFrames`, the worker posts each frame to main
+  (`op: 'frame'`, transferred) and store payloads carry only worker-derived
+  fields. Books, candles and fills flush at the venue's book tick, store
+  sections at 250 ms. Without it, accounts on the engine post objects through
+  the existing handlers.
 
-### 6. Client adoption (tealstreet-next)
+### 6. Client adoption (tealstreet-next) — blocked on two decisions
 
-- Main thread keeps engine state as columns: frame `MARKETS`/`TICKERS`
-  replace tables; `TICKER_DELTAS` apply in place (`TickerState`); `BOOK`
-  views feed the order book, DOM and depth chart directly; ORDERS and
-  POSITIONS tables replace the arrays; FILLS drive notifications.
-- Components read columns by market index; strings are decoded only for
-  display.
-- exchange-server switches to the native host and streams the same frames
-  over its socket, so hosted and local clients share one reader. Over a
-  network, full books every flush are too heavy (two 1,000-level books are
-  ~450 KB/s); networked consumers get `BOOK_DELTA` sections (changed levels
-  since the last flush) and a full `BOOK` on subscribe.
-- Developed on a `feat/rust-rewrite` branch in tealstreet-next against a
-  locally built SDK; it merges only after the SDK reaches master and Copybara
-  mirrors it.
+The app change is small because the store stays the seam: register
+`loadWebEngine` in `StoreWorkerEntry.ts`, push `acceptsFrames` and set
+`engine: 'rust'` behind a flag, and add `case 'frame':
+exchange.applyWorkerFrame(data)` to `exchangeAccountController`'s worker
+listener. Readers of `exchange.store` and the `listenOrderBook` consumers stay
+as they are; zero-copy book consumers (`Float64Array` rows into the order
+book, DOM and depth chart) are the next step after that.
+
+Decisions needed:
+
+1. **How SDK changes reach tealstreet-next before the final merge.** Copybara
+   mirrors master only, and the app cannot use the engine until
+   `packages/safe-cex` and `sdk-rs/safe-cex-wasm` arrive there. Either master
+   takes the landing branch once Binance is ready (rather than once at the
+   very end), or Copybara gains a branch lane.
+2. **How the web build gets the wasm.** `pkg/web` is built from Rust:
+   tealstreet-next's build installs the pinned toolchain and wasm-bindgen, or
+   the SDK publishes the built package.
+
+Then: exchange-server moves to the native host and streams the same frames
+(with `BOOK_DELTA` sections for networked clients — full books every flush
+are ~450 KB/s for two 1,000-level books).
 
 ### 7. CI — done for Binance
 
