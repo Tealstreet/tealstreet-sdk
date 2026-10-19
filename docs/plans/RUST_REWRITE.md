@@ -48,15 +48,13 @@ Action  = WsConnect | WsSend | WsClose
 ## Data model
 
 - Wire messages decode with serde into borrowed, venue-specific structs
-  (`&str` fields, numeric strings parsed straight to `f64`). There is no
-  intermediate `Value` tree on hot paths: order book, ticker, trade, order and
-  position updates.
+  (`&str`/`Cow` fields, numeric strings parsed straight to `f64`). There is no
+  intermediate `Value` tree anywhere in engine or venue code.
 - Symbols are interned to a `u32` market index. Tickers live in a `Vec` indexed
-  by it.
-- Order books use integer price ticks in sorted vectors (or a B-tree where depth
-  requires it), keyed per market. They are not maps of strings.
-- The Store holds typed state (`safe-cex-types`) plus the monotonic `updateIds`
-  the main thread depends on.
+  by it, with a per-field dirty mask.
+- Order books are sorted `Vec<(price, amount)>` per side, keyed per market.
+- The Store holds typed state (`safe-cex-engine/src/model.rs`) and change
+  tracking; it is written out only as flush frames.
 
 ## Data shapes: the flush frame
 
@@ -148,24 +146,119 @@ Every venue PR states both numbers. A PR that loses on either does not merge.
 - `serde_json::Value` on a hot path.
 - Dependencies on the deleted crates.
 
-## Reused crates (audited before use)
+## Reused crates
 
-`safe-cex-types`, `safe-cex-store`, `safe-cex-crypto`, `safe-cex-lighter-sdk`,
-`safe-cex-transport` (wire framing only: hosts own sockets), and the precision
-and rounding half of `safe-cex-num`. Anything that fails the bans above is cut
-from these crates or rewritten.
+`safe-cex-crypto` survived the audit, trimmed to signing primitives (HMAC,
+SHA, ed25519, EIP-712, ES256, StarkNet, zkLink, Lighter). Every other crate of
+the earlier port failed the bans and is deleted.
 
-## Order of work
+## Plan
 
-1. Delete the old port on this branch. Audit and trim the reused crates.
-2. Core: event/action types, Store, worker boundary, three hosts (browser,
-   Workers, native), and the replay harness with both gates.
-3. Binance USD-M end to end in the browser worker behind a per-venue switch:
-   markets, tickers, order books, candles, balance, positions, orders, fills,
-   place/amend/cancel. Both gates green. This sets the venue pattern.
-4. The remaining venues in parallel, one PR each, copying the Binance pattern.
-5. Each venue that passes both gates and ships has its TS implementation
-   deleted. There is no permanent dual path.
+Each phase ends with a commit on `feat/rust-rewrite` and green CI. Status is
+kept current in this section.
+
+### 1. Clean slate — done
+
+- Old port deleted: `js_runtime`, the 29 transcribed venue crates, the JS
+  emulation crates, their scripts, tests and CI jobs.
+- `safe-cex-crypto` audited and trimmed. CI bans enforce the rules above.
+
+### 2. Core and Binance public data — done
+
+- Sans-I/O engine, typed Store, streaming JSON decode, flush frame writer and
+  its JS reader (`wire.mjs`), browser host (`host.mjs`).
+- Binance USD-M public data: markets, tickers, full-depth books with
+  snapshot/diff sync and ban-safe backoff, candles.
+- Harness: live tape recorder, TS and Rust replay, correctness and
+  performance gate. On a 5-minute, 10-book tape: identical output, 15.2x less
+  worker CPU, 1.4x less retained memory.
+
+### 3. Binance USD-M private data and trading — next
+
+Engine side, all inside `safe-cex-venue-binance`:
+
+- Signing: HMAC-SHA256 over the query string, `timestamp` corrected by the
+  server-time offset, `recvWindow`.
+- Private startup: balance and positions (`/fapi/v3/account`), position mode,
+  open orders and open algo orders, then the user data stream (listenKey
+  create, 30-minute keepalive, reconnect on `listenKeyExpired`).
+- Stream events: `ORDER_TRADE_UPDATE`, `ALGO_UPDATE`, `ACCOUNT_UPDATE`,
+  `ACCOUNT_CONFIG_UPDATE` into ORDERS, POSITIONS, BALANCE and FILLS sections.
+- Commands: place (batch of 5, algo endpoint for conditional types), amend,
+  cancel (batch), cancel all for a symbol, leverage, margin type, position
+  mode. Optimistic `creating`/`canceling` states go out in the next frame;
+  results and venue errors come back as `CommandDone`.
+- Rare request/response calls (order history, fills history, income, closed
+  PnL, public trades) are commands whose result is JSON in `CommandDone`;
+  they never touch the frame.
+- Reconciliation: a periodic REST resync of orders and positions, paused
+  under rate limits exactly like depth snapshots.
+
+Correctness: a private tape built from Binance's documented payloads (REST
+responses and stream events, including partial fills, amend, cancel, algo
+triggers and liquidation) is replayed through TS and Rust and must produce the
+same orders, positions, balance and fills. A live private tape is recorded on
+Binance testnet once test keys are available.
+
+### 4. Hosts
+
+- Browser worker: `safe-cex-wasm` + `host.mjs` (exists).
+- Native: `safe-cex-native`, tokio + tokio-tungstenite + reqwest, driving the
+  same engine; used by exchange-server and the CLI.
+- Cloudflare: `safe-cex-workers`, workers-rs in a Durable Object (Workers
+  `WebSocket`, `fetch`, alarms as timers).
+- Host conformance test: the same tape through every host's event loop
+  yields byte-identical frames.
+
+### 5. Worker shell integration
+
+- `ExchangeWorker` gets a per-venue switch. A Rust venue posts each frame with
+  the buffer in the transfer list as `op: 'frame'`; it replaces `store`,
+  `store:delta`, `listenOrderBook*`, `listenOHLCV` and `fill` for that venue.
+- Shell features that read state in the worker (chasers, TWAP, CLI,
+  position updates) query the engine through small wasm calls (best bid/ask,
+  order by id, position by symbol) instead of a JS store copy.
+- Shell commands map one-to-one to engine commands.
+
+### 6. Client adoption (tealstreet-next)
+
+- Main thread keeps engine state as columns: frame `MARKETS`/`TICKERS`
+  replace tables; `TICKER_DELTAS` apply in place (`TickerState`); `BOOK`
+  views feed the order book, DOM and depth chart directly; ORDERS and
+  POSITIONS tables replace the arrays; FILLS drive notifications.
+- Components read columns by market index; strings are decoded only for
+  display.
+- exchange-server switches to the native host and streams the same frames
+  over its socket, so hosted and local clients share one reader.
+- Developed on a `feat/rust-rewrite` branch in tealstreet-next against a
+  locally built SDK; it merges only after the SDK reaches master and Copybara
+  mirrors it.
+
+### 7. CI
+
+- Existing: bans, fmt, clippy, native tests, wasm32 build and clippy.
+- Add: wasm-bindgen build plus the replay gate on small committed tapes
+  (public and private, compressed), failing on any output difference or a CPU
+  or memory loss against TS; a wasm size budget; host conformance.
+
+### 8. Remaining venues
+
+In parallel, one PR each into `feat/rust-rewrite`, copying the Binance
+pattern (borrowed wire structs, state machines, frame sections, tape, gate):
+Binance inverse, spot and portfolio margin first (shared code), then Bybit,
+OKX, Bitget, Hyperliquid, and the rest of `packages/safe-cex/src/exchanges`.
+
+### 9. Delete TypeScript and merge
+
+- Each venue that passes both gates and ships has its TS implementation
+  deleted in the same PR.
+- After the last venue: delete `BaseExchange`, the TS Store and the object
+  payload paths, then merge `feat/rust-rewrite` into master once.
+
+### Blockers that need Sam
+
+- Binance testnet (or live test-account) API keys for the live private tape.
+  The documented-payload tape does not need them.
 
 ## Branching
 
