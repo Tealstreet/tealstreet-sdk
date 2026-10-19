@@ -231,5 +231,5 @@ in, or the row is dropped if the order already left.
 and rely on them coming back) or from `updateOrdersStatus` (Bybit and Phemex map
 a non-final "Triggered" to Closed; Binance sends `EXPIRED` when a stop
 triggers). Only a venue whose stream event is FINAL calls it — OKX's `filled` /
-`canceled` today. `fromWorker` is skipped because the worker's store has already
+`canceled`, and BloFin's `filled` / `canceled` / `effective` / `order_failed`. `fromWorker` is skipped because the worker's store has already
 applied it. Proven by the gap-4 cases in `__tests__/faultBench/badLink.scenarios.test.ts`.

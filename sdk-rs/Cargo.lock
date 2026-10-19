@@ -3621,6 +3621,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-blofin"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "safe-cex-venue-bybit"
 version = "0.1.0"
 dependencies = [
@@ -3678,6 +3689,7 @@ dependencies = [
  "safe-cex-engine",
  "safe-cex-venue-binance",
  "safe-cex-venue-bingx",
+ "safe-cex-venue-blofin",
  "safe-cex-venue-bybit",
  "safe-cex-venue-cryptocom",
  "safe-cex-venue-mexc",
