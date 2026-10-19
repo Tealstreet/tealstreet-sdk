@@ -556,3 +556,20 @@ pub fn install_transport_adapter(
     }
     Ok(())
 }
+
+#[cfg(test)]
+pub(super) mod input_contract_tests {
+    #[allow(dead_code)]
+    mod observation {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/client-input-observers.rs"
+        ));
+    }
+    pub(in crate::js_runtime::client) fn status(input: &serde_json::Value) -> serde_json::Value {
+        observation::status(input, super::status_of)
+    }
+    pub(in crate::js_runtime::client) fn same(input: &serde_json::Value) -> serde_json::Value {
+        observation::same(input, super::same)
+    }
+}

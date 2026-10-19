@@ -294,12 +294,13 @@ fn normalized_header_value(value: Js) -> Result<Js, Thrown> {
     if value.is_nullish() || value.strict_equals(&Js::Bool(false)) {
         return Ok(value);
     }
-    if let Some(values) = value.array_values()? {
-        return values
-            .into_iter()
-            .map(normalized_header_value)
-            .collect::<Result<Vec<_>, _>>()
-            .map(Js::array);
+    if value.is_array() {
+        return value.call_method(
+            "map",
+            vec![Js::function("normalizeValue", |_, args| {
+                normalized_header_value(arg(&args, 0))
+            })],
+        );
     }
     let units = value.to_js_string()?;
     let units: Vec<u16> = units
@@ -1029,12 +1030,20 @@ fn optional_text(config: &Js, key: &str) -> Result<Option<String>, Thrown> {
 
 fn js_params_serializer(config: &Js) -> Result<Js, Thrown> {
     let serializer = config.get("paramsSerializer")?;
-    if serializer.is_callable() {
-        Ok(serializer)
+    let options = if serializer.is_callable() {
+        Js::object(vec![("serialize", serializer)])
     } else if serializer.is_object() {
-        super::scope::bound_member(&serializer, "serialize")
+        serializer
     } else {
-        Ok(Js::Undefined)
+        return Ok(Js::Undefined);
+    };
+    let serialize = options.get("serialize")?;
+    if serialize.is_callable() {
+        Ok(Js::function("serialize", move |_, args| {
+            serialize.call(Js::Undefined, vec![arg(&args, 0), options.clone()])
+        }))
+    } else {
+        Ok(serialize)
     }
 }
 
@@ -1356,5 +1365,50 @@ impl JsHttpHost for RestHttpHost {
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod input_contract_tests {
+    use super::*;
+    #[allow(dead_code)]
+    mod observation {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/client-input-observers.rs"
+        ));
+    }
+    #[test]
+    fn native_client_input_contracts_match_node() {
+        let source = std::process::Command::new("node")
+            .arg("tests/client_input_oracle.cjs")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .unwrap();
+        assert!(
+            source.status.success(),
+            "{}",
+            String::from_utf8_lossy(&source.stderr)
+        );
+        let expected: serde_json::Value = serde_json::from_slice(&source.stdout).unwrap();
+        for (name, rows) in expected.as_object().unwrap() {
+            if name == "pipeline" {
+                continue;
+            }
+            for row in rows.as_array().unwrap() {
+                let input = &row["input"];
+                let actual = match name.as_str() {
+                    "from" => observation::from(input, axios_headers_from),
+                    "key" => observation::key(input, header_key),
+                    "normalize" => observation::normalize(input, normalized_header_value),
+                    "set" => observation::set(input, set_header),
+                    "params" => observation::params(input, js_params_serializer),
+                    "status" => factory::input_contract_tests::status(input),
+                    "same" => factory::input_contract_tests::same(input),
+                    _ => unreachable!(),
+                };
+                assert_eq!(actual, row["output"], "client input {name}/{input}");
+            }
+        }
     }
 }

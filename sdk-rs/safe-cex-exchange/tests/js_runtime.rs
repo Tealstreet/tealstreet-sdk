@@ -5110,3 +5110,309 @@ fn audit_native_http_consumers_publish_config_numbers_and_proxy_classification()
         .unwrap()
         .block_on(tokio::task::LocalSet::new().run_until(run));
 }
+
+#[test]
+fn client_header_array_mapping_matches_installed_axios() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_headers_oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    fn view(value: &Js) -> Value {
+        if value.is_array() {
+            let len = value.get("length").unwrap().to_number().unwrap() as usize;
+            let keys: Vec<_> = value
+                .own_keys()
+                .iter()
+                .map(|s| String::from_utf16(s).unwrap())
+                .collect();
+            return json!([
+                "array",
+                len,
+                keys,
+                (0..len)
+                    .map(|i| {
+                        let key = i.to_string();
+                        if value.has_own(&key) {
+                            view(&value.get(&key).unwrap())
+                        } else {
+                            json!(["hole"])
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            ]);
+        }
+        match value {
+            Js::String(s) => json!(["string", s.as_ref()]),
+            Js::Null => json!(["null", null]),
+            Js::Undefined => json!(["undefined", null]),
+            Js::Bool(b) => json!(["boolean", b]),
+            _ => panic!("unexpected normalized header value"),
+        }
+    }
+    for row in expected["valueRows"].as_array().unwrap() {
+        let kind = row["input"].as_str().unwrap();
+        let trace = Rc::new(RefCell::new(Vec::<String>::new()));
+        let token = Js::object(vec![("marker", Js::str("array-map"))]);
+        let input = if kind == "nested" {
+            Js::array(vec![
+                Js::Bool(false),
+                Js::Null,
+                Js::Undefined,
+                Js::array(vec![
+                    Js::str("\t x\r\n "),
+                    Js::Number(123.0),
+                    Js::utf16(&[0xd800]),
+                ]),
+            ])
+        } else {
+            Js::array(vec![Js::Number(1.0)])
+        };
+        match kind {
+            "sparse" => {
+                input.set("length", Js::Number(4.0)).unwrap();
+                input.delete(&utf16("0")).unwrap();
+                input.set("1", Js::str(" a ")).unwrap();
+                input.set("3", Js::Undefined).unwrap();
+            }
+            "custom-map" => {
+                let owner = match &input {
+                    Js::Array(a) => Rc::downgrade(a),
+                    _ => unreachable!(),
+                };
+                let trace = trace.clone();
+                input
+                    .define(
+                        "map",
+                        Js::function("map", move |this, args| {
+                            trace.borrow_mut().push(
+                                if owner
+                                    .upgrade()
+                                    .is_some_and(|a| this.same_reference(&Js::Array(a)))
+                                {
+                                    "receiver"
+                                } else {
+                                    "wrong"
+                                }
+                                .into(),
+                            );
+                            Ok(Js::array(vec![
+                                arg(&args, 0).call(Js::Undefined, vec![Js::str(" X ")])?,
+                                arg(&args, 0).call(Js::Undefined, vec![Js::Bool(false)])?,
+                            ]))
+                        }),
+                    )
+                    .unwrap();
+            }
+            "map-throws" => {
+                let trace = trace.clone();
+                let token = token.clone();
+                input
+                    .define_accessor(
+                        "map",
+                        Some(Rc::new(move |_| {
+                            trace.borrow_mut().push("get-map".into());
+                            Err(Thrown::new(token.clone()))
+                        })),
+                        None,
+                    )
+                    .unwrap();
+            }
+            "map-noncallable" => input.define("map", Js::Number(0.0)).unwrap(),
+            "nested" => {}
+            _ => unreachable!(),
+        }
+        let actual = match client::axios_headers_from(&Js::object(vec![("X", input)])) {
+            Ok(headers) => {
+                json!({"ok":true,"value":view(&headers.call_method("get",vec![Js::str("x")]).unwrap()),"trace":trace.borrow().clone()})
+            }
+            Err(error) => {
+                json!({"ok":false,"name":if error.value.same_reference(&token){"original".into()}else{error.value.get("name").unwrap().to_display()},"trace":trace.borrow().clone()})
+            }
+        };
+        assert_eq!(
+            actual, row["output"],
+            "live AxiosHeaders array mapping {kind}"
+        );
+    }
+}
+
+#[test]
+fn client_query_serializer_preserves_axios_receiver_and_options() {
+    for object_form in [false, true] {
+        let runtime = Rc::new(Runtime::default());
+        let terminal = std::sync::Arc::new(Terminal::default());
+        let trace = Rc::new(RefCell::new(Vec::<bool>::new()));
+        let seen = trace.clone();
+        let serializer = Js::function("serialize", move |this, args| {
+            seen.borrow_mut()
+                .extend([this.is_undefined(), args.len() == 2]);
+            let options = arg(&args, 1);
+            seen.borrow_mut()
+                .push(options.get("serialize")?.is_callable());
+            Ok(Js::str("native=query"))
+        });
+        let serializer = if object_form {
+            Js::object(vec![("serialize", serializer)])
+        } else {
+            serializer
+        };
+        let xhr = client::create(
+            client::rest_http_host(runtime.clone(), terminal.clone()),
+            Js::object(vec![("paramsSerializer", serializer)]),
+        );
+        let result = settle(
+            &runtime,
+            xhr.call_method(
+                "get",
+                vec![
+                    Js::str("/ok"),
+                    Js::object(vec![("params", Js::object(vec![("x", Js::Number(1.0))]))]),
+                ],
+            )
+            .unwrap(),
+        );
+        assert!(result.is_ok(), "actual host serializer setup: {result:?}");
+        assert_eq!(
+            *trace.borrow(),
+            [true, true, true],
+            "Axios buildURL receiver/arguments, object={object_form}"
+        );
+        assert_eq!(terminal.seen.lock().unwrap()[0].url, "/ok?native=query");
+    }
+}
+
+#[test]
+fn client_constructor_and_promise_links_match_installed_axios() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/client_input_oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    for row in expected["pipeline"].as_array().unwrap() {
+        let kind = row["input"].as_str().unwrap();
+        let runtime = Rc::new(Runtime::default());
+        let host = Rc::new(Http {
+            runtime: runtime.clone(),
+            sent: RefCell::new(vec![]),
+        });
+        let token = Js::object(vec![("marker", Js::str("pipeline"))]);
+        let trace = Rc::new(RefCell::new(Vec::<String>::new()));
+        let adapter_token = token.clone();
+        let adapter_trace = trace.clone();
+        let xhr = client::create(
+            host,
+            Js::object(vec![(
+                "adapter",
+                Js::function("adapter", move |_, args| {
+                    adapter_trace.borrow_mut().push("adapter".into());
+                    Ok(Js::object(vec![
+                        ("status", Js::Number(200.0)),
+                        ("data", adapter_token.clone()),
+                        ("headers", Js::object(vec![])),
+                        ("config", arg(&args, 0)),
+                    ]))
+                }),
+            )]),
+        );
+        let request = xhr.get("interceptors").unwrap().get("request").unwrap();
+        let inner = trace.clone();
+        request
+            .call_method(
+                "use",
+                vec![Js::function("inner", move |_, args| {
+                    inner.borrow_mut().push("inner".into());
+                    Ok(arg(&args, 0))
+                })],
+            )
+            .unwrap();
+        let outer = trace.clone();
+        let reject = kind != "fulfilled";
+        let thrown = token.clone();
+        request
+            .call_method(
+                "use",
+                vec![Js::function("outer", move |_, args| {
+                    outer.borrow_mut().push("outer".into());
+                    if reject {
+                        Err(Thrown::new(thrown.clone()))
+                    } else {
+                        Ok(arg(&args, 0))
+                    }
+                })],
+            )
+            .unwrap();
+        let response = xhr.get("interceptors").unwrap().get("response").unwrap();
+        if kind == "recover" {
+            let trace = trace.clone();
+            let token = token.clone();
+            response
+                .call_method(
+                    "use",
+                    vec![
+                        Js::Undefined,
+                        Js::function("recover", move |_, args| {
+                            trace.borrow_mut().push(
+                                if arg(&args, 0).same_reference(&token) {
+                                    "original-rejection"
+                                } else {
+                                    "wrong-rejection"
+                                }
+                                .into(),
+                            );
+                            Ok(token.clone())
+                        }),
+                    ],
+                )
+                .unwrap();
+        }
+        let response_trace = trace.clone();
+        let fulfilled = kind == "fulfilled";
+        response
+            .call_method(
+                "use",
+                vec![Js::function("response", move |_, args| {
+                    response_trace.borrow_mut().push("response".into());
+                    if fulfilled {
+                        arg(&args, 0).get("data")
+                    } else {
+                        Ok(arg(&args, 0))
+                    }
+                })],
+            )
+            .unwrap();
+        let pending = xhr.call_method("get", vec![Js::str("/probe")]).unwrap();
+        assert!(
+            matches!(pending, Js::Promise(_)),
+            "create/spawn must return the canonical Promise carrier"
+        );
+        let output = match settle(&runtime, pending) {
+            Ok(value) => {
+                json!({"ok":true,"original":value.same_reference(&token),"trace":trace.borrow().clone()})
+            }
+            Err(error) => {
+                json!({"ok":false,"original":error.value.same_reference(&token),"trace":trace.borrow().clone()})
+            }
+        };
+        assert_eq!(
+            output, row["output"],
+            "actual native client pipeline {kind}"
+        );
+    }
+}
