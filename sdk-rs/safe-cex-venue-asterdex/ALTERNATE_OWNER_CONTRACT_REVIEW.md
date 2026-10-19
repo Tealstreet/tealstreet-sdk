@@ -122,3 +122,11 @@ API, then accepts all eight unchanged Parent entrypoints with the retained type.
 Logs: `/tmp/kxakrb-aster-parent-api-{red,green}.log`. This is a fixture refusal,
 not a production behavioral RED. The canonical native replay remains the runtime
 receipt for the actual constructed Parent and listener-error observations.
+
+The first executable replay passed the diagnostic and constructor cases but
+refused the two old Parent log expectations. Maintained `BaseExchange.log`
+(`packages/safe-cex/src/exchanges/base.ts`) calls `console.log(message, severity)`;
+executing that actual source initializer records `[message, "info"]` for both
+inputs. The native primitive console renders those arguments as `message info`.
+The two console expectations now include that severity; no runtime code changed.
+Source receipt: `/tmp/kxakrb-aster-parent-log-source.log`.

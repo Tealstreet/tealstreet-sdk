@@ -88973,11 +88973,11 @@
         "cases": [
           {
             "input": "α log",
-            "output": "α log"
+            "output": "α log info"
           },
           {
             "input": "β log",
-            "output": "β log"
+            "output": "β log info"
           }
         ]
       },
