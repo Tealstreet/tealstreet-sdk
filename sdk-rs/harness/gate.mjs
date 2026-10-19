@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
+import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { fixWeexConditionals } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { venueOf } from './venues.mjs';
@@ -421,6 +422,17 @@ for (let run = 0; run < runs; run++) {
   const right = JSON.stringify(stable(rust.commands));
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
   normalizeBingxPublic(ts);
+  if (['bybitinverse', 'bybitspot'].includes(values.venue)) {
+    const privateRecord = tapeRecords.find(
+      (record) => record.type === 'ws' && new URL(record.url).pathname === '/v5/private',
+    );
+    const privateUrl = privateRecord && new URL(privateRecord.url);
+    ts.subscriptions = normalizeTsBybitSubscriptions(
+      values.venue,
+      ts.subscriptions,
+      privateUrl && `${privateUrl.origin}${privateUrl.pathname}`,
+    );
+  }
   // OKX validates each native argument/wildcard against every delivered frame.
   if (
     !values.venue.startsWith('okx') &&

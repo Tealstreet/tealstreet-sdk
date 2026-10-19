@@ -270,3 +270,46 @@ fallback; keyless MEXC metadata reads respect inferred public-only mode; optiona
 caller identity is omitted on serialization so Rust's own option round-trip
 continues to work with the landed strict-null rejection. Full integrated build,
 replays and final-head CI remain required before merge.
+
+## Final seven-venue local gates
+
+All 25 replay gates PASS: eleven public correctness/performance medians of three,
+and fourteen private correctness replays, including every Bybit profile, Binance,
+BingX, MEXC, Crypto.com, WEEX and all four OKX aliases. Current frame counts also
+include the landing harness's recorded connection events. Public fixtures and
+performance thresholds are unchanged.
+
+| Venue | Frames | Main CPU TS / Rust ms | Steady CPU TS / Rust ms | Retained TS / Rust MB |
+| --- | ---: | ---: | ---: | ---: |
+| bybitinverse | 708 | 109.6 / 31.5 | 71.7 / 13.0 | 15.8 / 1.3 |
+| bybitspot | 4339 | 128.3 / 93.3 | 74.4 / 40.7 | 16.7 / 1.9 |
+| bybitdemo | 5833 | 196.2 / 139.7 | 98.2 / 57.3 | 21.0 / 2.9 |
+| hyrotrader | 160 | 35.3 / 24.0 | 11.0 / 9.1 | 15.4 / 0.9 |
+| binance | 873 | 168.9 / 76.4 | 90.8 / 30.0 | 18.1 / 2.5 |
+| bybit | 8743 | 236.1 / 216.5 | 128.6 / 105.8 | 21.5 / 2.9 |
+| cryptocom | 2178 | 245.5 / 158.8 | 150.2 / 93.8 | 14.4 / 1.7 |
+| okx | 8904 | 1353.6 / 1174.0 | 1020.6 / 861.9 | 19.1 / 3.8 |
+| weex | 2029 | 254.0 / 176.0 | 152.6 / 107.7 | 18.1 / 2.5 |
+| bingx | 189 | 134.5 / 91.7 | 59.5 / 44.6 | 17.6 / 2.3 |
+| mexc | 14701 | 994.4 / 523.5 | 644.4 / 307.8 | 23.7 / 3.9 |
+
+Native workspace tests, strict all-target Clippy, bans, fmt, wasm-target Clippy
+and the release wasm build PASS. Native counts: Bybit 105, engine 39, Binance 29,
+BingX 93, MEXC 52, Crypto.com 43, OKX 66 and WEEX 77. Rebuilt wasm shell 37,
+host/socket/Workers 13, inverse/MEXC frame/copier 8 and harness 46 tests pass.
+Root typecheck 44 tasks, lint 28 and licenses 31 workspaces pass. The artifact is
+2,539,883 bytes, within the landing branch's unchanged 2.5 MiB budget.
+
+The landed subscription audit initially reported inverse/spot generic TS topics
+versus category-qualified Rust topics. Bybit documents both alternatives. A
+TS-only oracle mapping at the taped private origin now recognizes those exact
+alternatives; Rust topics, origins, operations and generations remain exact.
+Independent adversarial review passed, including negative comparisons for each
+wrong-scope case and malformed collection validation. This is an API-equivalence
+check, not an additional TS bug.
+
+Independent reviews pass for the complete decoder, shared wasm boundary, venue
+registries, inverse/MEXC units, leverage rails, native execution-control guards,
+client-identity serialization and keyless metadata guard. Findings and resolutions
+are posted on PR #1307. Final-head CI remains required before merge. Live Hyro
+connectivity is still unverified; no credentials or endpoints are configured here.
