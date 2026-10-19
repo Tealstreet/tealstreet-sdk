@@ -4609,7 +4609,7 @@
       "signature": {
         "inputs": [
           [
-            "order_data",
+            "data",
             {
               "borrowed_ref": {
                 "lifetime": null,
@@ -4902,7 +4902,7 @@
             }
           ],
           [
-            "position_amount",
+            "amount",
             {
               "primitive": "f64"
             }
@@ -19487,14 +19487,14 @@
       "signature": {
         "inputs": [
           [
-            "order_data",
+            "data",
             {
               "borrowed_ref": {
                 "lifetime": null,
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
                     "args": null
                   }
                 }
@@ -19502,7 +19502,7 @@
             }
           ],
           [
-            "field",
+            "key",
             {
               "borrowed_ref": {
                 "lifetime": null,
@@ -19528,7 +19528,7 @@
                   {
                     "type": {
                       "resolved_path": {
-                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
                         "args": null
                       }
                     }
@@ -19546,7 +19546,7 @@
         "where_predicates": []
       }
     },
-    "call": "match $type(&$value[\"data\"],$value[\"field\"].as_str().unwrap()) {Ok(n)=>serde_json::json!({\"bits\":if n.is_nan() { \"NaN\".to_owned() } else { format!(\"{:016x}\",n.to_bits()) }}),Err(e)=>serde_json::json!({\"error\":e.name})}",
+    "call": "match $type(&safe_cex_exchange::js_runtime::value::from_json(&$value[\"data\"]),$value[\"field\"].as_str().unwrap()) {Ok(n)=>serde_json::json!({\"bits\":if n.is_nan() { \"NaN\".to_owned() } else { format!(\"{:016x}\",n.to_bits()) }}),Err(e)=>serde_json::json!({\"error\":e.to_exchange_error().name})}",
     "cases": [
       {
         "input": {
@@ -40547,8 +40547,8 @@
           "data": {
             "e": "kline",
             "extra": [
-              1,
-              2
+              1.0,
+              2.0
             ]
           }
         }
@@ -40597,7 +40597,7 @@
           "kind": "handlers",
           "event": "42",
           "data": {
-            "e": 42
+            "e": 42.0
           }
         }
       },
@@ -40653,8 +40653,8 @@
             "data": {
               "e": "kline",
               "extra": [
-                1,
-                2
+                1.0,
+                2.0
               ]
             }
           }
@@ -40703,7 +40703,7 @@
             "kind": "handlers",
             "event": "42",
             "data": {
-              "e": 42
+              "e": 42.0
             }
           }
         },
@@ -40849,7 +40849,7 @@
           "ok": true,
           "present": true,
           "stream": "btcusdt@kline_1m",
-          "timestamp": 1700000000000,
+          "timestamp": 1700000000000.0,
           "hasTimestamp": true,
           "bits": [
             "4024800000000000",
@@ -40979,7 +40979,7 @@
             "ok": true,
             "present": true,
             "stream": "btcusdt@kline_1m",
-            "timestamp": 1700000000000,
+            "timestamp": 1700000000000.0,
             "hasTimestamp": true,
             "bits": [
               "4024800000000000",
@@ -44443,27 +44443,13 @@
           [
             "value",
             {
-              "resolved_path": {
-                "path": "core::option::Option",
-                "args": {
-                  "angle_bracketed": {
-                    "args": [
-                      {
-                        "type": {
-                          "borrowed_ref": {
-                            "lifetime": null,
-                            "is_mutable": false,
-                            "type": {
-                              "resolved_path": {
-                                "path": "serde_json::value::Value",
-                                "args": null
-                              }
-                            }
-                          }
-                        }
-                      }
-                    ],
-                    "constraints": []
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
                   }
                 }
               }
@@ -44505,7 +44491,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ match $type($value.get(\"value\")) { Ok(text) => { let units = text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "call": "{ match $type(&$value.get(\"value\").map(safe_cex_exchange::js_runtime::value::from_json).unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined)) { Ok(text) => { let units = text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
     "cases": [
       {
         "input": {},
@@ -44592,7 +44578,7 @@
     ],
     "evidence": "asterdex.ws-public.ts handleEventData/handleStreamData bracket lookup and ws-private.ts interpolations apply JavaScript string coercion. Actual production helper is called before capturing text and UTF-16 length; missing, null, arrays, object, Unicode and shadowed toString are separate inputs.",
     "nativeObservation": {
-      "call": "{ match $type($value.get(\"value\")) { Ok(text) => { let units = text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match $type(&$value.get(\"value\").map(safe_cex_exchange::js_runtime::value::from_json).unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined)) { Ok(text) => { let units = text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "text",
         "units"
@@ -44693,27 +44679,13 @@
           [
             "value",
             {
-              "resolved_path": {
-                "path": "core::option::Option",
-                "args": {
-                  "angle_bracketed": {
-                    "args": [
-                      {
-                        "type": {
-                          "borrowed_ref": {
-                            "lifetime": null,
-                            "is_mutable": false,
-                            "type": {
-                              "resolved_path": {
-                                "path": "serde_json::value::Value",
-                                "args": null
-                              }
-                            }
-                          }
-                        }
-                      }
-                    ],
-                    "constraints": []
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
                   }
                 }
               }
@@ -44769,7 +44741,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ match $type($value.get(\"value\")) { Ok(id) => serde_json::json!({\"ok\":true,\"present\":id.is_some(),\"text\":id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "call": "{ match $type(&$value.get(\"value\").map(safe_cex_exchange::js_runtime::value::from_json).unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined)) { Ok(id) => serde_json::json!({\"ok\":true,\"present\":id.is_some(),\"text\":id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
     "cases": [
       {
         "input": {},
@@ -44845,7 +44817,7 @@
     ],
     "evidence": "asterdex.ws-private.ts handleOrderTradeUpdate and handleExecutionReport use data.i?.toString(). Missing/null skip conversion; falsy IDs still convert. Own non-callable toString refuses. Native optional presence and exact ID are observed before JSON.",
     "nativeObservation": {
-      "call": "{ match $type($value.get(\"value\")) { Ok(id) => serde_json::json!({\"ok\":true,\"present\":id.is_some(),\"text\":id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match $type(&$value.get(\"value\").map(safe_cex_exchange::js_runtime::value::from_json).unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined)) { Ok(id) => serde_json::json!({\"ok\":true,\"present\":id.is_some(),\"text\":id}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "present",
         "text"
@@ -44935,27 +44907,13 @@
           [
             "value",
             {
-              "resolved_path": {
-                "path": "core::option::Option",
-                "args": {
-                  "angle_bracketed": {
-                    "args": [
-                      {
-                        "type": {
-                          "borrowed_ref": {
-                            "lifetime": null,
-                            "is_mutable": false,
-                            "type": {
-                              "resolved_path": {
-                                "path": "serde_json::value::Value",
-                                "args": null
-                              }
-                            }
-                          }
-                        }
-                      }
-                    ],
-                    "constraints": []
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
                   }
                 }
               }
@@ -44994,7 +44952,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ match $type($value.get(\"value\")) { Ok(number) => serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.to_bits()),\"nan\":number.is_nan()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "call": "{ match $type(&$value.get(\"value\").map(safe_cex_exchange::js_runtime::value::from_json).unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined)) { Ok(number) => serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.to_bits()),\"nan\":number.is_nan()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
     "cases": [
       {
         "input": {},
@@ -45099,7 +45057,7 @@
     ],
     "evidence": "asterdex.ws-private.ts parseFloat(data.z || \"0\") and other private numeric fields: truthy fallback precedes JavaScript String/parseFloat. Exact binary64 bits observe signed zero, prefix parsing, nonfinite numbers and array coercion before projection.",
     "nativeObservation": {
-      "call": "{ match $type($value.get(\"value\")) { Ok(number) => serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.to_bits()),\"nan\":number.is_nan()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match $type(&$value.get(\"value\").map(safe_cex_exchange::js_runtime::value::from_json).unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined)) { Ok(number) => serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.to_bits()),\"nan\":number.is_nan()}), Err(_) => serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "bits",
         "nan"
@@ -45223,7 +45181,7 @@
                 "is_mutable": false,
                 "type": {
                   "resolved_path": {
-                    "path": "serde_json::value::Value",
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
                     "args": null
                   }
                 }
@@ -45266,7 +45224,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ match $type($value) { Ok(text) => { let units=text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "call": "{ match $type(&safe_cex_exchange::js_runtime::value::from_json($value)) { Ok(text) => { let units=text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
     "cases": [
       {
         "input": null,
@@ -45313,7 +45271,7 @@
     ],
     "evidence": "asterdex.ws-private.ts onMessage and ACCOUNT_UPDATE log JSON.stringify payloads. Native String and UTF-16 length are captured before writing the audit result. Fixtures cover null, arrays, Unicode, numeric spelling and integer-index property ordering; object order follows the production Value map boundary.",
     "nativeObservation": {
-      "call": "{ match $type($value) { Ok(text) => { let units=text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match $type(&safe_cex_exchange::js_runtime::value::from_json($value)) { Ok(text) => { let units=text.encode_utf16().count(); serde_json::json!({\"ok\":true,\"text\":text,\"units\":units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "text",
         "units"
@@ -45374,27 +45332,13 @@
           [
             "value",
             {
-              "resolved_path": {
-                "path": "core::option::Option",
-                "args": {
-                  "angle_bracketed": {
-                    "args": [
-                      {
-                        "type": {
-                          "borrowed_ref": {
-                            "lifetime": null,
-                            "is_mutable": false,
-                            "type": {
-                              "resolved_path": {
-                                "path": "serde_json::value::Value",
-                                "args": null
-                              }
-                            }
-                          }
-                        }
-                      }
-                    ],
-                    "constraints": []
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
                   }
                 }
               }
@@ -45436,7 +45380,7 @@
         "where_predicates": []
       }
     },
-    "call": "{ match $type($value.get(\"value\")) { Ok(status) => { let (name, terminal) = match status { safe_cex_types::OrderStatus::Open => (\"open\",false), safe_cex_types::OrderStatus::Closed => (\"closed\",true), safe_cex_types::OrderStatus::Canceled => (\"canceled\",true), other => panic!(\"unexpected native status: {other:?}\") }; serde_json::json!({\"ok\":true,\"status\":name,\"terminal\":terminal}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "call": "{ match $type(&$value.get(\"value\").map(safe_cex_exchange::js_runtime::value::from_json).unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined)) { Ok(status) => { let (name, terminal) = match status { safe_cex_types::OrderStatus::Open => (\"open\",false), safe_cex_types::OrderStatus::Closed => (\"closed\",true), safe_cex_types::OrderStatus::Canceled => (\"canceled\",true), other => panic!(\"unexpected native status: {other:?}\") }; serde_json::json!({\"ok\":true,\"status\":name,\"terminal\":terminal}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
     "cases": [
       {
         "input": {
@@ -45537,7 +45481,7 @@
     ],
     "evidence": "asterdex.exchange.ts reverseMapOrderStatus maps six uppercase statuses and falls back to open. Private stream applies that map after string coercion. Inherited prototype status is visibly refused at the closed native OrderStatus boundary rather than fabricated as an order state.",
     "nativeObservation": {
-      "call": "{ match $type($value.get(\"value\")) { Ok(status) => { let (name, terminal) = match status { safe_cex_types::OrderStatus::Open => (\"open\",false), safe_cex_types::OrderStatus::Closed => (\"closed\",true), safe_cex_types::OrderStatus::Canceled => (\"canceled\",true), other => panic!(\"unexpected native status: {other:?}\") }; serde_json::json!({\"ok\":true,\"status\":name,\"terminal\":terminal}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "call": "{ match $type(&$value.get(\"value\").map(safe_cex_exchange::js_runtime::value::from_json).unwrap_or(safe_cex_exchange::js_runtime::value::Js::Undefined)) { Ok(status) => { let (name, terminal) = match status { safe_cex_types::OrderStatus::Open => (\"open\",false), safe_cex_types::OrderStatus::Closed => (\"closed\",true), safe_cex_types::OrderStatus::Canceled => (\"canceled\",true), other => panic!(\"unexpected native status: {other:?}\") }; serde_json::json!({\"ok\":true,\"status\":name,\"terminal\":terminal}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
       "nativeFields": [
         "status",
         "terminal"
