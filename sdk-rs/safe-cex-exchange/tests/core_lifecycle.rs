@@ -528,7 +528,7 @@ impl JournalFolder for Folder {
         _: f64,
         _: f64,
         _: bool,
-        _: Box<dyn Fn(&str) -> Result<String, ExchangeError> + 'a>,
+        _: Box<dyn Fn(&str) -> Result<String, ExchangeError>>,
     ) -> ExchangeFuture<'a, Vec<Value>> {
         self.0.set(self.0.get() + 1);
         Box::pin(async { Ok(vec![]) })

@@ -20,6 +20,13 @@ for(let i=0;i<4;i++){
 }
 const failures=[];
 for(const setting of ['function(){throw Object.assign(new Error("capture fault"),{marker:17})}','true']){const context=vm.createContext({exports:{}});vm.runInContext('Error.captureStackTrace='+setting,context);const C=vm.runInContext(code.outputText,context);try{new C('message');assert.fail('capture should fail');}catch(e){failures.push({name:e.name,message:units(e.message),marker:e.marker??null});}}
+{
+ const context=vm.createContext({exports:{}}),C=vm.runInContext(code.outputText,context),cause={marker:17};
+ let calls=0;
+ Object.defineProperty(C.prototype,'name',{set(value){assert.equal(value,'LighterApiError');calls++;throw cause;}});
+ assert.throws(()=>new C('assigned name'),error=>error===cause);
+ assert.equal(calls,1,'source name assignment invokes the inherited setter');
+}
 const points=[];
 for(let i=0;i<4;i++){
  const p={accountIndex:['1','0001','\ud800-index','2'.repeat(100)][i],totalPoints:[1.25,-0,NaN,Infinity][i]};
