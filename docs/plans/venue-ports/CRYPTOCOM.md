@@ -177,3 +177,22 @@ checked. Root typecheck and lint had passed; no unrelated test behavior changed.
 
 The isolated registry-construction rerun PASS: all 5 tests. Added Crypto.com
 public/private replays and harness protocol regressions to existing Rust CI.
+
+### Pre-integration gates PASS
+
+All brief gates pass at 302d8c2399 (Node 24, Rust 1.99 release wasm):
+
+| Tape | Frames | Main CPU TS / Rust ms | Steady CPU TS / Rust ms | Retained TS / Rust MB |
+| --- | ---: | ---: | ---: | ---: |
+| Crypto.com public (3 runs) | 2177 | 137.8 / 106.5 | 83.0 / 52.5 | 1.8 / 1.4 |
+| Crypto.com private | 21 | 50.0 / 44.5 | 17.8 / 16.0 | 0.7 / 0.8 |
+| Binance public (3 runs) | 871 | 213.5 / 86.5 | 121.6 / 36.7 | 4.2 / 2.0 |
+| Binance private | 14 | 63.4 / 37.0 | 16.8 / 16.8 | 0.9 / 0.8 |
+
+Private replays gate correctness only. Public outputs match, including both
+Crypto.com books and 404 market/ticker rows. Wasm size 1,187,594 bytes.
+Bans, fmt, venue all-target clippy, wasm clippy PASS. Engine 10, Binance 29 and
+Crypto.com 35 native tests PASS; protocol harness 5 tests PASS. Gate-phase
+sub-agent review findings (transport, book retention, ticker subscriptions)
+are addressed. Next: merge current landing branch (now includes Bybit), rerun
+combined gates, push/PR, adversarial review and green CI before merge.
