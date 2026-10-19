@@ -8,6 +8,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+indexmap = "=2.14.2"
 safe-cex-types.workspace = true
 
 safe-cex-num.workspace = true
