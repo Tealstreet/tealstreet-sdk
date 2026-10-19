@@ -260,3 +260,16 @@ and cut a follow-up branch. Never touch master or force-push.
   6cd219ce4c adds documentation only and merges cleanly without code changes.
 - Push final evidence, wait for fresh CI green, merge PR1304 into feat/rust-rewrite
   and cut a fresh follow-up branch. No implementation work remains pending.
+
+- BingX landed (9ddec5d0a4) while the prior head's Rust and replay CI were
+  green and one root CI run remained. Integrate seven venues before landing;
+  independent bounded host/engine review PASS, harness merge40 tests PASS.
+  Preserve real elapsed quiescence outside CPU timing even while replay timers
+  are virtual, MEXC private metadata classification, strict request/protocol
+  checks, and public12/private31 readiness. No CPU/memory threshold changes.
+- Seven-venue workspace463 native tests and fmt/clippy/bans/wasm-clippy PASS;
+  root typecheck44/lint28 PASS. Artifact2416535 < inherited2621440 budget,
+  wasm-only opt-level s/native3. Add defaults to incoming BingX setting literal
+  for optional leverage rails. Run mandatory local MEXC/Binance acceptance and
+  fresh CI's entire integrated suite before merging; previous six-venue15 gate
+  results remain committed above.

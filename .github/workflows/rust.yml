@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Five venues: measured 2,150,200 bytes locally; allow 2.25 MiB.
-      WASM_BUDGET_BYTES: 2359296
+      # Six venues: measured 2,576,287 bytes; allow 2.5 MiB.
+      WASM_BUDGET_BYTES: 2621440
     defaults:
       run:
         working-directory: .
@@ -158,8 +158,14 @@ jobs:
         run: |
           yarn rust:private-tape-bybit
           yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''
-      - name: Harness protocol regressions
+      - name: Replay request and subscription matching
         run: yarn rust:test-harness
+      - name: BingX public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue bingx --tape sdk-rs/harness/fixtures/bingx-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: BingX account and trading (correctness)
+        run: |
+          yarn rust:private-tape-bingx
+          yarn rust:gate --venue bingx --tape sdk-rs/harness/tapes/bingx-private.jsonl --runs 1 --books ''
       - name: Crypto.com public data (correctness, CPU and memory)
         run: yarn rust:gate --venue cryptocom --tape sdk-rs/harness/fixtures/cryptocom-public.jsonl.gz --books BTCUSD-PERP,ETHUSD-PERP
       - name: Crypto.com account and trading (correctness)

@@ -28,7 +28,7 @@ import { FrameApplier } from '../../store/frameApplier';
 import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
-import { patternClientOrderIdRule } from '../clientOrderId';
+import { isRegularClientOrderShape, patternClientOrderIdRule } from '../clientOrderId';
 import { BROKER_ID } from '../okx/okx.types';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
@@ -36,6 +36,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   binancepm: 'binancepm',
   mexc: 'mexc',
+  bingx: 'bingx',
   bybit: 'bybit',
   cryptocom: 'cryptocom',
   okx: 'okx',
@@ -51,6 +52,13 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
   mint: () => `${BROKER_ID}${uuid()}`.slice(0, 32),
 });
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  bingx: {
+    label: 'BingX',
+    isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
+    mint: () => `ts${uuid()}`.toLowerCase().slice(0, 40),
+    requirement: 'be 1-40 characters with no uppercase letters',
+    isValid: (id) => id.length >= 1 && id.length <= 40 && id === id.toLowerCase(),
+  },
   bybit: patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/),
   okx: okxClientOrderIdRule,
   okxeu: okxClientOrderIdRule,
@@ -219,7 +227,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
-    if (this.name === 'bybit') this.assertCallerClientOrderIds(orders);
+    if (this.name === 'bybit' || this.name === 'bingx') this.assertCallerClientOrderIds(orders);
     return this.command<string[]>({ op: 'placeOrders', orders });
   };
 
