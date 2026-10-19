@@ -212,3 +212,19 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   producer-section stripping, within the unchanged 1.8 MiB budget. Backpack
   public/private gates pass; all eleven replay gates (including OKX's four
   private variants) are running before the next push and green-CI wait.
+- Four-venue OKX public replay initially missed memory by 2,208 bytes. Fixed a
+  real host allocation: frame readers no longer reserve unused string-cache
+  slots before any string is decoded. Two regressions cover numeric-only
+  readers and sparse/empty/multibyte cached decoding; independent review clear.
+  All four host tests and 17 SDK WASM tests pass. Gates remain unchanged.
+- All eleven integrated gates now PASS: public medians of three runs are
+  Backpack CPU 150.9/73.6 ms (2.05x), steady 81.6/31.5 ms (2.59x), memory
+  1.8/1.7 MB (1.03x); Binance CPU 169.9/75.7 ms (2.24x), steady 88.3/25.9 ms
+  (3.40x), memory 2.3/2.0 MB (1.13x); Bybit CPU 268.1/175.2 ms (1.53x),
+  steady 188.2/104.0 ms (1.81x), memory 3.1/2.4 MB (1.32x); OKX CPU
+  908.8/832.2 ms (1.09x), steady 730.3/618.5 ms (1.18x), memory 2.6/2.5 MB
+  (1.01x). Private gates PASS: Backpack 21, Binance 14, Bybit 18, and each of
+  OKX/OKX EU/OKX demo/OKX EU demo 29 frames. PR-range secret scan clean.
+- Three-venue head 666993c597 finished fully green repository/Rust CI. Pushing
+  the reviewed four-venue head, waiting for its CI, then merging PR #1299 into
+  feat/rust-rewrite and creating a fresh follow-up branch as authorized.
