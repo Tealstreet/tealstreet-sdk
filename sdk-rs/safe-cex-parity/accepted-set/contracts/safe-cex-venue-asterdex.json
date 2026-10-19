@@ -87160,7 +87160,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let value=$value.as_bool().unwrap();f::drive(&runtime,venue.change_position_mode(value,None)).unwrap();serde_json::json!({\"is_hedged\":store.options().is_hedged})}",
+        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let value=$value.as_bool().unwrap();f::drive(&runtime,venue.change_position_mode(value,None)).unwrap();serde_json::json!({\"is_hedged\":store.options().unwrap().is_hedged})}",
         "cases": [
           {
             "input": true,
@@ -87621,7 +87621,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let value=$value.as_bool().unwrap();venue.after_method_called_in_worker(&serde_json::Value::Null,safe_cex_exchange::worker::CallableMethodsInWorker::ChangePositionMode,&[serde_json::json!(value)]).unwrap();serde_json::json!({\"is_hedged\":store.options().is_hedged})}",
+        "call": "{let _:std::marker::PhantomData<$type>=std::marker::PhantomData;#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);let value=$value.as_bool().unwrap();venue.after_method_called_in_worker(&serde_json::Value::Null,safe_cex_exchange::worker::CallableMethodsInWorker::ChangePositionMode,&[serde_json::json!(value)]).unwrap();serde_json::json!({\"is_hedged\":store.options().unwrap().is_hedged})}",
         "cases": [
           {
             "input": true,

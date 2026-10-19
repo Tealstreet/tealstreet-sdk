@@ -108,6 +108,8 @@ carrier. Its compiler API expectation now records the actual retained type;
 production method bodies, the two distinct listener failures and their expected
 name/message are unchanged. The included fixture's balance observer unwraps the
 Store Result before inspecting fields, matching the current typed read API.
+The constructor cohort's two options observers likewise unwrap that Result; their
+original boolean expectations remain unchanged.
 The canonical scoped replay selects Parent plus the real constructor owner,
 which supplies its existing sandbox-only scope accessor. Parent stream-carrier
 entries remain separately owned; no production accessor is introduced. The actual
