@@ -655,6 +655,24 @@ describe('RustEngineExchange', () => {
     expect(tape.writes).toEqual([]);
   });
 
+  it.each(['amount', 'price', 'triggerPrice', 'stopLoss', 'takeProfit'] as const)(
+    'rejects non-finite Bybit order fields before any batch write (%s)',
+    async (field) => {
+      const tape = bybitTransport('spot');
+      setWasmEngineLoader(loadNodeEngine);
+      setRustEngineTransport(() => tape.transport);
+      exchange = new RustEngineExchange('bybitspot', { key: 'k', secret: 's' }, new DefaultStore());
+      await exchange.start();
+      const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.001, price: 90000 };
+      for (const value of [NaN, Infinity, -Infinity]) {
+        await expect(exchange.placeOrders([opts, { ...opts, [field]: value }])).rejects.toThrow(
+          `Bybit ${field} must be finite`,
+        );
+        expect(tape.writes).toEqual([]);
+      }
+    },
+  );
+
   it.each([NaN, Infinity, -Infinity])(
     'rejects non-finite Bybit tick protection before any batch write (%s)',
     async (ticks) => {

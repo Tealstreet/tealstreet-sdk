@@ -117,6 +117,9 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 //  - Bybit spot: Rust sends marketUnit=baseCoin for market buys, uses native
 //    spot conditional/amend/cancel families, and rejects unsupported trailing
 //    orders instead of calling derivative position/trading-stop endpoints.
+//  - Bybit spot: TS cancel-all omits orderFilter and leaves trigger families
+//    live; Rust cancels Order, StopOrder and tpslOrder independently. Documented
+//    private tapes select each implementation's exact expected write plan.
 //  - Hyro: seed unseen partial fills from accepted account snapshots; TS can
 //    report pre-snapshot cumulative executions again when the order stream resumes.
 //  - Hyro: TS keys ambiguous-create recovery by a re-rendered wire payload;

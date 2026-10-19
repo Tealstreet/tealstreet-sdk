@@ -29,7 +29,7 @@ const records = [];
 if (hyro) records.push({ t: 0, type: 'config', options: { endpoints: { rest, publicWs, privateWs } } });
 const ok = (result, extra = {}) => ({ retCode: 0, retMsg: 'OK', result, retExtInfo: {}, ...extra });
 const list = (rows) => ok({ category, list: rows, nextPageCursor: '' });
-const http = (path, params, response, method = 'GET', body) =>
+const http = (path, params, response, method = 'GET', body, impl) =>
   records.push({
     t: 0,
     type: 'http',
@@ -38,6 +38,7 @@ const http = (path, params, response, method = 'GET', body) =>
     status: 200,
     body: JSON.stringify(response),
     ...(body && { requestBody: JSON.stringify(body) }),
+    ...(impl && { impl }),
   });
 let clock = 0;
 const ws = (url, text) => records.push({ t: (clock += 250), type: 'ws', url, text: JSON.stringify(text) });
@@ -304,11 +305,19 @@ if (hyro)
     symbol: symbols[1],
     orderId: 'resting',
   });
-else
-  http('/v5/order/cancel-all', null, ok({ list: [{ orderId: 'resting' }], success: '1' }), 'POST', {
-    category,
-    symbol: symbols[1],
-  });
+else {
+  const response = ok({ list: [{ orderId: 'resting' }], success: '1' });
+  const body = { category, symbol: symbols[1] };
+  http('/v5/order/cancel-all', null, response, 'POST', body, spot ? 'ts' : undefined);
+  if (spot) {
+    // KNOWN_TS_FIXES: unfiltered spot cancel-all leaves trigger families live.
+    // Only an ordinary order is present here; both replays share its events.
+    for (const orderFilter of ['Order', 'StopOrder', 'tpslOrder']) {
+      const result = orderFilter === 'Order' ? response : ok({ list: [], success: '1' });
+      http('/v5/order/cancel-all', null, result, 'POST', { ...body, orderFilter }, 'rust');
+    }
+  }
+}
 stream('order', [
   { ...resting, price: '2810', orderStatus: 'Cancelled', leavesQty: '0', rejectReason: 'EC_PerCancelRequest' },
 ]);

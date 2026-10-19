@@ -1,12 +1,18 @@
 // Reads may reuse their last snapshot; a mutation response is consumed once.
 export class Responses {
-  constructor(records, key, check, isWrite) {
+  constructor(records, key, check, isWrite, impl) {
+    if (impl !== undefined && !['ts', 'rust'].includes(impl)) throw new Error('Unknown replay implementation');
     this.key = key;
     this.check = check;
     this.isWrite = isWrite;
     this.unserved = 0;
     this.queues = new Map();
     for (const record of records.filter((r) => r.type === 'http')) {
+      if (record.impl !== undefined) {
+        if (!['ts', 'rust'].includes(record.impl)) throw new Error('Unknown HTTP record implementation');
+        if (impl === undefined) throw new Error('Tagged HTTP records require a replay implementation');
+        if (record.impl !== impl) continue;
+      }
       const id = key(record.method, record.url, record.requestBody);
       if (!this.queues.has(id)) this.queues.set(id, []);
       this.queues.get(id).push(record);

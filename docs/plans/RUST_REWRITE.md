@@ -276,7 +276,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | --- | --- |
 | Binance USD-M, Binance PM | done |
 | Bybit linear | done ([#1298](https://github.com/Tealstreet/tealstreet-sdk/pull/1298)) |
-| Bybit inverse, spot, demo; HyroTrader profile | PR [#1307](https://github.com/Tealstreet/tealstreet-sdk/pull/1307), final reviews and CI |
+| Bybit inverse, spot, demo; HyroTrader profile | port complete ([#1307](https://github.com/Tealstreet/tealstreet-sdk/pull/1307)); Hyro live connectivity unverified |
 | OKX (+EU, demo) | done (#1302) |
 | Bitget, Hyperliquid, BloFin, BingX, MEXC, WEEX, Bitunix, Crypto.com, Backpack | wave 1 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |

@@ -40,8 +40,8 @@ credentials never come from simulator defaults.
 
 Public/config, private, trading/queries and native-unit frame transport are
 implemented and cross-reviewed locally. Public/config has 6 native cases,
-private variants 15, trading/recovery 25, plus the original 43 Bybit cases.
-The shell has 12 wasm integration tests and 4 independent binary/copier tests.
+private variants 18, trading/recovery 31, plus the original 43 Bybit cases.
+The shell has 31 wasm integration tests and 4 independent binary/copier tests.
 Root typecheck (44 tasks) and lint (28 tasks) pass. Final integrated gates are
 in progress; the landing branch's new OKX port will be merged before final checks.
 
@@ -134,6 +134,52 @@ push. Its typed protocol/request audits, stable heap + ArrayBuffer + wasm memory
 measurement, production TS store transport, and CPU sampling before forced GC
 are preserved. Both implementations still start memory measurement before module
 imports. These corrected measurements supersede the earlier table.
-All four venues and all Bybit/OKX variants will be revalidated together.
+All four venues and all Bybit/OKX variants are revalidated together. Integration
+also restores Crypto.com shell caller-ID helpers and rejects Bybit-only execution
+controls before any Crypto.com writes; both regressions were proved failing first.
+A final adjacent JSON check also rejects non-finite entry and protective numbers
+before transport, preventing a requested bracket from becoming an omitted field.
+
+## Final corrected public gates
+
+All eight public gates PASS (median of three). These measurements supersede all
+prior tables and include both startup and steady CPU gates:
+
+| Venue | Frames | Main CPU TS / Rust ms | Steady CPU TS / Rust ms | Retained TS / Rust MB |
+| --- | ---: | ---: | ---: | ---: |
+| bybitinverse | 707 | 178.9 / 61.4 | 126.5 / 32.3 | 16.1 / 1.4 |
+| bybitspot | 4,338 | 262.3 / 178.0 | 165.3 / 100.2 | 16.8 / 1.8 |
+| bybitdemo | 5,832 | 367.9 / 250.8 | 240.9 / 147.0 | 20.9 / 3.0 |
+| hyrotrader | 160 | 33.6 / 24.0 | 10.0 / 6.7 | 15.7 / 0.9 |
+| binance | 871 | 253.5 / 104.2 | 142.6 / 47.3 | 18.4 / 2.6 |
+| bybit | 8,742 | 478.8 / 325.7 | 300.4 / 194.4 | 21.5 / 2.9 |
+| cryptocom | 2,177 | 197.9 / 140.6 | 125.2 / 80.3 | 14.5 / 1.6 |
+| okx | 8,902 | 1136.5 / 1055.2 | 865.9 / 743.0 | 18.2 / 2.9 |
+
+The integrated four-venue wasm is 1,821,884 bytes under the landing branch's
+1.8 MiB budget. No size or performance threshold was relaxed for this integration.
+
+## Final local validation
+
+- Workspace bans, fmt, strict all-target Clippy, native tests and wasm-target
+  Clippy PASS. Bybit 98, engine 17, Binance 29, OKX 65, Crypto.com 43 native
+  cases pass; Crypto.com includes the new vendor-control guard.
+- Wasm shell 31 tests, Workers 2, independent inverse frame/copier 4, and
+  harness helpers 10 pass. Non-finite numeric preflight was independently
+  re-reviewed, including all five new wasm cases. Per-implementation fixture
+  selection was independently reviewed; exact bodies, single-use mutations,
+  unknown-tag rejection and unused selected-write failures remain enforced.
+- Root typecheck 44 tasks, lint 28, licenses 31 workspaces PASS. Final root
+  tests: 27/27 tasks; safe-cex 454 files / 6,498 tests in each run. Package
+  typecheck/lint also pass after the final shell preflight change.
+- Spot private tape documents the TS single unfiltered cancellation and Rust's
+  three native family writes with explicit implementation tags. Both consume
+  every selected mutation. Frames and state comparisons remain shared.
+
+All 19 final replay gates PASS: eight public performance/correctness replays and
+11 private correctness replays. Private frame counts: inverse14, spot11, demo14,
+Hyro13, Binance14, Bybit linear18, Crypto.com21 and each OKX variant29. No selected
+write is unmatched, reused or left unused. Final independent numeric-preflight
+and fixture-selection review passes with no remaining confirmed blocker.
 
 Final CI must be green before merge.

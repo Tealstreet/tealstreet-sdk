@@ -243,6 +243,12 @@ export class RustEngineExchange extends BaseExchange {
     if (['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name)) {
       this.assertCallerClientOrderIds(orders);
       for (const order of orders) {
+        for (const field of ['amount', 'price', 'triggerPrice', 'stopLoss', 'takeProfit'] as const) {
+          const value = order[field];
+          if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) {
+            this.rejectPreflight(`Bybit ${field} must be finite`);
+          }
+        }
         if (
           this.name === 'hyrotrader' &&
           (order.maxSlippagePct !== undefined || 'bybitBbo' in order || 'bybitSlippageToleranceTicks' in order)

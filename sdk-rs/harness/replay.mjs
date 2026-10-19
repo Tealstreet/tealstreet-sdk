@@ -137,7 +137,7 @@ class Tape {
       books: bookSymbols,
       tickers: venue.publicTickers?.(records),
     });
-    this.responses = new Responses(records, requestKey, venue.checkRequest, venue.isWrite);
+    this.responses = new Responses(records, requestKey, venue.checkRequest, venue.isWrite, impl);
     this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
     this.open = new Map();
     this.waiters = [];
