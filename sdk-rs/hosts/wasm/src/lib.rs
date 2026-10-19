@@ -8,6 +8,7 @@
     feature = "venue-bingx",
     feature = "venue-bybit",
     feature = "venue-cryptocom",
+    feature = "venue-mexc",
     feature = "venue-okx",
     feature = "venue-weex"
 )))]
@@ -25,6 +26,8 @@ use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 #[cfg(feature = "venue-cryptocom")]
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
+#[cfg(feature = "venue-mexc")]
+use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 #[cfg(feature = "venue-okx")]
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 #[cfg(feature = "venue-weex")]
@@ -77,6 +80,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "venue-bingx",
     feature = "venue-bybit",
     feature = "venue-cryptocom",
+    feature = "venue-mexc",
     feature = "venue-okx",
     feature = "venue-weex"
 ))]
@@ -321,6 +325,10 @@ enum CommandIn {
         command: u32,
         hedged: bool,
     },
+    FetchLeverage {
+        command: u32,
+        symbol: String,
+    },
     #[serde(rename_all = "camelCase")]
     FetchFills {
         command: u32,
@@ -417,6 +425,7 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
+            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
                 command,
                 symbol,
@@ -531,6 +540,7 @@ impl WasmEngine {
         feature = "venue-bingx",
         feature = "venue-bybit",
         feature = "venue-cryptocom",
+        feature = "venue-mexc",
         feature = "venue-okx",
         feature = "venue-weex"
     ))]
@@ -544,6 +554,12 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "venue-mexc")]
+            "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
             #[cfg(feature = "venue-binance")]
             "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
                 testnet: options.testnet,

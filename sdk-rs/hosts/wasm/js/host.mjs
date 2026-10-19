@@ -13,7 +13,7 @@
 // }
 
 const CHUNK_BYTES = 16 * 1024;
-const BATCH_BYTES = 1024 * 1024;
+const BATCH_BYTES = 64 * 1024;
 const BATCH_MESSAGES = 256;
 const RETAINED_SCRATCH_BYTES = 16 * 1024;
 const encoder = new TextEncoder();
@@ -180,23 +180,37 @@ export class EngineHost {
     this.batchTimer = undefined;
     const messages = this.messages;
     this.messages = [];
-    const capacity = this.messageBytes;
     this.messageBytes = 0;
-    if (this.batchBuffer.length < capacity) this.batchBuffer = new Uint8Array(capacity);
-    const buffer = this.batchBuffer;
-    const view = new DataView(buffer.buffer);
-    let at = 0;
-    for (let i = 0; i < messages.length; i += 3) {
-      const { written } = encoder.encodeInto(messages[i + 2], buffer.subarray(at + 16));
-      view.setUint32(at, messages[i], true);
-      view.setUint32(at + 4, written, true);
-      view.setFloat64(at + 8, messages[i + 1], true);
-      at += 16 + written;
+    const pendingActions = [];
+    for (let start = 0; start < messages.length && !this.disposed;) {
+      let end = start;
+      let capacity = 0;
+      while (end < messages.length) {
+        const bytes = 16 + messages[end + 2].length * 3;
+        if (end > start && capacity + bytes > BATCH_BYTES) break;
+        capacity += bytes;
+        end += 3;
+      }
+      if (this.batchBuffer.length < capacity) this.batchBuffer = new Uint8Array(capacity);
+      const buffer = this.batchBuffer;
+      const view = new DataView(buffer.buffer);
+      let at = 0;
+      for (let i = start; i < end; i += 3) {
+        const { written } = encoder.encodeInto(messages[i + 2], buffer.subarray(at + 16));
+        view.setUint32(at, messages[i], true);
+        view.setUint32(at + 4, written, true);
+        view.setFloat64(at + 8, messages[i + 1], true);
+        at += 16 + written;
+      }
+      const actions = this.engine.wsMessages(buffer.subarray(0, at));
+      if (actions) pendingActions.push(actions);
+      // Bursts and large individual messages must not grow retained scratch.
+      if (buffer.length > RETAINED_SCRATCH_BYTES) this.batchBuffer = new Uint8Array(0);
+      start = end;
     }
-    const actions = this.engine.wsMessages(buffer.subarray(0, at));
-    // Bursts and large individual messages must not grow retained scratch.
-    if (buffer.length > RETAINED_SCRATCH_BYTES) this.batchBuffer = new Uint8Array(0);
-    this.run(actions);
+    // All captured arrivals precede transport callbacks from any of their
+    // actions, even when an oversized last arrival needs its own crossing.
+    for (const actions of pendingActions) this.run(actions);
   }
 
   run(actionsJson) {
@@ -302,7 +316,21 @@ export class EngineHost {
         const pending = this.commands.get(action.command);
         this.commands.delete(action.command);
         if (!pending) break;
-        if (action.error !== undefined) pending.reject(new Error(action.error));
+        if (action.error !== undefined) {
+          const error = new Error(action.error);
+          try {
+            const details = JSON.parse(action.error);
+            if (typeof details.message === 'string' && Array.isArray(details.partialOrderIds) &&
+                details.partialOrderIds.every((id) => typeof id === 'string')) {
+              error.message = details.message;
+              error.partialOrderIds = details.partialOrderIds;
+              error.partialOrderCount = details.partialOrderCount;
+              error.totalOrderCount = details.totalOrderCount;
+              error.failedOrderIndex = details.failedOrderIndex;
+            }
+          } catch { /* Plain venue errors carry only their message. */ }
+          pending.reject(error);
+        }
         else {
           try {
             pending.resolve(action.result === undefined ? undefined : JSON.parse(action.result));

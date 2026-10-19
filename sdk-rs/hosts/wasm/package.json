@@ -65,12 +65,21 @@
     "./node/bingx": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/node/bingx/safe_cex_wasm.js"
+    },
+    "./web/mexc": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/mexc/safe_cex_wasm.js"
+    },
+    "./node/mexc": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/mexc/safe_cex_wasm.js"
     }
   },
   "scripts": {
     "build-wasm": "bash ../../harness/build.sh",
     "test": "node --test js/*.test.mjs",
-    "check-sizes": "node ../../harness/check-wasm-sizes.mjs"
+    "check-sizes": "node ../../harness/check-wasm-sizes.mjs",
+    "test-host": "node --test js/host.test.mjs"
   },
   "dependencies": {
     "ws": "^8.21.3"

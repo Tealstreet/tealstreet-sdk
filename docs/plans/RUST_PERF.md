@@ -241,3 +241,20 @@ replacement. Their setters now shrink spare incoming vector capacity before
 index construction; duplicate identity, row ordering, deltas and replacement
 cleanup are unchanged. Engine38 tests and independent review pass. Six release
 families rebuild before final public comparisons; no gate thresholds changed.
+
+Integrated MEXC landing `63d521a860`, expanding to seven isolated families and ten
+private variants. Kept the per-family release opt-level 3; the exact incoming
+aggregate control uses its committed opt-level s. Isolated baseline7 compiles all
+ten internal crates, audits 128 tracked source/manifest/config files, and emits
+2416535 bytes (SHA256 27cd96234cc5fdf92aa774f9544d71c93564f1eb7f0008c280bc1a995de9a4ba).
+The new shared tape/socket ordinals and virtual clock are retained for MEXC;
+its clock advances once per timestamp group so it does not cancel batching.
+Existing six venues retain strict typed request matching and existing clocks.
+MEXC-specific generated OID/snowflake/window normalization stays venue-scoped.
+All45 harness regressions and independent merge/partition review pass.
+Store frame reservations include MEXC's optional two leverage columns; exact-size
+and no-growth regressions pass (43 engine tests). Trimming table capacity saves
+one 64KiB Crypto.com page. JS now partitions bursts at 64KiB, one oversized message
+alone, processing all original partitions before any returned transport actions.
+This avoids grouped-book peak growth and preserves synchronous callback ordering;
+22 host tests pass. Final seven-family builds and comparisons remain in progress.

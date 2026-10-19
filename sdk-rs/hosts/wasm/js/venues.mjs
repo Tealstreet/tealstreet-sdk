@@ -5,6 +5,7 @@ const families = Object.freeze({
   bingx: 'bingx',
   bybit: 'bybit',
   cryptocom: 'cryptocom',
+  mexc: 'mexc',
   okx: 'okx',
   okxeu: 'okx',
   okxdemo: 'okx',

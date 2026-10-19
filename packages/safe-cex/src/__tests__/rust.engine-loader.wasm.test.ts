@@ -5,6 +5,7 @@ const init = vi.hoisted(() => ({
   bingx: vi.fn(async () => undefined),
   bybit: vi.fn(async () => undefined),
   cryptocom: vi.fn(async () => undefined),
+  mexc: vi.fn(async () => undefined),
   okx: vi.fn(async () => undefined),
   weex: vi.fn(async () => undefined),
 }));
@@ -13,6 +14,7 @@ vi.mock('@tealstreet/safe-cex-wasm/web/binance', () => ({ default: init.binance,
 vi.mock('@tealstreet/safe-cex-wasm/web/bingx', () => ({ default: init.bingx, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/bybit', () => ({ default: init.bybit, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/cryptocom', () => ({ default: init.cryptocom, WasmEngine: class {} }));
+vi.mock('@tealstreet/safe-cex-wasm/web/mexc', () => ({ default: init.mexc, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/okx', () => ({ default: init.okx, WasmEngine: class {} }));
 vi.mock('@tealstreet/safe-cex-wasm/web/weex', () => ({ default: init.weex, WasmEngine: class {} }));
 
@@ -29,6 +31,7 @@ describe.runIf(process.env.SAFE_CEX_WASM_TESTS)('browser Rust engine selection',
     expect(init.okx).toHaveBeenCalledTimes(1);
     expect(init.bybit).not.toHaveBeenCalled();
     expect(init.cryptocom).not.toHaveBeenCalled();
+    expect(init.mexc).not.toHaveBeenCalled();
     expect(init.weex).not.toHaveBeenCalled();
     expect(init.binance).not.toHaveBeenCalled();
     expect(init.bingx).not.toHaveBeenCalled();
@@ -36,9 +39,9 @@ describe.runIf(process.env.SAFE_CEX_WASM_TESTS)('browser Rust engine selection',
 
   it('initializes each requested family separately', async () => {
     const { loadWebEngine } = await import('../exchanges/rust/loadWebEngine');
-    const [binance, pm, bingx, bybit, cryptocom, okx, weex] = await Promise.all(['binance', 'binancepm', 'bingx', 'bybit', 'cryptocom', 'okx', 'weex'].map(loadWebEngine));
+    const [binance, pm, bingx, bybit, cryptocom, mexc, okx, weex] = await Promise.all(['binance', 'binancepm', 'bingx', 'bybit', 'cryptocom', 'mexc', 'okx', 'weex'].map(loadWebEngine));
     expect(binance).toBe(pm);
-    expect(new Set([binance, bingx, bybit, cryptocom, okx, weex]).size).toBe(6);
+    expect(new Set([binance, bingx, bybit, cryptocom, mexc, okx, weex]).size).toBe(7);
     for (const initialize of Object.values(init)) expect(initialize).toHaveBeenCalledTimes(1);
   });
 

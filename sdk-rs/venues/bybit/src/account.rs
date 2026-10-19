@@ -1106,6 +1106,7 @@ impl BybitLinear {
                     MarketSetting {
                         leverage: r.position.leverage,
                         margin_type: r.position.margin_type,
+                        ..MarketSetting::default()
                     },
                 ))
             })

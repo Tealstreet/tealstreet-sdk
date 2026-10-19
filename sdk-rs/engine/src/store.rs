@@ -61,10 +61,12 @@ fn ticker_values(t: &Ticker) -> [f64; 11] {
 }
 
 /// The account's leverage and margin type on one market.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MarketSetting {
     pub leverage: f64,
     pub margin_type: Option<MarginType>,
+    pub buy_leverage: Option<f64>,
+    pub sell_leverage: Option<f64>,
 }
 
 #[derive(Default)]
@@ -350,6 +352,7 @@ impl Store {
         let setting = self.settings.entry(market).or_insert(MarketSetting {
             leverage: f64::NAN,
             margin_type: None,
+            ..MarketSetting::default()
         });
         let before = *setting;
         update(setting);
@@ -553,6 +556,13 @@ impl Store {
         if changes.settings {
             let count = self.settings.len();
             size += 8 + (4 + 8 * count).next_multiple_of(8) + 8 * count;
+            if self
+                .settings
+                .values()
+                .any(|setting| setting.buy_leverage.is_some() || setting.sell_leverage.is_some())
+            {
+                size += 16 * count;
+            }
         }
         if changes.status {
             size += 24;
@@ -679,6 +689,19 @@ impl Store {
         );
         w.pad();
         w.f64s(rows.iter().map(|(_, s)| s.leverage));
+        if rows
+            .iter()
+            .any(|(_, s)| s.buy_leverage.is_some() || s.sell_leverage.is_some())
+        {
+            w.f64s(
+                rows.iter()
+                    .map(|(_, s)| s.buy_leverage.unwrap_or(s.leverage)),
+            );
+            w.f64s(
+                rows.iter()
+                    .map(|(_, s)| s.sell_leverage.unwrap_or(s.leverage)),
+            );
+        }
         w.end();
     }
 
@@ -755,6 +778,62 @@ mod tests {
             is_read_only: None,
             taker_fee: None,
             maker_fee: None,
+        }
+    }
+
+    #[test]
+    fn settings_frame_hint_reserves_both_optional_leverage_columns() {
+        for count in 0usize..=3 {
+            for legs in 0..4 {
+                let mut store = Store::default();
+                store.set_settings((0..count).rev().map(|index| {
+                    (
+                        index as u32,
+                        MarketSetting {
+                            leverage: 20.0 + index as f64,
+                            buy_leverage: (index == 0 && legs & 1 != 0).then_some(10.0),
+                            sell_leverage: (index == 0 && legs & 2 != 0).then_some(15.0),
+                            ..MarketSetting::default()
+                        },
+                    )
+                }));
+                let pending = store.take_pending();
+                let size = 16 + store.frame_size_hint(&pending);
+                let buffer = Vec::with_capacity(size);
+                let capacity = buffer.capacity();
+                let mut writer = FrameWriter::new(buffer, 1.0);
+                store.write(&pending, &mut writer);
+                let frame = writer.finish();
+                assert_eq!(frame.len(), size, "rows={count}, legs={legs}");
+                assert_eq!(frame.capacity(), capacity, "reservation must avoid growth");
+
+                let (kind, payload) = wire::sections(&frame).next().unwrap();
+                assert_eq!(kind, section::SETTINGS);
+                let values: Vec<f64> = payload[(4 + 8 * count).next_multiple_of(8)..]
+                    .as_chunks::<8>()
+                    .0
+                    .iter()
+                    .map(|bytes| f64::from_le_bytes(*bytes))
+                    .collect();
+                let mut expected: Vec<f64> = (0..count).map(|i| 20.0 + i as f64).collect();
+                if count > 0 && legs != 0 {
+                    expected.extend((0..count).map(|i| {
+                        if i == 0 && legs & 1 != 0 {
+                            10.0
+                        } else {
+                            20.0 + i as f64
+                        }
+                    }));
+                    expected.extend((0..count).map(|i| {
+                        if i == 0 && legs & 2 != 0 {
+                            15.0
+                        } else {
+                            20.0 + i as f64
+                        }
+                    }));
+                }
+                assert_eq!(values, expected);
+            }
         }
     }
 

@@ -8,6 +8,7 @@ import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
+import { canonicalUrl } from './tape.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 
 const { values } = parseArgs({
@@ -23,25 +24,30 @@ mkdirSync(dirname(out), { recursive: true });
 const tape = createWriteStream(out);
 const started = Date.now();
 const write = (record) => tape.write(`${JSON.stringify({ t: Date.now() - started, ...record })}\n`);
+write({ type: 'meta', epoch: started, private: false });
 
 const live = nativeTransport();
+const ordinals = new Map();
 const recording = {
   ...live,
   connect(url, handlers) {
+    const key = canonicalUrl(url);
+    const socket = ordinals.get(key) ?? 0;
+    ordinals.set(key, socket + 1);
     return live.connect(url, {
       headers: handlers.headers,
       onOpen: () => {
-        write({ type: 'open', url });
+        write({ type: 'open', url, socket });
         handlers.onOpen();
       },
-      onMessage: (text) => {
+      onMessage: (text, receivedAt) => {
         frames++;
-        write({ type: 'ws', url, text });
-        handlers.onMessage(text);
+        write({ type: 'ws', t: (receivedAt ?? Date.now()) - started, url, socket, text });
+        handlers.onMessage(text, receivedAt);
       },
-      onClose: (code) => {
-        write({ type: 'close', url, code });
-        handlers.onClose(code);
+      onClose: (code, receivedAt) => {
+        write({ type: 'close', t: (receivedAt ?? Date.now()) - started, url, socket, code });
+        handlers.onClose(code, receivedAt);
       },
     });
   },

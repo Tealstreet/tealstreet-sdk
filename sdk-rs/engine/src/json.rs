@@ -900,3 +900,80 @@ mod envelope_tests {
         assert!(!splitter.finished());
     }
 }
+
+#[cfg(test)]
+mod mexc_regressions {
+    use super::*;
+
+    #[test]
+    fn nested_envelope_streaming_matches_only_the_selected_parent() {
+        let body = r#"{"other":{"resultList":[0]},"success":true,"code":0,"data":{"pageSize":2,"resultList":[{"id":1},{"id":2}],"currentPage":1}}"#;
+        for chunk in 1..body.len() {
+            let mut split = ArraySplitter::new(ArrayAt::Path(&["data", "resultList"]));
+            let mut rows = vec![];
+            for part in body.as_bytes().chunks(chunk) {
+                split.feed(part, |s| rows.push(s.to_owned()));
+            }
+            assert!(split.finished());
+            assert_eq!(rows, [r#"{"id":1}"#, r#"{"id":2}"#]);
+            assert_eq!(
+                std::str::from_utf8(split.outside()).ok(),
+                Some(
+                    r#"{"other":{"resultList":[0]},"success":true,"code":0,"data":{"pageSize":2,"resultList":[],"currentPage":1}}"#
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_streamed_lists_are_not_successful_empty_snapshots() {
+        for body in [
+            br#"{"data":[,]}"#.as_slice(),
+            br#"{"data":[1,]}"#.as_slice(),
+            b"{\"data\":[\"\xff\"]}".as_slice(),
+        ] {
+            let mut split = ArraySplitter::new(ArrayAt::Field("data"));
+            split.feed(body, |_| {});
+            assert!(!split.finished());
+        }
+        for body in [
+            br#"{"data":{"resultList":[,]}}"#.as_slice(),
+            br#"{"data":{"resultList":[1,]}}"#.as_slice(),
+            b"{\"data\":{\"resultList\":[\"\xff\"]}}".as_slice(),
+        ] {
+            let mut split = ArraySplitter::new(ArrayAt::Path(&["data", "resultList"]));
+            split.feed(body, |_| {});
+            assert!(!split.finished());
+        }
+    }
+
+    #[test]
+    fn oversized_envelopes_are_rejected_instead_of_truncated() {
+        let body = format!(
+            r#"{{"data":[],"message":"{}"}}"#,
+            "x".repeat(METADATA_LIMIT)
+        );
+        let mut split = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
+        split.feed(body.as_bytes(), |_| {});
+        assert!(!split.finished());
+        assert_eq!(split.outside().len(), METADATA_LIMIT);
+    }
+
+    #[test]
+    fn streamed_envelope_retains_fields_before_and_after_the_array() {
+        let body = r#"{"code":510,"data":[{"x":[1,2]},3],"success":false}"#;
+        for chunk in 1..body.len() {
+            let mut split = ArraySplitter::new(ArrayAt::Field("data"));
+            let mut items = Vec::new();
+            for bytes in body.as_bytes().chunks(chunk) {
+                split.feed(bytes, |s| items.push(s.to_owned()));
+            }
+            assert!(split.finished());
+            assert_eq!(items, [r#"{"x":[1,2]}"#, "3"]);
+            assert_eq!(
+                std::str::from_utf8(split.outside()).ok(),
+                Some(r#"{"code":510,"data":[],"success":false}"#)
+            );
+        }
+    }
+}

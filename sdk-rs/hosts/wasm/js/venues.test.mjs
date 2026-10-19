@@ -9,6 +9,7 @@ const aliases = {
   bingx: ['bingx'],
   bybit: ['bybit'],
   cryptocom: ['cryptocom'],
+  mexc: ['mexc'],
   okx: ['okx', 'okxeu', 'okxdemo', 'okxeudemo'],
   weex: ['weex'],
 };
