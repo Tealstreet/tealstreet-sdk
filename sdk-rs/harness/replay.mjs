@@ -9,6 +9,8 @@ import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
 import { parseRequestJson } from './request-json.mjs';
+import { retainedMemory } from './memory.mjs';
+import { Responses } from './responses.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -61,26 +63,16 @@ const requestKey = (method, url, body) => method + ' ' + canonicalUrl(url) + ' '
 class Tape {
   constructor(impl) {
     this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records) });
-    this.responses = new Map();
-    for (const record of records.filter((r) => r.type === 'http')) {
-      const key = requestKey(record.method, record.url, record.requestBody);
-      if (!this.responses.has(key)) this.responses.set(key, []);
-      this.responses.get(key).push(record);
-    }
+    this.responses = new Responses(records, requestKey, venue.checkRequest, venue.isWrite);
     this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
     this.open = new Map();
     this.waiters = [];
-    this.unserved = 0;
   }
 
+  get unserved() { return this.responses.unserved; }
+
   respond(method, url, body) {
-    const queue = venue.checkRequest?.(method, url, body) === false ? undefined : this.responses.get(requestKey(method, url, body));
-    if (!queue?.length) {
-      this.unserved++;
-      return { status: 599, body: '' };
-    }
-    const record = queue.length > 1 || venue.isWrite?.(method, url) ? queue.shift() : queue[0];
-    return { status: record.status, body: record.body };
+    return this.responses.respond(method, url, body);
   }
 
   connect(url, onOpen, onMessage) {
@@ -135,7 +127,7 @@ class Tape {
   }
 
   unusedWrites() {
-    return [...this.responses.values()].flat().filter((r) => venue.isWrite?.(r.method, r.url)).length;
+    return this.responses.unusedWrites();
   }
 
   results = [];
@@ -163,14 +155,14 @@ const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
     heapUsedBytes: memory.heapUsed,
     wasmBytes,
     // What the implementation keeps alive beyond the harness and loaded code.
-    retainedBytes: memory.heapUsed - heapBefore + wasmBytes,
+    retainedBytes: retainedMemory(heapBefore, memory, wasmBytes),
   };
 };
 
 /** Heap retained before the implementation loads, so both start from zero. */
 const baseline = () => {
   globalThis.gc?.();
-  return process.memoryUsage().heapUsed;
+  return process.memoryUsage();
 };
 
 const sortBook = (book) => ({

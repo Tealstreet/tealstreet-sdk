@@ -194,6 +194,8 @@ impl ArraySplitter {
     fn keep(&mut self, byte: u8) {
         if self.outside.len() < OUTSIDE_LIMIT {
             self.outside.push(byte);
+        } else {
+            self.invalid = true;
         }
     }
 
@@ -291,7 +293,7 @@ impl ArraySplitter {
                     self.after_comma = true;
                     continue;
                 }
-                b' ' | b'\n' | b'\r' | b'\t' if at_array_level => continue,
+                b' ' | b'\n' | b'\r' | b'\t' if at_array_level && self.item.is_empty() => continue,
                 b' ' | b'\n' | b'\r' | b'\t' => {}
                 _ if self.phase == Phase::Seeking && self.depth == seek_depth => self.armed = false,
                 _ => {}
@@ -309,7 +311,7 @@ impl ArraySplitter {
             if serde_json::from_slice::<IgnoredAny>(&self.item).is_err() {
                 self.invalid = true;
             } else if let Ok(text) = std::str::from_utf8(&self.item) {
-                on_item(text);
+                on_item(text.trim());
             } else {
                 self.invalid = true;
             }
@@ -344,6 +346,26 @@ mod tests {
         ] {
             let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "data"]));
             splitter.feed(body, |_| {});
+            assert!(!splitter.finished());
+        }
+    }
+
+    #[test]
+    fn malformed_scalars_and_truncated_envelopes_fail_closed() {
+        for body in ["[1 2]", "[1 e2]"] {
+            let mut splitter = ArraySplitter::new(ArrayAt::Root);
+            splitter.feed(body.as_bytes(), |_| {});
+            assert!(!splitter.finished());
+        }
+        let body = format!(
+            "{{\"code\":0,\"result\":{{\"data\":[]}}}}{}garbage",
+            " ".repeat(OUTSIDE_LIMIT)
+        );
+        for chunk in [1, 1024, OUTSIDE_LIMIT * 2] {
+            let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "data"]));
+            for part in body.as_bytes().chunks(chunk) {
+                splitter.feed(part, |_| {});
+            }
             assert!(!splitter.finished());
         }
     }

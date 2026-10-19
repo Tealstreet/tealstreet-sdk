@@ -267,3 +267,118 @@ fn stop_limit_history_separates_requested_price_from_trigger_and_omits_missing_a
     assert!(result.contains(r#""price":95.0"#));
     assert!(!result.contains("averagePrice"));
 }
+
+#[test]
+fn fractional_millisecond_bounds_remain_exact_and_overflow_rejects() {
+    let mut h = Harness::new();
+    h.load();
+    query(
+        &mut h,
+        Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: Some(1610000000000.5),
+            to_ms: Some(1610000000001.5),
+            limit: Some(1),
+        },
+    );
+    let request = h.http("private/get-trades");
+    let body = request.body.as_deref().unwrap();
+    assert!(body.contains(r#""start_time":1610000000000500000"#));
+    assert!(body.contains(r#""end_time":1610000000001500000"#));
+    h.respond(
+        &request,
+        &format!(
+            r#"{{"code":0,"result":{{"data":[{},{},{}]}}}}"#,
+            fill(1, 1610000000000499999),
+            fill(2, 1610000000000500000),
+            fill(3, 1610000000001500000)
+        ),
+    );
+    let result = done(&h, 1).unwrap();
+    assert!(result.contains(r#""id":"2""#));
+    assert!(!result.contains(r#""id":"1""#));
+    h.event(Event::Command(Command::Query {
+        command: 2,
+        query: Query::Fills {
+            symbol: None,
+            order_id: None,
+            from_ms: Some(1e20),
+            to_ms: Some(1e20),
+            limit: None,
+        },
+    }));
+    assert!(done(&h, 2).is_err());
+}
+
+#[test]
+fn concurrent_history_reads_share_method_limits_but_not_other_methods() {
+    let mut h = Harness::new();
+    h.load();
+    query(&mut h, fills(1));
+    h.event(Event::Command(Command::Query {
+        command: 2,
+        query: fills(1),
+    }));
+    h.event(Event::Command(Command::Query {
+        command: 3,
+        query: Query::OrderHistory {
+            symbol: None,
+            from_ms: None,
+            to_ms: None,
+            limit: Some(1),
+        },
+    }));
+    assert_eq!(
+        h.actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("private/get-trades")))
+            .count(),
+        1
+    );
+    assert_eq!(
+        h.actions
+            .iter()
+            .filter(
+                |a| matches!(a, Action::Http(r) if r.url.ends_with("private/get-order-history"))
+            )
+            .count(),
+        1
+    );
+    page_timer(&mut h);
+    assert_eq!(
+        h.actions
+            .iter()
+            .filter(|a| matches!(a, Action::Http(r) if r.url.ends_with("private/get-trades")))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn documented_deposit_withdrawal_and_rollback_variants_are_transfers() {
+    let mut h = Harness::new();
+    h.load();
+    query(
+        &mut h,
+        Query::Income {
+            symbol: None,
+            kind: None,
+            from_ms: Some(0.0),
+            to_ms: Some(1000.0),
+            limit: Some(4),
+        },
+    );
+    let rows = ["DEPOSIT", "WITHDRAW", "ROLLBACK_DEPOSIT", "ROLLBACK_WITHDRAW"].iter().enumerate()
+        .map(|(i, kind)| format!(r#"{{"journal_id":"{i}","instrument_name":"USD","journal_type":"{kind}","transaction_qty":"-100","event_timestamp_ms":1,"event_timestamp_ns":1000000}}"#))
+        .collect::<Vec<_>>().join(",");
+    h.reply(
+        "private/get-transactions",
+        &format!(r#"{{"code":0,"result":{{"data":[{rows}]}}}}"#),
+    );
+    page_timer(&mut h);
+    h.reply("private/get-transactions", EMPTY);
+    let result = done(&h, 1).unwrap();
+    assert_eq!(result.matches(r#""category":"transfer""#).count(), 4);
+    assert_eq!(result.matches(r#""income":-100.0"#).count(), 4);
+}

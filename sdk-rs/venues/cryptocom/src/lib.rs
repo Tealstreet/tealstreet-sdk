@@ -455,7 +455,7 @@ impl Venue for Cryptocom {
                 request,
                 if (200..300).contains(&response.status)
                     || serde_json::from_str::<RestEnvelope>(response.body)
-                        .is_ok_and(|e| e.code == 40101)
+                        .is_ok_and(|e| e.code != 0)
                 {
                     Ok(response.body)
                 } else {

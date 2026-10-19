@@ -119,6 +119,7 @@ export const VENUES = {
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >= count,
     privateSocket: '/v5/private',
+    isWrite: (method) => method === 'POST',
   },
 };
 

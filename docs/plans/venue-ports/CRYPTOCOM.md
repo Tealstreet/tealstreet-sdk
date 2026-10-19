@@ -231,3 +231,27 @@ clippy/tests also running as CI preflight. Ready to push and open PR into
 feat/rust-rewrite, followed by required adversarial reviews/comments and green CI.
 Rust remains opt-in, with TS retained as the replay reference like the existing
 Binance/Bybit lanes; global production TS removal is rewrite phase 9.
+
+### PR #1303 adversarial review, round 1
+
+Three independent reviewers found and reproduced stale cached order overwrites,
+position resurrection after REST omission, splitter envelope truncation/scalar
+whitespace repair, omitted JS buffer memory, absent Bybit write classification,
+fractional history bounds, transfer variants and concurrent history rate-limit
+violations. Findings are posted at
+https://github.com/Tealstreet/tealstreet-sdk/pull/1303#issuecomment-6272520761.
+
+Fixed all: timestamp-preserving order merge; per-position omission closures for
+REST and stream; splitter overflow fails closed and keeps internal whitespace;
+baseline-adjusted ArrayBuffer bytes counted once alongside wasm; generic tested
+response queues and Bybit mutation classification; checked whole/fractional ms
+conversion; documented deposit/withdrawal/rollback categories; per-method query
+slots shared across commands/pages/retries. Non-2xx writes retain native rejection
+details without reporting success. Added concrete regressions: 41 venue tests,
+12 engine tests, 8 harness tests PASS; venue/engine/wasm clippy PASS. Full workspace
+clippy/tests passed before these fixes. New release/replays are running; the
+memory numbers above predate buffer accounting and are superseded by next results.
+
+Initial PR Rust CI (all six jobs) PASS. First-branch push scan found an inherited
+synthetic Binance signing vector in old commit 879fdc7461, not a lane credential;
+PR-range secret scan PASS. Subsequent pushes scan only their new commits.

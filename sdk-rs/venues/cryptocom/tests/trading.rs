@@ -273,3 +273,28 @@ fn unsuccessful_http_or_missing_success_code_never_reports_write_success() {
         )));
     }
 }
+
+#[test]
+fn unsuccessful_http_write_preserves_native_rejection_details() {
+    let mut h = Harness::new();
+    h.load();
+    command(
+        &mut h,
+        Command::CancelSymbolOrders {
+            command: 1,
+            symbol: "BTCUSD-PERP".into(),
+        },
+    );
+    let request = h.http("cancel-all-orders");
+    h.event(Event::HttpResponse {
+        request: request.id,
+        response: safe_cex_engine::Response {
+            status: 403,
+            headers: "",
+            body: r#"{"code":30003,"message":"INVALID_INSTRUMENT_NAME"}"#,
+        },
+    });
+    pace(&mut h);
+    assert!(h.actions.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone {
+        command: 1, result: Err(error) }) if error.contains("30003") && error.contains("INVALID_INSTRUMENT_NAME"))));
+}

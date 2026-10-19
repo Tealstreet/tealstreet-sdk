@@ -50,6 +50,7 @@ pub struct Account {
     position_versions: HashMap<String, u64>,
     symbol_closures: HashMap<String, (u64, f64)>,
     position_times: HashMap<String, f64>,
+    position_closures: HashMap<String, f64>,
     terminal: HashSet<String>,
     balance_revision: u64,
     executions: HashSet<String>,
@@ -381,6 +382,14 @@ impl Cryptocom {
                 rows.retain(|p| {
                     if self
                         .account
+                        .position_closures
+                        .get(&p.id)
+                        .is_some_and(|time| p.last_update.unwrap_or(0.0) <= *time)
+                    {
+                        return false;
+                    }
+                    if self
+                        .account
                         .symbol_closures
                         .get(&p.symbol)
                         .is_some_and(|(_, time)| p.last_update.unwrap_or(0.0) <= *time)
@@ -432,6 +441,21 @@ impl Cryptocom {
                         s.margin_type = row.margin_type;
                     });
                 }
+                for live in cx.store.positions() {
+                    if !rows.iter().any(|p| p.id == live.id && p.contracts > 0.0) {
+                        let time = self
+                            .account
+                            .position_times
+                            .get(&live.id)
+                            .copied()
+                            .unwrap_or(live.last_update.unwrap_or(0.0));
+                        self.account
+                            .position_closures
+                            .entry(live.id.clone())
+                            .and_modify(|t| *t = t.max(time))
+                            .or_insert(time);
+                    }
+                }
                 cx.store
                     .set_positions(rows.into_iter().filter(|p| p.contracts > 0.0).collect());
                 self.read_account(cx, Read::Balance, 0);
@@ -480,6 +504,13 @@ impl Cryptocom {
                                 })
                                 .cloned(),
                         );
+                        for row in &mut regular {
+                            if let Some(live) = cx.store.order(&row.id)
+                                && live.last_update > row.last_update
+                            {
+                                *row = live.clone();
+                            }
+                        }
                         cx.store.set_orders(regular);
                     }
                     self.account.count += 1;
@@ -587,7 +618,15 @@ impl Cryptocom {
                             .unwrap_or(f64::NEG_INFINITY)
                             .max(closed_at)
                     };
-                    if time < last || (position.contracts > 0.0 && time <= closed_at) {
+                    let closed_position = self
+                        .account
+                        .position_closures
+                        .get(&position.id)
+                        .copied()
+                        .unwrap_or(f64::NEG_INFINITY);
+                    if time < last
+                        || (position.contracts > 0.0 && time <= closed_at.max(closed_position))
+                    {
                         return;
                     }
                     self.account.revision += 1;

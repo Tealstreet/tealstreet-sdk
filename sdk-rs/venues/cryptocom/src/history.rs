@@ -39,6 +39,7 @@ pub struct Request {
 #[derive(Default)]
 pub struct History {
     pub waiting: HashMap<TimerId, Request>,
+    next_by_path: HashMap<&'static str, f64>,
 }
 
 #[derive(Serialize)]
@@ -106,6 +107,15 @@ struct Trade {
     timestamp: f64,
     side: &'static str,
 }
+fn millis_ns(value: f64) -> Option<u64> {
+    if !value.is_finite() || value < 0.0 {
+        return None;
+    }
+    (value.trunc() as u64)
+        .checked_mul(1_000_000)?
+        .checked_add((value.fract() * 1_000_000.0).round() as u64)
+}
+
 fn side_name(s: &str) -> &'static str {
     if side(s) == safe_cex_engine::model::OrderSide::Buy {
         "buy"
@@ -270,6 +280,13 @@ impl Cryptocom {
             cx.done(command, Err("Invalid history time range".into()));
             return;
         }
+        let (Some(from_ns), Some(to_ns)) = (millis_ns(from), millis_ns(to)) else {
+            cx.done(
+                command,
+                Err("History time range exceeds nanosecond bounds".into()),
+            );
+            return;
+        };
         let request = Request {
             command,
             kind,
@@ -277,8 +294,8 @@ impl Cryptocom {
             symbol,
             order_id,
             income_kind,
-            from_ns: (from as u64).saturating_mul(1_000_000),
-            to_ns: (to as u64).saturating_mul(1_000_000),
+            from_ns,
+            to_ns,
             limit: if matches!(kind, Kind::Income) && from_ms.is_some() && to_ms.is_some() {
                 usize::MAX
             } else {
@@ -298,13 +315,30 @@ impl Cryptocom {
             committed: 0,
             page_seen: vec![],
         };
-        if request.limit == 0 || from == to {
+        if request.limit == 0 || from_ns == to_ns {
             cx.done(command, Ok("[]".into()));
             return;
         }
         self.history_request(cx, request);
     }
-    pub(crate) fn history_request(&self, cx: &mut Cx<'_, Pending>, request: Request) {
+    pub(crate) fn history_request(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
+        let next = self
+            .history
+            .next_by_path
+            .entry(request.path)
+            .or_insert(cx.now);
+        if *next > cx.now {
+            let timer = cx.set_timer(*next - cx.now);
+            self.history.waiting.insert(timer, request);
+            return;
+        }
+        // Limits are per method/key, shared by initial reads, pages and retries.
+        *next = cx.now
+            + match request.kind {
+                Kind::Fills | Kind::Orders => 1000.0,
+                Kind::Income => 100.0,
+                Kind::Trades => 10.0,
+            };
         if matches!(request.kind, Kind::Trades) {
             let symbol = request.symbol.as_deref().unwrap_or("");
             let url = format!(
@@ -390,7 +424,8 @@ impl Cryptocom {
                     "TRADE_FEE" | "LIQUIDATION_FEE" => {
                         ("commission", num::parse(r.transaction_qty))
                     }
-                    "ONCHAIN_WITHDRAWAL" | "ONCHAIN_DEPOSIT" | "SUBACCOUNT_TX" => {
+                    "ONCHAIN_WITHDRAWAL" | "ONCHAIN_DEPOSIT" | "SUBACCOUNT_TX" | "DEPOSIT"
+                    | "WITHDRAW" | "ROLLBACK_DEPOSIT" | "ROLLBACK_WITHDRAW" => {
                         ("transfer", num::parse(r.transaction_qty))
                     }
                     _ => ("other", num::parse(r.transaction_qty)),

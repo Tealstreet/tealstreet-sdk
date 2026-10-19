@@ -223,3 +223,68 @@ fn rest_position_timestamps_fence_older_stream_frames() {
     );
     assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
 }
+
+#[test]
+fn cached_rest_order_cannot_rewind_stream_update_before_request_started() {
+    let mut h = Harness::new();
+    let live = ORDER
+        .replace("\"update_time\":1", "\"update_time\":30")
+        .replace(
+            "\"cumulative_quantity\":\"0\"",
+            "\"cumulative_quantity\":\"0.5\"",
+        );
+    h.ws("user.order", &live);
+    h.reply("get-positions", EMPTY);
+    h.reply("user-balance", BALANCE);
+    h.reply(
+        "private/get-open-orders",
+        &format!(r#"{{"code":0,"result":{{"data":[{ORDER}]}}}}"#),
+    );
+    h.reply("advanced/get-open-orders", EMPTY);
+    let row = &h.engine.store().orders()[0];
+    assert_eq!(row.last_update, 30.0);
+    assert_eq!(row.filled, 0.5);
+}
+
+#[test]
+fn authoritative_empty_snapshot_fences_duplicate_live_position() {
+    let mut h = Harness::new();
+    h.load();
+    let short = r#"{"instrument_name":"BTCUSD-PERP","quantity":"-2","cost":"200","update_timestamp_ms":10}"#;
+    h.ws("user.positions", short);
+    let timer = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 10000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    h.now += 10000.0;
+    h.event(Event::TimerFired { timer });
+    h.reply("get-positions", EMPTY);
+    assert!(h.engine.store().positions().is_empty());
+    h.ws("user.positions", short);
+    assert!(
+        h.engine.store().positions().is_empty(),
+        "duplicate older exposure must not resurrect after authoritative closure"
+    );
+    h.reply("user-balance", BALANCE);
+    let timer = h
+        .actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } if *at_ms == h.now + 10000.0 => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    h.now += 10000.0;
+    h.event(Event::TimerFired { timer });
+    h.reply(
+        "get-positions",
+        &format!(r#"{{"code":0,"result":{{"data":[{short}]}}}}"#),
+    );
+    assert!(h.engine.store().positions().is_empty());
+    h.ws("user.positions", &short.replace(":10", ":11"));
+    assert_eq!(h.engine.store().positions()[0].contracts, 2.0);
+}

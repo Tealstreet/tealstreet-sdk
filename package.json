@@ -22,7 +22,7 @@
     "rust:private-tape-cryptocom": "node sdk-rs/harness/private-tape-cryptocom.mjs",
     "rust:trim-tape": "node sdk-rs/harness/trim-tape.mjs",
     "rust:gate": "node sdk-rs/harness/gate.mjs",
-    "rust:test-harness": "node --test sdk-rs/harness/venues.test.mjs"
+    "rust:test-harness": "node --test sdk-rs/harness/*.test.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
