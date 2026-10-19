@@ -125,3 +125,23 @@ Bill rows emit gross PnL and signed commission separately with distinct IDs.
 UTA bills remain explicitly unsupported rather than calling incompatible v2.
 Verify documented samples, huge IDs, fee signs, hedge closes, cursor cycles,
 range boundaries, malformed pages and retry failure; sub-agent review afterward.
+
+## Query phase checkpoint
+
+- Streamed Classic/UTA fill and order history, Classic account bills, public
+  trades, typed Binance-compatible JSON results. Native cursors continue across
+  short pages; empty terminal pages end cleanly. Cycles/page caps fail loudly.
+- Inclusive 30-day windows, identity dedupe, execution timestamps in seconds,
+  order/income/public-trade timestamps in milliseconds. Classic hedge-close
+  direction, signed rebates, and separate gross PnL / commission bill rows.
+- Explicit UTA income unsupported error; no incompatible Classic fallback.
+- Query sub-agent review fixed filtered malformed rows, invalid financial
+  numbers, missing required Classic profit, unbounded detection wait, and
+  query-triggered late UTA promotion. Shared promotion also re-plans explicitly
+  rejected trading jobs before any accepted placements; its wait is bounded.
+- Native checks: 62 tests (public 11, account 15, trading 24, queries 12),
+  fmt/clippy/bans PASS. WASM clippy and release build PASS.
+- Harness work started: strict JSON body comparison preserving caller IDs,
+  subscription routing for same-URL sockets, passphrase options, documented
+  Classic private tape. Initial Bitget private and both Binance gates PASS.
+  Public 20-second two-symbol recording captured; fixture gate running.

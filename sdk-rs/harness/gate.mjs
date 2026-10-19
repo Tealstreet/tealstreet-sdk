@@ -88,6 +88,7 @@ const KNOWN_TS_FIXES = {
       'Send native crossed marginMode for Classic batches rather than cross.',
       'Resolve native modify identity using the fresh newClientOid.',
       'Never cancel-replace an amendment after an ambiguous transport/server result.',
+      'Report incomplete or malformed financial history as a failed read.',
     ],
   },
 };

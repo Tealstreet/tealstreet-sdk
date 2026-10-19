@@ -172,7 +172,7 @@ impl Harness {
             .iter()
             .copied()
             .find(|(_, at)| (*at - self.now - delay).abs() < 0.01)
-            .expect("timer at delay");
+            .unwrap_or_else(|| panic!("no timer after {delay} at {}: {:?}", self.now, self.timers));
         self.timers.retain(|(t, _)| *t != timer);
         self.now = at;
         self.event(Event::TimerFired { timer });

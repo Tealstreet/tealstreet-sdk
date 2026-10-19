@@ -529,18 +529,11 @@ impl BitgetFutures {
             }
             return;
         }
-        if let Ok(header) = &envelope
-            && header.code.0 == Some(40085.0)
-            && !self.account.uta
-            && !self.options.testnet
+        if envelope
+            .as_ref()
+            .is_ok_and(|header| header.code.0 == Some(40085.0))
+            && self.promote_uta(cx)
         {
-            self.account.uta = true;
-            self.account.generation += 1;
-            self.account.detected = false;
-            self.account.positions_in_flight = false;
-            self.account.balance_in_flight = false;
-            self.account.orders_in_flight = false;
-            self.account_request(cx, paths::SETTINGS.to_owned(), None, Request::Probe);
             return;
         }
         let valid = envelope
@@ -687,6 +680,20 @@ impl BitgetFutures {
         } else {
             self.account_failed(cx, request, error);
         }
+    }
+
+    pub(crate) fn promote_uta(&mut self, cx: &mut Cx<'_, Pending>) -> bool {
+        if self.account.uta || self.options.testnet {
+            return false;
+        }
+        self.account.uta = true;
+        self.account.generation += 1;
+        self.account.detected = false;
+        self.account.positions_in_flight = false;
+        self.account.balance_in_flight = false;
+        self.account.orders_in_flight = false;
+        self.account_request(cx, paths::SETTINGS.to_owned(), None, Request::Probe);
+        true
     }
 
     pub(crate) fn apply_settings(&self, cx: &mut Cx<'_, Pending>, settings: &UtaSettings<'_>) {

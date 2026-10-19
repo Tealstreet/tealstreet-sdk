@@ -12,6 +12,7 @@ pub struct Trading {
     active: Option<Job>,
     metadata_at: std::collections::HashMap<String, f64>,
     retry: Option<(TimerId, Request)>,
+    detect_wait: Option<TimerId>,
 }
 
 struct Job {
@@ -346,6 +347,16 @@ impl BitgetFutures {
         } else {
             return;
         };
+        if !self.account.detected {
+            if self.trading.detect_wait.is_none() {
+                self.trading.detect_wait = Some(cx.set_timer(10_000.0));
+            }
+            self.trading.active = Some(job);
+            return;
+        }
+        if let Some(timer) = self.trading.detect_wait.take() {
+            cx.clear_timer(timer);
+        }
         if job.waiting_positions {
             if self.positions_in_flight() {
                 self.trading.active = Some(job);
@@ -1153,6 +1164,44 @@ impl BitgetFutures {
             return;
         }
         job.outstanding = false;
+        if response
+            .as_ref()
+            .ok()
+            .and_then(|r| serde_json::from_str::<Envelope<serde::de::IgnoredAny>>(r.body).ok())
+            .is_some_and(|r| r.code.0 == Some(40085.0))
+            && self.promote_uta(cx)
+        {
+            if let Effect::Cancel { orders, .. } = &request.call.effect {
+                for o in orders {
+                    cx.store.update_order(&o.id, |row| {
+                        if row.status == OrderStatus::Canceling {
+                            row.status = o.status;
+                        }
+                    });
+                }
+            }
+            if job.ids.is_empty() {
+                job.calls.clear();
+                job.planned = false;
+                job.positions_checked = false;
+                job.waiting_positions = false;
+                job.metadata = symbols(cx, &job.intent).into();
+                job.fallback = None;
+                job.rollback = None;
+                self.trading.metadata_at.clear();
+                self.trading.active = Some(job);
+                self.resume_trading(cx);
+            } else {
+                cx.done(
+                    job.id,
+                    Err(format!(
+                        "Bitget switched to UTA after partial success; acknowledged IDs {:?}",
+                        job.ids
+                    )),
+                );
+            }
+            return;
+        }
         if matches!(
             request.call.effect,
             Effect::Metadata(_) | Effect::ResolveAmend { .. }
@@ -1574,6 +1623,21 @@ impl BitgetFutures {
     }
 
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.trading.detect_wait == Some(timer) {
+            self.trading.detect_wait = None;
+            if let Some(job) = self.trading.active.take() {
+                cx.done(
+                    job.id,
+                    Err("Bitget account detection did not complete".into()),
+                );
+            }
+            while let Some(command) = self.trading.queue.pop_front() {
+                if let Some(id) = command_id(&command) {
+                    cx.done(id, Err("Bitget account detection did not complete".into()));
+                }
+            }
+            return;
+        }
         if self
             .trading
             .retry

@@ -642,3 +642,27 @@ fn unknown_server_amend_failure_never_replaces() {
         assert!(h.requests.iter().all(|r| r.method == Method::Get));
     }
 }
+
+#[test]
+fn late_uta_write_wait_has_a_deadline_after_probe_failure() {
+    let mut h = Harness::classic();
+    place(&mut h, vec![limit()]);
+    h.respond(
+        "/batch-place-order",
+        200,
+        r#"{"code":"40085","msg":"Classic API unsupported","data":null}"#,
+    );
+    h.respond(
+        "/account/settings",
+        200,
+        r#"{"code":"40014","msg":"bad passphrase","data":null}"#,
+    );
+    h.timer_after(10_000.0);
+    assert!(
+        h.done[0]
+            .1
+            .as_ref()
+            .unwrap_err()
+            .contains("account detection")
+    );
+}
