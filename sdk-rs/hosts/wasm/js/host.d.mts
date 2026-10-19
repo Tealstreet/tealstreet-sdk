@@ -45,6 +45,8 @@ export interface WasmEngineLike {
   wsMessage(socket: number, text: string, now: number): string;
   /** Optional fast entry: undefined means no actions; legacy engines remain supported. */
   wsMessageActions?(socket: number, text: string, now: number): string | undefined;
+  /** Optional UTF-8 entry; invalid bytes are ignored without changing engine state. */
+  wsMessageBytes?(socket: number, bytes: Uint8Array, now: number): string | undefined;
   wsClose(socket: number, code: number, now: number): string;
   httpStart(request: number, status: number, headers: string, now: number): string;
   httpChunk(request: number, data: Uint8Array, now: number): string;

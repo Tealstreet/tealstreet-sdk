@@ -582,6 +582,13 @@ impl WasmEngine {
         (!actions.is_empty()).then_some(actions)
     }
 
+    /// A byte-input alternative that rejects invalid UTF-8 before handling any event.
+    #[wasm_bindgen(js_name = wsMessageBytes)]
+    pub fn ws_message_bytes(&mut self, socket: u32, bytes: &[u8], now: f64) -> Option<String> {
+        let text = std::str::from_utf8(bytes).ok()?;
+        self.ws_message_actions(socket, text, now)
+    }
+
     #[wasm_bindgen(js_name = wsClose)]
     pub fn ws_close(&mut self, socket: u32, code: u16, now: f64) -> String {
         let socket = SocketId(socket);
@@ -713,5 +720,42 @@ mod tests {
         );
         assert_eq!(legacy.ws_message(7, "quiet", 3.), "");
         assert_eq!(optional.ws_message_actions(7, "quiet", 3.), None);
+    }
+
+    #[test]
+    fn byte_websocket_actions_validate_utf8_before_handling_or_draining() {
+        let mut legacy = WasmEngine {
+            inner: Box::<Messages>::default(),
+        };
+        let mut bytes = WasmEngine {
+            inner: Box::<Messages>::default(),
+        };
+        // A rejected byte message must neither handle an event nor drain existing actions.
+        bytes.inner.handle(
+            1.,
+            Event::WsMessage {
+                socket: SocketId(7),
+                text: "pending",
+            },
+        );
+        for invalid in [
+            &[0xff][..],
+            &[0xc0, 0xaf],
+            &[0xed, 0xa0, 0x80],
+            &[0xf0, 0x9f],
+        ] {
+            assert_eq!(bytes.ws_message_bytes(7, invalid, 2.), None);
+        }
+        assert_eq!(
+            bytes.ws_message_bytes(7, b"quiet", 3.),
+            Some(legacy.ws_message(7, "pending", 1.))
+        );
+        for text in ["", "ASCII", "é漢🦀\u{fffd}", "a\0b"] {
+            assert_eq!(
+                bytes.ws_message_bytes(7, text.as_bytes(), 4.),
+                Some(legacy.ws_message(7, text, 4.))
+            );
+            assert_eq!(bytes.ws_message_bytes(7, b"quiet", 5.), None);
+        }
     }
 }
