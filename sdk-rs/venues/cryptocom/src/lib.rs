@@ -1,4 +1,6 @@
 //! Crypto.com Exchange v1 perpetual derivatives on the sans-I/O engine.
+mod account;
+pub mod sign;
 mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
@@ -19,6 +21,7 @@ pub struct Options {
 }
 
 pub enum Pending {
+    Account(account::Request),
     Markets {
         rows: Vec<Market>,
         indexes: HashMap<String, String>,
@@ -59,6 +62,8 @@ pub struct Cryptocom {
     indexes: HashMap<String, String>,
     books: HashMap<String, BookState>,
     message_id: u64,
+    credentials: Option<sign::Credentials>,
+    account: account::Account,
 }
 
 pub(crate) fn interval(value: &str) -> Result<&str, String> {
@@ -78,7 +83,22 @@ fn quoted(s: &str) -> String {
 
 impl Cryptocom {
     pub fn new(options: Options) -> Self {
+        let credentials = if options.public_data_only {
+            None
+        } else {
+            options
+                .key
+                .as_ref()
+                .filter(|k| !k.is_empty())
+                .zip(options.secret.as_ref().filter(|s| !s.is_empty()))
+                .map(|(key, secret)| sign::Credentials {
+                    key: key.clone(),
+                    secret: secret.clone(),
+                })
+        };
         Self {
+            credentials,
+            account: Default::default(),
             rest: if options.testnet {
                 "https://uat-api.3ona.co/exchange/v1"
             } else {
@@ -305,6 +325,8 @@ impl Venue for Cryptocom {
                         envelope.id
                     ),
                 );
+            } else if channel == 1 && envelope.method == "public/auth" && envelope.code == 0 {
+                self.authenticated(cx, &envelope);
             } else if envelope.code != 0 {
                 cx.log(
                     LogLevel::Error,
@@ -316,7 +338,11 @@ impl Venue for Cryptocom {
             } else if let Some(result) = envelope.result {
                 // Subscribe acknowledgements may carry a result without a channel.
                 if let Ok(message) = serde_json::from_str::<Message>(result.get()) {
-                    self.message(cx, message)?;
+                    if channel == 1 {
+                        self.private_message(cx, message)?;
+                    } else {
+                        self.message(cx, message)?;
+                    }
                 }
             }
             Ok::<_, serde_json::Error>(())
@@ -345,6 +371,7 @@ impl Venue for Cryptocom {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets {
                 rows,
                 indexes,
@@ -380,20 +407,24 @@ impl Venue for Cryptocom {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
-        let error = if !(200..300).contains(&response.status) {
-            Some(format!("Crypto.com HTTP error {}", response.status))
-        } else {
-            match serde_json::from_str::<RestEnvelope>(response.body) {
-                Ok(e) if e.code == 0 => None,
-                Ok(e) => Some(format!("Crypto.com API Error {}: {}", e.code, e.message)),
-                Err(e) => Some(e.to_string()),
+        let error = match serde_json::from_str::<RestEnvelope>(response.body) {
+            Ok(e) if e.code != 0 => Some(format!("Crypto.com API Error {}: {}", e.code, e.message)),
+            _ if !(200..300).contains(&response.status) => {
+                Some(format!("Crypto.com HTTP error {}", response.status))
             }
+            Ok(_) => None,
+            Err(e) => Some(e.to_string()),
         };
         if let Some(error) = error {
-            self.on_request_failed(cx, pending, &error);
+            if let Pending::Account(request) = pending {
+                self.account_failed(cx, request, &error, false);
+            } else {
+                self.on_request_failed(cx, pending, &error);
+            }
             return;
         }
         match pending {
+            Pending::Account(request) => self.account_response(cx, request),
             Pending::Markets {
                 rows,
                 indexes,
@@ -422,9 +453,13 @@ impl Venue for Cryptocom {
                 cx.store.set_tickers(rows);
                 self.market_channels(cx);
                 self.connect(cx, 0);
-                cx.store.set_balance(Balance::default());
-                cx.store.set_positions(vec![]);
-                cx.store.set_orders(vec![]);
+                if self.credentials.is_some() {
+                    self.private_start(cx);
+                } else {
+                    cx.store.set_balance(Balance::default());
+                    cx.store.set_positions(vec![]);
+                    cx.store.set_orders(vec![]);
+                }
             }
             Pending::Candles {
                 command,
@@ -441,13 +476,18 @@ impl Venue for Cryptocom {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Candles { command, .. } = pending {
-            cx.done(command, Err(error.into()));
-        } else {
-            cx.log(LogLevel::Error, error);
+        match pending {
+            Pending::Account(request) => self.account_failed(cx, request, error, true),
+            Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            _ => cx.log(LogLevel::Error, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account.timer == Some(timer) {
+            self.account.timer = None;
+            self.reconcile(cx);
+            return;
+        }
         if self.watchdog == Some(timer) {
             for channel in 0..2 {
                 let state = &self.sockets[channel];
@@ -468,6 +508,9 @@ impl Venue for Cryptocom {
             }
             if self.sockets[channel].ready == Some(timer) {
                 self.sockets[channel].ready = None;
+                if channel == 1 {
+                    self.authenticate(cx);
+                }
                 if channel == 0 {
                     self.subscribe(
                         cx,

@@ -53,3 +53,21 @@ arrays and signed-body reads without changing existing callers. Review found
 malformed list/UTF-8 acceptance; fixed with streamed syntax validation and
 regressions. Checks: bans PASS; crate clippy PASS; engine 10 tests and venue 6
 tests PASS. Public phase ready; private phase next.
+
+### Private phase
+
+Moved crate to `sdk-rs/venues/cryptocom` after merging origin's nested workspace
+(`fe79b018cd`). Signed POST reads stream `result.data`; auth waits one second,
+then subscribes to order/advanced-order/positions/balance plus `user.trade`.
+Snapshots merge around newer events; failed reads retain state. Settings carry
+leverage/margin without zero positions; terminal orders and position closures
+have independent stale-event fences. Executions retain full-width ids and emit
+once per trade id (bounded reconnect deduplication cache).
+
+Sub-agent found incorrect position-id separator, lost closure timestamp fence,
+and symbol-scoped snapshot fencing that dropped the other hedged side. Fixed
+all with regressions. Bans/clippy PASS; 15 venue tests PASS (including signer).
+TS defects intentionally corrected: failed reads previously committed empty;
+order mappers lost `client_oid`; `user.trade` was never subscribed/emitted;
+REST reset live leverage/liquidation enrichment; terminal/stale state could
+reopen exposure. Register in harness KNOWN_TS_FIXES during gate phase.
