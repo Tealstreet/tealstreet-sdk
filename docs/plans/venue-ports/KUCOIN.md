@@ -210,3 +210,39 @@ reviews posted as comments, fix/review loop, green CI, merge and fresh branch.
 Final lot-bridge review PASS, no P1/P2; existing MEXC compatibility 3/3 PASS.
 Fresh Node 22 package typecheck/lint, all 6,563 unit tests (458 files) and all
 20 wasm integration tests PASS after the bridge fix. Local gates are complete.
+
+### PR #1312: adversarial round 1
+
+Opened https://github.com/Tealstreet/tealstreet-sdk/pull/1312 into
+feat/rust-rewrite at 68e576b1c4. Its initial CI (root, secrets, Rust native,
+wasm and all replay gates) is green, but independent reviews found nine accepted
+issues. Findings and sources are posted in PR comments 6274462654 and the
+subsequent addendum; the initial head is not considered ready to merge.
+
+- R1 P1: partial WS rows erase known safety flags; preserve absent fields,
+  hydrate own placements across ACK/stream races, refuse unknown external order
+  amendments until reconciliation. Keep submitted bracket protections through
+  partial events and REST omission before replacement.
+- R2 P2: consume native margin-mode/cross-leverage maps for flat symbols and
+  fence delayed metadata reads.
+- R3 P2: cancel obsolete depth retries to prevent post-recovery rollback;
+  cancel them across disconnects and require a ready detail socket.
+- R4 P2: wait for welcome before subscriptions/private startup/ping, retaining
+  a bounded handshake deadline. Replay bootstraps only actual recorded welcomes
+  without redelivery, invented messages, lost frame counts or reordered business
+  traffic. TS's early sends are explicitly documented in KNOWN_TS_FIXES.
+- R5 P2: retain exact integer fill times for inclusive range filtering.
+- R6 P2: floor clock-derived default query bounds from fractional native clocks;
+  keep explicitly supplied fractional bounds invalid.
+- R7 P1: restore position contractsNative in the worker bridge; real wasm test
+  runs the actual copier-close path and asserts native size 10 for base size 1.
+- R8 P1: after cancel acceptance, prove terminal state/final fills through a
+  bounded signed read before creating a reduced remainder replacement.
+- R9 P2: use revision-scoped snapshot absence fences so triggered stops may
+  migrate into the normal book; reserve permanent tombstones for terminal proof.
+
+Public 18 and history 10/funding 13 focused tests pass. Independent follow-up
+review of recorded welcome routing and position bridge passes; harness 52,
+wasm 20 and fresh TS typecheck/lint/6,563 unit tests pass. The private/trading
+repair and final cancellation-race audit are finishing before aggregate native,
+wasm rebuild/replays, fix commit, push, and round 2 review.
