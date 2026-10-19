@@ -34,8 +34,8 @@ const isPrivate = records.some((r) => r.url?.includes(venue.privateSocket));
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 
-/** Per-request values: clocks, signatures and generated client ids. */
-const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId']);
+/** Per-request values: clocks, signatures, request ids and generated client ids. */
+const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams]
@@ -45,12 +45,35 @@ const canonicalUrl = (url) => {
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
 
+/**
+ * A JSON request body with its keys sorted and volatile fields dropped, so
+ * venues that sign headers and send parameters in the body (Bybit) key their
+ * writes by what they ask for. Empty for a body-less request.
+ */
+const canonicalBody = (body) => {
+  if (body === undefined || body === null || body === '') return '';
+  let parsed;
+  try {
+    parsed = JSON.parse(typeof body === 'string' ? body : new TextDecoder().decode(body));
+  } catch {
+    return String(body);
+  }
+  const strip = (value) => {
+    if (Array.isArray(value)) return value.map(strip);
+    if (!value || typeof value !== 'object') return value;
+    const keys = Object.keys(value).filter((key) => !VOLATILE.has(key) && value[key] !== undefined).sort();
+    return Object.fromEntries(keys.map((key) => [key, strip(value[key])]));
+  };
+  return JSON.stringify(strip(parsed));
+};
+const requestKey = (method, url, body) => `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
+
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
   constructor() {
     this.responses = new Map();
     for (const record of records.filter((r) => r.type === 'http')) {
-      const key = `${record.method} ${canonicalUrl(record.url)}`;
+      const key = requestKey(record.method, record.url, record.requestBody);
       if (!this.responses.has(key)) this.responses.set(key, []);
       this.responses.get(key).push(record);
     }
@@ -60,8 +83,8 @@ class Tape {
     this.unserved = 0;
   }
 
-  respond(method, url) {
-    const queue = this.responses.get(`${method} ${canonicalUrl(url)}`);
+  respond(method, url, body) {
+    const queue = this.responses.get(requestKey(method, url, body));
     if (!queue?.length) {
       this.unserved++;
       return { status: 599, body: '' };
@@ -74,14 +97,16 @@ class Tape {
     const socket = { url, onMessage, closed: false };
     setImmediate(() => {
       if (socket.closed) return;
-      this.open.set(url, socket);
+      // Keyed without volatile query params (Bybit's per-connection requestId).
+      this.open.set(canonicalUrl(url), socket);
       onOpen();
       this.waiters = this.waiters.filter((waiter) => !waiter());
     });
     return socket;
   }
 
-  async socketFor(url) {
+  async socketFor(rawUrl) {
+    const url = canonicalUrl(rawUrl);
     while (!this.open.get(url) || this.open.get(url).closed) {
       await new Promise((resolve) => this.waiters.push(() => (this.open.get(url) ? (resolve(), true) : false)));
     }
@@ -193,8 +218,8 @@ async function runRust() {
       const socket = tape.connect(url, onOpen, onMessage);
       return { send: () => {}, close: () => (socket.closed = true) };
     },
-    request: async ({ method, url }) => {
-      const { status, body } = tape.respond(method, url);
+    request: async ({ method, url, body: requestBody }) => {
+      const { status, body } = tape.respond(method, url, requestBody);
       return { status, headers: '', body: encoder.encode(body) };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -358,7 +383,7 @@ async function runTs() {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString());
+    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data);
     // The raw body: the client's own transformResponse parses it, big ids included.
     const response = { data: body, status, statusText: String(status), headers: {}, config, request: {} };
     if (status >= 400) {
@@ -406,6 +431,11 @@ async function runTs() {
       if (record.op === 'cancelOrders') {
         await exchange.cancelOrders(store.orders.filter((order) => record.ids.includes(order.id)));
         return [];
+      }
+      if (record.op === 'amendOrder') {
+        const order = store.orders.find((o) => o.id === record.id);
+        const update = { ...(record.price !== undefined && { price: record.price }), ...(record.amount !== undefined && { amount: record.amount }) };
+        return exchange.updateOrder({ order, update });
       }
       if (record.op === 'cancelSymbolOrders') {
         await exchange.cancelSymbolOrders(record.symbol);

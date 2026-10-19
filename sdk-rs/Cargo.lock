@@ -3607,12 +3607,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-bybit"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "safe-cex-wasm"
 version = "0.1.0"
 dependencies = [
  "js-sys",
  "safe-cex-engine",
  "safe-cex-venue-binance",
+ "safe-cex-venue-bybit",
  "serde",
  "serde_json",
  "wasm-bindgen",
