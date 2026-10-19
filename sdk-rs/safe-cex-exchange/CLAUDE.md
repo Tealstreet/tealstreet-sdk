@@ -2198,3 +2198,9 @@ see STRUCTURED_CLONE_REVIEW.md. Graph readers execute the native/Node profiles;
 the private hidden descriptor writer is a non-decoder and is observed through
 cloned Error fields. Only V8's lazy stack accessor representation is accepted;
 supplied stack values, UTF16, writes and flags remain compared against Node.
+
+Builtin validation shares a UTF16 operand formatter and the canonical TypeError
+constructor; formatting never invokes user coercion. The 21 builtin/global input
+owners have executed native/source receipts and bounded rulings in
+BUILTIN_GLOBAL_NATIVE_INPUT_REVIEW.md, including the exact V8 object short-print
+residual and the four compiled diagnostic RED-to-GREEN controls.
