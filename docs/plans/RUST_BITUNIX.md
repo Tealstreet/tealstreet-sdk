@@ -467,3 +467,35 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   background completions, and drain selected pending responses before return.
   Both regressions fail before/pass after, future watchdog remains unfired;
   60 helpers PASS and production MEXC all 144 bookEvents PASS.
+
+### Nine-venue gates and CI PASS; Backpack integration
+
+- Reviewed f965a4057f passed all nine public (three runs) and twelve private
+  gates. Bitunix CPU TS/Rust358.9/309.8ms, steady196.5/171.4ms,
+  retained3.6/2.3MB, sampled peak31.4/16.1MB; 28,694 public/42 private records.
+  Bundle2,867,213 bytes, 60 harness/54 engine/56 Bitunix/21 adapter/28 host tests.
+- Exact-head Rust SDK39305109128 and both root CI39305108864/39305092905 PASS.
+  Independent reviews PASS, reports and full table posted on PR #1309.
+- Backpack landed at b265a0bab0 immediately before merge and made PR conflicting.
+  Integrate pinned landing, preserve shared tape refactor and all prior strict
+  protocol/oracle/timing guards. Disjoint reviews own harness, host and engine.
+  Keep existing 3 MiB cap; verify ten-venue artifact, gates and updated CI.
+- Ten-venue merge core is resolved: production replay now delegates to the
+  incoming shared Tape, retaining all prior lifecycle, matching, actual HTTP
+  completion, explicit-command, terminal-drain, oracle and metric controls.
+  Combined helper suite 88 PASS; engine 55 and host 31 focused tests PASS.
+- Initial ten-factory WASM 3,150,942 bytes exceeded existing 3 MiB cap by 5,214.
+  Apply the existing size profile (`z`) to Backpack too; rebuilt 3,128,408 bytes
+  is within unchanged cap, all 22 adapter tests PASS. All ten public performance
+  gates verify this optimization, alongside thirteen private variants.
+- Full startup checks exposed explicit construction not notifying open-frame
+  waiters; notify after registration while preserving unopened state until the
+  recorded open. Regression fails before/pass after. Production Bitunix TS
+  fixture passes 28,694 frames, all 89 combined helpers PASS.
+- Independent review also found dropped headers on production delegation to
+  shared validation; forward the fourth argument so WEEX/Backpack signatures
+  stay independently checked. Keep all protocol/response controls unchanged.
+- Ten-venue root typecheck/lint PASS. Full local tests passed all but two
+  HyroTrader import timeouts under load; lower-worker retry also timed out on
+  unrelated metadata imports. Focused verification and exact-head CI determine
+  readiness; no test deadlines or unrelated venue implementation changed.

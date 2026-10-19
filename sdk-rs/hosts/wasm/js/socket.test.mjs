@@ -24,6 +24,25 @@ test('invalid compression reaches the transport error callback', async () => {
   assert.equal(errors.length, 1);
 });
 
+for (const [format, compress, field] of [['gzip', gzipSync, 'id'], ['deflate', deflateSync, 'symbol']]) {
+  test(`${format} rejects malformed UTF-8 in JSON ${field} instead of delivering a changed value`, { timeout: 1000 }, async () => {
+    const received = [];
+    let failures = 0;
+    let failed;
+    const rejected = new Promise((resolve) => { failed = resolve; });
+    const receive = socketMessages((text) => received.push(text), (error) => {
+      failures++;
+      failed(error);
+    });
+    const malformed = Buffer.concat([Buffer.from(`{"${field}":"`), Buffer.from([0xff]), Buffer.from('"}')]);
+    receive(compress(malformed));
+    const error = await rejected;
+    assert.ok(error instanceof TypeError);
+    assert.equal(failures, 1);
+    assert.deepEqual(received, []);
+  });
+}
+
 test('whole and streamed HTTP buffers cross in bounded chunks', async () => {
   for (const streamed of [false, true]) {
     const sizes=[];

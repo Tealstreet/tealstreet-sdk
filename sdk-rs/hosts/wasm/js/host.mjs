@@ -59,6 +59,7 @@ export class EngineHost {
    * fills go out, for flushing those at the venue's faster book cadence.
    */
   flush(marketOnly = false) {
+    if (this.disposed) return;
     const frame = this.engine.takeFrame(this.transport.now(), marketOnly);
     if (frame) this.handlers.onFrame?.(frame.buffer);
   }
@@ -66,6 +67,7 @@ export class EngineHost {
   /** The whole current state as one frame (an ArrayBuffer), for a consumer
    * that starts late or skipped frames; later flushes apply on top of it. */
   snapshot() {
+    if (this.disposed) throw new Error('engine disposed');
     return this.engine.snapshotFrame(this.transport.now()).buffer;
   }
 
@@ -92,6 +94,7 @@ export class EngineHost {
         }
       } else {
         for await (const chunk of body) {
+          if (this.disposed) return;
           for (let at = 0; at < chunk.length; at += CHUNK_BYTES) {
             if (this.disposed) return;
             this.run(engine.httpChunk(id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
@@ -160,6 +163,7 @@ export class EngineHost {
       case 'setTimer': {
         const id = action.timer;
         const handle = transport.setTimeout(() => {
+          if (this.disposed) return;
           this.timers.delete(id);
           if (this.disposed) return;
           this.run(engine.timer(id, transport.now()));

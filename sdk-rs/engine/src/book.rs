@@ -33,6 +33,12 @@ impl Book {
         target.extend(levels.into_iter().filter(|(_, amount)| *amount != 0.0));
     }
 
+    /// Adopt a decoded snapshot without allocating a second copy of its levels.
+    pub fn load_sorted_owned(&mut self, side: BookSide, mut levels: Vec<(f64, f64)>) {
+        levels.retain(|(_, amount)| *amount != 0.0);
+        *self.side_mut(side) = levels;
+    }
+
     /// Upsert one level; an amount of zero removes it.
     pub fn apply(&mut self, side: BookSide, price: f64, amount: f64) {
         let levels = self.side_mut(side);
@@ -91,6 +97,17 @@ impl Book {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adopts_snapshot_allocation_and_removes_empty_levels() {
+        let mut book = Book::default();
+        book.apply(BookSide::Bids, 100.0, 1.0);
+        let levels = vec![(12.0, 2.0), (11.0, 0.0), (10.0, 3.0)];
+        let allocation = levels.as_ptr();
+        book.load_sorted_owned(BookSide::Bids, levels);
+        assert_eq!(book.bids().as_ptr(), allocation);
+        assert_eq!(book.bids(), [(12.0, 2.0), (10.0, 3.0)]);
+    }
 
     #[test]
     fn keeps_sides_sorted_and_removes_zero_levels() {

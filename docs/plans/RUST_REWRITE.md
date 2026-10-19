@@ -263,13 +263,13 @@ Then: exchange-server moves to the native host and streams the same frames
 (with `BOOK_DELTA` sections for networked clients — full books every flush
 are ~450 KB/s for two 1,000-level books).
 
-### 7. CI — done for Binance
+### 7. CI — Binance, Bybit, Backpack, OKX, Crypto.com, WEEX and BingX
 
 - Bans, fmt, clippy, native tests, wasm32 build and clippy.
 - Replay gate (`rust.yml`, job "replay gate"): release wasm with the pinned
   wasm-bindgen, an explicit combined-venue size budget in `rust.yml`, committed public fixtures
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
-  and the generated private tape gated on identical account state.
+  and each venue's generated private tape gated on identical account state.
 
 ### 8. Remaining venues — in progress
 
@@ -288,7 +288,9 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | WEEX | done (#1301) |
 | BingX | done (#1305) |
 | MEXC | done (#1304); conditional/trailing parity check pending |
-| Bitget, Hyperliquid, BloFin, Bitunix, Backpack | wave 1, PRs in review |
+| BloFin | done (#1300) |
+| Backpack | done (#1299) |
+| Bitget, Hyperliquid, Bitunix | wave 1, PRs in review |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | lane starting |
 | KuCoin, Phemex | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |

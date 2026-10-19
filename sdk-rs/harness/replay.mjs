@@ -10,7 +10,7 @@ import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
 import { isRead, subscriptionKeys, requestKey as keyOf } from './requests.mjs';
-import { replayStoreReady, ReplayClock, Tape as SharedTape } from './tape.mjs';
+import { replayStoreReady, ReplayClock, Tape as SharedTape, canonicalUrl as sharedUrl } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout, setInterval as realInterval, clearInterval as realClearInterval } from 'node:timers';
 import { parseRequestJson } from './request-json.mjs';
 import { retainedMemory, settledMemory } from './memory.mjs';
@@ -63,9 +63,9 @@ const within = async (promise, ms, label) => {
 const isPrivate = metadata?.private ?? records.some((r) =>
   venue.isPrivateRecord ? venue.isPrivateRecord(r) : Boolean(venue.privateSocket && r.url?.includes(venue.privateSocket)),
 );
-const KEY = 'replay-key';
-const SECRET = 'replay-secret';
-const PASSPHRASE = 'replay-passphrase';
+const KEY = venue.replayCredentials?.key ?? 'replay-key';
+const SECRET = venue.replayCredentials?.secret ?? 'replay-secret';
+const PASSPHRASE = venue.replayCredentials?.passphrase ?? 'replay-passphrase';
 
 const callerIds = new Set();
 const collectCallerIds = (value) => {
@@ -122,19 +122,15 @@ const canonicalUrl = (url) => {
 const requestKey = (method, url, body) => values.venue === 'blofin'
   ? keyOf(method, url, body, callerIds, venue)
   : `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
-const apiSupported = (value) => value == null || value === '' ? true
-  : typeof value === 'number' ? value !== 0
-  : typeof value === 'boolean' ? value
-  : !['false', '0', 'no', 'n', 'disabled', 'unsupported'].includes(String(value).trim().toLowerCase());
 
 const isWriteRequest = (method, url) => venue.isWrite?.(method, url) ?? !isRead(method, url);
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape extends SharedTape {
   constructor(impl) {
-    super(records, { isPrivate, canonicalize: canonicalUrl,
+    super(records, { ...venue, impl, books: bookSymbols, timeoutMs: 15000, isPrivate, canonicalize: values.venue === 'backpack' ? (url) => sharedUrl(url, callerIds, venue) : canonicalUrl,
       explicitOpens: values.venue === 'bitunix', legacyLatest: false,
-      responses: new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
+      responses: values.venue === 'backpack' ? undefined : new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
         venue.matchRequestBody ? undefined : (method, url) => requestKey(method, url)),
       prepareFrame: (r) => {
         if (r.type !== 'ws') return r;
@@ -151,7 +147,7 @@ class Tape extends SharedTape {
     this.pendingStartupSubscriptions = this.startupSubscriptions.size;
   }
 
-  get unserved() { return this.responses.unserved; }
+  get unserved() { return this.responses.unserved ?? this.responseStore?.unserved ?? this._unserved; }
 
   time = 0;
   outbound = [];
@@ -162,6 +158,7 @@ class Tape extends SharedTape {
 
   send(socket, text) {
     const { url, connection } = socket;
+    if (values.venue === 'backpack') return super.send(socket, text);
     for (const key of subscriptionKeys(socket.rawUrl, text)) {
       if (this.startupSubscriptions.get(key) === false) {
         this.startupSubscriptions.set(key, true);
@@ -240,14 +237,13 @@ class Tape extends SharedTape {
   }
 
   respond(method, url, body, headers = {}) {
-    venue.validateRequest?.({ method, url, body, headers });
     if (values.venue === 'bitunix' && !new URL(url).pathname.includes('/market/')) {
       const query = [...new URL(url).searchParams].sort(([a], [b]) => a.localeCompare(b))
         .map(([key, value]) => `${key}${value}`).join('').replace(/[=&]/g, '');
       this.verifySignature(headers, query, body);
     }
     if (isWriteRequest(method, url)) this.outbound.push(requestKey(method, url, body));
-    return super.respond(method, url, body);
+    return super.respond(method, url, body, headers);
   }
 
   assertSubscribed(socket, message, subscriptionKey) {
@@ -286,7 +282,7 @@ class Tape extends SharedTape {
   }
 
   assertWritesConsumed() {
-    const missing = this.responses.unusedWrites();
+    const missing = this.missingWrites;
     if (missing) throw new Error(`${missing} taped write(s) were not sent`);
   }
 
@@ -299,95 +295,8 @@ class Tape extends SharedTape {
     if (frame.topic && !socket.topics.has(frame.topic)) this.socketErrors.push(`unsubscribed ${socket.connection} ${frame.topic}`);
   }
 
-  /**
-   * Deliver every frame in order, yielding to the event loop between frames.
-   * Commands are awaited where they fall. A private tape is paced: each record
-   * waits until its time after the account is ready.
-   */
-  async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
-    let initialized;
-    let startupReady = false;
-    const ensureReady = () => initialized ??= within((async () => {
-      await ready();
-      while (this.pendingStartupSubscriptions) await new Promise((resolve) => realTimeout(resolve, 1));
-      if (venue.startupTopics) {
-        const expected = venue.startupTopics(records, bookSymbols).map((arg) => JSON.stringify(canonicalObject(arg)));
-        const complete = () => expected.every((topic) => this.sockets.some((socket) => socket.opened && !socket.closed && socket.topics.has(topic)));
-        while (!complete()) await new Promise((r) => realTimeout(r, 10));
-      }
-      if (values.venue !== 'bitunix') return;
-      const symbols = JSON.parse(records.find((r) => r.type === 'http' && r.url.includes('/market/trading_pairs')).body).data
-        .filter((m) => apiSupported(m.isApiSupported) && m.symbolStatus === 'OPEN' && m.quote === 'USDT').length;
-      const active = () => this.sockets.filter((s) => s.opened && !s.closed).reduce((sum, s) => sum + s.publicTopics.size, 0);
-      const deadline = performance.now() + 10_000;
-      while (active() < symbols * 2) {
-        if (performance.now() > deadline) throw new Error(`active startup topics missing: expected ${symbols * 2}, got ${active()}`);
-        await new Promise((r) => realTimeout(r, 5));
-      }
-    })(), 15_000, 'Replay startup').then(() => { startupReady = true; });
-    const recordedLifecycle = records.some((r) => r.type === 'connect');
-    const inlineStartup = values.venue === 'bitunix' || recordedLifecycle;
-    if (!inlineStartup) await ensureReady();
-    else {
-      // Explicit opens can be prerequisites of readiness. Keep startup timers
-      // live while consuming that prelude, then move both venues to tape time.
-      ensureReady().catch(() => {}); // The same promise is awaited below.
-    }
-    begin();
-    this.replayClock = clock;
-    if (!inlineStartup) clock?.start();
-    this.peakBytes = Math.max(this.peakBytes ?? 0, this.sampleMemory?.() ?? 0);
-    const start = performance.now();
-    let delivered = 0;
-    const warm = Math.floor(this.frames.length / 4);
-    for (const frame of this.frames) {
-      if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
-      if (isPrivate) {
-        const wait = frame.t - (performance.now() - start);
-        if (wait > 0) await new Promise((resolve) => realTimeout(resolve, wait));
-      }
-      this.time = frame.t;
-      if (clock && !clock.active && startupReady) clock.start(frame.t);
-      await clock?.advance(frame.t);
-      if (frame.type === 'command') {
-        await ensureReady();
-        this.results.push(await within(this.executeCommand(frame, runCommand), 15_000, `Command ${frame.op}`).then((ids) => ({ ok: ids }), (error) => {
-          if (error instanceof ReplayTimeout) throw error;
-          return { error: String(error?.message ?? error) };
-        }));
-      } else {
-        const socket = await this.socketFor(frame);
-        if (frame.type === 'open' || frame.type === 'close') await this.lifecycle(frame);
-        else {
-          if (!socket.opened) throw new Error('frame before recorded socket open');
-          if (values.venue === 'bitunix' && frame.topic && !socket.url.includes(venue.privateSocket)) {
-            const deadline = performance.now() + 10_000;
-            while (!socket.topics.has(frame.topic) && !socket.closed && performance.now() < deadline)
-              await new Promise((r) => realTimeout(r, 5));
-          }
-          if ((venue.validateLogin || venue.validateSubscriptions) && frame.text.trimStart().startsWith('{')) {
-            const message = JSON.parse(frame.text);
-            if (venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified)
-              throw new Error(`Taped login success preceded a valid login on ${frame.url}`);
-            this.assertSubscribed(socket, message, frame.subscriptionKey);
-          }
-          this.validateTopic(socket, frame);
-          socket.onMessage(frame.text);
-        }
-      }
-      delivered++;
-      if (delivered % 64 === 0) this.peakBytes = Math.max(this.peakBytes, this.sampleMemory?.() ?? 0);
-      onTick?.(frame.t);
-      await new Promise(setImmediate);
-    }
-    await ensureReady();
-    if (clock && !clock.active) clock.start(this.time);
-    await this.finishResponses();
-    return delivered;
-  }
-
   unusedWrites() {
-    return this.responses.unusedWrites();
+    return this.missingWrites;
   }
 
   results = [];
@@ -476,7 +385,7 @@ async function runRust() {
     webSocketHeaders: true,
     connect: (url, { headers, onOpen, onMessage, onClose }) => {
       venue.validateSocket?.(url, headers);
-      const socket = tape.connect(url, onOpen, (text) => { tape.audit?.received(url, text); onMessage(text); }, onClose);
+      const socket = tape.connect(url, onOpen, onMessage, onClose);
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket, 1000, true) };
     },
     request: async ({ method, url, body: requestBody, headers }) => {
@@ -586,7 +495,7 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, bookEvents, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return { frames, metrics, bookEvents, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
 }
 
 const commandArgs = ({ t, type, ...args }) => args;
@@ -646,7 +555,6 @@ async function runTs() {
           this.onopen?.({});
         },
         (data) => {
-          tape.audit?.received(url, data);
           for (const fn of this.listeners.message) fn({ data });
           this.onmessage?.({ data });
           venue.afterTsFrame?.(exchange);
@@ -784,7 +692,7 @@ async function runTs() {
     : undefined;
   exchange.dispose();
   clock?.restore();
-  return { frames, metrics, bookEvents, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
+  return { frames, metrics, bookEvents, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], invalidSignatures: tape.invalidSignatures, wsRequests: [...tape.sentRequests].sort(), signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: values.venue === 'backpack' ? [...tape.nativeSubscriptions].sort() : tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
 }
 
 async function runTsCommand(exchange, store, record, { candleListeners, candleUpdates }) {
@@ -828,6 +736,7 @@ async function runTsCommand(exchange, store, record, { candleListeners, candleUp
 function normalizeAccount(account) {
   const order = (o) => ({
     id: String(o.id),
+    ...(venue.compareClientIds ? { clientOrderId: o.clientOrderId ?? null } : {}),
     symbol: o.symbol,
     status: o.status,
     ...(values.venue === 'bitunix' ? {
@@ -837,6 +746,7 @@ function normalizeAccount(account) {
       clientOrderId: o.clientOrderId || (String(o.info?.orderId) === String(o.id) ? o.info?.clientId : null) || null,
       parentId: o.parentId || (o.info?.orderId && ['tp', 'sl'].some((leg) => o.id === `${o.info.orderId}__${leg}`) ? String(o.info.orderId) : null),
     } : {}),
+    ...(venue.compareClientIds && o.type === 'limit' ? { timeInForce: o.timeInForce ?? null } : {}),
     type: o.type,
     side: o.side,
     price: o.price,
@@ -884,10 +794,11 @@ writeFileSync(
     unserved: result.unserved,
     unusedWrites: result.unusedWrites,
     protocolErrors: result.protocolErrors,
+    invalidSignatures: result.invalidSignatures,
     wsRequests: result.wsRequests,
     metrics: result.metrics,
-    markets: result.store.markets.map(marketFields),
-    tickers: result.store.tickers.map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, f === 'openInterest' ? (t[f] ?? 0) : t[f]])])),
+    markets: result.store.markets.filter(venue.marketFilter ?? (() => true)).map(marketFields),
+    tickers: result.store.tickers.filter(venue.marketFilter ?? (() => true)).map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, f === 'openInterest' ? (t[f] ?? 0) : t[f]])])),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
     commands: result.commands,
