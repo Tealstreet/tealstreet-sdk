@@ -13,6 +13,59 @@ use std::{
     rc::{Rc, Weak},
 };
 
+struct NativeOutcome(Js);
+
+pub fn is_unknown_outcome(error: &Js) -> Result<bool, Thrown> {
+    safe_cex_store::remaining_utils::is_unknown_outcome_value(&NativeOutcome(error.clone()))
+}
+
+impl safe_cex_store::remaining_utils::UnknownOutcomeValue for NativeOutcome {
+    type Error = Thrown;
+    fn outcome_object(&self) -> bool {
+        self.0.type_of() == "object" && !self.0.is_nullish()
+    }
+    fn outcome_get(&self, key: &str) -> Result<Self, Thrown> {
+        self.0.get(key).map(Self)
+    }
+    fn outcome_nullish(&self) -> bool {
+        self.0.is_nullish()
+    }
+    fn outcome_truthy(&self) -> bool {
+        self.0.truthy()
+    }
+    fn outcome_number(&self) -> Result<f64, Thrown> {
+        ops::number(&self.0)
+    }
+    fn outcome_at_least(&self, minimum: f64) -> Result<bool, Thrown> {
+        ops::greater_equal(&self.0, &Js::Number(minimum))
+    }
+    fn outcome_network_code(&self) -> bool {
+        ["ECONNRESET", "ECONNABORTED", "ETIMEDOUT", "ERR_NETWORK"]
+            .iter()
+            .any(|code| self.0.strict_equals(&Js::str(code)))
+    }
+    fn outcome_test(&self, pattern: &str, ignore_case: bool) -> Result<bool, Thrown> {
+        let regex = super::regexp::regexp(
+            &pattern.encode_utf16().collect::<Vec<_>>(),
+            &if ignore_case {
+                vec![u16::from(b'i')]
+            } else {
+                vec![]
+            },
+        )?;
+        regex
+            .call_method(
+                "test",
+                vec![if self.0.is_nullish() {
+                    Js::str("")
+                } else {
+                    self.0.clone()
+                }],
+            )
+            .map(|result| result.truthy())
+    }
+}
+
 pub(crate) const NATIVE_MODULE_ROOTS: [&str; 1] = ["p-iteration"];
 
 fn text(v: &Js) -> Result<String, Thrown> {

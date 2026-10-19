@@ -50,6 +50,29 @@ impl Public {
             timers: RefCell::default(),
         })
     }
+    pub(super) fn bind_handler_statistics(&self) -> Result<(), ExchangeError> {
+        let host = self.host().map_err(err)?;
+        let core = sockets::core_of(&host.0.shared.sockets, &self.this)
+            .ok_or_else(|| ExchangeError::new("GRVT public socket is not assembled"))?
+            .base()
+            .map_err(err)?;
+        let feeds = Rc::downgrade(&self.feeds);
+        safe_cex_exchange::websocket::install_native_handler_stats(
+            &core,
+            Rc::new(move |topic| {
+                let feeds = feeds
+                    .upgrade()
+                    .ok_or_else(|| ExchangeError::new("GRVT public feed owner released"))?;
+                let count = feeds
+                    .handlers
+                    .borrow()
+                    .get(topic)
+                    .map(|handlers| handlers.borrow().len());
+                Ok(count)
+            }),
+        );
+        Ok(())
+    }
     fn host(&self) -> Result<Host, Thrown> {
         Ok(Host::from_shared(
             self.shared

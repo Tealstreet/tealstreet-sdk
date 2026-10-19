@@ -91,6 +91,22 @@ impl BingxExchange {
         });
         let erased: Rc<dyn Exchange> = venue.clone();
         *venue.host.scope.sockets.venue.borrow_mut() = Some(Rc::downgrade(&erased));
+        let stream = Rc::downgrade(&venue.inner.public_websocket.stream);
+        safe_cex_exchange::websocket::install_native_handler_stats(
+            &venue.host.core(false)?,
+            Rc::new(move |topic| {
+                let stream = stream
+                    .upgrade()
+                    .ok_or_else(|| ExchangeError::new("BingX public stream owner released"))?;
+                let count = stream
+                    .message_handlers
+                    .borrow()
+                    .iter()
+                    .find(|(key, _)| key == topic)
+                    .map(|(_, handlers)| handlers.borrow().len());
+                Ok(count)
+            }),
+        );
         venue.base().set_borrowed_socket(
             safe_cex_exchange::socket_lifecycle::SocketSlot::Public,
             &venue.host.core(false)?,

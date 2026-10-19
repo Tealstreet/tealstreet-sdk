@@ -457,3 +457,52 @@ fn native_sdk_initialization_has_no_deferred_module_work() {
     assert!(h.runtime.report_names.borrow().is_empty());
     done(&h);
 }
+
+#[test]
+fn start_ticker_retains_maintained_constructor_key_order() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/lifecycle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let row = source["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["name"] == "start" && row["variant"] == 0)
+        .unwrap();
+    let tickers = row["state"]["values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry[0] == "tickers")
+        .unwrap();
+    let expected = tickers[1]["values"][0]["values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry[0].as_str().unwrap())
+        .collect::<Vec<_>>();
+    let h = fixture();
+    h.drive(h.venue().start()).unwrap();
+    let facade = h.store.facade().unwrap();
+    let ticker = facade.get("tickers").unwrap().get("0").unwrap();
+    let actual = ticker
+        .own_keys()
+        .iter()
+        .map(|key| String::from_utf16(key).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual, expected,
+        "APEX-CONSTRUCTION-ORDER actual started Store ticker"
+    );
+    done(&h);
+}

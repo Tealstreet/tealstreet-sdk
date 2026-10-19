@@ -27,7 +27,7 @@ pub struct Throttle {
     pub depth: bool,
     pub last: Cell<Option<f64>>,
     pub pending: RefCell<Option<Value>>,
-    pub task: RefCell<Option<Box<dyn ExchangeTask>>>,
+    pub task: RefCell<Option<safe_cex_exchange::OwnedOperation>>,
 }
 impl Throttle {
     // Source windows: throttle(handleTickerUpdate, 1000) and throttle(updateTickerFromDepth, 100).
@@ -66,29 +66,16 @@ impl Throttle {
             if self.task.borrow().is_none() {
                 let weak = Rc::downgrade(self);
                 let delay = (self.window_ms() - (now - self.last.get().unwrap())).max(0.0) as u64;
-                let runtime = owner.runtime.clone();
-                let sleep = runtime.sleep(delay);
-                let report = runtime.clone();
-                let task = runtime.spawn_local(Box::pin(async move {
-                    let result = async {
-                        sleep.await?;
-                        if let Some(throttle) = weak.upgrade() {
-                            throttle.task.borrow_mut().take();
-                            let pending = throttle.pending.borrow_mut().take();
-                            if let Some(data) = pending {
-                                return throttle.call(data);
-                            }
+                let task = owner.base.start_timeout(delay.max(1), move || {
+                    if let Some(throttle) = weak.upgrade() {
+                        throttle.task.borrow_mut().take();
+                        let pending = throttle.pending.borrow_mut().take();
+                        if let Some(data) = pending {
+                            return throttle.call(data);
                         }
-                        Ok(())
                     }
-                    .await;
-                    if let Err(e) = result {
-                        report.report_exception(
-                            &e,
-                            &serde_json::json!({"operation":"Backpack ticker throttle"}).into(),
-                        );
-                    }
-                }));
+                    Ok(())
+                })?;
                 *self.task.borrow_mut() = Some(task);
             }
             Ok(())
@@ -173,6 +160,23 @@ impl BackpackPublicWebSocket {
                 tasks: RefCell::new(vec![]),
             }
         });
+        let listeners = Rc::downgrade(&owner.listeners);
+        safe_cex_exchange::websocket::install_native_handler_stats(
+            &owner.base,
+            Rc::new(move |topic| {
+                let listeners = listeners
+                    .upgrade()
+                    .ok_or_else(|| ExchangeError::new("Backpack public registry owner released"))?;
+                let units: Vec<u16> = topic.encode_utf16().collect();
+                let count = listeners
+                    .handlers
+                    .borrow()
+                    .iter()
+                    .find(|(key, _)| key.as_slice() == units.as_slice())
+                    .map(|(_, handlers)| handlers.borrow().len());
+                Ok(count)
+            }),
+        );
         Ok(owner)
     }
     pub fn parent(&self) -> Result<Rc<BackpackExchange>, ExchangeError> {
@@ -425,12 +429,9 @@ impl listeners::Host for PublicFrame {
         callback: listeners::Action<ExchangeError>,
         delay: f64,
     ) -> Result<(), ExchangeError> {
-        let runtime = self.owner.runtime.clone();
-        let sleep = runtime.sleep(delay as u64);
-        self.owner.spawn(Box::pin(async move {
-            sleep.await?;
-            callback()
-        }));
+        self.owner
+            .base
+            .start_timeout((delay as u64).max(1), move || callback())?;
         Ok(())
     }
     fn subscribe_kline(&mut self, id: JsString, interval: JsString) -> Result<(), ExchangeError> {
@@ -758,32 +759,7 @@ impl socket_events::HandlerHost<Value> for PublicFrame {
         Ok(list.borrow().get(i).cloned())
     }
     fn record_stats(&mut self, topic: &[u16]) -> Result<(), ExchangeError> {
-        let count = self
-            .owner
-            .listeners
-            .handlers
-            .borrow()
-            .iter()
-            .find(|(k, _)| k == topic)
-            .map(|(_, v)| v.borrow().len());
-        let key = text(topic)?;
-        self.owner
-            .base
-            .message_handlers_stats
-            .borrow_mut()
-            .entry(key)
-            .and_modify(|s| {
-                s.last_message_timestamp = self.owner.runtime.now_ms();
-                s.last_callbacks_count = count.into();
-                s.had_handlers = Some(count.is_some_and(|n| n > 0));
-            })
-            .or_insert(safe_cex_exchange::websocket::MessageHandlerStat {
-                last_message_timestamp: self.owner.runtime.now_ms(),
-                last_callbacks_count: count.into(),
-                had_handlers: Some(count.is_some_and(|n| n > 0)),
-                had_handlers_undefined: false,
-            });
-        Ok(())
+        self.owner.base.record_message_handler_stats(&text(topic)?)
     }
     fn invoke_handler(
         &mut self,

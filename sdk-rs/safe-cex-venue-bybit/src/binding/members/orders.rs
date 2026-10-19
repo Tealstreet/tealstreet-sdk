@@ -122,8 +122,7 @@ pub(crate) async fn submit_create_orders_body(
                 emit(rt, &format_venue_error(rt, &data, &message)?)?;
                 if single
                     && opts.get("clientOrderId")?.truthy()
-                    && safe_cex_store::remaining_utils::is_unknown_outcome(&to_json(&error.value)?)
-                        .map_err(|m| Thrown::error("TypeError", &m))?
+                    && safe_cex_exchange::js_runtime::library::is_unknown_outcome(&error.value)?
                 {
                     return Err(error);
                 }

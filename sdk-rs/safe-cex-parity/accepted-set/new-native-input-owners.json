@@ -1,36 +1,42 @@
 {
   "version": 1,
-  "reason": "Exact native input classification debt: original149 from #1193 plus3 introduced on master by #1238, separately marked. No exemption/filter: normal measurements still require contracts. Any new owner or disappearance requires an explicit ledger update and ruling.",
+  "reason": "Exact native input classification debt: original149 from #1193 plus3 introduced on master by #1238,2 ApexOmni owners introduced on master (251d9906de and #901), and3 Store payload owners introduced by #1248 (94c1cdc90d), separately marked. No exemption/filter: normal measurements still require contracts. Any new owner or disappearance requires an explicit ledger update and ruling.",
   "owners": [
     {
       "package": "safe-cex-venue-asterdex",
       "name": "safe_cex_venue_asterdex::binding::globals::bytes",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: private typed-byte adapter reached by the constructed V3 signing globals. Source ABI/hash primitives produce byte sequences; the native array representation is internal. Public signed requests and valid byte/hash cases agree with ethers; unsupported caller-forged element types are outside this closed internal producer domain."
     },
     {
       "package": "safe-cex-venue-asterdex",
       "name": "safe_cex_venue_asterdex::binding::globals::hex_bytes",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: private ethers.getBytes string adapter. Source only passes a computed keccak hash at this call site; valid computed hex inputs decode exactly. Malformed arbitrary hex is not supplied by any reached public venue path. Native success/length/byte observations cover the decoder without extending that domain."
     },
     {
       "package": "safe-cex-venue-asterdex",
       "name": "safe_cex_venue_asterdex::binding::scope",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: non-decoder context constructor. It upgrades an already-typed Weak runtime capability and retains this Js receiver unchanged; it never parses or narrows the value. Constructed native receiver/weak-lifetime observations and a compiled receiver-loss control prove the classification independently."
     },
     {
       "package": "safe-cex-venue-asterdex",
       "name": "safe_cex_venue_asterdex::binding::text",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: reached primitive-string coercion followed by the approved typed UTF-8 view. Primitive values, object conversion failure, signed zero and UTF-16 replacement are observed; actual installed HMAC globals confirm the source UTF-8 byte encoding. This is not a claim to retain live object identity in typed strings."
     },
     {
       "package": "safe-cex-venue-asterdex",
       "name": "safe_cex_venue_asterdex::exchange_helpers::transform_klines",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: actual source map/parseFloat behavior is retained before typed Candle projection. Every scalar is observed natively, including missing values, signed zero, NaN/infinity and copied timestamp type. Constructed REST binding and custom-map/getter probes cover reachability; typed Candle output remains decision5."
     },
     {
       "package": "safe-cex-venue-asterdex",
       "name": "safe_cex_venue_asterdex::private_stream::utf8",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: raw fill symbols previously went through this String-only helper and became undefined. The real private socket compiled RED then GREEN after carrying PrivateFill.symbol through canonical RetainedJsonInput. Remaining uses are strict status matching or typed Order/Position symbols, whose closed output boundary is accepted; standalone presence/UTF-16 observations remain executed."
     },
     {
       "package": "safe-cex-exchange",
@@ -130,47 +136,56 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::decimal_to_precision",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::exact",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::install",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::integer",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::number_to_string",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::numeric_string",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::parse_precision",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::precision_from_string",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::safe_string",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
@@ -770,6 +785,46 @@
       "introduced": "introduced on master by #1238",
       "owner": "codex-0xekzz",
       "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+    },
+    {
+      "package": "safe-cex-venue-apexomni",
+      "name": "safe_cex_venue_apexomni::api_runtime::ApexApi",
+      "state": "pending",
+      "introduced": "introduced on master by #901, commit 84b06aec6f",
+      "owner": "codex-0w5ohi",
+      "ruling": "Coordinator-approved exact pending addition for the native response_handler input exposed by #1193 discovery. Its ordinary contract and native binding receipt remain required; this row supplies no measurement permission."
+    },
+    {
+      "package": "safe-cex-venue-apexomni",
+      "name": "safe_cex_venue_apexomni::binding::http::carry_config",
+      "state": "pending",
+      "introduced": "introduced on master by commit 251d9906dea before #901",
+      "owner": "codex-0w5ohi",
+      "ruling": "Coordinator-approved exact pending addition for the native config capability input, found by complete Apex inventory after the ApexApi refusal. Its ordinary contract and native binding receipt remain required; this row supplies no measurement permission."
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::store_payload::sanitize_for_post_message",
+      "state": "pending",
+      "introduced": "introduced on master by #1248, commit 94c1cdc90d",
+      "owner": "codex-4ri6pb",
+      "ruling": "Coordinator-approved exact pending addition for the canonical Js input exposed by sanitize_for_post_message(&Js, bool, bool). The #1248 cutover replaced typed/JSON Store payload ingress; full core compiler discovery found this owner. Ordinary classification and native binding receipts remain required; this row grants no measurement permission."
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::store_payload::StorePayloadPreparer",
+      "state": "pending",
+      "introduced": "introduced on master by #1248, commit 94c1cdc90d",
+      "owner": "codex-4ri6pb",
+      "ruling": "Coordinator-approved exact pending addition for the canonical Js input exposed by prepare(&Js, f64, f64, bool, Option<bool>). The #1248 cutover replaced typed/JSON Store payload ingress; full core compiler discovery found this owner. Ordinary classification and native binding receipts remain required; this row grants no measurement permission."
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::store_payload::TickerBaseline",
+      "state": "pending",
+      "introduced": "introduced on master by #1248, commit 94c1cdc90d",
+      "owner": "codex-4ri6pb",
+      "ruling": "Coordinator-approved exact pending addition for the canonical Js input exposed by copy_from(&Js) and pack_deltas(&Js). The #1248 cutover replaced typed/JSON Store payload ingress; full core compiler discovery found this owner. Ordinary classification and native binding receipts remain required; this row grants no measurement permission."
     }
   ]
 }

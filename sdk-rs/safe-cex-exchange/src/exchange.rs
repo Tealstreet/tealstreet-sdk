@@ -323,6 +323,25 @@ pub trait Exchange: std::any::Any + ExchangeView {
     ) -> Result<ListenerCleanup, ExchangeError> {
         self.base().listen_ohlcv(options, callback)
     }
+    /// Native callback values; typed-only implementations adapt their declared Candle.
+    fn listen_ohlcv_retained(
+        &self,
+        options: OHLCVOptions,
+        callback: Rc<dyn Fn(&Js) -> Result<(), ExchangeError>>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        let runtime = self.base().runtime.clone();
+        self.listen_ohlcv(
+            options,
+            Rc::new(move |candle| {
+                let delivered = from_typed(&candle)
+                    .map_err(|error| error.to_exchange_error())
+                    .and_then(|value| callback(&value));
+                if let Err(error) = delivered {
+                    runtime.report_exception(&error, &json!({"source":"listenOHLCV"}).into());
+                }
+            }),
+        )
+    }
     fn listen_ohlcvs(&self, options: OHLCVSOptions, callback: Rc<dyn Fn(SubscribedCandle)>) {
         self.base().listen_ohlcvs(options, callback);
     }
@@ -508,6 +527,13 @@ pub trait Exchange: std::any::Any + ExchangeView {
     }
     fn fetch_ohlcv(&self, _options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         Box::pin(async { Ok(vec![]) })
+    }
+    /// Native command view; the default's source-order proofs are in
+    /// safe-cex-registry/REST_RETURN_ORDER_REVIEW.md. Other shapes override it.
+    fn fetch_ohlcv_native(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Js> {
+        Box::pin(async move {
+            from_typed(&self.fetch_ohlcv(options).await?).map_err(|error| error.to_exchange_error())
+        })
     }
     fn update_symbol_metadata(&self, _symbol: String) -> ExchangeFuture<'_, ()> {
         Box::pin(async { Ok(()) })
