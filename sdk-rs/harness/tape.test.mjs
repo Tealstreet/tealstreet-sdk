@@ -209,3 +209,105 @@ test('factory supplies socket audit context and audits frames before venue deliv
     ['delivered', '{"method":"public/auth","code":0}'],
   ]);
 });
+
+test('signed request validation receives headers and leaves rejected writes unused', () => {
+  const checkedVenue = {
+    rust: 'weex',
+    matchRequestBody: true,
+    validateRequest: ({ method, url: sentUrl, body, headers }) => {
+      assert.equal(method, 'POST');
+      assert.equal(sentUrl, url);
+      assert.deepEqual(body, { quantity: '1' });
+      if (headers?.signature !== 'valid') throw new Error('bad request headers');
+    },
+  };
+  const tape = createTape([response({ quantity: '1' })], checkedVenue, true);
+  assert.throws(() => tape.respond('POST', url, { quantity: '1' }, {}), /bad request headers/);
+  assert.equal(tape.unusedWrites, 1);
+  assert.equal(tape.respond('POST', url, { quantity: '1' }, { signature: 'valid' }).status, 200);
+  assert.equal(tape.unusedWrites, 0);
+});
+
+test('frame times select reusable read templates within the active command stage', async () => {
+  const read = 'https://api-contract.weex.com/capi/v3/account/income';
+  const readVenue = { rust: 'weex', isWrite: () => false };
+  const seen = [];
+  const tape = createTape(
+    [
+      response(undefined, { method: 'POST', url: read, body: 'before', effectiveAt: 0 }),
+      response(undefined, { method: 'POST', url: read, body: 'after', effectiveAt: 10 }),
+      response(undefined, { method: 'POST', url: read, body: 'next stage', effectiveAt: 0, afterCommand: 3 }),
+      { type: 'command', op: 'checkpoint', t: 0 },
+      { type: 'command', op: 'checkpoint', t: 10 },
+      { type: 'command', op: 'checkpoint', t: 20 },
+    ],
+    readVenue,
+    false,
+  );
+  await tape.play(undefined, undefined, async () => {
+    seen.push(tape.respond('POST', read).body);
+    seen.push(tape.respond('POST', read).body);
+    return [];
+  });
+  assert.deepEqual(seen, ['before', 'before', 'after', 'after', 'next stage', 'next stage']);
+  assert.equal(tape.unusedWrites, 0);
+  assert.equal(tape.unserved, 0);
+});
+
+test('response placeholders use sent generated IDs and mutations remain single use', () => {
+  const write = 'https://api-contract.weex.com/capi/v3/algoOrder';
+  const generatedVenue = { rust: 'weex', matchRequestBody: true, volatileBodyFields: true };
+  const body = { symbol: 'BTCUSDT', clientAlgoId: 'fresh-algo', newClientOrderId: 'fresh-order' };
+  const tape = createTape(
+    [
+      response(
+        { symbol: 'BTCUSDT' },
+        {
+          url: write,
+          body: '{"algoId":"$clientAlgoId","clientId":"$newClientOrderId"}',
+        },
+      ),
+    ],
+    generatedVenue,
+    true,
+  );
+  assert.deepEqual(JSON.parse(tape.respond('POST', write, JSON.stringify(body)).body), {
+    algoId: 'fresh-algo',
+    clientId: 'fresh-order',
+  });
+  assert.equal(tape.respond('POST', write, body).status, 599);
+});
+
+test('URL and nested JSON query matching keep caller IDs exact', () => {
+  const queryVenue = { rust: 'weex', volatileBodyFields: true };
+  const endpoint = 'https://api-contract.weex.com/capi/v3/batchOrders';
+  const make = (caller, minted, reverse = false) => {
+    const row = reverse
+      ? { nested: { clientAlgoId: minted }, newClientOrderId: caller, symbol: 'BTCUSDT' }
+      : { symbol: 'BTCUSDT', newClientOrderId: caller, nested: { clientAlgoId: minted } };
+    return `${endpoint}?batchOrders=${encodeURIComponent(JSON.stringify([row]))}`;
+  };
+  const tape = createTape(
+    [
+      { type: 'command', orders: [{ clientOrderId: 'caller' }] },
+      response(undefined, { url: `${endpoint}?newClientOrderId=caller` }),
+      response(undefined, { url: make('caller', 'recorded-generated') }),
+    ],
+    queryVenue,
+    true,
+  );
+  assert.equal(tape.respond('POST', `${endpoint}?newClientOrderId=wrong`).status, 599);
+  assert.equal(tape.respond('POST', `${endpoint}?newClientOrderId=caller`).status, 200);
+  assert.equal(tape.respond('POST', make('wrong', 'actual-generated', true)).status, 599);
+  assert.equal(tape.respond('POST', make('caller', 'actual-generated', true)).status, 200);
+  assert.equal(tape.unusedWrites, 0);
+});
+
+test('missing sockets fail after thirty seconds and remove their pending waiter', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const tape = createTape([], venue, false);
+  const pending = assert.rejects(tape.socketFor('wss://ws.bitget.com/missing'), /socket did not open/);
+  t.mock.timers.tick(30_000);
+  await pending;
+  assert.equal(tape.waiters.length, 0);
+});

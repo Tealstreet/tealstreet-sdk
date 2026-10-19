@@ -46,6 +46,7 @@ const isPrivate = records.some((r) =>
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 const PASSPHRASE = 'replay-passphrase';
+
 const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
 };
@@ -140,12 +141,14 @@ async function runRust() {
   const fills = [];
   const transport = {
     now: () => Date.now(),
-    connect: (url, { onOpen, onMessage }) => {
+    webSocketHeaders: true,
+    connect: (url, { headers, onOpen, onMessage }) => {
+      venue.validateSocket?.(url, headers);
       const socket = tape.connect(url, onOpen, onMessage);
       return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
-    request: async ({ method, url, body: requestBody }) => {
-      const { status, headers = '', body } = tape.respond(method, url, requestBody);
+    request: async ({ method, url, body: requestBody, headers }) => {
+      const { status, headers: responseHeaders = '', body } = tape.respond(method, url, requestBody, headers);
       // Model nativeTransport's chunks so streamed lists do not allocate a whole
       // response in wasm before the venue sees the first item.
       const chunks = async function* () {
@@ -154,7 +157,7 @@ async function runRust() {
           yield bytes.subarray(offset, offset + 16 * 1024);
         }
       };
-      return { status, headers, body: chunks() };
+      return { status, headers: responseHeaders, body: chunks() };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
@@ -310,7 +313,8 @@ async function runTs() {
     static OPEN = 1;
     static CLOSING = 2;
     static CLOSED = 3;
-    constructor(url) {
+    constructor(url, _protocols, options = {}) {
+      venue.validateSocket?.(url, options.headers);
       this.url = url;
       this.readyState = 0;
       this.listeners = { open: [], message: [], close: [], error: [] };
@@ -351,9 +355,33 @@ async function runTs() {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data);
+    const {
+      status,
+      body,
+      headers: responseHeaders,
+    } = tape.respond(
+      (config.method ?? 'get').toUpperCase(),
+      url.toString(),
+      config.data,
+      config.headers?.toJSON?.() ?? config.headers,
+    );
     // The raw body: the client's own transformResponse parses it, big ids included.
-    const response = { data: body, status, statusText: String(status), headers: {}, config, request: {} };
+    const response = {
+      data: body,
+      status,
+      statusText: String(status),
+      headers: Object.fromEntries(
+        (responseHeaders ?? '')
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => {
+            const colon = line.indexOf(':');
+            return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()];
+          }),
+      ),
+      config,
+      request: {},
+    };
     if (status >= 400) {
       const error = new Error(`Request failed with status code ${status}`);
       error.response = response;
@@ -384,6 +412,7 @@ async function runTs() {
   };
   const exchange = new Exchange(venue.ts.name, options, store);
   venue.configureTs?.(exchange);
+  venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
@@ -410,7 +439,7 @@ async function runTs() {
       }
     },
     async () => {
-      venue.prepareTs?.(exchange, { isPrivate });
+      venue.prepareTsReady?.(exchange, { isPrivate });
       while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
       const loaded = () => Object.values(store.loaded).every(Boolean);
       while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
@@ -454,7 +483,7 @@ async function runTs() {
           ).values(),
         ],
         fills: executions.map((f) => ({
-          id: f.id,
+          id: f.orderId ?? f.id,
           symbol: f.symbol,
           side: f.side,
           amount: f.amount,

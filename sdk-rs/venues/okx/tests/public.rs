@@ -345,3 +345,66 @@ fn business_candle_stream_emits_a_candle_frame() {
     assert_eq!(u16::from_le_bytes(frame[16..18].try_into().unwrap()), 6);
     assert_eq!(u32::from_le_bytes(frame[24..28].try_into().unwrap()), 1);
 }
+
+#[test]
+fn public_topics_keep_their_order_and_cap_across_market_boundaries() {
+    let mut e = Engine::new(Okx::new(Options::default()));
+    e.start(0.0);
+    let market_rows = (0..101)
+        .map(|i| MARKET.replace("BTC", &format!("COIN{i}")))
+        .collect::<Vec<_>>()
+        .join(",");
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(&market_rows), 1.0);
+    let ticker_rows = (0..101)
+        .map(|i| TICKER.replace("BTC", &format!("COIN{i}")))
+        .collect::<Vec<_>>()
+        .join(",");
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(&ticker_rows), 2.0);
+    let socket = actions(&mut e)
+        .into_iter()
+        .find_map(|action| match action {
+            Action::WsConnect { socket, url } if url.ends_with("/public") => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(3.0, Event::WsOpened { socket });
+    let batches: Vec<serde_json::Value> = actions(&mut e)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::WsSend { text, .. } if text != "ping" => {
+                Some(serde_json::from_str(&text).unwrap())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(batches.len(), 6);
+    let mut topics = Vec::new();
+    for batch in batches {
+        assert_eq!(batch["op"], "subscribe");
+        let args = batch["args"].as_array().unwrap();
+        assert!(!args.is_empty() && args.len() <= 100);
+        topics.extend(args.iter().cloned());
+    }
+    let expected: Vec<_> = [
+        "tickers",
+        "mark-price",
+        "index-tickers",
+        "open-interest",
+        "funding-rate",
+    ]
+    .into_iter()
+    .flat_map(|channel| {
+        (0..101).map(move |i| {
+            let id = if channel == "index-tickers" {
+                format!("COIN{i}-USDT")
+            } else {
+                format!("COIN{i}-USDT-SWAP")
+            };
+            serde_json::json!({"channel": channel, "instId": id})
+        })
+    })
+    .collect();
+    assert_eq!(topics, expected);
+}

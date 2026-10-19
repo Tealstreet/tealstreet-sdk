@@ -104,12 +104,13 @@ pub enum ArrayAt {
     Root,
     /// The array is this field of the top-level object.
     Field(&'static str),
-    /// Retain the surrounding object for this top-level array.
+    /// Like `Field`, explicitly requesting the surrounding response metadata.
+    /// All modes retain metadata; this alias supports venues that opt in.
     EnvelopeField(&'static str),
-    /// The array sits under these nested object fields.
+    /// The array sits under these nested object fields (`result.list`).
     Path(&'static [&'static str]),
-    /// Stream the first matching array and retain its envelope with `[]` in
-    /// place of the list, including pagination and business-error metadata.
+    /// Stream the first matching path, retaining metadata from any native
+    /// response shape. An empty path selects a root array.
     Envelope(&'static [&'static [&'static str]]),
 }
 
@@ -120,13 +121,14 @@ enum Phase {
     Done,
 }
 
-/// Bound retained response metadata independently of the streamed list.
-const OUTSIDE_LIMIT: usize = 16 * 1024;
+/// The bytes outside the streamed array are kept up to this size, so an
+/// envelope's other fields (a page cursor, an error) stay readable.
+const METADATA_LIMIT: usize = 1024 * 1024;
 
 /// Splits an array out of a body that arrives in chunks, handing over each
 /// element's text as soon as it is complete. Only the element in progress is
 /// buffered, so memory stays at the size of one element however large the
-/// body is.
+/// body is. Everything around the array is kept, with the array emptied.
 pub struct ArraySplitter {
     at: ArrayAt,
     phase: Phase,
@@ -134,17 +136,19 @@ pub struct ArraySplitter {
     array_depth: u32,
     in_string: bool,
     escaped: bool,
-    /// The most recent string at depth 1 while seeking a field.
+    /// The most recent string at the seeking depth.
     key: Vec<u8>,
+    keys: Vec<Vec<u8>>,
     capturing_key: bool,
     /// The wanted key and its colon were just seen.
     armed: bool,
     item: Vec<u8>,
-    keys: Vec<Vec<u8>>,
+    // Keep metadata and separators, replacing streamed rows with null. This
+    // validates the complete document without retaining the large array.
     envelope: Vec<u8>,
-    envelope_overflow: bool,
+    // Metadata delivered to venues has the selected array emptied.
+    outside: Vec<u8>,
     invalid: bool,
-    saw_comma: bool,
 }
 
 impl ArraySplitter {
@@ -157,14 +161,13 @@ impl ArraySplitter {
             in_string: false,
             escaped: false,
             key: Vec::new(),
+            keys: Vec::new(),
             capturing_key: false,
             armed: false,
             item: Vec::new(),
-            keys: Vec::new(),
             envelope: Vec::new(),
-            envelope_overflow: false,
+            outside: Vec::new(),
             invalid: false,
-            saw_comma: false,
         }
     }
 
@@ -172,30 +175,40 @@ impl ArraySplitter {
     pub fn finished(&self) -> bool {
         self.phase == Phase::Done
             && !self.invalid
-            && (self.envelope().is_none()
-                || (!self.envelope_overflow
-                    && serde_json::from_slice::<IgnoredAny>(&self.envelope).is_ok()))
+            && std::str::from_utf8(&self.envelope).is_ok()
+            && serde_json::from_slice::<IgnoredAny>(&self.envelope).is_ok()
     }
 
-    pub fn envelope(&self) -> Option<&[u8]> {
-        matches!(
-            self.at,
-            ArrayAt::Envelope(_) | ArrayAt::EnvelopeField(_) | ArrayAt::Path(_)
-        )
-        .then_some(self.envelope.as_slice())
+    /// Response metadata with streamed rows replaced by null.
+    /// Callers must check [`Self::finished`] before treating it as valid JSON.
+    pub fn envelope(&self) -> &str {
+        std::str::from_utf8(&self.envelope).unwrap_or("")
     }
-    /// The body with the streamed array emptied, bounded to 16 KiB.
+
+    /// Response metadata with the selected array emptied (`"list":[]`).
+    /// Callers must check [`Self::finished`] before treating it as valid JSON.
     pub fn outside(&self) -> &[u8] {
-        &self.envelope
+        &self.outside
+    }
+
+    fn keep(&mut self, byte: u8) {
+        if self.outside.len() >= METADATA_LIMIT || self.envelope.len() >= METADATA_LIMIT {
+            self.invalid = true;
+            return;
+        }
+        self.outside.push(byte);
+        self.envelope.push(byte);
     }
 
     pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
         for &byte in data {
+            if self.invalid {
+                return;
+            }
             if self.phase != Phase::InArray {
-                if self.envelope.len() < OUTSIDE_LIMIT {
-                    self.envelope.push(byte);
-                } else {
-                    self.envelope_overflow = true;
+                self.keep(byte);
+                if self.invalid {
+                    return;
                 }
             }
             if self.phase == Phase::Done {
@@ -235,25 +248,20 @@ impl ArraySplitter {
                     }
                 }
                 b':' if self.phase == Phase::Seeking => {
+                    let matches = |path: &[&str]| {
+                        path.len() == self.depth as usize
+                            && path
+                                .iter()
+                                .zip(&self.keys)
+                                .all(|(name, key)| name.as_bytes() == key)
+                    };
                     self.armed = match self.at {
+                        ArrayAt::Root => false,
                         ArrayAt::Field(name) | ArrayAt::EnvelopeField(name) => {
                             self.depth == 1 && name.as_bytes() == self.key
                         }
-                        ArrayAt::Path(path) => {
-                            path.len() == self.depth as usize
-                                && path
-                                    .iter()
-                                    .zip(&self.keys)
-                                    .all(|(name, key)| name.as_bytes() == key)
-                        }
-                        ArrayAt::Envelope(paths) => paths.iter().any(|path| {
-                            path.len() == self.depth as usize
-                                && path
-                                    .iter()
-                                    .zip(&self.keys)
-                                    .all(|(name, key)| name.as_bytes() == key)
-                        }),
-                        ArrayAt::Root => false,
+                        ArrayAt::Path(path) => matches(path),
+                        ArrayAt::Envelope(paths) => paths.iter().any(|path| matches(path)),
                     };
                     continue;
                 }
@@ -285,27 +293,30 @@ impl ArraySplitter {
                 }
                 b']' | b'}' => {
                     if at_array_level && byte == b']' {
-                        if self.item.is_empty() && self.saw_comma {
-                            self.invalid = true;
-                        }
                         self.emit(&mut on_item);
-                        self.envelope.push(b']');
                         self.phase = Phase::Done;
+                        self.depth = self.depth.saturating_sub(1);
+                        self.keep(byte);
                         continue;
                     }
                     self.depth = self.depth.saturating_sub(1);
                 }
                 b',' if at_array_level => {
-                    if self.item.is_empty() {
-                        self.invalid = true;
-                    }
-                    self.saw_comma = true;
                     self.emit(&mut on_item);
+                    // Collapse completed rows; preserve malformed separators.
+                    if self.envelope.ends_with(b"null,null") {
+                        self.envelope.truncate(self.envelope.len() - 5);
+                    }
+                    if self.envelope.len() >= METADATA_LIMIT {
+                        self.invalid = true;
+                        return;
+                    }
+                    self.envelope.push(b',');
                     continue;
                 }
                 b' ' | b'\n' | b'\r' | b'\t' if at_array_level && self.item.is_empty() => continue,
                 b' ' | b'\n' | b'\r' | b'\t' => {}
-                _ if self.phase == Phase::Seeking && self.depth == 1 => self.armed = false,
+                _ if self.phase == Phase::Seeking => self.armed = false,
                 _ => {}
             }
             if self.phase == Phase::InArray {
@@ -316,12 +327,16 @@ impl ArraySplitter {
 
     fn emit(&mut self, on_item: &mut impl FnMut(&str)) {
         if !self.item.is_empty() {
-            if serde_json::from_slice::<IgnoredAny>(&self.item).is_err() {
+            match std::str::from_utf8(&self.item) {
+                Ok(text) if serde_json::from_str::<IgnoredAny>(text).is_ok() => {
+                    on_item(text.trim())
+                }
+                _ => self.invalid = true,
+            }
+            if self.envelope.len() > METADATA_LIMIT - 4 {
                 self.invalid = true;
-            } else if let Ok(text) = std::str::from_utf8(&self.item) {
-                on_item(text.trim());
             } else {
-                self.invalid = true;
+                self.envelope.extend_from_slice(b"null");
             }
             self.item.clear();
         }
@@ -366,9 +381,9 @@ mod tests {
         }
         let body = format!(
             "{{\"code\":0,\"result\":{{\"data\":[]}}}}{}garbage",
-            " ".repeat(OUTSIDE_LIMIT)
+            " ".repeat(METADATA_LIMIT)
         );
-        for chunk in [1, 1024, OUTSIDE_LIMIT * 2] {
+        for chunk in [1, 1024, METADATA_LIMIT * 2] {
             let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "data"]));
             for part in body.as_bytes().chunks(chunk) {
                 splitter.feed(part, |_| {});
@@ -377,7 +392,55 @@ mod tests {
         }
     }
 
-    pub(super) fn split(at: ArrayAt, body: &str, chunk: usize) -> Vec<String> {
+    #[test]
+    fn streamed_metadata_retains_paging_flags_without_rows() {
+        let mut splitter = ArraySplitter::new(ArrayAt::Field("items"));
+        splitter.feed(
+            br#"{"items":[{"id":1},{"id":2}],"hasNextPage":true,"nextKey":{"id":"3"}}"#,
+            |_| {},
+        );
+        assert!(splitter.finished());
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Metadata {
+            has_next_page: bool,
+            next_key: Option<Key>,
+        }
+        #[derive(Deserialize)]
+        struct Key {
+            id: String,
+        }
+        let metadata: Metadata = serde_json::from_str(splitter.envelope()).unwrap();
+        assert!(metadata.has_next_page);
+        assert_eq!(metadata.next_key.unwrap().id, "3");
+        assert!(!splitter.envelope().contains("\"id\":1"));
+    }
+
+    #[test]
+    fn rejects_invalid_documents_after_streaming_rows() {
+        for text in [
+            r#"{"symbols":[{"v":1}]"#,
+            r#"{"symbols":[{"v":1},,]}"#,
+            r#"{"symbols":[{"v":1}]}x"#,
+            r#"[1,]"#,
+            r#"[1,,2]"#,
+            r#"[1 2]"#,
+            r#"[tru e]"#,
+        ] {
+            let at = if text.starts_with('{') {
+                ArrayAt::Field("symbols")
+            } else {
+                ArrayAt::Root
+            };
+            let mut splitter = ArraySplitter::new(at);
+            for byte in text.bytes() {
+                splitter.feed(&[byte], |_| {});
+            }
+            assert!(!splitter.finished(), "{text}");
+        }
+    }
+
+    fn split(at: ArrayAt, body: &str, chunk: usize) -> Vec<String> {
         let mut splitter = ArraySplitter::new(at);
         let mut items = Vec::new();
         for part in body.as_bytes().chunks(chunk) {
@@ -407,28 +470,99 @@ mod tests {
         assert!(!splitter.finished());
     }
 
+    #[test]
+    fn splits_a_nested_array_and_keeps_its_envelope() {
+        let body = r#"{"retCode":0,"list":[9],"result":{"category":"linear","list":[{"s":"a"},{"s":"]"}],"nextPageCursor":"c%3D1"},"time":1}"#;
+        for chunk in [1, 4, 1024] {
+            let at = ArrayAt::Path(&["result", "list"]);
+            assert_eq!(split(at, body, chunk), [r#"{"s":"a"}"#, r#"{"s":"]"}"#]);
+            let mut splitter = ArraySplitter::new(at);
+            for part in body.as_bytes().chunks(chunk) {
+                splitter.feed(part, |_| {});
+            }
+            assert_eq!(
+                std::str::from_utf8(splitter.outside()).unwrap(),
+                r#"{"retCode":0,"list":[9],"result":{"category":"linear","list":[],"nextPageCursor":"c%3D1"},"time":1}"#
+            );
+        }
+        let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
+        splitter.feed(
+            br#"{"retCode":10001,"retMsg":"params error","result":{}}"#,
+            |_| {},
+        );
+        assert!(!splitter.finished());
+    }
+
+    #[test]
+    fn nested_streams_validate_the_complete_document_and_each_item() {
+        for body in [
+            r#"{"result":{"list":[1 2]}}"#,
+            r#"{"result":{"list":[1,]}}"#,
+            r#"{"result":{"list":[1,,2]}}"#,
+            r#"{"result":{"list":[tru e]}}"#,
+            r#"{"result":{"list":[{"x":1}]}}x"#,
+            r#"{"result":{"list":[{"x":1}]}"#,
+            r#"{"result":{"list":[{"x":1}]},}"#,
+        ] {
+            let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
+            for byte in body.bytes() {
+                splitter.feed(&[byte], |_| {});
+            }
+            assert!(!splitter.finished(), "{body}");
+        }
+        let body =
+            r#"{"unrelated":{"list":[0]},"result":{"nested":{"list":[1]},"list":[2]},"list":[3]}"#;
+        assert_eq!(split(ArrayAt::Path(&["result", "list"]), body, 1), ["2"]);
+    }
+
+    #[test]
+    fn keeps_large_metadata_but_rejects_overflow_without_truncation() {
+        let body = format!(
+            r#"{{"result":{{"list":[1,2],"nextPageCursor":"{}"}}}}"#,
+            "x".repeat(100 * 1024)
+        );
+        let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
+        for part in body.as_bytes().chunks(37) {
+            splitter.feed(part, |_| {});
+        }
+        assert!(splitter.finished());
+        assert_eq!(
+            std::str::from_utf8(splitter.outside()).unwrap(),
+            body.replace("[1,2]", "[]")
+        );
+        let oversized = format!(
+            r#"{{"items":[],"metadata":"{}"}}"#,
+            "x".repeat(METADATA_LIMIT)
+        );
+        let mut splitter = ArraySplitter::new(ArrayAt::Field("items"));
+        splitter.feed(oversized.as_bytes(), |_| {});
+        assert!(!splitter.finished());
+        assert!(splitter.outside.len() <= METADATA_LIMIT);
+        assert!(splitter.envelope.len() <= METADATA_LIMIT);
+        // Later chunks must not resume an invalid stream or exceed the cap.
+        splitter.feed(br#""}"#, |_| panic!("invalid stream resumed"));
+        assert!(!splitter.finished());
+        assert!(splitter.outside.len() <= METADATA_LIMIT);
+        assert!(splitter.envelope.len() <= METADATA_LIMIT);
+    }
+
+    #[test]
+    fn row_count_does_not_grow_either_metadata_buffer() {
+        let mut splitter = ArraySplitter::new(ArrayAt::Root);
+        splitter.feed(b"[", |_| {});
+        for _ in 0..1_000 {
+            splitter.feed(b"1,", |_| {});
+        }
+        splitter.feed(b"2]", |_| {});
+        assert!(splitter.finished());
+        assert_eq!(splitter.outside(), b"[]");
+        assert!(splitter.envelope().len() < 32);
+    }
+
     #[derive(Deserialize)]
     struct Row<'a> {
         s: &'a str,
         v: u32,
-    }
-
-    #[test]
-    fn nested_path_retains_envelope_and_ignores_unrelated_siblings() {
-        let body = r#"{"other":{"list":[{"id":"wrong"}]},"result":{"list":[{"id":"right"}],"nextPageCursor":"page2"},"retCode":0}"#;
-        for chunk in [1, 3, 17, 1024] {
-            let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
-            let mut rows = Vec::new();
-            for part in body.as_bytes().chunks(chunk) {
-                splitter.feed(part, |row| rows.push(row.to_owned()));
-            }
-            assert!(splitter.finished());
-            assert_eq!(rows, [r#"{"id":"right"}"#]);
-            assert_eq!(
-                std::str::from_utf8(splitter.outside()).unwrap(),
-                r#"{"other":{"list":[{"id":"wrong"}]},"result":{"list":[],"nextPageCursor":"page2"},"retCode":0}"#
-            );
-        }
     }
 
     #[test]
@@ -453,85 +587,50 @@ mod tests {
 mod envelope_tests {
     use super::*;
     #[test]
-    fn nested_list_streams_but_retains_business_code_and_cursor() {
-        let body = r#"{"code":"00000","data":{"entrustedList":[{"id":"a"},{"id":"b"}],"endId":"b"},"msg":"ok"}"#;
-        for size in [1, 2, 9, 1024] {
-            let mut splitter =
-                ArraySplitter::new(ArrayAt::Envelope(&[&["data", "entrustedList"], &["data"]]));
-            let mut items = vec![];
-            for chunk in body.as_bytes().chunks(size) {
-                splitter.feed(chunk, |item| items.push(item.to_owned()));
+    fn alternative_paths_stream_native_shapes_and_keep_metadata() {
+        for body in [
+            r#"{"code":"00000","data":{"entrustedList":[{"id":"a"},{"id":"b"}],"endId":"b"},"msg":"ok"}"#,
+            r#"{"code":"00000","data":[{"id":"a"},{"id":"b"}],"msg":"ok"}"#,
+        ] {
+            for size in [1, 2, 9, 1024] {
+                let mut splitter =
+                    ArraySplitter::new(ArrayAt::Envelope(&[&["data", "entrustedList"], &["data"]]));
+                let mut items = vec![];
+                for chunk in body.as_bytes().chunks(size) {
+                    splitter.feed(chunk, |item| items.push(item.to_owned()));
+                }
+                assert!(splitter.finished());
+                assert_eq!(items, [r#"{"id":"a"}"#, r#"{"id":"b"}"#]);
+                assert_eq!(
+                    std::str::from_utf8(splitter.outside()).unwrap(),
+                    body.replace(r#"[{"id":"a"},{"id":"b"}]"#, "[]")
+                );
+                assert!(serde_json::from_str::<IgnoredAny>(splitter.envelope()).is_ok());
             }
-            assert!(splitter.finished());
-            assert_eq!(items, [r#"{"id":"a"}"#, r#"{"id":"b"}"#]);
-            assert_eq!(
-                std::str::from_utf8(splitter.envelope().unwrap()).unwrap(),
-                r#"{"code":"00000","data":{"entrustedList":[],"endId":"b"},"msg":"ok"}"#
-            );
         }
+        let mut root = ArraySplitter::new(ArrayAt::Envelope(&[&["data"], &[]]));
+        let mut items = Vec::new();
+        root.feed(b"[1,2]", |item| items.push(item.to_owned()));
+        assert!(root.finished());
+        assert_eq!(items, ["1", "2"]);
+        assert_eq!(root.outside(), b"[]");
     }
+
     #[test]
-    fn envelope_requires_complete_document_and_exact_path() {
-        let at = ArrayAt::Envelope(&[&["data", "list"]]);
+    fn alternative_paths_require_complete_valid_documents_and_exact_paths() {
         for body in [
             r#"{"data":{"list":[]}"#,
             r#"{"else":{"list":[]}}"#,
             r#"{"data":{"list":[]}garbage}"#,
+            r#"{"data":{"list":[1,]}}"#,
+            r#"{"data":{"list":[1 2]}}"#,
         ] {
-            let mut splitter = ArraySplitter::new(at);
-            splitter.feed(body.as_bytes(), |_| {});
-            assert!(!splitter.finished());
-        }
-    }
-}
-
-#[cfg(test)]
-mod malformed_stream_tests {
-    use super::*;
-    #[test]
-    fn whitespace_cannot_join_separate_json_values() {
-        let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
-        splitter.feed(br#"{"data":[1 2]}"#, |_| panic!("malformed item delivered"));
-        assert!(!splitter.finished());
-    }
-
-    #[test]
-    fn streamed_arrays_reject_missing_elements_trailing_commas_and_bad_utf8() {
-        for body in [
-            b"{\"data\":[,]}".as_slice(),
-            b"{\"data\":[1,]}",
-            b"{\"data\":[\"\xff\"]}",
-        ] {
-            let mut splitter = ArraySplitter::new(ArrayAt::Envelope(&[&["data"]]));
-            splitter.feed(body, |_| {});
-            assert!(!splitter.finished());
-        }
-    }
-    #[test]
-    fn splits_a_nested_array_and_keeps_its_envelope() {
-        let body = r#"{"retCode":0,"list":[9],"result":{"category":"linear","list":[{"s":"a"},{"s":"]"}],"nextPageCursor":"c%3D1"},"time":1}"#;
-        for chunk in [1, 4, 1024] {
-            let at = ArrayAt::Path(&["result", "list"]);
-            assert_eq!(
-                super::tests::split(at, body, chunk),
-                [r#"{"s":"a"}"#, r#"{"s":"]"}"#]
-            );
-            let mut splitter = ArraySplitter::new(at);
-            for part in body.as_bytes().chunks(chunk) {
-                splitter.feed(part, |_| {});
+            let mut splitter = ArraySplitter::new(ArrayAt::Envelope(&[&["data", "list"]]));
+            for chunk in body.as_bytes().chunks(1) {
+                splitter.feed(chunk, |_| {});
             }
-            assert_eq!(splitter.envelope(), Some(splitter.outside()));
-            assert_eq!(
-                std::str::from_utf8(splitter.outside()).unwrap(),
-                r#"{"retCode":0,"list":[9],"result":{"category":"linear","list":[],"nextPageCursor":"c%3D1"},"time":1}"#
-            );
+            assert!(!splitter.finished(), "{body}");
         }
-        let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
-        splitter.feed(
-            br#"{"retCode":10001,"retMsg":"params error","result":{}}"#,
-            |_| {},
-        );
-        assert!(!splitter.finished());
     }
 
     #[test]
@@ -545,14 +644,11 @@ mod malformed_stream_tests {
             }
             assert!(splitter.finished());
             assert_eq!(items, [r#"{"s":"a"}"#, r#"{"s":"b"}"#]);
-            assert_eq!(
-                splitter.envelope().unwrap(),
-                br#"{"code":"0","data":[],"msg":"ok"}"#
-            );
+            assert_eq!(splitter.outside(), br#"{"code":"0","data":[],"msg":"ok"}"#);
         }
     }
     #[test]
-    fn legacy_modes_do_not_opt_into_response_metadata() {
+    fn root_and_field_modes_preserve_bounded_response_metadata() {
         for (at, body) in [
             (ArrayAt::Root, b"[]".as_slice()),
             (ArrayAt::Field("data"), br#"{"data":[]}"#.as_slice()),
@@ -561,7 +657,8 @@ mod malformed_stream_tests {
             splitter.feed(body, |_| {});
             splitter.feed(&[b' '; 16_384], |_| {});
             assert!(splitter.finished());
-            assert!(splitter.envelope().is_none());
+            assert!(splitter.outside().starts_with(body));
+            assert!(serde_json::from_slice::<IgnoredAny>(splitter.outside()).is_ok());
         }
     }
 
@@ -580,7 +677,20 @@ mod malformed_stream_tests {
         }
         let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
         splitter.feed(br#"{"result":{"list":[]}}"#, |_| {});
-        splitter.feed(&[b' '; 16_384], |_| {});
+        splitter.feed(&vec![b' '; METADATA_LIMIT], |_| {});
+        assert!(!splitter.finished());
+    }
+
+    #[test]
+    fn rejects_array_grammar_invalid_utf8_and_metadata_overflow() {
+        for body in [b"[, ]".as_slice(), b"[1,]", b"[\xff]"] {
+            let mut splitter = ArraySplitter::new(ArrayAt::Root);
+            splitter.feed(body, |_| {});
+            assert!(!splitter.finished());
+        }
+        let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
+        splitter.feed(br#"{"data":[]}"#, |_| {});
+        splitter.feed(&vec![b' '; METADATA_LIMIT], |_| {});
         assert!(!splitter.finished());
     }
 }

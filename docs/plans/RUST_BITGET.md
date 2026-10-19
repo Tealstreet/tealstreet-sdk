@@ -326,3 +326,20 @@ all focused tests pass. Final rebuild, replay and repeat audit in progress.
   end CPU counters are captured before settling. No clamping/sample selection.
 - Independent sub-agent review passes. Fresh cold TS sample retains +32 buffer
   bytes, rather than -208. Complete replay reruns are in progress.
+
+## WEEX landing integration
+
+- Integrated landing 6cd219ce4c when its merge made PR #1308 conflicting.
+  Preserved incoming authenticated WS headers, timed reusable read templates,
+  request-header checks, generated response placeholders and independent TS
+  corrections. All six venue registrations/gates remain available.
+- Preserved incoming all-mode complete-document validation, bounded 1MiB
+  response metadata and collapsed-null validation envelope, with Bitget's
+  alternative paths and business-error promotion hook. Engine23, Binance29,
+  WEEX76 and Bitget75 native tests pass; harness29 tests pass.
+- Kept the reviewed timer-turn baseline stabilization. Before this merge,
+  Bitget's fresh three-run gate passed: TS/Rust CPU2557.2/2425.4ms,
+  steady2068.5/1544.4ms, retained5.2/2.3MB. Regression reruns interrupted by
+  changing imports during the merge are invalidated, not counted as passes.
+- Six-venue rebuild/remeasurement and final regressions running; no thresholds
+  on CPU/memory were relaxed. Current PR head must pass CI before merge.

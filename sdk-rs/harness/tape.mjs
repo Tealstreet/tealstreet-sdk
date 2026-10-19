@@ -33,8 +33,8 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
     if (urlKeys.has(url)) return urlKeys.get(url);
     const parsed = new URL(url);
     const query = [...parsed.searchParams]
-      .filter(([name]) => !VOLATILE.has(name))
-      .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"[^"]*",?/g, '')])
+      .filter(([name, value]) => !VOLATILE.has(name) || callerIds.has(value))
+      .map(([name, value]) => [name, /^[\[{]/.test(value) ? canonicalBody(value, url) : value])
       .sort(([a], [b]) => a.localeCompare(b));
     const key = `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
     urlKeys.set(url, key);
@@ -65,7 +65,11 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
       if (Array.isArray(value)) return value.map(sorted);
       if (value === null || typeof value !== 'object') return value;
       const keys = Object.keys(value)
-        .filter((key) => value[key] !== undefined && !(venue.volatileBodyFields && VOLATILE.has(key)))
+        .filter(
+          (key) =>
+            value[key] !== undefined &&
+            !(venue.volatileBodyFields && VOLATILE.has(key) && !callerIds.has(String(value[key]))),
+        )
         .sort();
       return Object.fromEntries(
         keys.map((key) => [
@@ -108,54 +112,63 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
       this.open = new Map();
       this.waiters = [];
       this.commandIndex = 0;
+      this.time = 0;
       this.generated = new Set();
     }
 
-    respond(method, url, body) {
-      return this.responses.respond(method, url, body, this.commandIndex, (record) => {
-        if (method !== 'GET' && venue.rust.startsWith('bitget') && /(?:place|modify)-/.test(new URL(url).pathname)) {
-          const ids = [];
-          const visit = (value) => {
-            if (!value || typeof value !== 'object') return;
-            for (const [key, item] of Object.entries(value)) {
-              if (mintedField(key, url) && (key === 'newClientOid' || !callerIds.has(item))) {
+    respond(method, url, body, headers) {
+      venue.validateRequest?.({ method, url, body, headers });
+      return this.responses.respond(
+        method,
+        url,
+        body,
+        this.commandIndex,
+        (record) => {
+          if (method !== 'GET' && venue.rust.startsWith('bitget') && /(?:place|modify)-/.test(new URL(url).pathname)) {
+            const ids = [];
+            const visit = (value) => {
+              if (!value || typeof value !== 'object') return;
+              for (const [key, item] of Object.entries(value)) {
+                if (mintedField(key, url) && (key === 'newClientOid' || !callerIds.has(item))) {
+                  if (
+                    typeof item !== 'string' ||
+                    !/^[.A-Za-z0-9:/_-]{1,32}$/.test(item) ||
+                    (key === 'newClientOid' && callerIds.has(item))
+                  )
+                    throw new Error(`invalid generated ${key}`);
+                  ids.push(item);
+                } else visit(item);
+              }
+            };
+            visit(typeof body === 'string' ? parseRequestJson(body) : body);
+            const reply = JSON.parse(record.body);
+            // A rejected signature may be re-signed once with the same identity.
+            if (String(reply.code) !== '40009')
+              for (const id of ids) {
+                if (this.generated.has(id)) throw new Error(`generated client ID reused: ${id}`);
+                this.generated.add(id);
+              }
+          }
+          if (bitget && method !== 'GET') {
+            const decode = (value) => (typeof value === 'string' ? parseRequestJson(value) : value);
+            const bind = (expected, actual) => {
+              if (!expected || !actual || typeof expected !== 'object' || typeof actual !== 'object') return;
+              for (const key of Object.keys(expected)) {
                 if (
-                  typeof item !== 'string' ||
-                  !/^[.A-Za-z0-9:/_-]{1,32}$/.test(item) ||
-                  (key === 'newClientOid' && callerIds.has(item))
+                  mintedField(key, url) &&
+                  typeof expected[key] === 'string' &&
+                  typeof actual[key] === 'string' &&
+                  !callerIds.has(actual[key])
                 )
-                  throw new Error(`invalid generated ${key}`);
-                ids.push(item);
-              } else visit(item);
-            }
-          };
-          visit(typeof body === 'string' ? parseRequestJson(body) : body);
-          const reply = JSON.parse(record.body);
-          // A rejected signature may be re-signed once with the same identity.
-          if (String(reply.code) !== '40009')
-            for (const id of ids) {
-              if (this.generated.has(id)) throw new Error(`generated client ID reused: ${id}`);
-              this.generated.add(id);
-            }
-        }
-        if (bitget && method !== 'GET') {
-          const decode = (value) => (typeof value === 'string' ? parseRequestJson(value) : value);
-          const bind = (expected, actual) => {
-            if (!expected || !actual || typeof expected !== 'object' || typeof actual !== 'object') return;
-            for (const key of Object.keys(expected)) {
-              if (
-                mintedField(key, url) &&
-                typeof expected[key] === 'string' &&
-                typeof actual[key] === 'string' &&
-                !callerIds.has(actual[key])
-              )
-                generatedAliases.set(actual[key], expected[key]);
-              else bind(expected[key], actual[key]);
-            }
-          };
-          bind(decode(record.requestBody), decode(body));
-        }
-      });
+                  generatedAliases.set(actual[key], expected[key]);
+                else bind(expected[key], actual[key]);
+              }
+            };
+            bind(decode(record.requestBody), decode(body));
+          }
+        },
+        this.time,
+      );
     }
 
     connect(url, onOpen, onMessage) {
@@ -264,7 +277,16 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
 
     async socketFor(url) {
       while (!this.sockets(url).length) {
-        await new Promise((resolve) => this.waiters.push(() => (this.sockets(url).length ? (resolve(), true) : false)));
+        let waiter;
+        const opened = new Promise((resolve) => {
+          waiter = () => (this.sockets(url).length ? (resolve(), true) : false);
+          this.waiters.push(waiter);
+        });
+        try {
+          await within(opened, 30_000, `socket did not open: ${canonicalUrl(url)}`);
+        } finally {
+          this.waiters = this.waiters.filter((queued) => queued !== waiter);
+        }
       }
       return this.sockets(url)[0];
     }
@@ -321,6 +343,7 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
           const wait = frame.t - (performance.now() - start);
           if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
         }
+        this.time = frame.t;
         if (frame.type === 'command') {
           this.commandIndex++;
           this.results.push(

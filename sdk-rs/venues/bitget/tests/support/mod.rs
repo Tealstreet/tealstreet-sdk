@@ -55,7 +55,10 @@ impl Harness {
         for action in self.engine.drain_actions() {
             match action {
                 Action::Http(r) => self.requests.push(r),
-                Action::WsConnect { socket, url } => self.sockets.push((socket, url)),
+                Action::WsConnect { socket, url }
+                | Action::WsConnectWithHeaders { socket, url, .. } => {
+                    self.sockets.push((socket, url))
+                }
                 Action::WsSend { socket, text } => self.sent.push((socket, text)),
                 Action::WsClose { socket } => self.closed.push(socket),
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
