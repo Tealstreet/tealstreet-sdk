@@ -509,6 +509,13 @@ pub trait Exchange: std::any::Any + ExchangeView {
     fn fetch_ohlcv(&self, _options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         Box::pin(async { Ok(vec![]) })
     }
+    /// Native command view; the default's source-order proofs are in
+    /// safe-cex-registry/REST_RETURN_ORDER_REVIEW.md. Other shapes override it.
+    fn fetch_ohlcv_native(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Js> {
+        Box::pin(async move {
+            from_typed(&self.fetch_ohlcv(options).await?).map_err(|error| error.to_exchange_error())
+        })
+    }
     fn update_symbol_metadata(&self, _symbol: String) -> ExchangeFuture<'_, ()> {
         Box::pin(async { Ok(()) })
     }

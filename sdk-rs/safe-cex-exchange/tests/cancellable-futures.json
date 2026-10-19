@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "239 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "240 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -1115,6 +1115,18 @@
       "producer_sha256": "b8ef1f80fc7d7d209b4e7276690a62cdb96f7e25a1953898b8f2e029ac09fc55",
       "classification": "immediate",
       "reason": "Trait default returns an immediate result/error or a ready local future; no registration or reserved lifecycle state."
+    },
+    {
+      "owner": "src/exchange.rs::Exchange::fetch_ohlcv_native",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "69c99fa44086408844333296f8101b4f376698f5e74bb0e103e72b8195906ac4",
+      "classification": "no-owned-latch",
+      "reason": "Owns the existing typed candle child future and projects only its settled result; dropping the wrapper drops that child. No waiter registration, task, timer, latch, cache reservation or independent in-flight slot is installed by this default."
     },
     {
       "owner": "src/exchange.rs::Exchange::fetch_option_chain",

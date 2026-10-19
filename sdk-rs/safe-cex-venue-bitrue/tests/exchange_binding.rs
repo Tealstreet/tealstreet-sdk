@@ -1591,3 +1591,101 @@ fn audit_compressed_blob_bytes_reach_real_socket_pongs_without_utf8_decoding() {
             .all(|(_, socket)| socket.closed.get())
     );
 }
+
+#[test]
+fn native_candle_return_retains_map_kline_info_and_cached_aliases() {
+    use safe_cex_exchange::{js_runtime::globals::stringify_json, websocket::WsEvent};
+    use safe_cex_transport::socket::SocketFrame;
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/candle-stream-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "maintained Bitrue mapKline: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(source.len(), 4);
+    let case = &source[0];
+    let raw: Value = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
+    let runtime = Rc::new(support::Runtime::default());
+    let http = Rc::new(Http(
+        runtime.clone(),
+        RefCell::new(vec![]),
+        Cell::new(false),
+    ));
+    let venue = BitrueExchange::new(
+        ExchangeName::Bitrue,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        Rc::new(DefaultStore::new()),
+        BitrueDependencies {
+            runtime: runtime.clone(),
+            http,
+            external_public_data: None,
+        },
+    )
+    .unwrap();
+    complete(&runtime, venue.start()).unwrap();
+    runtime.pump();
+    let public = runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.contains("/kline-api/ws"))
+        .map(|(_, socket)| socket.clone())
+        .expect("actual Bitrue public socket");
+    let opts = || serde_json::from_value(json!({"symbol":"E-BTC-USDT","interval":"15m"})).unwrap();
+    let mut pending = venue.fetch_ohlcv_native(opts());
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(pending.as_mut().poll(&mut cx).is_pending());
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            json!({"event_rep":"rep", "channel":"market_e_btcusdt_kline_15min", "data":[raw]})
+                .to_string(),
+        )));
+    runtime.pump();
+    let candles = complete(&runtime, pending).unwrap();
+    let candle = candles.get("0").unwrap();
+    assert!(
+        candle.has_own("info"),
+        "BITRUE_NATIVE_CANDLE_INFO retains actual mapKline info:candle"
+    );
+    let keys: Vec<_> = candle
+        .own_keys()
+        .into_iter()
+        .map(|k| String::from_utf16(&k).unwrap())
+        .collect();
+    assert_eq!(serde_json::to_value(keys).unwrap(), case["keys"]);
+    let wire = String::from_utf16(&stringify_json(&candles).unwrap().unwrap()).unwrap();
+    assert_eq!(
+        wire,
+        case["wire"].as_str().unwrap(),
+        "actual source info and construction bytes"
+    );
+    let sends = public.sent.borrow().len();
+    let cached = complete(&runtime, venue.fetch_ohlcv_native(opts())).unwrap();
+    assert!(
+        cached.same_reference(&candles),
+        "source history cache retains its array"
+    );
+    assert!(
+        cached
+            .get("0")
+            .unwrap()
+            .get("info")
+            .unwrap()
+            .same_reference(&candle.get("info").unwrap()),
+        "source cache retains raw candle alias"
+    );
+    assert_eq!(public.sent.borrow().len(), sends);
+    let typed = complete(&runtime, venue.fetch_ohlcv(opts())).unwrap();
+    assert_eq!(typed.len(), 1, "typed SDK projection remains explicit");
+    assert_eq!(typed[0].low.to_bits(), (-0.0f64).to_bits());
+    venue.dispose().unwrap();
+}

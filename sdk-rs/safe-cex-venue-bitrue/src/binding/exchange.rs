@@ -143,15 +143,18 @@ impl BitrueExchange {
         name: &'static str,
         args: Vec<Js>,
     ) -> ExchangeFuture<'_, T> {
+        let pending = self.invoke_native(name, args);
+        Box::pin(async move { to_typed(&pending.await?).map_err(err) })
+    }
+    fn invoke_native(&self, name: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, Js> {
         let this = self.rt.this.clone();
         Box::pin(async move {
-            let value = await_js(
+            await_js(
                 &self.rt.exchange_runtime(),
                 this.call_method(name, args).map_err(err)?,
             )
             .await
-            .map_err(err)?;
-            to_typed(&value).map_err(err)
+            .map_err(err)
         })
     }
     fn listen<T: serde::de::DeserializeOwned + 'static>(
@@ -314,7 +317,11 @@ impl Exchange for BitrueExchange {
         self.invoke("fetchHistoricalFills", a)
     }
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
+        let pending = self.fetch_ohlcv_native(options);
+        Box::pin(async move { to_typed(&pending.await?).map_err(err) })
+    }
+    fn fetch_ohlcv_native(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Js> {
         let a = args!(js(&options));
-        self.invoke("fetchOHLCV", a)
+        self.invoke_native("fetchOHLCV", a)
     }
 }
