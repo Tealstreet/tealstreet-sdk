@@ -18,7 +18,7 @@ maintained-method oracle `tests/book-state-source.mjs` establish these boundarie
 - Recovery retains the original live topic across both sends, including later
   mutations, extra properties and source object-key order.
 
-The first three native probes fail on master `523e1ebf0d`. All five source
+The first three native probes fail on master `523e1ebf0d`. All six source
 observations pass against the actual TypeScript method bodies extracted through
 its AST. The initial selected-method candidate passed six native tests, including its
 maintained-source oracle. A further compiled public-frame RED pins the remaining
@@ -41,12 +41,14 @@ state-copy delta; it does not attribute the earlier non-book routing gain here.
 
 Freeze matched optimized release addons with the same toolchain, lockfile,
 profile and dependency source. Only the selected-state production delta may
-vary. Run the original 285713-frame OKX tape in serial A/B/A/B/A/B order without
+vary. The coordinator reduced this residual slice to one full matched pair,
+because #1218 owns the dominant non-book routing gain. Run the original
+285713-frame OKX tape once per side, control followed by candidate, without
 local Cargo or profiling during feeds. Keep both independent native repetitions
 and both TypeScript controls in each report. CPU is the primary metric; report
 all samples, medians and ranges, with wall time and shared-load bounds separately.
 
-`tests/book-state-throughput.mjs` requires all six reports, verified complete
+`tests/book-state-throughput.mjs` requires both reports, verified complete
 physical/application drains, identical input hashes and complete observable
 native graph identity across every control and candidate output, plus complete
 TypeScript repeatability across all reports. It imports the

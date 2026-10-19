@@ -1,4 +1,4 @@
-// Full original OKX tape; six serial interleaved RELEASE reports.
+// Full original OKX tape; approved single matched RELEASE pair.
 // Compare every retained output graph and preserve every CPU/wall sample.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -8,8 +8,8 @@ import { assertOutputIdentity, runIdentityGuardControls } from '../../scripts/li
 
 const paths = process.argv.slice(2);
 assert(
-  paths.length === 6,
-  'Supply all three full control/candidate pairs in actual interleaved order',
+  paths.length === 2,
+  'Supply the approved full control/candidate pair in actual run order',
 );
 const reports = paths.map((path) => JSON.parse(readFileSync(path)));
 const before = reports.filter((_, i) => i % 2 === 0);
@@ -111,7 +111,7 @@ console.log(
     {
       pairedReportCount: before.length,
       nativeSamplesPerSide: baseline.length,
-      sampleCountQualification: 'Three full interleaved pairs; two independent native repeats per report and six native samples per side.',
+      sampleCountQualification: 'Coordinator approved one full matched pair for this residual slice; two independent native repeats per report and two native samples per side. No three-pair confidence claim.',
       identicalCompleteNativeOutput: true,
       identicalCompleteTsOutput: true,
       identicalObservableNativeGraph: true,
