@@ -275,3 +275,14 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   Backpack 49 and engine 22 tests, workspace native/WASM clippy, bans/fmt,
   root typecheck (44) and lint (28) pass. All fifteen replay gates are running
   before the next push and green-CI wait. No gate thresholds were weakened.
+- All fifteen six-venue gates PASS (6a684ef4d1), public medians of three:
+  Backpack CPU 111.0/53.9 ms (2.06x), steady 56.8/22.3 ms (2.55x), memory
+  3.0/1.9 MB (1.56x); Binance 185.5/81.2 ms (2.28x), steady 99.0/27.0 ms
+  (3.66x), memory 4.3/2.5 MB (1.74x); Bybit 469.5/332.2 ms (1.41x), steady
+  314.1/219.4 ms (1.43x), memory 6.0/2.7 MB (2.25x); OKX 1210.5/1148.8 ms
+  (1.05x), steady 959.3/904.9 ms (1.06x), memory 4.1/2.6 MB (1.59x);
+  Crypto.com 177.4/137.1 ms (1.29x), steady 115.6/74.3 ms (1.56x), memory
+  1.8/1.4 MB (1.26x); WEEX 145.7/80.5 ms (1.81x), steady 74.9/30.2 ms
+  (2.48x), memory 5.1/2.7 MB (1.89x). Private correctness: Backpack 21,
+  Binance 14, Bybit 18, Crypto.com 21, WEEX 20, four OKX variants 29 each.
+  All reviews/checks above pass; pushing this final head for CI and landing.
