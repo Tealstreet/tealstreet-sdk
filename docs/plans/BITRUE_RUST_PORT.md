@@ -136,3 +136,25 @@ create a clean follow-up branch. Never stash, rebase, force-push or touch master
 - A final local public run narrowly missed steady CPU (Rust151.7/TS147.0ms),
   despite main CPU and memory passing. Optimizing duplicate ticker JSON scans
   before advancing the PR; no threshold or output normalization changes.
+
+### Bitget landing integration and PR round 2
+
+- Merged landing 3a7b46407d, retaining its structure, throughput profiles,
+  complete-document guards and unified createTape transport. Independent
+  integration review PASS: exact bodies, native/caller IDs, signature audit,
+  subscriptions and worker-method dispatch retained. Harness 118 PASS.
+- Round 1 findings independently re-reviewed PASS. Public single-pass decoder
+  review found missing candle close could become zero; explicit presence and
+  null rejection now have a regression and independent re-review PASS.
+- Final integrated public gate (three-run medians): 3,287 frames, 776 markets,
+  two books; TS/Rust CPU108.7/82.8ms, steady64.1/41.6ms, retained3.9/2.3MB.
+  Bitrue private20 frames PASS. Binance public873 frames CPU188.1/121.3ms,
+  steady98.7/59.5ms, retained4.4/2.3MB; private14 frames PASS.
+- Native workspace724 tests PASS (Bitrue57); SDK WASM26 PASS, host25 PASS.
+  Workspace native clippy, WASM host clippy and fmt PASS.
+- The eleven-venue artifact is3,759,020bytes,262KB above landing's ten-venue
+  artifact. Fixed combined budget becomes3.75MiB(3,932,160bytes), following
+  the landing's aggregate per-venue budgeting. Bitrue uses size profile z;
+  no correctness, CPU or memory threshold changed.
+- Earlier full safe-cex suite6,597 PASS and paired Bitrue56 PASS remain valid;
+  integration typecheck/lint and latest-head CI must pass before merge.
