@@ -9,6 +9,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
+import { isRead, subscriptionKeys } from './requests.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { retainedMemory } from './memory.mjs';
 import { Responses } from './responses.mjs';
@@ -30,7 +31,12 @@ const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes
   .toString('utf8')
   .split('\n')
   .filter(Boolean)
-  .map((line) => JSON.parse(line));
+  .map((line) => {
+    const record = JSON.parse(line);
+    // Both tape spellings describe the earliest time a snapshot is visible.
+    if (record.effectiveAt !== undefined) record.availableAfter ??= record.effectiveAt;
+    return record;
+  });
 const bookSymbols = values.books.split(',').filter(Boolean);
 // A wrong startup URL, missing socket or lost command must fail the gate.
 const replayDeadline = setTimeout(() => {
@@ -60,7 +66,7 @@ const callerIds = new Set(records.flatMap((r) => r.type === 'command' ? (r.order
 
 /** Per-request clocks, signatures, connection IDs and generated client IDs. */
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'requestId']);
-const clientFields = new Set(['newClientOrderId', 'clientAlgoId', 'clientId']);
+const clientFields = new Set(['newClientOrderId', 'clientAlgoId', 'clientId', 'clientOrderId']);
 const canonicalObject = (value) => {
   if (Array.isArray(value)) return value.map(canonicalObject);
   if (!value || typeof value !== 'object') return value;
@@ -100,7 +106,7 @@ const apiSupported = (value) => value == null || value === '' ? true
   : typeof value === 'boolean' ? value
   : !['false', '0', 'no', 'n', 'disabled', 'unsupported'].includes(String(value).trim().toLowerCase());
 
-const isWriteRequest = (method, url) => venue.isWrite?.(method, url) ?? method !== 'GET';
+const isWriteRequest = (method, url) => venue.isWrite?.(method, url) ?? !isRead(method, url);
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
@@ -125,6 +131,10 @@ class Tape {
     this.connectionCounts = new Map();
     this.byConnection = new Map();
     this.commandIndex = 0;
+    // Retain expected keys/backing storage across both memory samples: deleting
+    // startup-only harness state would subtract it from workload retained memory.
+    this.startupSubscriptions = new Map(Array.from(venue.startupSubscriptions?.(records, bookSymbols) ?? [], (key) => [key, false]));
+    this.pendingStartupSubscriptions = this.startupSubscriptions.size;
   }
 
   get unserved() { return this.responses.unserved; }
@@ -137,7 +147,14 @@ class Tape {
 
   send(socket, text) {
     const { url, connection } = socket;
+    for (const key of subscriptionKeys(socket.rawUrl, text)) {
+      if (this.startupSubscriptions.get(key) === false) {
+        this.startupSubscriptions.set(key, true);
+        this.pendingStartupSubscriptions--;
+      }
+    }
     this.audit?.sent(socket.rawUrl, text);
+    if (values.venue === 'bingx' && (text === 'Ping' || text === 'Pong')) return;
     if (venue.respondToPing && text === 'ping') {
       setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
       return;
@@ -161,6 +178,10 @@ class Tape {
         } else { socket.topics.delete(topic); socket.publicTopics.delete(topic); socket.subscriptionArgs.delete(topic); }
         this.subscriptions.push(JSON.stringify([url, connection, message.op, canonicalObject(arg)]));
       }
+    } else if (message.reqType === 'sub' || message.reqType === 'unsub') {
+      const topic = JSON.stringify(message.dataType);
+      if (message.reqType === 'sub') socket.topics.add(topic); else socket.topics.delete(topic);
+      this.subscriptions.push(JSON.stringify([url, connection, message.reqType, message.dataType]));
     } else if (message.event === 'sub' || message.event === 'unsub') {
       const topic = JSON.stringify(canonicalObject(message.params));
       if (message.event === 'sub') socket.topics.add(topic); else socket.topics.delete(topic);
@@ -318,6 +339,7 @@ class Tape {
     let initialized;
     const ensureReady = () => initialized ??= within((async () => {
       await ready();
+      while (this.pendingStartupSubscriptions) await new Promise((resolve) => setTimeout(resolve, 1));
       if (venue.startupTopics) {
         const expected = venue.startupTopics(records, bookSymbols).map((arg) => JSON.stringify(canonicalObject(arg)));
         const complete = () => expected.every((topic) => this.sockets.some((socket) => socket.opened && !socket.closed && socket.topics.has(topic)));
@@ -423,14 +445,19 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark,
 
 /** Loaded code is excluded; collect before I/O and after replay state settles. */
 const baseline = async () => {
+  const deadline = performance.now() + 1000;
   let previous;
-  let stable = 0;
-  for (let i = 0; i < 8; i++) {
+  let stableSince;
+  while (performance.now() < deadline) {
     globalThis.gc?.();
-    await new Promise(setImmediate);
+    // Loader/native cleanup can outlive several immediate turns. Require real
+    // elapsed quiescence so imported transient buffers cannot inflate baseline.
+    await new Promise((resolve) => setTimeout(resolve, 10));
     const memory = process.memoryUsage();
-    stable = memory.arrayBuffers === previous ? stable + 1 : 0;
-    if (stable >= 2) return memory;
+    const now = performance.now();
+    if (now >= deadline) break;
+    if (memory.arrayBuffers !== previous) stableSince = now;
+    if (now - stableSince >= 100) return memory;
     previous = memory.arrayBuffers;
   }
   throw new Error('Backing-buffer memory did not settle');
@@ -704,7 +731,7 @@ async function runTs() {
     if (!values['no-egress'] && state) mainStore.update(structuredClone(worker._prepareStorePayload(state)), true);
   };
   const options = { ...venue.options, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { key: '', secret: '', publicDataOnly: true }) };
-  const exchange = new Exchange(venue.ts.name, options, store);
+  const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
   venue.configureTs?.(exchange);
   venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
@@ -715,7 +742,15 @@ async function runTs() {
   const prepared = started.then(() => venue.prepareTsReady?.(exchange, { isPrivate }));
   const subscribed = (async () => {
     while (!store.markets.length) await new Promise((r) => setTimeout(r, 1));
-    for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => (finalBooks[symbol] = book));
+    for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => {
+      // KNOWN_TS_FIXES: BingX's feed supplies descending asks. Apply the
+      // independent price-order contract before consumers and flush hashes.
+      if (values.venue === 'bingx') {
+        book.bids.sort((a, b) => b.price - a.price);
+        book.asks.sort((a, b) => a.price - b.price);
+      }
+      finalBooks[symbol] = book;
+    });
   })();
   // Model the worker posting each subscribed book to main every 250 ms.
   let lastFlush = -Infinity;

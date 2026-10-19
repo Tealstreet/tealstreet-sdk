@@ -8,8 +8,8 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub struct Store {
     markets: Vec<Market>,
-    market_by_symbol: HashMap<String, u32>,
-    market_by_id: HashMap<String, u32>,
+    market_by_symbol: HashMap<Box<str>, u32>,
+    market_by_id: HashMap<Box<str>, u32>,
     tickers: Vec<Ticker>,
     ticker_by_market: Vec<u32>,
     tickers_without_market: HashMap<String, u32>,
@@ -101,6 +101,10 @@ impl Store {
         self.market_by_symbol.get(symbol).copied()
     }
 
+    pub fn market_index_by_id(&self, id: &str) -> Option<u32> {
+        self.market_by_id.get(id).copied()
+    }
+
     pub fn market_by_id(&self, id: &str) -> Option<&Market> {
         self.market_by_id
             .get(id)
@@ -111,12 +115,12 @@ impl Store {
         self.market_by_symbol = markets
             .iter()
             .enumerate()
-            .map(|(index, market)| (market.symbol.clone(), index as u32))
+            .map(|(index, market)| (market.symbol.clone().into_boxed_str(), index as u32))
             .collect();
         self.market_by_id = markets
             .iter()
             .enumerate()
-            .map(|(index, market)| (market.id.clone(), index as u32))
+            .map(|(index, market)| (market.id.clone().into_boxed_str(), index as u32))
             .collect();
         self.markets = markets;
         self.rebuild_ticker_index();
@@ -157,7 +161,7 @@ impl Store {
         self.ticker_by_market = vec![wire::NONE; self.markets.len()];
         self.tickers_without_market = HashMap::new();
         for (index, ticker) in self.tickers.iter().enumerate() {
-            if let Some(&market) = self.market_by_symbol.get(&ticker.symbol) {
+            if let Some(&market) = self.market_by_symbol.get(ticker.symbol.as_str()) {
                 self.ticker_by_market[market as usize] = index as u32;
             } else {
                 self.tickers_without_market
@@ -171,9 +175,23 @@ impl Store {
         let Some(index) = self.ticker_index(symbol) else {
             return;
         };
-        let ticker = &mut self.tickers[index as usize];
+        self.update_ticker_at(index, update);
+    }
+
+    /// Mutate a row of the current ticker table; rebuild cached indexes on replacement.
+    pub fn update_ticker_at(&mut self, index: u32, update: impl FnOnce(&mut Ticker)) {
+        let Some(ticker) = self.tickers.get_mut(index as usize) else {
+            return;
+        };
+        #[cfg(debug_assertions)]
+        let symbol = ticker.symbol.clone();
         let before = ticker_values(ticker);
         update(ticker);
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
+            ticker.symbol, symbol,
+            "ticker identity changes require set_tickers"
+        );
         let after = ticker_values(ticker);
         let mut mask = 0u16;
         for (bit, (a, b)) in before.iter().zip(after.iter()).enumerate() {
@@ -792,6 +810,45 @@ mod tests {
         assert_eq!(store.ticker("A").unwrap().last, 1.0);
         assert_eq!(store.ticker("B").unwrap().last, 2.0);
         assert_eq!(store.ticker("X").unwrap().last, 4.0);
+    }
+
+    #[test]
+    fn ticker_lookup_tracks_unsorted_replacements_and_last_duplicate() {
+        let mut store = Store::default();
+        let mut duplicate = ticker("A");
+        duplicate.last = 9.;
+        store.set_tickers(vec![ticker("C"), ticker("A"), ticker("B"), duplicate]);
+        assert_eq!(store.ticker("A").unwrap().last, 9.);
+        store.update_ticker("B", |row| row.last = 5.);
+        assert_eq!(store.tickers()[2].last, 5.);
+        assert!(store.ticker("missing").is_none());
+        store.set_tickers(vec![ticker("B")]);
+        assert!(store.ticker("A").is_none());
+        assert_eq!(store.ticker("B").unwrap().last, 0.);
+    }
+
+    #[test]
+    fn indexed_updates_match_symbol_updates_and_ignore_missing_rows() {
+        let mut by_symbol = Store::default();
+        let mut by_index = Store::default();
+        for store in [&mut by_symbol, &mut by_index] {
+            store.set_tickers(vec![ticker("C"), ticker("A"), ticker("B")]);
+            store.take_pending();
+        }
+        by_symbol.update_ticker("A", |row| {
+            row.last = 7.;
+            row.volume = 3.;
+        });
+        by_index.update_ticker_at(1, |row| {
+            row.last = 7.;
+            row.volume = 3.;
+        });
+        by_index.update_ticker_at(u32::MAX, |_| panic!("invalid row reached closure"));
+        assert_eq!(
+            by_symbol.take_pending().ticker_deltas,
+            by_index.take_pending().ticker_deltas
+        );
+        assert_eq!(by_index.tickers()[1].last, 7.);
     }
 
     #[test]

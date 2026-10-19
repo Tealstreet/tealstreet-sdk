@@ -1,8 +1,9 @@
 import { parseRequestJson } from './request-json.mjs';
+import { isRead } from './requests.mjs';
 
 // Reads may reuse their last snapshot; a mutation response is consumed once.
 export class Responses {
-  constructor(records, key, check, isWrite, fallbackKey) {
+  constructor(records, key, check, isWrite = (method, url) => !isRead(method, new URL(url, 'https://replay.invalid').href), fallbackKey) {
     this.key = key;
     this.check = check;
     this.isWrite = isWrite;
@@ -23,7 +24,7 @@ export class Responses {
       this.unserved++;
       return { status: 599, body: '' };
     }
-    const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= commandIndex && (r.after ?? 0) <= time && (r.effectiveAt ?? 0) <= time);
+    const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= commandIndex && (r.after ?? 0) <= time && (r.effectiveAt ?? 0) <= time && (r.availableAfter ?? 0) <= time);
     if (!eligible.length) {
       this.unserved++;
       return { status: 599, body: '' };
@@ -31,16 +32,17 @@ export class Responses {
     const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
     let current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
     const write = this.isWrite?.(method, url) ?? method !== 'GET';
-    const timed = !write && queue.some((r) => r.after !== undefined || r.effectiveAt !== undefined);
+    const timed = !write && queue.some((r) => r.after !== undefined || r.effectiveAt !== undefined || r.availableAfter !== undefined);
     if (timed) {
-      const after = Math.max(...current.map((r) => Math.max(r.after ?? 0, r.effectiveAt ?? 0)));
-      current = current.filter((r) => Math.max(r.after ?? 0, r.effectiveAt ?? 0) === after);
+      const after = Math.max(...current.map((r) => Math.max(r.after ?? 0, r.effectiveAt ?? 0, r.availableAfter ?? 0)));
+      current = current.filter((r) => Math.max(r.after ?? 0, r.effectiveAt ?? 0, r.availableAfter ?? 0) === after);
     }
     const record = timed ? current.at(-1) : current[0];
     if ((!timed && current.length > 1) || write) queue.splice(queue.indexOf(record), 1);
     let responseBody = record.body;
     if (/"\$(clientAlgoId|newClientOrderId)"/.test(responseBody)) {
-      const sent = typeof body === 'string' ? parseRequestJson(body) : body ?? {};
+      const raw = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;
+      const sent = typeof raw === 'string' ? parseRequestJson(raw) : raw ?? {};
       responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId)"/g,
         (_, field) => JSON.stringify(sent[field] ?? null));
     }

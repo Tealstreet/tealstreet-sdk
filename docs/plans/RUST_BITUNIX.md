@@ -332,3 +332,19 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
 - BingX landed at 022ab79de5 while PR reviews ran, introducing merge conflicts.
   Commit fixes before merging that pinned landing; preserve independent request
   oracles, all current protocols and the new BingX APIs, then rerun gates/CI.
+
+### BingX landing integration checkpoint
+
+- Merged pinned 022ab79de5 with disjoint engine/harness/host reviews. Preserved
+  seven factories, aliases, compressed ordered socket delivery, upgrade headers,
+  disposal guards, client-ID rules and every test from both engine branches.
+- Engine retains constant-time ticker slots/fallbacks and unshared frame identity
+  strings; adds BingX indexed update/market-ID APIs, compact collision-safe
+  interning and nested/alias selectors. Engine 43 tests PASS.
+- Harness retains lifecycle IDs, constructor/buffer baselines, independent
+  oracles, every-run book/candle/subscription/write checks and Crypto first-open
+  readiness. Adds BingX protocol/precision/order corrections, response stages
+  and per-socket Bybit startup readiness; helper 34 tests PASS.
+- Full workspace bans/fmt/clippy/tests and wasm clippy/build PASS. Root typecheck
+  44/lint 28/test 27 tasks PASS. Adapter 19 tests PASS; WASM 2,935,585 bytes,
+  aggregate budget 3 MiB. Final combined replays and updated-head CI remain.

@@ -12,7 +12,7 @@
 //   setTimeout(fn, ms), clearTimeout(handle),
 // }
 
-const CHUNK_BYTES = 64 * 1024;
+const CHUNK_BYTES = 16 * 1024;
 
 export class EngineHost {
   constructor(engine, transport, handlers = {}) {
@@ -85,8 +85,10 @@ export class EngineHost {
         }
       } else {
         for await (const chunk of body) {
-          if (this.disposed) return;
-          this.run(engine.httpChunk(id, chunk, transport.now()));
+          for (let at = 0; at < chunk.length; at += CHUNK_BYTES) {
+            if (this.disposed) return;
+            this.run(engine.httpChunk(id, chunk.subarray(at, at + CHUNK_BYTES), transport.now()));
+          }
         }
       }
     } catch (error) {
@@ -191,7 +193,7 @@ async function* chunks(stream) {
 }
 
 /** Deliver compressed binary messages and closure in receive order on every JS host. */
-export const bindSocketMessages = (socket, { onMessage, onClose }) => {
+export const bindSocketMessages = (socket, { onMessage, onClose, onError }) => {
   let pending;
   let disposed = false;
   let ending = false;
@@ -229,9 +231,11 @@ export const bindSocketMessages = (socket, { onMessage, onClose }) => {
         await reader.cancel();
       }
       if (!disposed) onMessage(text);
-    }).catch(() => {
+    }).catch((error) => {
       failed = true;
-      if (!disposed) socket.close();
+      if (!disposed) {
+        try { onError?.(error); } finally { socket.close(); }
+      }
     });
     pending = task;
     task.finally(() => { if (pending === task) pending = undefined; });
@@ -246,6 +250,16 @@ export const bindSocketMessages = (socket, { onMessage, onClose }) => {
   socket.addEventListener('close', (event) => end(event.code));
   socket.addEventListener('error', () => end(1006));
   return () => { disposed = true; };
+};
+
+/** Ordered decoding for transports that pass raw message data as a callback. */
+export const socketMessages = (onMessage, onError) => {
+  let receive;
+  bindSocketMessages({
+    addEventListener(type, listener) { if (type === 'message') receive = listener; },
+    close() {},
+  }, { onMessage, onError, onClose() {} });
+  return (data) => receive({ data });
 };
 
 /** Transport over the runtime's own WebSocket, fetch and timers. */
