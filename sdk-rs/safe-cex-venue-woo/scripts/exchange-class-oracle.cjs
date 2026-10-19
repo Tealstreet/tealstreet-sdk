@@ -3,6 +3,25 @@ const ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript');
 const file=path.resolve(__dirname,'../../../packages/safe-cex/src/exchanges/woo/woo.exchange.ts');
 const ast=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true),klass=ast.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='WOOXExchange');assert(klass);
 const code=ts.transpileModule(klass.getText(ast).replace(/^export /,'this.C='),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+if (process.argv.includes('--class-state')) {
+  const {WOOXExchange} = require(file);
+  const {DefaultStore} = require(path.resolve(__dirname, '../../../packages/safe-cex/src/store/store.base.ts'));
+  const owner = new WOOXExchange('woo', {publicDataOnly:true, applicationId:'fixture'}, new DefaultStore());
+  const other = new WOOXExchange('woo', {publicDataOnly:true, applicationId:'fixture'}, new DefaultStore());
+  const fields = klass.members.filter(n => ts.isPropertyDeclaration(n) && !n.modifiers?.some(m => m.kind === ts.SyntaxKind.StaticKeyword)).map(n => n.name.getText(ast));
+  assert.equal(fields.length, 86);
+  const keys = Object.keys(owner).filter(k => fields.includes(k));
+  assert.equal(keys.length, 86);
+  const arrows = klass.members.filter(n => ts.isPropertyDeclaration(n) && n.initializer && ts.isArrowFunction(n.initializer)).map(n => n.name.getText(ast));
+  assert.equal(arrows.length, 68);
+  for (const key of arrows) assert.notEqual(owner[key], other[key]);
+  const maps = keys.filter(k => owner[k] instanceof Map || owner[k] instanceof Set);
+  assert.equal(maps.length, 6);
+  for (const key of maps) { assert.equal(owner[key].size, 0); assert.notEqual(owner[key], other[key]); }
+  process.stdout.write(JSON.stringify({fields:keys, arrows, maps, constants:Object.fromEntries(['MAX_FILL_POSITION_REFRESH_ATTEMPTS','FILL_POSITION_REFRESH_BASE_DELAY_MS','FUNDING_REFRESH_INTERVAL_MS'].map(k=>[k,WOOXExchange[k]]))}));
+  owner.dispose(); other.dispose();
+  return;
+}
 if (process.argv.includes('--bound-response') || process.argv.includes('--fix-audit-boundary') || process.argv.includes('--schedule-cancel')) {
   const utilityFile = path.resolve(__dirname, '../../../packages/safe-cex/src/exchanges/woo/woo.utils.ts');
   const utility = {exports: {}, require: require('./oracle-runtime.cjs')};

@@ -152,7 +152,7 @@ impl IncomeHost for Rt {
     fn paginate<'a>(
         &'a self,
         options: Handle<Self>,
-        page: PageCallback<'a, Self>,
+        page: PageCallback<'static, Self>,
     ) -> ReadResult<Self, impl Future<Output = ReadResult<Self, Handle<Self>>> + 'a> {
         let opts = IncomeRangeOptions {
             start_time: number(&options, "startTime")?,
@@ -164,7 +164,7 @@ impl IncomeHost for Rt {
         };
         let runtime = self.exchange_runtime();
         Ok(async move {
-            let mut fetch: Box<IncomePageFetcher<'a>> = Box::new(move |p: IncomePageParams| {
+            let fetch: Box<IncomePageFetcher<'static>> = Box::new(move |p: IncomePageParams| {
                 let params = Js::object(vec![
                     ("startTime", Js::Number(p.start_time)),
                     ("endTime", Js::Number(p.end_time)),
@@ -177,8 +177,9 @@ impl IncomeHost for Rt {
                     Ok(typed)
                 })
             });
-            let mut delay = move |ms: f64| runtime.sleep(if ms > 0.0 { ms as u64 } else { 0 });
-            let result = paginate_income_range(&mut *fetch, opts, &mut delay).await?;
+            let pager_runtime = runtime.clone();
+            let delay = move |ms: f64| runtime.sleep(if ms > 0.0 { ms as u64 } else { 0 });
+            let result = paginate_income_range(pager_runtime, fetch, opts, Box::new(delay)).await?;
             Ok(h(Js::object(vec![
                 ("records", from_typed(&result.records)?),
                 ("truncated", Js::Bool(result.truncated)),

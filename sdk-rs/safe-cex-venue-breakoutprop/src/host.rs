@@ -220,6 +220,7 @@ impl NativeRuntimeHost for ProductionHost {
             Ok(())
         });
         let host = safe_cex_exchange::loop_util::LoopHost {
+            runtime: runtime.clone(),
             sleep: Rc::new(move |ms| {
                 let pending = sleep_runtime.sleep(ms.max(0.0) as u64);
                 Box::pin(async move { pending.await.map_err(|error| error.message) })
@@ -232,17 +233,16 @@ impl NativeRuntimeHost for ProductionHost {
         };
         let owner = self.clone();
         let callback = Rc::new(move || owner.owned(next()));
+        let pending = safe_cex_exchange::loop_util::loop_once(
+            callback,
+            &"() => this.tick()".encode_utf16().collect::<Vec<_>>(),
+            delay,
+            &host,
+        );
         parent.base.start_owned_operation(async move {
-            if let Err(error) = safe_cex_exchange::loop_util::loop_once(
-                callback,
-                &"() => this.tick()".encode_utf16().collect::<Vec<_>>(),
-                delay,
-                &host,
-            )
-            .await
-            {
+            if let Err(error) = pending.await {
                 runtime.report_exception(
-                    &ExchangeError::new(error),
+                    &error,
                     &json!({"venue":"breakoutprop","source":"poll loop"}).into(),
                 );
             }
@@ -560,7 +560,7 @@ fn query(value: &Js) -> Result<QueryValue, Thrown> {
         ),
         value if value.is_array() => QueryValue::Array(
             value
-                .array_values()
+                .array_values()?
                 .unwrap_or_default()
                 .iter()
                 .map(query)

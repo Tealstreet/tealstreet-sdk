@@ -1,8 +1,6 @@
-//! Extracted private socket operations; lifecycle registration remains separate.
-use safe_cex_exchange::{runtime::ExchangeError, websocket::BaseWebSocket};
+//! Private timestamp decoder; socket members use the constructed class.
 use safe_cex_num::{JsCoercionError, js_number};
 use serde_json::Value;
-use std::rc::Rc;
 
 // ts: WooPrivateWebscoket#parseTimestampToSeconds
 pub fn parse_timestamp_to_seconds(raw: Option<&Value>) -> Result<Option<f64>, JsCoercionError> {
@@ -18,13 +16,4 @@ pub fn parse_timestamp_to_seconds(raw: Option<&Value>) -> Result<Option<f64>, Js
     } else {
         parsed.floor()
     }))
-}
-
-// ts: WooPrivateWebscoket.ping
-pub fn ping(socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
-    if socket.is_disposed() {
-        return Ok(());
-    }
-    socket.mark_ping_sent();
-    socket.send_with_log(r#"{"event":"ping"}"#)
 }

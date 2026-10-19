@@ -463,3 +463,25 @@ transport retains the same canonical cause through RestFailure and the Realm
 REST rejection.
 `tests/byteslike-signing-controls.py` requires compiled native failures for prefix
 admission and dropped error metadata, then exact restoration and passing tests.
+
+The four Spot `spot_models` records have separate map decoder contracts from
+the perpetual wire records. `scripts/spot-decoder-contracts.mjs` runs their real
+native owners and all four delegated OnlyMap visitors through the canonical
+compiler inventory. Observations retain raw UTF-16 units and binary64 bits;
+`scripts/spot-decoder-controls.py` corrupts each actual visitor and requires a
+named compiled failure plus exact-source restoration. See
+`SPOT_DECODER_REVIEW.md`; no Realm or Value-ingress equivalence follows from
+these raw decoder receipts.
+
+The cloid FIX audit has constructed exchange/cache and exported lookup probes
+in `tests/support/cloid_audit.rs`. `FIX_AUDIT_CLOID.md` records the two bounded
+ACCEPT decisions: native pattern representation and nonboolean record inputs
+outside the typed placement producer. `scripts/cloid-audit-controls.py` requires
+compiled production mutations to fail those consumers before exact restoration.
+
+The unreadable order-response class audit uses the actual constructed binding,
+its original parser and placement catch branch. Preserve the custom Error
+constructor/prototype identity and the unreadable-only reconciliation branch.
+`FIX_AUDIT_ORDER_ERROR.md` records four native constructor profiles, fourteen
+source/native consumer profiles and three compiled semantic controls. The
+portable typed Result adapter is distinct from the production exception object.

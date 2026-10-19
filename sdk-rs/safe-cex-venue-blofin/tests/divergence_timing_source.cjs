@@ -23,7 +23,8 @@ const {DefaultStore} = require(path.join(root, 'packages/safe-cex/src/store/stor
       ['[blofin] Current positions count: 0','info'],
       ['[blofin] Current orders count: 0','info'],
     ]);
-    await pending;
+    const result = await pending;
+    assert.equal(result, undefined, "actual worker producer returns void, not arbitrary positionMode records");
     assert.equal(logs.length,4);
     assert.equal(requests.length,1);
     assert.equal(store.fetchedLeverage.BTCUSDT.positionMode,'hedged');

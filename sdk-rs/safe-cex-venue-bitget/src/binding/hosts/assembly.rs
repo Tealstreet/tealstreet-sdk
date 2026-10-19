@@ -160,7 +160,7 @@ fn qs_stringify(value: &Js, encode: bool) -> Result<String, Thrown> {
             Js::Undefined | Js::Function(_) => {}
             Js::Null => out.push(format!("{}=", enc(prefix, encode))),
             Js::Array(_) => {
-                for (i, v) in value.array_values().unwrap_or_default().iter().enumerate() {
+                for (i, v) in value.array_values()?.unwrap_or_default().iter().enumerate() {
                     walk(&format!("{prefix}[{i}]"), v, encode, out)?;
                 }
             }
@@ -201,7 +201,7 @@ pub(crate) fn to_js_json(value: &Js) -> Result<safe_cex_num::JsJsonValue, Thrown
         Js::String(s) => J::String(String::from_utf16_lossy(s)),
         Js::Array(_) => J::Array(
             value
-                .array_values()
+                .array_values()?
                 .unwrap_or_default()
                 .iter()
                 .map(to_js_json)

@@ -206,8 +206,106 @@ under the replay clock, through the real production throttle.
 
 Missing/extra frames, unfinished handlers, unread control frames and clock
 rollback fail closed. An ack-only instrument tape proves receipt wiring but
-provides no ticker/orderbook/candle coverage or 60-second venue result. Full
-venue comparisons await the shared Store hot-path repair before being rerun.
+provides no ticker/orderbook/candle coverage or 60-second venue result.
+The [post-emitter checkpoint](evidence/streams-post-emitter-2026-10-19.json)
+records verified Binance and Bybit drain, repeatable channel matches and the
+remaining metadata differences. OKX and Hyperliquid are explicitly pending in
+that checkpoint; it does not claim four-venue completion.
 
 The addon bytes are copied before child startup; the recorded SHA identifies the
 loaded snapshot even if another lane rebuilds the supplied addon path.
+
+## Widened keyless REST reads
+
+The [registry sweep results](PUBLIC_REST_RESULTS.md) retain qualified coverage,
+provisional cells, routed differences and the exact pinned artifact references.
+
+`rest.mjs` captures each public response once, including its original bytes,
+headers and status, then runs an offline TS replay and two fresh napi replays.
+The replay proxy rejects uncaptured requests with HTTP409 and never forwards
+those requests. The addon is copied and hashed before starting children.
+
+```sh
+node sdk-rs/scripts/live-diff/rest.mjs --venue binance \
+  --addon /absolute/path/safe_cex_ffi.node --rust-revision COMMIT
+# Every maintained TS registry name, in venue priority order:
+node sdk-rs/scripts/live-diff/rest-sweep.mjs --addon /absolute/path/safe_cex_ffi.node \
+  --rust-revision COMMIT --timeout-ms 30000
+# Reuse exact response inputs and closed candle windows:
+node sdk-rs/scripts/live-diff/rest.mjs --venue binance --replay /absolute/path/REST.rest-bundle.v8 \
+  --addon /absolute/path/safe_cex_ffi.node --rust-revision COMMIT
+# Keep linear reads independent of the separate options-enabled Bybit profile:
+node sdk-rs/scripts/live-diff/rest.mjs --venue bybit --linear-only --output .cache/live-diff/bybit-linear-rest.json
+# Optional macOS CPU sample plus concurrent native receipt on stalled calls:
+node sdk-rs/scripts/live-diff/rest.mjs --venue bybit --sample-after-ms 8000 --timeout-ms 60000
+```
+
+The plan includes full markets, ten closed candles on1m/1h/1d, actual TS REST
+orderbooks and public trades, Bybit public option markets/expiries/chains, and
+exposed public raw ticker helpers. Only actual TS overrides are selected for
+optional helpers; inherited empty trade fallbacks do not count as coverage.
+Bitrue candles and WS-derived live tickers remain explicitly `WS_REQUIRED`.
+There are no shared standalone funding/open-interest getters in the maintained
+TS API: those values are compared as part of each full ticker. Coverage reports
+own/finite/nonzero counts separately. An all-zero open-interest stub does not
+prove populated open-interest coverage. Signed account reads, leverage-bracket
+reads and operator-only origins are excluded explicitly.
+Coinbase uses the maintained public-only startup's INTX ticker method; its
+brokerage candles and spot/CFM product helpers require JWT and are excluded.
+Orderly broker candles also require signing in TS (`/v1/kline`); their public
+markets and tickers remain in the keyless plan.
+
+Both sides use the #1082 diagnostic clock host. Each operation starts at the
+same predetermined logical minute, then advances in1s steps only while the
+operation is pending and terminal HTTP is idle. This progresses native limiter
+windows; freezing its monotonic clock while keeping real sleeps can otherwise
+manufacture a liveness failure. Each operation's clock trace is retained and
+must repeat within each side and match across sides. A `CLOCK_DIFF` is
+unqualified input timing evidence, even when mapper values match. The runner
+also retains timestamp-only differences as `CLOCK_DIFF` if an operation needed
+clock advances: matching coarse traces do not fence HTTP parsing/completion
+relative to those advances. No timestamp is removed from the exact artifacts.
+The REST runner does not establish WS handler drain. `--realtime-clock` is an explicit liveness
+diagnostic with uncontrolled clock inputs, not a controlled-clock parity run.
+Legacy V1 bundles lack capture clock traces; fresh V2 captures are required for
+final clock qualification.
+
+Results distinguish `PASS`, `EMPTY`, `UNAVAILABLE`, `DIFF`, `INPUT_DIFF`,
+`CLOCK_DIFF`, `NONDETERMINISTIC`, `TIMEOUT`, `NOT_RUN` and `BLOCKED`. Killing a
+worker on timeout cannot produce a mapper diff for later unexecuted methods.
+Equal exceptions, HTTP refusals and empty public data never establish parity.
+Reports retain exact differences plus hashes and local paths of typed V8
+outputs and bundles. V8 preserves own `undefined`, NaN, signed zero and BigInt;
+JSON summaries are not the value oracle. Capture/replay equality and both
+native repeatability checks gate each mapper claim. Source hashes identify the
+runner, worker, planner, host inventory and transport used by each report.
+
+Each replay run also records `timings` with method names and monotonic wall
+milliseconds. These cover the complete operation, including HTTP, native decoding,
+Store updates and returned IPC values. They exclude the preceding replay-clock
+advance and stay outside SDK value comparisons. For an options-enabled Bybit run,
+`refreshMarkets` measures bootstrap rather than an isolated decoder call.
+
+Native controlled WS replay also requires `rawTasks.version === 1` with scope
+`exchange-runtime`. Unknown, finite, unpolled or awakened runtime work blocks the
+receipt, even when frame counters match and `pendingJobs` is zero. Only reviewed
+socket reads and future timer waits are excluded while actually pending; Promise
+queue drivers delegate to `pendingJobs`. Missing/malformed receipts from older
+addons fail closed. This certifies SDK ExchangeRuntime work, not arbitrary
+external Tokio tasks or transport internals. Existing reports without this field
+retain their earlier, narrower qualification; do not promote them retroactively.
+
+`unknownTasks` records each unclassified producer's source location and observed
+`waitHint` for investigation. A hint never exempts work. Reviewed timers with an
+asynchronous callback switch to finite work before entering that callback, so a
+later sleep inside it still blocks drain. Waking a reviewed idle task makes it
+blocking immediately, before its next poll; cancellation removes its receipt.
+
+The REST plan compares the public `Exchange` surface. Bybit's
+`fetchOptionMarkets`, `fetchTickersRaw` and `fetchTickersWithoutParse` are
+concrete-class helpers, absent from both `Exchange` and `CallableMethodsInWorker`.
+The worker's `CallMethodHandler` rejects all three even when the receiver has
+those properties. The hosted exchange-server forwards calls through this same
+worker dispatch. Both probe implementations therefore decline direct helper
+calls; public `fetchMarkets`/`refreshMarkets` and `fetchTickers` exercise their
+production callers. Option-chain and expiry reads remain in the options profile.

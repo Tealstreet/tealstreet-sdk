@@ -21,6 +21,33 @@ function subject(file,className,names){
  const exports={};vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports,Date:{now:()=>clock.wall},virtualClock:{getCurrentTimeMs:()=>clock.now}});return exports.subject;
 }
 const privateNames=['shouldEnforcePongMissReconnect','isReadonlyFallbackActive','shouldUseRestOrderReconciliation','getPingIntervalMs','getIdlePingThresholdMs','getIdleReconnectThresholdMs','getWatchdogStaleThresholdMs','isWsRateLimited','shouldForceToastPrivateStreamRateLimit','isRecentStreamEvent','flattenByMarketPayload','flattenOrdersByMarket'];
+if(process.argv.includes('--close-spread')) {
+ const sdk=path.resolve(__dirname,'../../../packages/safe-cex/src');
+ function body(file) {
+  const text=fs.readFileSync(path.join(sdk,file),'utf8');
+  const tree=ts.createSourceFile(file,text,ts.ScriptTarget.Latest,true);
+  return tree.statements.filter(n=>!ts.isImportDeclaration(n)).map(n=>n.getText(tree).replace(/^export /,'')).join('\n');
+ }
+ const typeText=fs.readFileSync(path.join(sdk,'types.ts'),'utf8');
+ const typeTree=ts.createSourceFile('types.ts',typeText,ts.ScriptTarget.Latest,true);
+ const status=typeTree.statements.find(n=>ts.isEnumDeclaration(n)&&n.name.text==='OrderStatus');
+ assert.ok(status);
+ const context=vm.createContext({structuredClone,uniqBy:require('lodash/uniqBy'),virtualClock:{getCurrentTimeMs:()=>clock.now}});
+ const run=code=>vm.runInContext(ts.transpileModule(code,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);
+ run(status.getText(typeTree).replace(/^export /,'')+'\n'+body('utils/clone.ts')+'\n'+body('store/store.base.ts')+'\nglobalThis.store=new DefaultStore();');
+ const store=context.store;
+ const position={id:'p',symbol:'ETH',side:'long',entryPrice:10,notional:10,leverage:2,unrealizedPnl:0,contracts:1,liquidationPrice:1,marginSize:120};
+ store.addOrUpdatePosition(position);
+ const row=store.positions[0],revision=store.updateIds.positions;
+ const socket=subject('lighter.ws-private.ts','LighterPrivateWebsocket',['handlePositionTopic']);
+ socket.store=store;socket.parent={mapPosition:()=>undefined};
+ socket.resolveExplicitlyClosedPositionUpdates=()=>new Set([[{id:'p'},{contracts:0,marginSize:undefined}]]).values();
+ socket.handlePositionTopic([{size:'0'}]);
+ assert.equal(store.positions[0],row);
+ const bits=value=>{const bytes=Buffer.alloc(8);bytes.writeDoubleBE(value);return bytes.toString('hex');};
+ process.stdout.write(JSON.stringify({contractsBits:bits(row.contracts),marginOwn:Object.hasOwn(row,'marginSize'),marginUndefined:row.marginSize===undefined,revisionDelta:store.updateIds.positions-revision}));
+ process.exit(0);
+}
 const privateWs=subject('lighter.ws-private.ts','LighterPrivateWebsocket',privateNames);
 const publicWs=subject('lighter.ws-public.ts','LighterPublicWebsocket',['shouldEnforcePongMissReconnect','getWatchdogStaleThresholdMs','isTickerRestFallbackCoolingDown','hasHydratedTickerPrice']);
 const flags=[];

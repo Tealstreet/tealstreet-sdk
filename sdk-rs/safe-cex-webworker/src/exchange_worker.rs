@@ -3,7 +3,6 @@
 use crate::chaser_manager::ChaserOrderManager;
 use crate::chaser_manager::ChaserSupervisor;
 use crate::payload::StoreWorkerOp;
-use crate::payload::StoreWorkerPayload;
 use crate::payload::StoreWorkerStorePayload;
 use crate::settings::AppSettingsWorkerType;
 use crate::settings::ExchangeMetadataWorkerType;
@@ -69,7 +68,7 @@ pub struct ExchangeWorker<H: ExchangeWorkerHost> {
     pub throttled_store_update: Rc<StoreUpdateThrottle<H>>,
     pub cancel_startup: RefCell<Option<StartupCancellation>>,
     pub startup_token: Cell<f64>,
-    pub message_buffer: Rc<RefCell<Vec<StoreWorkerPayload>>>,
+    pub message_buffer: Rc<RefCell<Vec<safe_cex_exchange::js_runtime::value::Js>>>,
     pub handler_kinds: [WorkerHandlerKind; 9],
     pub handlers: RefCell<HandlerList>,
     pub postprocessors: RefCell<ProcessorList>,
@@ -192,33 +191,53 @@ impl<H: ExchangeWorkerHost> ExchangeWorker<H> {
     }
     // ts: dispose. Re-read live exchange after cancellation and chaser cleanup.
     pub fn dispose(&self) -> Result<(), ExchangeError> {
+        self.dispose_with_error_handler(&mut Err)
+    }
+    pub(crate) fn dispose_with_error_handler(
+        &self,
+        on_error: &mut impl FnMut(ExchangeError) -> Result<(), ExchangeError>,
+    ) -> Result<(), ExchangeError> {
         self.startup_token.set(self.startup_token.get() + 1.0);
         let cancel = self.cancel_startup.borrow().clone();
         if let Some(cancel) = cancel {
-            cancel()?;
+            if let Err(error) = cancel() {
+                on_error(error)?;
+            }
         }
         *self.cancel_startup.borrow_mut() = None;
         if let Some(exchange) = self.exchange() {
-            self.construction.ctx.chaser_manager().cleanup_exchange(
+            if let Err(error) = self.construction.ctx.chaser_manager().cleanup_exchange(
                 exchange,
                 None,
                 self.construction.ctx.chaser_supervisor(),
-            )?;
+            ) {
+                on_error(error)?;
+            }
         }
         if let Some(exchange) = self.exchange() {
-            exchange.dispose()?;
+            if let Err(error) = exchange.dispose() {
+                on_error(error)?;
+            }
         }
-        self.clear_runtime_pipeline()
+        self.clear_pipeline_with_error_handler(on_error)
     }
     // ts: _clearRuntimePipeline. forEach retains original array and initial length.
     pub fn clear_runtime_pipeline(&self) -> Result<(), ExchangeError> {
+        self.clear_pipeline_with_error_handler(&mut Err)
+    }
+    fn clear_pipeline_with_error_handler(
+        &self,
+        on_error: &mut impl FnMut(ExchangeError) -> Result<(), ExchangeError>,
+    ) -> Result<(), ExchangeError> {
         self.throttled_store_update.cancel();
         let handlers = self.handlers.borrow().clone();
         let length = handlers.borrow().len();
         for index in 0..length {
             let handler = handlers.borrow().get(index).cloned();
             if let Some(handler) = handler {
-                handler.dispose()?;
+                if let Err(error) = handler.dispose() {
+                    on_error(error)?;
+                }
             }
         }
         *self.handlers.borrow_mut() = Rc::default();

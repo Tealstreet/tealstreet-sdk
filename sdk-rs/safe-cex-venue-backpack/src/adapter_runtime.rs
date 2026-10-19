@@ -8,7 +8,7 @@ use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
 };
-use safe_cex_types::*;
+use safe_cex_types::{Balance, Market, Order, Position, StoreDataLoaded, Ticker};
 use std::{cell::RefCell, rc::Rc};
 #[derive(Clone)]
 pub enum Data {
@@ -48,16 +48,28 @@ pub fn loaded_patch(v: Vec<(JsString, bool)>) -> Result<StoreDataLoaded, Exchang
 }
 impl BackpackExchange {
     pub fn start(self: &Rc<Self>) -> ExchangeFuture<'static, ()> {
-        Box::pin(source::start(self.frame()))
+        let future = Box::pin(source::start(self.frame()));
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn tick(self: &Rc<Self>) -> ExchangeFuture<'static, ()> {
-        Box::pin(source::tick(self.frame()))
+        let future = Box::pin(source::tick(self.frame()));
+        safe_cex_exchange::eager::start_eager(&self.base.runtime, future)
     }
     pub fn subscribe_to_all_markets(
         self: &Rc<Self>,
         markets: Vec<Market>,
     ) -> Result<(), ExchangeError> {
-        source::subscribe_to_all_markets(Data::Markets(markets), self.frame())
+        let owner = Rc::downgrade(self);
+        source::RuntimeHost::timeout(
+            &mut *self.frame().borrow_mut(),
+            Box::new(move || {
+                if let Some(owner) = owner.upgrade() {
+                    source::subscribe_markets_now(Data::Markets(markets), owner.frame())?;
+                }
+                Ok(())
+            }),
+            2000.0,
+        )
     }
     pub fn spawn(&self, task: ExchangeFuture<'static, ()>) {
         let runtime = self.runtime.clone();
@@ -225,7 +237,10 @@ impl source::RuntimeHost for Frame {
             .connect_and_subscribe()
     }
     fn subscribe_all(&mut self, m: Data) -> Result<(), ExchangeError> {
-        source::subscribe_to_all_markets(m, self.owner.frame())
+        let Data::Markets(markets) = m else {
+            return Err(ExchangeError::new("Market kind mismatch"));
+        };
+        self.owner.subscribe_to_all_markets(markets)
     }
     fn positions_upnl(&mut self, p: &Data) -> Result<f64, ExchangeError> {
         let Data::Positions(p) = p else {
@@ -251,7 +266,19 @@ impl source::RuntimeHost for Frame {
         cb: source::Callback<ExchangeError>,
         d: f64,
     ) -> Result<(), ExchangeError> {
-        self.timeout(cb, d)
+        // This source loop callback is exactly repeat_tick; do not let its
+        // captured Frame keep the final native Exchange handle alive forever.
+        drop(cb);
+        let owner = Rc::downgrade(&self.owner);
+        self.timeout(
+            Box::new(move || {
+                if let Some(owner) = owner.upgrade() {
+                    source::RuntimeHost::repeat_tick(&mut Frame { owner })?;
+                }
+                Ok(())
+            }),
+            d,
+        )
     }
     fn repeat_tick(&mut self) -> Result<(), ExchangeError> {
         self.owner.spawn(self.owner.tick());

@@ -112,9 +112,10 @@ fn ticker_mark_shared_ingress_preserves_nested_raw_and_tagged_paths() {
 
 #[test]
 fn ticker_mark_representation_and_depth_boundaries_are_explicit() {
-    assert!(
-        serde_json::from_str::<TickerMarkInput>(r#"{"id":"\ud800USD","mark":7}"#).is_err(),
-        "valid JSON lone surrogate is a UTF-8 representation refusal"
+    typed_utf16::assert_projection(
+        r#"{"id":"\ud800USD","mark":7}"#,
+        &(serde_json::from_str::<TickerMarkInput>(r#"{"id":"\ud800USD","mark":7}"#))
+            .expect("typed surrogate record is retained"),
     );
     for currency in ["BTC", "Ω", "🚀", "\u{feff}"] {
         let raw = json!({"id":format!("{currency}USD"),"mark":7}).to_string();
@@ -134,3 +135,6 @@ fn ticker_mark_representation_and_depth_boundaries_are_explicit() {
         "shared input depth bound stays explicit even for ignored fields"
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

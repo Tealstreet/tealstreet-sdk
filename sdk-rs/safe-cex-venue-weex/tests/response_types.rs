@@ -196,6 +196,12 @@ fn compare<T: DeserializeOwned + Serialize + JsNumberOutput>(
     );
     let mut compared = 0;
     for (route, decoded) in routes {
+        if case["utf8Refusal"] == true {
+            let decoded = decoded.expect("typed response keeps surrogate record");
+            typed_utf16::assert_projection(raw, &decoded);
+            compared += 1;
+            continue;
+        }
         assert_eq!(
             decoded.is_ok(),
             accepted,
@@ -217,6 +223,9 @@ fn compare<T: DeserializeOwned + Serialize + JsNumberOutput>(
     }
     compared
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;
 
 #[test]
 fn response_types_match_actual_typescript() {

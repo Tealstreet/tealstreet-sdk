@@ -155,7 +155,7 @@ impl Jobs {
         if (!self.jobs.borrow().is_empty() || !self.checks.borrow().is_empty())
             && !self.running.replace(true)
         {
-            OwnedTasks::start_detached(self.runtime.as_ref(), Box::pin(Driver(self.clone())));
+            OwnedTasks::start_promise_driver(self.runtime.as_ref(), Box::pin(Driver(self.clone())));
         }
     }
     fn enqueue(self: &Rc<Self>, work: Work, deadline: Option<f64>, eager: bool) -> Rc<Job> {
@@ -345,18 +345,27 @@ pub(crate) fn pending_non_timer(runtime: Rc<dyn ExchangeRuntime>) -> usize {
                     .and_then(|_| jobs.upgrade())
             })
             .map_or(0, |jobs| {
-                jobs.jobs
-                    .borrow()
-                    .iter()
-                    .filter(|job| job.deadline.is_none() && !job.cancelled.get())
-                    .count()
+                jobs.checks.borrow().len()
+                    + jobs
+                        .jobs
+                        .borrow()
+                        .iter()
+                        .filter(|job| job.deadline.is_none() && !job.cancelled.get())
+                        .count()
             })
     })
 }
 
-#[cfg(all(test, feature = "native", not(target_arch = "wasm32")))]
+#[cfg(test)]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 mod replay_receipt_tests {
-    use super::*;
+    use super::{checkpoint, for_runtime, pending_non_timer};
+    use crate::runtime::ExchangeRuntime;
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+        task::{Poll, Waker},
+    };
     #[test]
     fn pending_replay_receipt_includes_async_work_but_excludes_future_timers() {
         let host = tokio::runtime::Builder::new_current_thread()

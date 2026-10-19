@@ -20,6 +20,9 @@ Worker payloads preserve missing versus explicit-null data. Incoming/outgoing op
 sets are pinned against the live TypeScript unions. Store payloads reuse the
 existing StoreUpdate directly, including PackedTickerDelta, rather than duplicate
 that contract. Incoming commands and ordinary worker payloads retain their owned JSON boundary.
+The bootstrap routing oracle checks merged message-handler statistics as native
+number bits and through actual JS JSON.stringify, independently of serde's integer
+versus floating-point JSON representation.
 CallMethod results and OHLCV DATA posts use required WorkerDataPost with existing
 runtime Js, alongside separate native book and Error capabilities. DATA envelopes
 have no Serialize implementation; browser materialization retains native numbers
@@ -36,8 +39,10 @@ never manufactures success from a resolved void future. Missing/rejected executo
 emit exec-log, with exec-result only for a supplied reqId (including an empty one).
 
 Full account position refreshes use the full Store mutator even for empty
-results; scoped refreshes remain partial. Cancelling an in-flight Rust refresh
-releases its own pending markers and reports cancellation to the waiting bridge.
+results; scoped refreshes remain partial. Position refresh uses the canonical eager Promise driver: fetch/locks start
+during helper or dispatch entry, and even ready fetches yield before Store/reply
+work. Dropping a caller waiter does not cancel the request; runtime abandonment
+releases its pending markers and reports cancellation to the bridge.
 
 Market-load buffering uses separate 500ms self-rescheduling checks and a 30s
 deadline. Timeout reports are cooled down for five minutes and contain only
@@ -57,13 +62,15 @@ Sentry worker errors read only nonempty string message/name/stack properties;
 plain structured-clone objects work, primitive rejections use the supplied
 fallbacks, and whitespace strings remain valid. Missing stacks stay omitted.
 
-Sentry serialization currently accepts JSON properties only: inherited and
-non-enumerable browser Error/DOMException fields need host materialization.
-The live TypeScript witness pins this outstanding boundary, recorded as divergent.
+Sentry serialization accepts canonical Js values and reads inherited and hidden
+message/name/stack through Get in source order. Getter failures preserve their
+original thrown value and stop later reads; functions use fallbacks without Get.
+The existing String DTO replaces isolated UTF16 units with U+FFFD under the
+approved UTF-8 addendum; retained input units and valid pairs remain unchanged.
 Payload enums reject JSON object-form enum tags; worker ops are string literals.
 Private serde remote helpers expose the derived spelling inventory to unit tests,
-while public Deserialize requires strings. Fixture mode and version are closed
-literals too; test rejection as well as successful round trips when changing them.
+while public Deserialize requires strings. The unused perf mode/version codecs
+are retired; they no longer validate live native config or fixture arguments.
 
 Displayed-position processing consumes owned StoreData snapshots and a host wall
 clock callback, read separately for the five-minute then one-minute queue of each
@@ -302,12 +309,10 @@ tokens and three ingress paths originally pinned this FINDING. ChaserTerminate,
 ChaserCompleteEvent and ChaserOrderState now use shared public ingress; the
 remaining three task graphs are repaired by the complete adoption described below.
 
-The same ingress sweep covers worker config, fixture/frame/config and payload
-records. Their existing-Value integer -0 path also loses its sign; nested frame
-records and JSON msg/data fields cross a rebuffer even on raw outer decoding.
-Separate Node bit witnesses pin these paths rather than claiming raw ingress is
-universally safe. The fixture graph and envelope/config now repair their public decoders as
-described below; their separate bounded-depth choices remain divergent.
+The historical ingress sweep included standalone config and perf codecs. Those
+codecs are now retired after production caller proof; installed sessions forward
+native Js instead. The live StoreWorkerPayload numeric/depth/presence boundary
+remains independently tested and OPEN in the FIX-audit ledger.
 
 UI position leverage updates select buy leverage for OneWay or long positions,
 sell otherwise, and issue one native Store batch only when numeric values differ.
@@ -331,18 +336,13 @@ Every lifecycle row asserts pre-settlement/settled placement counts and executed
 slice count: merely generating zero, negative-zero and NaN cases missed a
 source truthiness mutation. That formerly surviving mutation now fails by name.
 
-Chaser price selection consumes shared predicted bid/ask, extrema and adjust
-helpers. Shared TableHit preserves inherited market TypeError and ticker NaN;
-missing-market logging re-reads options after reentrant listeners. Its 479-case
-source oracle constructs the real DefaultStore and asserts native numeric bits.
-A separate __proto__ market write poisoning a later precision lookup remains a
-shared Store FINDING; no worker-local prototype-write shim is introduced.
-Own-only lookup, wrong clamp and array-first mutations compile and fail named
-price assertions. The oracle passes all 479 cases in a disposable tracked-source
-mirror without ancestor node_modules; a missing compiler fails MODULE_NOT_FOUND.
-Source log/error listener throws also retain a separate shared-emit FINDING:
-a log throw prevents completion, while an error throw happens after completion.
-Core infallible listeners cannot propagate either source TypeError yet.
+Chaser price selection reads the canonical native Store facade's actual symbol
+maps and array fallback. Real inherited/prototype referents reach the numeric
+helpers; a stock inherited-name table cannot substitute for the Store graph.
+The 479-case maintained oracle and separate poisoned-map case compare numeric
+bits, precision throws and stop/event state. The old poisoned-map refusal is
+removed, with no worker-local Store sidecar. Missing-market logging re-reads
+options after reentrant listeners, and listener throws retain source order.
 
 Worker log forwarding spreads own context over exchange/account defaults and
 uses shared integer-key enumeration. Its post callback is fallible; errors
@@ -378,40 +378,24 @@ The risk oracle also passes in a disposable tracked-source mirror with no
 ancestor node_modules; explicit isolated compiler/lodash paths resolve there,
 and missing-package controls fail MODULE_NOT_FOUND. The mirror was deleted.
 
-Fixture/frame/config public Deserialize now captures shared JsNumberInput before
-strict map decoding, including every nested fixture buffer. Frame.msg uses the
-shared js_deserialize_passthrough adapter and an explicitly named eligibility
-exception; it keeps Value without disabling the whole-output numeric guard.
-Three old per-record loss witnesses failed unchanged after opt-in, including
-raw outer JSON frames[0].atMs. The permanent matrix compares 810 source/native
-bit observations across nine field paths, ten spellings and nine entry routes:
-bare raw str/slice, owned/borrowed Value, shared raw/owned/borrowed, and native
-negative-zero Value owned/borrowed. Shape and optional-null rejection stay strict.
-These three rows retain a separate CHOSEN shared input-depth boundary: Node
-accepts 140 nested msg arrays while the shared buffer refuses them. Ordinary
-20-level messages remain accepted. The bounded capture avoids a worker-specific
-unbounded recursive decoder; it is not a claim that TypeScript rejects depth.
-Frame/outer Value-rebuffer and omitted-msg-adapter mutations compile and fail
-FIXTURE-NUMERIC ACCEPTANCE. Restoring all legacy decoder bodies plus the legacy
-msg visitor compiles and accepts the deep owned input, failing the named depth
-refusal assertion: the depth boundary is a measured accepted-set narrowing,
-not an old refusal relabeled as new evidence.
+Unused WorkerConfig, PerfFixtureFrame, PerfFixture, PerfFixtureConfig and their
+mode/version codecs are removed with their private companions, eligibility and
+orphan-only validation tests. Actual listener/config/perf/dump capabilities carry
+canonical Js: no strict codec or JSON conversion runs on that path. The native
+carrier supplement checks fifteen config deliveries, ten fixture returns, sixty
+binary64 observations, original referents, own undefined and UTF16 units against
+maintained store.webworker. Existing callback ordering and deep-input tests remain.
 
-WorkerConfig and StoreWorkerPayload also capture JsNumberInput at public ingress.
-The optional data field uses shared js_deserialize_passthrough inside present_value,
-so explicit null remains present while absence remains None. WorkerConfig's
-eligibility uses the exhaustive shared macro for every field, including the shared
-IndexMap key/value traversal; it neither adds an orphan impl nor re-buffers JSON.
-Two committed old witnesses flipped unchanged (owned config and raw payload).
-The record oracle adds 450 comparisons over five envelope/config paths, ten
-spellings and nine routes, including nested fixtures. Shared capture's depth
-limit remains CHOSEN on both rows, including ignored deep config properties;
-Node and legacy bare decoders accept those inputs while the bounded capture
-refuses them. Ordinary nested values, absent data and explicit null remain covered.
-Config/payload rebuffer, omitted data adapter, and null-erasure controls compile
-and fail named acceptance/presence assertions. Separate compiled legacy decoders
-accept each deep input and fail the named depth-refusal assertion, pinning the
-new acceptance narrowing rather than presuming the old decoder refused it.
+StoreWorkerPayload retains its public JsNumberInput decoder and present_value
+passthrough. Its original ten spellings across nine entry routes still produce
+ninety bit comparisons; absent data, explicit null, ordinary nesting and the
+separate shared depth refusal remain covered. This does not accept that depth
+cost or close row 17. The eleven-field source optionality census remains intact;
+only its five still-live native record fields have corresponding strict codecs.
+
+Native perf service behavior is still OPEN FIX in rows 72-74: actual recording,
+structured clone, cap, timing, mode transitions and replay have not been ported.
+Required host callbacks and carrier probes do not replace that implementation.
 
 Carrier regressions compare original native numeric bits and real shared JS
 stringify with maintained source output before using finite JSON trace adapters.
@@ -598,8 +582,8 @@ The numeric capture probe executes an independent 11-token inventory, checking
 source row/pair counts and native comparison count. Empty, partial and extra
 iterations must fail even when the source-total guard is bypassed.
 
-Snapshot parity fixes its execution at 72 × 17 preparation steps and 354 ticker
-actions across 70 traces. Source per-case counts, independent native bounds and
+Snapshot parity fixes its execution at 72 × 17 preparation steps and 358 ticker
+actions across 71 traces. Source per-case counts, independent native bounds and
 full-output collection comparisons prevent truncated traces from skipping work.
 
 Task identity fixes each record's case/leaf counts and executed comparisons. Its
@@ -694,3 +678,61 @@ Constructed AsterDEX private-frame/worker emitter witnesses live in
 `../safe-cex-parity/tests/aster_worker_emitter.rs`, at the tooling integration layer.
 The venue retains private facade tests without importing the worker crate. Both paths preserve
 variadic event arguments; the real fill bridge retains Infinity and object identity.
+
+The ticker baseline corpus includes four nullable-index actions in addition to
+its original 354 comparisons. Actual maintained worker execution observes an
+updated null baseline without a packed null value; null-to-number emits the
+numeric index delta. This preserves the source typeof-number filter.
+
+The browser DATA materializer retains array holes plus enumerable named string
+properties from the canonical ArrayData owner. It caches the destination array
+before evaluating children/getters, preserving cycles and repeated references.
+The worker_data_host example compares the actual Wasm result and structuredClone
+for hole/undefined distinction, named getter receiver, aliases and numeric bits.
+
+TWAP resume/terminate keep their synchronous state/timer prefix and return the
+canonical eager Promise waiter, so even ready/no-op/error results yield before
+an awaiting caller continues. Posting failures preserve earlier state commits
+and stop later cleanup/removal; tests compare actual source instances before
+polling as well as after settlement.
+
+Chaser placement/completion use the canonical eager Promise driver. Caller waiter
+abandonment cannot cancel late-placement cleanup or fill reconciliation. Typed
+leaf results cross source await checkpoints before logs, retries, fills or events;
+ready, failed, no-op and held results are compared with the actual TS manager.
+
+CallMethod dispatch starts through the canonical eager driver at either entry.
+Ready venue futures yield at the source await before replying; synchronous cases
+reply during entry. Dropping a caller waiter leaves the operation and reply owned
+by the runtime. Runtime teardown keeps the existing guarded cancellation report.
+
+Chaser module composition is scoped per host thread, matching independent worker
+module realms. Eager TS construction and lazy native construction only allocate
+an empty live list. The composition witness binds the singleton to the actual
+ChaserEngine and compares registration, cleanup and completion with maintained
+source; terminal host capabilities remain required. This accepts composition,
+not the separately tracked state, carrier, startup or method timing findings.
+
+Worker startup and session listeners own their continuations through canonical
+start_eager. Clock, import, venue-start and startup-race typed results yield at
+their source await boundaries. Discarding a caller waiter cannot cancel startup
+or failed-worker table cleanup; token/disposal suppression and retained startup
+losers remain unchanged. Raw session/config admission is a separate audit row.
+
+WorkerModule owns its installed sessions; the returned session is an optional
+handle, not the listener lifetime owner. The reverse module link is weak. Module
+destruction unregisters listeners, clears ports/maps, disposes workers through
+canonical native teardown, and asks each context to release its runtime/replay
+work. Context shutdown must stop only work belonging to this worker module and
+must be idempotent for shared contexts; errors are reported while other contexts
+continue closing. Session ingress/config/replay/perf/opaque dispatch use native
+Js directly. Decode shared models only at their actual consumers, and keep
+buffered message identity. Separate ordinary output/report DTO findings remain
+tracked in the worker FIX-audit ledger.
+
+The frontier replay fixtures allocate fresh option rows per source case and
+observe numeric-key ordering at every margin publication. BBO subscriber identity
+is asserted on the retained subscriber cause separately from Error::source's
+retained transport-response origin, with complete metadata still checked. The
+actual DefaultStore/handler source oracle verifies original Error identity after
+post and committed bid/ask writes.

@@ -450,10 +450,15 @@ fn actual_typescript_records_match_decoded_fields_and_bits() {
                 accepted_comparisons[route] += 1;
                 wire_checks.push((wire, case["wire"].as_str().unwrap(), name, label, route));
             } else {
-                assert!(
-                    result.is_err(),
-                    "typed/UTF-8 refusal {name} {label} route {route}"
-                );
+                if route == 0 && !case["lone"].as_array().unwrap().is_empty() {
+                    let (native, _) = result.expect("typed String retains the record");
+                    typed_utf16::assert_projection(raw, &native);
+                } else {
+                    assert!(
+                        result.is_err(),
+                        "typed/Value refusal {name} {label} route {route}"
+                    );
+                }
                 refused_comparisons[route] += 1;
             }
         }
@@ -486,3 +491,6 @@ fn actual_typescript_records_match_decoded_fields_and_bits() {
         oracle["cases"].as_array().unwrap().len()
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

@@ -432,3 +432,37 @@ aliases, preserve arguments/results and shared effects, poll each pending future
 and execute production native HTTP factory/install and Date.parse callbacks.
 The finite instantiations do not claim every generic argument or JavaScript
 scheduler behavior.
+
+The REST Host's associated Array is the canonical native Js owner in the assembled
+adapter. Checked length/element/Set operations replace the former mutable Vec
+alias; callbacks and repair writes retain the original array identity. Terminal
+source fixtures may use their own scripted representation, but the native adapter
+never copies a live array into a second mutable collection. NativeValue::array
+returns the original Js and owned/prepared snapshots propagate property failures.
+
+
+The five-row divergence audit in [DIVERGENCE_FIX_AUDIT.md](DIVERGENCE_FIX_AUDIT.md)
+supersedes the earlier production Future/caught-error exclusions for getAccount,
+fetchBalance and private order/balance reconciliation. All 23 owned async Task
+entrypoints use the shared eager boundary; the caller receives a waiter, and
+losing it preserves source continuations. Production private catches are silent;
+configured generic helper Results remain diagnostic inputs. Final native Drop
+silently tears down source and shared resources under the coordinator lifetime
+ruling. Existing alias, input/corpus and identity guards remain independent.
+
+`RoutedClient::clone` shares the configured primary and reader client owners. The
+construction policy records only Clone; it adds no decoder or receiver exemption.
+The native adapter witness checks both Rc counts, shared retry state, primary
+identity and real GET/write routing after the original handle is dropped. A
+compiled swapped-owner Clone control must fail that witness before exact restore.
+
+The REST read fixture's indexed array assignment must grow the fake array and
+preserve holes, as the production canonical Value::set does. In the live getter
+shrink witness, reading the old order ID clears its array during findIndex;
+assigning the replacement at index zero grows it again. Keep the maintained TS
+oracle and the original length, ID, getter-count and call-order assertions.
+
+Production derived types in `batch_orders` and `adapter_runtime` use explicit
+imports so the accepted-set scanner can authenticate their attribute scope.
+Keep the scanner guard active; source-oracle batch tests and constructed native
+exchange tests continue to exercise the unchanged request and runtime bodies.

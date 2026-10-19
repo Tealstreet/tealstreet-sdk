@@ -345,7 +345,10 @@ fn native_class_callable_aliases_preserve_values_futures_and_errors() {
             panic!("native REST member must return its actual body Future")
         };
         let result = drive(&runtime, body).unwrap();
-        assert_eq!(result.array_values().unwrap().len(), 0);
+        assert_eq!(
+            result.array_values().unwrap().expect("native array").len(),
+            0
+        );
         assert!(
             wire.requests
                 .borrow()

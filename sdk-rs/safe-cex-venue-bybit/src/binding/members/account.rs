@@ -154,7 +154,7 @@ fn finite(value: Option<&Value>) -> Result<Option<f64>, Thrown> {
 pub(crate) fn format_balance(rt: &Rt, raw: Js) -> Result<Js, Thrown> {
     let this = &rt.this;
     let store = this.get("store")?;
-    let rows = raw.array_values().unwrap_or_default();
+    let rows = raw.array_values()?.unwrap_or_default();
     let Some(first) = rows.first().cloned() else {
         this.call_method(
             "log",

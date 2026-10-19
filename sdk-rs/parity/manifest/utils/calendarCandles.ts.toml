@@ -16,7 +16,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-candle-cache/src/calendar.rs::calendar"
 status = "divergent"
-note = "CHOSEN: Typed AnyTimeframe calendar classification returns a boolean, not a CalendarPeriod. Unsupported string aliases are rejected by union decoding. Adapted rename target: safe-cex-candle-cache/src/calendar.rs::calendar. Open aliases and automatic unit selection could be retained, but this cache-specific boundary uses the existing typed interval and explicit seconds contract to avoid ambiguous units in slot arithmetic."
+note = "CHOSEN: Typed AnyTimeframe calendar classification returns a boolean, not a CalendarPeriod. Unsupported string aliases are rejected by union decoding. Adapted rename target: safe-cex-candle-cache/src/calendar.rs::calendar. Open aliases and automatic unit selection could be retained, but this cache-specific boundary uses the existing typed interval and explicit seconds contract to avoid ambiguous units in slot arithmetic. FIX-audit ACCEPT (codex-4ri6pb): sdk-rs/parity/CANDLE_CACHE_FIX_AUDIT.md records this exact row, real constructed source/native cache probes, bounds and authorization; the declared divergence remains explicit."
 
 [[symbol]]
 ts = "calendarPeriodForChartSeconds"
@@ -48,7 +48,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-candle-cache/src/calendar.rs::start"
 status = "divergent"
-note = "CHOSEN: monthly Date.UTC year remapping, invalid-date NaN and clipped sub-millisecond inputs now retain source effects on the admitted epoch-seconds path. CHOSEN: Cache adaptation accepts AnyTimeframe and epoch seconds only, rather than string aliases and seconds-or-ms. Includes the exhaustive finite 27-interval duration table used by boundary arithmetic. Adapted rename target: safe-cex-candle-cache/src/calendar.rs::start. Open aliases and automatic unit selection could be retained, but this cache-specific boundary uses the existing typed interval and explicit seconds contract to avoid ambiguous units in slot arithmetic. Evidence: sdk-rs/parity/SHARED_CORE_BEHAVIOR_REPAIRS.md and SHARED_CORE_BEHAVIOR_GATE_EXITS.md."
+note = "CHOSEN: monthly Date.UTC year remapping, invalid-date NaN and clipped sub-millisecond inputs now retain source effects on the admitted epoch-seconds path. CHOSEN: Cache adaptation accepts AnyTimeframe and epoch seconds only, rather than string aliases and seconds-or-ms. Includes the exhaustive finite 27-interval duration table used by boundary arithmetic. Adapted rename target: safe-cex-candle-cache/src/calendar.rs::start. Open aliases and automatic unit selection could be retained, but this cache-specific boundary uses the existing typed interval and explicit seconds contract to avoid ambiguous units in slot arithmetic. Evidence: sdk-rs/parity/SHARED_CORE_BEHAVIOR_REPAIRS.md and SHARED_CORE_BEHAVIOR_GATE_EXITS.md. FIX-audit ACCEPT (codex-4ri6pb): sdk-rs/parity/CANDLE_CACHE_FIX_AUDIT.md records this exact row, real constructed source/native cache probes, bounds and authorization; the declared divergence remains explicit."
 
 [[symbol]]
 ts = "nextChartCandleStartTime"
@@ -56,7 +56,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-candle-cache/src/calendar.rs::next"
 status = "divergent"
-note = "CHOSEN: monthly Date.UTC year remapping, invalid-date NaN and clipped sub-millisecond inputs now retain source effects on the admitted epoch-seconds path. CHOSEN: Cache adaptation accepts AnyTimeframe and epoch seconds only; aliases and automatic seconds-or-ms output selection are not exposed. Adapted rename target: safe-cex-candle-cache/src/calendar.rs::next. Open aliases and automatic unit selection could be retained, but this cache-specific boundary uses the existing typed interval and explicit seconds contract to avoid ambiguous units in slot arithmetic. Evidence: sdk-rs/parity/SHARED_CORE_BEHAVIOR_REPAIRS.md and SHARED_CORE_BEHAVIOR_GATE_EXITS.md."
+note = "CHOSEN: monthly Date.UTC year remapping, invalid-date NaN and clipped sub-millisecond inputs now retain source effects on the admitted epoch-seconds path. CHOSEN: Cache adaptation accepts AnyTimeframe and epoch seconds only; aliases and automatic seconds-or-ms output selection are not exposed. Adapted rename target: safe-cex-candle-cache/src/calendar.rs::next. Open aliases and automatic unit selection could be retained, but this cache-specific boundary uses the existing typed interval and explicit seconds contract to avoid ambiguous units in slot arithmetic. Evidence: sdk-rs/parity/SHARED_CORE_BEHAVIOR_REPAIRS.md and SHARED_CORE_BEHAVIOR_GATE_EXITS.md. FIX-audit ACCEPT (codex-4ri6pb): sdk-rs/parity/CANDLE_CACHE_FIX_AUDIT.md records this exact row, real constructed source/native cache probes, bounds and authorization; the declared divergence remains explicit."
 
 [[symbol]]
 ts = "chartCandleCloseTime"
@@ -64,7 +64,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-candle-cache/src/calendar.rs::close"
 status = "divergent"
-note = "CHOSEN: monthly Date.UTC year remapping, invalid-date NaN and clipped sub-millisecond inputs now retain source effects on the admitted epoch-seconds path. CHOSEN: Cache adaptation accepts AnyTimeframe and epoch seconds only; preserves relative close and UTC month rollover behavior. Adapted rename target: safe-cex-candle-cache/src/calendar.rs::close. Open aliases and automatic unit selection could be retained, but this cache-specific boundary uses the existing typed interval and explicit seconds contract to avoid ambiguous units in slot arithmetic. Evidence: sdk-rs/parity/SHARED_CORE_BEHAVIOR_REPAIRS.md and SHARED_CORE_BEHAVIOR_GATE_EXITS.md."
+note = "CHOSEN: monthly Date.UTC year remapping, invalid-date NaN and clipped sub-millisecond inputs now retain source effects on the admitted epoch-seconds path. CHOSEN: Cache adaptation accepts AnyTimeframe and epoch seconds only; preserves relative close and UTC month rollover behavior. Adapted rename target: safe-cex-candle-cache/src/calendar.rs::close. Open aliases and automatic unit selection could be retained, but this cache-specific boundary uses the existing typed interval and explicit seconds contract to avoid ambiguous units in slot arithmetic. Evidence: sdk-rs/parity/SHARED_CORE_BEHAVIOR_REPAIRS.md and SHARED_CORE_BEHAVIOR_GATE_EXITS.md. FIX-audit ACCEPT (codex-4ri6pb): sdk-rs/parity/CANDLE_CACHE_FIX_AUDIT.md records this exact row, real constructed source/native cache probes, bounds and authorization; the declared divergence remains explicit."
 
 [[symbol]]
 ts = "getNumChartCandlesInRange"
@@ -72,7 +72,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-candle-cache/src/calendar.rs::count"
 status = "divergent"
-note = "CHOSEN: monthly Date.UTC year remapping, invalid-date NaN and clipped sub-millisecond inputs now retain source effects on the admitted epoch-seconds path. CHOSEN: Cache adaptation accepts AnyTimeframe and epoch seconds only; preserves inclusive calendar counting. Adapted rename target: safe-cex-candle-cache/src/calendar.rs::count. Open aliases and automatic unit selection could be retained, but this cache-specific boundary uses the existing typed interval and explicit seconds contract to avoid ambiguous units in slot arithmetic. Evidence: sdk-rs/parity/SHARED_CORE_BEHAVIOR_REPAIRS.md and SHARED_CORE_BEHAVIOR_GATE_EXITS.md."
+note = "CHOSEN: monthly Date.UTC year remapping, invalid-date NaN and clipped sub-millisecond inputs now retain source effects on the admitted epoch-seconds path. CHOSEN: Cache adaptation accepts AnyTimeframe and epoch seconds only; preserves inclusive calendar counting. Adapted rename target: safe-cex-candle-cache/src/calendar.rs::count. Open aliases and automatic unit selection could be retained, but this cache-specific boundary uses the existing typed interval and explicit seconds contract to avoid ambiguous units in slot arithmetic. Evidence: sdk-rs/parity/SHARED_CORE_BEHAVIOR_REPAIRS.md and SHARED_CORE_BEHAVIOR_GATE_EXITS.md. FIX-audit ACCEPT (codex-4ri6pb): sdk-rs/parity/CANDLE_CACHE_FIX_AUDIT.md records this exact row, real constructed source/native cache probes, bounds and authorization; the declared divergence remains explicit."
 
 [[symbol]]
 ts = "createLiveCandleStart"

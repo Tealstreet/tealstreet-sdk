@@ -1045,6 +1045,71 @@ fn production_ticker_coercion_matches_constructed_typescript() {
     }
     venue.dispose().unwrap();
 }
+
+#[test]
+fn production_public_ingress_keeps_surrogate_batches_and_numeric_bits() {
+    use safe_cex_store::{Store, StoreUpdate};
+    let output = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args([
+            "--import",
+            "tsx",
+            "sdk-rs/safe-cex-venue-asterdex/tests/public-ingress-source.cjs",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let corpus: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = corpus["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 12);
+    assert_eq!(
+        cases
+            .iter()
+            .map(|case| case["frames"].as_array().unwrap().len())
+            .sum::<usize>(),
+        20
+    );
+    let (venue, rt, store, _) = stream_fixture();
+    let socket = rt
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| !url.ends_with("/ws/fixture-listen-key"))
+        .unwrap()
+        .1
+        .clone();
+    for case in cases {
+        Store::update(
+            store.as_ref(),
+            StoreUpdate {
+                tickers: Some(ticker_coercion::seed("asterdex")),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        rt.console.borrow_mut().clear();
+        for frame in case["frames"].as_array().unwrap() {
+            socket
+                .events
+                .borrow_mut()
+                .push_back(safe_cex_exchange::websocket::WsEvent::Message(
+                    safe_cex_transport::socket::SocketFrame::Text(frame.as_str().unwrap().into()),
+                ));
+            for _ in 0..8 {
+                rt.pump();
+            }
+        }
+        ticker_coercion::assert_native(&store.tickers().unwrap(), case);
+        assert!(rt.errors.borrow().is_empty(), "{:?}", rt.errors.borrow());
+        assert!(rt.console.borrow().is_empty(), "{:?}", rt.console.borrow());
+    }
+    venue.dispose().unwrap();
+}
 #[test]
 fn public_frames_preserve_partial_depth_and_candle_semantics() {
     use safe_cex_exchange::websocket::WsEvent;
@@ -1150,7 +1215,7 @@ fn public_frames_preserve_partial_depth_and_candle_semantics() {
         assert_eq!(
             (
                 ticker.mark,
-                ticker.index,
+                ticker.index.unwrap(),
                 ticker.funding_rate,
                 ticker.funding_time
             ),

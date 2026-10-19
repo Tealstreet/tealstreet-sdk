@@ -28,5 +28,7 @@ const all=structuredClone(base);for(const f of context.fields)all[0][f]=99;
 traces.push([{op:'copy',tickers:base},{op:'pack',tickers:all}]);
 const plus=structuredClone(base),minus=structuredClone(base);for(const f of context.fields){plus[0][f]=0;minus[0][f]=-0;}
 traces.push([{op:'copy',tickers:plus},{op:'pack',tickers:minus},{op:'pack',tickers:plus},{op:'copy',tickers:minus},{op:'pack',tickers:plus},{op:'pack',tickers:minus}]);
+const nullIndex=structuredClone(base);nullIndex[0].index=null;
+traces.push([{op:'copy',tickers:base},{op:'pack',tickers:nullIndex},{op:'pack',tickers:nullIndex},{op:'pack',tickers:base}]);
 const scenarios=traces.map(actions=>{const instance=new context.Worker();return {actions:encode(actions),expected:actions.map(a=>a.op==='copy'?(instance._copyTickerBaseline(a.tickers),null):encode(instance._packTickerDeltasSinceBaseline(a.tickers)))};});
 process.stdout.write(JSON.stringify({fields:context.fields,versions,scenarios}));

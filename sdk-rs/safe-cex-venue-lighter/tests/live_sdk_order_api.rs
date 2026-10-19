@@ -297,11 +297,24 @@ fn order_api_string_identity() {
                 identity(&native.orders[0], &expected, path);
             }
         } else {
-            assert!(serde_json::from_str::<ApiOrder>(raw).is_err());
-            assert!(js_from_str::<ApiOrder>(raw).is_err());
+            let mut expected = capture()["base"].clone();
+            expected[field] = json!(String::from_utf16_lossy(&units[index % 9]));
+            for native in [
+                serde_json::from_str::<ApiOrder>(raw).unwrap(),
+                js_from_str::<ApiOrder>(raw).unwrap(),
+            ] {
+                typed_utf16::assert_projection(raw, &native);
+                identity(&native, &expected, "raw typed surrogate");
+            }
             let outer = format!("{{\"orders\":[{raw}]}}");
-            assert!(serde_json::from_str::<AccountOrdersResponse>(&outer).is_err());
-            assert!(js_from_str::<AccountOrdersResponse>(&outer).is_err());
+            for native in [
+                serde_json::from_str::<AccountOrdersResponse>(&outer).unwrap(),
+                js_from_str::<AccountOrdersResponse>(&outer).unwrap(),
+            ] {
+                assert_eq!(native.orders.len(), 1);
+                typed_utf16::assert_projection(&outer, &native);
+                identity(&native.orders[0], &expected, "raw typed nested surrogate");
+            }
         }
     }
 }
@@ -426,12 +439,24 @@ fn order_api_unknown_boundaries() {
             } else {
                 format!("{{\"orders\":[],\"extra\":\"{escaped}\"}}")
             };
+            typed_utf16::retained(&raw);
             if record == "ApiOrder" {
-                assert!(serde_json::from_str::<ApiOrder>(&raw).is_err());
-                assert!(js_from_str::<ApiOrder>(&raw).is_err());
+                for order in [
+                    serde_json::from_str::<ApiOrder>(&raw).unwrap(),
+                    js_from_str::<ApiOrder>(&raw).unwrap(),
+                ] {
+                    identity(&order, &capture()["base"], "unknown surrogate ignored");
+                }
             } else {
-                assert!(serde_json::from_str::<AccountOrdersResponse>(&raw).is_err());
-                assert!(js_from_str::<AccountOrdersResponse>(&raw).is_err());
+                for response in [
+                    serde_json::from_str::<AccountOrdersResponse>(&raw).unwrap(),
+                    js_from_str::<AccountOrdersResponse>(&raw).unwrap(),
+                ] {
+                    assert!(
+                        response.orders.is_empty(),
+                        "unknown surrogate does not change orders"
+                    );
+                }
             }
         }
     }
@@ -532,8 +557,16 @@ fn order_api_cursor_and_extra_units() {
                 );
             }
         } else {
-            assert!(serde_json::from_str::<AccountOrdersResponse>(raw).is_err());
-            assert!(js_from_str::<AccountOrdersResponse>(raw).is_err());
+            for native in [
+                serde_json::from_str::<AccountOrdersResponse>(raw).unwrap(),
+                js_from_str::<AccountOrdersResponse>(raw).unwrap(),
+            ] {
+                typed_utf16::assert_projection(raw, &native);
+                assert_eq!(
+                    native.next_cursor.as_deref(),
+                    Some(String::from_utf16_lossy(&units[index]).as_str())
+                );
+            }
         }
     }
     let extras = corpus.get("extras").unwrap().as_array().unwrap();
@@ -566,11 +599,26 @@ fn order_api_cursor_and_extra_units() {
                 }
             }
         } else if record == "ApiOrder" {
-            assert!(serde_json::from_str::<ApiOrder>(raw).is_err());
-            assert!(js_from_str::<ApiOrder>(raw).is_err());
+            typed_utf16::retained(raw);
+            for native in [
+                serde_json::from_str::<ApiOrder>(raw).unwrap(),
+                js_from_str::<ApiOrder>(raw).unwrap(),
+            ] {
+                identity(&native, &corpus["base"], "raw unknown surrogate");
+            }
         } else {
-            assert!(serde_json::from_str::<AccountOrdersResponse>(raw).is_err());
-            assert!(js_from_str::<AccountOrdersResponse>(raw).is_err());
+            typed_utf16::retained(raw);
+            for native in [
+                serde_json::from_str::<AccountOrdersResponse>(raw).unwrap(),
+                js_from_str::<AccountOrdersResponse>(raw).unwrap(),
+            ] {
+                assert_eq!(native.orders.len(), 1);
+                identity(
+                    &native.orders[0],
+                    &corpus["base"],
+                    "raw nested unknown surrogate",
+                );
+            }
         }
     }
 }
@@ -584,3 +632,6 @@ fn comparison_count(actual: usize, expected: usize, label: &str) {
         "ORDER-API orders comparison count {label}"
     );
 }
+
+#[path = "../../test-support/typed_utf16.rs"]
+mod typed_utf16;

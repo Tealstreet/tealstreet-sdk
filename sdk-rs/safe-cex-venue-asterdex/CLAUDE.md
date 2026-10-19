@@ -1,5 +1,11 @@
 # AsterDEX Rust venue
 
+`FIX_AUDIT_REVIEW.md` records the twelve assigned runtime rows and the shared
+factory error enhancer. Constructed native tests cover held clock settlement,
+private repair/timer teardown and source error fields; the exported browser
+ApprovalHost remains an explicit missing binding. Clock completions use the
+canonical eager driver so stopping a generation cannot strand its waiters.
+
 Cross-layer native venue/worker witnesses live in the parity tooling target
 `aster_worker_emitter`. Private facade/frame checks remain in this crate;
 AsterDEX has no dependency on the higher worker layer.
@@ -123,13 +129,14 @@ already-gone `-2011` response; cancellation still logs completion.
 `tests/exchange_trait.rs` covers both HTTP-success and HTTP-error envelopes through
 the constructed venue, signer, transport and event emitter.
 
-Public transport errors call the stream's existing `on_close(None, "")` path,
-matching the source error listener's `this.onClose()` call. This runs the existing
-subscription reset wrapper and native reconnect without an invented close code.
-`public_socket_error` proves master has no redial before the watchdog timeout and
-requires one after the hook is installed. Shared scripted response data lives in
-`tests/support/exchange_data.rs`; frame queues stay injectable at the transport
-boundary while the production constructor, API and socket handlers run unchanged.
+Plain WebSocket errors stop at the base listener, which is registered before
+this venue's error callback and calls `stopImmediatePropagation`. They log without
+running the subscription reset or scheduling a reconnect. Actual close events
+still invoke the existing close wrapper. The registry's
+`native_socket_error_dispatch` compares maintained Aster/Bitunix WebSocket
+dispatch with production native hosts and loopback upgrade failures and close frames;
+`public_socket_error` also checks that an error alone does not redial.
+Grouped RWS dispatch retains the venue error listener, matching its dispatcher.
 
 `fetchPositions` consumes raw `positionRisk` rows, matching the source's field
 access and parseFloat coercions instead of requiring the declared 17-field DTO.
@@ -206,4 +213,26 @@ Promise in another task. `tests/eager_sdk_binding.rs` compares the maintained
 whole TS class with NativeRuntime and signed reqwest loopback requests: missing
 credentials log before polling; discarded getAccount/changePositionMode waiters
 retain their held HTTP continuation and Store effect. This family proof does
-not resolve the separate socket or validateAccount error-envelope findings.
+not by itself close the socket or validation error-envelope findings.
+`VALIDATION_ERROR_REVIEW.md` records the later real HTTP/setup-error witnesses: retained
+error markers come from the existing origin, and unsupported protocols use the
+shared transport classification rather than a network-reset diagnostic.
+
+Public socket ingress uses canonical retained capture, then derives the existing
+typed Value callback argument. String fields and keys use the canonical typed
+decoder's U+FFFD view; numeric scalars keep the retained projection, including
+overflow and signed zero. It does not stringify/reparse the frame or use the
+request-params parser. `exchange_trait` compares twelve actual constructed TS
+and Rust socket cases (twenty frames), including whole batches with lone units
+in an unused nested value/key, ordinary siblings and native numeric bits. The
+private stream's Value callback/info seam remains a separate migration.
+
+REST depth sorting delegates both source subtraction comparators to canonical
+CI V8 TimSort. `native_exchange::fix_audit_tests::rest_book_*` calls the actual
+constructed fetchOrderBook member, factory, HTTP response path and mapper against
+maintained TS over ten NaN-containing depth profiles, preserving every price,
+amount and cumulative quote-total bit. The previous Rust sort panicked for both
+sides; the bounded native witnesses catch that panic without hanging.
+PnL grouping sanitizes time/id keys and uses the original index to break ties;
+public depth admission rejects nonfinite prices, and API signing sorts UTF-16
+strings. Those remaining crate comparators have a total order.

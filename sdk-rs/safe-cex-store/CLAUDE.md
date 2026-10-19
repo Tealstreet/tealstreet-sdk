@@ -211,3 +211,22 @@ native Store witness compares thirteen configuration profiles with TypeScript.
 Required numeric Ticker patch fields reject own Undefined as a typed patch error.
 Candidate publication remains atomic; optional-field and info presence policies
 are unchanged. Orderly's real socket census covers per-row refusal and siblings.
+
+Ticker.index patches accept null and retain it across both aliases. Packed ticker
+values stay numeric: both maintained packers filter non-numbers. Full ticker
+snapshots retain null; packing a null field intentionally omits its delta.
+
+`subscribe_native` is a required opaque native-state subscription. The canonical
+owner borrows its actual state referent at each reached slot; lower layers cannot
+replace it with a typed snapshot. Internal emitter and native account observers
+use it, while `subscribe` keeps its explicit typed projection semantics.
+
+`orderbook::sort_order_book` delegates directly to safe-cex-num TimSort. Its
+112-profile native/source test pins both sides and retained fields against
+CI Node 24.20.0 / V8 13.6, including inconsistent NaN-price comparisons.
+
+Socket health reads and partial merges carry canonical RetainedJsonInput. An own undefined property overwrites a previous number without deleting its insertion position; JSON serialization omits it only at the wire boundary.
+
+The seven historical non-UTF-8 mutation claims are reconciled in
+`per-row-rulings.md`. The actual native facade accepts open fields and preserves
+references/partial writes; do not insert typed patch admission into that path.

@@ -46,9 +46,9 @@ note = "The canonical native graph preserves live property effects and reference
 ts = "DefaultStore#buildIdLookup"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_lookup"
+rs = [ "safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_lookup", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_key", "safe-cex-exchange/src/js_runtime/native_store/graph.rs::set_id_key" ]
 status = "ported"
-note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_lookup`."
+note = "The canonical native graph preserves live property effects and reference generations; typed Store reads use an explicit fallible preserving-undefined projection. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_lookup`. The split id_key/set_id_key adapters preserve source ToPropertyKey string-hint coercion and Symbol identity on the private null-prototype dictionary; they do not project keys through UTF-8. Renamed Rust target: safe-cex-exchange/src/js_runtime/native_store/graph.rs::id_key. Renamed Rust target: safe-cex-exchange/src/js_runtime/native_store/graph.rs::set_id_key. Both split property-key adapters are reused by buildIdIndexMap/findIndexById."
 
 [[symbol]]
 ts = "DefaultStore#findIndexById"
@@ -456,7 +456,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_one"
 status = "divergent"
-note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_one`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_one`. Non-UTF-8 audit ACCEPT: the production native facade retains open properties, own undefined, exact numeric bits and actual references; typed patch admission remains an explicit boundary. See safe-cex-store/per-row-rulings.md and canonical_native_store::audit_mutation_rows_preserve_open_fields_identity_and_partial_writes (38 maintained-source profiles)."
 
 [[symbol]]
 ts = "DefaultStore.addOrder"
@@ -480,7 +480,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many"
 status = "divergent"
-note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::upsert_many`. Non-UTF-8 audit ACCEPT: the production native facade retains open properties, own undefined, exact numeric bits and actual references; typed patch admission remains an explicit boundary. See safe-cex-store/per-row-rulings.md and canonical_native_store::audit_mutation_rows_preserve_open_fields_identity_and_partial_writes (38 maintained-source profiles)."
 
 [[symbol]]
 ts = "DefaultStore.updatePosition"
@@ -488,7 +488,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_one"
 status = "divergent"
-note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_one`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_one`. Non-UTF-8 audit ACCEPT: the production native facade retains open properties, own undefined, exact numeric bits and actual references; typed patch admission remains an explicit boundary. See safe-cex-store/per-row-rulings.md and canonical_native_store::audit_mutation_rows_preserve_open_fields_identity_and_partial_writes (38 maintained-source profiles)."
 
 [[symbol]]
 ts = "DefaultStore.addOrUpdatePosition"
@@ -504,7 +504,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_positions"
 status = "divergent"
-note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_positions`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_positions`. Non-UTF-8 audit ACCEPT: the production native facade retains open properties, own undefined, exact numeric bits and actual references; typed patch admission remains an explicit boundary. See safe-cex-store/per-row-rulings.md and canonical_native_store::audit_mutation_rows_preserve_open_fields_identity_and_partial_writes (38 maintained-source profiles)."
 
 [[symbol]]
 ts = "DefaultStore.addOrUpdatePositions"
@@ -552,7 +552,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_ticker"
 status = "divergent"
-note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_ticker`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_ticker`. Non-UTF-8 audit ACCEPT: the production native facade retains open properties, own undefined, exact numeric bits and actual references; typed patch admission remains an explicit boundary. See safe-cex-store/per-row-rulings.md and canonical_native_store::audit_mutation_rows_preserve_open_fields_identity_and_partial_writes (38 maintained-source profiles)."
 
 [[symbol]]
 ts = "DefaultStore.applyTickerDeltas"
@@ -608,7 +608,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_market"
 status = "divergent"
-note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_market`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_market`. Non-UTF-8 audit ACCEPT: the production native facade retains open properties, own undefined, exact numeric bits and actual references; typed patch admission remains an explicit boundary. See safe-cex-store/per-row-rulings.md and canonical_native_store::audit_mutation_rows_preserve_open_fields_identity_and_partial_writes (38 maintained-source profiles)."
 
 [[symbol]]
 ts = "DefaultStore.setSetting"
@@ -624,7 +624,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_in_array", "safe-cex-store/src/model_patch.rs::apply" ]
 status = "divergent"
-note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_in_array`. Mapped `safe-cex-store/src/model_patch.rs::apply`."
+note = "The single canonical Graph supplies this source operation; its typed Store companion projects only at explicit typed boundaries. Mapped `safe-cex-exchange/src/js_runtime/native_store/graph.rs::Graph::update_in_array`. Mapped `safe-cex-store/src/model_patch.rs::apply`. Non-UTF-8 audit ACCEPT: the production native facade retains open properties, own undefined, exact numeric bits and actual references; typed patch admission remains an explicit boundary. See safe-cex-store/per-row-rulings.md and canonical_native_store::audit_mutation_rows_preserve_open_fields_identity_and_partial_writes (38 maintained-source profiles)."
 
 [[symbol]]
 ts = "DefaultStore#notify"

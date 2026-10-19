@@ -24,7 +24,7 @@ fn method(
 }
 fn items(value: &Js) -> Result<Vec<Js>, Thrown> {
     Ok(value
-        .array_items()
+        .array_items()?
         .ok_or_else(|| Thrown::type_error("value is not iterable"))?
         .into_iter()
         .map(|item| item.unwrap_or(Js::Undefined))
@@ -114,6 +114,26 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                 }
                 Ok(Js::Number(index))
             }
+        })))
+    })?;
+    method(rt, "getStopOrderPositionIdx", |rt, a| {
+        let input = arg(&a, 0);
+        Ok(rt.clone().spawn(Box::pin(async move {
+            let opts = rt.global("omit")?.call(
+                Js::Undefined,
+                vec![input, Js::array(vec![Js::str("reduceOnly")])],
+            )?;
+            let index = await_js(
+                &rt.exchange_runtime(),
+                rt.this.call_method("getOrderPositionIdx", vec![opts])?,
+            )
+            .await?;
+            Js::object(vec![
+                ("0", Js::Number(0.)),
+                ("1", Js::Number(2.)),
+                ("2", Js::Number(1.)),
+            ])
+            .get_key(&index.to_js_string()?)
         })))
     })?;
     method(rt, "placeOrders", place_orders)?;

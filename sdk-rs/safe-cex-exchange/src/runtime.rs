@@ -283,7 +283,18 @@ impl From<safe_cex_transport::RestFailure> for ExchangeError {
                 .error()
                 .downcast_ref::<crate::js_runtime::value::owned::OwnedCallbackError>()
         {
-            crate::js_runtime::value::Thrown::new(cause.value().to_js()).to_exchange_error()
+            let mut projected =
+                crate::js_runtime::value::Thrown::new(cause.value().to_js()).to_exchange_error();
+            projected.is_axios_error = matches!(
+                cause.value().get("isAxiosError"),
+                Some(crate::js_runtime::value::OwnedJsValue::Bool(true))
+            );
+            if let Some(crate::js_runtime::value::OwnedJsValue::String(units)) =
+                cause.value().get("stack")
+            {
+                projected.stack = Some(String::from_utf16_lossy(units));
+            }
+            projected
         } else {
             let mut projected = Self::new(error.message.clone());
             if let Some(safe_cex_transport::TransportError::JavaScript(cause)) =
@@ -388,6 +399,14 @@ pub type ListenerCleanup = Box<dyn FnOnce() -> Result<(), ExchangeError>>;
 pub trait ExchangeTask {
     fn cancel(&self);
 }
+/// Host diagnostics only: classification never changes task scheduling or ownership.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeTaskKind {
+    Finite,
+    Timer,
+    SocketReader,
+    PromiseDriver,
+}
 pub trait ExchangeRuntime {
     /// Elapsed milliseconds from a stable origin, on the same clock as sleep.
     /// Wall-clock adjustments must not affect this value.
@@ -395,7 +414,20 @@ pub trait ExchangeRuntime {
     fn now_ms(&self) -> f64;
     /// Schedule on the monotonic clock; even zero delay yields a scheduler turn.
     fn sleep(&self, delay_ms: u64) -> ExchangeFuture<'static, ()>;
+    #[track_caller]
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask>;
+    /// Unclassified spawn_local calls remain unknown to diagnostic drain receipts.
+    /// Hosts without receipts retain their ordinary scheduling implementation.
+    fn spawn_classified(
+        &self,
+        _kind: RuntimeTaskKind,
+        future: Pin<Box<dyn Future<Output = ()>>>,
+    ) -> Box<dyn ExchangeTask> {
+        self.spawn_local(future)
+    }
+    /// A reviewed timer has entered asynchronous callback work. Its remaining
+    /// lifetime blocks drain, including any timer waits inside that callback.
+    fn task_work_started(&self) {}
     /// Original console arguments, including native Error references. Hosts must
     /// observe these values before choosing a terminal or telemetry representation.
     fn console_values(&self, severity: &str, values: &[Js]);

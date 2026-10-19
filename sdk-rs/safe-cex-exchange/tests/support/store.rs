@@ -6,7 +6,7 @@ use safe_cex_store::{
     model_patch::{ModelPatch, PatchSource},
 };
 use safe_cex_types::*;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -62,6 +62,16 @@ impl Store for TestStore {
     fn reset(&self) -> Result<(), StoreMutationError> {
         *self.data.borrow_mut() = Self::default().data.into_inner();
         self.notify(false)
+    }
+    fn subscribe_native(
+        &self,
+        callback: safe_cex_store::contract::NativeStoreSubscriber,
+    ) -> Box<dyn Fn()> {
+        self.subscribe(Box::new(move |data, from_worker| {
+            let value = safe_cex_exchange::js_runtime::value::from_typed(data)
+                .map_err(|cause| StoreSubscriberError::new(cause.message()))?;
+            callback(&value, from_worker)
+        }))
     }
     fn subscribe(&self, callback: StoreSubscriber) -> Box<dyn Fn()> {
         let callback: Subscriber = Rc::from(callback);
@@ -272,7 +282,9 @@ impl Store for TestStore {
     fn fetched_leverage(&self) -> Result<IndexMap<String, FetchedLeverage>, StoreReadError> {
         Ok(self.data.borrow().fetched_leverage.clone())
     }
-    fn socket_health(&self) -> Result<Option<Value>, StoreReadError> {
+    fn socket_health(
+        &self,
+    ) -> Result<Option<safe_cex_types::retained_json::RetainedJsonInput>, StoreReadError> {
         Ok(self.data.borrow().socket_health.clone())
     }
     fn tickers_by_id(&self) -> Result<IndexMap<String, Ticker>, StoreReadError> {
@@ -321,10 +333,20 @@ impl Store for TestStore {
     fn get_tickers_version(&self) -> f64 {
         0.0
     }
-    fn update_socket_health(&self, data: &Map<String, Value>) -> Result<(), StoreMutationError> {
+    fn update_socket_health(
+        &self,
+        data: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<(), StoreMutationError> {
         let mut state = self.data.borrow_mut();
-        let health = state.socket_health.get_or_insert_with(|| json!({}));
-        health.as_object_mut().unwrap().extend(data.clone());
+        let health = state.socket_health.get_or_insert_with(|| json!({}).into());
+        let entries = health.as_object_mut().unwrap();
+        for (key, value) in data.as_object().unwrap() {
+            if let Some((_, old)) = entries.iter_mut().find(|(name, _)| name == key) {
+                *old = value.clone();
+            } else {
+                entries.push((key.clone(), value.clone()));
+            }
+        }
         drop(state);
         self.notify(false)
     }

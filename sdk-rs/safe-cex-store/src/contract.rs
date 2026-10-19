@@ -13,7 +13,7 @@ use safe_cex_types::{
 };
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::{any::Any, rc::Rc};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -214,7 +214,7 @@ pub struct StoreUpdate {
         skip_serializing_if = "Option::is_none"
     )]
     #[serde(rename = "socketHealth")]
-    pub socket_health: Option<Value>,
+    pub socket_health: Option<safe_cex_types::retained_json::RetainedJsonInput>,
     #[serde(
         default,
         deserialize_with = "deserialize_present",
@@ -232,12 +232,17 @@ fn deserialize_present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
 
 type Subscriber = StoreSubscriber;
 
+/// A borrowed native state referent; no typed snapshot is constructed for delivery.
+pub type NativeStoreSubscriber =
+    Box<dyn Fn(&dyn Any, bool) -> Result<(), safe_cex_types::StoreSubscriberError>>;
+
 /// Object-safe, local callbacks support native and browser hosts without an SDK projection.
 pub trait Store {
     fn native_owner(&self) -> Rc<dyn Any>;
     fn update(&self, changes: StoreUpdate, from_worker: bool) -> Result<(), StoreMutationError>;
     fn reset(&self) -> Result<(), StoreMutationError>;
     fn subscribe(&self, callback: Subscriber) -> Box<dyn Fn()>;
+    fn subscribe_native(&self, callback: NativeStoreSubscriber) -> Box<dyn Fn()>;
     fn set_setting(&self, key: &str, value: bool) -> Result<(), StoreMutationError>;
     fn remove_order(&self, id: &str) -> Result<(), StoreMutationError>;
     fn update_order_status(&self, id: &str, status: OrderStatus) -> Result<(), StoreMutationError>;
@@ -324,8 +329,13 @@ pub trait Store {
     fn get_markets_version(&self) -> f64;
     fn get_tickers_version(&self) -> f64;
     fn fetched_leverage(&self) -> Result<IndexMap<String, FetchedLeverage>, StoreReadError>;
-    fn socket_health(&self) -> Result<Option<Value>, StoreReadError>;
-    fn update_socket_health(&self, data: &Map<String, Value>) -> Result<(), StoreMutationError>;
+    fn socket_health(
+        &self,
+    ) -> Result<Option<safe_cex_types::retained_json::RetainedJsonInput>, StoreReadError>;
+    fn update_socket_health(
+        &self,
+        data: &safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<(), StoreMutationError>;
     fn request_stats(&self) -> Result<Option<RequestOutcomeCounts>, StoreReadError>;
     fn record_request_outcome(&self, outcome: RequestOutcome) -> Result<(), StoreMutationError>;
     fn serialize(&self) -> Result<StoreData, StoreReadError>;
@@ -510,7 +520,7 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         #[serde(rename = "socketHealth")]
-        socket_health: Option<Value>,
+        socket_health: Option<safe_cex_types::retained_json::RetainedJsonInput>,
         #[serde(
             default,
             deserialize_with = "deserialize_present",

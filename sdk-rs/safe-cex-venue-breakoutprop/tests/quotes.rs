@@ -62,7 +62,7 @@ fn market(m: &Market) -> Value {
     v
 }
 fn ticker(t: &Ticker) -> Value {
-    let mut v = json!({"id":t.id,"symbol":t.symbol,"bid":number(t.bid),"ask":number(t.ask),"last":number(t.last),"mark":number(t.mark),"index":number(t.index),"percentage":number(t.percentage),"openInterest":number(t.open_interest),"fundingRate":number(t.funding_rate),"fundingTime":number(t.funding_time),"volume":number(t.volume),"quoteVolume":number(t.quote_volume)});
+    let mut v = json!({"id":t.id,"symbol":t.symbol,"bid":number(t.bid),"ask":number(t.ask),"last":number(t.last),"mark":number(t.mark),"index":t.index.map(number).unwrap_or(Value::Null),"percentage":number(t.percentage),"openInterest":number(t.open_interest),"fundingRate":number(t.funding_rate),"fundingTime":number(t.funding_time),"volume":number(t.volume),"quoteVolume":number(t.quote_volume)});
     optional(&mut v, "midPrice", t.mid_price.map(number));
     optional(&mut v, "info", t.info.as_ref().map(observe));
     v
@@ -152,7 +152,30 @@ fn actual_quote_reads() {
                 vec![json!("combined")],
                 "QUOTES-EAGER combined"
             );
-            run(future).map(|rows| Value::Array(rows.iter().map(market).collect()))
+            run(future).map(|rows| {
+                if name == "surrogate" {
+                    assert_eq!(rows.len(), 2);
+                    assert_eq!(rows[0].id, "\u{fffd}");
+                    assert_eq!(rows[0].symbol, "\u{fffd}");
+                    assert_eq!(rows[0].base, "\u{fffd}");
+                    assert_eq!(rows[1].symbol, "ETHUSD");
+                    assert_eq!(
+                        rows[0]
+                            .info
+                            .as_ref()
+                            .unwrap()
+                            .get("instrument")
+                            .unwrap()
+                            .get("symbol")
+                            .unwrap()
+                            .as_text(),
+                        Some([0xd800].as_slice())
+                    );
+                    json!({"typedSurrogate":true})
+                } else {
+                    Value::Array(rows.iter().map(market).collect())
+                }
+            })
         } else {
             original = original.with_retained_response((json!({"data":{"msg":if name=="empty-msg"{json!("")}else if name=="object-msg"{json!({"detail":"object"})}else{json!("venue-message")}}})).into());
             let session = || {
@@ -214,35 +237,40 @@ fn actual_quote_reads() {
                 }
             }
             output.map(|rows| {
-                rows.map_or_else(
-                    || json!({"$undefined":true}),
-                    |rows| Value::Array(rows.iter().map(ticker).collect()),
-                )
+                if name == "surrogate" {
+                    let rows = rows.unwrap();
+                    assert_eq!(rows.len(), 2);
+                    assert_eq!(rows[0].id, "\u{fffd}");
+                    assert_eq!(rows[0].symbol, "\u{fffd}");
+                    assert_eq!(rows[1].symbol, "B");
+                    assert_eq!(rows[0].bid.to_bits(), 13.125_f64.to_bits());
+                    assert_eq!(rows[0].ask.to_bits(), 17.375_f64.to_bits());
+                    assert_eq!(
+                        rows[0]
+                            .info
+                            .as_ref()
+                            .unwrap()
+                            .get("symbol")
+                            .unwrap()
+                            .as_text(),
+                        Some([0xd800].as_slice())
+                    );
+                    json!({"typedSurrogate":true})
+                } else {
+                    rows.map_or_else(
+                        || json!({"$undefined":true}),
+                        |rows| Value::Array(rows.iter().map(ticker).collect()),
+                    )
+                }
             })
         };
         if name == "surrogate" {
-            if method == "fetchMarkets" {
-                assert_eq!(
-                    result.unwrap(),
-                    Value::Array(store.markets().unwrap().iter().map(market).collect()),
-                    "closed market symbol uses source mapping catch"
-                );
-                assert_eq!(
-                    errors.borrow().len(),
-                    1,
-                    "market projection failure reported once"
-                );
-            } else {
-                let error = result.unwrap_err();
-                assert!(
-                    !error.message.is_empty(),
-                    "closed ticker symbol visibly refuses after mapping"
-                );
-                assert!(
-                    errors.borrow().is_empty(),
-                    "ticker projection remains outside source catch"
-                );
-            }
+            assert_eq!(result.unwrap(), json!({"typedSurrogate":true}));
+            assert!(
+                errors.borrow().is_empty(),
+                "typed String view does not reject the retained record"
+            );
+
             assert_eq!(
                 json!(*trace.borrow()),
                 case["trace"],

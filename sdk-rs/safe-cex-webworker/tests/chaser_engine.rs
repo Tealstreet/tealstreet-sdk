@@ -55,6 +55,10 @@ struct Host {
     assert_cleanup_prefix: Cell<bool>,
     fill_mode: Cell<&'static str>,
     sleep_stop: Cell<bool>,
+    place_released: Rc<Cell<bool>>,
+    fill_released: Rc<Cell<bool>>,
+    place_waker: Rc<RefCell<Option<Waker>>>,
+    fill_waker: Rc<RefCell<Option<Waker>>>,
     instance: RefCell<Weak<ChaserOrderInstance>>,
     runtime: Rc<runtime::Runtime>,
 }
@@ -63,11 +67,14 @@ impl Host {
         let h = Rc::new(Self::default());
         h.next.set(1);
         h.cancel_released.set(true);
+        h.place_released.set(true);
+        h.fill_released.set(true);
         h.runtime.advance(0);
         h
     }
     fn drain(&self) {
         for _iteration in 0..32 {
+            self.runtime.advance(self.runtime.now.get());
             let tasks = std::mem::take(&mut *self.tasks.borrow_mut());
             for mut f in tasks {
                 match f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
@@ -110,7 +117,17 @@ impl ChaserHost for Host {
     ) -> ExchangeFuture<'static, Vec<String>> {
         self.places.borrow_mut().push(o);
         let result = self.replies.borrow_mut().pop_front().unwrap_or(Ok(vec![]));
-        ready(result)
+        let release = self.place_released.clone();
+        let mut result = Some(result);
+        let waker = self.place_waker.clone();
+        Box::pin(std::future::poll_fn(move |cx| {
+            if release.get() {
+                Poll::Ready(result.take().unwrap())
+            } else {
+                *waker.borrow_mut() = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        }))
     }
     fn construct_lookup(
         &self,
@@ -155,14 +172,27 @@ impl ChaserHost for Host {
         }))
     }
     fn fill_lookup(&self, _: Rc<dyn Exchange>) -> Option<FillLookup> {
-        match self.fill_mode.get() {
-            "partial" => Some(Rc::new(|_, _| ready(Ok(vec![("o".into(), 1.)])))),
-            "empty" => Some(Rc::new(|_, _| ready(Ok(vec![])))),
-            "error" => Some(Rc::new(|_, _| {
-                ready(Err(ExchangeError::new("fills failed")))
-            })),
-            _ => None,
-        }
+        let result = match self.fill_mode.get() {
+            "partial" => Ok(vec![("o".into(), 1.)]),
+            "empty" => Ok(vec![]),
+            "error" => Err(ExchangeError::new("fills failed")),
+            _ => return None,
+        };
+        let release = self.fill_released.clone();
+        let waker = self.fill_waker.clone();
+        Some(Rc::new(move |_, _| {
+            let release = release.clone();
+            let waker = waker.clone();
+            let mut result = Some(result.clone());
+            Box::pin(std::future::poll_fn(move |cx| {
+                if release.get() {
+                    Poll::Ready(result.take().unwrap())
+                } else {
+                    *waker.borrow_mut() = Some(cx.waker().clone());
+                    Poll::Pending
+                }
+            }))
+        }))
     }
     fn construct_sleep(&self, _: Rc<dyn Exchange>, delay: f64) -> ExchangeFuture<'static, ()> {
         self.events
@@ -219,7 +249,7 @@ fn fixture(
         StoreUpdate {
             markets: Some(vec![market]),
             tickers: Some(vec![ticker]),
-            socket_health: Some(json!({"privateInitialized":true})),
+            socket_health: Some(json!({"privateInitialized":true}).into()),
             ..Default::default()
         },
         true,
@@ -268,8 +298,12 @@ fn fixture(
     let engine = ChaserEngine::new(host.clone(), manager);
     (host, engine, instance)
 }
-fn settle<T>(mut f: ExchangeFuture<'static, T>) -> Result<T, ExchangeError> {
+fn settle<T>(
+    runtime: &runtime::Runtime,
+    mut f: ExchangeFuture<'static, T>,
+) -> Result<T, ExchangeError> {
     for _ in 0..32 {
+        runtime.advance(runtime.now.get());
         if let Poll::Ready(r) = f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
             return r;
         }
@@ -295,7 +329,11 @@ fn source() -> Value {
 fn placement_retry_ceiling_and_stopped_lost_lookup() {
     let (h, e, i) = fixture(ExchangeName::Bybit, false, 3.);
     i.mark_complete(Some("user"));
-    assert!(settle(e.try_place_orders(i, 1.)).unwrap().is_empty());
+    assert!(
+        settle(&h.runtime, e.try_place_orders(i, 1.))
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(
         h.places.borrow().len(),
         0,
@@ -305,7 +343,7 @@ fn placement_retry_ceiling_and_stopped_lost_lookup() {
     h.replies
         .borrow_mut()
         .extend([Ok(vec![]), Ok(vec!["o".into()])]);
-    let ids = settle(e.try_place_orders(i.clone(), 1.)).unwrap();
+    let ids = settle(&h.runtime, e.try_place_orders(i.clone(), 1.)).unwrap();
     assert_eq!(ids, ["o"]);
     assert_eq!(
         h.places.borrow().len(),
@@ -338,7 +376,7 @@ fn placement_retry_ceiling_and_stopped_lost_lookup() {
     ]);
     h.sleep_stop.set(true);
     assert!(
-        settle(e.try_place_orders(i.clone(), 1.))
+        settle(&h.runtime, e.try_place_orders(i.clone(), 1.))
             .unwrap()
             .is_empty()
     );
@@ -363,7 +401,7 @@ fn placement_retry_ceiling_and_stopped_lost_lookup() {
     for (name, expected) in [(ExchangeName::Binance, 19), (ExchangeName::Bybit, 9)] {
         let (h, e, i) = fixture(name, false, 3.);
         assert!(
-            settle(e.try_place_orders(i.clone(), 1.))
+            settle(&h.runtime, e.try_place_orders(i.clone(), 1.))
                 .unwrap()
                 .is_empty()
         );
@@ -379,7 +417,7 @@ fn placement_retry_ceiling_and_stopped_lost_lookup() {
     }
     let (h, e, i) = fixture(ExchangeName::Bybit, false, f64::INFINITY);
     h.replies.borrow_mut().push_back(Ok(vec!["o".into()]));
-    settle(e.try_place_orders(i, 1.)).unwrap();
+    settle(&h.runtime, e.try_place_orders(i, 1.)).unwrap();
     assert_eq!(
         h.places.borrow()[0].amount.to_bits(),
         f64::INFINITY.to_bits(),
@@ -431,7 +469,7 @@ fn cleanup_prefix_identity_live_cancel_targets_and_single_completion() {
         matches!(&h.cancels.borrow()[0][0],ChaserCancel::Full(o) if o.id=="a"&&o.symbol=="BTC")
     );
     let second = e.cleanup_instance(i.clone());
-    settle(second).unwrap();
+    settle(&h.runtime, second).unwrap();
     assert!(
         h.completes.borrow().is_empty(),
         "CHASER native concurrent nonowner cannot complete early"
@@ -443,7 +481,7 @@ fn cleanup_prefix_identity_live_cancel_targets_and_single_completion() {
             .is_pending()
     );
     h.cancel_released.set(true);
-    settle(first).unwrap();
+    settle(&h.runtime, first).unwrap();
     assert_eq!(h.cancels.borrow().len(), 2);
     assert!(
         matches!(&h.cancels.borrow()[1][0],ChaserCancel::ById{id,symbol} if id=="b"&&symbol=="NEW")
@@ -476,7 +514,7 @@ fn cleanup_prefix_identity_live_cancel_targets_and_single_completion() {
         )
         .unwrap();
     h.fill_mode.set("empty");
-    settle(e.emit_complete(i)).unwrap();
+    settle(&h.runtime, e.emit_complete(i)).unwrap();
     assert_eq!(
         h.completes.borrow()[0].filled.to_bits(),
         0f64.to_bits(),
@@ -498,7 +536,7 @@ fn monitor_tracks_mutations_ticker_queue_and_two_missing_confirmations() {
         "CHASER native process log prefix"
     );
     assert!(h.places.borrow().is_empty());
-    settle(starting).unwrap();
+    settle(&h.runtime, starting).unwrap();
     assert_eq!(i.current_order_ids(), ["o"]);
     let notify = |orders: Vec<Order>, orders_id: Value, positions_id: Value| {
         i.exchange
@@ -591,13 +629,13 @@ fn monitor_tracks_mutations_ticker_queue_and_two_missing_confirmations() {
         .store
         .update(
             StoreUpdate {
-                socket_health: Some(json!({"privateInitialized":false})),
+                socket_health: Some(json!({"privateInitialized":false}).into()),
                 ..Default::default()
             },
             true,
         )
         .unwrap();
-    settle(process).unwrap();
+    settle(&hp.runtime, process).unwrap();
     assert_eq!(
         hp.places.borrow().len(),
         1,
@@ -609,7 +647,7 @@ fn monitor_tracks_mutations_ticker_queue_and_two_missing_confirmations() {
         "CHASER native log listener can reenter options"
     );
     ip.mark_complete(Some("end fixture"));
-    settle(ep.cleanup_instance(ip.clone())).unwrap();
+    settle(&hp.runtime, ep.cleanup_instance(ip.clone())).unwrap();
     ip.exchange.base().off("log", None);
     let expected = source();
     assert_eq!(expected["monitorReason"], i.state().borrow().stop_reason);
@@ -623,7 +661,7 @@ fn monitor_reprices_after_authoritative_fills_and_collapses_queued_checks() {
     h.replies
         .borrow_mut()
         .extend([Ok(vec!["o".into()]), Ok(vec!["n".into()])]);
-    settle(e.process_instance(i.clone())).unwrap();
+    settle(&h.runtime, e.process_instance(i.clone())).unwrap();
     h.cancel_released.set(false);
     let notify = |id: Value| {
         i.exchange
@@ -689,11 +727,11 @@ fn monitor_reprices_after_authoritative_fills_and_collapses_queued_checks() {
     assert_eq!(h.places.borrow().len(), 2);
     let reprice_events = h.events.borrow().clone();
     i.mark_complete(Some("user"));
-    settle(e.cleanup_instance(i)).unwrap();
+    settle(&h.runtime, e.cleanup_instance(i)).unwrap();
 
     let (h, e, i) = fixture(ExchangeName::Grvt, false, 3.);
     h.replies.borrow_mut().push_back(Ok(vec!["o".into()]));
-    settle(e.process_instance(i.clone())).unwrap();
+    settle(&h.runtime, e.process_instance(i.clone())).unwrap();
     i.exchange
         .base()
         .emit(
@@ -719,7 +757,7 @@ fn monitor_reprices_after_authoritative_fills_and_collapses_queued_checks() {
 
     let (h, e, i) = fixture(ExchangeName::Grvt, false, 3.);
     h.replies.borrow_mut().push_back(Ok(vec!["o".into()]));
-    settle(e.process_instance(i.clone())).unwrap();
+    settle(&h.runtime, e.process_instance(i.clone())).unwrap();
     for (id, symbol) in [("other", "BTC"), ("o", "OTHER")] {
         i.exchange
             .base()
@@ -753,7 +791,7 @@ fn monitor_reprices_after_authoritative_fills_and_collapses_queued_checks() {
 
     let (h, e, i) = fixture(ExchangeName::Grvt, false, 3.);
     h.replies.borrow_mut().push_back(Ok(vec!["o".into()]));
-    settle(e.process_instance(i.clone())).unwrap();
+    settle(&h.runtime, e.process_instance(i.clone())).unwrap();
     for id in [json!(1), json!("1"), Value::Null] {
         i.exchange
             .base()
@@ -781,9 +819,208 @@ fn monitor_reprices_after_authoritative_fills_and_collapses_queued_checks() {
         .unwrap();
     assert!(!i.pending_orders_update());
     i.mark_complete(Some("user"));
-    settle(e.cleanup_instance(i)).unwrap();
+    settle(&h.runtime, e.cleanup_instance(i)).unwrap();
     let src = source();
     assert_eq!(src["repriceEvents"], json!(reprice_events));
     assert_eq!(src["unavailableReason"], unavailable_reason);
     assert_eq!(src["fillReason"], fill_reason);
+}
+
+fn timing_snapshot(h: &Host, i: &ChaserOrderInstance) -> Value {
+    json!({"places":h.places.borrow().len(),"cancels":h.cancels.borrow().len(),
+        "completes":h.completes.borrow().len(),"filled":safe_cex_num::js_number_string(i.filled_size()),
+        "stopped":i.is_stopped(),"events":h.events.borrow().clone()})
+}
+fn timing_profiles(method: &str, dropped: bool) {
+    let src = source();
+    for profile in src["timing"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["method"] == method)
+    {
+        let mode = profile["mode"].as_str().unwrap();
+        if (mode == "held-drop") != dropped {
+            continue;
+        }
+        let (h, e, i) = fixture(
+            if method == "completion" {
+                ExchangeName::Bybitdemo
+            } else {
+                ExchangeName::Bybit
+            },
+            false,
+            3.,
+        );
+        if method == "placement" {
+            h.replies.borrow_mut().push_back(if mode == "error" {
+                Err(ExchangeError::new("placement failed"))
+            } else {
+                Ok(vec!["o".into()])
+            });
+            if mode == "noop" {
+                i.mark_complete(Some("user"));
+            }
+            if mode == "error" {
+                h.sleep_stop.set(true);
+            }
+            h.place_released.set(mode != "held-drop");
+        } else if mode != "noop" {
+            i.options().borrow_mut().client_id = Some("awaited".into());
+            i.set_current_order_ids(vec!["o".into()]);
+            h.fill_mode
+                .set(if mode == "error" { "error" } else { "partial" });
+            h.fill_released.set(mode != "held-drop");
+        }
+        let mut future: ExchangeFuture<'static, Value> = if method == "placement" {
+            let f = e.try_place_orders(i.clone(), 1.);
+            Box::pin(async move { f.await.map(|ids| json!(ids)) })
+        } else {
+            let f = e.emit_complete(i.clone());
+            Box::pin(async move { f.await.map(|()| Value::Null) })
+        };
+        assert_eq!(
+            timing_snapshot(&h, &i),
+            profile["returned"],
+            "{method}/{mode} synchronous source prefix"
+        );
+        if mode != "held-drop" {
+            assert!(
+                future
+                    .as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop()))
+                    .is_pending(),
+                "{method}/{mode} caller must yield"
+            );
+            assert_eq!(
+                timing_snapshot(&h, &i),
+                profile["returned"],
+                "{method}/{mode} first caller poll cannot cross source await"
+            );
+        }
+        if mode == "held-drop" {
+            drop(future);
+            if method == "placement" {
+                i.mark_complete(Some("user"));
+            }
+            h.place_released.set(true);
+            h.fill_released.set(true);
+            for waker in [&h.place_waker, &h.fill_waker] {
+                if let Some(waker) = waker.borrow_mut().take() {
+                    waker.wake();
+                }
+            }
+            h.runtime.advance(h.runtime.now.get());
+            h.drain();
+        } else {
+            h.runtime.advance(h.runtime.now.get());
+            h.drain();
+            assert_eq!(settle(&h.runtime, future).unwrap(), profile["outcome"]);
+        }
+        assert_eq!(
+            i.filled_size().to_bits(),
+            if method == "completion" && matches!(mode, "ready" | "held-drop") {
+                1f64.to_bits()
+            } else {
+                0f64.to_bits()
+            }
+        );
+        assert_eq!(
+            timing_snapshot(&h, &i),
+            profile["final"],
+            "{method}/{mode} native continuation effects"
+        );
+        assert!(h.runtime.exceptions.borrow().is_empty());
+    }
+}
+#[test]
+fn placement_retains_continuation_and_source_await_order() {
+    timing_profiles("placement", false);
+}
+#[test]
+fn completion_retains_continuation_and_source_await_order() {
+    timing_profiles("completion", false);
+}
+
+#[test]
+fn placement_dropped_waiter_keeps_late_stop_cancellation() {
+    timing_profiles("placement", true);
+}
+#[test]
+fn completion_dropped_waiter_keeps_fill_reconciliation() {
+    timing_profiles("completion", true);
+}
+
+#[test]
+fn manager_module_composition_runs_the_real_engine() {
+    use safe_cex_webworker::chaser_manager::chaser_order_manager_instance;
+    let (host, _, instance) = fixture(ExchangeName::Bybit, false, 3.0);
+    *host.runtime.id.borrow_mut() = Some("composition".into());
+    let instance =
+        Rc::new(ChaserOrderInstance::new(instance.exchange.clone(), instance.options()).unwrap());
+    *host.instance.borrow_mut() = Rc::downgrade(&instance);
+    instance.mark_complete(Some("user"));
+    let singleton = chaser_order_manager_instance();
+    let list = singleton.instances();
+    let empty = list.borrow().is_empty();
+    let fresh = ChaserOrderManager::new();
+    let same_manager = Rc::ptr_eq(&singleton, &chaser_order_manager_instance());
+    let same_list = Rc::ptr_eq(&list, &chaser_order_manager_instance().instances());
+    let independent = !Rc::ptr_eq(&singleton, &fresh)
+        && !Rc::ptr_eq(&list, &fresh.instances())
+        && fresh.instances().borrow().is_empty();
+    assert!(host.events.borrow().is_empty());
+    assert!(host.tasks.borrow().is_empty());
+    assert!(host.places.borrow().is_empty());
+    assert!(host.timers.borrow().is_empty());
+    let engine = ChaserEngine::new(host.clone(), singleton.clone());
+    singleton.add(instance.clone(), engine);
+    let prefix = json!({"count":list.borrow().len(),
+        "sameInstance":Rc::ptr_eq(&list.borrow()[0], &instance),
+        "logs":host.events.borrow().len()});
+    let isolated = std::thread::spawn(|| {
+        let singleton = chaser_order_manager_instance();
+        singleton.instances().borrow().is_empty()
+            && Rc::ptr_eq(&singleton, &chaser_order_manager_instance())
+    })
+    .join()
+    .unwrap();
+    host.drain();
+    host.runtime.advance(0);
+    host.drain();
+    assert!(host.tasks.borrow().is_empty());
+    assert!(host.places.borrow().is_empty());
+    assert!(host.cancels.borrow().is_empty());
+    assert_eq!(
+        host.completes.borrow().len(),
+        1,
+        "MANAGER bound completion count"
+    );
+    let complete = host.completes.borrow()[0].clone();
+    assert_eq!(complete.size.to_bits(), 3.0f64.to_bits());
+    assert_eq!(complete.filled.to_bits(), 0.0f64.to_bits());
+    assert!(complete.client_id.is_none());
+    let actual = json!({"empty":empty,"sameManager":same_manager,"sameList":same_list,
+        "independent":independent,"isolated":isolated,"externalCalls":0,
+        "prefix":prefix,"remaining":list.borrow().len(),
+        "complete":{"id":complete.id,"symbol":complete.symbol,"side":complete.side,
+            "reduceOnly":complete.reduce_only,"sizeBits":format!("{:016x}", complete.size.to_bits()),
+            "filledBits":format!("{:016x}", complete.filled.to_bits()),
+            "stopReason":complete.stop_reason},
+        "logs":host.events.borrow().iter().map(|s|s.strip_prefix("log:").unwrap()).collect::<Vec<_>>()});
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/chaser_manager_dispatch_oracle.mjs"
+        ))
+        .arg("--composition")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(actual, expected, "MANAGER actual engine/module composition");
 }

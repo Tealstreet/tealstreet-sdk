@@ -368,7 +368,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::handle_web_socket_error", "safe-cex-exchange/src/websocket.rs::WsProtocol::on_error" ]
 status = "ported"
-note = " Split member `safe-cex-exchange/src/websocket.rs::WsProtocol::on_error`. The socket error event reaches venue error listeners after this base handling, as TS fires every registered error listener whether or not the parent is disposed."
+note = " Split member `safe-cex-exchange/src/websocket.rs::WsProtocol::on_error`. The base error listener registers first and calls stopImmediatePropagation, suppressing later venue listeners on plain WebSocket dispatch, including after disposal. Grouped ReconnectingWebSocket dispatch ignores that flag and still runs those listeners. Actual maintained Aster/Bitunix WebSockets and production native-host upgrade failures and close frames are compared in safe-cex-registry/tests/native_socket_error_dispatch.rs."
 
 [[symbol]]
 ts = "BaseWebSocket.send"

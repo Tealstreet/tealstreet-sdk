@@ -120,7 +120,13 @@ A module-scope `macro_rules!` is accepted only when every same-name definition i
 the target is unconditional and every arm transcribes without a declaration
 keyword or `item` fragment; each invocation's arguments get the same check. Macro binding guards still
 reject local shadowing of trusted expression/derive/attribute names and
-namespaces. A target-wide token proof permits module-level `core` declarations only when
+namespaces. The compiler builtin `#[track_caller]` accepts only its bare,
+unqualified form (including inside an otherwise accepted `cfg_attr`). Argument
+lists, assigned values, qualified lookalikes and uncertain imports remain refused,
+including attributes renamed from known procedural-macro crates;
+the annotated body still receives every local-declaration and macro-effect check.
+The bounded local-macro recipe grammar is unchanged.
+A target-wide token proof permits module-level `core` declarations only when
 every `core` identifier in every supplied source is another such declaration
 or an AST-proven value binding/reference, and the actual compiler `core` origin
 is authenticated. Only authenticated std `vec!` operands are parsed as expressions;
@@ -319,3 +325,22 @@ the binary's name/use collectors and Bindings visitor inspect parsed syntax.
 Their specific non-decoder rows do not waive macro-effect, provenance, import
 shadowing or missing-classification checks. Refresh these reviewed file pins
 alongside changes to either source file.
+
+The `JsJsonValue::from(Value)` native observer uses that enum's actual `String`
+object keys directly; retained-input UTF-16 key adapters belong to their separate
+owners. `node --test safe-cex-parity/scripts/accepted-string-key-observer-native.test.mjs`
+(from `sdk-rs`) runs the canonical compiler inventory and generated production
+probe, including nested Unicode/NUL/empty keys and a compiled wrong-key output
+control. No classification receipt can replace the executed conversion witness.
+
+Kraken's exact `stream_updates::NumericChanges = Vec<(&'static str, f64)>`
+uses the separate reviewed `borrowed-sequence` route policy in
+`scripts/accepted-kraken-numeric-changes.mjs`. It authenticates the source span,
+raw/expanded compiler AST, sysroot Vec artifact and invariant native type.
+Its complete four-route matrix observes native f64 bits and borrowed key pointers
+or offsets, including duplicate keys, escaped text refusal and owned nonempty
+Value refusal. The general borrowed-alias refusal and DeserializeOwned bound
+stay intact; a control bypassing the exact native routes must explicitly select
+that unchanged borrowed guard and produce its compiled runtime refusal. Do not extend this permission to another owner or shape by copying its
+contract. Registered native identity/member-order/dispatch controls must fail by
+runtime receipt and pass after exact restoration.

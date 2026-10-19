@@ -199,6 +199,16 @@ fn real_income_history_reads_venue_bills() {
         json!([{"symbol":"BTCUSDT","incomeType":"contract_settle_fee","asset":"USDT","timestamp":1700000000000.0,"tranId":"b1:funding","income":-0.25,"category":"funding"}]),
         "fetchIncomeHistory must read the real bill route"
     );
+    let range = h
+        .drive(
+            h.venue()
+                .fetch_income_history_range(1_699_999_999_900.0, 1_700_000_000_100.0, None),
+        )
+        .unwrap();
+    assert_eq!(
+        range, records,
+        "shared pager retains the actual signed bill result"
+    );
     let via_capability = h
         .drive(
             h.venue()

@@ -1,4 +1,5 @@
 use crate::native_value::NativeValue;
+use safe_cex_exchange::js_runtime::value::{Js, to_typed_preserving_undefined};
 use safe_cex_exchange::{
     delivery_timers::WorkerPortTimers,
     message_stats::MessageHandlerStatsPostprocessor,
@@ -34,15 +35,18 @@ impl WorkerPortTimers for NativeStoreTimers {
         let sleep = self.runtime.sleep(delay);
         let runtime = self.runtime.clone();
         self.runtime
-            .spawn_local(Box::pin(async move {
-                match sleep.await {
-                    Ok(()) => callback(),
-                    Err(error) => runtime.report_exception(
-                        &error,
-                        &json!({"module":"native account Store timer"}).into(),
-                    ),
-                }
-            }))
+            .spawn_classified(
+                safe_cex_exchange::runtime::RuntimeTaskKind::Timer,
+                Box::pin(async move {
+                    match sleep.await {
+                        Ok(()) => callback(),
+                        Err(error) => runtime.report_exception(
+                            &error,
+                            &json!({"module":"native account Store timer"}).into(),
+                        ),
+                    }
+                }),
+            )
             .into()
     }
     fn clear_timeout(&self, timer: &Self::Timer) {
@@ -67,7 +71,7 @@ pub(super) struct NativeStoreDelivery {
     store: Weak<dyn Store>,
     preparer: RefCell<StorePayloadPreparer>,
     post: Rc<dyn Fn(NativeValue)>,
-    throttle: Rc<StoreUpdateThrottle<NativeStoreTimers>>,
+    throttle: Rc<StoreUpdateThrottle<NativeStoreTimers, Js>>,
 }
 impl NativeStoreDelivery {
     pub fn new(
@@ -90,14 +94,21 @@ impl NativeStoreDelivery {
                 store: Rc::downgrade(store),
                 preparer: RefCell::default(),
                 post,
-                throttle: StoreUpdateThrottle::new(
+                throttle: StoreUpdateThrottle::new_with_argument(
                     Rc::new(NativeStoreTimers {
                         runtime: exchange.base().runtime.clone(),
                     }),
                     250.0 * multiplier,
                     Rc::new(move |data| {
                         if let Some(delivery) = delivery.upgrade() {
-                            delivery.deliver(data.borrow().clone(), false)?;
+                            let snapshot: StoreData = to_typed_preserving_undefined(&data)
+                                .map_err(|cause| {
+                                    safe_cex_types::StoreReadError::new(
+                                        safe_cex_types::StoreReadPhase::Projection,
+                                        Rc::new(cause),
+                                    )
+                                })?;
+                            delivery.deliver(snapshot, false)?;
                         }
                         Ok(())
                     }),
@@ -124,9 +135,12 @@ impl NativeStoreDelivery {
         (self.post)(value);
         Ok(())
     }
-    pub fn update(&self, data: &StoreData) -> Result<(), ExchangeError> {
+    pub fn update(&self, data: &dyn std::any::Any) -> Result<(), ExchangeError> {
         if self.active.get() {
-            self.throttle.call(Rc::new(RefCell::new(data.clone())))?;
+            let data = data
+                .downcast_ref::<Js>()
+                .ok_or_else(|| ExchangeError::new("Unsupported native Store state"))?;
+            self.throttle.call(data.clone())?;
         }
         Ok(())
     }

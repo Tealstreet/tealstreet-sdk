@@ -104,6 +104,7 @@ fn dynamic_bucket(function: &str) -> &'static str {
     match function {
         "decoded_task_snapshots_use_distinct_dimensions_and_one_hot_flags"
         | "record"
+        | "nullable_index_ticker_fixture"
         | "roundtrip"
         | "ticker_derivative_sentinels_are_required_and_preserve_fractional_numbers"
         | "recursive_balances_and_execution_legs_keep_absence_distinct_from_zero"
@@ -208,7 +209,18 @@ fn parse_native_test_fixtures_and_bit_comparison_functions() {
             }
         }
     }
+    // The canonical Store owner moved to exchange-core. Follow its existing
+    // fixtures rather than lowering the reviewed observation bucket counts.
     for relative in [
+        "../safe-cex-exchange/tests/store_bucket_witnesses.rs",
+        "../safe-cex-exchange/tests/store_clone_construction.rs",
+        "../safe-cex-exchange/tests/store_contract_runtime.rs",
+        "../safe-cex-exchange/tests/store_notification.rs",
+        "../safe-cex-exchange/tests/store_p4_store.rs",
+        "../safe-cex-exchange/tests/store_patch_info.rs",
+        "../safe-cex-exchange/tests/store_ticker_timestamp.rs",
+        "../safe-cex-exchange/src/js_runtime/native_store/legacy_owner_tests.rs",
+        "../safe-cex-exchange/src/js_runtime/native_store/legacy_request_tests.rs",
         "../safe-cex/tests/native_store_patches.rs",
         "../safe-cex/tests/risk_recovery.rs",
         "../safe-cex/tests/dictionary_write.rs",
@@ -230,7 +242,7 @@ fn parse_native_test_fixtures_and_bit_comparison_functions() {
     assert_eq!(
         inventory.dynamic_buckets,
         BTreeMap::from([
-            ("decoded-record", 18),
+            ("decoded-record", 19),
             ("effect-observation", 19),
             ("numeric-observation", 12),
             ("operation-result", 16),

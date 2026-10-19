@@ -538,12 +538,11 @@ impl BaseExchange {
     ) -> Self {
         let listeners: ListenerRows = Rc::default();
         let events = listeners.clone();
-        let unsubscribe = store.subscribe(Box::new(move |data, _| {
-            let data = from_typed(data).map_err(|error| {
-                safe_cex_types::StoreSubscriberError::new(error.message())
-                    .with_cause(Rc::new(error.to_exchange_error()))
+        let unsubscribe = store.subscribe_native(Box::new(move |data, _| {
+            let data = data.downcast_ref::<Js>().ok_or_else(|| {
+                safe_cex_types::StoreSubscriberError::new("Unsupported native Store state")
             })?;
-            emit_listeners(&events, "update", &[data]).map_err(Into::into)
+            emit_listeners(&events, "update", std::slice::from_ref(data)).map_err(Into::into)
         }));
         let active = options
             .tuning
@@ -2096,22 +2095,26 @@ impl BaseExchange {
             completed: completed.clone(),
         };
         let sleep = self.runtime.sleep(10000);
-        let task = self.runtime.spawn_local(Box::pin(async move {
-            let result = sleep.await;
-            guard.release();
-            if result.is_err() {
-                return;
-            }
-            let _ = owner.with_base(|exchange| {
-                if let Err(error) = exchange.audit_socket_health() {
-                    exchange
-                        .runtime
-                        .report_exception(&error, &json!({"operation":"socket watchdog"}).into());
+        let task = self.runtime.spawn_classified(
+            crate::runtime::RuntimeTaskKind::Timer,
+            Box::pin(async move {
+                let result = sleep.await;
+                guard.release();
+                if result.is_err() {
                     return;
                 }
-                exchange.start_watchdog();
-            });
-        }));
+                let _ = owner.with_base(|exchange| {
+                    if let Err(error) = exchange.audit_socket_health() {
+                        exchange.runtime.report_exception(
+                            &error,
+                            &json!({"operation":"socket watchdog"}).into(),
+                        );
+                        return;
+                    }
+                    exchange.start_watchdog();
+                });
+            }),
+        );
         if !completed.get() && self.watchdog_generation.get() == generation && !self.is_disposed() {
             *self.watchdog.borrow_mut() = Some(task);
         } else {
@@ -2211,27 +2214,31 @@ impl BaseExchange {
             .iter()
             .filter_map(|socket| socket.last_message_timestamp())
             .reduce(f64::max);
-        let mut health = json!({"publicHealthy":public_healthy,"privateHealthy":private_healthy,"publicInitialized":public_initialized,"privateInitialized":private_initialized});
-        let fields = health.as_object_mut().expect("health object");
-        if let Some(at) = public_at.filter(|at| *at != 0.0) {
-            fields.insert("publicLastMessage".into(), json!(at));
-        }
-        if let Some(at) = private_at.filter(|at| *at != 0.0) {
-            fields.insert("privateLastMessage".into(), json!(at));
-        }
-        fields.extend(
-            socket_diagnostics(&public, false)
-                .as_object()
-                .expect("public diagnostics")
-                .clone(),
-        );
-        fields.extend(
-            socket_diagnostics(&private, true)
-                .as_object()
-                .expect("private diagnostics")
-                .clone(),
-        );
-        self.publish_socket_health(health)?;
+        use safe_cex_types::retained_json::RetainedJsonInput as NativeValue;
+        let mut health = vec![
+            ("publicHealthy", NativeValue::Bool(public_healthy)),
+            ("privateHealthy", NativeValue::Bool(private_healthy)),
+            ("publicInitialized", NativeValue::Bool(public_initialized)),
+            ("privateInitialized", NativeValue::Bool(private_initialized)),
+            (
+                "publicLastMessage",
+                public_at
+                    .filter(|at| *at != 0.0)
+                    .map_or(NativeValue::Undefined, NativeValue::Float),
+            ),
+            (
+                "privateLastMessage",
+                private_at
+                    .filter(|at| *at != 0.0)
+                    .map_or(NativeValue::Undefined, NativeValue::Float),
+            ),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.encode_utf16().collect(), value))
+        .collect::<Vec<_>>();
+        health.extend(socket_diagnostics(&public, false));
+        health.extend(socket_diagnostics(&private, true));
+        self.publish_socket_health(NativeValue::Object(health))?;
         Ok(())
     }
     pub fn fetch_last_logs_from_websockets(&self) -> Vec<String> {
@@ -2490,32 +2497,11 @@ impl BaseExchange {
             )
         })
     }
-    pub(crate) fn publish_socket_health(&self, health: Value) -> Result<(), ExchangeError> {
-        let Some(current) = health.as_object() else {
-            return Ok(());
-        };
-        let mut merged = self
-            .store
-            .socket_health()?
-            .and_then(|old| old.as_object().cloned())
-            .unwrap_or_default();
-        // TS object spread writes undefined for cleared optional scalar diagnostics.
-        for key in [
-            "publicLastMessage",
-            "privateLastMessage",
-            "publicCloseCode",
-            "privateCloseCode",
-        ] {
-            merged.shift_remove(key);
-        }
-        merged.extend(current.clone());
-        self.store.update(
-            StoreUpdate {
-                socket_health: Some(Value::Object(merged)),
-                ..Default::default()
-            },
-            false,
-        )?;
+    pub(crate) fn publish_socket_health(
+        &self,
+        health: safe_cex_types::retained_json::RetainedJsonInput,
+    ) -> Result<(), ExchangeError> {
+        self.store.update_socket_health(&health)?;
         Ok(())
     }
 

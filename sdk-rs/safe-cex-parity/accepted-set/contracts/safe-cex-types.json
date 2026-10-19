@@ -27731,13 +27731,48 @@
               ]
             ],
             "output": {
-              "generic": "Self"
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "serde_core::de::Deserializer",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "lifetime": "'de"
+                            }
+                          ],
+                          "constraints": [
+                            {
+                              "name": "Error",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "serde_json::error::Error",
+                                      "args": null
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
             },
             "is_c_variadic": false
           }
         },
         "input": "typed",
-        "reason": "into_native_payload inspects or transforms an already captured canonical enum tree; it does not decode or admit a raw shape. Native Store/codec witnesses exercise native values before projection."
+        "reason": "Streams the already captured canonical tree through the native payload Deserializer without constructing Float nodes for UTF16 units; actual codec/native tests retain all unit and Number variants."
       },
       {
         "api": {
@@ -54528,6 +54563,141 @@
         "api": {
           "kind": "trait",
           "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_identifier",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior. The same direct native method now additionally observes short ASCII, boundary-length, long, Unicode and lone-unit keys; bool dispatch controls remain unchanged.",
+        "call": "if $value.is_boolean(){struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_identifier(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}else{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=Vec<u16>;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native field identifier\")}fn visit_str<E:serde::de::Error>(self,text:&str)->Result<Self::Value,E>{Ok(text.encode_utf16().collect())}fn visit_string<E:serde::de::Error>(self,text:String)->Result<Self::Value,E>{self.visit_str(&text)}}let units:Vec<u16>=serde_json::from_value($value.clone()).unwrap();let native=$type(super::Input::Text(units),super::NativeMode::Key);match serde::Deserializer::deserialize_identifier(native,Probe){Ok(units)=>serde_json::json!({\"ok\":true,\"units\":units}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {"input": [65], "output": {"ok": true, "units": [65]}},
+          {"input": [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120], "output": {"ok": true, "units": [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120]}},
+          {"input": [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120], "output": {"ok": true, "units": [120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120]}},
+          {"input": [233], "output": {"ok": true, "units": [233]}},
+          {"input": [55296], "output": {"ok": true, "units": [65533]}}
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
           "name": "deserialize_bool",
           "signature": {
             "inputs": [
@@ -56681,145 +56851,6 @@
         "api": {
           "kind": "trait",
           "trait": "serde_core::de::Deserializer",
-          "name": "deserialize_identifier",
-          "signature": {
-            "inputs": [
-              [
-                "self",
-                {
-                  "generic": "Self"
-                }
-              ],
-              [
-                "visitor",
-                {
-                  "generic": "V"
-                }
-              ]
-            ],
-            "output": {
-              "resolved_path": {
-                "path": "core::result::Result",
-                "args": {
-                  "angle_bracketed": {
-                    "args": [
-                      {
-                        "type": {
-                          "qualified_path": {
-                            "name": "Value",
-                            "args": null,
-                            "self_type": {
-                              "generic": "V"
-                            },
-                            "trait": {
-                              "path": "",
-                              "args": null
-                            }
-                          }
-                        }
-                      },
-                      {
-                        "type": {
-                          "qualified_path": {
-                            "name": "Error",
-                            "args": null,
-                            "self_type": {
-                              "generic": "Self"
-                            },
-                            "trait": {
-                              "path": "serde_core::de::Deserializer",
-                              "args": {
-                                "angle_bracketed": {
-                                  "args": [
-                                    {
-                                      "lifetime": "'de"
-                                    }
-                                  ],
-                                  "constraints": []
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    ],
-                    "constraints": []
-                  }
-                }
-              }
-            },
-            "is_c_variadic": false
-          },
-          "generics": {
-            "params": [
-              {
-                "name": "V",
-                "kind": {
-                  "type": {
-                    "bounds": [],
-                    "default": null,
-                    "is_synthetic": false
-                  }
-                }
-              }
-            ],
-            "where_predicates": [
-              {
-                "bound_predicate": {
-                  "type": {
-                    "generic": "V"
-                  },
-                  "bounds": [
-                    {
-                      "trait_bound": {
-                        "trait": {
-                          "path": "serde_core::de::Visitor",
-                          "args": {
-                            "angle_bracketed": {
-                              "args": [
-                                {
-                                  "lifetime": "'de"
-                                }
-                              ],
-                              "constraints": []
-                            }
-                          }
-                        },
-                        "generic_params": [],
-                        "modifier": "none"
-                      }
-                    }
-                  ],
-                  "generic_params": []
-                }
-              }
-            ]
-          }
-        },
-        "input": "observed",
-        "reason": "Executes this exact compiler-expanded forwarding method with one fixed native bool visitor and two captured bool values. Name/length/field metadata, where present, are fixed. This observes forwarding only; it makes no claim for numeric/string/aggregate visitor behavior.",
-        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native bool\")}fn visit_bool<E:serde::de::Error>(self,flag:bool)->Result<bool,E>{Ok(flag)}}let flag=$value.as_bool().unwrap();let native=$type(super::Input::Bool(flag),super::NativeMode::Normal);match serde::Deserializer::deserialize_identifier(native,Probe){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})}}",
-        "cases": [
-          {
-            "input": true,
-            "output": {
-              "ok": true,
-              "flag": true
-            }
-          },
-          {
-            "input": false,
-            "output": {
-              "ok": true,
-              "flag": false
-            }
-          }
-        ]
-      },
-      {
-        "api": {
-          "kind": "trait",
-          "trait": "serde_core::de::Deserializer",
           "name": "deserialize_ignored_any",
           "signature": {
             "inputs": [
@@ -57088,5 +57119,4262 @@
         "reason": "Constructs a typed phase and retains the supplied opaque native Rc cause. It never reads cause getters or parses a raw value. Actual canonical Store property/projection regressions exercise original-cause recovery, identity and diagnostics."
       }
     ]
+  },
+  "safe_cex_types::retained_json::payload::Payload": {
+    "shape": "observed",
+    "evidence": "Private lazy adapter for the existing closed retained payload schema. Direct forwarding observations execute each inventoried method; full tag/UTF16/native-bit and malformed-payload witnesses execute the canonical codec.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::IntoDeserializer",
+          "name": "into_deserializer",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "typed",
+        "reason": "Returns the closed typed payload adapter itself; no raw input argument."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_newtype_struct",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "_name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::error::Error",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::Visitor",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_newtype_struct(payload,\"AcceptedPayload\",Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_bool",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_bool(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_i8",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_i8(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_i16",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_i16(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_i32",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_i32(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_i64",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_i64(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_u8",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_u8(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_u16",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_u16(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_u32",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_u32(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_u64",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_u64(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_f32",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_f32(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_f64",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_f64(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_char",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_char(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_str",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_str(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_string",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_string(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_bytes",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_bytes(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_byte_buf",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_byte_buf(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_unit",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_unit(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_unit_struct",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_unit_struct(payload,\"AcceptedPayload\",Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_seq",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_seq(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_tuple",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "len",
+                {
+                  "primitive": "usize"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_tuple(payload,2,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_tuple_struct",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "len",
+                {
+                  "primitive": "usize"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_tuple_struct(payload,\"AcceptedPayload\",2,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_map",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_map(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_struct",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "fields",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "borrowed_ref": {
+                          "lifetime": "'static",
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_struct(payload,\"AcceptedPayload\",&[\"field\"],Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_enum",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "variants",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "borrowed_ref": {
+                          "lifetime": "'static",
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_enum(payload,\"AcceptedPayload\",&[\"field\"],Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_identifier",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_identifier(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Deserializer",
+          "name": "deserialize_ignored_any",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "visitor",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "serde_core::de::Deserializer",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "lifetime": "'de"
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": [
+              {
+                "bound_predicate": {
+                  "type": {
+                    "generic": "V"
+                  },
+                  "bounds": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "serde_core::de::Visitor",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "lifetime": "'de"
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ],
+                  "generic_params": []
+                }
+              }
+            ]
+          }
+        },
+        "input": "observed",
+        "reason": "Direct bounded dispatch of captured Bool payload through this forwarding entrypoint; the canonical retained decoder separately observes full payload variants.",
+        "call": "{struct Probe;impl<'de> serde::de::Visitor<'de> for Probe{type Value=bool;fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result{f.write_str(\"native payload bool\")}fn visit_bool<E:serde::de::Error>(self,value:bool)->Result<bool,E>{Ok(value)}fn visit_newtype_struct<D:serde::Deserializer<'de>>(self,d:D)->Result<bool,D::Error>{serde::Deserialize::deserialize(d)}}let flag=$value.as_bool().unwrap();let payload=$type::Value(super::Input::Bool(flag));let observed=serde::Deserializer::deserialize_ignored_any(payload,Probe).expect(\"payload forwarding\");serde_json::json!({\"ok\":true,\"flag\":observed})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "flag": false
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "flag": true
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_types::retained_json::codec::Unit": {
+    "shape": "union",
+    "sample": 65,
+    "evidence": "Private validated UTF16 storage element. JSON numeric admission and direct native f64 observations cover integral range0..65535, signed zero, malformed types and out-of-range/fractional refusals.",
+    "entrypoints": [],
+    "positive": [
+      0,
+      65,
+      65535,
+      3,
+      0
+    ],
+    "negative": [
+      null,
+      false,
+      "1",
+      {},
+      [],
+      -1,
+      65536,
+      1.5
+    ],
+    "nativeObservation": {
+      "call": "{let number=$value.as_f64().expect(\"numeric event fixture\");match <$type as serde::Deserialize>::deserialize(serde::de::value::F64Deserializer::<serde_json::Error>::new(number)){Ok(value)=>serde_json::json!({\"ok\":true,\"kind\":\"unit\",\"native\":value.0}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "kind",
+        "native"
+      ],
+      "cases": [
+        {
+          "input": 0,
+          "output": {
+            "ok": true,
+            "kind": "unit",
+            "native": 0
+          }
+        },
+        {
+          "input": 65,
+          "output": {
+            "ok": true,
+            "kind": "unit",
+            "native": 65
+          }
+        },
+        {
+          "input": 65535,
+          "output": {
+            "ok": true,
+            "kind": "unit",
+            "native": 65535
+          }
+        },
+        {
+          "input": 0,
+          "output": {
+            "ok": true,
+            "kind": "unit",
+            "native": 0
+          }
+        },
+        {
+          "input": -1,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 65536,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 1.5,
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+"safe_cex_types::retained_json::codec::Units": {
+  "shape": "union",
+  "sample": [
+    65,
+    55296,
+    65535
+  ],
+  "evidence": "Private UTF-16 storage decoder accepts the existing validated numeric unit sequence or the canonical internal packed native-endian byte event. Direct native bytes observe decoded length and complete units across empty/even/odd input and lone units; retained_utf16 exercises every unit through the actual payload adapter. No JSON wire format change.",
+  "entrypoints": [],
+  "positive": [
+    [],
+    [
+      0,
+      65535
+    ],
+    [
+      55296,
+      57343
+    ],
+    [
+      3.0,
+      -0.0
+    ]
+  ],
+  "negative": [
+    null,
+    false,
+    "1",
+    {},
+    [
+      -1
+    ],
+    [
+      65536
+    ],
+    [
+      1.5
+    ],
+    [
+      null
+    ],
+    [
+      true
+    ],
+    [
+      "1"
+    ]
+  ],
+  "nativeObservation": {
+    "call": "{let bytes:Vec<u8>=if let Some(units)=$value.get(\"units\"){let units:Vec<u16>=serde_json::from_value(units.clone()).unwrap();units.into_iter().flat_map(u16::to_ne_bytes).collect()}else{serde_json::from_value($value.clone()).unwrap()}; match <$type as serde::Deserialize>::deserialize(serde::de::value::BytesDeserializer::<serde_json::Error>::new(&bytes)){Ok(value)=>serde_json::json!({\"ok\":true,\"length\":value.0.len(),\"units\":value.0}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+    "nativeFields": ["length", "units"],
+    "cases": [
+  {
+    "input": [],
+    "output": {
+      "ok": true,
+      "units": [],
+      "length": 0
+    }
+  },
+  {
+    "input": [
+      0,
+      0,
+      255,
+      255
+    ],
+    "output": {
+      "ok": true,
+      "units": [
+        0,
+        65535
+      ],
+      "length": 2
+    }
+  },
+  {
+    "input": {
+      "units": [
+        55296,
+        57343
+      ]
+    },
+    "output": {
+      "ok": true,
+      "units": [
+        55296,
+        57343
+      ],
+      "length": 2
+    }
+  },
+  {
+    "input": [
+      1
+    ],
+    "output": {
+      "ok": false
+    }
+  },
+  {
+    "input": [
+      1,
+      0,
+      2
+    ],
+    "output": {
+      "ok": false
+    }
+  }
+]
+  }
+},
+  "safe_cex_types::retained_json::codec::Tag": {
+    "shape": "union",
+    "sample": "Text",
+    "entrypoints": [],
+    "evidence": "Closed retained payload tag decoder eliminates intermediate owned tags while preserving all eight names, string/UTF8 byte admission and malformed-tag refusals. Native observations inspect the actual enum discriminant before JSON output; retained_utf16 additionally invokes the owned-byte visitor through the actual payload decoder. The helper contract separately observes the concrete Rust discriminant and its matched tag name.",
+    "positive": [
+      "Undefined",
+      "Null",
+      "Bool",
+      "Text",
+      "Lexeme",
+      "Float",
+      "Array",
+      "Object"
+    ],
+    "negative": [
+      null,
+      false,
+      0,
+      [],
+      {},
+      "unknown",
+      {
+        "Text": null
+      }
+    ],
+    "nativeObservation": {
+      "call": "{let result=if let Some(raw)=$value.get(\"bytes\"){let bytes:Vec<u8>=serde_json::from_value(raw.clone()).unwrap();<$type as serde::Deserialize>::deserialize(serde::de::value::BytesDeserializer::<serde_json::Error>::new(&bytes))}else{serde_json::from_value::<$type>($value.clone())}; match result{Ok(tag)=>{let discriminant=format!(\"{:?}\",std::mem::discriminant(&tag));let name=match tag{$type::Undefined=>\"Undefined\",$type::Null=>\"Null\",$type::Bool=>\"Bool\",$type::Text=>\"Text\",$type::Lexeme=>\"Lexeme\",$type::Float=>\"Float\",$type::Array=>\"Array\",$type::Object=>\"Object\"};serde_json::json!({\"ok\":true,\"tag\":name,\"discriminant\":discriminant})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "tag",
+        "discriminant"
+      ],
+      "cases": [
+        {
+          "input": "Undefined",
+          "output": {
+            "ok": true,
+            "tag": "Undefined",
+            "discriminant": "Discriminant(0)"
+          }
+        },
+        {
+          "input": "Null",
+          "output": {
+            "ok": true,
+            "tag": "Null",
+            "discriminant": "Discriminant(1)"
+          }
+        },
+        {
+          "input": "Bool",
+          "output": {
+            "ok": true,
+            "tag": "Bool",
+            "discriminant": "Discriminant(2)"
+          }
+        },
+        {
+          "input": "Text",
+          "output": {
+            "ok": true,
+            "tag": "Text",
+            "discriminant": "Discriminant(3)"
+          }
+        },
+        {
+          "input": "Lexeme",
+          "output": {
+            "ok": true,
+            "tag": "Lexeme",
+            "discriminant": "Discriminant(4)"
+          }
+        },
+        {
+          "input": "Float",
+          "output": {
+            "ok": true,
+            "tag": "Float",
+            "discriminant": "Discriminant(5)"
+          }
+        },
+        {
+          "input": "Array",
+          "output": {
+            "ok": true,
+            "tag": "Array",
+            "discriminant": "Discriminant(6)"
+          }
+        },
+        {
+          "input": "Object",
+          "output": {
+            "ok": true,
+            "tag": "Object",
+            "discriminant": "Discriminant(7)"
+          }
+        },
+        {
+          "input": "unknown",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "Text": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "bytes": [
+              78,
+              117,
+              108,
+              108
+            ]
+          },
+          "output": {
+            "ok": true,
+            "tag": "Null",
+            "discriminant": "Discriminant(1)"
+          }
+        },
+        {
+          "input": {
+            "bytes": [
+              85,
+              110,
+              100,
+              101,
+              102,
+              105,
+              110,
+              101,
+              100
+            ]
+          },
+          "output": {
+            "ok": true,
+            "tag": "Undefined",
+            "discriminant": "Discriminant(0)"
+          }
+        },
+        {
+          "input": {
+            "bytes": [
+              84,
+              101,
+              120,
+              116
+            ]
+          },
+          "output": {
+            "ok": true,
+            "tag": "Text",
+            "discriminant": "Discriminant(3)"
+          }
+        },
+        {
+          "input": {
+            "bytes": [
+              255
+            ]
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "bytes": [
+              117,
+              110,
+              107,
+              110,
+              111,
+              119,
+              110
+            ]
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }

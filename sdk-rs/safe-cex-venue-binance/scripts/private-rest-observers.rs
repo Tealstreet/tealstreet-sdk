@@ -188,7 +188,7 @@ pub fn lookup(value: EventValue, b: &Bindings) -> Value {
 
 pub fn child(value: &EventValue) -> Value {
     match value
-        .array_items()
+        .array_items()?
         .and_then(|rows| rows.into_iter().next())
         .flatten()
     {

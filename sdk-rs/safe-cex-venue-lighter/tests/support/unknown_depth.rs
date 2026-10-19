@@ -186,11 +186,23 @@ const rows=['','plain','é','👩','\ufeff','\u0085','\ud800','\udfff','x\ud800y
                 js_from_str::<T>(raw).map_err(|e| e.to_string()),
             ),
         ] {
-            assert_eq!(
+            assert!(
                 result.is_ok(),
-                row["representable"] == true,
-                "{name} {path} unknown-string UTF8 boundary nested={nested}: {}",
+                "{name} {path} unknown-string admission nested={nested}: {}",
                 row["units"]
+            );
+            let captured = typed_utf16::retained(raw);
+            let extra = if nested {
+                captured.get("opts").unwrap()
+            } else {
+                &captured
+            }
+            .get("extra")
+            .unwrap();
+            assert_eq!(
+                json!(extra.as_text().unwrap()),
+                row["units"],
+                "{name} unknown field raw units remain exact"
             );
             if let Ok(value) = result {
                 assert_eq!(
@@ -204,3 +216,6 @@ const rows=['','plain','é','👩','\ufeff','\u0085','\ud800','\udfff','x\ud800y
         // raw refusal as an owned/borrowed witness on an impossible Value.
     }
 }
+
+#[path = "../../../test-support/typed_utf16.rs"]
+pub(crate) mod typed_utf16;

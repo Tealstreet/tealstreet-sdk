@@ -275,3 +275,15 @@ it does not replace protocol or provider bodies. Run
 from the repository root. Its four production disconnect controls compile,
 require named observation failures and restore exact bytes; run it serially
 with every other source-sensitive probe or Cargo command in this worktree.
+
+`native::prepare_websocket` validates constructor inputs synchronously and returns
+ownership of the same handshake future used by `connect_websocket`. NativeRuntime
+uses it to expose a CONNECTING plain socket before the upgrade settles; its owned
+task registry cancels pending I/O. Keep one physical handshake/reader/writer
+algorithm, and preserve admission Host errors versus network Error/Close delivery.
+See exchange-core WS_CONTRACT.md and registry's native_connecting_socket witness.
+
+Native reqwest builder failures for protocols Axios rejects retain
+`ERR_BAD_REQUEST` and `Unsupported protocol <scheme>:`. They are request setup
+failures, not retryable connection resets. The constructed Aster validation
+regression compares the real native adapter with maintained Axios.

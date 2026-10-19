@@ -245,6 +245,7 @@ fn to_fixture(value: &Js) -> Value {
         Js::Array(_) => Value::Array(
             value
                 .array_values()
+                .expect("fixture array property reads")
                 .unwrap()
                 .iter()
                 .map(to_fixture)
@@ -604,5 +605,360 @@ fn parameter_validation_precedence_matches_live_transaction_client() {
             "{} validation order",
             case["label"]
         );
+    }
+}
+
+fn pump(runtime: &Rc<Runtime>) {
+    for _ in 0..100 {
+        let jobs = std::mem::take(&mut *runtime.jobs.borrow_mut());
+        if jobs.is_empty() {
+            return;
+        }
+        for mut job in jobs {
+            if job
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+            {
+                runtime.jobs.borrow_mut().push(job);
+            }
+        }
+    }
+}
+
+#[test]
+fn transaction_timing_awaits_nonce_before_reading_live_parameters() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/transaction-timing-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let rows = rows.as_array().unwrap();
+    assert_eq!(rows.len(), 30);
+    let mut failures = vec![];
+    for row in rows {
+        let method = row["method"].as_str().unwrap();
+        let (realm, runtime) = realm();
+        let runtime_dyn: Rc<dyn ExchangeRuntime> = runtime.clone();
+        let held = Promise::pending(&runtime_dyn);
+        let nonce = held.clone();
+        let calls = Rc::new(std::cell::Cell::new(0));
+        let count = calls.clone();
+        let api = Js::object(vec![(
+            "getNextNonce",
+            Js::function("getNextNonce", move |_, _| {
+                count.set(count.get() + 1);
+                Ok(Js::Promise(nonce.clone()))
+            }),
+        )]);
+        let client = realm
+            .global("TransactionClient")
+            .unwrap()
+            .construct(
+                vec![Js::object(vec![
+                    ("httpClient", api),
+                    ("crypto", Js::object(vec![])),
+                    ("chainId", Js::Number(304.)),
+                    ("privateKey", Js::str("test")),
+                    ("accountIndex", Js::BigInt(Rc::new(42.into()))),
+                    ("apiKeyIndex", Js::Number(3.)),
+                ])],
+                None,
+            )
+            .unwrap();
+        let reads = Rc::new(std::cell::Cell::new(0));
+        let count = reads.clone();
+        let getter_error = Js::object(vec![("getter", Js::Bool(true))]);
+        let token = getter_error.clone();
+        let params = transaction_params();
+        params
+            .define_accessor(
+                row["field"].as_str().unwrap(),
+                Some(Rc::new(move |_| {
+                    count.set(count.get() + 1);
+                    Err(Thrown::new(token.clone()))
+                })),
+                None,
+            )
+            .unwrap();
+        let params = if method == "getCreateOrderTransactions" || method == "submitCreateOrders" {
+            Js::array(vec![params])
+        } else {
+            params
+        };
+        if row["explicitNonce"].as_bool().unwrap() {
+            params.set("nonce", Js::BigInt(Rc::new(7.into()))).unwrap();
+        }
+        let invocation = client.call_method(method, vec![params]);
+        let _observer = invocation.as_ref().ok().and_then(|value| match value {
+            Js::Promise(promise) => Some(promise.wait()),
+            _ => None,
+        });
+        let before = reads.get();
+        pump(&runtime);
+        let while_held = reads.get();
+        let nonce_error = Js::object(vec![("nonce", Js::Bool(true))]);
+        let reject = row["rejectNonce"].as_bool().unwrap();
+        if calls.get() > 0 {
+            held.settle(if reject {
+                Err(Thrown::new(nonce_error.clone()))
+            } else {
+                Ok(Js::BigInt(Rc::new(7.into())))
+            });
+        }
+        let result = invocation.and_then(|value| settle(&runtime, value));
+        let expected = if reject { &nonce_error } else { &getter_error };
+        let identity = result
+            .err()
+            .is_some_and(|error| error.value.strict_equals(expected));
+        if before != row["before"].as_u64().unwrap()
+            || while_held != row["held"].as_u64().unwrap()
+            || calls.get() != row["calls"].as_u64().unwrap()
+            || !identity
+            || (reads.get() > 0) == reject
+        {
+            failures.push(format!("{method} reject={reject}: before={before}, held={while_held}, nonce={}, identity={identity}, reads={}", calls.get(), reads.get()));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "LIGHTER-AWAIT-PARAMETERS:\n{}",
+        failures.join("\n")
+    );
+}
+
+fn transaction_params() -> Js {
+    let big = |n: i64| Js::BigInt(Rc::new(n.into()));
+    let order = Js::object(vec![
+        ("orderId", big(1)),
+        ("marketId", Js::Number(1.)),
+        ("isBuy", Js::Bool(true)),
+        ("price", big(100)),
+        ("amount", big(1)),
+    ]);
+    let child = Js::object(vec![
+        ("orderId", big(2)),
+        ("marketId", Js::Number(1.)),
+        ("isBuy", Js::Bool(false)),
+        ("price", big(100)),
+        ("amount", big(0)),
+        ("orderType", Js::str("stop_loss")),
+        ("reduceOnly", Js::Bool(true)),
+    ]);
+    Js::object(vec![
+        ("orderId", big(1)),
+        ("marketId", Js::Number(1.)),
+        ("isBuy", Js::Bool(true)),
+        ("price", big(100)),
+        ("amount", big(1)),
+        ("groupingType", Js::Number(1.)),
+        ("orders", Js::array(vec![order, child])),
+        ("toAccountIndex", big(2)),
+        ("leverage", Js::Number(5.)),
+        ("marginMode", Js::Number(0.)),
+        ("integratorAccountIndex", big(3)),
+        ("maxPerpsTakerFee", Js::Number(0.)),
+        ("maxPerpsMakerFee", Js::Number(0.)),
+        ("maxSpotTakerFee", Js::Number(0.)),
+        ("maxSpotMakerFee", Js::Number(0.)),
+        ("approvalExpiry", big(1710000000000)),
+    ])
+}
+
+#[test]
+fn transaction_timing_live_inputs_and_detached_success_match_source() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/transaction-timing-source.cjs"
+        ))
+        .arg("--success")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = cases.as_array().unwrap();
+    assert_eq!(cases.len(), 14);
+    for case in cases {
+        let method = case["method"].as_str().unwrap();
+        for detached in [false, true] {
+            let (realm, runtime) = realm();
+            let init = realm
+                .global("initWasm")
+                .unwrap()
+                .call(Js::Undefined, vec![])
+                .unwrap();
+            settle(&runtime, init).unwrap();
+            let crypto = realm
+                .global("getCryptoApi")
+                .unwrap()
+                .call(Js::Undefined, vec![])
+                .unwrap();
+            let signs = Rc::new(std::cell::Cell::new(0));
+            let count = signs.clone();
+            let sign = crypto.get("schnorrSign").unwrap();
+            crypto
+                .define(
+                    "schnorrSign",
+                    Js::function("schnorrSign", move |_, args| {
+                        count.set(count.get() + 1);
+                        sign.call(Js::Undefined, args)
+                    }),
+                )
+                .unwrap();
+            let rt: Rc<dyn ExchangeRuntime> = runtime.clone();
+            let held = Promise::pending(&rt);
+            let nonce = held.clone();
+            let calls = Rc::new(std::cell::Cell::new(0));
+            let count = calls.clone();
+            let sent = Rc::new(RefCell::new(vec![]));
+            let single = sent.clone();
+            let batch = sent.clone();
+            let hashes = Js::array(vec![Js::utf16(&[65, 0xd800]), Js::str("B")]);
+            let hash_array = hashes.clone();
+            let api = Js::object(vec![
+                (
+                    "getNextNonce",
+                    Js::function("getNextNonce", move |_, _| {
+                        count.set(count.get() + 1);
+                        Ok(Js::Promise(nonce.clone()))
+                    }),
+                ),
+                (
+                    "sendRawTx",
+                    Js::function("sendRawTx", move |_, args| {
+                        single.borrow_mut().push(args[0].clone());
+                        Ok(Js::utf16(&[104, 97, 115, 104, 0xd800]))
+                    }),
+                ),
+                (
+                    "sendRawTxBatch",
+                    Js::function("sendRawTxBatch", move |_, args| {
+                        batch.borrow_mut().extend(
+                            args[0]
+                                .array_values()
+                                .expect("fixture array property reads")
+                                .unwrap(),
+                        );
+                        Ok(Js::object(vec![("txHashes", hash_array.clone())]))
+                    }),
+                ),
+            ]);
+            let client = realm.global("TransactionClient").unwrap().construct(vec![Js::object(vec![
+                ("httpClient", api), ("crypto", crypto), ("chainId", Js::Number(304.)),
+                ("privateKey", Js::str("01000000000000000000000000000000000000000000000000000000000000000000000000000000")),
+                ("accountIndex", Js::BigInt(Rc::new(42.into()))), ("apiKeyIndex", Js::Number(3.)),
+            ])], None).unwrap();
+            let params = transaction_params();
+            let is_batch = method == "getCreateOrderTransactions" || method == "submitCreateOrders";
+            let argument = if is_batch {
+                Js::array(vec![params.clone()])
+            } else {
+                params.clone()
+            };
+            let pending = client.call_method(method, vec![argument.clone()]).unwrap();
+            let big = |n: i64| Js::BigInt(Rc::new(n.into()));
+            params.set("price", big(199)).unwrap();
+            params
+                .get("orders")
+                .unwrap()
+                .get("0")
+                .unwrap()
+                .set("price", big(199))
+                .unwrap();
+            params.set("orderId", big(9)).unwrap();
+            params.set("amount", big(9)).unwrap();
+            params.set("leverage", Js::Number(10.)).unwrap();
+            params.set("maxPerpsTakerFee", Js::Number(1.)).unwrap();
+            if is_batch {
+                let second = transaction_params();
+                second.set("orderId", big(10)).unwrap();
+                argument.call_method("push", vec![second]).unwrap();
+            }
+            pump(&runtime);
+            assert_eq!(calls.get(), 1, "{method} eagerly owns nonce work");
+            assert_eq!(signs.get(), 0, "{method} cannot sign before nonce");
+            held.settle(Ok(big(7)));
+            if detached {
+                drop(pending);
+                pump(&runtime);
+            } else {
+                let value = settle(&runtime, pending).unwrap();
+                let txs = if method.starts_with("submit") {
+                    if is_batch {
+                        assert!(value.strict_equals(&hashes), "batch hash-array identity");
+                    } else {
+                        assert!(value.strict_equals(&Js::utf16(&[104, 97, 115, 104, 0xd800])));
+                    }
+                    sent.borrow().clone()
+                } else if is_batch {
+                    value
+                        .array_values()
+                        .expect("fixture array property reads")
+                        .unwrap()
+                } else {
+                    vec![value]
+                };
+                assert_eq!(
+                    txs.len(),
+                    case["transactions"].as_u64().unwrap() as usize,
+                    "{method} live batch cardinality"
+                );
+                assert!(
+                    txs[0].get("nonce").unwrap().strict_equals(&big(7)),
+                    "{method} nonce"
+                );
+                let path: &[&str] = if method.contains("Grouped") {
+                    &["groupedOrderDetails", "orders", "0", "price"]
+                } else if method.contains("CreateOrder") {
+                    &["orderDetails", "price"]
+                } else if method.contains("CancelOrder") {
+                    &["cancelDetails", "orderId"]
+                } else if method.contains("Transfer") {
+                    &["transferDetails", "amount"]
+                } else if method.contains("Leverage") {
+                    &["leverageDetails", "initialMarginFraction"]
+                } else {
+                    &["approveIntegratorDetails", "maxPerpsTakerFee"]
+                };
+                let mut selected = txs[0].clone();
+                for key in path {
+                    selected = selected.get(key).unwrap();
+                }
+                let selected = String::from_utf16(&selected.to_js_string().unwrap()).unwrap();
+                assert_eq!(
+                    selected,
+                    case["selected"].as_str().unwrap(),
+                    "{method} params remain live across await"
+                );
+            }
+            let expected = case["transactions"].as_u64().unwrap() as usize;
+            assert_eq!(
+                signs.get(),
+                expected,
+                "{method} detached={detached}: signing completes"
+            );
+            assert_eq!(
+                sent.borrow().len(),
+                if method.starts_with("submit") {
+                    expected
+                } else {
+                    0
+                },
+                "{method} detached={detached}: HTTP submission completes"
+            );
+        }
     }
 }

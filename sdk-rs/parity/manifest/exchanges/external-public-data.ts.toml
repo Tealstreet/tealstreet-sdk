@@ -32,7 +32,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-registry/src/public_data.rs::parse_candle_subscription_key"
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#public-data-provider-choice. Valid generated delimiter-bearing keys match. Malformed no-colon astral fallback differs; no actual producer or program-observable materialized-unit witness is established for that private path. The unproved FORCED subclaim is withdrawn. Targets: safe-cex-registry/src/public_data.rs::parse_candle_subscription_key"
+note = "CHOSEN: typed String output replaces isolated UTF-16 units with U+FFFD under the approved UTF-8 addendum in divergence-cluster-rulings.md. FIXED: no-colon fallback removes one UTF-16 unit like source slice(0,-1), rather than a whole Unicode scalar. tests/data.rs proves the old scalar fallback fails and compares 40 maintained-source code-unit results, including valid pairs, combining marks, NUL and generated colon-bearing keys. scripts/check.mjs independently compares the actual native example with source toWellFormed output while retaining the original high-unit observation. Provider candle keys only originate in getCandleSubscriptionKey, which always inserts a colon, so malformed fallback is unreachable through production subscription/reconnect. No FORCED claim. Targets: safe-cex-registry/src/public_data.rs::parse_candle_subscription_key"
 
 [[symbol]]
 ts = "GatewayMessageType"
@@ -48,7 +48,7 @@ kind = "type"
 layer = "adapted"
 rs = "safe-cex-types/src/gateway.rs::GatewayChannel"
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#public-data-provider-choice. ts-bug: actual onOpen emits auth outside the declared source union; native Auth preserves that frame and subscribed reply. This is a type-surface widening, not a newly discovered wire defect. Targets: safe-cex-types/src/gateway.rs::GatewayChannel"
+note = "ACCEPT (non-UTF-8 FIX-audit): actual source onOpen emits auth outside its declared union; native Auth preserves the same frame and acknowledgement. tests/native_host_external_data.rs::gateway_type_audit_uses_channel_fields_without_envelope_validation drives the constructed exchange over a real NativeRuntime/loopback WebSocket and checks the exact auth frame before comparing the maintained TS provider. The extra variant is type-only; no source runtime result is changed. Per-row reason: safe-cex-types/per-row-rulings.md. Targets: safe-cex-types/src/gateway.rs::GatewayChannel"
 
 [[symbol]]
 ts = "GatewayMessage"
@@ -56,7 +56,7 @@ kind = "type"
 layer = "adapted"
 rs = "safe-cex-types/src/gateway.rs::GatewayMessage"
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#public-data-provider-choice, sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. The public envelope decoder rejects whole frames for malformed unused fields, required-field omission, unknown enum values and typed optional nulls; unknown top-level properties are discarded. Literal reserved-looking info objects and numeric ingress are repaired, not excluded. This full-envelope boundary is distinct from provider on_message channel decoding. Runtime interval adaptation uses the existing AnyTimeframe union so worker OHLCV options preserve all 27 maintained chart intervals through subscribe, reconnect, delivery and unsubscribe; source forwards these values despite its narrower Timeframe annotation. tests/public_data_providers.rs and tests/gateway-interval-source.cjs execute these paths. Targets: safe-cex-types/src/gateway.rs::GatewayMessage"
+note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#public-data-provider-choice, sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. ACCEPT (non-UTF-8 FIX-audit): the standalone envelope decoder rejects malformed unused fields, required-field omission, unknown enum values and typed optional nulls; production raw gateway ingress does not invoke it. The actual constructed NativeRuntime/loopback gateway test gateway_type_audit_uses_channel_fields_without_envelope_validation proves that frames rejected by this type still reach both market and ticker Store updates, with no public REST fallback, and compares the maintained TS provider. Outbound frames are constructed with valid fields. Per-row reason: safe-cex-types/per-row-rulings.md. Literal reserved-looking info objects and numeric ingress are repaired, not excluded. This full-envelope boundary is distinct from provider on_message channel decoding. Runtime interval adaptation uses the existing AnyTimeframe union so worker OHLCV options preserve all 27 maintained chart intervals through subscribe, reconnect, delivery and unsubscribe; source forwards these values despite its narrower Timeframe annotation. tests/public_data_providers.rs and tests/gateway-interval-source.cjs execute these paths. Targets: safe-cex-types/src/gateway.rs::GatewayMessage"
 
 [[symbol]]
 ts = "GatewayTickerUpdate"

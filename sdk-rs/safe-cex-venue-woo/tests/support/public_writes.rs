@@ -161,7 +161,7 @@ fn public_writer_matches_numeric_bits_and_notification_failure() {
                     ("ask", actual.ask),
                     ("last", actual.last),
                     ("mark", actual.mark),
-                    ("index", actual.index),
+                    ("index", actual.index.unwrap()),
                     ("percentage", actual.percentage),
                     ("openInterest", actual.open_interest),
                     ("fundingRate", actual.funding_rate),

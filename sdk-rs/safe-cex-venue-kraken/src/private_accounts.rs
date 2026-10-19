@@ -740,7 +740,7 @@ pub trait IncomeHost: ReadHost {
     fn paginate<'a>(
         &'a self,
         options: Handle<Self>,
-        page: PageCallback<'a, Self>,
+        page: PageCallback<'static, Self>,
     ) -> ReadResult<Self, impl std::future::Future<Output = ReadResult<Self, Handle<Self>>> + 'a>;
     fn account_log_page(
         &self,
@@ -755,17 +755,20 @@ pub trait IncomeHost: ReadHost {
     fn warning(&self, message: Handle<Self>) -> ReadResult<Self, ()>;
     fn income_error(&self, message: Handle<Self>) -> ReadResult<Self, ()>;
 }
-pub async fn income_range<H: IncomeHost>(
-    h: &H,
+pub async fn income_range<H: IncomeHost + 'static>(
+    h: std::rc::Rc<H>,
     start: Handle<H>,
     end: Handle<H>,
     income_type: Handle<H>,
-) -> ReadResult<H, Handle<H>> {
+) -> ReadResult<H, Handle<H>>
+where
+    H::Value: 'static,
+{
     if h.truthy(&*h.current("publicDataOnly")?) {
         return Ok(h.array(vec![]));
     }
     let options = obj(
-        h,
+        h.as_ref(),
         vec![
             ("startTime", start.clone()),
             ("endTime", end.clone()),
@@ -773,20 +776,22 @@ pub async fn income_range<H: IncomeHost>(
             ("pageLimit", h.number(500.0)),
         ],
     )?;
-    let page: PageCallback<'_, H> = Box::new(move |params| {
+    let page_host = h.clone();
+    let page: PageCallback<'static, H> = Box::new(move |params| {
+        let h = page_host.clone();
         let params = obj(
-            h,
+            h.as_ref(),
             vec![
-                ("startTime", field(h, &params, "startTime")?),
-                ("limit", field(h, &params, "limit")?),
+                ("startTime", field(h.as_ref(), &params, "startTime")?),
+                ("limit", field(h.as_ref(), &params, "limit")?),
             ],
         )?;
-        Ok(Box::pin(h.account_log_page(params)?))
+        Ok(Box::pin(async move { h.account_log_page(params)?.await }))
     });
     let result = h.paginate(options, page)?.await?;
-    let records = field(h, &result, "records")?;
-    let truncated = field(h, &result, "truncated")?;
-    let exhausted = field(h, &result, "exhaustedChunks")?;
+    let records = field(h.as_ref(), &result, "records")?;
+    let truncated = field(h.as_ref(), &result, "truncated")?;
+    let exhausted = field(h.as_ref(), &result, "exhaustedChunks")?;
     if h.truthy(&truncated) {
         let msg=[units("Income history for "),h.date_iso(&start)?,units(".."),h.date_iso(&end)?,units(" is INCOMPLETE — "),h.string(&exhausted)?,units(" chunk(s) could not be walked to completion. Any total derived from it is a lower bound.")].concat();
         h.warning(h.text(&msg))?;
@@ -794,7 +799,7 @@ pub async fn income_range<H: IncomeHost>(
     if h.truthy(&income_type) {
         let mut selected = vec![];
         for record in h.items(&records)? {
-            if h.strict_eq(&*field(h, &record, "incomeType")?, &income_type) {
+            if h.strict_eq(&*field(h.as_ref(), &record, "incomeType")?, &income_type) {
                 selected.push(record);
             }
         }
