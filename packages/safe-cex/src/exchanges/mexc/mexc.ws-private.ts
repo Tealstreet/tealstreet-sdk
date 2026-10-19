@@ -24,6 +24,7 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
 
   private refreshBalanceTimeout?: NodeJS.Timeout;
   private heartbeatInterval?: NodeJS.Timeout;
+  private readonly executionIds = new Map<string, number>();
 
   connectAndSubscribe = () => {
     if (this.isDisposed || this.parent.isPublicDataOnly) return;
@@ -124,6 +125,7 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
   dispose = () => {
     this.stopHeartbeat();
     clearTimeout(this.refreshBalanceTimeout);
+    this.executionIds.clear();
     super.dispose();
   };
 
@@ -253,15 +255,21 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
   private handleOrder = (json: Record<string, any>) => {
     const data = json.data || json;
     const rows = Array.isArray(data) ? data : [data];
+    const latest = new Map<string, Order>();
     const orders = rows
       .map((row) => normalizeOrder(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]))
-      .filter((order): order is Order => !!order);
+      .filter((order): order is Order => !!order)
+      .map((order) => {
+        const next = this.parent.mergeOrderSnapshot(order, latest.get(order.id));
+        latest.set(order.id, next);
+        return next;
+      });
 
     if (orders.length) {
       this.store.addOrUpdateOrders(orders as any);
       for (const order of orders) {
         if (order.status === OrderStatus.Closed || order.status === OrderStatus.Canceled) {
-          this.store.updateOrderStatus({ id: order.id }, order.status);
+          this.store.markOrdersTerminal([{ id: order.id }], order.status);
         }
       }
     }
@@ -296,9 +304,20 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
   private handleFill = (json: Record<string, any>) => {
     const data = json.data || json;
     const rows = Array.isArray(data) ? data : [data];
+    const now = virtualClock.getCurrentTimeMs();
+    for (const [id, seenAt] of this.executionIds) {
+      if (now - seenAt < 300_000) break;
+      this.executionIds.delete(id);
+    }
     for (const row of rows) {
       const fill = normalizeExecution(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]);
       if (!fill) continue;
+      if (fill.id) {
+        const duplicate = this.executionIds.has(fill.id);
+        this.executionIds.delete(fill.id);
+        this.executionIds.set(fill.id, now);
+        if (duplicate) continue;
+      }
       this.parent.emitter.emit('fill', {
         id: fill.id || fill.orderId || `${fill.symbol}:${fill.timestamp}`,
         orderId: fill.orderId,
@@ -378,10 +397,15 @@ export class MexcPrivateWebsocket extends BaseWebSocket<MexcExchange> {
     // "sticky" TP/SL / reappearing lines during rapid cancel bursts.
     // Canceled and Closed frames are always honored (they're authoritative
     // regardless of what our local shield thinks).
+    const latest = new Map<string, Order>();
     const orders = parsed.filter((order) => {
       if (order.status !== OrderStatus.Open) return true;
       if (this.parent.isRecentlyCanceledStopLikeOrderId(order.id)) return false;
       return true;
+    }).map((order) => {
+      const next = this.parent.mergeOrderSnapshot(order, latest.get(order.id));
+      latest.set(order.id, next);
+      return next;
     });
 
     if (!orders.length) return;
