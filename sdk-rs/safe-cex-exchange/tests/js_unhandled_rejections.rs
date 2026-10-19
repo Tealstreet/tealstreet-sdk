@@ -183,6 +183,28 @@ fn native_unhandled_rejections_match_node_without_reporting_handled_promises() {
             .unwrap()
             .call_method("catch", vec![catch.clone()])
             .unwrap();
+        let race = shared.globals.get("Promise").unwrap();
+        race.call_method(
+            "race",
+            vec![Js::array(vec![
+                reject("unhandled-race-first"),
+                reject("handled-race-loser"),
+            ])],
+        )
+        .unwrap();
+        race.call_method("race", vec![Js::array(vec![reject("handled-race-sync")])])
+            .unwrap()
+            .call_method("catch", vec![catch.clone()])
+            .unwrap();
+        let race_loser = Promise::pending(&runtime);
+        race.call_method(
+            "race",
+            vec![Js::array(vec![
+                Js::Number(1.),
+                Js::Promise(race_loser.clone()),
+            ])],
+        )
+        .unwrap();
         let pending = Promise::pending(&runtime);
         shared
             .globals
@@ -200,6 +222,7 @@ fn native_unhandled_rejections_match_node_without_reporting_handled_promises() {
         tokio::time::sleep(Duration::from_millis(5)).await;
         late.call_method("catch", vec![catch]).unwrap();
         pending.settle(Ok(Js::Undefined));
+        race_loser.settle(Err(Thrown::error("Error", "handled-race-late-loser")));
         tokio::time::sleep(Duration::from_millis(5)).await;
         reject("unhandled-idle-driver");
         tokio::time::sleep(Duration::from_millis(15)).await;

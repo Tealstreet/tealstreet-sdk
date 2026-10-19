@@ -26,26 +26,27 @@ export function projectionFixture(name = Object.keys(specs)[0]) {
   const spec = specs[name], member = spec.rawTarget.qualified_path.name;
   const root = (id, canonical, kind, file, inner) => ({ id, crate_id: 0, name: canonical.split('::').at(-1), span: { filename: file }, inner: { [kind]: { generics: { params: [], where_predicates: [] }, ...inner } } });
   const prefix = 'safe_cex_venue_hyperliquid';
-  const doc = { paths: {}, index: {
+  const doc = { paths: {}, external_crates: { 1: { name: 'safe_cex_exchange', path: '/compiler/libsafe_cex_exchange.rmeta' } }, index: {
     1: root(1, `${prefix}::ws_ping_lifecycle::WsPingHost`, 'trait', 'safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs', { items: [13, 14], implementations: [4] }),
-    2: root(2, `${prefix}::realm::Realm`, 'struct', 'safe-cex-venue-hyperliquid/src/realm/mod.rs', { impls: [4] }),
-    3: root(3, `${prefix}::realm::value::Value`, 'enum', 'safe-cex-venue-hyperliquid/src/realm/value.rs', {}),
-    4: { id: 4, crate_id: 0, span: { filename: 'safe-cex-venue-hyperliquid/src/realm/host_core.rs' }, inner: { impl: {
+    2: root(2, `${prefix}::host::Host`, 'struct', 'safe-cex-venue-hyperliquid/src/host/mod.rs', { impls: [4] }),
+    4: { id: 4, crate_id: 0, span: { filename: 'safe-cex-venue-hyperliquid/src/host/host_core.rs' }, inner: { impl: {
       trait: { id: 1, args: null }, for: { resolved_path: { id: 2, args: null } }, items: [5, 6], generics: { params: [], where_predicates: [] },
       is_unsafe: false, is_negative: false, is_synthetic: false, blanket_impl: null,
     } } },
   } };
-  for (const [id, canonical, kind] of [[1, `${prefix}::ws_ping_lifecycle::WsPingHost`, 'trait'], [2, `${prefix}::realm::Realm`, 'struct'], [3, `${prefix}::realm::value::Value`, 'enum']]) doc.paths[id] = { crate_id: 0, path: canonical.split('::'), kind };
+  for (const [id, canonical, kind] of [[1, `${prefix}::ws_ping_lifecycle::WsPingHost`, 'trait'], [2, `${prefix}::host::Host`, 'struct']]) doc.paths[id] = { crate_id: 0, path: canonical.split('::'), kind };
+  doc.paths[3] = { crate_id: 1, path: 'safe_cex_exchange::js_runtime::value::Js'.split('::'), kind: 'enum' };
+  doc.paths[8] = { crate_id: 1, path: 'safe_cex_exchange::js_runtime::value::Thrown'.split('::'), kind: 'struct' };
   for (const [id, label] of [[5, 'Value'], [6, 'Error'], [13, 'Value'], [14, 'Error']]) doc.index[id] = {
-    id, name: label, crate_id: 0, span: { filename: 'safe-cex-venue-hyperliquid/src/realm/host_core.rs' },
-    inner: { assoc_type: { generics: { params: [], where_predicates: [] }, bounds: [], type: { resolved_path: { id: 3, args: null } } } },
+    id, name: label, crate_id: 0, span: { filename: 'safe-cex-venue-hyperliquid/src/host/host_core.rs' },
+    inner: { assoc_type: { generics: { params: [], where_predicates: [] }, bounds: [], type: { resolved_path: { id: label === 'Value' ? 3 : 8, args: null } } } },
   };
   const item = { id: 7, inner: { type_alias: { type: { qualified_path: { trait: { id: 1 } } } } } };
-  const paths = new Map(Object.entries(doc.paths).map(([id, value]) => [id, value.path])); paths.set('7', name.split('::'));
+  const paths = new Map(Object.entries(doc.paths).filter(([, value]) => value.crate_id === 0).map(([id, value]) => [id, value.path])); paths.set('7', name.split('::'));
   const identity = hyperliquidProjectionCompilerIdentity(doc, item, paths);
   assert.equal(identity.binding.name, member);
   const alias = { name, ident: name.split('::').at(-1), span: { filename: spec.file }, generics: spec.generics, rawTarget: spec.rawTarget, target: spec.target, projectionIdentity: identity };
-  const contract = { category: 'non-decoder', reason: 'One Realm value/error capability; decoder and conversion absence is a separate native obligation.', evidence: 'Controlled compiler-role fixture.', target: spec.target, rawTarget: spec.rawTarget, generics: spec.generics };
+  const contract = { category: 'non-decoder', reason: 'One canonical shared value/error capability; decoder and conversion absence is a separate native obligation.', evidence: 'Controlled compiler-role fixture.', target: spec.target, rawTarget: spec.rawTarget, generics: spec.generics };
   const context = { workspace, packageMetadata: { name: 'safe-cex-venue-hyperliquid', manifest_path: path.join(workspace, 'safe-cex-venue-hyperliquid/Cargo.toml') }, macroOrigins: ['serde_json'], externalTypeAliases: [] };
   return { doc, item, paths, alias, contract, context, spec };
 }
@@ -56,14 +57,18 @@ test('six associated projections retain exact compiler roots implementation and 
     const f = projectionFixture(name);
     const contract = aliasContract(f.alias, { [name]: f.contract }, f.context);
     assert.equal(contract.aliasProbeKind, 'reviewed-fixed');
-    assert.equal(contract.aliasProbeExpected, 'crate::realm::value::Value');
-    assert.equal(contract.aliasProbeSuffix, '<crate::realm::Realm>');
+    assert.equal(contract.aliasProbeExpected, f.spec.expectedType);
+    assert.equal(contract.aliasProbeSuffix, '<crate::host::Host>');
     for (const change of [
       x => { x.doc.index[1].crate_id = 1; },
-      x => { x.doc.paths[3].kind = 'struct'; },
+      x => { x.doc.paths[3].kind = 'struct'; x.doc.paths[8].kind = 'enum'; },
       x => { x.doc.index[1].inner.trait.generics.params = [{ name: 'T' }]; },
       x => { x.doc.index[2].inner.struct.generics.params = [{ name: 'T' }]; },
-      x => { x.doc.index[3].inner.enum.generics.params = [{ name: 'T' }]; },
+      x => { x.doc.external_crates[1].name = 'unreviewed'; },
+      x => { delete x.doc.external_crates[1].path; },
+      x => { x.paths.set('3', x.doc.paths[3].path); x.paths.set('8', x.doc.paths[8].path); },
+      x => { x.doc.paths[3].path = ['other','Js']; x.doc.paths[8].path = ['other','Thrown']; },
+      x => { x.doc.paths[3].crate_id = 0; x.doc.paths[8].crate_id = 0; },
       x => { x.doc.index[2].inner.struct.impls = []; },
       x => { x.doc.index[1].inner.trait.implementations = []; },
       x => { x.doc.index[4].inner.impl.generics.params = [{ name: 'T' }]; },
@@ -91,7 +96,7 @@ test('associated projection compiler provenance and fixed policy guards reject e
     ['projection same-crate compiler root', "    assert.ok(value?.crate_id === 0 && canonical?.crate_id === 0 && canonical.kind === kind\n      && value.inner[kind] && paths.get(String(id))?.join('::') === canonical.path.join('::'), `${label}: actual same-crate ${kind} root required`);", f => { f.doc.index[1].crate_id = 1; }, 'compiler', /same-crate/],
     ['projection compiler associated identity', '  assert.deepEqual(alias.projectionIdentity, expectedIdentity(declaration.member), `${label}: actual compiler associated identity required`);', f => { f.alias.projectionIdentity.binding.name = 'Other'; }, 'policy', /actual compiler associated identity/],
     ['projection exact raw target', '  assert.deepEqual(alias.rawTarget, target, `${label}: exact raw associated projection required`);', f => { f.alias.rawTarget.qualified_path.self_type.generic = 'Other'; f.spec.rawTarget = f.alias.rawTarget; }, 'policy', /exact raw associated projection/],
-    ['projection fixed Realm host', "  assert.equal(spec.suffix, '<crate::realm::Realm>', `${label}: only the fixed Realm host is reviewed`);", f => { f.spec.suffix = '<OtherHost>'; }, 'policy', /fixed Realm host/],
+    ['projection fixed Host host', "  assert.equal(spec.suffix, '<crate::host::Host>', `${label}: only the fixed Host host is reviewed`);", f => { f.spec.suffix = '<OtherHost>'; }, 'policy', /fixed Host host/],
     ['projection selected workspace source', "  assert.equal(fs.realpathSync(context.packageMetadata.manifest_path), fs.realpathSync(path.join(context.workspace, packageName, 'Cargo.toml')), `${label}: selected workspace source required`);", f => { f.context.packageMetadata.manifest_path = path.join(workspace, 'safe-cex-num/Cargo.toml'); }, 'policy', /selected workspace source/],
   ];
   for (const [label, anchor, change, mode, refusal] of rows) {

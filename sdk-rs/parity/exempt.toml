@@ -7618,6 +7618,26 @@ rs = "safe-cex-num/src/sorting.rs::stable_sort"
 reason = "Native JS intrinsic capability: one error-generic V8 TimSort backs Array.sort, lodash orderBy and venue comparator ports without Rust's total-order requirement. This exposes the shared V8 TimSort implementation for cross-crate reuse; no standalone maintained TS declaration. Native js_sort coverage and constructed Paradex socket/getter regressions exercise NaN comparisons, retained levels, stability and first-throw termination."
 
 [[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::define_property"
+reason = "Native cross-crate class/descriptor installation operation; exposes the existing canonical ToPropertyDescriptor and integrity algorithm to the Hyperliquid host without a second property engine. No standalone SDK TS declaration. Existing native accessor/descriptor controls and actual constructed family bindings retain receivers and original throws."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::define_property_for"
+reason = "Native computed-key descriptor installer over the canonical property algorithm, preserving the supported well-known iterator symbol instead of converting it into a string. No standalone SDK declaration; actual HL market iterator override/refusal and source construction controls exercise this operation."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::get_key_receiver"
+reason = "Native lexical-super property access retaining the source original receiver through canonical prototype traversal. No standalone TS SDK declaration. Actual HL constructed subclasses and native inherited-getter controls exercise this operation."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::instance_of"
+reason = "Native host operation for reached InstanceofOperator checks: object/callable RHS validation then the existing canonical OrdinaryHasInstance. No standalone SDK TS declaration; native/Node ordinary, bound, primitive-LHS and original-getter controls cover the reached profile. Symbol.hasInstance is absent from shipped package source and recorded as unreachable ACCEPT."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::prototype"
+reason = "Native internal prototype link read for lexical super and the shared for-in record, rather than a shadowable __proto__ property. No standalone TS SDK declaration; native/Node class construction, inherited getter and for-in controls exercise the same canonical referents."
+
+[[exempt]]
 rs = "safe-cex-transport/src/rate_limit.rs::RateLimitTimer"
 reason = "Native cancellation capability for the one Axios window-reset timer. Drop of the limiter cancels this task; no standalone SDK declaration. Constructed Bybit controlled-clock and disposal witnesses exercise the real runtime owner."
 
@@ -7636,3 +7656,7 @@ reason = "Native host callback scheduling capability for the single window timer
 [[exempt]]
 rs = "safe-cex-exchange/src/runtime.rs::rate_limit_scheduler"
 reason = "Native injection adapter from ExchangeRuntime to RateLimitScheduler using the existing OwnedTasks registry and Timer task kind. It introduces no per-request spawn, alternate clock or value carrier. Actual constructed Bybit controlled-clock and limiter drop observations prove timer progress and cancellation."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/js_runtime/value.rs::Js::copy_data_properties_to"
+reason = "Native embedding entry into the single canonical CopyDataProperties algorithm used by shared object spread and Hyperliquid object literals; no additional TS SDK export. The actual constructed host/source witness checks live descriptors, original aliases and iterator symbols, and the exact API accepted probe reads native UTF-16 and binary64 bits."

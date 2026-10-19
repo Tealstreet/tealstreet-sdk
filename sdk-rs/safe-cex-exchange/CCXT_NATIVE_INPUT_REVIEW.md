@@ -10,7 +10,7 @@ changed by this classification.
 | --- | --- |
 | `decimal_to_precision` | Conversion: installed `decimalToPrecision`, including rounding/truncation, tick-size recursion, negative precision, malformed strings and original coercion errors. |
 | `exact` | Non-decoder: strict native numeric-tag comparison, without coercing an object mode or accepting the string `"1"` as ROUND. Installed strict-mode probes exercise both outcomes. |
-| `install` | Non-decoder: constructs constants and callable descriptors on the supplied native globals. Every installed import test executes it through `install_library`; the owner-route probe checks all nine constants and all four callables. |
+| `install` | Non-decoder: constructs constants and callable descriptors on the supplied native globals. Every installed import test executes it through `install_library`; the owner-route probe checks all nine constants and all five callables. |
 | `integer` | Conversion: parseInt string-hint coercion, hexadecimal prefix, trailing text, undefined and a lone surrogate. Installed parsePrecision and scientific notation routes consume it. |
 | `number_to_string` | Conversion: scientific notation expansion and direct non-number `toString` dispatch; installed probes retain arbitrary returned referents, thrown identity and UTF-16. |
 | `numeric_string` | Conversion: the negative-precision decimal route's actual `toString()` call. Direct native receipts preserve raw units and the null refusal. |

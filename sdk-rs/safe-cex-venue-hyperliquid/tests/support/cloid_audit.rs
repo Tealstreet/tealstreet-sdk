@@ -1,7 +1,8 @@
 //! Audit the cloid claims through the constructed production class/imports.
 use super::{HyperliquidDependencies, HyperliquidExchange, RuntimeClock};
 use crate::binding_test_runtime as host;
-use crate::{rate_limit::RateLimiter, realm::Value};
+use crate::rate_limit::RateLimiter;
+use safe_cex_exchange::js_runtime::value::Js;
 use safe_cex_exchange::{exchange::Exchange, native_store::DefaultStore};
 use serde_json::json;
 use std::{io::Write, process::Stdio, rc::Rc, sync::Arc};
@@ -50,34 +51,34 @@ fn cloid_audit_generated_wires_reach_the_real_placement_cache() {
                 let order_type = if shape == "limit" {
                     r.object_from(vec![(
                         "limit",
-                        r.object_from(vec![("tif", Value::str("Gtc"))]),
+                        r.object_from(vec![("tif", Js::str("Gtc"))]),
                     )])
                 } else {
                     let trigger = r.object_from(vec![
-                        ("triggerPx", Value::Number(23.75)),
-                        ("isMarket", Value::Bool(true)),
-                        ("tpsl", Value::str(shape)),
+                        ("triggerPx", Js::Number(23.75)),
+                        ("isMarket", Js::Bool(true)),
+                        ("tpsl", Js::str(shape)),
                     ]);
                     r.object_from(vec![("trigger", trigger)])
                 };
                 let request = r.object_from(vec![
-                    ("is_buy", Value::Bool(buy)),
-                    ("limit_px", Value::Number(91.25)),
-                    ("sz", Value::Number(0.5)),
-                    ("reduce_only", Value::Bool(reduce_only)),
+                    ("is_buy", Js::Bool(buy)),
+                    ("limit_px", Js::Number(91.25)),
+                    ("sz", Js::Number(0.5)),
+                    ("reduce_only", Js::Bool(reduce_only)),
                     ("order_type", order_type),
                 ]);
                 let wire = r
-                    .call(&producer, &Value::Undefined, &[request, Value::Number(7.)])
+                    .call(&producer, &Js::Undefined, &[request, Js::Number(7.)])
                     .unwrap();
                 assert!(
                     r.get_str(&wire, "r")
                         .unwrap()
-                        .strict_equal(&Value::Bool(reduce_only)),
+                        .strict_equals(&Js::Bool(reduce_only)),
                     "HL_CLOID_AUDIT producer must supply boolean r"
                 );
                 let id = format!("0x{:032x}", source_inputs.len() + 1);
-                r.set_str(&wire, "c", Value::str(&id)).unwrap();
+                r.set_str(&wire, "c", Js::str(&id)).unwrap();
                 let raw = r.to_serde(&wire).unwrap();
                 source_inputs
                     .push(json!({"wire":raw,"symbol":"BTC-PERP","placedAt":1_700_000_000_000_f64}));
@@ -85,22 +86,22 @@ fn cloid_audit_generated_wires_reach_the_real_placement_cache() {
                 r.call_method(
                     &binding.instance,
                     "recordPlacement",
-                    &[wires, Value::str("BTC-PERP")],
+                    &[wires, Js::str("BTC-PERP")],
                 )
                 .unwrap();
                 let record = r
-                    .call_method(&binding.instance, "getPlacementRecord", &[Value::str(&id)])
+                    .call_method(&binding.instance, "getPlacementRecord", &[Js::str(&id)])
                     .unwrap();
                 let mut row = serde_json::Map::new();
                 for key in ["price", "amount", "placedAt"] {
-                    let value = r.get_str(&record, key).unwrap().as_number().unwrap();
+                    let value = r.get_str(&record, key).unwrap().as_f64().unwrap();
                     row.insert(key.into(), json!(format!("{:016x}", value.to_bits())));
                 }
                 for key in ["type", "side", "reduceOnly", "symbol", "timeInForce"] {
                     let value = r.get_str(&record, key).unwrap();
                     row.insert(
                         key.into(),
-                        if matches!(value, Value::Undefined) {
+                        if matches!(value, Js::Undefined) {
                             serde_json::Value::Null
                         } else {
                             r.to_serde(&value).unwrap()

@@ -12,7 +12,7 @@ after = b'let remaining = h.binary("+", &tokens, &weight)?;'
 assert original.count(before) == 1
 command = ["cargo", "test", "--manifest-path", str(root / "Cargo.toml"),
            "-p", "safe-cex-venue-hyperliquid", "--lib", "--locked",
-           "--jobs", "1", "realm::spot_limiter_tests::production_spot_limiter_debits_refills_and_recursively_waits",
+           "--jobs", "1", "host::spot_limiter_tests::production_spot_limiter_debits_refills_and_recursively_waits",
            "--", "--exact"]
 logs = Path(tempfile.mkdtemp(prefix="hyperliquid-spot-limiter-"))
 

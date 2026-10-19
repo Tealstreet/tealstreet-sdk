@@ -367,6 +367,17 @@ fn construct_promise(
 /// The JS builtins venue bodies resolve by name. `rt` is weak: the globals
 /// object lives inside the shared scope state.
 pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
+    for (name, value) in [
+        ("Infinity", Js::Number(f64::INFINITY)),
+        ("NaN", Js::Number(f64::NAN)),
+        ("undefined", Js::Undefined),
+    ] {
+        g.define_property(
+            &name.encode_utf16().collect::<Vec<_>>(),
+            &Js::object(vec![("value", value)]),
+        )
+        .expect("stock global constant descriptor");
+    }
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
     };
@@ -375,6 +386,12 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         Ok(Js::Number(arg(&a, 0).parse_float()?))
     });
     def("parseFloat", parse_float.clone());
+    def(
+        "isNaN",
+        Js::function("isNaN", |_, args| {
+            Ok(Js::Bool(arg(&args, 0).to_number()?.is_nan()))
+        }),
+    );
     def(
         "parseInt",
         Js::function("parseInt", |_, a| {
@@ -450,6 +467,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     );
     def("Error", error_constructor("Error"));
     def("SyntaxError", error_constructor("SyntaxError"));
+    def("RangeError", error_constructor("RangeError"));
     def(
         "BigInt",
         Js::function("BigInt", |_, a| {
@@ -779,6 +797,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     );
     let promise_rt = rt.clone();
     let settled_rt = rt.clone();
+    let race_rt = rt.clone();
     let resolve_rt = rt.clone();
     let reject_rt = rt.clone();
     let constructor_rt = rt.clone();
@@ -789,6 +808,16 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         )
     });
     for (name, method) in [
+        (
+            "race",
+            Js::function("race", move |_, args| {
+                let runtime = scope_of(&race_rt)?.exchange_runtime();
+                Ok(Js::Promise(promise::race_iterable(
+                    &runtime,
+                    &arg(&args, 0),
+                )))
+            }),
+        ),
         (
             "all",
             Js::function("all", move |_, a| {

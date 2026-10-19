@@ -3,6 +3,11 @@
 //! instance's ported method and converts its result at the typed boundary.
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "../tests/support/weight_limiter_audit.rs"]
+mod weight_limiter_audit;
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "../tests/support/api_signing_audit.rs"]
 mod api_signing_audit;
 
@@ -23,17 +28,18 @@ use crate::{
     cloid::hyperliquid_client_order_id_rule,
     core_exchange_class,
     exchange::HyperliquidExchange,
-    private_class, public_class,
-    rate_limit::RateLimiter,
-    realm::{
-        Realm, Value,
+    host::{
+        Host,
         facade_exchange::base_exchange_class,
         facade_rest::{RestDependencies, bind_api_factories},
         facade_socket::{SocketDependencies, base_websocket_class},
         facade_store::store_object,
         imports,
     },
+    private_class, public_class,
+    rate_limit::RateLimiter,
 };
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use safe_cex_exchange::{
     capabilities::{
         CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
@@ -70,8 +76,8 @@ pub struct HyperliquidDependencies {
 
 #[derive(Clone)]
 pub(crate) struct Binding {
-    pub realm: Realm,
-    pub instance: Value,
+    pub realm: Host,
+    pub instance: Js,
 }
 
 /// The limiter clock over the exchange runtime's monotonic clock and sleep.
@@ -95,8 +101,12 @@ impl RateLimitClock for RuntimeClock {
 /// Error('Not implemented'))` (base.ts getAccount L734, fetchMarkets L754,
 /// fetchTickers L759, fetchSymbolMaxLeverage L799, changePositionMode L832,
 /// fetchPublicTrades L1138). No request, no emit.
-pub(crate) fn base_exchange_rejection<'a, T: 'a>() -> ExchangeFuture<'a, T> {
-    Box::pin(async { Err(ExchangeError::new("Not implemented")) })
+pub(crate) fn base_exchange_rejection<T: 'static>(
+    runtime: &Rc<dyn ExchangeRuntime>,
+) -> ExchangeFuture<'static, T> {
+    safe_cex_exchange::eager::start_eager(runtime, async {
+        Err(ExchangeError::new("Not implemented"))
+    })
 }
 
 impl HyperliquidExchange {
@@ -127,9 +137,9 @@ impl HyperliquidExchange {
         let as_exchange: Rc<dyn Exchange> = venue.clone();
         let parent = WsExchangeParent::new(&as_exchange);
 
-        let mut realm = Realm::new(runtime);
+        let mut realm = Host::new(deps.runtime.clone(), deps.http.clone(), store.clone());
         imports::bind(&realm);
-        let thrown = |r: &mut Realm, e: Value| r.exchange_error(&e);
+        let thrown = |r: &mut Host, e: Thrown| r.exchange_error(&e);
         bind_api_factories(
             &realm,
             venue.base.clone(),
@@ -158,26 +168,30 @@ impl HyperliquidExchange {
             .map_err(|e| thrown(&mut realm, e))?;
         realm.bind_import("HyperliquidExchange", class.clone());
         let js_options = realm
-            .from_typed(&options)
+            .encode_typed(&options)
             .map_err(|e| thrown(&mut realm, e))?;
         // Startup resolves legacy identities by mutating the shared JS options.
         // Publish each successful write immediately to native privacy readers,
         // including callbacks that run before start() returns or rejects.
         let identity_owner = venue.base.clone();
-        js_options.object().unwrap().borrow_mut().after_set =
-            Some(Rc::new(move |r, key, value| {
-                let application_id = key.same(&crate::realm::PropKey::str("applicationId"));
-                if !application_id && !key.same(&crate::realm::PropKey::str("vault")) {
+        js_options
+            .set_write_observer(Some(Rc::new(move |_, key, value| {
+                let application_id = key == "applicationId".encode_utf16().collect::<Vec<_>>();
+                if !application_id && key != "vault".encode_utf16().collect::<Vec<_>>() {
                     return Ok(());
                 }
                 let value = match value {
-                    Value::Undefined => IdentityFieldPatch::Remove,
-                    Value::String(units) => {
+                    Js::Undefined => IdentityFieldPatch::Remove,
+                    Js::String(units) => {
                         IdentityFieldPatch::Set(String::from_utf16(units).map_err(|_| {
-                            r.type_error("Native account identity requires scalar Unicode")
+                            Thrown::type_error("Native account identity requires scalar Unicode")
                         })?)
                     }
-                    _ => return Err(r.type_error("Native account identity must be a string")),
+                    _ => {
+                        return Err(Thrown::type_error(
+                            "Native account identity must be a string",
+                        ));
+                    }
                 };
                 let patch = if application_id {
                     AccountIdentityPatch {
@@ -192,13 +206,14 @@ impl HyperliquidExchange {
                 };
                 identity_owner.patch_account_identity(patch);
                 Ok(())
-            }));
-        let js_store = store_object(&realm, store);
+            })))
+            .map_err(|error| error.to_exchange_error())?;
+        let js_store = store_object(&realm, store).map_err(|error| error.to_exchange_error())?;
         let mut scope = realm.with_lexical(&class);
         let instance = scope
             .construct(
                 &class,
-                &[Value::str("hyperliquid"), js_options, js_store],
+                &[Js::str("hyperliquid"), js_options, js_store],
                 None,
             )
             .map_err(|e| thrown(&mut scope, e))?;
@@ -214,19 +229,29 @@ impl HyperliquidExchange {
             ExchangeError::new("Hyperliquid exchange was built without its runtime binding")
         })
     }
-    async fn typed<T: serde::de::DeserializeOwned>(
+    fn launch<T: 'static, F: std::future::Future<Output = Result<T, ExchangeError>> + 'static>(
         &self,
-        name: &str,
-        args: impl FnOnce(&mut Realm) -> Result<Vec<Value>, Value>,
-    ) -> Result<T, ExchangeError> {
-        self.bound()?.typed(name, args).await
+        body: impl FnOnce(Binding) -> F + 'static,
+    ) -> ExchangeFuture<'static, T> {
+        let binding = self.bound();
+        safe_cex_exchange::eager::start_eager(
+            &self.base.runtime,
+            async move { body(binding?).await },
+        )
     }
-    async fn unit(
+    fn typed<T: serde::de::DeserializeOwned + 'static>(
         &self,
-        name: &str,
-        args: impl FnOnce(&mut Realm) -> Result<Vec<Value>, Value>,
-    ) -> Result<(), ExchangeError> {
-        self.bound()?.unit(name, args).await
+        name: &'static str,
+        args: impl FnOnce(&mut Host) -> Result<Vec<Js>, Thrown> + 'static,
+    ) -> ExchangeFuture<'static, T> {
+        self.launch(move |binding| async move { binding.typed(name, args).await })
+    }
+    fn unit(
+        &self,
+        name: &'static str,
+        args: impl FnOnce(&mut Host) -> Result<Vec<Js>, Thrown> + 'static,
+    ) -> ExchangeFuture<'static, ()> {
+        self.launch(move |binding| async move { binding.unit(name, args).await })
     }
     fn listen<T: serde::de::DeserializeOwned + 'static>(
         &self,
@@ -239,19 +264,19 @@ impl HyperliquidExchange {
             instance,
         } = self.bound()?;
         let listener = realm.native("callback", 1, move |realm, _, args| {
-            let value = args.first().cloned().unwrap_or(Value::Undefined);
+            let value = args.first().cloned().unwrap_or(Js::Undefined);
             callback(realm.to_typed::<T>(&value)?);
-            Ok(Value::Undefined)
+            Ok(Js::Undefined)
         });
         let first = realm
-            .from_typed(&first)
+            .encode_typed(&first)
             .map_err(|error| realm.exchange_error(&error))?;
         let cleanup = realm
             .call_method(&instance, name, &[first, listener])
             .map_err(|error| realm.exchange_error(&error))?;
         Ok(Box::new(move || {
             realm
-                .call(&cleanup, &Value::Undefined, &[])
+                .call(&cleanup, &Js::Undefined, &[])
                 .map(|_| ())
                 .map_err(|error| realm.exchange_error(&error))
         }))
@@ -263,8 +288,8 @@ impl Binding {
     pub(crate) async fn invoke(
         &self,
         name: &str,
-        args: impl FnOnce(&mut Realm) -> Result<Vec<Value>, Value>,
-    ) -> Result<(Realm, Value), ExchangeError> {
+        args: impl FnOnce(&mut Host) -> Result<Vec<Js>, Thrown>,
+    ) -> Result<(Host, Js), ExchangeError> {
         let (mut realm, instance) = (self.realm.clone(), self.instance.clone());
         let args = args(&mut realm).map_err(|e| realm.exchange_error(&e))?;
         let result = realm
@@ -279,24 +304,24 @@ impl Binding {
     pub(crate) async fn typed<T: serde::de::DeserializeOwned>(
         &self,
         name: &str,
-        args: impl FnOnce(&mut Realm) -> Result<Vec<Value>, Value>,
+        args: impl FnOnce(&mut Host) -> Result<Vec<Js>, Thrown>,
     ) -> Result<T, ExchangeError> {
-        let (mut realm, value) = self.invoke(name, args).await?;
+        let (realm, value) = self.invoke(name, args).await?;
         realm.to_typed(&value).map_err(|e| realm.exchange_error(&e))
     }
     pub(crate) async fn unit(
         &self,
         name: &str,
-        args: impl FnOnce(&mut Realm) -> Result<Vec<Value>, Value>,
+        args: impl FnOnce(&mut Host) -> Result<Vec<Js>, Thrown>,
     ) -> Result<(), ExchangeError> {
         self.invoke(name, args).await.map(|_| ())
     }
 }
 
-pub(crate) fn opt<T: serde::Serialize>(r: &mut Realm, v: &Option<T>) -> Result<Value, Value> {
+pub(crate) fn opt<T: serde::Serialize>(r: &mut Host, v: &Option<T>) -> Result<Js, Thrown> {
     match v {
-        Some(v) => r.from_typed(v),
-        None => Ok(Value::Undefined),
+        Some(v) => r.encode_typed(v),
+        None => Ok(Js::Undefined),
     }
 }
 
@@ -355,14 +380,14 @@ impl Exchange for HyperliquidExchange {
         &self,
         options: safe_cex_types::OHLCVOptions,
     ) -> ExchangeFuture<'_, Vec<safe_cex_types::Candle>> {
-        Box::pin(self.typed("fetchOHLCV", move |r| Ok(vec![r.from_typed(&options)?])))
+        Box::pin(self.typed("fetchOHLCV", move |r| Ok(vec![r.encode_typed(&options)?])))
     }
     fn fetch_historical_fills(
         &self,
         options: safe_cex_types::ExecutionsOptions,
     ) -> ExchangeFuture<'_, Vec<safe_cex_types::Execution>> {
         Box::pin(self.typed("fetchHistoricalFills", move |r| {
-            Ok(vec![r.from_typed(&options)?])
+            Ok(vec![r.encode_typed(&options)?])
         }))
     }
     fn fetch_historical_orders(
@@ -386,16 +411,12 @@ impl Exchange for HyperliquidExchange {
         kind: Option<String>,
     ) -> ExchangeFuture<'_, Vec<safe_cex_types::IncomeRecord>> {
         Box::pin(self.typed("fetchIncomeHistoryRange", move |r| {
-            Ok(vec![
-                Value::Number(start),
-                Value::Number(end),
-                opt(r, &kind)?,
-            ])
+            Ok(vec![Js::Number(start), Js::Number(end), opt(r, &kind)?])
         }))
     }
     fn fetch_and_set_private_snapshot(&self, tries: u32) -> ExchangeFuture<'_, ()> {
         Box::pin(self.unit("fetchAndSetPrivateSnapshot", move |_| {
-            Ok(vec![Value::Number(tries as f64)])
+            Ok(vec![Js::Number(tries as f64)])
         }))
     }
     fn find_order_by_client_order_id(
@@ -403,11 +424,10 @@ impl Exchange for HyperliquidExchange {
         symbol: String,
         id: String,
     ) -> ExchangeFuture<'_, ClientOrderLookup> {
-        Box::pin(async move {
-            let (mut realm, result) = self
-                .bound()?
+        self.launch(move |binding| async move {
+            let (mut realm, result) = binding
                 .invoke("findOrderByClientOrderId", move |_| {
-                    Ok(vec![Value::str(&symbol), Value::str(&id)])
+                    Ok(vec![Js::str(&symbol), Js::str(&id)])
                 })
                 .await?;
             let found = realm
@@ -436,58 +456,47 @@ impl Exchange for HyperliquidExchange {
     ) -> ExchangeFuture<'_, Vec<serde_json::Value>> {
         Box::pin(self.typed("fetchHistoricalPositions", move |realm| {
             let opts = realm.new_object();
-            realm.define_str(&opts, "account", Value::str(&options.account))?;
+            realm.define_str(&opts, "account", Js::str(&options.account))?;
             if let Some(from) = options.from {
-                realm.define_str(&opts, "from", Value::Number(from))?;
+                realm.define_str(&opts, "from", Js::Number(from))?;
             }
             if let Some(to) = options.to {
-                realm.define_str(&opts, "to", Value::Number(to))?;
+                realm.define_str(&opts, "to", Js::Number(to))?;
             }
             Ok(vec![opts])
         }))
     }
     fn place_order(&self, order: ValidatedOrder<Self>) -> ExchangeFuture<'_, Vec<String>> {
-        Box::pin(async move {
-            self.typed("placeOrder", |r| Ok(vec![r.from_typed(order.options())?]))
-                .await
+        self.typed("placeOrder", move |r| {
+            Ok(vec![r.encode_typed(order.options())?])
         })
     }
     fn place_orders<'a>(&'a self, orders: ValidatedBatch<Self>) -> ExchangeFuture<'a, Vec<String>> {
-        Box::pin(async move {
-            self.typed("placeOrders", |r| {
-                let list: Vec<&PlaceOrderOpts> =
-                    orders.orders().iter().map(|o| o.options()).collect();
-                Ok(vec![r.from_typed(&list)?])
-            })
-            .await
+        self.typed("placeOrders", move |r| {
+            let list: Vec<&PlaceOrderOpts> = orders.orders().iter().map(|o| o.options()).collect();
+            Ok(vec![r.encode_typed(&list)?])
         })
     }
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {
         Box::pin(self.typed("validateAccount", |_| Ok(vec![])))
     }
     fn fetch_positions(&self, symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Position>> {
-        Box::pin(async move {
-            self.typed("fetchPositions", |r| Ok(vec![opt(r, &symbols)?]))
-                .await
-        })
+        self.typed("fetchPositions", move |r| Ok(vec![opt(r, &symbols)?]))
     }
     fn fetch_orders(&self, symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Order>> {
-        Box::pin(async move {
-            self.typed("fetchOrders", |r| Ok(vec![opt(r, &symbols)?]))
-                .await
-        })
+        self.typed("fetchOrders", move |r| Ok(vec![opt(r, &symbols)?]))
     }
     fn fetch_markets(&self) -> ExchangeFuture<'_, Vec<Market>> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn fetch_symbol_max_leverage(&self, _symbol: String) -> ExchangeFuture<'_, f64> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn set_leverage(
         &self,
@@ -495,15 +504,8 @@ impl Exchange for HyperliquidExchange {
         leverage: f64,
         side: Option<PositionSide>,
     ) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move {
-            self.unit("setLeverage", |r| {
-                Ok(vec![
-                    Value::str(&symbol),
-                    Value::Number(leverage),
-                    opt(r, &side)?,
-                ])
-            })
-            .await
+        self.unit("setLeverage", move |r| {
+            Ok(vec![Js::str(&symbol), Js::Number(leverage), opt(r, &side)?])
         })
     }
     fn change_position_mode(
@@ -511,39 +513,27 @@ impl Exchange for HyperliquidExchange {
         _hedged: bool,
         _symbol: Option<String>,
     ) -> ExchangeFuture<'_, ()> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
     fn change_margin_type(&self, isolated: bool, symbol: Option<String>) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move {
-            self.unit("changeMarginType", |r| {
-                Ok(vec![Value::Bool(isolated), opt(r, &symbol)?])
-            })
-            .await
+        self.unit("changeMarginType", move |r| {
+            Ok(vec![Js::Bool(isolated), opt(r, &symbol)?])
         })
     }
     fn update_order(&self, options: UpdateOrderOpts) -> ExchangeFuture<'_, Vec<String>> {
-        Box::pin(async move {
-            self.typed("updateOrder", |r| Ok(vec![r.from_typed(&options)?]))
-                .await
-        })
+        self.typed("updateOrder", move |r| Ok(vec![r.encode_typed(&options)?]))
     }
     fn cancel_orders(&self, orders: Vec<Order>) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move {
-            self.unit("cancelOrders", |r| Ok(vec![r.from_typed(&orders)?]))
-                .await
-        })
+        self.unit("cancelOrders", move |r| Ok(vec![r.encode_typed(&orders)?]))
     }
     /// None omits the argument (clear), Some(None) passes null (clear), Some(Some(t)) arms at t.
     fn schedule_cancel(&self, time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
-        Box::pin(async move {
-            self.unit("scheduleCancel", |_| {
-                Ok(match time {
-                    None => vec![],
-                    Some(None) => vec![Value::Null],
-                    Some(Some(t)) => vec![Value::Number(t)],
-                })
+        self.unit("scheduleCancel", move |_| {
+            Ok(match time {
+                None => vec![],
+                Some(None) => vec![Js::Null],
+                Some(Some(t)) => vec![Js::Number(t)],
             })
-            .await
         })
     }
     fn fetch_public_trades(
@@ -551,6 +541,6 @@ impl Exchange for HyperliquidExchange {
         _symbol: String,
         _limit: Option<f64>,
     ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
-        base_exchange_rejection()
+        base_exchange_rejection(&self.base.runtime)
     }
 }
