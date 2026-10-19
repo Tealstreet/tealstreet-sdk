@@ -97,12 +97,19 @@ test('notification callbacks retain arity, raw returns and original thrown error
       const { openStartedAccount } = await import(process.argv[1]);
       const cleanups = [];
       const original = Object.assign(new TypeError('callback \\ud800 failure'), { code: 'CALLBACK_SENTINEL' });
-      let thrown = false, caught = false, events = 0, stores = 0;
+      const hostile = Object.create(null);
+      for (const key of ['name', 'message', 'stack', 'cause']) Object.defineProperty(hostile, key, {
+        get() { throw Error('notification exception getter must not run: ' + key); },
+      });
+      const exceptions = [original, Symbol('raw callback failure'), hostile];
+      let thrown = 0, caught = 0, events = 0, stores = 0;
       process.on('uncaughtException', error => {
-        assert.equal(error, original);
-        assert.equal(error.code, 'CALLBACK_SENTINEL');
-        assert.equal(error.stack, original.stack);
-        caught = true;
+        assert.equal(error, exceptions[caught]);
+        if (caught === 0) {
+          assert.equal(error.code, 'CALLBACK_SENTINEL');
+          assert.equal(error.stack, original.stack);
+        }
+        caught++;
       });
       const callbacks = {
         event: function (value) {
@@ -115,21 +122,23 @@ test('notification callbacks retain arity, raw returns and original thrown error
           assert.equal(arguments.length, 1);
           assert.equal(typeof value, 'object');
           stores++;
-          if (!thrown) { thrown = true; throw original; }
+          if (thrown < exceptions.length) throw exceptions[thrown++];
           return () => { throw Error('callback return must not be invoked'); };
         },
       };
       const host = await openStartedAccount({ after: callback => cleanups.push(callback) }, {}, callbacks);
       try {
         const deadline = Date.now() + 5000;
-        while ((!caught || stores < 2 || !events) && Date.now() < deadline) {
+        while ((caught < exceptions.length || stores < 4 || !events) && Date.now() < deadline) {
           host.sendGateway({ type: 'data', exchangeId: 'binance', channel: 'tickers', data: [{
-            id: 'BTCUSDT', symbol: 'BTCUSDT', last: 11 + stores,
+            id: 'BTCUSDT', symbol: 'BTCUSDT', last: 11 + stores, bid: 9.9, ask: 10.1,
+            mark: 10, index: 10, percentage: 0, openInterest: 0, fundingRate: 0,
+            fundingTime: 0, volume: 1, quoteVolume: 10,
           }] });
           await new Promise(resolve => setTimeout(resolve, 25));
         }
-        assert.equal(caught, true, 'original callback exception must reach the host');
-        assert.ok(events > 0 && stores >= 2, 'later notifications must survive a thrown callback');
+        assert.equal(caught, exceptions.length, 'each original callback exception must reach the host');
+        assert.ok(events > 0 && stores >= 4, 'later notifications must survive thrown callbacks');
         console.log('notification callback contract preserved');
       } finally {
         for (const cleanup of cleanups.reverse()) await cleanup();
