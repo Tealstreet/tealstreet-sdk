@@ -55,3 +55,32 @@ Report PR, exact correctness/performance numbers, TS fixes, unfinished work.
 - Independent account, trading and harness plan audits in progress.
 - Early audit: store keys positions by ID, but frame currently reconstructs IDs;
   optional identity extension required for simultaneous margin modes.
+
+### Public phase
+
+Implemented public crate and typed broker options, streamed market/ticker
+seeds, four aggregate streams, refcounted early subscriptions, candle reads
+and stream, heartbeat and reconnect, full-depth snapshot buffering with exact
+integer predecessor timestamps and generation-correlated snapshot requests.
+
+Official current docs omit the incremental topic; a read-only live probe
+confirmed `@orderbookupdate` contains `data.prevTs`. Snapshot `data.ts` is the
+same book clock. First buffered update bridges `prevTs <= snapshot.ts < ts`,
+then predecessor must equal the last applied timestamp. Gaps/malformed frames
+hide the stale book and resnapshot. No floating-point sequence conversion.
+
+Public live sockets reject invented identifiers with normal close1000. The
+official js-sdk `packages/net/src/ws/ws.ts` uses COMMON_ID
+`OqdphuyCtYWxwzhxyLLjOWNdFP7sQt8RPWzmb5xY`; this identifier works keylessly.
+Documented WS `event:request` orderbook snapshots returned full depth (372
+bids/356 asks in probe), avoiding TS's private signed REST snapshot in public
+mode. Source: https://github.com/OrderlyNetwork/js-sdk/blob/main/packages/net/src/ws/ws.ts
+and https://github.com/OrderlyNetwork/documentation-public/blob/main/build-on-omnichain/websocket-api/public/request-orderbook.mdx .
+
+Independent phase review found and fixed startup subscription loss, quiet-book
+snapshot starvation, malformed update retaining a stale book, missing candle
+timestamps/OHLC bounds, unsupported intervals, and snapshot symbol mismatch.
+Re-review found no phase blockers; also tightened null timestamps and missing
+depth data. Native tests: 11 passing; fmt/clippy/bans passed. SDK wiring and
+record/replay performance checks remain in the integration phase. Genuine TS
+book continuity/public snapshot fixes will be declared in gate/PR.
