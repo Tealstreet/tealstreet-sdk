@@ -84,6 +84,7 @@
       "classified free decoder executes production output witnesses",
       "Deserialize output witnesses supplement strict shape probes",
       "external reexports retain canonical production decoder and feature coverage",
+      "reexport bindings retain the compiler-selected default features",
       "public aliases classify targets by compiler package identity",
       "public alias probes execute native values and declared alternate traits",
       "public aliases refuse unsupported static-only string conversions",
@@ -105,7 +106,7 @@
       "reviewed no-op defaults pin their complete APIs, source and declaration",
       "reviewed defaults cannot substitute arbitrary or missing native witnesses",
       "default inventory supplies every inherited body and never infers exemptions for unknown traits",
-      "Exchange default classifications cover only sixteen reviewed candidates and preserve source refusal"
+      "Exchange default classifications cover only seventeen reviewed candidates and preserve source refusal"
     ],
     "accepted-exchange-future.test.mjs": [
       "three exact aliases retain actual internally fixed instantiations and complete expected types",
@@ -486,6 +487,7 @@
     "Binance source oracle pin",
     "NumericChanges identity",
     "NumericChanges members",
-    "NumericChanges route"
+    "NumericChanges route",
+    "canonical default feature changes decoder admission"
   ]
 }

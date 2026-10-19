@@ -191,6 +191,24 @@ fn native_market_frames_reach_sdk_tickers_books_and_candles() {
         ),
         (3.0, 3.0, 103.0)
     );
+    runtime.now.set(runtime.now.get() + 300.0);
+    public
+        .base
+        .cleanup_message_handler_stats("unrelated")
+        .unwrap();
+    for topic in ["kline.1m.BTC_USDC", "depth.BTC_USDC"] {
+        assert_eq!(
+            public.base.message_handlers_stats.borrow()[topic].had_handlers,
+            Some(true)
+        );
+        assert!(
+            matches!(
+                public.base.message_handlers_stats.borrow()[topic].last_callbacks_count,
+                safe_cex_num::PrototypeScalar::Number(1.0)
+            ),
+            "forced reconciliation reads the live native {topic} registry"
+        );
+    }
     let snapshot = json!({"lastUpdateId":102,"bids":[["97","8"]],"asks":[["104","2"]]});
     put("/api/v1/depth", snapshot.clone());
     put("/api/v1/depth?symbol=BTC_USDC", snapshot);

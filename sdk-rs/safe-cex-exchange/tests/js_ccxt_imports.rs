@@ -287,6 +287,116 @@ fn installed_ccxt_imports_preserve_repeated_reads_original_values_and_coercion_o
 }
 
 #[test]
+fn installed_ccxt_owner_routes_keep_constants_and_strict_modes() {
+    let shared = installed();
+    let g = &shared.globals;
+    for (name, expected) in [
+        ("TRUNCATE", 0.),
+        ("ROUND", 1.),
+        ("ROUND_UP", 2.),
+        ("ROUND_DOWN", 3.),
+        ("DECIMAL_PLACES", 2.),
+        ("SIGNIFICANT_DIGITS", 3.),
+        ("TICK_SIZE", 4.),
+        ("NO_PADDING", 5.),
+        ("PAD_WITH_ZERO", 6.),
+    ] {
+        assert!(
+            g.get(name).unwrap().strict_equals(&Js::Number(expected)),
+            "{name}"
+        );
+    }
+    let source = Command::new("node")
+        .args([
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/js_ccxt_imports_source.cjs"
+            ),
+            "owner-routes",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    // Each route reaches the private helpers through the actual installed import.
+    for (index, (name, args)) in [
+        ("numberToString", vec![Js::Number(1e-8)]),
+        ("parsePrecision", vec![Js::str("3junk")]),
+        (
+            "decimalToPrecision",
+            vec![Js::str("123.45"), Js::Number(1.), Js::Number(-1.)],
+        ),
+        (
+            "decimalToPrecision",
+            vec![
+                Js::str("1.2345"),
+                Js::Number(1.),
+                Js::Number(0.05),
+                Js::Number(4.),
+            ],
+        ),
+        (
+            "decimalToPrecision",
+            vec![Js::str("1.235"), Js::str("1"), Js::Number(2.)],
+        ),
+        (
+            "safeString",
+            vec![Js::object(vec![("x", Js::Number(42.))]), Js::str("x")],
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(expected[index]["name"], name);
+        let result = g.call_method(name, args).unwrap();
+        assert_eq!(
+            serde_json::json!(result.to_js_string().unwrap().as_ref()),
+            expected[index]["units"],
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn ccxt_owner_receipts_match_maintained_source_expectations() {
+    let source = Command::new("node")
+        .args([
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/js_ccxt_imports_source.cjs"
+            ),
+            "owner-contracts",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let contracts: Value = serde_json::from_str(include_str!(
+        "../../safe-cex-parity/accepted-set/contracts/safe-cex-exchange.json"
+    ))
+    .unwrap();
+    for (owner, cases) in expected.as_object().unwrap() {
+        let key = format!("safe_cex_exchange::js_runtime::ccxt::{owner}");
+        assert_eq!(
+            &contracts[&key]["cases"], cases,
+            "actual TS expectations for {owner}"
+        );
+        assert_eq!(
+            &contracts[&key]["nativeObservation"]["cases"], cases,
+            "native input observations for {owner}"
+        );
+    }
+}
+
+#[test]
 fn installed_precision_from_string_matches_the_source_import() {
     let output = Command::new("node")
         .arg(concat!(

@@ -3,10 +3,9 @@
 use crate::chaser_manager::ChaserOrderManager;
 use crate::chaser_manager::ChaserSupervisor;
 use crate::payload::StoreWorkerOp;
-use crate::payload::StoreWorkerStorePayload;
 use crate::settings::AppSettingsWorkerType;
 use crate::settings::ExchangeMetadataWorkerType;
-use safe_cex_exchange::js_runtime::value::Js;
+use safe_cex_exchange::js_runtime::value::{Js, from_typed};
 use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::store_delivery::StoreFrame;
 use safe_cex_exchange::store_delivery::StoreUpdateThrottle;
@@ -29,10 +28,10 @@ pub trait WorkerHandler {
 }
 pub type ProcessorList = Rc<RefCell<Vec<Rc<dyn WorkerPostprocessor>>>>;
 pub type HandlerList = Rc<RefCell<Vec<Rc<dyn WorkerHandler>>>>;
-/// Typed store envelope avoids serializing native nonfinite values into JSON.
+/// Native store envelope retains construction order and nonfinite values.
 pub struct WorkerStoreMessage {
     pub op: StoreWorkerOp,
-    pub data: StoreWorkerStorePayload,
+    pub data: Js,
 }
 pub trait ExchangeWorkerHost: StoreUpdateThrottleHost + 'static {
     fn post_store(&self, message: WorkerStoreMessage) -> Result<(), ExchangeError>;
@@ -168,12 +167,12 @@ impl<H: ExchangeWorkerHost> ExchangeWorker<H> {
         let tickers_version = self.store.get_tickers_version();
         let hosted = self.construction.options.borrow().hosted_mode == Some(true);
         let prepared = self.preparer.borrow_mut().prepare(
-            &data.borrow(),
+            &from_typed(&*data.borrow())?,
             markets_version,
             tickers_version,
             hosted,
             force_full_store,
-        );
+        )?;
         self.construction.ctx.post_store(WorkerStoreMessage {
             op: StoreWorkerOp::Store,
             data: prepared,

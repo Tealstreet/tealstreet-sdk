@@ -215,3 +215,9 @@ The common native HTTP request adds the Axios Promise await boundary even for
 ready terminal responses; private login captures clock/nonce and starts sync
 before its waiter is queued. `ASYNC_WRAPPER_REVIEW.md` records actual dropped,
 ready and held-response binding probes and three compiled boundary controls.
+
+Public socket topics retain insertion order, matching the maintained Object.keys
+subscription path (JSON-encoded topic keys are never array-index keys). The
+native_identity repeated-constructor regression compares exact subscription bytes
+for both ticker/price sockets and all three batches against maintained TS members.
+See SUBSCRIPTION_ORDER_REVIEW.md for the compiled original-code failures and scope.

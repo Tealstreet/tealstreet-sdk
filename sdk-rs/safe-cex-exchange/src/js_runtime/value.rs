@@ -1997,7 +1997,7 @@ impl Js {
             _ => self.own_property_names(),
         }
     }
-    pub(super) fn own_enumerability(&self, key: &[u16]) -> Result<Option<bool>, Thrown> {
+    pub(crate) fn own_enumerability(&self, key: &[u16]) -> Result<Option<bool>, Thrown> {
         match self {
             Js::Builtin(reference) => Ok(reference
                 .own_properties()

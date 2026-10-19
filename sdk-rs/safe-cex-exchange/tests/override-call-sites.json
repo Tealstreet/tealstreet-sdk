@@ -277,6 +277,18 @@
   },
   {
     "file": "safe-cex-exchange/src/exchange.rs",
+    "function": "listen_ohlcv_retained",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "listen_ohlcv",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-exchange/src/exchange.rs",
     "function": "listen_ohlcvs",
     "edges": [
       {
@@ -803,12 +815,6 @@
     "file": "safe-cex-registry/src/native_account.rs",
     "function": "listen",
     "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "listen_ohlcv",
-        "count": 1
-      },
       {
         "receiver": "dynamic",
         "kind": "call",

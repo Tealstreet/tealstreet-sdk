@@ -40,6 +40,21 @@ impl SocketHost {
 }
 impl Host {
     pub fn bind_protocols(&self) -> Result<(), ExchangeError> {
+        let public = self
+            .public_body
+            .borrow()
+            .as_ref()
+            .map(Rc::downgrade)
+            .ok_or_else(|| ExchangeError::new("Apex public socket is not assembled"))?;
+        safe_cex_exchange::websocket::install_native_handler_stats(
+            &self.core(false)?,
+            Rc::new(move |topic| {
+                let public = public
+                    .upgrade()
+                    .ok_or_else(|| ExchangeError::new("Apex public socket owner released"))?;
+                Ok(public.handler_count(topic))
+            }),
+        );
         let public = Rc::downgrade(self.public_body.borrow().as_ref().expect("public body"));
         let reconnect_public = public.clone();
         self.public

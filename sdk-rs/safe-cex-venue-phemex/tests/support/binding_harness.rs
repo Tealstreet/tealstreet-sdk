@@ -41,6 +41,7 @@ type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 pub struct Runtime {
     sleep_wakers: virtual_time::SleepWakers,
     pub now: Rc<Cell<f64>>,
+    pub wall_offset: Cell<f64>,
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
@@ -92,7 +93,7 @@ impl ExchangeRuntime for Runtime {
         self.now.get()
     }
     fn now_ms(&self) -> f64 {
-        self.now.get()
+        self.now.get() + self.wall_offset.get()
     }
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         let now = self.now.clone();
