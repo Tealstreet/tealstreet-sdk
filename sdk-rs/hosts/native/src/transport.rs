@@ -63,7 +63,9 @@ impl Transport for NetworkTransport {
                 tokio::select! {
                     message = ws.next() => match message {
                         Some(Ok(Message::Text(text))) => {
-                            let _ = events.send(HostEvent::WsMessage(socket, text.to_string()));
+                            if events.send(HostEvent::WsMessage(socket, text.to_string())).is_err() {
+                                return;
+                            }
                         }
                         // Answering pings needs a flush on a quiet socket.
                         Some(Ok(Message::Ping(_))) => {
