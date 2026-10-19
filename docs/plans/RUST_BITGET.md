@@ -1,0 +1,55 @@
+# Bitget Rust port
+
+Lane: `feat/rust-bitget`. Spec: `RUST_REWRITE.md`; process: the venue port
+brief on `origin/feat/rust-rewrite`. Full automatic execution, phase review by
+sub-agent, commits at stable points. Target is USDT-M first, USDC shared paths;
+inverse only where its sizing and collateral behavior can be verified.
+
+## Phases
+
+1. Public: borrowed wire records, streamed markets/tickers/candles, three
+   ticker sockets, ref-counted books/candles, snapshot/update sequencing and
+   checksum validation, reconnect and ping watchdog. Register crate and wasm.
+   Verify bans, fmt, clippy and documented-payload public tests; sub-agent audit.
+2. Private: exact REST/WS signing, Classic/UTA detection and subscriptions,
+   typed account snapshots, position/settings mapping, failed-read preservation,
+   terminal tombstones and fresh-WS guards, polling and event reconciliation.
+   Verify signing, snapshot races, reconnect, empty/error responses; audit.
+3. Trading: sequenced jobs, whole-batch client-id preflight, Classic batches,
+   UTA orders/strategy orders, sized vs position stops, brackets/trailing,
+   amend with fresh newClientOid, cancel and account settings. Never retry an
+   ambiguous write. Verify payloads, partial failures and lifecycle; audit.
+4. Queries: paged executions, order history, income and public trades as rare
+   JSON command results. Bound ranges/cursors and dedupe executions. Audit.
+5. Harness/gates: generic replay requests including JSON bodies and commands,
+   documented private tape, real 20-second two-book public fixture, Bitget
+   correctness/CPU/memory and Binance regression gates, wasm clippy/build,
+   repository checks. Audit and record actual measurements.
+
+## Risks and decisions
+
+- Classic v2 public streams stay shared across Classic/UTA private accounts.
+- A sized TPSL is clamped to the protected side, floored to the lot; zero is
+  a full-position sentinel. Cancel uses immutable native plan type.
+- Native modify-order sends both price and size plus a fresh client id.
+- Successful error envelopes and malformed streamed records must not clear
+  last-known-good account state.
+- Books must not publish updates before a snapshot or across a sequence gap.
+- TS cumulative fill events violate one execution per fill; any intentional
+  correction needs an explicit gate entry and commit explanation.
+- Keep TS available to the replay oracle until the migration integration decides
+  deletion; never weaken parity or performance gates to make a tape pass.
+
+## Progress
+
+- Read the spec, existing engine/Binance pattern, Bitget plan-type and client-id
+  guidance, TS Classic/UTA startup, public and trading behavior.
+- Fetched origin and read the updated Process section. Existing lane is clean.
+- No implementation changes yet. Next: public phase.
+
+## Final integration
+
+After all gates: merge `origin/feat/rust-rewrite` into lane (stop on conflicts),
+re-run affected checks, push, PR to `feat/rust-rewrite`, adversarial local
+sub-agent reviews posted to PR, fix/review until clean or diminishing returns,
+merge PR, create fresh follow-up branch. Never touch master or force/rebase.
