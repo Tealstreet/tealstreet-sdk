@@ -165,3 +165,16 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   retained memory1.8/1.8MB (ratio1.03; wasm1.4MB). Private/Binance gates running.
 - Root full suite PASS27/27 tasks with --maxWorkers=2 --testTimeout=30000;
   both safe-cex test tasks pass6489/6489 tests. No test timeout source edits.
+
+### All lane gates green (before landing sync)
+
+- BingX public PASS3runs:188frames,1268markets,1260tickers,2books;
+  TS/Rust CPU76.9/60.4ms, steady29.4/24.9ms, memory ratio1.03 (wasm1.4MB).
+- BingX private PASS1run:38frames,2markets,2tickers; CPU64.0/43.0ms,
+  steady23.1/17.8ms, retained1.0/1.1MB (correctness-only).
+- Binance public PASS3runs:871frames,917markets,783tickers,3books;
+  CPU208.0/102.6ms, steady122.2/42.8ms, retained2.3/1.9MB.
+- Binance private PASS1run:14frames; CPU61.8/40.6ms, retained0.9/1.1MB
+  (correctness-only). Bans, fmt, venue/shared-engine clippy and wasm clippy pass.
+- Syncing latest landing branch next; preserve Bybit Path/envelope pagination,
+  recheck combined code, then push/PR/adversarial review/green CI/merge.
