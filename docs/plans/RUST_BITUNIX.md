@@ -282,3 +282,11 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
 - Host review additionally fixed disposed-engine calls from delayed HTTP/timer
   callbacks, retaining ordered binary decoding and fail-closed upgrade headers.
   Final combined public/private replays are next, then PR review and green CI.
+- Strict component checks caught a Bybit Rust negative JS heap delta even though
+  correctness/CPU/total-memory passed. Diagnosis: one concatenated canonical URL
+  per replay frame flattened during comparisons, releasing harness-only ropes
+  after baseline. Canonicalize/share each immutable raw URL once before either
+  baseline. Three fresh Rust probes retain +796–806 KB, with all non-metric
+  outputs identical. GC counts and thresholds unchanged; helper 19 tests PASS.
+- Actual merged landing parent is 6cd219ce4c (WEEX plus status-only landing
+  updates), already containing 4046db3826. Bitunix private 42 records PASS.

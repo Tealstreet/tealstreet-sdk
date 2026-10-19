@@ -108,8 +108,14 @@ class Tape {
     this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records) });
     this.responses = new Responses(records, requestKey, venue.checkRequest, isWriteRequest,
       venue.matchRequestBody ? undefined : (method, url) => requestKey(method, url));
+    // Each connection URL is immutable tape metadata. Share its canonical
+    // spelling instead of allocating one concatenated URL per frame.
+    const urls = new Map();
     this.frames = records.filter((r) => ['ws', 'command', 'open', 'close'].includes(r.type)).map((r) => {
-      if (r.url) r = { ...r, url: canonicalUrl(r.url) };
+      if (r.url) {
+        if (!urls.has(r.url)) urls.set(r.url, canonicalUrl(r.url));
+        r = { ...r, url: urls.get(r.url) };
+      }
       if (r.type !== 'ws') return r;
       const m = r.text.trimStart().startsWith('{') ? JSON.parse(r.text) : {};
       const topic = m.channel ? { channel: m.channel } : m.ch ? (m.symbol ? { ch: m.ch, symbol: m.symbol } : { ch: m.ch }) : undefined;
