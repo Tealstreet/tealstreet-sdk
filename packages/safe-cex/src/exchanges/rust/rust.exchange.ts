@@ -36,6 +36,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binancepm: 'binancepm',
   bingx: 'bingx',
   bybit: 'bybit',
+  cryptocom: 'cryptocom',
   okx: 'okx',
   okxeu: 'okxeu',
   okxdemo: 'okxdemo',

@@ -86,3 +86,17 @@ test('nested generated OKX IDs vary while caller IDs and body types stay exact',
   assert.notEqual(requestKey('POST',url,body('broker1'),new Set(['broker1']),opts),requestKey('POST',url,body('broker2'),new Set(['broker1']),opts));
   assert.notEqual(requestKey('POST',url,body('broker1'),new Set(),opts),requestKey('POST',url,body('broker2',1),new Set(),opts));
 });
+
+test('Crypto signing envelope varies while typed params and caller IDs remain exact', async () => {
+  const { venueOf } = await import('./venues.mjs');
+  const venue = venueOf('cryptocom');
+  const route = 'https://api.crypto.com/exchange/v1/private/create-order';
+  const key = (params, id = 1) => requestKey('POST', route, JSON.stringify({ id, nonce: id, sig: String(id), params }), new Set(['caller']), venue);
+  assert.equal(key({ quantity: '1', client_oid: 'caller' }, 1), key({ client_oid: 'caller', quantity: '1' }, 2));
+  assert.notEqual(key({ quantity: '1', client_oid: 'caller' }), key({ quantity: 1, client_oid: 'caller' }));
+  assert.notEqual(key({ client_oid: 'caller' }), key({ client_oid: 'other' }));
+  assert.notEqual(requestKey('POST', route, '[1]'), requestKey('POST', route, '{"0":1}'));
+  assert.deepEqual(subscriptionKeys('wss://stream.crypto.com/exchange/v1/market', '{"method":"subscribe","params":{"channels":["ticker.BTCUSD-PERP"]}}'), [
+    'wss://stream.crypto.com/exchange/v1/market subscribe ticker.BTCUSD-PERP',
+  ]);
+});

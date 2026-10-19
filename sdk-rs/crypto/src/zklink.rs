@@ -15,8 +15,6 @@ use franklin_crypto::{
 };
 use sha2::{Digest, Sha256};
 
-pub mod contract;
-
 #[cfg(test)]
 thread_local! {
     static EMPTY_RESCUE_OUTPUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };

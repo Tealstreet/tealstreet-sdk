@@ -299,3 +299,21 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   combined price/amount forwarding remains intact with a no-write regression.
 - Pushing review fixes now for PR CI. Final rebuilt four-venue replay/SDK gates
   and repository checks run before merge; no CI-green/landing claim yet.
+
+
+### Concurrent Crypto.com landing integration
+
+- Merged the new landing base while retaining nested venue paths and all five
+  registries. Removed duplicate harness script key introduced by the auto-merge.
+  Independent SDK/Cargo/engine audits found no remaining registry regression.
+- Preserved landing crypto dead-code cleanup, signed Crypto.com protocol checks,
+  real TS worker egress, and isolated retained-memory measurement. Combined these
+  with typed request matching, staged BingX snapshots, reconnect delivery and
+  subscription/write coverage. Independent shared harness review and rebuilt
+  five-venue verification run before pushing this integration.
+
+- Shared review found a lost BingX write classification in the new response
+  helper. Restored lifecycle-aware once-only mutations and leftover enforcement;
+  independent repeat audit is clear. All22 harness tests pass. Rebuilt aggregate
+  wasm2,114,189bytes (CI allowance2.125MiB), SDK18/host5 tests pass, workspace
+  clippy passes. Full native tests and fresh replay gates remain in progress.

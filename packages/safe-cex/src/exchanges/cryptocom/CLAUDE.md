@@ -673,3 +673,23 @@ position/balance state, and isolated-position behavior.
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `client_oid`, rule 1-36 characters.
+
+## Rust engine
+
+`engine: 'rust'` selects `sdk-rs/venues/cryptocom` through the wasm host.
+The engine streams nested REST lists and stores account settings separately
+from open positions. Failed reads retain state; snapshots and stream frames
+respect terminal order/position timestamp fences. Execution fills come from
+`user.trade`, deduplicated by trade id, with each execution's own price.
+Caller `client_oid` survives incoming order mapping; native amend preserves it.
+The Rust caller-ID validator uses a conservative 36-byte ceiling.
+
+Rust deliberately corrects these TS paths: post-only uses `exec_inst` plus
+`GOOD_TILL_CANCEL`; leverage uses account identity and an integer on the global
+account endpoint; unsupported attached brackets and opening triggers reject
+before writes. Default snapshot books replace both sides. Public ticker/book
+updates process every symbol rather than sharing the TS handler throttles.
+History reads use exact nanosecond cursors, overlap/deduplicate boundaries and
+walk ranged income to exhaustion. Settlement PnL uses `realized_pnl`; historical
+requested limit prices stay separate from triggers. The replay harness records
+these corrections under `KNOWN_TS_FIXES`.
