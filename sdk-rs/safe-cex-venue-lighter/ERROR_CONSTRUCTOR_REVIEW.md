@@ -34,6 +34,11 @@ After normally merging master c1ad856ceb, restoring its constructor body still
 compiles and fails both named regressions. Exact restoration of the repair passes
 all 18 SDK binding tests, including both NativeRuntime constructor witnesses.
 
+Final review additionally found that name assignment must preserve an inherited
+setter's original throw. The actual TS constructor oracle checks that abrupt
+completion. The native capture regression also compiles RED with direct property
+definition; ordinary assignment restores the original thrown identity.
+
 The shared Error implementation does not generate an engine call stack or
 provide a stock captureStackTrace. The repair preserves supplied diagnostics and
 executes a supplied capture hook; it does not invent a V8 stack. This shared OPEN

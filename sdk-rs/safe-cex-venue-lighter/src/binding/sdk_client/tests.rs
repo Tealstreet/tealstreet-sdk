@@ -1395,5 +1395,25 @@ mod native_error_constructor {
         assert_eq!(error.message(), "Error.captureStackTrace is not a function");
         error_class.set("captureStackTrace", Js::Null).unwrap();
         assert!(class.construct(vec![Js::str("uncaptured")], None).is_ok());
+        let assigned = original.clone();
+        class
+            .get("prototype")
+            .unwrap()
+            .define_accessor(
+                "name",
+                None,
+                Some(Rc::new(move |_, value| {
+                    assert_eq!(value.to_display(), "LighterApiError");
+                    Err(Thrown::new(assigned.clone()))
+                })),
+            )
+            .unwrap();
+        assert!(
+            class
+                .construct(vec![Js::str("assigned name")], None)
+                .unwrap_err()
+                .value
+                .strict_equals(&original)
+        );
     }
 }

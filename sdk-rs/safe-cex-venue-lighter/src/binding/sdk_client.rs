@@ -436,7 +436,7 @@ fn lighter_api_error(
     for key in ["code", "details", "requestId", "statusCode"] {
         error.define(key, Js::Undefined)?;
     }
-    error.define("name", Js::str(shape.name))?;
+    error.set("name", Js::str(shape.name))?;
     let code = arg(&args, 1);
     error.set(
         "code",
