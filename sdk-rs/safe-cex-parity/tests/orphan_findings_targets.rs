@@ -139,9 +139,11 @@ fn assigned_finding_targets_resolve_in_the_real_source_index() {
             targets.insert(target.to_owned());
         }
     }
+    // #1230 adds install_native_handler_stats to recordMessageHandlerStats.
+    // Retain the original 48 targets plus that resolved registry installer.
     assert_eq!(
         targets.len(),
-        48,
-        "independent 15-row assignment floor, including original split targets and 27 prototype-realm targets; stop inverse.mapOrder"
+        49,
+        "independent 15-row assignment floor, including original split targets, 27 prototype-realm targets and the native handler stats installer; stop inverse.mapOrder"
     );
 }
