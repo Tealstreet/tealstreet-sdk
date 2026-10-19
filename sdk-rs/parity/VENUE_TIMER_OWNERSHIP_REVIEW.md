@@ -17,8 +17,8 @@ observe WOO's funding request at 60 seconds and Backpack's delayed market
 subscriptions at two seconds. Disposal suppresses subsequent callbacks. The
 terminal transport is the only supplied seam; no receipt exemptions are used.
 
-The existing LocalDial test wrapper now forwards spawn_classified and
- task_work_started to its NativeRuntime. This preserves the production receipt
+The existing `LocalDial` test wrapper now forwards `spawn_classified` and
+`task_work_started` to its NativeRuntime. This preserves the production receipt
 rather than turning all classified core operations into wrapper-local raw tasks.
 
 The independent live-diff owner has pinned ee045514f4 for the preserved WOO
@@ -26,9 +26,13 @@ The independent live-diff owner has pinned ee045514f4 for the preserved WOO
 from the constructed regressions; this review does not claim their parity or CPU
 ratio before their terminal receipts exist.
 
+Backpack disposal fixtures track real owned timeout handles. They retain the
+existing assertions for depth cancellation before socket close and the source
+retention of the ticker throttle; no cancellation assertion is dropped.
+
 ## Venue census and direct cutover
 
-The census inspects every venue crate's production timer scheduling, including
+The census inspects all 27 venue crates' production timer scheduling, including
 sleep calls captured before a spawn and delayed work inside a finite owner.
 
 | Venue | Former timer path | Canonical owner and callback phase |
