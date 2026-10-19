@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Five venues plus Bybit profiles; allow 2.25 MiB.
-      WASM_BUDGET_BYTES: 2359296
+      # Seven venues plus Bybit profiles; retain the landing 2.5 MiB budget.
+      WASM_BUDGET_BYTES: 2621440
     defaults:
       run:
         working-directory: .
@@ -135,8 +135,6 @@ jobs:
         run: yarn workspace @tealstreet/safe-cex test-wasm
       - name: The Cloudflare Workers host
         run: yarn workspace @tealstreet/safe-cex-wasm test
-      - name: Harness oracle regressions
-        run: corepack yarn -s rust:test-harness
       - name: Check the wasm size budget
         run: |
           size=$(stat -c%s sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm)
@@ -148,14 +146,26 @@ jobs:
         run: |
           yarn rust:private-tape
           yarn rust:gate --tape sdk-rs/harness/tapes/binance-private.jsonl --runs 1 --books ''
+      - name: MEXC public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue mexc --tape sdk-rs/harness/fixtures/mexc-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: MEXC account and trading (correctness)
+        run: |
+          yarn rust:private-tape-mexc
+          yarn rust:gate --venue mexc --tape sdk-rs/harness/tapes/mexc-private.jsonl --runs 1 --books ''
       - name: Bybit public data (correctness, CPU and memory)
         run: yarn rust:gate --venue bybit --tape sdk-rs/harness/fixtures/bybit-public.jsonl.gz --books BTCUSDT,ETHUSDT
       - name: Bybit account and trading (correctness)
         run: |
           yarn rust:private-tape-bybit
           yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''
-      - name: Harness protocol regressions
+      - name: Replay request and subscription matching
         run: yarn rust:test-harness
+      - name: BingX public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue bingx --tape sdk-rs/harness/fixtures/bingx-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: BingX account and trading (correctness)
+        run: |
+          yarn rust:private-tape-bingx
+          yarn rust:gate --venue bingx --tape sdk-rs/harness/tapes/bingx-private.jsonl --runs 1 --books ''
       - name: Crypto.com public data (correctness, CPU and memory)
         run: yarn rust:gate --venue cryptocom --tape sdk-rs/harness/fixtures/cryptocom-public.jsonl.gz --books BTCUSD-PERP,ETHUSD-PERP
       - name: Crypto.com account and trading (correctness)

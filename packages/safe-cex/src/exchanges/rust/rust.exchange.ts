@@ -4,6 +4,7 @@ import type {
   Candle,
   ExchangeName,
   ExchangeOptions,
+  FetchedLeverage,
   Execution,
   ExecutionsOptions,
   HistoricalOrder,
@@ -33,13 +34,15 @@ import {
   HYROTRADER_SIMULATOR_URL,
   HYROTRADER_SIMULATOR_WS_URL,
 } from '../bybit/bybit.types';
-import { patternClientOrderIdRule } from '../clientOrderId';
+import { isRegularClientOrderShape, patternClientOrderIdRule } from '../clientOrderId';
 import { BROKER_ID } from '../okx/okx.types';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   binancepm: 'binancepm',
+  mexc: 'mexc',
+  bingx: 'bingx',
   bybit: 'bybit',
   bybitinverse: 'bybitinverse',
   bybitspot: 'bybitspot',
@@ -60,6 +63,13 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  bingx: {
+    label: 'BingX',
+    isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
+    mint: () => `ts${uuid()}`.toLowerCase().slice(0, 40),
+    requirement: 'be 1-40 characters with no uppercase letters',
+    isValid: (id) => id.length >= 1 && id.length <= 40 && id === id.toLowerCase(),
+  },
   cryptocom: patternClientOrderIdRule('Crypto.com', /^.{1,36}$/),
   weex: patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/, {
     mint: () => `ts${uuid()}`.slice(0, 36),
@@ -123,7 +133,7 @@ export class RustEngineExchange extends BaseExchange {
     this.isSpot = exchangeName === 'bybitspot';
     this.isDemo =
       exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
-    this.applier = new FrameApplier(store);
+    this.applier = new FrameApplier(store, this.name === 'mexc');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
   }
 
@@ -184,6 +194,12 @@ export class RustEngineExchange extends BaseExchange {
 
   /** The whole current state as one frame, for a consumer that starts late. */
   snapshotFrame = () => this.host?.snapshot();
+
+  updateSymbolMetadata = async (symbol: string) => {
+    if (this.name !== 'mexc' || this.isPublicDataOnly) return;
+    const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+    this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: rails } });
+  };
 
   private receiveFrame = (buffer: ArrayBuffer) => {
     const frame = new Frame(buffer);
@@ -252,6 +268,7 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (this.name === 'bingx') this.assertCallerClientOrderIds(orders);
     if (['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name)) {
       this.assertCallerClientOrderIds(orders);
       for (const order of orders) {

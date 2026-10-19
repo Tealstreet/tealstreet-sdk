@@ -6,15 +6,25 @@ const venue = venueOf('cryptocom');
 const privateUrl = 'wss://stream.crypto.com/exchange/v1/user';
 const publicUrl = 'wss://stream.crypto.com/exchange/v1/market';
 const auth = () => {
-  const method = 'public/auth', id = Date.now(), nonce = id, api_key = 'replay-key';
-  const sig = createHmac('sha256', 'replay-secret').update(method + id + api_key + nonce).digest('hex');
+  const method = 'public/auth',
+    id = Date.now(),
+    nonce = id,
+    api_key = 'replay-key';
+  const sig = createHmac('sha256', 'replay-secret')
+    .update(method + id + api_key + nonce)
+    .digest('hex');
   return { method, id, nonce, api_key, sig };
 };
 const subscriptions = ['user.order', 'user.advance.order', 'user.positions', 'user.balance', 'user.trade'];
 test('HMAC check binds the signed method to the REST route', () => {
   const body = (method) => {
-    const id = Date.now(), nonce = id, api_key = 'replay-key', params = { client_oid: 'caller' };
-    const sig = createHmac('sha256', 'replay-secret').update(method + id + api_key + 'client_oidcaller' + nonce).digest('hex');
+    const id = Date.now(),
+      nonce = id,
+      api_key = 'replay-key',
+      params = { client_oid: 'caller' };
+    const sig = createHmac('sha256', 'replay-secret')
+      .update(method + id + api_key + 'client_oidcaller' + nonce)
+      .digest('hex');
     return JSON.stringify({ method, id, nonce, api_key, params, sig });
   };
   const url = 'https://api.crypto.com/exchange/v1/private/create-order';
@@ -41,17 +51,27 @@ test('bad signatures and missing channels cannot pass the socket audit', () => {
 });
 
 test('HMAC check preserves exact nanosecond integer parameters', () => {
-  const method = 'private/get-trades', id = Date.now(), nonce = id, api_key = 'replay-key';
+  const method = 'private/get-trades',
+    id = Date.now(),
+    nonce = id,
+    api_key = 'replay-key';
   const payload = method + id + api_key + 'end_time1610000000000000001' + nonce;
   const sig = createHmac('sha256', 'replay-secret').update(payload).digest('hex');
-  const body = JSON.stringify({ method, id, nonce, api_key, sig, params: {} }).replace('"params":{}', '"params":{"end_time":1610000000000000001}');
+  const body = JSON.stringify({ method, id, nonce, api_key, sig, params: {} }).replace(
+    '"params":{}',
+    '"params":{"end_time":1610000000000000001}',
+  );
   const url = 'https://api.crypto.com/exchange/v1/private/get-trades';
   assert.equal(venue.checkRequest('POST', url, body), true);
   assert.equal(venue.checkRequest('POST', url, body.replace('1610000000000000001', '1610000000000000002')), false);
 });
 
 test('public audit requires ticker subscriptions before replay', () => {
-  const audit = venue.createSocketAudit('rust', { isPrivate: false, books: ['BTCUSD-PERP'], tickers: ['BTCUSD-PERP', 'ETHUSD-PERP'] });
+  const audit = venue.createSocketAudit('rust', {
+    isPrivate: false,
+    books: ['BTCUSD-PERP'],
+    tickers: ['BTCUSD-PERP', 'ETHUSD-PERP'],
+  });
   const send = (channels) => audit.sent(publicUrl, JSON.stringify({ method: 'subscribe', params: { channels } }));
   send(['book.BTCUSD-PERP.50']);
   assert.equal(audit.ready(), false);
@@ -60,4 +80,76 @@ test('public audit requires ticker subscriptions before replay', () => {
   ready.sent(publicUrl, JSON.stringify({ method: 'subscribe', params: { channels: ['ticker.BTCUSD-PERP'] } }));
   assert.equal(ready.ready(), true);
   assert.deepEqual(ready.errors(), []);
+});
+
+test('Bybit startup topics derive all successful seed pages independently of sent subscriptions', async () => {
+  const { subscriptionKeys } = await import('./requests.mjs');
+  const bybit = venueOf('bybit');
+  const row = (symbol, quoteCoin) => ({ symbol, quoteCoin });
+  const seed = (list, extra = {}) => ({
+    type: 'http',
+    method: 'GET',
+    status: 200,
+    url: 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000',
+    body: JSON.stringify({ retCode: 0, result: { list } }),
+    ...extra,
+  });
+  const required = bybit.startupSubscriptions(
+    [
+      seed([row('BTCUSDT', 'USDT'), row('BTCUSD', 'USD'), row('BTCUSDT', 'USDT')]),
+      seed([row('ETHUSDC', 'USDC')], { url: 'https://api.bybit.com/v5/market/instruments-info?cursor=page2' }),
+      seed([row('NEXTUSDT', 'USDT')], { url: 'https://api.bybit.com/v5/market/instruments-info?status=PreLaunch' }),
+      seed([row('FAILEDUSDT', 'USDT')], { status: 503 }),
+      seed([row('FAILEDUSDT', 'USDT')], {
+        body: JSON.stringify({ retCode: 10001, result: { list: [row('FAILEDUSDT', 'USDT')] } }),
+      }),
+      seed([row('OTHERUSDT', 'USDT')], { url: 'https://api.bybit.com/v5/market/tickers' }),
+    ],
+    ['BTCUSDT', 'ETHUSDC'],
+  );
+  const socket = 'wss://stream.bybit.com/v5/public/linear';
+  assert.deepEqual(required, [
+    `${socket} subscribe tickers.BTCUSDT`,
+    `${socket} subscribe tickers.ETHUSDC`,
+    `${socket} subscribe tickers.NEXTUSDT`,
+    `${socket} subscribe orderbook.1000.BTCUSDT`,
+    `${socket} subscribe orderbook.1000.ETHUSDC`,
+  ]);
+  const pending = new Set(required);
+  const sent = (url, args) => {
+    for (const key of subscriptionKeys(url, JSON.stringify({ op: 'subscribe', args }))) pending.delete(key);
+  };
+  sent('wss://stream.bybit.com/v5/private', ['tickers.BTCUSDT']);
+  assert.equal(pending.size, 5, 'wrong native socket cannot satisfy readiness');
+  sent(socket + '?requestId=generated', ['tickers.BTCUSDT', 'orderbook.1000.BTCUSDT']);
+  assert.equal(pending.size, 3, 'a partial outgoing batch cannot satisfy readiness');
+  sent(socket, ['tickers.ETHUSDC', 'tickers.NEXTUSDT', 'orderbook.1000.ETHUSDC']);
+  assert.equal(pending.size, 0);
+});
+
+test('Bybit variant startup topics keep native categories, depths and configured origins', () => {
+  for (const [name, symbol, quoteCoin, category, depth, origin] of [
+    ['bybitinverse', 'BTCUSD', 'USD', 'inverse', 1000, 'wss://stream.bybit.com'],
+    ['bybitspot', 'BTCUSDT', 'USDT', 'spot', 200, 'wss://stream.bybit.com'],
+    ['bybitdemo', 'BTCUSDT', 'USDT', 'linear', 1000, 'wss://stream.bybit.com'],
+    ['hyrotrader', 'BTCUSDT', 'USDT', 'linear', 1000, 'wss://challenge.example.test'],
+  ]) {
+    const publicWs = `${origin}/v5/public/${category}`;
+    const records = [
+      {
+        type: 'http',
+        method: 'GET',
+        status: 200,
+        url: `https://example.test/v5/market/instruments-info?category=${category}`,
+        body: JSON.stringify({ retCode: 0, result: { list: [{ symbol, quoteCoin }] } }),
+      },
+      { type: 'ws', url: `${publicWs}?requestId=generated`, text: '{}' },
+    ];
+    if (name === 'hyrotrader') records.unshift({ type: 'config', options: { endpoints: { publicWs } } });
+    assert.deepEqual(
+      venueOf(name).startupSubscriptions(records, [symbol]),
+      [`${publicWs} subscribe tickers.${symbol}`, `${publicWs} subscribe orderbook.${depth}.${symbol}`],
+      name,
+    );
+  }
 });

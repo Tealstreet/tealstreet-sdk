@@ -13,6 +13,40 @@ const bybit = (name, className) => ({
     Object.keys((exchange.publicWebsocket ?? exchange.publicInverseWebsocket)?.messageHandlers ?? {}).filter((key) =>
       key.startsWith('orderbook.'),
     ).length >= count,
+  startupSubscriptions: (records, books) => {
+    const symbols = new Set();
+    for (const record of records) {
+      if (
+        record.type !== 'http' ||
+        record.method !== 'GET' ||
+        !(record.status >= 200 && record.status < 300) ||
+        new URL(record.url).pathname !== '/v5/market/instruments-info'
+      )
+        continue;
+      const body = JSON.parse(record.body);
+      if (Number(body.retCode) !== 0) continue;
+      for (const row of body.result?.list ?? []) {
+        if (
+          (name === 'bybitinverse' ? row.quoteCoin === 'USD' : ['USDT', 'USDC'].includes(row.quoteCoin)) &&
+          typeof row.symbol === 'string' &&
+          row.symbol
+        )
+          symbols.add(row.symbol);
+      }
+    }
+    const category = name === 'bybitinverse' ? 'inverse' : name === 'bybitspot' ? 'spot' : 'linear';
+    const configured = records.find((record) => record.type === 'config')?.options?.endpoints?.publicWs;
+    const observed = records.find(
+      (record) => record.type === 'ws' && record.url?.includes(`/v5/public/${category}`),
+    )?.url;
+    const url = new URL(configured ?? observed ?? `wss://stream.bybit.com/v5/public/${category}`);
+    const socket = `${url.origin}${url.pathname} subscribe `;
+    return [...symbols]
+      .map((symbol) => `${socket}tickers.${symbol}`)
+      .concat(books.map((symbol) => `${socket}orderbook.${name === 'bybitspot' ? 200 : 1000}.${symbol}`));
+  },
+  tsRejectReason: (order) =>
+    order.status === 'canceled' && order.info?.rejectReason === 'EC_PostOnlyWillTakeLiquidity' ? 'PostOnly' : undefined,
   privateSocket: '/v5/private',
   bootstrapPrivateFromTape: name === 'hyrotrader',
   isWrite: (method) => method === 'POST',
@@ -59,6 +93,35 @@ const okx = (name) => ({
 });
 
 export const VENUES = {
+  mexc: {
+    rust: 'mexc',
+    matchRequestBody: true,
+    ts: { module: `${root}/mexc/mexc.exchange.ts`, className: 'MexcExchange', name: 'mexc' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depth.')).length >= count,
+    // Public/private sockets share this URL; tapes identify their ordinal.
+    privateSocket: undefined,
+    independentLeverage: true,
+    tsSettings: (exchange, store) =>
+      store.markets.map((market) => {
+        const config = exchange.symbolSettings.get(market.symbol) ?? exchange.deriveSymbolConfig(market.symbol);
+        return {
+          symbol: market.symbol,
+          marginType: config.marginType,
+          buyLeverage: config.buyLeverage,
+          sellLeverage: config.sellLeverage,
+        };
+      }),
+  },
+  bingx: {
+    rust: 'bingx',
+    ts: { module: `${root}/bingx/bingx.exchange.ts`, className: 'BingxExchange', name: 'bingx' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('market.depth.')).length >=
+      count,
+    privateSocket: '?listenKey=',
+    matchRequestBody: true,
+  },
   weex: {
     rust: 'weex',
     ts: { module: `${root}/weex/weex.exchange.ts`, className: 'WeexExchange', name: 'weex' },
@@ -116,6 +179,7 @@ export const VENUES = {
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('book.')).length >= count,
     privateSocket: '/exchange/v1/user',
     matchRequestBody: true,
+    requestBody: (body) => body?.params ?? body,
     publicTickers: (records) => {
       const seed = records.find((r) => r.type === 'http' && r.url.endsWith('/public/get-instruments'));
       return seed

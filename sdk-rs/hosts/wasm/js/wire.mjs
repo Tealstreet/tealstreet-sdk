@@ -80,15 +80,16 @@ class Strings {
     const count = new Uint32Array(buffer, offset, 1)[0];
     this.offsets = new Uint32Array(buffer, offset + 4, count + 1);
     this.bytes = new Uint8Array(buffer, offset + 4 + 4 * (count + 1));
-    this.cache = new Array(count);
+    this.cache = undefined;
   }
 
   get(index) {
     if (index === NONE) return undefined;
-    let value = this.cache[index];
+    const cache = this.cache ??= new Array(this.offsets.length - 1);
+    let value = cache[index];
     if (value === undefined) {
       value = utf8.decode(this.bytes.subarray(this.offsets[index], this.offsets[index + 1]));
-      this.cache[index] = value;
+      cache[index] = value;
     }
     return value;
   }
@@ -254,7 +255,11 @@ export class Frame {
     const market = new Uint32Array(buffer, section.offset + 4, count);
     const margin = new Uint32Array(buffer, section.offset + 4 + count * 4, count);
     const leverage = new Float64Array(buffer, align8(section.offset + 4 + count * 8), count);
-    return { count, market, leverage, marginType: (i) => MARGIN_TYPE[margin[i]] };
+    const rails = leverage.byteOffset + count * 8;
+    const independent = rails + count * 16 <= section.offset + section.length;
+    const buyLeverage = independent ? new Float64Array(buffer, rails, count) : leverage;
+    const sellLeverage = independent ? new Float64Array(buffer, rails + count * 8, count) : leverage;
+    return { count, market, leverage, buyLeverage, sellLeverage, marginType: (i) => MARGIN_TYPE[margin[i]] };
   }
 
   fills() {

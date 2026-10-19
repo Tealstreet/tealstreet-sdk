@@ -155,6 +155,11 @@ pub enum Command {
         command: CommandId,
         hedged: bool,
     },
+    /// Refresh account-specific leverage rails and margin mode for a symbol.
+    FetchLeverage {
+        command: CommandId,
+        symbol: String,
+    },
     /// A rare request/response read (history, income, trades); the result is
     /// JSON in [`Notice::CommandDone`] and never enters the frame.
     Query {
@@ -652,11 +657,19 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_request_failed(&mut cx, pending, &message);
                 return;
             }
-            // The envelope with the array emptied: page cursors and status fields.
+            // Every selector retains the fully validated envelope, with its array emptied.
+            let body = match std::str::from_utf8(outside) {
+                Ok(body) => body,
+                Err(_) => {
+                    self.venue
+                        .on_request_failed(&mut cx, pending, "stream envelope is not UTF-8");
+                    return;
+                }
+            };
             let response = Response {
                 status: incoming.status,
                 headers: &incoming.headers,
-                body: std::str::from_utf8(outside).unwrap_or_default(),
+                body,
             };
             self.venue.on_response(&mut cx, pending, response);
             return;
@@ -769,5 +782,143 @@ impl<V: Venue> Engine<V> {
         self.io.candles.clear();
         self.io.frame = frame;
         (!empty).then_some(self.io.frame.as_slice())
+    }
+}
+
+#[cfg(test)]
+mod streaming_tests {
+    use super::*;
+
+    struct StreamVenue {
+        at: ArrayAt,
+        rows: Vec<String>,
+        body: Option<String>,
+        failure: Option<String>,
+    }
+
+    impl Venue for StreamVenue {
+        type Pending = Vec<String>;
+        fn start(&mut self, cx: &mut Cx<'_, Self::Pending>) {
+            cx.request_streamed(
+                Method::Get,
+                "https://example.test/list".into(),
+                Vec::new(),
+                self.at,
+                Vec::new(),
+            );
+        }
+        fn on_open(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId) {}
+        fn on_message(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _text: &str) {}
+        fn on_close(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _code: u16) {}
+        fn on_response(
+            &mut self,
+            _cx: &mut Cx<'_, Self::Pending>,
+            pending: Self::Pending,
+            response: Response<'_>,
+        ) {
+            self.rows = pending;
+            self.body = Some(response.body.to_owned());
+        }
+        fn on_item(
+            &mut self,
+            _cx: &mut Cx<'_, Self::Pending>,
+            pending: &mut Self::Pending,
+            item: &str,
+        ) {
+            pending.push(item.to_owned());
+        }
+        fn on_request_failed(
+            &mut self,
+            _cx: &mut Cx<'_, Self::Pending>,
+            _pending: Self::Pending,
+            error: &str,
+        ) {
+            self.failure = Some(error.to_owned());
+        }
+        fn on_timer(&mut self, _cx: &mut Cx<'_, Self::Pending>, _timer: TimerId) {}
+        fn on_command(&mut self, _cx: &mut Cx<'_, Self::Pending>, _command: Command) {}
+        fn book(&self, _symbol: &str) -> Option<&Book> {
+            None
+        }
+        fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    fn stream(at: ArrayAt, body: &[u8]) -> StreamVenue {
+        let mut engine = Engine::new(StreamVenue {
+            at,
+            rows: Vec::new(),
+            body: None,
+            failure: None,
+        });
+        engine.start(0.0);
+        let request = engine
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::Http(request) => Some(request.id),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(
+            1.0,
+            Event::HttpStart {
+                request,
+                status: 200,
+                headers: "",
+            },
+        );
+        for data in body.chunks(1) {
+            engine.handle(1.0, Event::HttpChunk { request, data });
+        }
+        engine.handle(1.0, Event::HttpEnd { request });
+        engine.venue
+    }
+
+    #[test]
+    fn streamed_completion_preserves_bybit_cursor_and_bingx_alias_envelopes() {
+        for (at, body) in [
+            (ArrayAt::Root, "[1]"),
+            (ArrayAt::Field("symbols"), r#"{"symbols":[1]}"#),
+            (
+                ArrayAt::Path(&["result", "list"]),
+                r#"{"list":[9],"retCode":0,"result":{"list":[1],"nextPageCursor":"next"}}"#,
+            ),
+            (ArrayAt::EnvelopeField("data"), r#"{"data":[1],"code":0}"#),
+            (
+                ArrayAt::EnvelopeFieldOrNested("data", "orders"),
+                r#"{"data":{"orders":[1]},"code":0}"#,
+            ),
+            (
+                ArrayAt::EnvelopeFieldOrNestedAny("data", &["fill_orders", "fill_history_orders"]),
+                r#"{"data":{"fill_orders":[1]},"code":0}"#,
+            ),
+            (
+                ArrayAt::EnvelopeFieldOrNestedAny("data", &["fill_orders", "fill_history_orders"]),
+                r#"{"data":{"fill_history_orders":[1]},"code":0}"#,
+            ),
+        ] {
+            let venue = stream(at, body.as_bytes());
+            assert_eq!(venue.failure, None, "{at:?}");
+            assert_eq!(venue.rows, ["1"]);
+            let expected = body.replace("[1]", "[]");
+            assert_eq!(venue.body.as_deref(), Some(expected.as_str()));
+        }
+    }
+
+    #[test]
+    fn invalid_utf8_truncated_lists_and_oversized_metadata_discard_staged_rows() {
+        let oversized = format!(r#"{{"data":[1]}}{}garbage"#, " ".repeat(1024 * 1024));
+        for body in [
+            b"{\"data\":[1],\"msg\":\"\xff\"}".as_slice(),
+            b"{\"data\":[1,\"\xff\"]}".as_slice(),
+            br#"{"data":[1,"#,
+            oversized.as_bytes(),
+        ] {
+            let venue = stream(ArrayAt::EnvelopeField("data"), body);
+            assert!(venue.failure.is_some());
+            assert!(venue.rows.is_empty());
+            assert!(venue.body.is_none());
+        }
     }
 }

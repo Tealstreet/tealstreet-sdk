@@ -109,22 +109,45 @@ pub enum ArrayAt {
     EnvelopeField(&'static str),
     /// The array sits under these nested object fields (`result.list`).
     Path(&'static [&'static str]),
+    /// Either `field: []` or `field: { nested: [] }`.
+    EnvelopeFieldOrNested(&'static str, &'static str),
+    /// A direct array or one of several accepted nested array names.
+    EnvelopeFieldOrNestedAny(&'static str, &'static [&'static str]),
 }
 
 impl ArrayAt {
-    fn len(self) -> usize {
+    fn matches_segment(self, index: usize, key: &[u8]) -> bool {
         match self {
-            Self::Root => 0,
-            Self::Field(_) | Self::EnvelopeField(_) => 1,
-            Self::Path(path) => path.len(),
+            Self::Root => false,
+            Self::Field(name) | Self::EnvelopeField(name) => index == 0 && name.as_bytes() == key,
+            Self::Path(path) => path.get(index).is_some_and(|name| name.as_bytes() == key),
+            Self::EnvelopeFieldOrNested(field, nested) => match index {
+                0 => field.as_bytes() == key,
+                1 => nested.as_bytes() == key,
+                _ => false,
+            },
+            Self::EnvelopeFieldOrNestedAny(field, nested) => match index {
+                0 => field.as_bytes() == key,
+                1 => nested.iter().any(|name| name.as_bytes() == key),
+                _ => false,
+            },
         }
     }
 
-    fn segment(self, index: usize) -> Option<&'static str> {
+    fn can_end_at(self, index: usize) -> bool {
         match self {
-            Self::Root => None,
-            Self::Field(name) | Self::EnvelopeField(name) => (index == 0).then_some(name),
-            Self::Path(path) => path.get(index).copied(),
+            Self::Root => false,
+            Self::Field(_) | Self::EnvelopeField(_) => index == 0,
+            Self::Path(path) => index + 1 == path.len(),
+            Self::EnvelopeFieldOrNested(_, _) | Self::EnvelopeFieldOrNestedAny(_, _) => index <= 1,
+        }
+    }
+
+    fn can_descend_at(self, index: usize) -> bool {
+        match self {
+            Self::Path(path) => index + 1 < path.len(),
+            Self::EnvelopeFieldOrNested(_, _) | Self::EnvelopeFieldOrNestedAny(_, _) => index == 0,
+            _ => false,
         }
     }
 }
@@ -261,23 +284,26 @@ impl ArraySplitter {
                     }
                 }
                 b':' if self.phase == Phase::Seeking && self.depth == seek_depth => {
-                    self.armed = self
-                        .at
-                        .segment(self.matched as usize)
-                        .is_some_and(|name| name.as_bytes() == self.key);
+                    self.armed = self.at.matches_segment(self.matched as usize, &self.key);
                     continue;
                 }
                 b'[' | b'{' => {
                     self.depth += 1;
                     if self.phase == Phase::Seeking {
-                        let last = self.matched as usize + 1 == self.at.len();
+                        let matched = self.matched as usize;
                         let found = byte == b'['
                             && match self.at {
                                 ArrayAt::Root => self.depth == 1,
-                                _ => self.armed && last && self.depth == seek_depth + 1,
+                                _ => {
+                                    self.armed
+                                        && self.at.can_end_at(matched)
+                                        && self.depth == seek_depth + 1
+                                }
                             };
-                        let descend =
-                            byte == b'{' && self.armed && !last && self.depth == seek_depth + 1;
+                        let descend = byte == b'{'
+                            && self.armed
+                            && self.at.can_descend_at(matched)
+                            && self.depth == seek_depth + 1;
                         self.armed = false;
                         if found {
                             self.phase = Phase::InArray;
@@ -560,6 +586,132 @@ mod tests {
         assert!(splitter.envelope().len() < 32);
     }
 
+    #[test]
+    fn nested_array_aliases_retain_valid_envelopes_across_chunks() {
+        for body in [
+            r#"{"data":[{"id":1}],"code":0}"#,
+            r#"{"data":{"fill_orders":[{"id":1}]},"code":0}"#,
+            r#"{"data":{"fill_history_orders":[{"id":1}]},"code":0}"#,
+        ] {
+            let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeFieldOrNestedAny(
+                "data",
+                &["fill_orders", "fill_history_orders"],
+            ));
+            let mut rows = 0;
+            for b in body.as_bytes().chunks(2) {
+                splitter.feed(b, |_| rows += 1)
+            }
+            assert!(splitter.finished());
+            assert_eq!(rows, 1);
+            assert_eq!(
+                std::str::from_utf8(splitter.outside()).unwrap(),
+                body.replace(r#"{"id":1}"#, "")
+            );
+        }
+    }
+
+    #[test]
+    fn streams_either_direct_or_nested_envelope_arrays() {
+        for text in [
+            r#"{"code":0,"data":[{"n":1}],"msg":""}"#,
+            r#"{"code":0,"data":{"orders":[{"n":1}]},"msg":""}"#,
+        ] {
+            for size in [1, 3, 1000] {
+                let mut splitter =
+                    ArraySplitter::new(ArrayAt::EnvelopeFieldOrNested("data", "orders"));
+                let mut items = Vec::new();
+                for chunk in text.as_bytes().chunks(size) {
+                    splitter.feed(chunk, |s| items.push(s.to_owned()))
+                }
+                assert!(splitter.finished());
+                assert_eq!(items, [r#"{"n":1}"#]);
+                let envelope = std::str::from_utf8(splitter.outside()).unwrap();
+                assert_eq!(envelope, text.replace(r#"{"n":1}"#, ""));
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_an_oversized_stream_envelope() {
+        let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
+        splitter.feed(
+            format!(
+                r#"{{"code":0,"data":[]}}{}garbage"#,
+                " ".repeat(METADATA_LIMIT)
+            )
+            .as_bytes(),
+            |_| {},
+        );
+        assert!(!splitter.finished());
+    }
+
+    #[test]
+    fn retains_envelope_fields_on_either_side_of_the_stream() {
+        let text = r#"{"code":0,"data":[{"n":[1,2],"s":"],}"},{"n":3}],"msg":"ok"}"#;
+        for size in [1, 2, 7, 1000] {
+            let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
+            let mut count = 0;
+            for chunk in text.as_bytes().chunks(size) {
+                splitter.feed(chunk, |_| count += 1)
+            }
+            assert_eq!(count, 2);
+            assert_eq!(
+                splitter.outside(),
+                br#"{"code":0,"data":[],"msg":"ok"}"#.as_slice()
+            );
+        }
+    }
+
+    #[test]
+    fn path_matching_ignores_sibling_and_wrong_depth_lists() {
+        let body = r#"{"result":{"wrong":{"list":[9]},"data":{"list":[1]}},"data":{"list":[8]}}"#;
+        for width in [1, 3, 1024] {
+            let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "data", "list"]));
+            let mut rows = Vec::new();
+            for chunk in body.as_bytes().chunks(width) {
+                splitter.feed(chunk, |row| rows.push(row.to_owned()));
+            }
+            assert!(splitter.finished());
+            assert_eq!(rows, ["1"]);
+            assert_eq!(
+                std::str::from_utf8(splitter.outside()).unwrap(),
+                body.replace("[1]", "[]")
+            );
+        }
+    }
+
+    #[test]
+    fn empty_nested_list_keeps_its_pagination_cursor() {
+        let body = br#"{"retCode":0,"result":{"list":[],"nextPageCursor":"next"}}"#;
+        let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
+        for byte in body.chunks(1) {
+            splitter.feed(byte, |_| panic!("empty list"));
+        }
+        assert!(splitter.finished());
+        assert_eq!(splitter.outside(), body);
+    }
+
+    #[test]
+    fn metadata_selectors_reject_truncation_instead_of_accepting_a_valid_prefix() {
+        for (at, body) in [
+            (
+                ArrayAt::Path(&["result", "list"]),
+                r#"{"result":{"list":[1]}}"#,
+            ),
+            (ArrayAt::EnvelopeField("data"), r#"{"data":[1]}"#),
+            (
+                ArrayAt::EnvelopeFieldOrNestedAny("data", &["fill_orders", "fill_history_orders"]),
+                r#"{"data":{"fill_orders":[1]}}"#,
+            ),
+        ] {
+            let text = format!("{body}{}garbage", " ".repeat(METADATA_LIMIT));
+            let mut splitter = ArraySplitter::new(at);
+            splitter.feed(text.as_bytes(), |_| {});
+            assert!(!splitter.finished(), "{at:?}");
+            assert!(splitter.outside().len() <= METADATA_LIMIT);
+        }
+    }
+
     #[derive(Deserialize)]
     struct Row<'a> {
         s: &'a str,
@@ -646,5 +798,82 @@ mod envelope_tests {
         splitter.feed(br#"{"data":[]}"#, |_| {});
         splitter.feed(&vec![b' '; METADATA_LIMIT], |_| {});
         assert!(!splitter.finished());
+    }
+}
+
+#[cfg(test)]
+mod mexc_regressions {
+    use super::*;
+
+    #[test]
+    fn nested_envelope_streaming_matches_only_the_selected_parent() {
+        let body = r#"{"other":{"resultList":[0]},"success":true,"code":0,"data":{"pageSize":2,"resultList":[{"id":1},{"id":2}],"currentPage":1}}"#;
+        for chunk in 1..body.len() {
+            let mut split = ArraySplitter::new(ArrayAt::Path(&["data", "resultList"]));
+            let mut rows = vec![];
+            for part in body.as_bytes().chunks(chunk) {
+                split.feed(part, |s| rows.push(s.to_owned()));
+            }
+            assert!(split.finished());
+            assert_eq!(rows, [r#"{"id":1}"#, r#"{"id":2}"#]);
+            assert_eq!(
+                std::str::from_utf8(split.outside()).ok(),
+                Some(
+                    r#"{"other":{"resultList":[0]},"success":true,"code":0,"data":{"pageSize":2,"resultList":[],"currentPage":1}}"#
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_streamed_lists_are_not_successful_empty_snapshots() {
+        for body in [
+            br#"{"data":[,]}"#.as_slice(),
+            br#"{"data":[1,]}"#.as_slice(),
+            b"{\"data\":[\"\xff\"]}".as_slice(),
+        ] {
+            let mut split = ArraySplitter::new(ArrayAt::Field("data"));
+            split.feed(body, |_| {});
+            assert!(!split.finished());
+        }
+        for body in [
+            br#"{"data":{"resultList":[,]}}"#.as_slice(),
+            br#"{"data":{"resultList":[1,]}}"#.as_slice(),
+            b"{\"data\":{\"resultList\":[\"\xff\"]}}".as_slice(),
+        ] {
+            let mut split = ArraySplitter::new(ArrayAt::Path(&["data", "resultList"]));
+            split.feed(body, |_| {});
+            assert!(!split.finished());
+        }
+    }
+
+    #[test]
+    fn oversized_envelopes_are_rejected_instead_of_truncated() {
+        let body = format!(
+            r#"{{"data":[],"message":"{}"}}"#,
+            "x".repeat(METADATA_LIMIT)
+        );
+        let mut split = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
+        split.feed(body.as_bytes(), |_| {});
+        assert!(!split.finished());
+        assert_eq!(split.outside().len(), METADATA_LIMIT);
+    }
+
+    #[test]
+    fn streamed_envelope_retains_fields_before_and_after_the_array() {
+        let body = r#"{"code":510,"data":[{"x":[1,2]},3],"success":false}"#;
+        for chunk in 1..body.len() {
+            let mut split = ArraySplitter::new(ArrayAt::Field("data"));
+            let mut items = Vec::new();
+            for bytes in body.as_bytes().chunks(chunk) {
+                split.feed(bytes, |s| items.push(s.to_owned()));
+            }
+            assert!(split.finished());
+            assert_eq!(items, [r#"{"x":[1,2]}"#, "3"]);
+            assert_eq!(
+                std::str::from_utf8(split.outside()).ok(),
+                Some(r#"{"code":510,"data":[],"success":false}"#)
+            );
+        }
     }
 }

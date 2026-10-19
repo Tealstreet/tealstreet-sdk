@@ -18,8 +18,9 @@ const finite = (value: number) => (Number.isNaN(value) ? undefined : value);
  */
 export class FrameApplier {
   private marketSymbols: string[] = [];
+  private contractSizes: number[] = [];
 
-  constructor(private readonly store: Store) {}
+  constructor(private readonly store: Store, private readonly nativePlacementAmounts = false) {}
 
   /** Apply the frame's store sections. Books, candles and fills are decoded on request. */
   apply(frame: Frame): void {
@@ -29,6 +30,7 @@ export class FrameApplier {
     if (markets) {
       const rows: Market[] = [];
       this.marketSymbols = new Array(markets.count);
+      this.contractSizes = Array.from(markets.contractSize, (size) => size > 0 ? size : 1);
       for (let i = 0; i < markets.count; i++) {
         const flags = markets.flags[i];
         const flag = (bit: number) => ((flags & bit) !== 0 ? true : undefined);
@@ -97,8 +99,17 @@ export class FrameApplier {
         const nativeExtra = market?.isInverse && native !== undefined && Number.isFinite(native)
           ? { remainingNative: native, remainingNotional: native }
           : undefined;
-        const extra = nativeExtra || enums.rejectReason
-          ? { ...nativeExtra, ...(enums.rejectReason && { rejectReason: enums.rejectReason as never }) }
+        const extra = nativeExtra || enums.rejectReason || this.nativePlacementAmounts
+          ? {
+              ...nativeExtra,
+              ...(enums.rejectReason && { rejectReason: enums.rejectReason as never }),
+              ...(this.nativePlacementAmounts && {
+                remainingNative: native !== undefined && Number.isFinite(native)
+                  ? native
+                  : orders.remaining[i] / this.contractSizes[orders.market[i]],
+                filledInPlacementUnits: orders.filled[i] / this.contractSizes[orders.market[i]],
+              }),
+            }
           : undefined;
         rows.push({
           id: orders.id(i),
@@ -184,8 +195,8 @@ export class FrameApplier {
       for (let i = 0; i < settings.count; i++) {
         const value = settings.leverage[i];
         leverage[this.symbol(settings.market[i])] = {
-          buyLeverage: value,
-          sellLeverage: value,
+          buyLeverage: settings.buyLeverage?.[i] ?? value,
+          sellLeverage: settings.sellLeverage?.[i] ?? value,
           marginType: settings.marginType(i) as MarginType | undefined,
           positionMode: hedged ? PositionMode.Hedged : PositionMode.OneWay,
         };

@@ -994,6 +994,7 @@ impl BybitLinear {
                     MarketSetting {
                         leverage: row.position.leverage,
                         margin_type: Some(MarginType::Cross),
+                        ..Default::default()
                     },
                 ))
             })
@@ -1804,6 +1805,7 @@ impl BybitLinear {
                     MarketSetting {
                         leverage: r.position.leverage,
                         margin_type: r.position.margin_type,
+                        ..MarketSetting::default()
                     },
                 ))
             })

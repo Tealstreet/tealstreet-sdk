@@ -246,3 +246,27 @@ payload behavior independently checked. These changes alone still missed the
 small-fixture steady CPU gate locally; all failed results are retained. Further
 optimization and integration with the concurrent BingX/MEXC landing remain in
 progress. No fixture, performance threshold or sample selection was changed.
+
+## Seven-venue integration checkpoint
+
+Merge `63d521a860` adds the landed BingX and MEXC ports. Preserve their binary
+socket support, timed replay clock, connection generations, request/subscription
+audits, full position scopes, leverage rails and existing 2.5 MiB wasm budget.
+The shared replay baseline remains before implementation imports, with bounded
+backing-buffer quiescence and every memory component validated on private tapes
+too. Exact spot write-plan selection and Hyro's taped readiness/ACK correlation
+remain explicit. All 42 harness helper tests and the TS Hyro private replay pass.
+
+The final Bybit decoder reuses two typed numeric side buffers and validates the
+entire frame before changing a book. All 105 native Bybit tests pass; independent
+review passed 266 object-frame comparisons. Undocumented array-shaped struct
+representations now reject; documented object frames preserve validation and
+numeric behavior. The public fixture and CPU/memory thresholds remain unchanged.
+
+Integration review fixes: BingX/MEXC reject Bybit-only controls for an entire
+batch before writes (both reproduced red; 93/52 native tests pass); MEXC consumes
+an exact native-leaves column when present and retains legacy reconstruction as
+fallback; keyless MEXC metadata reads respect inferred public-only mode; optional
+caller identity is omitted on serialization so Rust's own option round-trip
+continues to work with the landed strict-null rejection. Full integrated build,
+replays and final-head CI remain required before merge.

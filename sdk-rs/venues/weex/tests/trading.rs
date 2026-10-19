@@ -53,6 +53,7 @@ fn engine_with_private_ws(private_ws_headers: bool) -> Engine<WeexFutures> {
         *s = MarketSetting {
             leverage: 20.0,
             margin_type: Some(MarginType::Cross),
+            ..MarketSetting::default()
         }
     });
     e
