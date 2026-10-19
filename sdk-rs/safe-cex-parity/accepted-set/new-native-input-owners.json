@@ -5,32 +5,38 @@
     {
       "package": "safe-cex-venue-asterdex",
       "name": "safe_cex_venue_asterdex::binding::globals::bytes",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: private typed-byte adapter reached by the constructed V3 signing globals. Source ABI/hash primitives produce byte sequences; the native array representation is internal. Public signed requests and valid byte/hash cases agree with ethers; unsupported caller-forged element types are outside this closed internal producer domain."
     },
     {
       "package": "safe-cex-venue-asterdex",
       "name": "safe_cex_venue_asterdex::binding::globals::hex_bytes",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: private ethers.getBytes string adapter. Source only passes a computed keccak hash at this call site; valid computed hex inputs decode exactly. Malformed arbitrary hex is not supplied by any reached public venue path. Native success/length/byte observations cover the decoder without extending that domain."
     },
     {
       "package": "safe-cex-venue-asterdex",
       "name": "safe_cex_venue_asterdex::binding::scope",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: non-decoder context constructor. It upgrades an already-typed Weak runtime capability and retains this Js receiver unchanged; it never parses or narrows the value. Constructed native receiver/weak-lifetime observations and a compiled receiver-loss control prove the classification independently."
     },
     {
       "package": "safe-cex-venue-asterdex",
       "name": "safe_cex_venue_asterdex::binding::text",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: reached primitive-string coercion followed by the approved typed UTF-8 view. Primitive values, object conversion failure, signed zero and UTF-16 replacement are observed; actual installed HMAC globals confirm the source UTF-8 byte encoding. This is not a claim to retain live object identity in typed strings."
     },
     {
       "package": "safe-cex-venue-asterdex",
       "name": "safe_cex_venue_asterdex::exchange_helpers::transform_klines",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT: actual source map/parseFloat behavior is retained before typed Candle projection. Every scalar is observed natively, including missing values, signed zero, NaN/infinity and copied timestamp type. Constructed REST binding and custom-map/getter probes cover reachability; typed Candle output remains decision5."
     },
     {
       "package": "safe-cex-venue-asterdex",
       "name": "safe_cex_venue_asterdex::private_stream::utf8",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: raw fill symbols previously went through this String-only helper and became undefined. The real private socket compiled RED then GREEN after carrying PrivateFill.symbol through canonical RetainedJsonInput. Remaining uses are strict status matching or typed Order/Position symbols, whose closed output boundary is accepted; standalone presence/UTF-16 observations remain executed."
     },
     {
       "package": "safe-cex-exchange",
