@@ -392,7 +392,7 @@ impl Venue for Bingx {
             cx,
             paths::MARKETS,
             Pending::Markets {
-                rows: Vec::with_capacity(2048),
+                rows: Vec::with_capacity(1536),
                 valid: true,
             },
         );

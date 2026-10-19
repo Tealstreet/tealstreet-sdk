@@ -11,7 +11,8 @@ pub struct Store {
     market_by_symbol: HashMap<Box<str>, u32>,
     market_by_id: HashMap<Box<str>, u32>,
     tickers: Vec<Ticker>,
-    ticker_by_symbol: HashMap<Box<str>, u32>,
+    // Sorted row indexes borrow ticker identity instead of copying every symbol.
+    ticker_by_symbol: Vec<u32>,
     orders: Vec<Order>,
     positions: Vec<Position>,
     balance: Balance,
@@ -127,32 +128,46 @@ impl Store {
     }
 
     pub fn ticker(&self, symbol: &str) -> Option<&Ticker> {
-        self.ticker_by_symbol
-            .get(symbol)
-            .map(|&index| &self.tickers[index as usize])
+        self.ticker_index(symbol)
+            .map(|index| &self.tickers[index as usize])
     }
 
     pub fn set_tickers(&mut self, tickers: Vec<Ticker>) {
-        self.ticker_by_symbol = tickers
-            .iter()
-            .enumerate()
-            .map(|(index, ticker)| (ticker.symbol.clone().into_boxed_str(), index as u32))
-            .collect();
         self.tickers = tickers;
+        self.ticker_by_symbol = (0..self.tickers.len() as u32).collect();
+        self.ticker_by_symbol.sort_unstable_by(|&a, &b| {
+            self.tickers[a as usize]
+                .symbol
+                .cmp(&self.tickers[b as usize].symbol)
+                .then_with(|| b.cmp(&a))
+        });
+        self.ticker_by_symbol
+            .dedup_by(|a, b| self.tickers[*a as usize].symbol == self.tickers[*b as usize].symbol);
         self.changes.tickers_replaced = true;
         self.ticker_masks = vec![0; self.tickers.len()];
         self.dirty_tickers.clear();
         self.set_loaded(|loaded| loaded.tickers = true);
     }
 
-    /// Mutate one ticker in place; changed fields go out with the next deltas.
+    fn ticker_index(&self, symbol: &str) -> Option<u32> {
+        self.ticker_by_symbol
+            .binary_search_by(|&index| self.tickers[index as usize].symbol.as_str().cmp(symbol))
+            .ok()
+            .map(|slot| self.ticker_by_symbol[slot])
+    }
+
+    /// Mutate ticker values, keeping its symbol identity; changed fields go out as deltas.
     pub fn update_ticker(&mut self, symbol: &str, update: impl FnOnce(&mut Ticker)) {
-        let Some(&index) = self.ticker_by_symbol.get(symbol) else {
+        let Some(index) = self.ticker_index(symbol) else {
             return;
         };
         let ticker = &mut self.tickers[index as usize];
         let before = ticker_values(ticker);
         update(ticker);
+        debug_assert_eq!(
+            ticker.symbol, symbol,
+            "ticker identity changes require set_tickers"
+        );
         let after = ticker_values(ticker);
         let mut mask = 0u16;
         for (bit, (a, b)) in before.iter().zip(after.iter()).enumerate() {
@@ -607,6 +622,21 @@ mod tests {
             symbol: symbol.into(),
             ..Ticker::default()
         }
+    }
+
+    #[test]
+    fn ticker_lookup_tracks_unsorted_replacements_and_last_duplicate() {
+        let mut store = Store::default();
+        let mut duplicate = ticker("A");
+        duplicate.last = 9.;
+        store.set_tickers(vec![ticker("C"), ticker("A"), ticker("B"), duplicate]);
+        assert_eq!(store.ticker("A").unwrap().last, 9.);
+        store.update_ticker("B", |row| row.last = 5.);
+        assert_eq!(store.tickers()[2].last, 5.);
+        assert!(store.ticker("missing").is_none());
+        store.set_tickers(vec![ticker("B")]);
+        assert!(store.ticker("A").is_none());
+        assert_eq!(store.ticker("B").unwrap().last, 0.);
     }
 
     #[test]

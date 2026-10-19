@@ -154,3 +154,14 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
 - Gates rerunning with final build. Latest pre-visitor public run passed memory
   but missed steady CPU; no all-gates claim. Root test rerun still in progress,
   with two unrelated5s Hyro dynamic-import timeouts under shared machine load.
+
+### Public gate green
+
+- Replaced ticker symbol-key copies with a sorted u32 row index, preserving
+  row/frame order and last-duplicate wins. Identity immutability is documented
+  and debug-asserted. Independent implementation review has no findings.
+- Engine15, BingX78 and Binance tests pass. Public3-run gate PASS:188frames,
+  1268markets,1260tickers,2books; TS/Rust CPU76.9/60.4ms, steady29.4/24.9ms,
+  retained memory1.8/1.8MB (ratio1.03; wasm1.4MB). Private/Binance gates running.
+- Root full suite PASS27/27 tasks with --maxWorkers=2 --testTimeout=30000;
+  both safe-cex test tasks pass6489/6489 tests. No test timeout source edits.
