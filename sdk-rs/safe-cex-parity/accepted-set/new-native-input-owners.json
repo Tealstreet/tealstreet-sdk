@@ -136,47 +136,56 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::decimal_to_precision",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::exact",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::install",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::integer",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::number_to_string",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::numeric_string",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::parse_precision",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::precision_from_string",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::ccxt::safe_string",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "ACCEPT reviewed native-input role: CCXT_NATIVE_INPUT_REVIEW.md records the exact conversion or non-decoder reason, canonical owner observations and actual installed/native maintained-source probes. No behavior mismatch inferred from this bounded corpus."
     },
     {
       "package": "safe-cex-exchange",
