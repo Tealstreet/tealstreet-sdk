@@ -211,13 +211,21 @@ impl Core {
         member: &'static str,
         args: Result<Vec<Js>, ExchangeError>,
     ) -> ExchangeFuture<'static, T> {
+        let pending = self.invoke_native(member, args);
+        Box::pin(async move { to_typed(&pending.await?).map_err(err) })
+    }
+
+    fn invoke_native(
+        &self,
+        member: &'static str,
+        args: Result<Vec<Js>, ExchangeError>,
+    ) -> ExchangeFuture<'static, Js> {
         let this = self.this.clone();
         let runtime = self.shared.http.runtime();
         Box::pin(async move {
-            let value = await_js(&runtime, this.call_method(member, args?).map_err(err)?)
+            await_js(&runtime, this.call_method(member, args?).map_err(err)?)
                 .await
-                .map_err(err)?;
-            to_typed(&value).map_err(err)
+                .map_err(err)
         })
     }
 
@@ -447,8 +455,12 @@ impl Exchange for KucoinExchange {
         Box::pin(async { Err(ExchangeError::new("Not implemented")) })
     }
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
+        let pending = self.fetch_ohlcv_native(options);
+        Box::pin(async move { to_typed(&pending.await?).map_err(err) })
+    }
+    fn fetch_ohlcv_native(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Js> {
         self.receiver
-            .invoke("fetchOHLCV", js(&options).map(|o| vec![o]))
+            .invoke_native("fetchOHLCV", js(&options).map(|o| vec![o]))
     }
     fn listen_ohlcv(
         &self,
@@ -563,8 +575,12 @@ impl Exchange for KucoinSpotExchange {
         Box::pin(async { Err(ExchangeError::new("Not implemented")) })
     }
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
+        let pending = self.fetch_ohlcv_native(options);
+        Box::pin(async move { to_typed(&pending.await?).map_err(err) })
+    }
+    fn fetch_ohlcv_native(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Js> {
         self.receiver
-            .invoke("fetchOHLCV", js(&options).map(|o| vec![o]))
+            .invoke_native("fetchOHLCV", js(&options).map(|o| vec![o]))
     }
     fn fetch_historical_fills(
         &self,

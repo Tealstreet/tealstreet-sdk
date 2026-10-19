@@ -40,3 +40,69 @@ fn woo_constructs_through_native_registry_and_signs_its_account_read() {
         h.exchange.dispose().unwrap();
     });
 }
+
+#[test]
+fn woo_constructed_funding_timer_drains_fires_and_cancels_on_replay_clock() {
+    use safe_cex_exchange::{
+        native::{native_replay_runtime, replay_raw_tasks},
+        replay_clock,
+    };
+    run_local(async {
+        let runtime = native_replay_runtime(1_800_000_000_000.0);
+        let h = venue_harness(
+            safe_cex_types::ExchangeName::Woo,
+            Rc::new(|r| match r.path.as_str() {
+                "/v1/public/info" => Some(json!({"success":true,"rows":[]})),
+                "/v1/public/futures" => Some(json!({"success":true,"rows":[]})),
+                "/v1/public/funding_rates" => Some(json!({"success":true,"rows":[]})),
+                _ => None,
+            }),
+            json!({"key":"","secret":"","publicDataOnly":true}),
+            None,
+            runtime.clone(),
+        )
+        .await;
+        h.exchange.start().await.unwrap();
+        eventually("WOO socket", || !h.peers.borrow().is_empty()).await;
+        for _ in 0..32 {
+            tokio::task::yield_now().await;
+        }
+        let receipt = replay_raw_tasks(&runtime);
+        assert_eq!(
+            receipt["unknown"], 0,
+            "WOO constructed startup timer must use core ownership: {receipt}"
+        );
+        assert_eq!(receipt["blocking"], 0, "WOO startup drain: {receipt}");
+        replay_clock::activate(runtime.replay_clock.as_ref().unwrap()).unwrap();
+        replay_clock::advance(runtime.replay_clock.as_ref().unwrap(), 60_000.0)
+            .await
+            .unwrap();
+        eventually("WOO funding timer callback", || {
+            h.seen
+                .borrow()
+                .iter()
+                .any(|r| r.path == "/v1/public/funding_rates")
+        })
+        .await;
+        for _ in 0..32 {
+            tokio::task::yield_now().await;
+        }
+        h.exchange.dispose().unwrap();
+        for _ in 0..32 {
+            tokio::task::yield_now().await;
+        }
+        let before = h.seen.borrow().len();
+        replay_clock::advance(runtime.replay_clock.as_ref().unwrap(), 120_000.0)
+            .await
+            .unwrap();
+        for _ in 0..32 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            h.seen.borrow().len(),
+            before,
+            "disposed funding interval never runs"
+        );
+        assert_eq!(replay_raw_tasks(&runtime)["blocking"], 0);
+    });
+}

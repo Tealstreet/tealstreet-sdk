@@ -25,7 +25,7 @@ for (const ds of ['2024-06-08 01:23:45', '2024-06-08T01:23:45.250', 0, 'not-a-da
     buffer.writeDoubleBE(value);
     return [key, Number.isNaN(value) ? 'nan' : buffer.toString('hex')];
   }));
-  cases.push({raw, fields});
+  cases.push({raw, fields, keys: Object.keys(candles[0]), wire: JSON.stringify(candles)});
 }
 assert.equal(cases.length, 4);
 process.stdout.write(JSON.stringify(cases));
