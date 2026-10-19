@@ -91,6 +91,20 @@ const isPrivate = tape.find((record) => record.type === 'meta')?.private ?? tape
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
+  if (values.venue === 'blofin') {
+    // TS can retain the zero-size placeholder's margin. Derive the repair
+    // from its own normalized cross-position notional and leverage.
+    for (const position of account.positions) {
+      if (position.marginSize === 0 && position.marginType === 'cross' && position.leverage > 0)
+        position.marginSize = position.notional / position.leverage;
+    }
+    // No remaining positions implies no position margin or unrealized PnL.
+    if (!account.positions.length) {
+      account.balance.used = 0;
+      account.balance.upnl = 0;
+    }
+    return;
+  }
   if (values.venue === 'mexc') {
     // Full incremental depth, rather than replacing a 20-level snapshot.
     // Sized stops choose the closing leverage rail even without reduceOnly.
@@ -332,7 +346,7 @@ for (let run = 0; run < runs; run++) {
     }
     ts.subscriptions.sort();
   }
-  for (const field of ['outbound', 'subscriptions', 'candles', 'bookEvents']) {
+  for (const field of ['outbound', 'subscriptions', 'candles', 'bookEvents', 'wsRequests']) {
     if (!equal(ts[field], rust[field])) {
       const left = ts[field] ?? [];
       const right = rust[field] ?? [];

@@ -26,6 +26,7 @@ pub mod section {
     pub const BALANCE: u16 = 9;
     pub const STATUS: u16 = 10;
     pub const FILLS: u16 = 11;
+    /// Scalar leverage retains its offset; optional buy/sell f64 columns follow it.
     pub const SETTINGS: u16 = 12;
 }
 

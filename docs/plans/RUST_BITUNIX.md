@@ -441,3 +441,29 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
 - MEXC complete single-run gate PASS including all 144 bookEvents, helper suite
   53 PASS. Eight public medians are being repeated; private variants continue.
   Independent review and final CI/results are tracked on PR #1309.
+
+### BloFin landing integration checkpoint
+
+- Merged pinned a4d9e2ec84 (BloFin and MEXC parity) after it made PR #1309
+  conflicting. Keep nested structure, all nine factories, new partial leverage
+  columns, MEXC parity fixture, landing release profiles, and prior replay fixes.
+- Disjoint engine, host and harness reviews completed. Engine 54 tests, focused
+  host/codec 21 tests, MEXC TS 3 tests, combined harness 58 tests PASS. Bitunix
+  explicit leverage10 defaults and absent buy/sell rails remain unchanged.
+- Both adapters retain recorded public HTTP completion timing, request-time
+  eligibility/consumption, real startup readiness, explicit connection lifecycle
+  and strict intermediate book comparisons. BloFin adds per-connection request
+  comparisons and plain ping/pong handling. Keep existing combined 3 MiB cap.
+- Host review found private BloFin without passphrase waited indefinitely;
+  reject immediately, matching existing passphrase venues. Add boundary proof.
+  Final nine-venue artifact, gates, independent integration re-review and exact
+  head CI are tracked on PR #1309 before merge and fresh follow-up branch.
+- Final artifact including BloFin passphrase guard: 2,867,213 bytes. Boundary
+  regression fails against the pre-guard bundle and passes after rebuild; all
+  21 adapter tests and 28 host tests PASS. Root typecheck/lint/full tests PASS.
+- Independent HTTP-timing review found explicit public commands waiting on
+  virtual time they block, plus pending background completions after last WS
+  frame. Serialize commands through a shared try/finally context; defer only
+  background completions, and drain selected pending responses before return.
+  Both regressions fail before/pass after, future watchdog remains unfired;
+  60 helpers PASS and production MEXC all 144 bookEvents PASS.

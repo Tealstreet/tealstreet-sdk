@@ -222,13 +222,39 @@ export class Tape {
     return { status: record.status, headers: record.headers ?? '', body: record.body };
   }
 
+  activeCommands = 0;
+  async executeCommand(frame, runCommand) {
+    this.commandIndex = (this.commandIndex ?? 0) + 1;
+    this.activeCommands++;
+    try { return await runCommand(frame); }
+    finally { this.activeCommands--; }
+  }
+
+  pendingResponses = new Set();
   async waitForResponse(response) {
     // A recorded completion follows any depth frames received while its request
-    // was in flight. Startup and private replay keep their existing real timing.
-    if (!this.isPrivate && this.replayClock?.active && response.recordedAt > this.responseTime) {
-      await new Promise((resolve) => setTimeout(resolve, response.recordedAt - this.responseTime));
+    // was in flight. Serialized commands cannot await a later tape timer; their
+    // replies remain immediate, as do startup and private replies.
+    if (!this.isPrivate && !this.activeCommands && this.replayClock?.active && response.recordedAt > this.responseTime) {
+      const completion = { at: response.recordedAt };
+      this.pendingResponses.add(completion);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, completion.at - this.responseTime));
+      } finally { this.pendingResponses.delete(completion); }
     }
     return response;
+  }
+
+  async finishResponses() {
+    if (this.isPrivate || !this.replayClock?.active) return;
+    // Advance only to selected HTTP completions. Other recurring timers do not
+    // extend the replay; any callbacks before that completion retain tape order.
+    while (this.pendingResponses.size) {
+      const next = Math.min(...Array.from(this.pendingResponses, (response) => response.at));
+      this.time = Math.max(this.responseTime, next);
+      await this.replayClock.advance(this.time);
+      await new Promise(setImmediate);
+    }
   }
 
   connect(url, onOpen, onMessage, onClose) {
@@ -319,7 +345,7 @@ export class Tape {
       await clock?.advance(frame.t);
       if (frame.type === 'command') {
         this.results.push(
-          await runCommand(frame).then(
+          await this.executeCommand(frame, runCommand).then(
             (ids) => ({ ok: ids }),
             (error) => ({ error: String(error?.message ?? error) }),
           ),
@@ -333,6 +359,7 @@ export class Tape {
       onTick?.(frame.t);
       await new Promise(setImmediate);
     }
+    await this.finishResponses();
     return delivered;
   }
 

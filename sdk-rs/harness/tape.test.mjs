@@ -349,3 +349,56 @@ test('active public HTTP completion follows its recorded time while consumption 
   assert.equal(await startup.waitForResponse(reply), reply);
   assert.equal(await privateTape.waitForResponse(reply), reply);
 });
+
+test('serialized public commands complete future HTTP replies without advancing past the command', { timeout: 1000 }, async () => {
+  const http = { type: 'http', t: 200, method: 'GET', url: 'https://example.test/candles', status: 200, body: 'candles' };
+  const records = [http, { type: 'command', t: 100, op: 'fetchCandles' }, { type: 'command', t: 300, op: 'reject' }];
+  const responses = new Responses(records, (method, url) => method + url);
+  const tape = new Tape(records, { responses });
+  const clock = new ReplayClock(1700000000000);
+  const times = [];
+  clock.install();
+  try {
+    await tape.play(undefined, undefined, async (frame) => {
+      if (frame.op === 'reject') throw new Error('rejected');
+      const result = await tape.waitForResponse(tape.respond('GET', http.url));
+      times.push(clock.time - clock.epoch);
+      return result.body;
+    }, clock);
+    assert.deepEqual(times, [100]);
+    assert.deepEqual(tape.results, [{ ok: 'candles' }, { error: 'rejected' }]);
+    assert.equal(tape.commandIndex, 2);
+    assert.equal(tape.activeCommands, 0);
+    let completed = false;
+    const background = tape.waitForResponse({ recordedAt: 500 }).then(() => { completed = true; });
+    await clock.advance(499);
+    assert.equal(completed, false);
+    await clock.advance(500);
+    await background;
+    assert.equal(completed, true);
+  } finally { clock.restore(); }
+});
+
+test('play drains selected HTTP completions past the last frame without draining future watchdogs', async () => {
+  const http = { type: 'http', t: 200, method: 'GET', url: 'https://example.test/book', status: 200, body: 'book' };
+  const tape = new Tape([http, { type: 'command', t: 100, op: 'noop' }], {
+    responses: new Responses([http], (method, url) => method + url),
+  });
+  const clock = new ReplayClock(1700000000000);
+  let delivered = false;
+  let watchdog = false;
+  clock.install();
+  try {
+    await tape.play(undefined, async () => {
+      setTimeout(() => {
+        tape.waitForResponse(tape.respond('GET', http.url)).then(() => { delivered = true; });
+      }, 50);
+      setTimeout(() => { watchdog = true; }, 1000);
+    }, async () => [], clock);
+    assert.equal(delivered, true);
+    assert.equal(watchdog, false);
+    assert.equal(clock.time - clock.epoch, 200);
+    assert.equal(tape.time, 200);
+    assert.equal(tape.pendingResponses.size, 0);
+  } finally { clock.restore(); }
+});

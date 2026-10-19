@@ -10,6 +10,7 @@ use safe_cex_engine::{
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 use safe_cex_venue_bitunix::{BitunixFutures, Options as BitunixOptions};
+use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
@@ -229,10 +230,6 @@ enum CommandIn {
         command: u32,
         hedged: bool,
     },
-    FetchLeverage {
-        command: u32,
-        symbol: String,
-    },
     #[serde(rename_all = "camelCase")]
     FetchFills {
         command: u32,
@@ -271,6 +268,10 @@ enum CommandIn {
         to: Option<f64>,
         #[serde(default)]
         limit: Option<u32>,
+    },
+    FetchLeverage {
+        command: u32,
+        symbol: String,
     },
     FetchPublicTrades {
         command: u32,
@@ -329,7 +330,6 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
-            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
                 command,
                 symbol,
@@ -379,6 +379,7 @@ impl From<CommandIn> for Command {
                     limit,
                 },
             },
+            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchPublicTrades {
                 command,
                 symbol,
@@ -447,6 +448,12 @@ impl WasmEngine {
         {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
+        if venue == "blofin"
+            && !options.public_data_only
+            && options.passphrase.as_deref().is_none_or(str::is_empty)
+        {
+            return Err(JsError::new("BloFin requires a passphrase"));
+        }
         let inner: Box<dyn AnyEngine> = match venue {
             "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
                 public_data_only: options.public_data_only,
@@ -465,6 +472,13 @@ impl WasmEngine {
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
+            }))),
+            "blofin" => Box::new(Engine::new(Blofin::new(BlofinOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
             }))),
             "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {
                 public_data_only: options.public_data_only,
