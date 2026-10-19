@@ -357,7 +357,7 @@ describe('RustEngineExchange', () => {
     expect(orders).toHaveBeenCalledWith({ from: 500_000, to: 3_000_000 });
     expect(fills).not.toHaveBeenCalled();
     expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({ account: 'woo-account', symbol: 'ETHUSDT', state: 'closed', realizedPnl: 10 });
+    expect(records[0]).toMatchObject({ account: 'woo-account', symbol: 'ETHUSDT', state: 'closed', realizedPnl: 10, sourceAxis: 'orders' });
   });
 
   it('fills the store from engine frames and serves books to listeners', async () => {

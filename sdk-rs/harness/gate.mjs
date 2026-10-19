@@ -117,7 +117,8 @@ const binanceFixes = (account, rustAccount) => {
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
   // WOO repairs live in the TS reference itself; no result normalization:
-  // exact integer IDs; camel-case aliases; monotonic cumulative/terminal state;
+  // exact integer IDs; order-axis journal provenance; camel-case aliases;
+  // monotonic cumulative/terminal state;
   // execution-ID dedup and per-execution fills; atomic failed-page snapshots;
   // STOP direction/source and buy-trailing inference; exact tick splitting;
   // sized protections, full-position trailing and sibling preservation;

@@ -13,7 +13,7 @@ export const wooOrdersToPositionRecords = (
   for (const interval of reconstructPositionIntervals(wooOrdersToExecutions(orders))) {
     if (interval.closedAt === undefined || interval.closedAt < opts.from) continue;
     const record = mapFoldedInterval(interval, opts);
-    if (record) records.push(record);
+    if (record) records.push({ ...record, sourceAxis: 'orders' });
   }
   return records;
 };
