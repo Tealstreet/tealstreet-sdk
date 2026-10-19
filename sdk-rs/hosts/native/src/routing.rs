@@ -716,4 +716,132 @@ mod tests {
         }
         assert_eq!(argument_body(None).unwrap().get(), "{}");
     }
+
+    #[test]
+    fn native_selectors_consume_the_exact_ts_generated_golden_matrix() {
+        #[derive(Deserialize)]
+        struct Example {
+            name: String,
+            plan: RoutingPlan,
+            http: Vec<HttpExample>,
+            sockets: Vec<SocketExample>,
+        }
+        #[derive(Deserialize)]
+        struct Request {
+            url: String,
+            headers: BTreeMap<String, String>,
+        }
+        #[derive(Deserialize)]
+        struct HttpExample {
+            request: Request,
+            expected: ExpectedHttp,
+        }
+        #[derive(Deserialize)]
+        struct ExpectedHttp {
+            url: String,
+            #[serde(flatten)]
+            route: HttpRoute,
+        }
+        #[derive(Deserialize)]
+        struct SocketExample {
+            channel: SocketChannel,
+            original: String,
+            headers: BTreeMap<String, String>,
+            attempts: Vec<ExpectedSocket>,
+        }
+        #[derive(Deserialize)]
+        struct ExpectedSocket {
+            url: String,
+            relay: Option<String>,
+            headers: BTreeMap<String, String>,
+        }
+
+        let examples: Vec<Example> =
+            serde_json::from_str(include_str!("../tests/fixtures/routing-plans.json")).unwrap();
+        assert_eq!(examples.len(), 25);
+        for example in examples {
+            let state = state(example.plan);
+            for http in example.http {
+                let mut request = HttpRequest {
+                    id: RequestId(1),
+                    method: Method::Get,
+                    url: http.request.url,
+                    headers: vec![("Content-Type", "application/json".into())],
+                    body: None,
+                };
+                if let Some(key) = http.request.headers.get("x-mbx-apikey") {
+                    request.headers.push(("x-mbx-apikey", key.clone()));
+                }
+                let actual = state.http(&request);
+                let rewritten = if actual.prefix.is_empty() {
+                    request.url.clone()
+                } else {
+                    format!("{}/{}", actual.prefix, request.url)
+                };
+                assert_eq!(rewritten, http.expected.url, "{} HTTP URL", example.name);
+                assert_eq!(
+                    actual.mode, http.expected.route.mode,
+                    "{} HTTP mode",
+                    example.name
+                );
+                assert_eq!(
+                    actual.prefix, http.expected.route.prefix,
+                    "{} HTTP prefix",
+                    example.name
+                );
+                assert_eq!(
+                    actual.authorize, http.expected.route.authorize,
+                    "{} proxy auth",
+                    example.name
+                );
+                assert_eq!(
+                    actual.authorization_header, http.expected.route.authorization_header,
+                    "{} auth header",
+                    example.name
+                );
+                assert_eq!(
+                    actual.headers, http.expected.route.headers,
+                    "{} HTTP headers",
+                    example.name
+                );
+                assert_eq!(
+                    actual.tunnel_url, http.expected.route.tunnel_url,
+                    "{} HOW egress",
+                    example.name
+                );
+            }
+            for socket in example.sockets {
+                let role = match socket.channel {
+                    SocketChannel::Public => safe_cex_engine::SocketChannel::Public,
+                    SocketChannel::Private => safe_cex_engine::SocketChannel::Private,
+                    SocketChannel::Business => safe_cex_engine::SocketChannel::Business,
+                };
+                for (attempt, expected) in socket.attempts.into_iter().enumerate() {
+                    // Repeated silent attempts exercise the real selector's
+                    // primary -> relay -> fallback transitions and header merge.
+                    let actual = state.socket(
+                        &socket.original,
+                        socket.headers.clone().into_iter().collect(),
+                        Some(role.clone()),
+                    );
+                    assert_eq!(
+                        actual.url, expected.url,
+                        "{} {role:?} attempt {attempt}",
+                        example.name
+                    );
+                    assert_eq!(
+                        actual.relay, expected.relay,
+                        "{} relay upstream",
+                        example.name
+                    );
+                    assert_eq!(
+                        actual.headers.into_iter().collect::<BTreeMap<_, _>>(),
+                        expected.headers,
+                        "{} WS upgrade headers",
+                        example.name
+                    );
+                }
+            }
+        }
+    }
 }

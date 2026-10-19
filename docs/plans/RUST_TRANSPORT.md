@@ -63,3 +63,18 @@ nested workspace.
   rebuild/replay verification continue in phase 4.
 - Existing secondary signing options cannot be honored by the engine's single
   signer; reject them before startup instead of silently using primary egress.
+
+### Phase 4 verification checkpoint
+
+- Rebuilt six-venue wasm and passed 21 real SDK/engine tests, including actual
+  signed OKX HTTP effects reaching the proxy and private/business socket routes.
+- Added a shared 25-case TS/native golden fixture. The TS suite regenerates its
+  oracle from the existing provider/resolver; native deserializes that exact
+  policy and checks 27 HTTP selections and 375 socket transitions.
+- Adversarial cross-scope review found a Workers-specific gap: HOW and relay
+  bypassed the Workers header-capable socket dialer, and proxy authorization
+  omitted non-browser fetch headers. Implementing an injected raw WebSocket
+  constructor in the existing HOW package, with per-adapter lifecycle/disposal;
+  the browser/Node global clients retain their existing behavior.
+- Landing advanced with MEXC while validation ran; merge it after this host
+  correction and include its regression gates before opening the PR.

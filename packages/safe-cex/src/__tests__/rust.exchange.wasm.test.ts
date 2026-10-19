@@ -7,6 +7,8 @@ import { BaseExchange } from '../exchanges/base';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
+import { tealstreetTransport } from '../transport/tealstreet/tealstreetTransport';
+import { PRIVATE_PROXY_JP } from '../transport/tealstreet/transportResolution';
 import { OrderSide, OrderStatus, OrderType } from '../types';
 
 const EXCHANGE_INFO = JSON.stringify({
@@ -342,6 +344,84 @@ describe('RustEngineExchange', () => {
   let exchange: RustEngineExchange | undefined;
   afterEach(() => exchange?.dispose());
 
+  it('routes real engine HTTP and private sockets through the account provider', async () => {
+    const tape = recordedOkxTransport();
+    const outgoing: Array<Parameters<Transport['request']>[0]> = [];
+    const sockets: string[] = [];
+    let tokens = 0;
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => ({
+      ...tape.transport,
+      request: async (request) => {
+        outgoing.push(request);
+        return tape.transport.request(request);
+      },
+      connect: (url, handlers) => {
+        sockets.push(url);
+        return tape.transport.connect(url, handlers);
+      },
+    }));
+    exchange = new RustEngineExchange(
+      'okx',
+      {
+        key: 'venue-key',
+        secret: 'venue-secret',
+        passphrase: 'venue-pass',
+        tealstreetProxy: true,
+        tealstreetTunnel: false,
+        transport: {
+          ...tealstreetTransport,
+          rest: (context) => ({
+            ...tealstreetTransport.rest(context),
+            authorize: async (request) => {
+              request.headers.set('Authorization', `Bearer fixture-${++tokens}`);
+            },
+          }),
+        },
+      },
+      new DefaultStore(),
+    );
+    await exchange.start();
+    expect(
+      await exchange.placeOrder({
+        symbol: 'BTCUSDT',
+        side: OrderSide.Buy,
+        type: OrderType.Limit,
+        amount: 1,
+        price: 39000,
+      }),
+    ).toEqual(['4242']);
+    expect(outgoing.every((request) => request.url.startsWith(`${PRIVATE_PROXY_JP}/https://www.okx.com/`))).toBe(true);
+    expect(outgoing.map((request) => request.headers.Authorization)).toEqual(
+      outgoing.map((_, at) => `Bearer fixture-${at + 1}`),
+    );
+    const placement = outgoing.find((request) => request.url.endsWith('/trade/batch-orders'))!;
+    expect(placement.headers['OK-ACCESS-SIGN']).toBeTruthy();
+    expect(placement.body).toContain('39000');
+    expect(sockets).toContain('wss://fsjnpy143pbz.asia.tealstreet.io/okx/private');
+    expect(sockets).toContain('wss://fsjnpy143pbz.asia.tealstreet.io/okx/business');
+  });
+
+  it('rejects secondary signing keys before transport creation or engine startup', async () => {
+    let transports = 0;
+    setRustEngineTransport(() => {
+      transports++;
+      return recordedTransport().transport;
+    });
+    exchange = new RustEngineExchange(
+      'binance',
+      {
+        key: 'primary-key',
+        secret: 'primary-secret',
+        secondary_key: 'read-key',
+        secondary_secret: 'read-secret',
+      },
+      new DefaultStore(),
+    );
+    await expect(exchange.start()).rejects.toThrow('secondary signing keys are unsupported');
+    expect(transports).toBe(0);
+  });
+
   it('fills the store from engine frames and serves books to listeners', async () => {
     const tape = recordedTransport();
     setWasmEngineLoader(loadNodeEngine);
@@ -652,10 +732,12 @@ describe('RustEngineExchange', () => {
       order: { id: '4243', clientOrderId, status: OrderStatus.Open },
     });
     expect(await exchange.findOrderByClientOrderId('BTCUSDT', 'missing')).toEqual({ found: false, definitive: false });
-    await expect(exchange.updateOrder({
-      order: store.orders.find((order) => order.id === '4243')!,
-      update: { price: 90001, amount: 0.02 },
-    })).rejects.toThrow('exactly one');
+    await expect(
+      exchange.updateOrder({
+        order: store.orders.find((order) => order.id === '4243')!,
+        update: { price: 90001, amount: 0.02 },
+      }),
+    ).rejects.toThrow('exactly one');
     expect(tape.writes).toHaveLength(2);
   });
 
@@ -746,5 +828,7 @@ describe('RustEngineExchange', () => {
 
 it('WEEX private engines require the passphrase before starting I/O', async () => {
   const { WasmEngine } = await loadNodeEngine();
-  expect(() => new WasmEngine('weex', JSON.stringify({ key: 'replay-key', secret: 'replay-secret' }))).toThrow('WEEX requires a passphrase');
+  expect(() => new WasmEngine('weex', JSON.stringify({ key: 'replay-key', secret: 'replay-secret' }))).toThrow(
+    'WEEX requires a passphrase',
+  );
 });
