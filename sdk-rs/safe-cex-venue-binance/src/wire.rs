@@ -258,10 +258,20 @@ pub struct SymbolConfig<'a> {
     pub leverage: f64,
 }
 
-/// One `/fapi/v3/positionRisk` row.
+/// A number that may be absent, bare or a decimal string.
+fn optional_number<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<f64>, D::Error> {
+    number(deserializer).map(Some)
+}
+
+/// One `positionRisk` row (USD-M `/fapi/v3`, portfolio margin `/papi/v1/um`).
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PositionRisk<'a> {
+    /// Portfolio margin rows carry the symbol's leverage.
+    #[serde(default, deserialize_with = "optional_number")]
+    pub leverage: Option<f64>,
     #[serde(borrow)]
     pub symbol: Str<'a>,
     #[serde(borrow)]
@@ -393,8 +403,11 @@ pub struct OrderUpdate<'a> {
     pub s: Str<'a>,
     #[serde(rename = "S", borrow)]
     pub side: Str<'a>,
-    #[serde(borrow)]
-    pub ot: Str<'a>,
+    /// Original order type; portfolio margin may send only `o`.
+    #[serde(borrow, default)]
+    pub ot: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub o: Option<Str<'a>>,
     #[serde(rename = "X", borrow)]
     pub status: Str<'a>,
     #[serde(borrow)]
@@ -587,4 +600,74 @@ pub struct PublicTrade<'a> {
     pub quote_qty: Str<'a>,
     pub time: f64,
     pub is_buyer_maker: bool,
+}
+
+/// One `/papi/v1/balance` row.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PmBalance<'a> {
+    #[serde(borrow)]
+    pub asset: Str<'a>,
+    #[serde(borrow, default)]
+    pub total_wallet_balance: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub cross_margin_free: Option<Str<'a>>,
+    #[serde(borrow, rename = "umUnrealizedPNL", default)]
+    pub um_unrealized_pnl: Option<Str<'a>>,
+}
+
+/// One `/papi/v1/um/conditional/openOrders` row.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PmConditionalOrder<'a> {
+    #[serde(borrow)]
+    pub new_client_strategy_id: Str<'a>,
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(borrow)]
+    pub strategy_type: Str<'a>,
+    #[serde(borrow)]
+    pub side: Str<'a>,
+    #[serde(borrow, default)]
+    pub price: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub stop_price: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub orig_qty: Option<Str<'a>>,
+    #[serde(default)]
+    pub reduce_only: bool,
+    #[serde(borrow, default)]
+    pub working_type: Option<Str<'a>>,
+}
+
+#[derive(Deserialize)]
+pub struct ConditionalUpdateEvent<'a> {
+    #[serde(borrow)]
+    pub so: ConditionalUpdate<'a>,
+}
+
+/// `CONDITIONAL_ORDER_TRADE_UPDATE.so` (portfolio margin).
+#[derive(Deserialize)]
+pub struct ConditionalUpdate<'a> {
+    #[serde(borrow)]
+    pub s: Str<'a>,
+    /// newClientStrategyId.
+    #[serde(borrow)]
+    pub c: Str<'a>,
+    #[serde(rename = "S", borrow)]
+    pub side: Str<'a>,
+    #[serde(borrow)]
+    pub st: Str<'a>,
+    #[serde(borrow)]
+    pub os: Str<'a>,
+    #[serde(borrow, default)]
+    pub p: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub sp: Option<Str<'a>>,
+    #[serde(borrow, default)]
+    pub q: Option<Str<'a>>,
+    #[serde(rename = "R", default)]
+    pub reduce_only: bool,
+    #[serde(borrow, default)]
+    pub wt: Option<Str<'a>>,
 }

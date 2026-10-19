@@ -410,11 +410,12 @@ impl WasmEngine {
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: EngineOptions = serde_json::from_str(options_json)?;
         let inner: Box<dyn AnyEngine> = match venue {
-            "binance" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
+            "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
+                portfolio_margin: venue == "binancepm",
             }))),
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };

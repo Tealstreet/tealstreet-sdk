@@ -1,6 +1,8 @@
-//! Binance USD-M futures on the sans-I/O engine.
+//! Binance USD-M futures, and portfolio margin's USD-M side, on the sans-I/O
+//! engine. Both use USD-M public data; their accounts differ (see `paths`).
 mod account;
 mod history;
+mod paths;
 mod sign;
 mod trading;
 mod wire;
@@ -32,30 +34,36 @@ pub struct Options {
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+    /// A portfolio margin account (`papi`) rather than USD-M futures.
+    pub portfolio_margin: bool,
 }
 
 struct Urls {
     rest: &'static str,
     public_ws: &'static str,
     market_ws: &'static str,
+    /// The account's REST host and private stream.
+    account_rest: &'static str,
     private_ws: &'static str,
 }
 
 impl Urls {
-    fn for_options(options: &Options) -> Self {
+    fn for_options(options: &Options, paths: &paths::Paths) -> Self {
         if options.testnet {
             Self {
                 rest: "https://demo-fapi.binance.com",
                 public_ws: "wss://demo-fstream.binance.com/public/ws",
                 market_ws: "wss://demo-fstream.binance.com/market/ws",
-                private_ws: "wss://demo-fstream.binance.com/private/ws",
+                account_rest: paths.rest_testnet,
+                private_ws: paths.private_ws_testnet,
             }
         } else {
             Self {
                 rest: "https://fapi.binance.com",
                 public_ws: "wss://fstream.binance.com/public/ws",
                 market_ws: "wss://fstream.binance.com/market/ws",
-                private_ws: "wss://fstream.binance.com/private/ws",
+                account_rest: paths.rest,
+                private_ws: paths.private_ws,
             }
         }
     }
@@ -171,6 +179,7 @@ mod source {
 pub struct BinanceFutures {
     options: Options,
     urls: Urls,
+    paths: &'static paths::Paths,
     credentials: Option<Credentials>,
     public: Connection,
     market: Connection,
@@ -189,7 +198,12 @@ pub struct BinanceFutures {
 
 impl BinanceFutures {
     pub fn new(options: Options) -> Self {
-        let urls = Urls::for_options(&options);
+        let paths = if options.portfolio_margin {
+            &paths::PORTFOLIO_MARGIN
+        } else {
+            &paths::USD_M
+        };
+        let urls = Urls::for_options(&options, paths);
         let credentials = match (&options.key, &options.secret) {
             (Some(key), Some(secret)) if !options.public_data_only && !key.is_empty() => {
                 Some(Credentials {
@@ -202,6 +216,7 @@ impl BinanceFutures {
         Self {
             options,
             urls,
+            paths,
             credentials,
             public: Connection::new(),
             market: Connection::new(),
@@ -295,7 +310,7 @@ impl BinanceFutures {
             return;
         };
         let query = query.signed(credentials, cx.now);
-        let url = format!("{}{path}?{query}", self.urls.rest);
+        let url = format!("{}{path}?{query}", self.urls.account_rest);
         let headers = vec![("X-MBX-APIKEY", credentials.key.clone())];
         match stream {
             Some(at) => cx.request_streamed(method, url, headers, at, pending),

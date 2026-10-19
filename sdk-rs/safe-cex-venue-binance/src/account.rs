@@ -179,7 +179,7 @@ impl BinanceFutures {
     pub(crate) fn request_leverage_brackets(&self, cx: &mut Cx<'_, Pending>) {
         self.signed_streamed(
             cx,
-            "/fapi/v1/leverageBracket",
+            self.paths.leverage_bracket,
             Query::new(),
             Pending::Account(Request::LeverageBrackets(HashMap::new())),
         );
@@ -195,7 +195,7 @@ impl BinanceFutures {
         self.signed(
             cx,
             Method::Get,
-            "/fapi/v1/positionSide/dual",
+            self.paths.position_mode,
             Query::new(),
             Pending::Account(Request::PositionMode),
         );
@@ -220,14 +220,14 @@ impl BinanceFutures {
             self.signed(
                 cx,
                 method,
-                "/fapi/v1/listenKey",
+                self.paths.listen_key,
                 Query::new(),
                 Pending::Account(request),
             );
         } else {
             cx.request(
                 method,
-                format!("{}/fapi/v1/listenKey", self.urls.rest),
+                format!("{}{}", self.urls.account_rest, self.paths.listen_key),
                 vec![("X-MBX-APIKEY", credentials.key.clone())],
                 None,
                 Pending::Account(request),
@@ -241,32 +241,36 @@ impl BinanceFutures {
         }
         self.account.positions_generation += 1;
         let generation = self.account.positions_generation;
+        let symbol_config = self.paths.symbol_config;
         self.account.positions = Some(PositionsJoin {
             generation,
             version: self.account.position_version,
             rows: None,
-            configs: None,
+            // Without a symbol config endpoint, settings come from the rows.
+            configs: symbol_config.is_none().then(Vec::new),
             failed: false,
         });
         self.account.pending_position_events = false;
         self.signed_streamed(
             cx,
-            "/fapi/v3/positionRisk",
+            self.paths.position_risk,
             Query::new(),
             Pending::Account(Request::PositionRisk {
                 generation,
                 rows: Vec::new(),
             }),
         );
-        self.signed_streamed(
-            cx,
-            "/fapi/v1/symbolConfig",
-            Query::new(),
-            Pending::Account(Request::SymbolConfig {
-                generation,
-                configs: Vec::new(),
-            }),
-        );
+        if let Some(path) = symbol_config {
+            self.signed_streamed(
+                cx,
+                path,
+                Query::new(),
+                Pending::Account(Request::SymbolConfig {
+                    generation,
+                    configs: Vec::new(),
+                }),
+            );
+        }
     }
 
     fn fetch_account(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -276,7 +280,7 @@ impl BinanceFutures {
         self.signed(
             cx,
             Method::Get,
-            "/fapi/v3/account",
+            self.paths.balance,
             Query::new(),
             Pending::Account(Request::Account),
         );
@@ -297,15 +301,20 @@ impl BinanceFutures {
         self.signed(
             cx,
             Method::Get,
-            "/fapi/v1/openOrders",
+            self.paths.open_orders,
             Query::new(),
             Pending::Account(Request::OpenOrders { generation }),
         );
+        let conditional = if self.options.portfolio_margin {
+            Query::new()
+        } else {
+            Query::new().str("algoType", "CONDITIONAL")
+        };
         self.signed(
             cx,
             Method::Get,
-            "/fapi/v1/openAlgoOrders",
-            Query::new().str("algoType", "CONDITIONAL"),
+            self.paths.open_conditional_orders,
+            conditional,
             Pending::Account(Request::OpenAlgoOrders { generation }),
         );
     }
@@ -389,7 +398,7 @@ impl BinanceFutures {
             self.account.last_risk_at = now;
             self.fetch_positions(cx);
         }
-        let interval = if self.private.open {
+        let interval = if self.private.open && !self.options.portfolio_margin {
             ACCOUNT_INTERVAL_MS
         } else {
             DEGRADED_ACCOUNT_INTERVAL_MS
@@ -491,10 +500,21 @@ impl BinanceFutures {
                     max_by_symbol.insert(b.symbol.into_owned(), first.initial_leverage);
                 }
             }
-            Request::PositionRisk { rows, .. } => {
+            Request::PositionRisk { rows, generation } => {
                 let Ok(p) = serde_json::from_str::<PositionRisk>(item) else {
                     return;
                 };
+                if let (Some(leverage), Some(join)) = (p.leverage, &mut self.account.positions)
+                    && join.generation == *generation
+                    && let Some(configs) = &mut join.configs
+                    && self.paths.symbol_config.is_none()
+                {
+                    let setting = MarketSetting {
+                        leverage,
+                        margin_type: Some(MarginType::Cross),
+                    };
+                    configs.push((p.symbol.to_string(), setting));
+                }
                 let signed = num::parse(&p.position_amt);
                 if signed == 0.0 {
                     return;
@@ -569,7 +589,11 @@ impl BinanceFutures {
                     }
                     self.account.keepalive_timer = Some(cx.set_timer(LISTEN_KEY_REFRESH_MS));
                     let mut url = String::from(self.urls.private_ws);
-                    url.push_str("?listenKey=");
+                    url.push_str(if self.paths.listen_key_in_path {
+                        "/"
+                    } else {
+                        "?listenKey="
+                    });
                     url.push_str(&crate::sign::encode(&key.listen_key));
                     self.connect_url(cx, Channel::Private, &url);
                 }
@@ -605,6 +629,25 @@ impl BinanceFutures {
                 }
                 self.finish_positions(cx);
             }
+            Request::Account if self.options.portfolio_margin => {
+                self.account.account_in_flight = false;
+                let mut balance = Balance::default();
+                let parsed = json::each::<PmBalance>(body, |row| {
+                    if !matches!(row.asset.as_ref(), "USDT" | "USDC" | "FDUSD") {
+                        return;
+                    }
+                    let total = opt(&row.total_wallet_balance);
+                    let free = opt(&row.cross_margin_free);
+                    balance.total += total;
+                    balance.free += free;
+                    balance.used += total - free;
+                    balance.upnl += opt(&row.um_unrealized_pnl);
+                });
+                match parsed {
+                    Ok(()) => cx.store.set_balance(balance),
+                    Err(error) => cx.log(LogLevel::Error, format!("Binance balance: {error}")),
+                }
+            }
             Request::Account => {
                 self.account.account_in_flight = false;
                 match serde_json::from_str::<Account>(body) {
@@ -625,8 +668,12 @@ impl BinanceFutures {
                     let price = num::parse(&o.price);
                     let amount = num::parse(&o.orig_qty);
                     let filled = num::parse(&o.executed_qty);
+                    let id = match (&o.client_order_id, self.options.portfolio_margin) {
+                        (Some(client), true) => client.to_string(),
+                        _ => o.order_id.to_string(),
+                    };
                     orders.push(Order {
-                        id: o.order_id.to_string(),
+                        id,
                         parent_id: None,
                         status: OrderStatus::Open,
                         symbol: o.symbol.into_owned(),
@@ -656,6 +703,51 @@ impl BinanceFutures {
                 {
                     match parsed {
                         Ok(()) => join.regular = Some(orders),
+                        Err(_) => join.failed = true,
+                    }
+                }
+                self.finish_orders(cx);
+            }
+            Request::OpenAlgoOrders { generation } if self.options.portfolio_margin => {
+                let now = cx.now;
+                let mut orders = Vec::new();
+                let parsed = json::each::<PmConditionalOrder>(body, |o| {
+                    let Some(kind) = order_type(&o.strategy_type) else {
+                        return;
+                    };
+                    let price = opt(&o.price);
+                    let amount = opt(&o.orig_qty);
+                    orders.push(Order {
+                        id: o.new_client_strategy_id.into_owned(),
+                        parent_id: None,
+                        status: OrderStatus::Open,
+                        symbol: o.symbol.into_owned(),
+                        kind,
+                        side: order_side(&o.side),
+                        price: if price != 0.0 {
+                            price
+                        } else {
+                            opt(&o.stop_price)
+                        },
+                        amount,
+                        filled: 0.0,
+                        remaining: amount,
+                        reduce_only: o.reduce_only,
+                        close: Some(false),
+                        client_order_id: None,
+                        time_in_force: None,
+                        last_update: now,
+                        trigger_type: trigger_type(kind, o.working_type.as_deref()),
+                        take_profit: None,
+                        stop_loss: None,
+                        extra: None,
+                    });
+                });
+                if let Some(join) = &mut self.account.orders
+                    && join.generation == generation
+                {
+                    match parsed {
+                        Ok(()) => join.algo = Some(orders),
                         Err(_) => join.failed = true,
                     }
                 }
@@ -829,6 +921,12 @@ impl BinanceFutures {
                     self.schedule_orders_refresh(cx);
                 }
             }
+            Some("CONDITIONAL_ORDER_TRADE_UPDATE") => {
+                if let Ok(event) = serde_json::from_str::<ConditionalUpdateEvent>(text) {
+                    self.on_conditional_update(cx, event.so);
+                    self.schedule_orders_refresh(cx);
+                }
+            }
             Some("ALGO_UPDATE") => {
                 if let Ok(event) = serde_json::from_str::<AlgoUpdateEvent>(text) {
                     self.on_algo_update(cx, event.o);
@@ -866,7 +964,11 @@ impl BinanceFutures {
     }
 
     fn on_order_update(&mut self, cx: &mut Cx<'_, Pending>, o: OrderUpdate<'_>) {
-        let id = o.i.to_string();
+        // Portfolio margin identifies orders by client order id.
+        let id = match (&o.c, self.options.portfolio_margin) {
+            (Some(client), true) => client.to_string(),
+            _ => o.i.to_string(),
+        };
         let status = o.status.as_ref();
         let amount = num::parse(&o.q);
         let filled = num::parse(&o.z);
@@ -893,7 +995,7 @@ impl BinanceFutures {
             });
         }
         if status == "NEW"
-            && let Some(kind) = order_type(&o.ot)
+            && let Some(kind) = o.ot.as_deref().or(o.o.as_deref()).and_then(order_type)
         {
             let price = num::parse(&o.p);
             cx.store.upsert_order(Order {
@@ -934,6 +1036,48 @@ impl BinanceFutures {
         }
         if status == "FILLED" {
             cx.store.set_order_status(&id, OrderStatus::Closed);
+        }
+    }
+
+    /// Portfolio margin's stop, take-profit and trailing orders.
+    fn on_conditional_update(&mut self, cx: &mut Cx<'_, Pending>, o: ConditionalUpdate<'_>) {
+        let id = o.c.to_string();
+        match o.os.as_ref() {
+            "TRIGGERED" | "FINISHED" | "FILLED" => {
+                cx.store.set_order_status(&id, OrderStatus::Closed);
+            }
+            "CANCELED" | "CANCELLED" | "EXPIRED" | "REJECTED" => {
+                cx.store.set_order_status(&id, OrderStatus::Canceled);
+            }
+            "NEW" => {
+                let Some(kind) = order_type(&o.st) else {
+                    return;
+                };
+                let price = opt(&o.p);
+                let amount = opt(&o.q);
+                cx.store.upsert_order(Order {
+                    id,
+                    parent_id: None,
+                    status: OrderStatus::Open,
+                    symbol: o.s.to_string(),
+                    kind,
+                    side: order_side(&o.side),
+                    price: if price != 0.0 { price } else { opt(&o.sp) },
+                    amount,
+                    filled: 0.0,
+                    remaining: amount,
+                    reduce_only: o.reduce_only,
+                    close: Some(false),
+                    client_order_id: None,
+                    time_in_force: None,
+                    last_update: cx.now,
+                    trigger_type: trigger_type(kind, o.wt.as_deref()),
+                    take_profit: None,
+                    stop_loss: None,
+                    extra: None,
+                });
+            }
+            _ => {}
         }
     }
 

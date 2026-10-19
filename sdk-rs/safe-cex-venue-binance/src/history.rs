@@ -211,7 +211,7 @@ impl BinanceFutures {
                         "limit",
                         f64::from(limit.unwrap_or(PAGE_LIMIT).min(PAGE_LIMIT)),
                     );
-                self.history_request(cx, command, "/fapi/v1/allOrders", query, (0.0, 0.0));
+                self.history_request(cx, command, self.paths.all_orders, query, (0.0, 0.0));
             }
             Read::Income {
                 symbol,
@@ -305,7 +305,7 @@ impl BinanceFutures {
             .opt_str("orderId", order_id.as_deref())
             .opt_num("startTime", from)
             .opt_num("endTime", to);
-        self.history_request(cx, command, "/fapi/v1/userTrades", query, (0.0, 0.0));
+        self.history_request(cx, command, self.paths.user_trades, query, (0.0, 0.0));
     }
 
     fn income_request(
@@ -331,7 +331,7 @@ impl BinanceFutures {
             .opt_num("startTime", from)
             .opt_num("endTime", to);
         let window = (from.unwrap_or(f64::NAN), to.unwrap_or(f64::NAN));
-        self.history_request(cx, command, "/fapi/v1/income", query, window);
+        self.history_request(cx, command, self.paths.income, query, window);
     }
 
     fn next_income_page(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) {

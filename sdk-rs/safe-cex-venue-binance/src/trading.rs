@@ -26,9 +26,14 @@ pub struct Request {
 
 /// What a response means for its job.
 enum Call {
-    PlaceOne,
+    /// Portfolio margin answers with our client id, which is the order's id.
+    PlaceOne {
+        client_id: Option<String>,
+    },
     PlaceBatch,
-    PlaceAlgo,
+    PlaceAlgo {
+        client_id: Option<String>,
+    },
     /// Regular orders by id, or a whole symbol's regular or algo orders;
     /// these rows are marked canceled once the venue accepts.
     Cancel {
@@ -76,6 +81,13 @@ struct Params(Vec<(&'static str, String)>);
 impl Params {
     fn set(&mut self, name: &'static str, value: impl Into<String>) {
         self.0.push((name, value.into()));
+    }
+
+    fn get(&self, name: &str) -> Option<String> {
+        self.0
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, v)| v.clone())
     }
 
     fn query(&self) -> Query {
@@ -178,13 +190,13 @@ impl BinanceFutures {
                 let step = vec![
                     Planned {
                         method: Method::Delete,
-                        path: "/fapi/v1/allOpenOrders",
+                        path: self.paths.cancel_all,
                         query: Query::new().str("symbol", &symbol),
                         call: Call::Cancel { ids: ids(regular) },
                     },
                     Planned {
                         method: Method::Delete,
-                        path: "/fapi/v1/algoOpenOrders",
+                        path: self.paths.cancel_all_conditional,
                         query: Query::new().str("symbol", &symbol),
                         call: Call::Cancel { ids: ids(algo) },
                     },
@@ -210,10 +222,11 @@ impl BinanceFutures {
                     .str("symbol", &symbol)
                     .str("marginType", if isolated { "ISOLATED" } else { "CROSSED" });
                 let call = Call::MarginType { symbol, isolated };
-                (
-                    command,
-                    Ok(single(Method::Post, "/fapi/v1/marginType", query, call)),
-                )
+                let plan = match self.paths.margin_type {
+                    Some(path) => Ok(single(Method::Post, path, query, call)),
+                    None => Err("Portfolio margin accounts are cross margin only".to_owned()),
+                };
+                (command, plan)
             }
             Command::SetPositionMode { command, hedged } => {
                 let plan = if cx.store.positions().iter().any(|p| p.contracts > 0.0) {
@@ -222,12 +235,7 @@ impl BinanceFutures {
                     let query =
                         Query::new().str("dualSidePosition", if hedged { "true" } else { "false" });
                     let call = Call::PositionMode { hedged };
-                    Ok(single(
-                        Method::Post,
-                        "/fapi/v1/positionSide/dual",
-                        query,
-                        call,
-                    ))
+                    Ok(single(Method::Post, self.paths.position_mode, query, call))
                 };
                 (command, plan)
             }
@@ -296,7 +304,22 @@ impl BinanceFutures {
         };
         let mut ids = Vec::new();
         let error = match (call, outcome) {
-            (Call::PlaceOne, Ok(body)) | (Call::PlaceAlgo, Ok(body)) => {
+            (
+                Call::PlaceOne {
+                    client_id: Some(id),
+                },
+                Ok(_),
+            )
+            | (
+                Call::PlaceAlgo {
+                    client_id: Some(id),
+                },
+                Ok(_),
+            ) => {
+                ids.push(id);
+                None
+            }
+            (Call::PlaceOne { .. }, Ok(body)) | (Call::PlaceAlgo { .. }, Ok(body)) => {
                 match serde_json::from_str::<PlacedOrder>(body) {
                     Ok(placed) => {
                         ids.extend(placed.order_id.or(placed.algo_id).map(|id| id.to_string()));
@@ -385,15 +408,25 @@ impl BinanceFutures {
         let mut algo = Vec::new();
         // Binance allows one closePosition order per direction per symbol.
         let mut replaced: Vec<Order> = Vec::new();
+        let pm = self.options.portfolio_margin;
         for opts in orders {
-            for existing in self.conflicting_close_orders(cx, opts) {
-                if !replaced.iter().any(|o| o.id == existing.id) {
-                    replaced.push(existing);
+            if !pm {
+                for existing in self.conflicting_close_orders(cx, opts) {
+                    if !replaced.iter().any(|o| o.id == existing.id) {
+                        replaced.push(existing);
+                    }
                 }
             }
             let (r, a) = self.format_order(cx, opts)?;
             regular.extend(r);
-            algo.extend(a);
+            if pm {
+                algo.extend(
+                    a.into_iter()
+                        .map(|params| self.conditional_params(cx, params)),
+                );
+            } else {
+                algo.extend(a);
+            }
         }
         if !replaced.is_empty() {
             cx.log(
@@ -405,31 +438,42 @@ impl BinanceFutures {
             );
             job.steps.extend(self.plan_cancel(&replaced).steps);
         }
-        for lot in regular.chunks(5) {
-            let step = if let [only] = lot {
-                Planned {
+        let lot_size = if self.paths.batch_orders.is_some() {
+            5
+        } else {
+            1
+        };
+        for lot in regular.chunks(lot_size) {
+            let step = match (lot, self.paths.batch_orders) {
+                ([only], _) => Planned {
                     method: Method::Post,
-                    path: "/fapi/v1/order",
+                    path: self.paths.order,
                     query: only.query(),
-                    call: Call::PlaceOne,
+                    call: Call::PlaceOne {
+                        client_id: pm.then(|| only.get("newClientOrderId")).flatten(),
+                    },
+                },
+                (_, Some(path)) => {
+                    let batch: Vec<String> = lot.iter().map(Params::json).collect();
+                    Planned {
+                        method: Method::Post,
+                        path,
+                        query: Query::new().str("batchOrders", &format!("[{}]", batch.join(","))),
+                        call: Call::PlaceBatch,
+                    }
                 }
-            } else {
-                let batch: Vec<String> = lot.iter().map(Params::json).collect();
-                Planned {
-                    method: Method::Post,
-                    path: "/fapi/v1/batchOrders",
-                    query: Query::new().str("batchOrders", &format!("[{}]", batch.join(","))),
-                    call: Call::PlaceBatch,
-                }
+                (_, None) => unreachable!("lots are single orders without a batch endpoint"),
             };
             job.steps.push_back(vec![step]);
         }
         for params in algo {
             job.steps.push_back(vec![Planned {
                 method: Method::Post,
-                path: "/fapi/v1/algoOrder",
+                path: self.paths.conditional_order,
                 query: params.query(),
-                call: Call::PlaceAlgo,
+                call: Call::PlaceAlgo {
+                    client_id: pm.then(|| params.get("newClientStrategyId")).flatten(),
+                },
             }]);
         }
         Ok(job)
@@ -462,6 +506,27 @@ impl BinanceFutures {
 
     fn plan_cancel(&self, orders: &[Order]) -> Job {
         let mut job = Job::default();
+        if self.options.portfolio_margin {
+            // One at a time, by the client ids the orders were placed with.
+            for order in orders {
+                let (path, field) = if is_algo(order.kind) {
+                    (self.paths.conditional_order, "newClientStrategyId")
+                } else {
+                    (self.paths.order, "origClientOrderId")
+                };
+                job.steps.push_back(vec![Planned {
+                    method: Method::Delete,
+                    path,
+                    query: Query::new()
+                        .str("symbol", &order.symbol)
+                        .str(field, &order.id),
+                    call: Call::Cancel {
+                        ids: vec![order.id.clone()],
+                    },
+                }]);
+            }
+            return job;
+        }
         let mut by_symbol: Vec<(String, Vec<String>)> = Vec::new();
         for order in orders.iter().filter(|o| !is_algo(o.kind)) {
             match by_symbol
@@ -472,12 +537,13 @@ impl BinanceFutures {
                 None => by_symbol.push((order.symbol.clone(), vec![order.id.clone()])),
             }
         }
+        let batch = self.paths.batch_orders.expect("USD-M has a batch endpoint");
         for (symbol, ids) in by_symbol {
             if let [id] = ids.as_slice() {
                 let query = Query::new().str("symbol", &symbol).str("orderId", id);
                 job.steps.push_back(vec![Planned {
                     method: Method::Delete,
-                    path: "/fapi/v1/order",
+                    path: self.paths.order,
                     query,
                     call: Call::Cancel { ids: ids.clone() },
                 }]);
@@ -490,7 +556,7 @@ impl BinanceFutures {
                     .str("orderIdList", &format!("[{}]", lot.join(",")));
                 job.steps.push_back(vec![Planned {
                     method: Method::Delete,
-                    path: "/fapi/v1/batchOrders",
+                    path: batch,
                     query,
                     call: Call::Cancel { ids: lot.to_vec() },
                 }]);
@@ -499,7 +565,7 @@ impl BinanceFutures {
         for order in orders.iter().filter(|o| is_algo(o.kind)) {
             job.steps.push_back(vec![Planned {
                 method: Method::Delete,
-                path: "/fapi/v1/algoOrder",
+                path: self.paths.conditional_order,
                 query: Query::new().str("algoId", &order.id),
                 call: Call::Cancel {
                     ids: vec![order.id.clone()],
@@ -507,6 +573,40 @@ impl BinanceFutures {
             }]);
         }
         job
+    }
+
+    /// Portfolio margin's conditional orders name their fields differently and
+    /// have no closePosition: a full-position stop carries the position's size.
+    fn conditional_params(&self, cx: &Cx<'_, Pending>, params: Params) -> Params {
+        let symbol = params.get("symbol").unwrap_or_default();
+        let side = params.get("side");
+        let mut out = Params::default();
+        for (name, value) in params.0 {
+            match name {
+                "algoType" => {}
+                "type" => out.set("strategyType", value),
+                "triggerPrice" => out.set("stopPrice", value),
+                "clientAlgoId" => out.set("newClientStrategyId", value),
+                "closePosition" => {
+                    let closes = match side.as_deref() {
+                        Some("SELL") => PositionSide::Long,
+                        _ => PositionSide::Short,
+                    };
+                    let size = cx
+                        .store
+                        .positions()
+                        .iter()
+                        .find(|p| p.symbol == symbol && p.side == closes)
+                        .map_or(0.0, |p| p.contracts);
+                    out.set("quantity", number(size));
+                    if !cx.store.hedged() {
+                        out.set("reduceOnly", "true");
+                    }
+                }
+                _ => out.set(name, value),
+            }
+        }
+        out
     }
 
     /// Binance has no amend for these orders: cancel, then place the replacement.
@@ -570,7 +670,7 @@ impl BinanceFutures {
             .str("leverage", &number(leverage));
         Ok(single(
             Method::Post,
-            "/fapi/v1/leverage",
+            self.paths.leverage,
             query,
             Call::Leverage { symbol, leverage },
         ))
