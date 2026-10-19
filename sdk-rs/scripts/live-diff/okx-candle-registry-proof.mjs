@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { deserialize, serialize } from 'node:v8';
+import { differences } from './compare.mjs';
 
 const topic = 'candle.1m.BTC-USDT-SWAP';
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -45,10 +46,32 @@ if (mode === 'prefix') {
   assert.equal(entry(red.rows[2]).hadHandlers, false);
   assert.equal(entry(green.rows[2]).hadHandlers, true);
   assert.deepEqual(green.rows[0], red.rows[0], 'maintained source observations unchanged');
-  assert.deepEqual(green.rows[2], green.rows[0], 'complete candidate output and final state equal source');
+  assert.deepEqual(green.rows[2].outputs, green.rows[0].outputs, 'emitted values and own-property presence equal source');
+  const stateCandle = '$.messageHandlerStats.business.candle.1m.BTC-USDT-SWAP.hadHandlers';
+  const inheritedState = {path:'$.starkConfig', ts:'<undefined>', rust:'<absent>'};
+  assert.deepEqual(differences(red.rows[0].state, red.rows[2].state), [
+    {path:stateCandle, ts:true, rust:false}, inheritedState,
+  ]);
+  assert.deepEqual(differences(green.rows[0].state, green.rows[2].state), [inheritedState]);
+  function keyDeltas(a, b, path='$', seen=new WeakMap(), out=[]) {
+    if (!a || typeof a !== 'object' || !b || typeof b !== 'object' || seen.get(a) === b) return out;
+    seen.set(a,b);
+    const x=Reflect.ownKeys(a), y=Reflect.ownKeys(b);
+    if (x.length !== y.length || x.some((key,index) => key !== y[index])) out.push({path,ts:x,rust:y});
+    for (const key of x) keyDeltas(a[key],b[key],path+'.'+key,seen,out);
+    return out;
+  }
+  for (const phase of [red,green]) {
+    assert.deepEqual(keyDeltas(phase.rows[0],phase.rows[1]), [], 'ordered source repeat');
+    assert.deepEqual(keyDeltas(phase.rows[2],phase.rows[3]), [], 'ordered native repeat');
+  }
+  assert.deepEqual(keyDeltas(red.rows[0],green.rows[0]), [], 'source property order unchanged');
+  const inheritedKeys=keyDeltas(red.rows[0],red.rows[2]);
+  assert.equal(inheritedKeys.length,2041, 'unchanged Store/Ticker/Market order plus state presence FIXes');
+  assert.deepEqual(keyDeltas(green.rows[0],green.rows[2]), inheritedKeys, 'each exact pre-existing key-list delta unchanged');
   assert.equal(green.report.runs[2].receipt.inputHash, red.report.runs[2].receipt.inputHash);
   assert.notEqual(green.report.addonSha256, red.report.addonSha256, 'different compiled production addons');
-  console.log('PASS: compiled RED -> GREEN on exact recorded 105-frame prefix; full venue coverage not claimed');
+  console.log('PASS: compiled candle RED -> GREEN on exact 105-frame prefix, emitted value/presence equality and strict drains; inherited final-state starkConfig presence and all 2041 key-list deltas pinned unchanged. No ordered whole-output, full-state or full-minute parity claim.');
 } else {
   throw new Error('Usage: okx-candle-registry-proof.mjs prefix INPUT.bundle.v8 OUTPUT.bundle.v8 | check RED.json GREEN.json');
 }

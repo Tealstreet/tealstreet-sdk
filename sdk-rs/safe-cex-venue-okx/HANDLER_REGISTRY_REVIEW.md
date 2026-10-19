@@ -38,3 +38,15 @@ live callback-array growth after key deletion, callback throw identity, pong,
 forced cleanup and periodic reconciliation. The pre-cutover public lookup fails
 the unrelated-getter control; the source-table dispatch passes without reading
 that property. Getter failures retain the original thrown referent before writes.
+
+Run `python3 safe-cex-exchange/scripts/js-handler-registry-controls.py --logs ABS_DIR`
+from `sdk-rs` with the normal oracle dependency environment. Each independent
+statistics, table-enumeration and snapshot-iteration fault must compile, fail its
+named real binding assertion, then pass after byte-exact source restoration.
+
+The strict 105-frame napi candidate fixes the emitted candle statistics; all
+three emitted values and own-property presence match the maintained source and
+both implementations repeat. The final native Store still omits the source's
+own-undefined `starkConfig`. All 2041 pre-existing key-list differences (including
+that presence difference) are pinned unchanged before/after. These are separate
+Store/model obligations; no ordered whole-output or full-state parity is claimed.
