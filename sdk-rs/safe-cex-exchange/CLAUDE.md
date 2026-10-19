@@ -8,6 +8,10 @@ Executable config capabilities retain the owned-data boundary. Constructed Aster
 and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
 The typed REST host recovers owned callback errors through the canonical
 ExchangeError-to-Thrown conversion and attaches the effective request config.
+Both JS factory request interceptors stamp the live config with integer
+request-start time after accounting. Read-only telemetry fields do not fail HTTP;
+the maintained-source comparison observes both prepared and terminal configs.
+Socket diagnostics reuse the shared auth-operation predicate after JSON parsing.
 The Bitget owned-transport regression pins retry eligibility after that boundary.
 
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
