@@ -844,6 +844,10 @@ impl Venue for BinanceFutures {
         }
     }
 
+    fn book_mut(&mut self, symbol: &str) -> Option<&mut Book> {
+        self.books.get_mut(symbol).map(|state| &mut state.book)
+    }
+
     fn book(&self, symbol: &str) -> Option<&Book> {
         self.books
             .get(symbol)

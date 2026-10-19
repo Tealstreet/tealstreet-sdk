@@ -16,8 +16,9 @@ trait AnyEngine {
     fn handle(&mut self, now: f64, event: Event<'_>);
     fn drain(&mut self) -> Vec<Action>;
     fn store_update(&mut self) -> String;
+    fn ticker_deltas(&mut self) -> Vec<f64>;
     fn changed_books(&mut self) -> Vec<String>;
-    fn book(&self, symbol: &str) -> String;
+    fn book_ops(&mut self, symbol: &str) -> Vec<f64>;
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
@@ -42,14 +43,20 @@ impl<V: Venue> AnyEngine for Engine<V> {
         }
     }
 
+    fn ticker_deltas(&mut self) -> Vec<f64> {
+        let mut out = Vec::new();
+        self.store_mut().take_ticker_deltas(&mut out);
+        out
+    }
+
     fn changed_books(&mut self) -> Vec<String> {
         self.take_changed_books()
     }
 
-    fn book(&self, symbol: &str) -> String {
-        Engine::book(self, symbol)
-            .map(|book| serde_json::to_string(&book.to_model()).unwrap_or_default())
-            .unwrap_or_default()
+    fn book_ops(&mut self, symbol: &str) -> Vec<f64> {
+        let mut out = Vec::new();
+        self.take_book_ops(symbol, &mut out);
+        out
     }
 }
 
@@ -276,6 +283,19 @@ impl From<CommandIn> for Command {
     }
 }
 
+/// Bytes of WebAssembly linear memory currently reserved by this module.
+#[wasm_bindgen(js_name = wasmMemoryBytes)]
+pub fn wasm_memory_bytes() -> f64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        (core::arch::wasm32::memory_size(0) * 65_536) as f64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        0.0
+    }
+}
+
 #[wasm_bindgen]
 pub struct WasmEngine {
     inner: Box<dyn AnyEngine>,
@@ -376,8 +396,17 @@ impl WasmEngine {
         }
     }
 
-    /// The synchronized book for `symbol` as JSON, or "" while it is syncing.
-    pub fn book(&self, symbol: &str) -> String {
-        self.inner.book(symbol)
+    /// Packed ticker deltas since the previous call: `[index, mask, ...values]`
+    /// repeated, in `PACKED_TICKER_FIELDS` order.
+    #[wasm_bindgen(js_name = tickerDeltas)]
+    pub fn ticker_deltas(&mut self) -> Vec<f64> {
+        self.inner.ticker_deltas()
+    }
+
+    /// Book ops for `symbol` since the previous call: `[code, price, amount]`
+    /// triples (0 bid, 1 ask, 2 reset, 3 reset bids, 4 reset asks).
+    #[wasm_bindgen(js_name = bookOps)]
+    pub fn book_ops(&mut self, symbol: &str) -> Vec<f64> {
+        self.inner.book_ops(symbol)
     }
 }

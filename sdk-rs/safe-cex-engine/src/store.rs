@@ -1,5 +1,6 @@
 //! Typed exchange state plus change tracking. Hosts drain changes with
-//! [`Store::take_update`] once per flush instead of per websocket message.
+//! [`Store::take_update`] and [`Store::take_ticker_deltas`] once per flush
+//! instead of per websocket message.
 use crate::model::{Balance, Loaded, Market, Order, Position, Ticker};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -17,14 +18,47 @@ pub struct Store {
     loaded: Loaded,
     latency: f64,
     changes: Changes,
+    /// Changed-field bits per ticker, in [`TICKER_FIELDS`] order.
+    ticker_masks: Vec<u16>,
+    dirty_tickers: Vec<u32>,
+}
+
+/// Packed ticker delta field order; matches `PACKED_TICKER_FIELDS` in
+/// `packages/safe-cex/src/store/store.base.ts`.
+pub const TICKER_FIELDS: [&str; 11] = [
+    "bid",
+    "ask",
+    "last",
+    "mark",
+    "index",
+    "percentage",
+    "openInterest",
+    "fundingRate",
+    "fundingTime",
+    "volume",
+    "quoteVolume",
+];
+
+fn ticker_values(t: &Ticker) -> [f64; 11] {
+    [
+        t.bid,
+        t.ask,
+        t.last,
+        t.mark,
+        t.index,
+        t.percentage,
+        t.open_interest,
+        t.funding_rate,
+        t.funding_time,
+        t.volume,
+        t.quote_volume,
+    ]
 }
 
 #[derive(Default)]
 struct Changes {
     markets: bool,
     tickers_replaced: bool,
-    ticker_dirty: Vec<bool>,
-    dirty_tickers: Vec<u32>,
     orders: bool,
     positions: bool,
     balance: bool,
@@ -39,11 +73,9 @@ pub struct StoreUpdate<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub markets: Option<&'a [Market]>,
     /// The complete ticker list, sent when the set of tickers was replaced.
+    /// Value changes otherwise travel as packed deltas.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tickers: Option<&'a [Ticker]>,
-    /// Tickers whose values changed, when the set itself did not.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub ticker_changes: Vec<&'a Ticker>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub orders: Option<&'a [Order]>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -60,7 +92,6 @@ impl StoreUpdate<'_> {
     pub fn is_empty(&self) -> bool {
         self.markets.is_none()
             && self.tickers.is_none()
-            && self.ticker_changes.is_empty()
             && self.orders.is_none()
             && self.positions.is_none()
             && self.balance.is_none()
@@ -120,47 +151,49 @@ impl Store {
             .collect();
         self.tickers = tickers;
         self.changes.tickers_replaced = true;
-        self.changes.ticker_dirty = vec![false; self.tickers.len()];
-        self.changes.dirty_tickers.clear();
+        self.ticker_masks = vec![0; self.tickers.len()];
+        self.dirty_tickers.clear();
         self.set_loaded(|loaded| loaded.tickers = true);
     }
 
-    /// Mutate one ticker in place; it is sent on the next flush only if a field changed.
+    /// Mutate one ticker in place; changed fields go out with the next deltas.
     pub fn update_ticker(&mut self, symbol: &str, update: impl FnOnce(&mut Ticker)) {
         let Some(&index) = self.ticker_by_symbol.get(symbol) else {
             return;
         };
         let ticker = &mut self.tickers[index as usize];
-        let before = (
-            ticker.bid,
-            ticker.ask,
-            ticker.last,
-            ticker.mark,
-            ticker.index,
-            ticker.percentage,
-            ticker.open_interest,
-            ticker.funding_rate,
-            ticker.funding_time,
-            ticker.volume,
-            ticker.quote_volume,
-        );
+        let before = ticker_values(ticker);
         update(ticker);
-        let after = (
-            ticker.bid,
-            ticker.ask,
-            ticker.last,
-            ticker.mark,
-            ticker.index,
-            ticker.percentage,
-            ticker.open_interest,
-            ticker.funding_rate,
-            ticker.funding_time,
-            ticker.volume,
-            ticker.quote_volume,
-        );
-        if before != after && !self.changes.ticker_dirty[index as usize] {
-            self.changes.ticker_dirty[index as usize] = true;
-            self.changes.dirty_tickers.push(index);
+        let after = ticker_values(ticker);
+        let mut mask = 0u16;
+        for (bit, (a, b)) in before.iter().zip(after.iter()).enumerate() {
+            if a.to_bits() != b.to_bits() {
+                mask |= 1 << bit;
+            }
+        }
+        if mask == 0 {
+            return;
+        }
+        let slot = &mut self.ticker_masks[index as usize];
+        if *slot == 0 {
+            self.dirty_tickers.push(index);
+        }
+        *slot |= mask;
+    }
+
+    /// Append changed tickers as packed deltas, `[index, mask, ...values]`
+    /// each, and reset tracking.
+    pub fn take_ticker_deltas(&mut self, out: &mut Vec<f64>) {
+        for index in self.dirty_tickers.drain(..) {
+            let mask = std::mem::take(&mut self.ticker_masks[index as usize]);
+            let values = ticker_values(&self.tickers[index as usize]);
+            out.push(index as f64);
+            out.push(mask as f64);
+            for (bit, value) in values.iter().enumerate() {
+                if mask & (1 << bit) != 0 {
+                    out.push(*value);
+                }
+            }
         }
     }
 
@@ -260,25 +293,15 @@ impl Store {
     /// Call it once per flush; serialize the result before mutating again.
     pub fn take_update(&mut self) -> StoreUpdate<'_> {
         let changes = std::mem::take(&mut self.changes);
-        let mut ticker_dirty = changes.ticker_dirty;
-        let ticker_changes = if changes.tickers_replaced {
-            Vec::new()
-        } else {
-            changes
-                .dirty_tickers
-                .iter()
-                .map(|&index| &self.tickers[index as usize])
-                .collect()
-        };
-        ticker_dirty.iter_mut().for_each(|dirty| *dirty = false);
-        if ticker_dirty.len() != self.tickers.len() {
-            ticker_dirty = vec![false; self.tickers.len()];
+        if changes.tickers_replaced {
+            // The full list supersedes any pending value deltas.
+            for index in self.dirty_tickers.drain(..) {
+                self.ticker_masks[index as usize] = 0;
+            }
         }
-        self.changes.ticker_dirty = ticker_dirty;
         StoreUpdate {
             markets: changes.markets.then_some(self.markets.as_slice()),
             tickers: changes.tickers_replaced.then_some(self.tickers.as_slice()),
-            ticker_changes,
             orders: changes.orders.then_some(self.orders.as_slice()),
             positions: changes.positions.then_some(self.positions.as_slice()),
             balance: changes.balance.then_some(&self.balance),
@@ -301,24 +324,28 @@ mod tests {
     }
 
     #[test]
-    fn sends_only_changed_tickers_after_the_initial_list() {
+    fn packs_only_changed_ticker_fields_after_the_initial_list() {
         let mut store = Store::default();
         store.set_tickers(vec![ticker("A"), ticker("B"), ticker("C")]);
+        store.update_ticker("A", |t| t.bid = 5.0);
         let first = store.take_update();
         assert_eq!(first.tickers.map(<[_]>::len), Some(3));
-        assert!(first.ticker_changes.is_empty());
+        let mut deltas = Vec::new();
+        store.take_ticker_deltas(&mut deltas);
+        assert!(deltas.is_empty(), "full list supersedes deltas");
 
         store.update_ticker("B", |t| t.last = 1.0);
-        store.update_ticker("B", |t| t.last = 2.0);
+        store.update_ticker("B", |t| {
+            t.last = 2.0;
+            t.volume = 7.0;
+        });
         store.update_ticker("C", |t| t.last = 0.0);
-        let second = store.take_update();
-        assert!(second.tickers.is_none());
-        let changed: Vec<_> = second
-            .ticker_changes
-            .iter()
-            .map(|t| (t.symbol.as_str(), t.last))
-            .collect();
-        assert_eq!(changed, [("B", 2.0)]);
         assert!(store.take_update().is_empty());
+        store.take_ticker_deltas(&mut deltas);
+        let last_and_volume = (1 << 2) | (1 << 9);
+        assert_eq!(deltas, [1.0, last_and_volume as f64, 2.0, 7.0]);
+        deltas.clear();
+        store.take_ticker_deltas(&mut deltas);
+        assert!(deltas.is_empty());
     }
 }

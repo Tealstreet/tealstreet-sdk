@@ -12,6 +12,8 @@ const { values } = parseArgs({
     tape: { type: 'string' },
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
     out: { type: 'string' },
+    // Skip modelling the worker posting books to main (same work for both).
+    'no-egress': { type: 'boolean', default: false },
   },
 });
 const records = readFileSync(values.tape, 'utf8')
@@ -90,18 +92,29 @@ const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
 };
 
-const measure = (cpuStart, wallStart) => {
+const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0) => {
   globalThis.gc?.();
-  const cpu = process.cpuUsage(cpuStart);
+  const cpu = process.cpuUsage(cpuStart.process);
+  const thread = process.threadCpuUsage(cpuStart.thread);
   const memory = process.memoryUsage();
   return {
-    cpuMs: (cpu.user + cpu.system) / 1000,
+    // The worker's own thread: what competes with its message handling.
+    cpuMs: (thread.user + thread.system) / 1000,
+    // All threads, including V8 background compilation and GC helpers.
+    processCpuMs: (cpu.user + cpu.system) / 1000,
     wallMs: performance.now() - wallStart,
     rssBytes: memory.rss,
     heapUsedBytes: memory.heapUsed,
-    externalBytes: memory.external,
-    arrayBuffersBytes: memory.arrayBuffers,
+    wasmBytes,
+    // What the implementation keeps alive beyond the harness and loaded code.
+    retainedBytes: memory.heapUsed - heapBefore + wasmBytes,
   };
+};
+
+/** Heap retained before the implementation loads, so both start from zero. */
+const baseline = () => {
+  globalThis.gc?.();
+  return process.memoryUsage().heapUsed;
 };
 
 const sortBook = (book) => ({
@@ -121,12 +134,11 @@ const marketFields = (m) => ({
 });
 
 async function runRust() {
-  const { EngineHost } = await import('../safe-cex-wasm/js/host.mjs');
+  const { EngineHost, TICKER_FIELDS } = await import('../safe-cex-wasm/js/host.mjs');
   const { loadEngine } = await import('./engine.mjs');
-  const { WasmEngine } = await loadEngine();
+  const { WasmEngine, wasmMemoryBytes } = await loadEngine();
   const tape = new Tape();
   const store = { markets: [], tickers: [] };
-  let tickerIndex = new Map();
   const finalBooks = {};
   const transport = {
     now: () => Date.now(),
@@ -143,20 +155,26 @@ async function runRust() {
       if (update.markets) store.markets = update.markets;
       if (update.tickers) {
         store.tickers = update.tickers;
-        tickerIndex = new Map(store.tickers.map((t, i) => [t.symbol, i]));
       }
-      for (const changed of update.tickerChanges ?? []) {
-        const index = tickerIndex.get(changed.symbol);
-        if (index !== undefined) store.tickers[index] = changed;
+    },
+    onTickerDeltas: (flat) => {
+      for (let i = 0; i < flat.length; ) {
+        const ticker = store.tickers[flat[i]];
+        const mask = flat[i + 1];
+        i += 2;
+        for (let field = 0; field < TICKER_FIELDS.length; field++) {
+          if (mask & (1 << field)) ticker[TICKER_FIELDS[field]] = flat[i++];
+        }
       }
     },
     onBook: (symbol, book) => {
       finalBooks[symbol] = book;
-      posted += structuredClone(book).bids.length;
+      if (!values['no-egress']) posted += structuredClone(book).bids.length;
     },
   });
   let posted = 0;
-  const cpuStart = process.cpuUsage();
+  const heapBefore = baseline();
+  const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   host.start();
   for (const symbol of books) host.command({ op: 'subscribeOrderBook', symbol });
@@ -169,7 +187,7 @@ async function runRust() {
   });
   await settle();
   host.flush();
-  const metrics = measure(cpuStart, wallStart);
+  const metrics = measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes());
   host.dispose();
   return { frames, metrics, unserved: tape.unserved, store, books: finalBooks };
 }
@@ -237,7 +255,8 @@ async function runTs() {
     if (client?.defaults) client.defaults.adapter = adapter;
   }
   const finalBooks = {};
-  const cpuStart = process.cpuUsage();
+  const heapBefore = baseline();
+  const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   const started = exchange.start();
   const subscribed = (async () => {
@@ -252,7 +271,9 @@ async function runTs() {
   const frames = await tape.play(
     (t) => {
       if (t - lastFlush >= 250) {
-        for (const book of Object.values(finalBooks)) posted += structuredClone(book).bids.length;
+        if (!values['no-egress']) {
+          for (const book of Object.values(finalBooks)) posted += structuredClone(book).bids.length;
+        }
         lastFlush = t;
       }
     },
@@ -262,7 +283,7 @@ async function runTs() {
   );
   await Promise.all([started, subscribed]);
   await settle();
-  const metrics = measure(cpuStart, wallStart);
+  const metrics = measure(cpuStart, wallStart, heapBefore);
   const snapshot = {
     markets: store.markets.map((m) => ({ ...m })),
     tickers: store.tickers.map((t) => ({ ...t })),

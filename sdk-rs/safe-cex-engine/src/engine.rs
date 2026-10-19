@@ -309,6 +309,7 @@ pub trait Venue {
     fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId);
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
     fn book(&self, symbol: &str) -> Option<&Book>;
+    fn book_mut(&mut self, symbol: &str) -> Option<&mut Book>;
 }
 
 pub struct Engine<V: Venue> {
@@ -401,5 +402,12 @@ impl<V: Venue> Engine<V> {
 
     pub fn book(&self, symbol: &str) -> Option<&Book> {
         self.venue.book(symbol)
+    }
+
+    /// Append `symbol`'s book ops logged since the previous call to `out`.
+    pub fn take_book_ops(&mut self, symbol: &str, out: &mut Vec<f64>) {
+        if let Some(book) = self.venue.book_mut(symbol) {
+            book.take_ops(out);
+        }
     }
 }
