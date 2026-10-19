@@ -1,8 +1,0 @@
-extractor 0
-coverage 0
-census8 moved39/79/7
-Traceback (most recent call last):
-  File "/tmp/blofin-public-data-source-gates.py", line 20, in <module>
-    (p/'exempt.toml').write_text('');cmd=[str(sdk/'target/debug/parity-check'),'--workspace',str(p),'--manifest',str(sdk/'parity/manifest/exchanges/blofin'),'--exempt',str(p/'exempt.toml')];r=subprocess.run(cmd,capture_output=True,text=True);output=r.stdout+r.stderr;(out/'rust-parity.log').write_text(output);results.append(dict(sha=sha,name='rust-parity',exit=r.returncode,command=cmd,binary_built_this_slice=False,stdout_bytes=len(r.stdout.encode()),stderr_bytes=len(r.stderr.encode())));assert r.returncode==1 and output.count('invention:')==3 and all('position_adapter.rs::' in l for l in output.splitlines()),'only3 inherited Rust findings';print('Rust parity1 only3 inherited findings; stdout/stderr',len(r.stdout),len(r.stderr),flush=True)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-AssertionError: only3 inherited Rust findings

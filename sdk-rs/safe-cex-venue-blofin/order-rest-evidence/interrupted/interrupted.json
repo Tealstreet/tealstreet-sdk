@@ -1,7 +1,0 @@
-{
-  "sha": "a7c73e0bd35365e660638c0fb85f49b115f36278",
-  "check": "interrupted before exit measurement; no pass claimed",
-  "reason": "review requires cached native bits before request assertions",
-  "remaining_cargo_gates": "not run",
-  "controls": "not run"
-}

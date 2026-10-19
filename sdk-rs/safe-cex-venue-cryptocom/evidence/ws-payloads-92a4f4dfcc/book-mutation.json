@@ -1,9 +1,0 @@
-{
-  "base_sha": "92a4f4dfcc7eb28defeaf018911ca5abb5fe5332",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n@@ -444,8 +444,8 @@\n impl CryptocomWsBookData {\n     pub fn from_value(value: &PayloadValue) -> Result<Self, PayloadError> {\n         Ok(Self {\n-            bids: (|v| array(v, tuple))(field(value, \"bids\")?)?,\n-            asks: (|v| array(v, tuple))(field(value, \"asks\")?)?,\n+            bids: (|v| array(v, tuple))(field(value, \"asks\")?)?,\n+            asks: (|v| array(v, tuple))(field(value, \"bids\")?)?,\n             t: (number)(field(value, \"t\")?)?,\n             tt: (number)(field(value, \"tt\")?)?,\n         })\n",
-  "expected_named_assertion": "CRYPTOCOM-PAYLOAD-NATIVE-STRING CryptocomWsBookUpdate:rows-1.data.0.bids.0.0",
-  "runtime_proof": true,
-  "stop_case_name": "CryptocomWsBookUpdate:rows-1",
-  "stop_case_index": 87
-}

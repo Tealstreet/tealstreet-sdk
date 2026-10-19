@@ -1,9 +1,0 @@
-{
-  "tested_commit": "01a16f36c12497f9a45719c535cf80086574dafe",
-  "gate": "canonical wasm clippy",
-  "signal": "SIGINT to owned Cargo",
-  "reason": "User removed duplicated wasm gate from lane bar and explicitly required stopping the in-flight run. No wasm pass or compilation defect is claimed.",
-  "recorded_utc": "2026-10-15T18:38:59.469873+00:00",
-  "helper_exit": 1,
-  "underlying_cargo_exit_reported": 255
-}

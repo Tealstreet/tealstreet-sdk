@@ -1,2 +1,0 @@
-[workspace]
-members = ["safe-cex-venue-bybit", "safe-cex-venue-okx", "safe-cex-venue-binance"]

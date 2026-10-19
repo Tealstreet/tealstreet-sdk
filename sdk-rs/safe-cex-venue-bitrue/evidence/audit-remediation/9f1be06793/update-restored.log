@@ -1,9 +1,0 @@
-
-running 1 test
-test native_entry_phases_match_actual_typescript ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.48s
-
-   Compiling safe-cex-venue-bitrue v0.1.0 (<worktree>/sdk-rs/safe-cex-venue-bitrue)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.66s
-     Running tests/entry_timing.rs (sdk-rs/target/debug/deps/entry_timing-916592b1ec69eae4)

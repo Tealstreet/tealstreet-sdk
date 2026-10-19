@@ -1,5 +1,0 @@
-baseline_sha 78dda34609976cf1fa2468530ea81d5aab48ccdd
-config compiled exit=101: ROOT-UTILS config native constant identity
-broker compiled exit=101: ROOT-UTILS broker fallback identity
-telemetry compiled exit=101: ROOT-UTILS telemetry native failure propagation
-RESTORED exit=0 4/4; stopped after control 3

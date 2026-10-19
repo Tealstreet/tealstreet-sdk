@@ -1,7 +1,0 @@
-{
-  "base_sha": "e1bd9d4e0b44e932727758acdb1a140f04294fcd",
-  "patch": "diff --git a/sdk-rs/safe-cex-venue-cryptocom/src/private_order_mappings.rs b/sdk-rs/safe-cex-venue-cryptocom/src/private_order_mappings.rs\nindex 3cce9a9aa4..c8cf6cb546 100644\n--- a/sdk-rs/safe-cex-venue-cryptocom/src/private_order_mappings.rs\n+++ b/sdk-rs/safe-cex-venue-cryptocom/src/private_order_mappings.rs\n@@ -9,7 +9,7 @@ fn equals(value: Option<&[u16]>, literal: &str) -> bool {\n \n pub fn map_order_type(kind: Option<&[u16]>) -> OrderType {\n     if equals(kind, \"MARKET\") {\n-        return OrderType::Market;\n+        return OrderType::Limit;\n     }\n     if equals(kind, \"LIMIT\") {\n         return OrderType::Limit;\n",
-  "named_assertion": "CRYPTOCOM-PRIVATE-MAPPING-NATIVE mapOrderType case0",
-  "stop_method": "mapOrderType",
-  "stop_case_index": 0
-}

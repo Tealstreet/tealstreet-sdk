@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"profile":"mexc-fetchMarkets","immediateCalls":1,"scope":"actual source prefix, continuation not reached; native async laziness inspected only"}]}

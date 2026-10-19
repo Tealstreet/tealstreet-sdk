@@ -1,7 +1,0 @@
-import pathlib,subprocess,json,os,sys
-out=pathlib.Path(sys.argv[1]);out.mkdir(parents=True,exist_ok=True);sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip();env=dict(os.environ,SAFE_CEX_TYPESCRIPT_PATH='/Users/sam/cs/tealstreet-next/node_modules/typescript');rows=[]
-commands=[('check',['cargo','check','--manifest-path','sdk-rs/Cargo.toml','-p','safe-cex-venue-blofin','--all-targets','--jobs','2']),('host-clippy-crate-only',['cargo','clippy','--manifest-path','sdk-rs/Cargo.toml','-p','safe-cex-venue-blofin','--all-targets','--jobs','2','--no-deps','--','-D','warnings']),('tests',['cargo','test','--manifest-path','sdk-rs/Cargo.toml','-p','safe-cex-venue-blofin','--test','private_stream_control','--jobs','2','--','--nocapture']),('fmt',['rustfmt','--edition','2024','--check','sdk-rs/safe-cex-venue-blofin/src/private_stream_control.rs','sdk-rs/safe-cex-venue-blofin/tests/private_stream_control.rs'])]
-for name,command in commands:
- assert subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()==sha
- r=subprocess.run(command,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True);(out/(name+'.log')).write_text(r.stdout);rows.append(dict(sha=sha,name=name,command=command,exit=r.returncode));(out/'cargo.json').write_text(json.dumps(dict(sha=sha,results=rows),indent=2)+'\n');print(name,r.returncode,flush=True)
- if r.returncode:raise SystemExit(r.returncode)

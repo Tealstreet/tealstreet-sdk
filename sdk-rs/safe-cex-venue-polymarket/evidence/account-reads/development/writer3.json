@@ -1,8 +1,0 @@
-{
-  "command": [
-    "node",
-    "/Users/sam/.volta/tools/image/yarn/1.22.21/bin/yarn.js",
-    "parity:extract"
-  ],
-  "exit": 0
-}

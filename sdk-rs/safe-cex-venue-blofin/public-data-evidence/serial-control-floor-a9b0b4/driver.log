@@ -1,9 +1,0 @@
-{"sha": "a9b0b4a2be85aa586e602bf4af866907f282ea0d", "label": "constructor", "assertion": "native_constructor_close_capture", "call_site": "sdk-rs/safe-cex-venue-blofin/src/public_stream_data.rs", "changes": [["(self.base_on_close)(event).map_err(PublicDataError::Host)?;", "let _ = (&self.base_on_close, event);"]], "command": ["cargo", "test", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-venue-blofin", "--test", "public_stream_data", "--jobs", "2", "native_constructor_close_capture", "--", "--exact", "--nocapture"], "broken_exit": 101, "restored_exit": 0, "caught": true, "restored": true}
-Traceback (most recent call last):
-  File "/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-p2c-signing/sdk-rs/safe-cex-venue-blofin/tests/public_stream_data_controls.py", line 27, in <module>
-    path.write_text(changed);broken=subprocess.run(command,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True);(out/(label+'-'+test+'-broken.log')).write_text(broken.stdout)
-  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 507, in run
-    stdout, stderr = process.communicate(input, timeout=timeout)
-  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1121, in communicate
-    stdout = self.stdout.read()
-KeyboardInterrupt

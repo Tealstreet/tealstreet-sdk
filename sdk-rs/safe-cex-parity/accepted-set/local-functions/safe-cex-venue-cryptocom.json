@@ -1,7 +1,0 @@
-{
-  "safe-cex-venue-cryptocom/src/binding/globals.rs::LOCAL_FUNCTION:open_window": {
-    "category": "non-decoder",
-    "reason": "Inside throttle construction: schedules the existing callback, tracks the open/pending/last state and recursively starts the next timer window. It forwards native callback arguments/results without a raw-data decoder or model projection. Re-reviewed the current source after the #955 pin audit: this nested helper body is unchanged from pre-cutover master, and its existing reviewed source role remains valid. The enclosing file fingerprint is refreshed without changing the helper or its classification. Canonical ArrayData review: the sort-level snapshot propagates property errors before the existing ordering and checked writes. open_window and its scheduler ownership are unchanged. Comparator sweep review: sort_levels now delegates source subtraction and per-comparison property reads to canonical V8 TimSort; the nested open_window body, timer ownership and classification remain unchanged. Real constructed bid/ask socket regressions independently observe exact price/amount/total bits. Reviewed direct TimSort move to safe-cex-num: only sort_levels changes its call path and explicitly retains Thrown; the complete throttle prefix including open_window is byte-identical.",
-    "sourceSha256": "14d74651668b934507da762515e07f462b16e5f44242e84f4f18af06c0b69fc5"
-  }
-}

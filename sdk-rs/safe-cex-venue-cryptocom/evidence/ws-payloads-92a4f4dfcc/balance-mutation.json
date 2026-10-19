@@ -1,9 +1,0 @@
-{
-  "base_sha": "92a4f4dfcc7eb28defeaf018911ca5abb5fe5332",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n@@ -563,8 +563,8 @@\n impl CryptocomWsBalanceSummary {\n     pub fn from_value(value: &PayloadValue) -> Result<Self, PayloadError> {\n         Ok(Self {\n-            total_available_balance: (string)(field(value, \"total_available_balance\")?)?,\n-            total_margin_balance: (string)(field(value, \"total_margin_balance\")?)?,\n+            total_available_balance: (string)(field(value, \"total_margin_balance\")?)?,\n+            total_margin_balance: (string)(field(value, \"total_available_balance\")?)?,\n             total_initial_margin: (string)(field(value, \"total_initial_margin\")?)?,\n             total_maintenance_margin: (string)(field(value, \"total_maintenance_margin\")?)?,\n             total_cash_balance: (string)(field(value, \"total_cash_balance\")?)?,\n",
-  "expected_named_assertion": "CRYPTOCOM-PAYLOAD-NATIVE-STRING CryptocomWsBalanceUpdate:rows-1.data.0.total_available_balance",
-  "runtime_proof": true,
-  "stop_case_name": "CryptocomWsBalanceUpdate:rows-1",
-  "stop_case_index": 284
-}

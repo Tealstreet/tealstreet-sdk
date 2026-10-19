@@ -1,5 +1,0 @@
-BASE SHA: 8cac2ac8ce2e76940242b9c72cf838789534c083
-COMMAND: ["/opt/homebrew/opt/rustup/bin/cargo", "clippy", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-venue-cryptocom", "--target", "wasm32-unknown-unknown", "--all-targets", "--jobs", "2", "--locked", "--", "-D", "warnings"]
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.38s
-
-MEASURED EXIT: 0

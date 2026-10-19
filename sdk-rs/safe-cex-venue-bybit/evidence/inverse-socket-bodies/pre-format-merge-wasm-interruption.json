@@ -1,9 +1,0 @@
-{
-  "tested_commit": "4ee64f5ffd7c74c5bad1e9683f2f1c16085136e6",
-  "gate": "canonical wasm clippy",
-  "helper_exit": 1,
-  "underlying_cargo_exit_reported": 255,
-  "signal": "SIGINT to owned Cargo 47343",
-  "reason": "User requires merging integration formatting sweep 7bac54167c before delivery. Attempt stopped for that merge, not counted as pass or compilation defect.",
-  "recorded_utc": "2026-10-15T17:03:43.070841+00:00"
-}

@@ -1,7 +1,0 @@
-{
-  "safe-cex-venue-bybit/src/ws_public.rs::LOCAL_FUNCTION:round_numbers": {
-    "category": "non-decoder",
-    "reason": "Inside parse_frame: canonicalizes numeric tokens in an already JSON-parsed generic Value tree, retaining negative zero spelling and refusing nonfinite projections. Its output is the same untyped tree, not a typed domain record or a field/enum admission decision; the surrounding JSON parser remains a separate production boundary. Reviewed ticker error propagation since 1b81d57fe2: Store errors retain their native conversion and source failures retain TypeError identity; parse_frame and its numeric normalization helper are unchanged. Canonical Store/HL hook review: this nested helper body is unchanged; neighboring Store reads and Realm key/presence operations now propagate Result at the original expression, retaining original failure/order. Reviewed inherited ticker lookup and parse ordering: native lookup truthiness and delayed update-id access change handle_tickers_event outside parse_frame. The nested numeric normalization body is unchanged.",
-    "sourceSha256": "956dd500b19b43b9a11c453c36cdd6a0e785d3aa2c620699188715b70eb03b92"
-  }
-}

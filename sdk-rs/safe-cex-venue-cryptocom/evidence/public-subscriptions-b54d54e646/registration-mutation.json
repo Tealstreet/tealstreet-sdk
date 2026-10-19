@@ -1,6 +1,0 @@
-{
-  "base_sha": "b54d54e646fb15e46b644fd792c6cdbc7bceab08",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/public_subscriptions.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/public_subscriptions.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/public_subscriptions.rs\n@@ -190,7 +190,7 @@\n         if subscriptions(state).contains(&channel) {\n             continue;\n         }\n-        subscriptions(state).insert(channel.clone());\n+        let _ = &channel;\n         new_channels.push(ArraySlot::Value(channel));\n     }\n     let prepared = resolve_frames()?;\n",
-  "expected_named_assertion": "CRYPTOCOM-SUBSCRIPTIONS-NATIVE-STATE register-duplicates"
-}

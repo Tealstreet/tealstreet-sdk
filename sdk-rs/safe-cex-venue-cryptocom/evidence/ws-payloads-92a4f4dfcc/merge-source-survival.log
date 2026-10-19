@@ -1,4 +1,0 @@
-MEASUREMENT HEAD SHA: e785d23496604970ba77ab1bada0cf4cca2983b2
-COMMAND: ["git", "diff", "--exit-code", "92a4f4dfcc7eb28defeaf018911ca5abb5fe5332", "HEAD", "--", "sdk-rs/safe-cex-venue-cryptocom/src", "sdk-rs/safe-cex-venue-cryptocom/tests"]
-
-MEASURED EXIT: 0

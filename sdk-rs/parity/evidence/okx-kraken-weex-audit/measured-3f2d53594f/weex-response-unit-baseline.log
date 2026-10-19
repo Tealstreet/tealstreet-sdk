@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","controlled":false,"observations":[{"id":"weex-response-unit","units":[55296],"scope":"actual parser; declared shape inspected separately, not runtime TS validation"}]}

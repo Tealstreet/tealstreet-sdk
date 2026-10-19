@@ -1,7 +1,0 @@
-    Checking safe-cex-num v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-p2c-signing/sdk-rs/safe-cex-num)
-    Checking safe-cex-crypto v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-p2c-signing/sdk-rs/safe-cex-crypto)
-    Checking safe-cex-transport v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-p2c-signing/sdk-rs/safe-cex-transport)
-    Checking safe-cex-store v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-p2c-signing/sdk-rs/safe-cex-store)
-    Checking safe-cex-candle-cache v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-p2c-signing/sdk-rs/safe-cex-candle-cache)
-    Checking safe-cex-exchange v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-p2c-signing/sdk-rs/safe-cex-exchange)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 29s

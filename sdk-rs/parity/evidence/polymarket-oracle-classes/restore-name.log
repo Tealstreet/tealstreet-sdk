@@ -1,9 +1,0 @@
-   Compiling safe-cex-venue-polymarket v0.1.0 (<worktree>/sdk-rs/safe-cex-venue-polymarket)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.47s
-     Running tests/class_cost_closed.rs (sdk-rs/target/debug/deps/class_cost_closed-ad78d5c25d270a1a)
-
-running 1 test
-test class_cost_closed_native ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.45s
-

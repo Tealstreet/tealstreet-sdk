@@ -1,3 +1,0 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.10s
-     Running `sdk-rs/target/debug/parity-report`
-safe-cex-webworker/src/chaser_manager.rs: item macro thread_local cannot be indexed without expansion; provide checked-in generated declarations

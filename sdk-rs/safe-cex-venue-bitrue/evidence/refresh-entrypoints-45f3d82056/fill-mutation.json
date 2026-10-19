@@ -1,6 +1,0 @@
-{
-  "base_sha": "45f3d82056db724775dead3b9acb37ad2809d39e",
-  "source": "sdk-rs/safe-cex-venue-bitrue/src/refresh_entrypoints.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-bitrue/src/refresh_entrypoints.rs\n+++ sdk-rs/safe-cex-venue-bitrue/src/refresh_entrypoints.rs\n@@ -13,7 +13,7 @@\n {\n     // JS resolves the callee before evaluating fill?.symbol.\n     let queue_fast_private_refresh = resolve_queue()?;\n-    let symbol = fill.map(read_symbol).transpose()?;\n+    let symbol = fill.map(read_symbol).transpose()?.filter(|_| false);\n     queue_fast_private_refresh(symbol)?;\n     Ok(())\n }\n",
-  "expected_named_assertion": "BITRUE-REFRESH-NATIVE-EFFECTS fill case3 empty"
-}

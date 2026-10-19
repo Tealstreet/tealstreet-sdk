@@ -1,7 +1,0 @@
-error[E0277]: the trait bound `NetworkFailure: From<bool>` is not satisfied
- --> tests/ui/network_retry_from_bool.rs:3:34
-  |
-3 |     let _: NetworkFailure = true.into();
-  |                                  ^^^^ the trait `From<bool>` is not implemented for `NetworkFailure`
-  |
-  = note: required for `bool` to implement `Into<NetworkFailure>`

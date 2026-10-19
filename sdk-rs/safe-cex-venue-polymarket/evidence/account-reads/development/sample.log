@@ -1,4 +1,0 @@
-Sampling process 33824 for 1 second with 1 millisecond of run time between samples
-Couldn't find _sigtramp symbol in expected dylibs
-Sampling completed, processing symbols...
-Sample analysis of process 33824 written to file sdk-rs/target/account-reads-development/rest-forwarding-sample.txt

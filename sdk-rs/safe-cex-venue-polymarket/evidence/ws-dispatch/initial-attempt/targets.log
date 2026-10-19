@@ -1,4 +1,0 @@
-exit_code=0
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.10s
-     Running `sdk-rs/target/debug/parity-check --workspace /Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-polymarket/sdk-rs/target/polymarket-parity-l5ydwiko --manifest /Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-polymarket/sdk-rs/parity/manifest/exchanges/polymarket --exempt /Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-polymarket/sdk-rs/target/polymarket-parity-l5ydwiko/exempt.toml`
-parity: invention and status gates passed (141 rows, 170 public Rust items)

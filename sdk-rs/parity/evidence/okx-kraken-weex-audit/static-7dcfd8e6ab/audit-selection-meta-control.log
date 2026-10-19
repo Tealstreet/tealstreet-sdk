@@ -1,5 +1,0 @@
-Traceback (most recent call last):
-  File "<worktree>/sdk-rs/parity/evidence/okx-kraken-weex-audit/verify.py", line 37, in <module>
-    assert selection["venues"][venue]["sample"] == sample, "AUDIT-SELECTION frozen git row/hash/order"
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-AssertionError: AUDIT-SELECTION frozen git row/hash/order

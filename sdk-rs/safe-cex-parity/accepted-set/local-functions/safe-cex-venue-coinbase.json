@@ -1,7 +1,0 @@
-{
-  "safe-cex-venue-coinbase/src/starbase_public.rs::LOCAL_FUNCTION:spelling": {
-    "category": "non-decoder",
-    "reason": "Inside CoinbaseStarbasePublicChannel::serialize: obtains the canonical string emitted by an already typed enum serializer when constructing an outgoing channel suffix. This is outbound encoding; the error protects the serializer contract and is not raw input admission.",
-    "sourceSha256": "994eecfc020aefcd0a52b4a0b6c738cd382268ac78294b8664cddd38bbe26cf5"
-  }
-}

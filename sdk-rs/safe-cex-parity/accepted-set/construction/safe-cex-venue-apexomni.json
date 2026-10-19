@@ -1,8 +1,0 @@
-{
-  "safe_cex_venue_apexomni::decimal::Decimal": {
-    "traits": [
-      "core::clone::Clone"
-    ],
-    "reason": "Reviewed decimal.rs::Decimal: derived Clone copies exponent/special f64 and clones the owned optional BigInt coefficient. It preserves an already constructed reusable arithmetic value, including nonfinite special bits, without rerunning parse or widening its domain; the owned coefficient storage is separate and this is not validation authority See sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect. Decoder/API acceptance and native behavior remain separate obligations; this is a construction-capability classification, not an executed proof."
-  }
-}

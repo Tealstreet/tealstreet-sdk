@@ -1,8 +1,0 @@
-{
-  "safe_cex_venue_blofin::exchange::BlofinPublicListeners::listen_book for alloc::rc::Rc<safe_cex_venue_blofin::public_stream_data::BlofinPublicWebsocket<H>>": {
-    "category": "delegated",
-    "file": "safe-cex-venue-blofin/src/exchange.rs",
-    "reason": "Reviewed exchange.rs: listen_book on the Rc<BlofinPublicWebsocket<H>> receiver forwards the symbol and callback to BlofinPublicWebsocket::listen_order_book unchanged. Book message decoding belongs to that websocket owner; this impl adds no parsing. Re-reviewed against seed 91a50c7a2c: the only whole-file change passes account_modes into change_margin_type; this listener impl is unchanged. Native evidence: tests/complete.rs::exchange_class_native constructs the actual Rc receiver, registers a book listener and executes its cleanup; forwarding_book_native independently checks symbol, callback and cleanup identity.",
-    "itemSha256": "c511abd154e2fe0068ad299dde6452c90cd40ef0942aa6758b8b54905bd093b8"
-  }
-}

@@ -1,9 +1,0 @@
-{
-  "base_sha": "92a4f4dfcc7eb28defeaf018911ca5abb5fe5332",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/ws_payloads.rs\n@@ -377,8 +377,8 @@\n     pub fn from_value(value: &PayloadValue) -> Result<Self, PayloadError> {\n         Ok(Self {\n             i: (string)(field(value, \"i\")?)?,\n-            b: (string)(field(value, \"b\")?)?,\n-            k: (string)(field(value, \"k\")?)?,\n+            b: (string)(field(value, \"k\")?)?,\n+            k: (string)(field(value, \"b\")?)?,\n             a: (string)(field(value, \"a\")?)?,\n             c: (string)(field(value, \"c\")?)?,\n             h: (string)(field(value, \"h\")?)?,\n",
-  "expected_named_assertion": "CRYPTOCOM-PAYLOAD-NATIVE-STRING CryptocomWsTickerUpdate:rows-1.data.0.b",
-  "runtime_proof": true,
-  "stop_case_name": "CryptocomWsTickerUpdate:rows-1",
-  "stop_case_index": 1
-}

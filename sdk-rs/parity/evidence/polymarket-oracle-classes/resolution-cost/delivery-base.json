@@ -1,8 +1,0 @@
-{
-  "fetched_origin": "ed8a613e1c09b49c2cf0b3864efef28801c78996",
-  "first_merge": "992712b88e9481c77585d44a7f989e4d6675a84f",
-  "accepted_closure_source_commit": "3b631ad92f370bb919bff163b26dc49c488f971b",
-  "accepted_closure_merge_commit": "9666b359e5",
-  "accepted_merge_in_frozen_origin_exit": 1,
-  "note": "Fetched origin was frozen before the announced closure merge was its ancestor. Own accepted closure source is already a branch ancestor. No mutable-ref ancestry claim or borrowed gate exit."
-}

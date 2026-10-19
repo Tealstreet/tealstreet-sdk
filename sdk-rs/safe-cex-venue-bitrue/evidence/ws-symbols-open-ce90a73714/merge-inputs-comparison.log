@@ -1,4 +1,0 @@
-MEASURED SHA: 9cb39ad77312e1a8bc47cb0197f4d0157ba03e5f
-COMMAND: ["git", "diff", "--exit-code", "ce90a737147b3a86de21f6c342db30612f7e4a40", "9cb39ad77312e1a8bc47cb0197f4d0157ba03e5f", "--", "packages/safe-cex/src/exchanges/bitrue", "sdk-rs/safe-cex-venue-bitrue/Cargo.toml", "sdk-rs/Cargo.toml", "sdk-rs/safe-cex-core/src", "sdk-rs/safe-cex-store/src", "sdk-rs/safe-cex-types/src"]
-
-MEASURED EXIT: 0

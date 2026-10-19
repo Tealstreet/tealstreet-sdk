@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"id":"kraken-position-leg-comparison","units":[[55296],[56320]],"same":true,"distinct":false,"scope":"actual ledger leg classifier; native Value restriction inspected"}]}

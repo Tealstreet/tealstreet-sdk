@@ -1,6 +1,0 @@
-{
-  "base_sha": "a92859adcdbb90a778150f3fdfa59956160cd2be",
-  "patch": "diff --git a/sdk-rs/safe-cex-venue-bitrue/src/ws_private.rs b/sdk-rs/safe-cex-venue-bitrue/src/ws_private.rs\nindex 74b473c95f..f112324a20 100644\n--- a/sdk-rs/safe-cex-venue-bitrue/src/ws_private.rs\n+++ b/sdk-rs/safe-cex-venue-bitrue/src/ws_private.rs\n@@ -11,7 +11,7 @@ pub enum SuccessCode<'a> {\n \n pub fn is_successful_code(code: SuccessCode<'_>) -> bool {\n     match code {\n-        SuccessCode::Number(code) => code == 0.0 || code == 200.0,\n+        SuccessCode::Number(code) => code == 0.0 || code == 201.0,\n         SuccessCode::String(code) => code == [0x30] || code == [0x32, 0x30, 0x30],\n         SuccessCode::Other => false,\n     }\n",
-  "named_assertion": "BITRUE-WS-CODE-NATIVE independent n-200",
-  "control_stop": "code input index2 n-200"
-}

@@ -1,9 +1,0 @@
-{
-  "gate_sha": "bbea559c1ce7eee3ac44ae5cd30320e9ff8d1c45",
-  "workspace_build_exit": 0,
-  "workspace_clippy_exit": null,
-  "orchestrator_exit": 130,
-  "reason": "User reported sprint merge landed and directed immediate integration merge and return to venue lane. Clippy interrupted; no Cargo exit measured.",
-  "scoped_tests_run": false,
-  "mutation_controls_run": false
-}

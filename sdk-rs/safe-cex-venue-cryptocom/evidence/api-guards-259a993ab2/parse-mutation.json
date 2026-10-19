@@ -1,6 +1,0 @@
-{
-  "base_sha": "259a993ab27fd0aa5b50fb7ab5824258bc37bbe9",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/api_guards.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/api_guards.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/api_guards.rs\n@@ -18,7 +18,7 @@\n     record: impl FnOnce(&T) -> Result<bool, E>,\n ) -> Option<T> {\n     let parsed = json_parse(value).ok()?;\n-    if record(&parsed).ok()? {\n+    if !record(&parsed).ok()? {\n         Some(parsed)\n     } else {\n         None\n",
-  "expected_named_assertion": "CRYPTOCOM-API-GUARD-NATIVE parse case0 object"
-}

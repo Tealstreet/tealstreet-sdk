@@ -1,8 +1,0 @@
-{
-  "safe_cex_transport::signing::RemoteSigner::sign_query": {
-    "category": "non-decoder",
-    "file": "safe-cex-transport/src/signing.rs",
-    "reason": "Reviewed signing.rs: the default ignores its typed HttpSigningRequest and returns TransportError::Host refusing native query signing. It reads no raw input and produces no decoded value. TS createRemoteSigningAdapter has no such refusal, so every production signer must override it: the registry HostSigner (native_account.rs, witnessed by tests/native_account_methods.rs hosted_signer_signs_native_query_requests) and binance TransportSigner forward it to the host.",
-    "itemSha256": "5dd004fe9ebf22513e32f96b22a02781fbd3c0a4de8f20483796fe257896afbc"
-  }
-}

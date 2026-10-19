@@ -1,6 +1,0 @@
-{
-  "gate_sha": "980e93d1deb6b6d25c13a204cf5ea6b02cac7a94",
-  "cargo_exit": null,
-  "orchestrator_exit": 130,
-  "reason": "Sub-agent found an accidental duplicate insertion in the older source comparison before test compilation reached it. Stopped to fix undefined references and preserve old oracle shape; no pass claimed."
-}

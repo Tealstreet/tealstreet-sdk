@@ -1,6 +1,0 @@
-exit_code=0
-    Blocking waiting for file lock on package cache
-    Blocking waiting for file lock on package cache
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
-     Running `sdk-rs/target/debug/parity-check --workspace /Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-polymarket/sdk-rs/target/polymarket-parity-5son61lc --manifest /Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-polymarket/sdk-rs/parity/manifest/exchanges/polymarket --exempt /Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-venue-polymarket/sdk-rs/target/polymarket-parity-5son61lc/exempt.toml`
-parity: invention and status gates passed (141 rows, 46 public Rust items)

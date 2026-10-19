@@ -1,8 +1,0 @@
-{
-  "sha": "2978e3939ae12ca26bbdc8c34ec3d25dd0241447",
-  "extractor_exit": 0,
-  "coverage_subprocess_exit": 0,
-  "aggregation_exit": 1,
-  "census_claim": true,
-  "reason": "Census JSON was validated/written; aggregation subsequently checked only Rust-checker stdout. Final run explicitly measures empty stdout and findings on stderr, and checks combined output."
-}

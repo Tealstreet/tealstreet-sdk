@@ -1,5 +1,0 @@
-Traceback (most recent call last):
-  File "<worktree>/sdk-rs/parity/evidence/mexc-asterdex-audit/verify.py", line 23, in <module>
-    assert {k:v for k,v in a.items() if k!='note'}=={k:v for k,v in b.items() if k!='note'},'AUDIT-ZERO-STATUS target/status/identity changed'
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-AssertionError: AUDIT-ZERO-STATUS target/status/identity changed

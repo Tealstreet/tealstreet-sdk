@@ -1,5 +1,0 @@
-SHA: 0b21217cc5b190c3fccee8cb1695025131526d65
-COMMAND: ["/opt/homebrew/opt/rustup/bin/cargo", "check", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-venue-bitrue", "--all-targets", "--jobs", "2", "--locked"]
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.49s
-
-MEASURED EXIT: 0

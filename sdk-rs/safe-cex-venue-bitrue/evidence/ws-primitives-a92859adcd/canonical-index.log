@@ -1,8 +1,0 @@
-BASE SHA: a92859adcdbb90a778150f3fdfa59956160cd2be
-VARIANT: clean tracked tree
-COMMAND: ["/opt/homebrew/opt/rustup/bin/cargo", "run", "--manifest-path", "sdk-rs/Cargo.toml", "-p", "safe-cex-parity", "--bin", "parity-check", "--jobs", "2", "--locked", "--", "--workspace", "sdk-rs", "--manifest", "sdk-rs/parity/manifest", "--exempt", "sdk-rs/parity/exempt.toml"]
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
-     Running `sdk-rs/target/debug/parity-check --workspace sdk-rs --manifest sdk-rs/parity/manifest --exempt sdk-rs/parity/exempt.toml`
-safe-cex-webworker/src/twap_manager.rs: item macro thread_local cannot be indexed without expansion; provide checked-in generated declarations
-
-MEASURED EXIT: 1

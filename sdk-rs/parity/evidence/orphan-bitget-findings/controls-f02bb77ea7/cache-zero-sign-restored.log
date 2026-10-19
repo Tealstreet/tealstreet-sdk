@@ -1,9 +1,0 @@
-   Compiling safe-cex-candle-cache v0.1.0 (<worktree>/sdk-rs/safe-cex-candle-cache)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.85s
-     Running tests/numeric_ingress.rs (sdk-rs/target/debug/deps/numeric_ingress-f0e246f6683c11bb)
-
-running 1 test
-test chunk_record_numeric_ingress_preserves_native_bits ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.07s
-

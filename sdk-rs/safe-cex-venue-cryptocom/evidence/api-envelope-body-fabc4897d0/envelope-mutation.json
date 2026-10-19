@@ -1,6 +1,0 @@
-{
-  "base_sha": "fabc4897d044028134baeb340e47a802f2905595",
-  "source": "sdk-rs/safe-cex-venue-cryptocom/src/api_envelope_body.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-cryptocom/src/api_envelope_body.rs\n+++ sdk-rs/safe-cex-venue-cryptocom/src/api_envelope_body.rs\n@@ -39,7 +39,7 @@\n     if !matches!(get(value, \"sig\")?, EnvelopeValue::String(_)) {\n         return Ok(false);\n     }\n-    Ok(matches!(get(value, \"nonce\")?, EnvelopeValue::Number(_)))\n+    Ok(!matches!(get(value, \"nonce\")?, EnvelopeValue::Number(_)))\n }\n \n /// Primitive strings bypass both builtins. All other values retain their native\n",
-  "expected_named_assertion": "CRYPTOCOM-ENVELOPE-BODY-NATIVE envelope case6 valid"
-}

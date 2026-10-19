@@ -1,5 +1,0 @@
-error[E0451]: field `value` of struct `TransformedData` is private
- --> tests/ui/transformed_data_private.rs:4:31
-  |
-4 |     let _ = TransformedData { value: RetainedJsonInput::Null };
-  |                               ^^^^^ private field

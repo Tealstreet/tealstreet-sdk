@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"id":"PolymarketL2Headers","units":[55296],"scope":"actual helper and HMAC library with public test bytes; no authenticated request"}]}

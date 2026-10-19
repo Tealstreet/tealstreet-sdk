@@ -1,8 +1,0 @@
-{
-  "input_sha": "2a71dbd69e4a65ca08d0d1ea433d219fd2eff087",
-  "receipt": "full-measured-2a71dbd69e/controls.json",
-  "prior_input_sha": "bc1af045fbc773062dea0458a4e7c6f805ecb7a2",
-  "prior_control_rejected_for_same_class_precedence": true,
-  "prior_failure": "error class before exact later-commission assertion",
-  "fixed_marker": "FULL-WEEX-MAKER-ERROR-ORDER later commission wins"
-}

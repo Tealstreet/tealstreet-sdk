@@ -1,5 +1,0 @@
-Traceback (most recent call last):
-  File "<worktree>/sdk-rs/parity/evidence/okx-kraken-weex-audit/verify-full.py", line 32, in <module>
-    assert {k:v for k,v in a.items() if k!="note"}=={k:v for k,v in b.items() if k!="note"},"FULL-AUDIT-ZERO-STATUS targets/status/identity changed"
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-AssertionError: FULL-AUDIT-ZERO-STATUS targets/status/identity changed

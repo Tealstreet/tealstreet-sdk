@@ -1,1 +1,0 @@
-PASS metadata only: 242 unique frozen rows; 208 historically paired; 189 with some direct native assertions; 10 partial. No native/TS execution or whole-row parity inferred.

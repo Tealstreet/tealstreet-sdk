@@ -1,1 +1,0 @@
-{"node":"v24.20.0","arch":"arm64","observations":[{"profile":"mexc-query-encoding","fieldCount":2,"scope":"encoder erases input units; not a retained-output surrogate witness"}]}

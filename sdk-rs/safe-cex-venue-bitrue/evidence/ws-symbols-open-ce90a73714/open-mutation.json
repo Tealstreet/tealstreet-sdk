@@ -1,6 +1,0 @@
-{
-  "base_sha": "ce90a737147b3a86de21f6c342db30612f7e4a40",
-  "source": "sdk-rs/safe-cex-venue-bitrue/src/ws_private.rs",
-  "patch": "--- sdk-rs/safe-cex-venue-bitrue/src/ws_private.rs\n+++ sdk-rs/safe-cex-venue-bitrue/src/ws_private.rs\n@@ -29,7 +29,7 @@\n ) -> Result<(), E> {\n     if !is_disposed()? {\n         subscribe()?;\n-        ping()?;\n+        let _ = ping;\n     }\n     Ok(())\n }\n",
-  "expected_named_assertion": "BITRUE-WS-SYMBOLS-NATIVE-EFFECTS open case0"
-}
