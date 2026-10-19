@@ -52,6 +52,12 @@ export class EngineHost {
     if (frame) this.handlers.onFrame?.(frame.buffer);
   }
 
+  /** The whole current state as one frame (an ArrayBuffer), for a consumer
+   * that starts late or skipped frames; later flushes apply on top of it. */
+  snapshot() {
+    return this.engine.snapshotFrame(this.transport.now()).buffer;
+  }
+
   dispose() {
     for (const socket of this.sockets.values()) socket.close();
     for (const handle of this.timers.values()) this.transport.clearTimeout(handle);

@@ -1126,4 +1126,13 @@ impl Venue for BinanceFutures {
             .filter(|state| matches!(state.sync, Sync::Synced { .. }))
             .map(|state| &state.book)
     }
+
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
+        Box::new(
+            self.books
+                .iter()
+                .filter(|(_, state)| matches!(state.sync, Sync::Synced { .. }))
+                .map(|(symbol, state)| (symbol.as_str(), &state.book)),
+        )
+    }
 }

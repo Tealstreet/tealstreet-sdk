@@ -16,6 +16,7 @@ trait AnyEngine {
     fn handle(&mut self, now: f64, event: Event<'_>);
     fn drain(&mut self) -> Vec<Action>;
     fn frame(&mut self, now: f64) -> Option<&[u8]>;
+    fn snapshot(&mut self, now: f64) -> &[u8];
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
@@ -33,6 +34,10 @@ impl<V: Venue> AnyEngine for Engine<V> {
 
     fn frame(&mut self, now: f64) -> Option<&[u8]> {
         self.take_frame(now)
+    }
+
+    fn snapshot(&mut self, now: f64) -> &[u8] {
+        self.snapshot_frame(now)
     }
 }
 
@@ -493,6 +498,13 @@ impl WasmEngine {
 
     /// Everything that changed since the previous call as one flush frame
     /// (layout: docs/plans/RUST_REWRITE.md), or `undefined` when nothing did.
+    /// The whole current state as one frame, for a consumer that starts late
+    /// or skipped frames. Frames taken afterwards apply on top of it.
+    #[wasm_bindgen(js_name = snapshotFrame)]
+    pub fn snapshot_frame(&mut self, now: f64) -> js_sys::Uint8Array {
+        js_sys::Uint8Array::from(self.inner.snapshot(now))
+    }
+
     /// Transfer `frame.buffer` to the consumer: it is copied once, straight
     /// out of the engine's reused frame buffer.
     #[wasm_bindgen(js_name = takeFrame)]

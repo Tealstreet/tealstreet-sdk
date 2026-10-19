@@ -335,6 +335,22 @@ impl Store {
         }
     }
 
+    /// Every section, for a snapshot frame; change tracking is left alone.
+    pub fn everything(&self) -> Pending {
+        Pending {
+            changes: Changes {
+                markets: true,
+                tickers_replaced: true,
+                orders: true,
+                positions: true,
+                balance: true,
+                settings: true,
+                status: true,
+            },
+            ticker_deltas: Vec::new(),
+        }
+    }
+
     /// Drain change tracking for one frame.
     pub fn take_pending(&mut self) -> Pending {
         let changes = std::mem::take(&mut self.changes);

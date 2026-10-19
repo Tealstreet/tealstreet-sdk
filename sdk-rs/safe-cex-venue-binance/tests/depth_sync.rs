@@ -41,3 +41,30 @@ fn rate_limits_pause_snapshots_instead_of_retrying() {
     }
     assert_eq!(h.snapshot_requests(), 0, "no requests during the ban");
 }
+
+#[test]
+fn a_snapshot_frame_carries_the_whole_state_without_draining_changes() {
+    let mut h = Harness::new();
+    h.diff(90, 95, 89, "98.0");
+    h.respond("/fapi/v1/depth", 200, SNAPSHOT);
+    h.diff(101, 102, 100, "98.5");
+    let kinds = |frame: &[u8]| -> Vec<u16> {
+        safe_cex_engine::wire::sections(frame)
+            .map(|(kind, _)| kind)
+            .collect()
+    };
+    let snapshot = h.engine.snapshot_frame(h.now).to_vec();
+    use safe_cex_engine::wire::section::*;
+    assert_eq!(
+        kinds(&snapshot),
+        [
+            MARKETS, TICKERS, ORDERS, POSITIONS, BALANCE, SETTINGS, STATUS, BOOK, STRINGS
+        ]
+    );
+    let frame = h
+        .engine
+        .take_frame(h.now)
+        .expect("pending changes survive the snapshot")
+        .to_vec();
+    assert!(kinds(&frame).contains(&BOOK));
+}

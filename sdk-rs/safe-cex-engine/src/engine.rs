@@ -271,6 +271,7 @@ struct Io<P> {
     candles: Vec<(String, String, Candle)>,
     fills: Vec<Fill>,
     frame: Vec<u8>,
+    snapshot: Vec<u8>,
 }
 
 impl<P> Default for Io<P> {
@@ -286,6 +287,7 @@ impl<P> Default for Io<P> {
             candles: Vec::new(),
             fills: Vec::new(),
             frame: Vec::new(),
+            snapshot: Vec::new(),
         }
     }
 }
@@ -436,6 +438,8 @@ pub trait Venue {
     fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId);
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
     fn book(&self, symbol: &str) -> Option<&Book>;
+    /// Every synchronized book, for snapshot frames.
+    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_>;
 }
 
 pub struct Engine<V: Venue> {
@@ -623,6 +627,23 @@ impl<V: Venue> Engine<V> {
     /// The venue's synchronized book for `symbol`, if any.
     pub fn book(&self, symbol: &str) -> Option<&Book> {
         self.venue.book(symbol)
+    }
+
+    /// The whole current state as one frame, for a consumer that starts late
+    /// or skipped frames (a new tab, a throttled hidden tab). Frames taken
+    /// afterwards still apply on top: every value in them is absolute.
+    pub fn snapshot_frame(&mut self, now: f64) -> &[u8] {
+        let buffer = std::mem::take(&mut self.io.snapshot);
+        let mut w = FrameWriter::new(buffer, now);
+        let everything = self.store.everything();
+        self.store.write(&everything, &mut w);
+        for (symbol, book) in self.venue.books() {
+            if let Some(market) = self.store.market_index(symbol) {
+                book.write(market, &mut w);
+            }
+        }
+        self.io.snapshot = w.finish();
+        &self.io.snapshot
     }
 
     /// Write everything that changed since the previous call as one flush
