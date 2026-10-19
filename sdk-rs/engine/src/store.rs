@@ -101,6 +101,10 @@ impl Store {
         self.market_by_symbol.get(symbol).copied()
     }
 
+    pub fn market_index_by_id(&self, id: &str) -> Option<u32> {
+        self.market_by_id.get(id).copied()
+    }
+
     pub fn market_by_id(&self, id: &str) -> Option<&Market> {
         self.market_by_id
             .get(id)
@@ -161,9 +165,19 @@ impl Store {
         let Some(index) = self.ticker_index(symbol) else {
             return;
         };
-        let ticker = &mut self.tickers[index as usize];
+        self.update_ticker_at(index, update);
+    }
+
+    /// Mutate a row of the current ticker table; rebuild cached indexes on replacement.
+    pub fn update_ticker_at(&mut self, index: u32, update: impl FnOnce(&mut Ticker)) {
+        let Some(ticker) = self.tickers.get_mut(index as usize) else {
+            return;
+        };
+        #[cfg(debug_assertions)]
+        let symbol = ticker.symbol.clone();
         let before = ticker_values(ticker);
         update(ticker);
+        #[cfg(debug_assertions)]
         debug_assert_eq!(
             ticker.symbol, symbol,
             "ticker identity changes require set_tickers"
@@ -637,6 +651,30 @@ mod tests {
         store.set_tickers(vec![ticker("B")]);
         assert!(store.ticker("A").is_none());
         assert_eq!(store.ticker("B").unwrap().last, 0.);
+    }
+
+    #[test]
+    fn indexed_updates_match_symbol_updates_and_ignore_missing_rows() {
+        let mut by_symbol = Store::default();
+        let mut by_index = Store::default();
+        for store in [&mut by_symbol, &mut by_index] {
+            store.set_tickers(vec![ticker("C"), ticker("A"), ticker("B")]);
+            store.take_pending();
+        }
+        by_symbol.update_ticker("A", |row| {
+            row.last = 7.;
+            row.volume = 3.;
+        });
+        by_index.update_ticker_at(1, |row| {
+            row.last = 7.;
+            row.volume = 3.;
+        });
+        by_index.update_ticker_at(u32::MAX, |_| panic!("invalid row reached closure"));
+        assert_eq!(
+            by_symbol.take_pending().ticker_deltas,
+            by_index.take_pending().ticker_deltas
+        );
+        assert_eq!(by_index.tickers()[1].last, 7.);
     }
 
     #[test]

@@ -189,3 +189,95 @@ fn startup_failure_retries_the_read_without_loading_empty_markets() {
             .any(|a| matches!(a,Action::Http(r) if r.url.ends_with("/contracts")))
     );
 }
+
+#[test]
+fn live_ticker_cache_handles_early_frames_filtered_rows_and_reconnects() {
+    let mut e = Engine::new(Bingx::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(0.);
+    respond(
+        &mut e,
+        1.,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","asset":"BTC","currency":"USDT","status":1,"quantityPrecision":3,"pricePrecision":1,"tradeMinLimit":"0.001"},{"symbol":"ETH-USDT","asset":"ETH","currency":"USDT","status":1,"quantityPrecision":3,"pricePrecision":2,"tradeMinLimit":"0.001"}]}"#,
+    );
+    let update = r#"{"dataType":"market.contracts","data":{"contracts":[{"symbol":"BTC-USDT","tradePrice":"90","fairPrice":"91","indexPrice":"92","fundingRate":"0.01"},{"symbol":"ETH-USDT","tradePrice":"101","fairPrice":"102","indexPrice":"103","fundingRate":"0.01"}]}}"#;
+    e.handle(
+        1.1,
+        Event::WsOpened {
+            socket: SocketId(2),
+        },
+    );
+    e.handle(
+        1.2,
+        Event::WsMessage {
+            socket: SocketId(2),
+            text: update,
+        },
+    );
+    assert!(e.store().tickers().is_empty());
+    // Daily order differs from market order, and Premium removes the leading daily row.
+    respond(
+        &mut e,
+        2.,
+        r#"{"code":0,"data":[{"symbol":"ETH-USDT","lastPrice":"100","priceChangePercent":"1","volume":"1","quoteVolume":"100"},{"symbol":"BTC-USDT","lastPrice":"80","priceChangePercent":"1","volume":"1","quoteVolume":"80"}]}"#,
+    );
+    e.handle(
+        2.1,
+        Event::WsMessage {
+            socket: SocketId(2),
+            text: update,
+        },
+    );
+    assert!(e.store().tickers().is_empty());
+    respond(
+        &mut e,
+        3.,
+        r#"{"code":0,"data":[{"symbol":"BTC-USDT","markPrice":"80","indexPrice":"80","lastFundingRate":"0.01","nextFundingTime":0}]}"#,
+    );
+    e.handle(
+        4.,
+        Event::WsMessage {
+            socket: SocketId(2),
+            text: update,
+        },
+    );
+    assert_eq!(e.store().tickers().len(), 1);
+    assert_eq!(e.store().tickers()[0].symbol, "BTCUSDT");
+    assert_eq!(e.store().tickers()[0].last, 90.);
+    assert!(e.store().ticker("ETHUSDT").is_none());
+    e.drain_actions().for_each(drop);
+    e.handle(
+        5.,
+        Event::WsClosed {
+            socket: SocketId(2),
+            code: 1006,
+        },
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1005., Event::TimerFired { timer });
+    let socket = e
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::WsConnect { socket, .. } => Some(socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1006., Event::WsOpened { socket });
+    let after_reconnect = update.replace("\"fairPrice\":\"91\"", "\"fairPrice\":\"96\"");
+    e.handle(
+        1007.,
+        Event::WsMessage {
+            socket,
+            text: &after_reconnect,
+        },
+    );
+    assert_eq!(e.store().tickers()[0].mark, 96.);
+}

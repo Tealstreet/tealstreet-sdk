@@ -257,3 +257,15 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   closes through TS fake sockets. Enabled BingX leftover-write checks (listen
   lifecycle requests stay repeatable reads). Independent helper/host12 tests
   pass; full replay rerun follows. Every run retains upstream correctness checks.
+
+### Dense public ticker cache
+
+- Retained the seed's market-to-ticker index after premium filtering. Live rows
+  now use one native-ID lookup and indexed Store mutation, preserving ordinary
+  symbol mutation and identical delta masks. Indexed mutation is range checked;
+  identity snapshots allocate only in debug builds.
+- Independent plan and implementation audits are clear. Regressions cover early
+  frames, reordered daily rows, filtered leading rows, changed reconnect data,
+  invalid row indexes and mask equivalence. Engine26/public7 tests pass.
+- Four-venue Node22 public gate PASS:188frames,1268markets,1260tickers,2books;
+  CPU80.5/58.9ms, steady30.9/23.3ms, retained1.8/1.7MB, wasm1.4MB.

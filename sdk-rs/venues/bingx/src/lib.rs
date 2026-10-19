@@ -236,12 +236,15 @@ impl Bingx {
                 data.get(),
                 "contracts",
                 |row| {
-                    let Some(market) = cx.store.market_by_id(&row.symbol) else {
+                    let Some(market) = cx.store.market_index_by_id(&row.symbol) else {
                         return;
                     };
-                    let symbol = market.symbol.clone();
-                    let step = market.precision.price;
-                    cx.store.update_ticker(&symbol, |t| {
+                    let Some(ticker) = self.seed_index.get(market as usize).copied().flatten()
+                    else {
+                        return;
+                    };
+                    let step = cx.store.markets()[market as usize].precision.price;
+                    cx.store.update_ticker_at(ticker as u32, |t| {
                         if row.trade_price > 0. {
                             t.last = row.trade_price;
                             (t.bid, t.ask) = touch(row.trade_price, step)
@@ -616,7 +619,6 @@ impl Venue for Bingx {
                 self.read(cx, paths::PREMIUM, Pending::Premium { valid: true })
             }
             Pending::Premium { valid: true } => {
-                self.seed_index = Vec::new();
                 let reported = std::mem::take(&mut self.seed_reported);
                 let mut index = 0;
                 self.seed.retain(|_| {
@@ -625,6 +627,12 @@ impl Venue for Bingx {
                     keep
                 });
                 let rows = std::mem::take(&mut self.seed);
+                self.seed_index.fill(None);
+                for (i, ticker) in rows.iter().enumerate() {
+                    if let Some(market) = cx.store.market_index(&ticker.symbol) {
+                        self.seed_index[market as usize] = Some(i);
+                    }
+                }
                 cx.store.set_tickers(rows);
                 if let Some(c) = &self.credentials {
                     self.account.start(cx, c);
