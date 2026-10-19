@@ -63,6 +63,8 @@ const isPrivate = Boolean(ts.account);
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
+// OKX full-depth correction is also applied to the TS oracle: its old
+// last-trade filter permanently deleted valid levels when the trade lagged.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
   for (const position of account.positions) {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);

@@ -36,3 +36,22 @@ Never touch master, rebase, or force-push.
 - Planning: read port/rewrite spec, root/package/exchange guidance and TS paths.
 - Public implementation in progress. Engine's streamed envelopes need opt-in
   metadata retention; existing Binance streaming behavior stays compatible.
+
+### Public phase review
+
+- Independent review found malformed seed/depth acceptance and streamed-array
+  grammar/metadata-overflow gaps. Fixed before committing the phase; tests cover
+  malformed envelopes (including errors after data), sequence resets, recovery,
+  full-depth retention, both socket watchdogs, and ignored retired sockets.
+- Engine + OKX native tests: 17 passed. OKX all-target clippy and bans passed.
+- TS bug fixed: OKX filtered books against a stale last trade, deleting valid
+  depth permanently. Removed from TS oracle too; explicit KNOWN_TS_FIXES note
+  and independent TS/Rust regressions. Candle time bounds/history fallback
+  remain in the queries phase.
+- Tooling: corepack was absent from PATH; installed a temporary tooling copy
+  outside the repository at /tmp/okx-port-tools, preserving repository deps.
+- Public review follow-up: rejected incomplete ticker seeds and invalid UTF-8,
+  suppressed repeated malformed-frame recovery, added variant routing tests.
+  WASM registration builds natively; SDK passphrase forwarding is wired.
+- Package typecheck passed. Package lint and focused regression are running.
+- Checkpoint requested by overseer before workspace-layout merge (b32847fca6).

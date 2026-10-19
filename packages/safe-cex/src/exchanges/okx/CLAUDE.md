@@ -1108,3 +1108,9 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 - Sends `clOrdId`, rule `^[A-Za-z0-9]{1,32}$` (OKX: case-sensitive alphanumeric). Replaces the generated `BROKER_ID…` ID; no prefix is composed. Inherited by OKX EU and both demo variants.
 - The native amend keeps the order and its `clOrdId`; no new client ID is sent.
+
+## Rust replay depth correction
+
+Books retain every venue level. Never filter bids/asks by the last trade price:
+trades can lag book updates, so that filter permanently deletes valid liquidity.
+The Rust replay oracle includes this correction explicitly in `KNOWN_TS_FIXES`.

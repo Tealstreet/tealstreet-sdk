@@ -604,7 +604,10 @@ impl<V: Venue> Engine<V> {
             let response = Response {
                 status: incoming.status,
                 headers: &incoming.headers,
-                body: "",
+                body: splitter
+                    .envelope()
+                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                    .unwrap_or(""),
             };
             self.venue.on_response(&mut cx, pending, response);
             return;
