@@ -48,4 +48,19 @@ const row = {get seqId(){return ++reads === 1 ? '10' : '11';}};
 assert.equal(repeated.acceptOrderBookSequence('books.BTC',{action:'snapshot',data:[row]}),true);
 assert.equal(reads,2);
 assert.equal(repeated.orderBookSequenceByHandler.get('books.BTC'),'11');
-process.stdout.write('4 maintained source state observations PASS\n');
+const aliased = scene(), sent = [];
+aliased.isConnected = true;
+const topic = {channel:'books', instId:'BTC', extra:'before'};
+aliased.topics['books.BTC'] = [topic];
+aliased.send = function(wire) {
+  assert.equal(this,aliased);
+  sent.push(wire);
+  topic.extra = 'after';
+  aliased.topics['books.BTC'] = [{instId:'replacement'}];
+};
+aliased.recoverOrderBook('books.BTC');
+assert.deepEqual(sent,[
+  '{"op":"unsubscribe","args":[{"channel":"books","instId":"BTC","extra":"before"}]}',
+  '{"op":"subscribe","args":[{"channel":"books","instId":"BTC","extra":"after"}]}',
+]);
+process.stdout.write('5 maintained source state observations PASS\n');

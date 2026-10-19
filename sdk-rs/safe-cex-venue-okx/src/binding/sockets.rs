@@ -790,6 +790,81 @@ fn recover(
     )
 }
 
+fn sequence_value(s: &OkxScope, update: &Js, key: &str) -> Result<Js, Thrown> {
+    if optional(update, key)?.is_nullish() {
+        Ok(Js::str(""))
+    } else {
+        let string = s.global("String")?;
+        string.call(Js::Undefined, vec![update.get(key)?])
+    }
+}
+
+fn accept_sequence(s: &OkxScope, handler: Js, data: Js) -> Result<bool, Thrown> {
+    let update = optional(&data.get("data")?, "0")?;
+    let sequence = sequence_value(s, &update, "seqId")?;
+    if data.get("action")?.strict_equals(&Js::str("snapshot")) && sequence.truthy() {
+        s.this
+            .get("orderBookSequenceByHandler")?
+            .call_method("set", vec![handler.clone(), sequence])?;
+        s.this
+            .get("recoveringOrderBooks")?
+            .call_method("delete", vec![handler])?;
+        return Ok(true);
+    }
+    if s.this
+        .get("recoveringOrderBooks")?
+        .call_method("has", vec![handler.clone()])?
+        .truthy()
+    {
+        return Ok(false);
+    }
+    let previous = sequence_value(s, &update, "prevSeqId")?;
+    let expected = s
+        .this
+        .get("orderBookSequenceByHandler")?
+        .call_method("get", vec![handler.clone()])?;
+    if !sequence.truthy()
+        || !previous.truthy()
+        || !expected.truthy()
+        || !previous.strict_equals(&expected)
+    {
+        s.this.call_method("recoverOrderBook", vec![handler])?;
+        return Ok(false);
+    }
+    s.this
+        .get("orderBookSequenceByHandler")?
+        .call_method("set", vec![handler, sequence])?;
+    Ok(true)
+}
+
+fn recover_selected(s: &OkxScope, handler: Js) -> Result<(), Thrown> {
+    s.this
+        .get("orderBookSequenceByHandler")?
+        .call_method("delete", vec![handler.clone()])?;
+    s.this
+        .get("recoveringOrderBooks")?
+        .call_method("add", vec![handler.clone()])?;
+    let topics = s.this.get("topics")?;
+    let topic = optional(&topics.get_property(&handler)?, "0")?;
+    if !topic.truthy() || !s.this.get("isConnected")?.truthy() || s.this.get("isDisposed")?.truthy()
+    {
+        return Ok(());
+    }
+    for operation in ["unsubscribe", "subscribe"] {
+        let send = s.this.get("send")?;
+        let stringify = s.global("JSON.stringify")?;
+        let wire = stringify.call(
+            Js::Undefined,
+            vec![Js::object(vec![
+                ("op", Js::str(operation)),
+                ("args", Js::array(vec![topic.clone()])),
+            ])],
+        )?;
+        send.call(s.this.clone(), vec![wire])?;
+    }
+    Ok(())
+}
+
 fn public_connect(s: &OkxScope) -> Result<(), Thrown> {
     let this = s.this.clone();
     let core_scope = s.clone();
@@ -996,24 +1071,10 @@ fn new_public(s: &OkxScope) -> Result<(), Thrown> {
         Ok(Js::Undefined)
     });
     sync_member(s, "acceptOrderBookSequence", |s, a| {
-        let handler = text(&arg(&a, 0))?;
-        let json = arg(&a, 1);
-        let accepted = with_book(s, |socket, st| {
-            let recover = |h: &str| recover(socket, st, h);
-            public_socket::accept_order_book_sequence(
-                &handler,
-                &json,
-                &st.sequences,
-                &st.recovering,
-                &recover,
-            )
-        })?;
-        Ok(Js::Bool(accepted))
+        accept_sequence(s, arg(&a, 0), arg(&a, 1)).map(Js::Bool)
     });
     sync_member(s, "recoverOrderBook", |s, a| {
-        let handler = text(&arg(&a, 0))?;
-        with_book(s, |socket, st| recover(socket, st, &handler))?;
-        Ok(Js::Undefined)
+        recover_selected(s, arg(&a, 0)).map(|_| Js::Undefined)
     });
     ticker_members(s);
     sync_member(s, "listenOrderBook", |s, a| {

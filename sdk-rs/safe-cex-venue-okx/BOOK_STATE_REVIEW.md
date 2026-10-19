@@ -14,9 +14,14 @@ maintained-method oracle `tests/book-state-source.mjs` establish these boundarie
 - Recovery commits its delete/add before a selected topic getter throws, keeping
   the original thrown value.
 - A replaced selected Map method receives its original receiver and arguments.
+- Sequence guards and String conversion retain their repeated getter reads.
+- Recovery retains the original live topic across both sends, including later
+  mutations, extra properties and source object-key order.
 
-All three native probes fail on master `523e1ebf0d`; the same three observations
-pass against the actual TypeScript method bodies extracted through its AST.
+The first three native probes fail on master `523e1ebf0d`. All five source
+observations pass against the actual TypeScript method bodies extracted through
+its AST. The candidate passes six native tests, including its maintained-source
+oracle.
 
 The implementation must keep canonical Js state as its only material owner.
 Selected Map/Set calls use the existing shared runtime methods; there is no
