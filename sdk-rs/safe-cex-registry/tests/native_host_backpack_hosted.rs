@@ -277,7 +277,7 @@ fn backpack_native_factory_publishes_telemetry_and_updates_the_live_store() {
             Rc::new(|request| (request.path == "/api/v1/capital/collateral").then(|| json!({"netEquity":"100","netEquityAvailable":"90","netEquityLocked":"10","pnlUnrealized":"0"}))),
             json!({"key":"synthetic-backpack-key","secret":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}),
             None,
-            safe_cex_exchange::native::native_runtime(),
+            safe_cex_exchange::native::native_replay_runtime(2_000_000_000_000.0),
         ).await;
         let events = Rc::new(RefCell::new(Vec::new()));
         for event in ["grafana-http-request", "grafana-http-response"] {

@@ -117,7 +117,7 @@ fn woo_native_factory_emits_http_telemetry_after_accounting() {
                 json!({"success":true,"data":{"applicationId":"telemetry","accountMode":"FUTURES","positionMode":"ONE_WAY"},"timestamp":1}))),
             json!({"key":"synthetic-woo-key","secret":SECRET}),
             None,
-            safe_cex_exchange::native::native_runtime(),
+            safe_cex_exchange::native::native_replay_runtime(2_000_000_000_000.0),
         ).await;
         let events = Rc::new(RefCell::new(Vec::new()));
         for event in ["grafana-http-request", "grafana-http-response"] {
@@ -143,6 +143,14 @@ fn woo_native_factory_emits_http_telemetry_after_accounting() {
         );
         assert_eq!(events[0].0, "grafana-http-request");
         assert_eq!(events[1].0, "grafana-http-response");
+        assert_eq!(
+            (
+                events[0].2.as_ref().unwrap().ok,
+                events[1].2.as_ref().unwrap().ok
+            ),
+            (0.0, 1.0),
+            "HTTP_TELEMETRY actual WOO response follows Store accounting"
+        );
         assert!(
             events[0].1.to_js_string().unwrap().starts_with(
                 &"Request GET /v3/accountinfo "
