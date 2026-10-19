@@ -161,6 +161,8 @@ impl CandleRow<'_> {
 #[derive(Deserialize)]
 pub struct RestEnvelope<'a> {
     pub code: i64,
+    #[serde(borrow)]
+    pub result: Option<&'a RawValue>,
     #[serde(default)]
     pub message: &'a str,
 }

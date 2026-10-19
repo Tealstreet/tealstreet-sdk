@@ -1,6 +1,7 @@
 //! Crypto.com Exchange v1 perpetual derivatives on the sans-I/O engine.
 mod account;
 pub mod sign;
+mod trading;
 mod wire;
 
 use safe_cex_engine::book::{Book, BookSide};
@@ -22,6 +23,7 @@ pub struct Options {
 
 pub enum Pending {
     Account(account::Request),
+    Trade(trading::Request),
     Markets {
         rows: Vec<Market>,
         indexes: HashMap<String, String>,
@@ -64,6 +66,7 @@ pub struct Cryptocom {
     message_id: u64,
     credentials: Option<sign::Credentials>,
     account: account::Account,
+    trading: trading::Trading,
 }
 
 pub(crate) fn interval(value: &str) -> Result<&str, String> {
@@ -79,6 +82,18 @@ pub(crate) fn interval(value: &str) -> Result<&str, String> {
 
 fn quoted(s: &str) -> String {
     serde_json::to_string(s).expect("string")
+}
+
+pub(crate) fn encode(value: &str) -> String {
+    let mut out = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 impl Cryptocom {
@@ -99,6 +114,7 @@ impl Cryptocom {
         Self {
             credentials,
             account: Default::default(),
+            trading: Default::default(),
             rest: if options.testnet {
                 "https://uat-api.3ona.co/exchange/v1"
             } else {
@@ -371,6 +387,7 @@ impl Venue for Cryptocom {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Trade(_) => {}
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets {
                 rows,
@@ -407,6 +424,21 @@ impl Venue for Cryptocom {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Trade(request) = pending {
+            self.trade_response(
+                cx,
+                request,
+                if (200..300).contains(&response.status)
+                    || serde_json::from_str::<RestEnvelope>(response.body)
+                        .is_ok_and(|e| e.code == 40101)
+                {
+                    Ok(response.body)
+                } else {
+                    Err("Crypto.com HTTP write failed")
+                },
+            );
+            return;
+        }
         let error = match serde_json::from_str::<RestEnvelope>(response.body) {
             Ok(e) if e.code != 0 => Some(format!("Crypto.com API Error {}: {}", e.code, e.message)),
             _ if !(200..300).contains(&response.status) => {
@@ -416,14 +448,14 @@ impl Venue for Cryptocom {
             Err(e) => Some(e.to_string()),
         };
         if let Some(error) = error {
-            if let Pending::Account(request) = pending {
-                self.account_failed(cx, request, &error, false);
-            } else {
-                self.on_request_failed(cx, pending, &error);
+            match pending {
+                Pending::Account(request) => self.account_failed(cx, request, &error, false),
+                pending => self.on_request_failed(cx, pending, &error),
             }
             return;
         }
         match pending {
+            Pending::Trade(_) => unreachable!(),
             Pending::Account(request) => self.account_response(cx, request),
             Pending::Markets {
                 rows,
@@ -477,12 +509,18 @@ impl Venue for Cryptocom {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
             Pending::Account(request) => self.account_failed(cx, request, error, true),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             _ => cx.log(LogLevel::Error, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.trading.timer == Some(timer) {
+            self.trading.timer = None;
+            self.drive_trading(cx);
+            return;
+        }
         if self.account.timer == Some(timer) {
             self.account.timer = None;
             self.reconcile(cx);
@@ -570,7 +608,8 @@ impl Venue for Cryptocom {
             } => match interval(&timeframe) {
                 Ok(timeframe) => {
                     let mut path = format!(
-                        "/public/get-candlestick?instrument_name={symbol}&timeframe={timeframe}"
+                        "/public/get-candlestick?instrument_name={}&timeframe={timeframe}",
+                        encode(&symbol)
                     );
                     if let Some(from) = from_ms {
                         path.push_str(&format!("&start_ts={from}"));
@@ -590,7 +629,7 @@ impl Venue for Cryptocom {
                 }
                 Err(error) => cx.done(command, Err(error)),
             },
-            _ => {}
+            command => self.trade_command(cx, command),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {

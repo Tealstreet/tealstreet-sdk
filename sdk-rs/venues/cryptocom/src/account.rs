@@ -140,11 +140,15 @@ impl OrderRow<'_> {
             reduce_only: self.exec_inst.contains(&"REDUCE_ONLY"),
             close: None,
             client_order_id: self.client_oid.map(str::to_owned),
-            time_in_force: Some(match self.time_in_force {
-                "IMMEDIATE_OR_CANCEL" => TimeInForce::ImmediateOrCancel,
-                "FILL_OR_KILL" => TimeInForce::FillOrKill,
-                "POST_ONLY" => TimeInForce::PostOnly,
-                _ => TimeInForce::GoodTillCancel,
+            time_in_force: Some(if self.exec_inst.contains(&"POST_ONLY") {
+                TimeInForce::PostOnly
+            } else {
+                match self.time_in_force {
+                    "IMMEDIATE_OR_CANCEL" => TimeInForce::ImmediateOrCancel,
+                    "FILL_OR_KILL" => TimeInForce::FillOrKill,
+                    "POST_ONLY" => TimeInForce::PostOnly,
+                    _ => TimeInForce::GoodTillCancel,
+                }
             }),
             last_update: self
                 .update_time

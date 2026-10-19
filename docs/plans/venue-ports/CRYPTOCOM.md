@@ -71,3 +71,22 @@ TS defects intentionally corrected: failed reads previously committed empty;
 order mappers lost `client_oid`; `user.trade` was never subscribed/emitted;
 REST reset live leverage/liquidation enrichment; terminal/stale state could
 reopen exposure. Register in harness KNOWN_TS_FIXES during gate phase.
+
+### Trading phase
+
+Preflighted typed jobs run sequentially with 20 ms pacing. Caller ids are sent
+verbatim; duplicates and unsupported shapes reject the entire batch before any
+write. Validation uses a conservative 36-byte ceiling (also rejects line
+terminators) rather than introducing JS string-length emulation. Native amend
+preserves caller ids. Regular/advanced cancel routing, best-effort batch cancel,
+cancel-all, fixed hedged mode and fail-closed margin switching are implemented.
+
+Official API audit found TS sends an invalid per-symbol/string account-leverage
+request; Rust reads `account_id`, sends integer leverage, and updates global
+settings. TS silently ignores attached brackets/opening triggers; Rust rejects
+them. TS sends POST_ONLY as time_in_force; Rust sends the execution instruction
+with GOOD_TILL_CANCEL and combines REDUCE_ONLY. Sub-agent found false HTTP
+success, post-only wire shape, missing-id cancel abortion and Unicode length
+mismatch; fixes and regressions added. Bans/clippy PASS; 25 venue tests PASS.
+
+Next: history queries, exact nanosecond pagination, then wasm/harness gates.
