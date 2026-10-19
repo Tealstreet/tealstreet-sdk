@@ -978,17 +978,27 @@ impl BinanceFutures {
                 (Some(existing), true) => existing.side,
                 _ => event_side,
             };
+            let notional = (signed * entry_price + upnl).abs();
+            let leverage = existing
+                .as_ref()
+                .map(|e| e.leverage)
+                .or(setting.map(|s| s.leverage))
+                .unwrap_or(0.0);
+            let isolated_wallet = opt(&p.iw);
+            let margin_size = if isolated_wallet > 0.0 {
+                Some(isolated_wallet)
+            } else if leverage > 0.0 {
+                Some(notional / leverage)
+            } else {
+                existing.as_ref().and_then(|e| e.margin_size)
+            };
             cx.store.upsert_position(Position {
                 id,
                 symbol: p.s.to_string(),
                 side,
                 entry_price,
-                notional: (signed * entry_price + upnl).abs(),
-                leverage: existing
-                    .as_ref()
-                    .map(|e| e.leverage)
-                    .or(setting.map(|s| s.leverage))
-                    .unwrap_or(0.0),
+                notional,
+                leverage,
                 margin_type: existing
                     .as_ref()
                     .and_then(|e| e.margin_type)
@@ -999,7 +1009,7 @@ impl BinanceFutures {
                 realized_pnl: existing.as_ref().and_then(|e| e.realized_pnl),
                 contracts: signed.abs(),
                 liquidation_price: existing.as_ref().map_or(0.0, |e| e.liquidation_price),
-                margin_size: existing.as_ref().and_then(|e| e.margin_size),
+                margin_size,
                 last_update: Some(cx.now),
             });
         }

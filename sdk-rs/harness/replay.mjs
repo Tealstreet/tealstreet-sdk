@@ -5,6 +5,7 @@
 //   node --expose-gc sdk-rs/harness/replay.mjs --impl rust --tape <file>
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../safe-cex-wasm/js/wire.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -21,10 +22,20 @@ const records = readFileSync(values.tape, 'utf8')
   .filter(Boolean)
   .map((line) => JSON.parse(line));
 const bookSymbols = values.books.split(',').filter(Boolean);
+// A tape with a user stream replays an account: signed, paced in real time,
+// and compared on its private state rather than its books.
+const isPrivate = records.some((r) => r.url?.includes('/private/ws'));
+const KEY = 'replay-key';
+const SECRET = 'replay-secret';
 
+/** Per-request values: clocks, signatures and generated client ids. */
+const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId']);
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
-  const query = [...parsed.searchParams].sort(([a], [b]) => a.localeCompare(b));
+  const query = [...parsed.searchParams]
+    .filter(([name]) => !VOLATILE.has(name))
+    .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"[^"]*",?/g, '')])
+    .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
 
@@ -37,7 +48,7 @@ class Tape {
       if (!this.responses.has(key)) this.responses.set(key, []);
       this.responses.get(key).push(record);
     }
-    this.frames = records.filter((r) => r.type === 'ws');
+    this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
     this.open = new Map();
     this.waiters = [];
     this.unserved = 0;
@@ -71,23 +82,38 @@ class Tape {
     return this.open.get(url);
   }
 
-  /** Deliver every frame in order, yielding to the event loop between frames. */
-  async play(onTick, ready = async () => {}) {
-    const urls = [...new Set(this.frames.map((f) => f.url))];
+  /**
+   * Deliver every frame in order, yielding to the event loop between frames.
+   * Commands are awaited where they fall. A private tape is paced: each record
+   * waits until its time after the account is ready.
+   */
+  async play(onTick, ready = async () => {}, runCommand = async () => {}) {
+    const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
     for (const url of urls) await this.socketFor(url);
     await ready();
+    const start = performance.now();
     let delivered = 0;
     const warm = Math.floor(this.frames.length / 4);
     for (const frame of this.frames) {
       if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
-      const socket = await this.socketFor(frame.url);
-      socket.onMessage(frame.text);
+      if (isPrivate) {
+        const wait = frame.t - (performance.now() - start);
+        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      }
+      if (frame.type === 'command') {
+        this.results.push(await runCommand(frame).then((ids) => ({ ok: ids }), (error) => ({ error: String(error?.message ?? error) })));
+      } else {
+        const socket = await this.socketFor(frame.url);
+        socket.onMessage(frame.text);
+      }
       delivered++;
       onTick?.(frame.t);
       await new Promise(setImmediate);
     }
     return delivered;
   }
+
+  results = [];
 }
 
 const settle = async () => {
@@ -149,6 +175,12 @@ async function runRust() {
   let markets;
   const tickers = new TickerState();
   const books = new Map();
+  let orders;
+  let positions;
+  let balance;
+  let settings;
+  let status;
+  const fills = [];
   const transport = {
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
@@ -157,12 +189,13 @@ async function runRust() {
     },
     request: async ({ method, url }) => {
       const { status, body } = tape.respond(method, url);
-      return { status, body: encoder.encode(body) };
+      return { status, headers: '', body: encoder.encode(body) };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
-  const host = new EngineHost(new WasmEngine('binance', JSON.stringify({ publicDataOnly: true })), transport, {
+  const options = isPrivate ? { key: KEY, secret: SECRET } : { publicDataOnly: true };
+  const host = new EngineHost(new WasmEngine('binance', JSON.stringify(options)), transport, {
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
       const received = values['no-egress'] ? buffer : structuredClone(buffer, { transfer: [buffer] });
@@ -170,6 +203,15 @@ async function runRust() {
       markets = frame.markets() ?? markets;
       tickers.apply(frame);
       for (const book of frame.books()) books.set(book.market, book);
+      orders = frame.orders() ?? orders;
+      positions = frame.positions() ?? positions;
+      balance = frame.balance() ?? balance;
+      settings = frame.settings() ?? settings;
+      status = frame.status() ?? status;
+      const executed = frame.fills();
+      for (let i = 0; i < (executed?.count ?? 0); i++) {
+        fills.push({ market: executed.market[i], side: executed.side[i], amount: executed.rows[i * 2 + 1], id: executed.orderId(i) });
+      }
     },
   });
   const heapBefore = baseline();
@@ -178,13 +220,25 @@ async function runRust() {
   host.start();
   for (const symbol of bookSymbols) host.command({ op: 'subscribeOrderBook', symbol });
   let lastFlush = -Infinity;
-  const frames = await tape.play((t) => {
-    if (t - lastFlush >= 250) {
-      host.flush();
-      lastFlush = t;
-    }
-  });
+  const allLoaded = 31;
+  const flushTimer = isPrivate ? setInterval(() => host.flush(), 250) : undefined;
+  const frames = await tape.play(
+    (t) => {
+      if (t - lastFlush >= 250) {
+        host.flush();
+        lastFlush = t;
+      }
+    },
+    async () => {
+      while (isPrivate && (status?.loaded ?? 0) !== allLoaded) await new Promise((r) => setTimeout(r, 5));
+    },
+    (record) => {
+      const { op, ...rest } = record;
+      return host.command({ op, ...commandArgs(rest) });
+    },
+  );
   await settle();
+  clearInterval(flushTimer);
   host.flush();
   const metrics = measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
   host.dispose();
@@ -217,7 +271,40 @@ async function runRust() {
     };
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
-  return { frames, metrics, unserved: tape.unserved, store: { markets: marketRows, tickers: tickerRows }, books: bookRows };
+  const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
+  return { frames, metrics, unserved: tape.unserved, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+}
+
+const commandArgs = ({ t, type, ...args }) => args;
+
+
+/** Main-thread view of the account, rebuilt from the latest frame tables. */
+function rustAccount({ markets, orders, positions, balance, settings, status, fills }) {
+  const symbol = (i) => markets.symbol(i);
+  const orderRows = [];
+  for (let i = 0; i < (orders?.count ?? 0); i++) {
+    const row = { id: orders.id(i), symbol: symbol(orders.market[i]), ...orderEnums(orders.enums[i]) };
+    for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
+    orderRows.push(row);
+  }
+  const positionRows = [];
+  for (let i = 0; i < (positions?.count ?? 0); i++) {
+    const row = { symbol: symbol(positions.market[i]), ...positionEnums(positions.enums[i]) };
+    for (const column of POSITION_COLUMNS) row[column] = positions[column][i];
+    positionRows.push(row);
+  }
+  const settingRows = [];
+  for (let i = 0; i < (settings?.count ?? 0); i++) {
+    settingRows.push({ symbol: symbol(settings.market[i]), leverage: settings.leverage[i], marginType: settings.marginType(i) });
+  }
+  return {
+    hedged: status?.hedged ?? false,
+    balance,
+    orders: orderRows,
+    positions: positionRows,
+    settings: settingRows,
+    fills: fills.map((f) => ({ id: f.id, symbol: symbol(f.market), side: f.side === 0 ? 'buy' : 'sell', amount: f.amount })),
+  };
 }
 
 async function runTs() {
@@ -267,8 +354,8 @@ async function runTs() {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
     const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString());
-    const data = body ? JSON.parse(body) : undefined;
-    const response = { data, status, statusText: String(status), headers: {}, config, request: {} };
+    // The raw body: the client's own transformResponse parses it, big ids included.
+    const response = { data: body, status, statusText: String(status), headers: {}, config, request: {} };
     if (status >= 400) {
       const error = new Error(`Request failed with status code ${status}`);
       error.response = response;
@@ -278,8 +365,11 @@ async function runTs() {
     return response;
   };
   const store = new DefaultStore();
-  const exchange = new BinanceExchange('binance', { key: '', secret: '', publicDataOnly: true }, store);
-  for (const client of [exchange.xhr, exchange.publicXhr]) {
+  const options = isPrivate ? { key: KEY, secret: SECRET } : { key: '', secret: '', publicDataOnly: true };
+  const exchange = new BinanceExchange('binance', options, store);
+  const executions = [];
+  exchange.emitter.on('fill', (fill) => executions.push(fill));
+  for (const client of [exchange.xhr, exchange.publicXhr, exchange.unlimitedXHR, exchange._primaryXhr, exchange._secondaryXhr]) {
     if (client?.defaults) client.defaults.adapter = adapter;
   }
   const finalBooks = {};
@@ -307,6 +397,20 @@ async function runTs() {
     },
     async () => {
       while (depthHandlers() < bookSymbols.length) await new Promise((r) => setTimeout(r, 5));
+      const loaded = () => Object.values(store.loaded).every(Boolean);
+      while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
+    },
+    async (record) => {
+      if (record.op === 'placeOrders') return exchange.placeOrders(record.orders);
+      if (record.op === 'cancelOrders') {
+        await exchange.cancelOrders(store.orders.filter((order) => record.ids.includes(order.id)));
+        return [];
+      }
+      if (record.op === 'cancelSymbolOrders') {
+        await exchange.cancelSymbolOrders(record.symbol);
+        return [];
+      }
+      throw new Error(`unknown command ${record.op}`);
     },
   );
   await Promise.all([started, subscribed]);
@@ -319,8 +423,60 @@ async function runTs() {
   const bookCopies = Object.fromEntries(
     Object.entries(finalBooks).map(([symbol, book]) => [symbol, JSON.parse(JSON.stringify(book))]),
   );
+  const account = isPrivate
+    ? {
+        hedged: Boolean(store.options.isHedged),
+        balance: { used: store.balance.used, free: store.balance.free, total: store.balance.total, upnl: store.balance.upnl },
+        orders: store.orders.map((o) => ({ ...o })),
+        // Zero-size placeholders carry each market's leverage and margin type.
+        positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
+        settings: [...new Map(store.positions.filter((p) => p.leverage > 0).map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }])).values()],
+        fills: executions.map((f) => ({ id: f.id, symbol: f.symbol, side: f.side, amount: f.amount })),
+      }
+    : undefined;
   exchange.dispose();
-  return { frames, metrics, unserved: tape.unserved, store: snapshot, books: bookCopies };
+  return { frames, metrics, unserved: tape.unserved, store: snapshot, books: bookCopies, account, commands: tape.results };
+}
+
+/** The fields both implementations carry, in one shape. */
+function normalizeAccount(account) {
+  const order = (o) => ({
+    id: String(o.id),
+    symbol: o.symbol,
+    status: o.status,
+    type: o.type,
+    side: o.side,
+    price: o.price,
+    amount: o.amount,
+    filled: o.filled,
+    remaining: o.remaining,
+    reduceOnly: Boolean(o.reduceOnly),
+    close: Boolean(o.close),
+    trigger: o.tpTriggerType ?? o.slTriggerType ?? o.triggerType ?? null,
+    rejectReason: o.extra?.rejectReason ?? o.rejectReason ?? null,
+  });
+  const position = (p) => ({
+    symbol: p.symbol,
+    side: p.side,
+    entryPrice: p.entryPrice,
+    contracts: p.contracts,
+    notional: p.notional,
+    leverage: p.leverage,
+    unrealizedPnl: p.unrealizedPnl,
+    liquidationPrice: p.liquidationPrice,
+    marginType: p.marginType ?? null,
+    positionMode: p.positionMode ?? null,
+    marginSize: Number.isFinite(p.marginSize) ? p.marginSize : null,
+  });
+  const bySymbol = (a, b) => a.symbol.localeCompare(b.symbol) || String(a.id ?? '').localeCompare(String(b.id ?? ''));
+  return {
+    hedged: account.hedged,
+    balance: account.balance,
+    orders: account.orders.map(order).sort(bySymbol),
+    positions: account.positions.map(position).sort(bySymbol),
+    settings: [...account.settings].sort(bySymbol),
+    fills: account.fills,
+  };
 }
 
 const result = values.impl === 'ts' ? await runTs() : await runRust();
@@ -335,6 +491,8 @@ writeFileSync(
     markets: result.store.markets.map(marketFields),
     tickers: result.store.tickers.map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, t[f]])])),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
+    account: result.account && normalizeAccount(result.account),
+    commands: result.commands,
   }),
 );
 process.exit(0);

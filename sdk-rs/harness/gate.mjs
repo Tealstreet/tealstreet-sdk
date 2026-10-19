@@ -2,7 +2,7 @@
 // require identical Store output and order books, and require Rust to use
 // less CPU and less retained memory. Exits non-zero on any failure.
 //
-//   node sdk-rs/harness/gate.mjs --tape sdk-rs/harness/tapes/binance.jsonl
+//   corepack yarn rust:gate --tape sdk-rs/harness/tapes/binance.jsonl
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
@@ -50,6 +50,35 @@ for (let run = 0; run < runs; run++) {
 const [ts, rust] = [results.ts[0], results.rust[0]];
 
 if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
+// Every request must match a taped one: an unserved request sent different parameters.
+for (const impl of ['ts', 'rust']) {
+  const unserved = results[impl][0].unserved;
+  if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
+}
+const isPrivate = Boolean(ts.account);
+// TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
+//  - A position first seen on the user stream keeps the margin size of TS's
+//    zero-size placeholder (0); Rust takes the isolated wallet, or notional
+//    over leverage for cross.
+//  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
+//    the execution's own price (`L`). Fill prices are not compared.
+const KNOWN_TS_FIXES = (account, rustAccount) => {
+  for (const position of account.positions) {
+    const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
+    if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+  }
+};
+if (isPrivate) {
+  KNOWN_TS_FIXES(ts.account, rust.account);
+  for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
+    const left = JSON.stringify(ts.account[field]);
+    const right = JSON.stringify(rust.account[field]);
+    if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
+  }
+  const left = JSON.stringify(ts.commands);
+  const right = JSON.stringify(rust.commands);
+  if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
+}
 compare('market', ts.markets, rust.markets);
 compare('ticker', ts.tickers, rust.tickers);
 for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
@@ -75,11 +104,15 @@ row('steady cpu', t.steadyCpuMs, r.steadyCpuMs);
 row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
+if (ts.account) console.log('(private tape: paced in real time, so it gates correctness only)');
 
 const failures = [...differences];
-if (!(r.cpuMs < t.cpuMs)) failures.push('Rust main-thread CPU is not below TS');
-if (!(r.steadyCpuMs < t.steadyCpuMs)) failures.push('Rust steady-state CPU is not below TS');
-if (!(r.retainedMB < t.retainedMB)) failures.push('Rust retained memory is not below TS');
+// A private tape is paced in real time, so it gates correctness only.
+if (!isPrivate) {
+  if (!(r.cpuMs < t.cpuMs)) failures.push('Rust main-thread CPU is not below TS');
+  if (!(r.steadyCpuMs < t.steadyCpuMs)) failures.push('Rust steady-state CPU is not below TS');
+  if (!(r.retainedMB < t.retainedMB)) failures.push('Rust retained memory is not below TS');
+}
 if (failures.length) {
   console.log(`FAIL (${failures.length})`);
   for (const failure of failures.slice(0, 40)) console.log(`  ${failure}`);

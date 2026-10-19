@@ -479,6 +479,9 @@ pub struct AccountPosition<'a> {
     pub up: Str<'a>,
     #[serde(borrow)]
     pub ps: Str<'a>,
+    /// Isolated wallet; zero for cross positions.
+    #[serde(borrow, default)]
+    pub iw: Option<Str<'a>>,
 }
 
 #[derive(Deserialize)]

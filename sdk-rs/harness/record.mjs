@@ -1,7 +1,7 @@
 // Record a live public-data tape by running the Rust engine against the venue
 // and capturing every HTTP response and websocket frame it receives.
 //
-//   node sdk-rs/harness/record.mjs --venue binance --seconds 60 \
+//   corepack yarn rust:record --venue binance --seconds 60 \
 //     --books BTCUSDT,ETHUSDT,SOLUSDT --out sdk-rs/harness/tapes/binance.jsonl
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
