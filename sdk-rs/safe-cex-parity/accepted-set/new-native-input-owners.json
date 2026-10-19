@@ -1,0 +1,775 @@
+{
+  "version": 1,
+  "reason": "Exact native input classification debt: original149 from #1193 plus3 introduced on master by #1238, separately marked. No exemption/filter: normal measurements still require contracts. Any new owner or disappearance requires an explicit ledger update and ruling.",
+  "owners": [
+    {
+      "package": "safe-cex-venue-asterdex",
+      "name": "safe_cex_venue_asterdex::binding::globals::bytes",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-venue-asterdex",
+      "name": "safe_cex_venue_asterdex::binding::globals::hex_bytes",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-venue-asterdex",
+      "name": "safe_cex_venue_asterdex::binding::scope",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-venue-asterdex",
+      "name": "safe_cex_venue_asterdex::binding::text",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-venue-asterdex",
+      "name": "safe_cex_venue_asterdex::exchange_helpers::transform_klines",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-venue-asterdex",
+      "name": "safe_cex_venue_asterdex::private_stream::utf8",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::error_reporting::raw_formatted_context",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::error_reporting::sentry_context",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::base_exchange::create",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::base_exchange::create_xhr_with_secondary_key",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::base_exchange::exchange_options",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::base_exchange::market_overlay",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::base_exchange::reads_on",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::base_exchange::text",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::base_exchange::worker_rpc",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::builtins::array_length",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::builtins::chain_value",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::builtins::flatten_into",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::builtins::flatten_length",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::builtins::indexed",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::builtins::is_regexp",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::builtins::items",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::builtins::map_entries",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::builtins::member",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::builtins::require_callback",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ccxt::decimal_to_precision",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ccxt::exact",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ccxt::install",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ccxt::integer",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ccxt::number_to_string",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ccxt::numeric_string",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ccxt::parse_precision",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ccxt::precision_from_string",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ccxt::safe_string",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::axios_error",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::axios_headers_from",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::chain_step",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::create",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::current_retry_state",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::dispatch",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::dispatch_request",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::effective_config",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::factory::apply_changes",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::factory::create",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::factory::create_no_proxy",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::factory::install_outcome_interceptor",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::factory::install_transport_adapter",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::factory::record_outcome",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::factory::report_proxy_failure",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::factory::same",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::factory::status_of",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::header_key",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::js_params_serializer",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::js_response",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::merged_config",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::normalized_header",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::normalized_header_value",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::rest_request",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::rest_request_data",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::rest_response",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::RestHttpHost",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::send_once",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::set_header",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::spawn",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::client::transform_response",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::collections::collection_iterator",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::collections::iterator_method",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::collections::iterator_method_receiver",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::globals::array_from",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::globals::construct_promise",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::globals::consume_iterator",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::globals::install_builtins",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::globals::install_enums",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::globals::iterate",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::globals::json_stringify",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::globals::map_from_entries",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::globals::not_iterable",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::globals::stringify_json",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::globals::v8_operand",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::call",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::compare_ascending",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::dayjs_from",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::dayjs_ms",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::decimal_of",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::extreme",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::group_by",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::install_library",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::iteratee",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::list",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::lodash_times",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::order_by",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::qs_stringify",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::text",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::uniq_by",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::library::update_order_book",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::native_store::balance_reference",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::native_store::graph::assign",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::native_store::graph::find",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::native_store::graph::find_selector",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::native_store::graph::id_index",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::native_store::graph::id_key",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::native_store::graph::id_lookup",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::native_store::graph::length",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::native_store::graph::pair",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::native_store::graph::patch",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::native_store::graph::row",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::native_store::graph::set_id_key",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::native_store::graph::strip_info",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::add",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::compare",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::divide",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::greater_equal",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::greater_than",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::is_primitive",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::less_equal",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::less_than",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::multiply",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::negate",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::numeric_pair",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::remainder",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::subtract",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::to_numeric",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::ops::to_primitive",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::promise::all",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::promise::all_iterable",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::promise::all_settled",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::promise::await_js",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::promise::combine",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::promise::resolve_promise",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::regexp::match_all_or_first",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::regexp::replace",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::regexp::search",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::regexp::split",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::regexp::split_limit",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::regexp::to_length",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::regexp::to_string",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::scope::take_timers",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::sockets::base_websocket",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::sockets::connection_options",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::sockets::core_of",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::sockets::create_websocket",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::throttle::new",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::value::arg",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::value::error_string",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::value::same_optional_value",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::value::same_value",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::value::to_js_json",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::runtime::console_text",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::runtime::exception_text",
+      "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::structured_clone::structured_clone",
+      "state": "pending",
+      "introduced": "introduced on master by #1238",
+      "owner": "codex-0xekzz",
+      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::structured_clone::copy",
+      "state": "pending",
+      "introduced": "introduced on master by #1238",
+      "owner": "codex-0xekzz",
+      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::structured_clone::hidden",
+      "state": "pending",
+      "introduced": "introduced on master by #1238",
+      "owner": "codex-0xekzz",
+      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+    }
+  ]
+}

@@ -208,3 +208,9 @@ The websocket-account fixture supplies Map, Set and WsDirectFallback as explicit
 A separate constructed-family witness verifies all four OKX variants install
 distinct public/private/business socket owners sharing the original Store,
 without issuing HTTP during construction.
+
+Shared WebSocket message handlers now borrow the canonical `Js` frame graph.
+Restore retained ingress once per frame, preserve it across all callbacks, and
+project only reached typed output fields; see exchange/WS_CONTRACT.md and the
+actual-source/native retained-handler witnesses. Do not reintroduce Value frame
+projections or a second callback registry.

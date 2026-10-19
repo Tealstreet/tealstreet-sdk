@@ -227,6 +227,12 @@ and Rust socket cases (twenty frames), including whole batches with lone units
 in an unused nested value/key, ordinary siblings and native numeric bits. The
 private stream's Value callback/info seam remains a separate migration.
 
+Shared WebSocket message handlers now borrow the canonical `Js` frame graph.
+Restore retained ingress once per frame, preserve it across all callbacks, and
+project only reached typed output fields; see exchange/WS_CONTRACT.md and the
+actual-source/native retained-handler witnesses. Do not reintroduce Value frame
+projections or a second callback registry.
+
 REST depth sorting delegates both source subtraction comparators to canonical
 CI V8 TimSort. `native_exchange::fix_audit_tests::rest_book_*` calls the actual
 constructed fetchOrderBook member, factory, HTTP response path and mapper against

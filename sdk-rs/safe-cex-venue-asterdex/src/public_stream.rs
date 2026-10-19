@@ -5,12 +5,12 @@ use crate::{
     },
     ws_helpers::{self, PublicEventDataDispatch, PublicStreamDispatch, PublicStreamTradeEvent},
 };
+use safe_cex_exchange::js_runtime::value::{Js, from_retained_input};
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
     websocket::{BaseWebSocket, WsParent, WsProtocol, WsRuntime},
 };
-use safe_cex_num::{js_string, js_truthy};
 use safe_cex_store::model_patch::ModelPatch;
 use safe_cex_transport::socket::SocketFrame;
 use safe_cex_types::retained_json::RetainedJsonInput;
@@ -23,12 +23,7 @@ use std::{
 
 pub trait PublicStreamParent: WsParent {
     fn owner(&self) -> Rc<BaseExchange>;
-    fn emit_ticker(
-        &self,
-        event: &str,
-        symbol: &Value,
-        ticker: &Ticker,
-    ) -> Result<(), ExchangeError>;
+    fn emit_ticker(&self, event: &str, symbol: &Js, ticker: &Ticker) -> Result<(), ExchangeError>;
     fn emit_trade(&self, trade: &PublicStreamTradeEvent) -> Result<(), ExchangeError>;
 }
 // ts: AsterDEXPublicWebsocket
@@ -105,35 +100,7 @@ fn coerce(e: safe_cex_num::JsCoercionError) -> ExchangeError {
     error.name = e.name.into();
     error
 }
-fn string(v: Option<&Value>) -> Result<String, ExchangeError> {
-    js_string(v).map_err(coerce)
-}
-// Public callback arguments have a typed Value ABI. Only that String view is
-// normalized; canonical capture owns parsing, and its scalar projection keeps
-// numeric lexemes (including overflowing JSON numbers) instead of JSON writing.
-fn callback_data(input: RetainedJsonInput) -> Result<Value, serde_json::Error> {
-    Ok(match input {
-        RetainedJsonInput::Text(_) => Value::String(input.decode_native(false)?),
-        RetainedJsonInput::Array(values) => Value::Array(
-            values
-                .into_iter()
-                .map(callback_data)
-                .collect::<Result<_, _>>()?,
-        ),
-        RetainedJsonInput::Object(values) => Value::Object(
-            values
-                .into_iter()
-                .map(|(key, value)| {
-                    Ok((
-                        RetainedJsonInput::Text(key).decode_native(false)?,
-                        callback_data(value)?,
-                    ))
-                })
-                .collect::<Result<_, serde_json::Error>>()?,
-        ),
-        scalar => scalar.into_value()?,
-    })
-}
+
 impl PublicStream {
     // ts: AsterDEXPublicWebsocket.constructor
     pub fn new(
@@ -171,7 +138,7 @@ impl PublicStream {
         for (key, handler) in [
             (
                 "24hrTicker",
-                Self::handle_ticker_update as fn(&Self, &Value) -> Result<(), ExchangeError>,
+                Self::handle_ticker_update as fn(&Self, &Js) -> Result<(), ExchangeError>,
             ),
             ("aggTrade", Self::handle_trade_update),
             ("markPriceUpdate", Self::handle_mark_price_update),
@@ -180,7 +147,7 @@ impl PublicStream {
             let weak = Rc::downgrade(&stream);
             stream.socket.message_handlers.borrow_mut().insert(
                 key.into(),
-                Rc::new(RefCell::new(vec![Rc::new(move |data: &Value| {
+                Rc::new(RefCell::new(vec![Rc::new(move |data: &Js| {
                     weak.upgrade().map_or(Ok(()), |s| handler(&s, data))
                 })])),
             );
@@ -208,6 +175,7 @@ impl PublicStream {
         if self.parent.is_disposed() {
             return Ok(());
         }
+        let _realm = self.socket.prototype_realm.bind();
         self.socket.track_last_received()?;
         let _ = (|| {
             let text = match frame {
@@ -215,55 +183,67 @@ impl PublicStream {
                 SocketFrame::Binary(b) => String::from_utf8_lossy(b).into_owned(),
                 SocketFrame::Close { .. } => return Ok(()),
             };
-            let captured: RetainedJsonInput =
-                serde_json::from_str(&text).map_err(|e| ExchangeError::new(e.to_string()))?;
-            let json = callback_data(captured).map_err(|e| ExchangeError::new(e.to_string()))?;
-            if !js_truthy(Some(&json)) {
+            let captured = RetainedJsonInput::parse_json(&text.encode_utf16().collect::<Vec<_>>())
+                .map_err(|e| ExchangeError::new(e.to_string()))?;
+            let json = from_retained_input(captured);
+            if !json.truthy() {
                 return Ok(());
             }
-            if json.get("id").and_then(Value::as_f64) == Some(-1.0) {
+            if json.get("id")?.strict_equals(&Js::Number(-1.)) {
                 return self.socket.handle_pong_event(5_000);
             }
-            if json.get("id").is_some() && json.get("result") == Some(&Value::Null) {
+            if !matches!(json.get("id")?, Js::Undefined) && matches!(json.get("result")?, Js::Null)
+            {
                 return Ok(());
             }
-            if js_truthy(json.get("error")) {
+            if json.get("error")?.truthy() {
                 return Ok(());
             }
-            if js_truthy(json.get("stream")) && js_truthy(json.get("data")) {
-                let stream = json["stream"]
-                    .as_str()
-                    .ok_or_else(|| ExchangeError::new("stream.split is not a function"))?;
-                let data = &json["data"];
-                match stream {
+            let stream = json.get("stream")?;
+            if stream.truthy() && json.get("data")?.truthy() {
+                let Js::String(stream) = stream else {
+                    return Err(ExchangeError::new("stream.split is not a function"));
+                };
+                let stream = String::from_utf16_lossy(&stream);
+                let data = json.get("data")?;
+                match stream.as_str() {
                     "!markPrice@arr@1s" | "!markPrice@arr" => {
-                        if let Some(items) = data.as_array() {
-                            for item in items {
-                                self.handle_mark_price_update(item)?;
+                        if let Js::Array(items) = &data {
+                            let mut index = 0;
+                            while index < items.len() {
+                                let item = data.get(&index.to_string())?;
+                                self.handle_mark_price_update(&item)?;
+                                index += 1;
                             }
                         }
                     }
                     "!ticker@arr" => {
-                        if let Some(items) = data.as_array() {
-                            for item in items {
-                                self.handle_ticker_update(item)?;
+                        if let Js::Array(items) = &data {
+                            let mut index = 0;
+                            while index < items.len() {
+                                let item = data.get(&index.to_string())?;
+                                self.handle_ticker_update(&item)?;
+                                index += 1;
                             }
                         }
                     }
-                    _ => self.stream_data(stream, data)?,
+                    _ => self.stream_data(&stream, &data)?,
                 }
-            } else if let Some(items) = json.as_array() {
-                for item in items {
-                    self.event_data(item)?;
+            } else if let Js::Array(items) = &json {
+                let mut index = 0;
+                while index < items.len() {
+                    let item = json.get(&index.to_string())?;
+                    self.event_data(&item)?;
+                    index += 1;
                 }
-            } else if js_truthy(json.get("e")) {
+            } else if json.get("e")?.truthy() {
                 self.event_data(&json)?;
             }
             Ok::<(), ExchangeError>(())
         })();
         Ok(())
     }
-    fn dispatch(&self, key: &str, data: &Value) -> Result<(), ExchangeError> {
+    fn dispatch(&self, key: &str, data: &Js) -> Result<(), ExchangeError> {
         self.socket.record_message_handler_stats(key)?;
         let callbacks = self
             .socket
@@ -283,7 +263,7 @@ impl PublicStream {
         }
         Ok(())
     }
-    fn event_data(&self, data: &Value) -> Result<(), ExchangeError> {
+    fn event_data(&self, data: &Js) -> Result<(), ExchangeError> {
         let keys: Vec<_> = self
             .socket
             .message_handlers
@@ -292,7 +272,7 @@ impl PublicStream {
             .cloned()
             .collect();
         let keys: Vec<_> = keys.iter().map(|key| (key.as_str(), ())).collect();
-        match ws_helpers::public_event_data_dispatch(data, &keys).map_err(coerce)? {
+        match ws_helpers::public_event_data_dispatch(data, &keys)? {
             PublicEventDataDispatch::Ignore => Ok(()),
             PublicEventDataDispatch::Handlers { event_type, data } => {
                 self.dispatch(&event_type, &data)
@@ -302,9 +282,9 @@ impl PublicStream {
             }
         }
     }
-    fn stream_data(&self, stream: &str, data: &Value) -> Result<(), ExchangeError> {
+    fn stream_data(&self, stream: &str, data: &Js) -> Result<(), ExchangeError> {
         let (key, assigned, depth) =
-            match ws_helpers::public_stream_dispatch(stream, js_truthy(data.get("s")))
+            match ws_helpers::public_stream_dispatch(stream, data.get("s")?.truthy())
                 .map_err(ExchangeError::new)?
             {
                 PublicStreamDispatch::Ignore => return Ok(()),
@@ -319,11 +299,8 @@ impl PublicStream {
         if !depth && !self.socket.message_handlers.borrow().contains_key(key) {
             return Ok(());
         }
-        let mut data = data.clone();
         if let Some(symbol) = assigned {
-            data.as_object_mut()
-                .ok_or_else(|| ExchangeError::new("Cannot assign symbol on primitive"))?
-                .insert("s".into(), Value::String(symbol));
+            data.set("s", Js::str(&symbol))?;
         }
         if depth {
             self.handle_depth_snapshot(&data)
@@ -382,11 +359,11 @@ impl PublicStream {
         Ok(Some(retained))
     }
 
-    pub fn handle_ticker_update(&self, data: &Value) -> Result<(), ExchangeError> {
+    pub fn handle_ticker_update(&self, data: &Js) -> Result<(), ExchangeError> {
         let store = self.parent.store();
         let tickers = store.tickers()?.to_vec();
         let entries: Vec<_> = tickers.iter().map(|t| (t.symbol.as_str(), t)).collect();
-        let Some(update) = ws_helpers::public_ticker_update(data, &entries).map_err(coerce)? else {
+        let Some(update) = ws_helpers::public_ticker_update(data, &entries)? else {
             return Ok(());
         };
         let mut patch = ModelPatch::default();
@@ -400,17 +377,20 @@ impl PublicStream {
                 patch.set_number(key, v);
             }
         }
-        if let Some(ticker) = self.patch_ticker(&string(data.get("s"))?, patch)? {
-            self.parent.emit_ticker("ticker", &update.symbol, &ticker)?;
+        if let Some(ticker) = self.patch_ticker(
+            &String::from_utf16_lossy(&data.get("s")?.to_js_string()?),
+            patch,
+        )? {
+            self.parent
+                .emit_ticker("ticker", &data.get("s")?, &ticker)?;
         }
         Ok(())
     }
-    pub fn handle_mark_price_update(&self, data: &Value) -> Result<(), ExchangeError> {
+    pub fn handle_mark_price_update(&self, data: &Js) -> Result<(), ExchangeError> {
         let store = self.parent.store();
         let tickers = store.tickers()?.to_vec();
         let entries: Vec<_> = tickers.iter().map(|t| (t.symbol.as_str(), t)).collect();
-        let Some(update) = ws_helpers::public_mark_price_update(data, &entries).map_err(coerce)?
-        else {
+        let Some(update) = ws_helpers::public_mark_price_update(data, &entries)? else {
             return Ok(());
         };
         let mut patch = ModelPatch::default();
@@ -424,35 +404,50 @@ impl PublicStream {
             }
         }
         if let Some(value) = update.patch.funding_time {
-            patch.set_json("fundingTime", value);
+            match value {
+                Js::Number(value) => patch.set_number("fundingTime", value),
+                value => patch.set_json(
+                    "fundingTime",
+                    safe_cex_exchange::js_runtime::value::to_typed(&value)?,
+                ),
+            }
         }
-        if let Some(ticker) = self.patch_ticker(&string(data.get("s"))?, patch)? {
+        if let Some(ticker) = self.patch_ticker(
+            &String::from_utf16_lossy(&data.get("s")?.to_js_string()?),
+            patch,
+        )? {
             self.parent
-                .emit_ticker("markPrice", &update.symbol, &ticker)?;
+                .emit_ticker("markPrice", &data.get("s")?, &ticker)?;
         }
         Ok(())
     }
-    pub fn handle_trade_update(&self, data: &Value) -> Result<(), ExchangeError> {
-        if data.is_null() {
+    pub fn handle_trade_update(&self, data: &Js) -> Result<(), ExchangeError> {
+        if matches!(data, Js::Null) {
             return Err(coerce(safe_cex_num::JsCoercionError {
                 name: "TypeError",
                 message: "Cannot read properties of null (reading 's')",
             }));
         }
-        let symbol = data.get("s").and_then(Value::as_str).ok_or_else(|| {
-            ExchangeError::new("Non-string trade symbol cannot enter native trade event")
-        })?;
-        let price = safe_cex_num::parse_float(&string(data.get("p"))?);
-        let qty = safe_cex_num::parse_float(&string(data.get("q"))?);
-        let timestamp = data.get("T").and_then(Value::as_f64).ok_or_else(|| {
-            ExchangeError::new("Non-number trade timestamp cannot enter native trade event")
-        })?;
+        let symbol = data.get("s")?;
+        let Js::String(symbol) = symbol else {
+            return Err(ExchangeError::new(
+                "Non-string trade symbol cannot enter native trade event",
+            ));
+        };
+        let symbol = String::from_utf16_lossy(&symbol);
+        let price = data.get("p")?.parse_float()?;
+        let qty = data.get("q")?.parse_float()?;
+        let Js::Number(timestamp) = data.get("T")? else {
+            return Err(ExchangeError::new(
+                "Non-number trade timestamp cannot enter native trade event",
+            ));
+        };
         let event = PublicStreamTradeEvent {
-            symbol: symbol.into(),
+            symbol: symbol.clone(),
             price,
             qty,
             timestamp,
-            side: if js_truthy(data.get("m")) {
+            side: if data.get("m")?.truthy() {
                 "SELL"
             } else {
                 "BUY"
@@ -461,12 +456,12 @@ impl PublicStream {
         };
         let mut patch = ModelPatch::default();
         patch.set_number("last", price);
-        self.patch_ticker(symbol, patch)?;
+        self.patch_ticker(&symbol, patch)?;
         self.parent.emit_trade(&event)
     }
 
-    pub fn handle_depth_snapshot(&self, data: &Value) -> Result<(), ExchangeError> {
-        if data.is_null() {
+    pub fn handle_depth_snapshot(&self, data: &Js) -> Result<(), ExchangeError> {
+        if matches!(data, Js::Null) {
             return Err(coerce(safe_cex_num::JsCoercionError {
                 name: "TypeError",
                 message: "Cannot read properties of null (reading 'b')",
@@ -475,23 +470,23 @@ impl PublicStream {
         let Some(book) = ws_helpers::public_depth_snapshot(data) else {
             return Ok(());
         };
-        let symbol = string(data.get("s"))?;
+        let symbol = String::from_utf16_lossy(&data.get("s")?.to_js_string()?);
         let mut patch = ModelPatch::default();
         patch.set_number("bid", book.bids[0].price);
         patch.set_number("ask", book.asks[0].price);
         self.patch_ticker(&symbol, patch)?;
-        let lower = data
-            .get("s")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ExchangeError::new("data.s.toLowerCase is not a function"))?
-            .to_lowercase();
+        let symbol = data.get("s")?;
+        let Js::String(symbol) = symbol else {
+            return Err(ExchangeError::new("data.s.toLowerCase is not a function"));
+        };
+        let lower = String::from_utf16_lossy(&symbol).to_lowercase();
         self.subscriptions
             .deliver_book(&format!("{lower}@depth20@100ms"), &book)
     }
-    pub fn handle_kline_update(&self, data: &Value) -> Result<(), ExchangeError> {
+    pub fn handle_kline_update(&self, data: &Js) -> Result<(), ExchangeError> {
         let keys = self.subscriptions.state().klines;
         let keys: Vec<_> = keys.iter().map(String::as_str).collect();
-        if let Some(update) = ws_helpers::public_kline_update(data, &keys).map_err(coerce)? {
+        if let Some(update) = ws_helpers::public_kline_update(data, &keys)? {
             self.subscriptions
                 .deliver_kline(&update.stream, update.candle)?;
         }
