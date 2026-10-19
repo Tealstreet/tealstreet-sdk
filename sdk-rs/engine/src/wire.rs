@@ -1,6 +1,6 @@
 //! The flush frame: everything a consumer needs from one flush, in one
 //! transferable buffer of typed columns. Layout: docs/plans/RUST_REWRITE.md,
-//! "Data shapes: the flush frame". The decoder is safe-cex-wasm/js/wire.mjs.
+//! "Data shapes: the flush frame". The decoder is hosts/wasm/js/wire.mjs.
 use crate::model::{
     Candle, MarginType, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide,
     RejectReason, StopTriggerType, TimeInForce,
@@ -211,7 +211,7 @@ impl<'a> FrameWriter<'a> {
 }
 
 /// The `(kind, payload)` sections of a frame, for native consumers; the
-/// browser reads frames with `safe-cex-wasm/js/wire.mjs`.
+/// browser reads frames with `hosts/wasm/js/wire.mjs`.
 pub fn sections(frame: &[u8]) -> impl Iterator<Item = (u16, &[u8])> {
     let count = if frame.len() >= 16 && frame[..4] == MAGIC {
         u16::from_le_bytes([frame[6], frame[7]])
