@@ -51,16 +51,25 @@ fn option_fields_survive_shared_store_patches_merges_and_source_facade_reads() {
     );
     let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(rows.len(), 5);
-    let market = from_json(
-        &json!({"id":"m","symbol":"BTC","base":"BTC","quote":"USDT","active":true,"precision":{"amount":1,"price":1},"limits":{"amount":{"min":1,"max":9},"leverage":{"min":1,"max":1}}}),
-    );
-    let position = from_json(
-        &json!({"id":"p","symbol":"BTC","side":"long","entryPrice":1,"notional":1,"leverage":1,"contracts":1,"unrealizedPnl":0,"liquidationPrice":0}),
-    );
     for (n, row) in [2.5, -0.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY]
         .into_iter()
         .zip(rows)
     {
+        let market = from_json(
+            &json!({"id":"m","symbol":"BTC","base":"BTC","quote":"USDT","active":true,"precision":{"amount":1,"price":1},"limits":{"amount":{"min":1,"max":9},"leverage":{"min":1,"max":1}}}),
+        );
+        let position = from_json(
+            &json!({"id":"p","symbol":"BTC","side":"long","entryPrice":1,"notional":1,"leverage":1,"contracts":1,"unrealizedPnl":0,"liquidationPrice":0}),
+        );
+        assert!(
+            row["snapshots"][0]["position"].is_null(),
+            "fresh source row has no option"
+        );
+        assert_eq!(
+            row["snapshots"][7]["position"],
+            json!({}),
+            "source retains an explicitly empty option"
+        );
         let core = Rc::new(DefaultStore::new());
         let store = facade(core).unwrap();
         store
