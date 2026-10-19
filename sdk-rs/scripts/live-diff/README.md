@@ -135,6 +135,14 @@ public parity is not authenticated or order lifecycle proof.
 
 ## Public streams: capture once, replay four times
 
+Public host adapters also cover Bitget, Phemex, WOO, Backpack, Crypto.com,
+Bitunix, Kraken futures, MEXC, BingX, Coinbase, GRVT and ApexOmni. Use their
+registry names with `--venue` and omit `--replay` to capture 60 seconds before
+the four identical-input replays. ApexOmni accepts a full capture as well as its
+existing bounded `--startup-only --replay` proof. Unsupported channels, public
+startup refusals and incomplete native drains remain explicit failures.
+
+
 `streams.mjs` uses the actual TS exchange and ExchangeWorker Store delivery,
 plus the compiled native account binding. Public host adapters cover Binance
 USD-M, Bybit, OKX and Hyperliquid, in that order. No credentials are accepted.
