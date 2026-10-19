@@ -64,9 +64,10 @@ impl Notifications {
     }
 
     fn deliver(&self, store: bool, value: JsData) -> Status {
-        let status = self
-            .queue
-            .call((store, value).into(), ThreadsafeFunctionCallMode::NonBlocking);
+        let status = self.queue.call(
+            (store, value).into(),
+            ThreadsafeFunctionCallMode::NonBlocking,
+        );
         if status != Status::Ok {
             let channel = if store { "Store" } else { "event" };
             eprintln!("native account {channel} notification delivery failed: {status:?}");
