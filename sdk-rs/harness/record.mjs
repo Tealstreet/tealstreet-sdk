@@ -34,6 +34,7 @@ const recording = {
         handlers.onOpen();
       },
       onMessage: (text) => {
+        frames++;
         write({ type: 'ws', url, text });
         handlers.onMessage(text);
       },
@@ -45,18 +46,24 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const body = async function* () {
+    const recorded = (body) => write({
+      type: 'http', method: request.method, url: request.url,
+      ...(request.body === undefined ? {} : { requestBody: request.body }),
+      status: response.status, headers: response.headers ?? '', body,
+    });
+    if (response.body instanceof Uint8Array) {
+      recorded(new TextDecoder().decode(response.body));
+      return response;
+    }
+    return { ...response, body: (async function* () {
       const decoder = new TextDecoder();
-      let text = '';
-      const chunks = response.body instanceof Uint8Array ? [response.body] : response.body;
-      for await (const chunk of chunks) {
-        text += decoder.decode(chunk, { stream: true });
+      let body = '';
+      for await (const chunk of response.body) {
+        body += decoder.decode(chunk, { stream: true });
         yield chunk;
       }
-      text += decoder.decode();
-      write({ type: 'http', method: request.method, url: request.url, ...(request.body && { requestBody: request.body }), status: response.status, body: text });
-    };
-    return { ...response, body: body() };
+      recorded(body + decoder.decode());
+    })() };
   },
 };
 
@@ -64,7 +71,7 @@ const { WasmEngine } = await loadEngine();
 let frames = 0;
 const seenBooks = new Set();
 const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: false })), recording, {
-  onFrame: (buffer) => { frames++; for (const book of new Frame(buffer).books()) seenBooks.add(book.market); },
+  onFrame: (buffer) => { for (const book of new Frame(buffer).books()) seenBooks.add(book.market); },
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });
 host.start();

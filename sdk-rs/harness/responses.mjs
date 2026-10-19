@@ -12,14 +12,22 @@ export class Responses {
       this.queues.get(id).push(record);
     }
   }
-  respond(method, url, body) {
+  respond(method, url, body, commandIndex = 0) {
     const queue = this.check?.(method, url, body) === false ? undefined : this.queues.get(this.key(method, url, body));
     if (!queue?.length) {
       this.unserved++;
       return { status: 599, body: '' };
     }
-    const record = queue.length > 1 || this.isWrite?.(method, url) ? queue.shift() : queue[0];
-    return { status: record.status, body: record.body };
+    const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= commandIndex);
+    if (!eligible.length) {
+      this.unserved++;
+      return { status: 599, body: '' };
+    }
+    const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
+    const current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
+    const record = current[0];
+    if (current.length > 1 || this.isWrite?.(method, url)) queue.splice(queue.indexOf(record), 1);
+    return { status: record.status, headers: record.headers ?? '', body: record.body };
   }
   unusedWrites() {
     return [...this.queues.values()].flat().filter((r) => this.isWrite?.(r.method, r.url)).length;

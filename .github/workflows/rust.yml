@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Binance + Bybit + Crypto.com: measured 1,618,621 bytes; allow 1.6 MiB.
-      WASM_BUDGET_BYTES: 1677721
+      # Four venues: measured 1,687,019 bytes; allow 1.8 MiB.
+      WASM_BUDGET_BYTES: 1887436
     defaults:
       run:
         working-directory: .
@@ -160,3 +160,11 @@ jobs:
         run: |
           yarn rust:private-tape-cryptocom
           yarn rust:gate --venue cryptocom --tape sdk-rs/harness/tapes/cryptocom-private.jsonl --runs 1 --books ''
+      - name: OKX public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue okx --tape sdk-rs/harness/fixtures/okx-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: OKX account and trading variants (correctness)
+        run: |
+          for venue in okx okxeu okxdemo okxeudemo; do
+            yarn rust:private-tape-okx --venue "$venue"
+            yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
+          done

@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
+import { parseRequestJson } from './request-json.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -19,8 +20,7 @@ const { values } = parseArgs({
 });
 const tapeBytes = readFileSync(values.tape);
 const tapeRecords = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes).toString('utf8').trim().split('\n').map(JSON.parse);
-const replayTimeout = Math.max(60_000, tapeRecords.reduce((last, r) => Math.max(last, r.t ?? 0), 0) + 30_000);
-const outDir = 'sdk-rs/harness/out';
+const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 
 const replay = (impl, run) => {
@@ -28,21 +28,27 @@ const replay = (impl, run) => {
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
   args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
   if (values['no-egress']) args.push('--no-egress');
-  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: replayTimeout });
-  if (result.status !== 0) throw new Error(`${impl} replay failed:\n${result.error?.message ?? result.stderr}`);
+  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125_000 });
+  if (result.status !== 0) throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
 };
 
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 
+// JSON object insertion order is immaterial; array order and values are exact.
+const stable = (value) => {
+  if (Array.isArray(value)) return value.map(stable);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+};
 const differences = [];
 const compare = (label, a, b) => {
   const keyed = (rows) => new Map(rows.map((row) => [row.symbol, row]));
   const ta = keyed(a);
   const tb = keyed(b);
   for (const symbol of new Set([...ta.keys(), ...tb.keys()])) {
-    const left = JSON.stringify(ta.get(symbol));
-    const right = JSON.stringify(tb.get(symbol));
+    const left = JSON.stringify(stable(ta.get(symbol)));
+    const right = JSON.stringify(stable(tb.get(symbol)));
     if (left !== right) differences.push(`${label} ${symbol}: ts=${left} rust=${right}`);
   }
 };
@@ -53,21 +59,8 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
-for (const impl of ['ts', 'rust']) for (const result of results[impl]) {
-  if (result.metrics.retainedBytes < 0 || result.metrics.bufferRetainedBytes < 0) differences.push(impl + ': negative retained memory component; baseline is invalid');
-}
-
-
-if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
-// Every request must match a taped one: an unserved request sent different parameters.
-for (const impl of ['ts', 'rust']) {
-  const unserved = results[impl][0].unserved;
-  const result = results[impl][0];
-  if (result.unusedWrites) differences.push(impl + ': ' + result.unusedWrites + ' taped mutation(s) never sent');
-  for (const error of result.protocolErrors ?? []) differences.push(impl + ': ' + error);
-  if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
-}
 const isPrivate = Boolean(ts.account);
+
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 //  - A position first seen on the user stream keeps the margin size of TS's
 //    zero-size placeholder (0); Rust takes the isolated wallet, or notional
@@ -85,8 +78,41 @@ const isPrivate = Boolean(ts.account);
 //    coverage; the committed replay tapes require no normalization for them.
 //  - Bybit: with no mark price, TS can add a second Partial stop on amend;
 //    Rust amends the existing native order ID.
-const KNOWN_TS_FIXES = (account, rustAccount) => {
-  if (values.venue === 'cryptocom') {
+// OKX full-depth correction is also applied to the TS oracle: its old
+// last-trade filter permanently deleted valid levels when the trade lagged.
+const KNOWN_TS_FIXES = {
+  // Applied to the TS oracle itself (okx.ws-public.ts / okx.exchange.ts).
+  okx: [
+    'full books retain levels past a stale last trade',
+    'public trades implement the inherited Not implemented method',
+    'candle calendar bounds use UTC independently of host timezone',
+    'fill window filtering retains native milliseconds before output seconds are truncated',
+    'keyless/public-only business socket avoids empty-credential login and private topics',
+    // Rust safety fixes: covered independently by documented-payload tests.
+    'split bracket entries acquire SL/TP before the next entry is placed',
+    'native OCO amend preserves its sibling protective leg',
+    'negative protective sizes and market or terminal amends fail before writes',
+    'positive protective dust cannot round into a close-entire-position order',
+    'standalone protective limit amendment fails before cancel if execution price cannot be retained',
+    'standalone cancellation continues remaining batches after per-row failures',
+    'new account equity survives delayed snapshots and local balance ticks',
+    'acknowledged leverage survives failed post-write snapshots',
+  ],
+  account: (account, rustAccount) => {
+    for (const position of account.positions) {
+      const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
+      if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+    }
+  },
+  bybit: (account, rustAccount) => {
+    KNOWN_TS_FIXES.account(account, rustAccount);
+    for (const order of account.orders) {
+      const fixed = rustAccount.orders.find((o) => o.id === order.id);
+      if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled') order.rejectReason = 'PostOnly';
+    }
+  },
+};
+const fixCryptocomAccount = (account) => {
     // TS never sets the hedged store flag despite mapping positions as hedged.
     account.hedged = true;
     // TS omits user.trade entirely. Derive the execution oracle from documented
@@ -96,7 +122,7 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
     account.fills = [];
     for (const record of tape) {
       if (record.type !== 'ws' || !record.url.includes('/exchange/v1/user')) continue;
-      const result = JSON.parse(record.text).result;
+      const result = parseRequestJson(record.text).result;
       if (result?.channel !== 'user.trade') continue;
       for (const row of result.data) {
         const id = String(row.trade_id);
@@ -113,41 +139,50 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
     // conservative 36-byte ceiling without JS string emulation.
     // Public throttle and public-only subscription corrections are the
     // afterTsFrame and prepareTs hooks in venues.mjs.
-    return;
-  }
-  for (const position of account.positions) {
-    const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
-    if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
-  }
-  for (const order of account.orders) {
-    const fixed = rustAccount.orders.find((o) => o.id === order.id);
-    if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled') order.rejectReason = 'PostOnly';
-  }
 };
-if (isPrivate) {
-  KNOWN_TS_FIXES(ts.account, rust.account);
-  for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
-    const left = JSON.stringify(ts.account[field]);
-    const right = JSON.stringify(rust.account[field]);
-    if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
+for (let run = 0; run < runs; run++) {
+  const ts = results.ts[run];
+  const rust = results.rust[run];
+  if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
+  // Every request must match a taped one: an unserved request sent different parameters.
+  for (const impl of ['ts', 'rust']) {
+    const output = impl === 'ts' ? ts : rust;
+    const unserved = output.unserved;
+    if (output.metrics.retainedBytes < 0 || output.metrics.bufferRetainedBytes < 0) differences.push(impl + ': negative retained memory component; baseline is invalid');
+    if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
+    for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
+    for (const symbol of values.books.split(',').filter(Boolean)) {
+      if (!output.books[symbol]) differences.push(`${impl}: requested book ${symbol} is missing`);
+    }
+    if (!output.markets.length || !output.tickers.length) differences.push(`${impl}: empty public seed`);
+    if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
   }
-  const left = JSON.stringify(ts.commands);
-  const right = JSON.stringify(rust.commands);
+  const isPrivate = Boolean(ts.account);
+  if (isPrivate) {
+    if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
+    if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
+    if (values.venue === 'bybit') KNOWN_TS_FIXES.bybit(ts.account, rust.account);
+    for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
+      const left = JSON.stringify(ts.account[field]);
+      const right = JSON.stringify(rust.account[field]);
+      if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
+    }
+  }
+  const left = JSON.stringify(stable(ts.commands));
+  const right = JSON.stringify(stable(rust.commands));
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
-}
-// KNOWN_TS_FIXES: Crypto.com legitimately sends null quotes (empty books).
-// TS parseFloat(null) yields NaN; the engine's numeric boundary represents
-// unavailable ticker numbers as zero.
-if (values.venue === 'cryptocom') {
-  for (const ticker of ts.tickers) for (const field of ['bid', 'ask', 'last', 'percentage', 'volume', 'quoteVolume', 'openInterest']) {
-    if (ticker[field] === null) ticker[field] = 0;
+  // KNOWN_TS_FIXES: unavailable Crypto.com quotes produce NaN in TS.
+  if (values.venue === 'cryptocom') for (const ticker of ts.tickers) {
+    for (const field of ['bid', 'ask', 'last', 'percentage', 'volume', 'quoteVolume', 'openInterest']) {
+      if (ticker[field] === null) ticker[field] = 0;
+    }
   }
-}
-compare('market', ts.markets, rust.markets);
-compare('ticker', ts.tickers, rust.tickers);
-for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
-  if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
-    differences.push(`book ${symbol} differs`);
+  compare('market', ts.markets, rust.markets);
+  compare('ticker', ts.tickers, rust.tickers);
+  for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
+    if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
+      differences.push(`book ${symbol} differs`);
+    }
   }
 }
 
@@ -169,6 +204,7 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (ts.account) console.log('(private tape: paced in real time, so it gates correctness only)');
+if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
 
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.

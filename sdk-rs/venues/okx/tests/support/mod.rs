@@ -1,0 +1,117 @@
+use safe_cex_engine::{Action, Engine, Event, Method, Response, SocketId};
+use safe_cex_venue_okx::{Okx, Options};
+
+// OKX v5 docs: public instruments, tickers and books payload schemas.
+// https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments
+pub const MARKET: &str = r#"{"instId":"BTC-USDT-SWAP","instType":"SWAP","ctType":"linear","ctVal":"0.01","ctValCcy":"BTC","settleCcy":"USDT","state":"live","lotSz":"0.01","tickSz":"0.1","minSz":"0.01","maxIcebergSz":"1000","maxLmtSz":"1000","maxMktSz":"1000","maxStopSz":"1000","maxTriggerSz":"1000","maxTwapSz":"1000","lever":"100"}"#;
+pub const TICKER: &str = r#"{"instId":"BTC-USDT-SWAP","last":"40000","open24h":"40000","bidPx":"39999.9","askPx":"40000.1","volCcy24h":"123.4","vol24h":"12340"}"#;
+
+pub fn actions(engine: &mut Engine<Okx>) -> Vec<Action> {
+    engine.drain_actions().collect()
+}
+pub fn reply(engine: &mut Engine<Okx>, action: &Action, body: &str, now: f64) {
+    let Action::Http(r) = action else {
+        panic!("expected request")
+    };
+    engine.handle(
+        now,
+        Event::HttpResponse {
+            request: r.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body,
+            },
+        },
+    );
+}
+pub fn envelope(row: &str) -> String {
+    format!(r#"{{"code":"0","msg":"","data":[{row}]}}"#)
+}
+pub fn public(options: Options) -> (Engine<Okx>, SocketId, SocketId) {
+    let mut engine = Engine::new(Okx::new(options));
+    engine.start(1_709_209_849_123.0);
+    let request = actions(&mut engine)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .unwrap();
+    reply(&mut engine, &request, &envelope(MARKET), 1.0);
+    let request = actions(&mut engine)
+        .into_iter()
+        .find(|a| matches!(a, Action::Http(_)))
+        .unwrap();
+    reply(&mut engine, &request, &envelope(TICKER), 2.0);
+    let sockets: Vec<_> = actions(&mut engine)
+        .into_iter()
+        .filter_map(|a| {
+            if let Action::WsConnect { socket, url } = a {
+                Some((socket, url))
+            } else {
+                None
+            }
+        })
+        .collect();
+    let public = sockets
+        .iter()
+        .find(|(_, u)| u.ends_with("/public"))
+        .unwrap()
+        .0;
+    let business = sockets
+        .iter()
+        .find(|(_, u)| u.ends_with("/business"))
+        .unwrap()
+        .0;
+    engine.handle(3.0, Event::WsOpened { socket: public });
+    engine.handle(3.0, Event::WsOpened { socket: business });
+    actions(&mut engine);
+    (engine, public, business)
+}
+pub fn ws(engine: &mut Engine<Okx>, socket: SocketId, text: &str) {
+    engine.handle(4.0, Event::WsMessage { socket, text });
+}
+pub fn is_get(action: &Action, suffix: &str) -> bool {
+    matches!(action, Action::Http(r) if r.method == Method::Get && r.url.ends_with(suffix))
+}
+
+pub fn trading_engine() -> Engine<Okx> {
+    let mut e = Engine::new(Okx::new(Options {
+        key: Some("test-key".into()),
+        secret: Some("test-secret".into()),
+        passphrase: Some("test-passphrase".into()),
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(MARKET), 1.0);
+    let a = actions(&mut e).remove(0);
+    reply(&mut e, &a, &envelope(TICKER), 2.0);
+    let out = actions(&mut e);
+    let a = out
+        .iter()
+        .find(|a| is_get(a, "/api/v5/account/config"))
+        .unwrap();
+    reply(
+        &mut e,
+        a,
+        &envelope(r#"{"posMode":"net_mode","acctLv":"2"}"#),
+        3.0,
+    );
+    let mut pending: Vec<_> = actions(&mut e)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    while let Some(a) = pending.pop() {
+        let body = if matches!(&a, Action::Http(r) if r.url.contains("account-position-risk")) {
+            envelope(r#"{"balData":[{"ccy":"USDT","eq":"5000"}]}"#)
+        } else {
+            envelope("")
+        };
+        reply(&mut e, &a, &body, 4.0);
+        pending.extend(
+            actions(&mut e)
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(_))),
+        );
+    }
+    e
+}

@@ -305,3 +305,16 @@ https://github.com/Tealstreet/tealstreet-sdk/pull/1303#issuecomment-6272721603.
 Port and local review phases complete. Landing remains subject to green CI on
 the final PR head, then authorized merge into feat/rust-rewrite and a fresh
 follow-up branch. PR: https://github.com/Tealstreet/tealstreet-sdk/pull/1303.
+
+### Concurrent OKX landing integration
+
+While final CI was starting, PR1302 landed at2b37754970. Merged that landing
+commit, preserving OKX aliases/passphrase/configuration, opt-in streaming
+envelopes, staged response headers, subscription/login checks, query dispatch,
+all-run correctness checks, isolated outputs and stripped wasm metadata. Combined
+these with exact Crypto.com body/HMAC validation, stable memory accounting,
+production TS store transport and generic single-consumption response queues.
+Added staged-snapshot/headers regression. Nine harness tests and all four venue
+native suites plus engine PASS (engine16,Crypto.com42); wasm clippy PASS.
+Combined four-venue wasm1,687,019bytes; aggregate budget1.8MiB. Revalidating public
+and private gates, including all four OKX account variants, before updated CI.
