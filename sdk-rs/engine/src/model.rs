@@ -270,14 +270,14 @@ pub struct Candle {
     pub volume: f64,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BybitBbo {
     pub side_type: String,
     pub level: f64,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaceOrderOpts {
     pub symbol: String,

@@ -81,6 +81,14 @@ fn ready(variant: Variant) -> Harness {
         h.respond("/v5/position/list", 200, EMPTY);
         h.respond("/v5/account/wallet-balance", 200, WALLET);
         assert!(h.engine.store().loaded().orders);
+    } else if variant == Variant::Demo {
+        while h.has_request("/v5/order/realtime") {
+            h.respond("/v5/order/realtime", 200, EMPTY);
+        }
+        while h.has_request("/v5/position/list") {
+            h.respond("/v5/position/list", 200, EMPTY);
+        }
+        h.respond("/v5/account/wallet-balance", 200, WALLET);
     }
     h.requests.clear();
     h
@@ -699,4 +707,151 @@ fn hyro_market_ack_does_not_invent_a_resting_open_order() {
     created(&mut h, "market");
     assert_eq!(h.result(1), Some(&Ok("[\"market\"]".into())));
     assert!(h.engine.store().order("market").is_none());
+}
+
+#[test]
+fn demo_late_create_ack_cannot_reopen_order_removed_by_newer_snapshot() {
+    let mut h = ready(Variant::Demo);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    resolve_mode(&mut h, "BTCUSDT");
+    let create = h.take("/v5/order/create-batch");
+    h.message("/v5/private", r#"{"topic":"order","data":[{"category":"linear","symbol":"BTCUSDT","orderId":"late","orderStatus":"Filled","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"1","leavesQty":"0"}]}"#);
+    assert!(h.engine.store().order("late").is_some());
+    h.now += 1.0;
+    h.message("/v5/private", r#"{"op":"auth","success":true}"#);
+    h.message("/v5/private", r#"{"op":"subscribe","success":true}"#);
+    while h.has_request("/v5/order/realtime") {
+        h.respond("/v5/order/realtime", 200, EMPTY);
+    }
+    assert!(h.engine.store().order("late").is_none());
+    h.reply(create.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"late"}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
+    assert_eq!(h.result(1), Some(&Ok("[\"late\"]".into())));
+    assert!(h.engine.store().order("late").is_none());
+}
+
+#[test]
+fn demo_create_ack_from_closed_private_socket_cannot_publish_open_order() {
+    let mut h = ready(Variant::Demo);
+    place(&mut h, 1, vec![order("BTCUSDT", 1.0)]);
+    resolve_mode(&mut h, "BTCUSDT");
+    let create = h.take("/v5/order/create-batch");
+    let socket = h.socket("/v5/private").unwrap();
+    h.event(Event::WsClosed { socket, code: 1006 });
+    h.reply(create.id, 200, r#"{"retCode":0,"result":{"list":[{"orderId":"late"}]},"retExtInfo":{"list":[{"code":0,"msg":"OK"}]}}"#);
+    assert_eq!(h.result(1), Some(&Ok("[\"late\"]".into())));
+    assert!(h.engine.store().order("late").is_none());
+}
+
+#[test]
+fn spot_cancel_all_covers_each_family_and_keeps_failed_family_open() {
+    for (failed, success_zero) in [
+        (None, false),
+        (Some("Order"), false),
+        (Some("StopOrder"), false),
+        (Some("tpslOrder"), false),
+        (Some("Order"), true),
+        (Some("StopOrder"), true),
+        (Some("tpslOrder"), true),
+    ] {
+        let mut h = ready(Variant::Spot);
+        h.message("/v5/private", r#"{"topic":"order.spot","data":[{"category":"spot","symbol":"BTCUSDT","orderId":"ordinary","orderStatus":"New","orderType":"Limit","side":"Buy","price":"100","qty":"1","cumExecQty":"0","leavesQty":"1","stopLoss":"90"},{"category":"spot","symbol":"BTCUSDT","orderId":"conditional","orderStatus":"Untriggered","orderType":"Market","stopOrderType":"Stop","side":"Buy","triggerPrice":"101","qty":"1","cumExecQty":"0","leavesQty":"1"},{"category":"spot","symbol":"BTCUSDT","orderId":"stop","orderStatus":"Untriggered","orderType":"Market","stopOrderType":"tpslOrder","side":"Sell","triggerPrice":"90","qty":"1","cumExecQty":"0","leavesQty":"1"}]}"#);
+        h.command(Command::CancelSymbolOrders {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+        });
+        for filter in ["Order", "StopOrder", "tpslOrder"] {
+            let request = h.take("/v5/order/cancel-all");
+            assert!(body(&request).contains(&format!("\"orderFilter\":\"{filter}\"")));
+            let reply = if failed == Some(filter) {
+                if success_zero {
+                    r#"{"retCode":0,"result":{"list":[],"success":"0"}}"#
+                } else {
+                    r#"{"retCode":10006,"retMsg":"Too many visits"}"#
+                }
+            } else {
+                r#"{"retCode":0,"result":{"list":[],"success":"1"}}"#
+            };
+            h.reply(request.id, 200, reply);
+        }
+        for (id, filter) in [
+            ("ordinary", "Order"),
+            ("ordinary__stop_loss", "Order"),
+            ("conditional", "StopOrder"),
+            ("stop", "tpslOrder"),
+        ] {
+            assert_eq!(
+                h.engine.store().order(id).unwrap().status,
+                if failed == Some(filter) {
+                    safe_cex_engine::model::OrderStatus::Open
+                } else {
+                    safe_cex_engine::model::OrderStatus::Canceled
+                },
+                "{id} after {failed:?} failed"
+            );
+        }
+        assert_eq!(h.result(1).unwrap().is_err(), failed.is_some());
+    }
+}
+
+#[test]
+fn hyro_conditional_retry_preserves_identity_and_body_after_ticker_crosses_trigger() {
+    let mut h = ready(Variant::Hyrotrader);
+    let mut opts = order("BTCUSDT", 1.0);
+    opts.kind = OrderType::Conditional;
+    opts.trigger_price = Some(70000.0);
+    place(&mut h, 1, vec![opts.clone()]);
+    let create = h.take("/v5/order/create");
+    let original = body(&create).to_owned();
+    assert!(original.contains("\"triggerDirection\":\"1\""));
+    h.event(Event::HttpFailed {
+        request: create.id,
+        error: "lost",
+    });
+    h.respond("/v5/order/realtime", 500, r#"{"retCode":10016}"#);
+    h.message("/v5/public/linear", r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","lastPrice":"71000"}}"#);
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 71000.0);
+    place(&mut h, 2, vec![opts]);
+    assert!(!h.has_request("/v5/order/create"));
+    h.respond("/v5/order/realtime", 200, EMPTY);
+    h.respond("/v5/order/history", 200, EMPTY);
+    let retry = h.take("/v5/order/create");
+    assert_eq!(body(&retry), original);
+    h.reply(
+        retry.id,
+        200,
+        r#"{"retCode":0,"result":{"orderId":"same"}}"#,
+    );
+    assert_eq!(h.result(2), Some(&Ok("[\"same\"]".into())));
+}
+
+#[test]
+fn hyro_unknown_trailing_stop_cannot_bypass_recovery_after_ticker_changes() {
+    let mut h = ready(Variant::Hyrotrader);
+    let mut opts = order("BTCUSDT", 0.0);
+    opts.kind = OrderType::TrailingStopLoss;
+    opts.price = Some(65000.0);
+    place(&mut h, 1, vec![opts.clone()]);
+    let stop = h.take("/v5/position/trading-stop");
+    h.event(Event::HttpFailed {
+        request: stop.id,
+        error: "lost",
+    });
+    h.message("/v5/public/linear", r#"{"topic":"tickers.BTCUSDT","type":"delta","data":{"symbol":"BTCUSDT","lastPrice":"71000"}}"#);
+    place(&mut h, 2, vec![opts]);
+    assert!(h.result(2).unwrap().is_err());
+    assert!(!h.has_request("/v5/position/trading-stop"));
+}
+
+#[test]
+fn hyro_invalid_nonfinite_option_cannot_alias_pending_intent() {
+    let mut h = ready(Variant::Hyrotrader);
+    let opts = order("BTCUSDT", 1.0);
+    place(&mut h, 1, vec![opts.clone()]);
+    let mut invalid = opts;
+    invalid.stop_loss = Some(f64::NAN);
+    place(&mut h, 2, vec![invalid]);
+    assert!(h.result(2).unwrap().is_err());
+    created(&mut h, "first");
+    assert_eq!(h.result(1), Some(&Ok("[\"first\"]".into())));
+    assert!(h.requests.is_empty());
 }

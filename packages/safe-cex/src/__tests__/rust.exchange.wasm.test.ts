@@ -605,6 +605,46 @@ describe('RustEngineExchange', () => {
     expect(tape.writes).toEqual([]);
   });
 
+  it.each([NaN, Infinity, -Infinity])(
+    'rejects non-finite Bybit tick protection before any batch write (%s)',
+    async (ticks) => {
+      const tape = bybitTransport('spot');
+      setWasmEngineLoader(loadNodeEngine);
+      setRustEngineTransport(() => tape.transport);
+      exchange = new RustEngineExchange('bybitspot', { key: 'k', secret: 's' }, new DefaultStore());
+      await exchange.start();
+      const opts = { symbol: 'BTCUSDT', type: OrderType.Market, side: OrderSide.Buy, amount: 0.001 };
+      const protectedOrder = { ...opts, bybitSlippageToleranceTicks: ticks };
+      await expect(exchange.placeOrders([opts, protectedOrder])).rejects.toThrow(
+        'bybitSlippageToleranceTicks must be finite',
+      );
+      expect(tape.writes).toEqual([]);
+    },
+  );
+
+  it.each([false, true])('selects the demo REST and socket environments (testnet=%s)', async (testnet) => {
+    const tape = bybitTransport();
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    exchange = new RustEngineExchange('bybitdemo', { key: 'k', secret: 's', testnet }, new DefaultStore());
+    await exchange.start();
+    const restHost = testnet ? 'api-testnet.bybit.com' : 'api-demo.bybit.com';
+    expect(tape.requests.every(({ url }) => new URL(url).hostname === restHost)).toBe(true);
+    await until(() => tape.socketUrls.some((url) => url.includes('/v5/private')));
+    expect(new URL(tape.socketUrls.find((url) => url.includes('/v5/private'))!).hostname).toBe(
+      testnet ? 'stream-testnet.bybit.com' : 'stream-demo.bybit.com',
+    );
+    expect(new URL(tape.socketUrls.find((url) => url.includes('/v5/public/linear'))!).hostname).toBe(
+      testnet ? 'stream-testnet.bybit.com' : 'stream.bybit.com',
+    );
+    expect(exchange.isDemo).toBe(true);
+    const opts = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 0.001, price: 90000 };
+    await expect(exchange.placeOrders([opts, { ...opts, clientOrderId: 'invalid.id' }])).rejects.toThrow(
+      'clientOrderId must match',
+    );
+    expect(tape.writes).toEqual([]);
+  });
+
   it('rejects Hyro without configured origins before any transport I/O', async () => {
     const prod = { ...HYROTRADER_PROD_URL };
     const simulator = { ...HYROTRADER_SIMULATOR_URL };

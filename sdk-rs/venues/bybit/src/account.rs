@@ -115,6 +115,7 @@ pub struct AccountState {
     pub orders_snapshot_version: u32,
     fill_cursors: HashMap<String, FillCursor>,
     terminal_fills: VecDeque<String>,
+    recent_fill_cursors: VecDeque<String>,
     ready: bool,
     revision: u32,
     handshake: Option<&'static str>,
@@ -715,6 +716,36 @@ fn open_upnl(store: &Store) -> f64 {
 }
 
 impl BybitLinear {
+    fn remember_hyro_fill_cursor(&mut self, id: &str) {
+        self.account.recent_fill_cursors.retain(|known| known != id);
+        self.account.recent_fill_cursors.push_back(id.to_owned());
+        while self.account.recent_fill_cursors.len() > 500 {
+            self.account.recent_fill_cursors.pop_front();
+        }
+    }
+
+    fn retain_hyro_fill_cursors(&mut self, active: &HashSet<&str>) {
+        self.account.fill_cursors.retain(|id, _| {
+            active.contains(id.as_str()) || self.account.recent_fill_cursors.contains(id)
+        });
+        self.account
+            .terminal_fills
+            .retain(|id| self.account.fill_cursors.contains_key(id));
+    }
+
+    fn store_hyro_fill_cursor(&mut self, cx: &Cx<'_, Pending>, id: &str, cursor: FillCursor) {
+        self.account.fill_cursors.insert(id.to_owned(), cursor);
+        self.remember_hyro_fill_cursor(id);
+        let active = cx
+            .store
+            .orders()
+            .iter()
+            .filter(|order| order.status == OrderStatus::Open)
+            .map(|order| order.id.as_str())
+            .collect();
+        self.retain_hyro_fill_cursors(&active);
+    }
+
     fn on_hyro_fill(&mut self, cx: &mut Cx<'_, Pending>, row: &OrderRow<'_>) -> bool {
         let quantity = or_zero(&row.cum_exec_qty);
         let previous = self
@@ -743,12 +774,11 @@ impl BybitLinear {
                 .terminal_fills
                 .push_back(row.order_id.to_string());
             while self.account.terminal_fills.len() > 500 {
-                if let Some(id) = self.account.terminal_fills.pop_front() {
-                    self.account.fill_cursors.remove(&id);
-                }
+                self.account.terminal_fills.pop_front();
             }
         }
         if quantity <= previous.quantity {
+            self.store_hyro_fill_cursor(cx, &row.order_id, previous);
             return true;
         }
         let amount = subtract(quantity, previous.quantity);
@@ -779,8 +809,9 @@ impl BybitLinear {
                 amount,
             });
         }
-        self.account.fill_cursors.insert(
-            row.order_id.to_string(),
+        self.store_hyro_fill_cursor(
+            cx,
+            &row.order_id,
             FillCursor {
                 quantity,
                 value: cumulative.or_else(|| average.map(|price| price * quantity)),
@@ -923,12 +954,24 @@ impl BybitLinear {
         self.account.position_bound.clear();
         for mapped in snapshot.orders.expect("checked above") {
             let id = mapped.orders[0].id.clone();
-            let previous = self.account.fill_cursors.entry(id).or_default();
-            if mapped.fill_cursor.quantity > previous.quantity {
-                *previous = mapped.fill_cursor;
-            } else if mapped.fill_cursor.quantity == previous.quantity {
-                previous.value = mapped.fill_cursor.value.or(previous.value);
+            // Recovery establishes the baseline. Healthy polls cannot consume
+            // executions whose order events have not arrived yet.
+            if !self.account.ready {
+                let previous = self.account.fill_cursors.entry(id.clone()).or_default();
+                if mapped.fill_cursor.quantity > previous.quantity {
+                    *previous = mapped.fill_cursor;
+                } else if mapped.fill_cursor.quantity == previous.quantity {
+                    previous.value = mapped.fill_cursor.value.or(previous.value);
+                }
+                if mapped.orders[0].status != OrderStatus::Open {
+                    self.account.terminal_fills.retain(|known| known != &id);
+                    self.account.terminal_fills.push_back(id.clone());
+                    while self.account.terminal_fills.len() > 500 {
+                        self.account.terminal_fills.pop_front();
+                    }
+                }
             }
+            self.remember_hyro_fill_cursor(&id);
             if mapped.position_bound {
                 self.account
                     .position_bound
@@ -941,9 +984,7 @@ impl BybitLinear {
             .filter(|order| order.status == OrderStatus::Open)
             .map(|order| order.id.as_str())
             .collect();
-        self.account.fill_cursors.retain(|id, _| {
-            active.contains(id.as_str()) || self.account.terminal_fills.contains(id)
-        });
+        self.retain_hyro_fill_cursors(&active);
         let positions = best_positions(snapshot.positions.expect("checked above"));
         let settings: Vec<_> = positions
             .iter()

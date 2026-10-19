@@ -1,0 +1,4 @@
+# Public Binance HMAC documentation vector in a historical signing unit test:
+# https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info
+# Exact commit/path/rule/line only; production source and future changes stay scanned.
+879fdc74610ec6b2504c9faf8a8d8ffbaff576c7:sdk-rs/safe-cex-venue-binance/src/sign.rs:generic-api-key:103

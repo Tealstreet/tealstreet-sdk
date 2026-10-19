@@ -408,3 +408,52 @@ fn hyro_regressing_fill_value_does_not_invent_a_fill() {
     assert!(!h.closed.is_empty());
     assert_eq!(h.engine.store().order("delta-fill").unwrap().filled, 0.4);
 }
+
+#[test]
+fn hyro_periodic_snapshot_does_not_consume_delayed_fill() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    emitted_fills(&mut h);
+    h.message("/v5/private", &hyro_fill_frame("New", "0", "0"));
+    emitted_fills(&mut h);
+    h.advance(5000.0);
+    h.respond("/v5/order/realtime",200,r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","orderId":"delta-fill","side":"Buy","orderType":"Limit","orderStatus":"PartiallyFilled","price":"120","qty":"1","cumExecQty":"0.4","cumExecValue":"40","avgPrice":"100","leavesQty":"0.6"}],"nextPageCursor":""}}"#);
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    h.message(
+        "/v5/private",
+        &hyro_fill_frame("PartiallyFilled", "0.4", "40"),
+    );
+    assert_eq!(emitted_fills(&mut h), vec![(100.0, 0.4)]);
+}
+
+#[test]
+fn hyro_recovery_terminal_snapshot_seeds_fill_cursor() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    h.respond("/v5/order/realtime",200,r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","orderId":"delta-fill","side":"Buy","orderType":"Limit","orderStatus":"Filled","price":"120","qty":"1","cumExecQty":"1","cumExecValue":"106","avgPrice":"106","leavesQty":"0"}],"nextPageCursor":""}}"#);
+    h.respond("/v5/position/list", 200, POSITIONS);
+    h.respond("/v5/account/wallet-balance", 200, WALLET);
+    emitted_fills(&mut h);
+    h.message("/v5/private", &hyro_fill_frame("Filled", "1", "106"));
+    assert!(emitted_fills(&mut h).is_empty());
+}
+
+#[test]
+fn hyro_periodic_absent_order_keeps_partial_fill_cursor() {
+    let mut h = startup(Variant::Hyrotrader);
+    handshake(&mut h);
+    hyro_snapshot(&mut h);
+    emitted_fills(&mut h);
+    h.message(
+        "/v5/private",
+        &hyro_fill_frame("PartiallyFilled", "0.4", "40"),
+    );
+    assert_eq!(emitted_fills(&mut h), vec![(100.0, 0.4)]);
+    h.advance(5000.0);
+    hyro_snapshot(&mut h);
+    emitted_fills(&mut h);
+    h.message("/v5/private", &hyro_fill_frame("Filled", "1", "106"));
+    assert_eq!(emitted_fills(&mut h), vec![(110.0, 0.6)]);
+}

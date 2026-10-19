@@ -9,7 +9,7 @@ use safe_cex_engine::model::{
     MarginType, Order, OrderSide, OrderStatus, OrderType, PlaceOrderOpts, PositionSide,
     StopTriggerType, TimeInForce,
 };
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Response, TimerId, num};
+use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Response, SocketId, TimerId, num};
 use std::collections::{HashMap, VecDeque};
 
 /// Orders per `create-batch` request (Bybit's non-VIP limit).
@@ -34,6 +34,8 @@ struct LocalWrite {
     path: &'static str,
     body: String,
     before: Vec<Order>,
+    socket: Option<SocketId>,
+    snapshot: u32,
 }
 
 /// What a response means for its job.
@@ -384,19 +386,54 @@ impl BybitLinear {
                     self.advance(cx, command);
                     return;
                 }
-                let ids = cx
-                    .store
-                    .orders()
-                    .iter()
-                    .filter(|o| o.symbol == symbol)
-                    .map(|o| o.id.clone())
-                    .collect();
-                let body = Body::new()
-                    .str("category", self.paths.category)
-                    .str("symbol", &symbol)
-                    .finish();
-                let call = Call::CancelAll { ids };
-                (command, Ok(single("/v5/order/cancel-all", body, call)))
+                if self.variant.is_spot() {
+                    let mut job = Job {
+                        continue_on_error: true,
+                        ..Job::default()
+                    };
+                    // Spot defaults to ordinary orders; every trigger family
+                    // needs its own cancel, even when absent from our snapshot.
+                    for filter in ["Order", "StopOrder", "tpslOrder"] {
+                        let ids = cx
+                            .store
+                            .orders()
+                            .iter()
+                            .filter(|o| {
+                                o.symbol == symbol
+                                    && !is_virtual(&o.id)
+                                    && spot_order_filter(o.kind) == filter
+                            })
+                            .map(|o| o.id.clone())
+                            .collect();
+                        job.steps.push_back(Step {
+                            delay_ms: 0.0,
+                            requests: vec![Planned {
+                                path: "/v5/order/cancel-all",
+                                body: Body::new()
+                                    .str("category", self.paths.category)
+                                    .str("symbol", &symbol)
+                                    .str("orderFilter", filter)
+                                    .finish(),
+                                call: Call::CancelAll { ids },
+                            }],
+                        });
+                    }
+                    (command, Ok(job))
+                } else {
+                    let ids = cx
+                        .store
+                        .orders()
+                        .iter()
+                        .filter(|o| o.symbol == symbol)
+                        .map(|o| o.id.clone())
+                        .collect();
+                    let body = Body::new()
+                        .str("category", self.paths.category)
+                        .str("symbol", &symbol)
+                        .finish();
+                    let call = Call::CancelAll { ids };
+                    (command, Ok(single("/v5/order/cancel-all", body, call)))
+                }
             }
             Command::SetLeverage {
                 command,
@@ -502,6 +539,8 @@ impl BybitLinear {
                         path: planned.path,
                         body: planned.body.clone(),
                         before: cx.store.orders().to_vec(),
+                        socket: self.private.socket,
+                        snapshot: self.account.orders_snapshot_version,
                     });
                     let request = Request {
                         command,
@@ -734,8 +773,25 @@ impl BybitLinear {
             {
                 mark_canceled(cx, &ids, self.local_order_lifecycle());
             }
-            (Call::CancelAll { ids }, Ok(_)) => {
-                mark_canceled(cx, &ids, self.local_order_lifecycle())
+            (Call::CancelAll { ids }, Ok(body)) => {
+                #[derive(serde::Deserialize)]
+                struct Reply {
+                    result: Option<Success>,
+                }
+                #[derive(serde::Deserialize)]
+                struct Success {
+                    success: Option<String>,
+                }
+                let rejected = serde_json::from_str::<Reply>(body)
+                    .ok()
+                    .and_then(|r| r.result)
+                    .and_then(|r| r.success)
+                    .is_some_and(|s| s != "1");
+                if rejected {
+                    errors.push("Bybit cancel-all was not successful".into());
+                } else {
+                    mark_canceled(cx, &ids, self.local_order_lifecycle());
+                }
             }
             (Call::Leverage { symbol, leverage }, outcome)
                 if outcome
@@ -1327,6 +1383,14 @@ fn trading_stop_job(body: String) -> Job {
     single("/v5/position/trading-stop", body, Call::TradingStop)
 }
 
+fn spot_order_filter(kind: OrderType) -> &'static str {
+    match kind {
+        OrderType::StopLoss | OrderType::TakeProfit => "tpslOrder",
+        OrderType::Conditional => "StopOrder",
+        _ => "Order",
+    }
+}
+
 /// Cancel by id, ten per batch; attached TP/SL rows are not venue orders
 /// and go with their parent.
 impl BybitLinear {
@@ -1335,11 +1399,10 @@ impl BybitLinear {
         let real: Vec<&Order> = orders.iter().filter(|o| !is_virtual(&o.id)).collect();
         if !self.paths.batch_orders {
             for order in real {
-                let filter = self.variant.is_spot().then_some(match order.kind {
-                    OrderType::StopLoss | OrderType::TakeProfit => "tpslOrder",
-                    OrderType::Conditional => "StopOrder",
-                    _ => "Order",
-                });
+                let filter = self
+                    .variant
+                    .is_spot()
+                    .then_some(spot_order_filter(order.kind));
                 let body = Body::new()
                     .str("category", self.paths.category)
                     .str("symbol", &order.symbol)
@@ -1611,6 +1674,12 @@ struct LocalOrder {
 
 impl BybitLinear {
     fn apply_local_write(&self, cx: &mut Cx<'_, Pending>, local: &LocalWrite, response: &str) {
+        // A later authoritative snapshot or private session supersedes an ack.
+        if local.socket != self.private.socket
+            || local.snapshot != self.account.orders_snapshot_version
+        {
+            return;
+        }
         match local.path {
             "/v5/order/create" => {
                 if let (Ok(input), Ok(reply)) = (

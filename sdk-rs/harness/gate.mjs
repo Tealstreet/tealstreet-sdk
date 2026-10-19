@@ -118,6 +118,9 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 //    orders instead of calling derivative position/trading-stop endpoints.
 //  - Hyro: seed unseen partial fills from accepted account snapshots; TS can
 //    report pre-snapshot cumulative executions again when the order stream resumes.
+//  - Hyro: TS keys ambiguous-create recovery by a re-rendered wire payload;
+//    ticker/position changes can allocate a new identity for the same retry.
+//    Rust resumes the original caller intent before rendering any new payload.
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
 const KNOWN_TS_FIXES = {

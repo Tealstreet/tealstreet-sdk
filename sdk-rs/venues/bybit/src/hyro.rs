@@ -102,7 +102,7 @@ impl BybitLinear {
         command: CommandId,
         orders: &[PlaceOrderOpts],
     ) {
-        let planned = (|| {
+        let key = (|| {
             self.check_ids(cx, orders)?;
             if self.credentials.is_none() {
                 return Err("HyroTrader trading needs an API key".to_owned());
@@ -113,36 +113,35 @@ impl BybitLinear {
                         .to_owned(),
                 );
             }
-            let mut creates = Vec::new();
-            let mut parts = Vec::new();
             for opts in orders {
-                let market = cx
-                    .store
-                    .market(&opts.symbol)
-                    .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
-                if market.quote != "USDT" {
-                    return Err("HyroTrader supports USDT perpetuals only".into());
-                }
-                if let Some(stop) = self.hyro_stop(cx, opts)? {
-                    parts.push(stop.clone());
-                    creates.push((Body::new(), opts.clone(), Some(stop)));
-                    continue;
-                }
-                for lot in self.format_lots(cx, opts)? {
-                    let base = lot.single;
-                    parts.push(base.clone().finish());
-                    creates.push((base, opts.clone(), None));
+                if !opts.amount.is_finite()
+                    || [
+                        opts.price,
+                        opts.trigger_price,
+                        opts.stop_loss,
+                        opts.take_profit,
+                        opts.max_slippage_pct,
+                        opts.bybit_slippage_tolerance_ticks,
+                        opts.bybit_bbo.as_ref().map(|bbo| bbo.level),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .any(|n| !n.is_finite())
+                {
+                    return Err("Order numbers must be finite".into());
                 }
             }
-            Ok((serde_json::to_string(&parts).unwrap_or_default(), creates))
+            serde_json::to_string(orders).map_err(|e| e.to_string())
         })();
-        let (key, creates) = match planned {
-            Ok(planned) => planned,
+        let key = match key {
+            Ok(key) => key,
             Err(message) => {
                 cx.done(command, Err(message));
                 return;
             }
         };
+        // Retries keep the original lots and trigger direction even when
+        // current prices, precision or the position have changed.
         if let Some(group) = self.trading.hyro.groups.get_mut(&key) {
             group.waiters.push(command);
             if group.running {
@@ -152,95 +151,124 @@ impl BybitLinear {
             for create in &mut group.creates {
                 create.attempts = 0;
             }
-        } else {
-            let creates: Result<Vec<Create>, String> = creates
-                .into_iter()
-                .map(|(base, opts, stop_body)| {
-                    let link = safe_cex_crypto::uuid::uuid()?;
-                    // Publish the sent lot, not the original unsplit quantity.
-                    #[derive(Deserialize)]
-                    struct Lot {
-                        qty: String,
-                        #[serde(default)]
-                        price: Option<String>,
-                        #[serde(default, rename = "triggerPrice")]
-                        trigger_price: Option<String>,
-                        #[serde(default, rename = "stopLoss")]
-                        stop_loss: Option<String>,
-                        #[serde(default, rename = "takeProfit")]
-                        take_profit: Option<String>,
-                    }
-                    let sent: Lot = if stop_body.is_some() {
-                        Lot {
-                            qty: "0".into(),
-                            price: None,
-                            trigger_price: None,
-                            stop_loss: None,
-                            take_profit: None,
-                        }
-                    } else {
-                        serde_json::from_str(&base.clone().finish()).map_err(|e| e.to_string())?
-                    };
-                    let amount = sent.qty.parse::<f64>().map_err(|e| e.to_string())?;
-                    let price = sent
-                        .price
-                        .or(sent.trigger_price)
-                        .and_then(|p| p.parse().ok())
-                        .or_else(|| cx.store.ticker(&opts.symbol).map(|t| t.last))
-                        .unwrap_or(0.0);
-                    let optimistic = Order {
-                        id: String::new(),
-                        parent_id: None,
-                        status: OrderStatus::Open,
-                        symbol: opts.symbol.clone(),
-                        kind: opts.kind,
-                        side: opts.side,
-                        price,
-                        amount,
-                        filled: 0.0,
-                        remaining: amount,
-                        reduce_only: opts.reduce_only.unwrap_or(false),
-                        close: opts.close,
-                        client_order_id: Some(link.clone()),
-                        time_in_force: opts.time_in_force,
-                        last_update: cx.now,
-                        trigger_type: opts.trigger_type,
-                        take_profit: sent.take_profit.and_then(|p| p.parse().ok()),
-                        stop_loss: sent.stop_loss.and_then(|p| p.parse().ok()),
-                        extra: None,
-                    };
-                    Ok(Create {
-                        base,
-                        stop_body,
-                        blocked: false,
-                        link,
-                        symbol: opts.symbol,
-                        optimistic,
-                        uncertain: false,
-                        accepted: None,
-                        observed: false,
-                        attempts: 0,
-                    })
-                })
-                .collect();
-            let creates = match creates {
-                Ok(creates) => creates,
-                Err(error) => {
-                    cx.done(command, Err(error));
-                    return;
-                }
-            };
-            self.trading.hyro.groups.insert(
-                key.clone(),
-                Group {
-                    creates,
-                    index: 0,
-                    ids: Vec::new(),
-                    waiters: vec![command],
-                    running: true,
-                },
-            );
+            self.advance_hyro(cx, key);
+            return;
         }
+        let planned = (|| {
+            let mut creates = Vec::new();
+            for opts in orders {
+                let market = cx
+                    .store
+                    .market(&opts.symbol)
+                    .ok_or_else(|| format!("Market {} not found", opts.symbol))?;
+                if market.quote != "USDT" {
+                    return Err("HyroTrader supports USDT perpetuals only".into());
+                }
+                if let Some(stop) = self.hyro_stop(cx, opts)? {
+                    creates.push((Body::new(), opts.clone(), Some(stop)));
+                    continue;
+                }
+                for lot in self.format_lots(cx, opts)? {
+                    let base = lot.single;
+                    creates.push((base, opts.clone(), None));
+                }
+            }
+            Ok(creates)
+        })();
+        let creates = match planned {
+            Ok(planned) => planned,
+            Err(message) => {
+                cx.done(command, Err(message));
+                return;
+            }
+        };
+        let creates: Result<Vec<Create>, String> = creates
+            .into_iter()
+            .map(|(base, opts, stop_body)| {
+                let link = safe_cex_crypto::uuid::uuid()?;
+                // Publish the sent lot, not the original unsplit quantity.
+                #[derive(Deserialize)]
+                struct Lot {
+                    qty: String,
+                    #[serde(default)]
+                    price: Option<String>,
+                    #[serde(default, rename = "triggerPrice")]
+                    trigger_price: Option<String>,
+                    #[serde(default, rename = "stopLoss")]
+                    stop_loss: Option<String>,
+                    #[serde(default, rename = "takeProfit")]
+                    take_profit: Option<String>,
+                }
+                let sent: Lot = if stop_body.is_some() {
+                    Lot {
+                        qty: "0".into(),
+                        price: None,
+                        trigger_price: None,
+                        stop_loss: None,
+                        take_profit: None,
+                    }
+                } else {
+                    serde_json::from_str(&base.clone().finish()).map_err(|e| e.to_string())?
+                };
+                let amount = sent.qty.parse::<f64>().map_err(|e| e.to_string())?;
+                let price = sent
+                    .price
+                    .or(sent.trigger_price)
+                    .and_then(|p| p.parse().ok())
+                    .or_else(|| cx.store.ticker(&opts.symbol).map(|t| t.last))
+                    .unwrap_or(0.0);
+                let optimistic = Order {
+                    id: String::new(),
+                    parent_id: None,
+                    status: OrderStatus::Open,
+                    symbol: opts.symbol.clone(),
+                    kind: opts.kind,
+                    side: opts.side,
+                    price,
+                    amount,
+                    filled: 0.0,
+                    remaining: amount,
+                    reduce_only: opts.reduce_only.unwrap_or(false),
+                    close: opts.close,
+                    client_order_id: Some(link.clone()),
+                    time_in_force: opts.time_in_force,
+                    last_update: cx.now,
+                    trigger_type: opts.trigger_type,
+                    take_profit: sent.take_profit.and_then(|p| p.parse().ok()),
+                    stop_loss: sent.stop_loss.and_then(|p| p.parse().ok()),
+                    extra: None,
+                };
+                Ok(Create {
+                    base,
+                    stop_body,
+                    blocked: false,
+                    link,
+                    symbol: opts.symbol,
+                    optimistic,
+                    uncertain: false,
+                    accepted: None,
+                    observed: false,
+                    attempts: 0,
+                })
+            })
+            .collect();
+        let creates = match creates {
+            Ok(creates) => creates,
+            Err(error) => {
+                cx.done(command, Err(error));
+                return;
+            }
+        };
+        self.trading.hyro.groups.insert(
+            key.clone(),
+            Group {
+                creates,
+                index: 0,
+                ids: Vec::new(),
+                waiters: vec![command],
+                running: true,
+            },
+        );
         self.advance_hyro(cx, key);
     }
 

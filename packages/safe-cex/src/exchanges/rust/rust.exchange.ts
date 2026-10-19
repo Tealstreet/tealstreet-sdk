@@ -247,6 +247,10 @@ export class RustEngineExchange extends BaseExchange {
         ) {
           this.rejectPreflight('HyroTrader does not support client-defined slippage or Bybit execution controls');
         }
+        const ticks = 'bybitSlippageToleranceTicks' in order ? order.bybitSlippageToleranceTicks : undefined;
+        if (ticks !== undefined && (typeof ticks !== 'number' || !Number.isFinite(ticks))) {
+          this.rejectPreflight('Bybit bybitSlippageToleranceTicks must be finite');
+        }
         if (order.maxSlippagePct !== undefined && !Number.isFinite(order.maxSlippagePct)) {
           this.rejectPreflight('Bybit maxSlippagePct must be finite');
         }
