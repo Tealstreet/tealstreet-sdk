@@ -49,7 +49,7 @@ test('Exchange default classifications cover only seventeen reviewed candidates 
   const compiler = JSON.parse(fs.readFileSync(new URL('../accepted-set/exchange-defaults-fixture.json', import.meta.url)));
   const records = loadPolicy('default-traits');
   const text = fs.readFileSync(new URL('../../safe-cex-exchange/src/exchange.rs', import.meta.url));
-  assert.equal(compiler.methods.length, 54, 'review snapshot includes all fifty-four defaults');
+  assert.equal(compiler.methods.length, 55, 'review snapshot includes all fifty-five defaults');
   assert.equal(records[compiler.name].reviewedMethods.length, 17, 'independent reviewed candidate floor');
   assert.equal(reviewedDefaultTrait(compiler, records, text), records[compiler.name]);
   assert.equal(records[compiler.name].reviewedMethods.some(method => ['sign_http_request', 'sign_remote_request'].includes(method.name)), false, 'HTTP signing decode path is outside this classification');

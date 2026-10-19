@@ -13,7 +13,7 @@ use safe_cex_exchange::{
         sockets,
         value::{Js, Thrown},
     },
-    runtime::{ExchangeError, ExchangeFuture, ExchangeTask},
+    runtime::{ExchangeError, ExchangeFuture},
     websocket::BaseWebSocket,
 };
 use safe_cex_store::Store;
@@ -72,7 +72,7 @@ pub(super) struct Host {
     pub clients: RefCell<Vec<super::http::ClientEntry>>,
     pub next: Rc<Cell<u64>>,
     pub blobs: Rc<RefCell<std::collections::HashMap<u64, Js>>>,
-    pub tasks: Rc<RefCell<Vec<(u64, Box<dyn ExchangeTask>)>>>,
+    pub tasks: Rc<RefCell<Vec<(u64, Js)>>>,
     pub private_listeners: RefCell<Vec<(&'static str, Js)>>,
 }
 impl Host {
@@ -167,27 +167,27 @@ impl Host {
     ) -> Result<u64, ExchangeError> {
         let id = self.next.get() + 1;
         self.next.set(id);
-        let sleep = self
-            .scope
-            .runtime
-            .sleep(if delay.is_finite() && delay > 0.0 {
-                delay as u64
-            } else {
-                0
-            });
-        let runtime = self.scope.runtime.clone();
         let tasks = Rc::downgrade(&self.tasks);
-        let task = self.scope.runtime.spawn_local(Box::pin(async move {
-            let slept = sleep.await;
-            if let Some(tasks) = tasks.upgrade() {
-                tasks.borrow_mut().retain(|(key, _)| *key != id);
-            }
-            let result = slept.and_then(|_| callback());
-            if let Err(e) = result {
-                runtime
-                    .report_exception(&e, &serde_json::json!({"operation":"BingX timer"}).into());
-            }
-        }));
+        let runtime = self.scope.runtime.clone();
+        let scope = safe_cex_exchange::js_runtime::scope::Scope {
+            shared: self.scope.clone(),
+            this: Js::Undefined,
+        };
+        let task = scope.set_timeout(
+            Rc::new(move || {
+                if let Some(tasks) = tasks.upgrade() {
+                    tasks.borrow_mut().retain(|(key, _)| *key != id);
+                }
+                if let Err(error) = callback() {
+                    runtime.report_exception(
+                        &error,
+                        &serde_json::json!({"operation":"BingX timer"}).into(),
+                    );
+                }
+                Ok(())
+            }),
+            delay,
+        );
         self.tasks.borrow_mut().push((id, task));
         Ok(id)
     }
@@ -195,12 +195,20 @@ impl Host {
         let index = { self.tasks.borrow().iter().position(|(key, _)| *key == id) };
         if let Some(i) = index {
             let (_, task) = self.tasks.borrow_mut().remove(i);
-            task.cancel();
+            safe_cex_exchange::js_runtime::scope::Scope {
+                shared: self.scope.clone(),
+                this: Js::Undefined,
+            }
+            .clear_timeout(&task);
         }
     }
     pub fn dispose_timers(&self) {
         for (_, task) in self.tasks.borrow_mut().drain(..) {
-            task.cancel();
+            safe_cex_exchange::js_runtime::scope::Scope {
+                shared: self.scope.clone(),
+                this: Js::Undefined,
+            }
+            .clear_timeout(&task);
         }
     }
     pub fn spawn(&self, future: ExchangeFuture<'static, ()>) {
