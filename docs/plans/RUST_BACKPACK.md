@@ -187,3 +187,14 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   (1.79x), steady 101.3/56.6 ms (1.79x), memory 1.8/1.7 MB (1.04x).
   Added Backpack CI public/private gates and measured combined wasm 1,747,356
   bytes with an explicit 1.8 MiB budget. Other post-merge gates are running.
+- Combined-build verification is complete: all six replay gates PASS. Backpack
+  public numbers above include 1,179,648 bytes of wasm memory; exact retained
+  medians are TS 1,753,696 / Rust 1,693,640 bytes. Private correctness: 21 frames.
+  Binance public (3 runs): CPU 204.6/90.5 ms (2.26x), steady 119.6/36.4 ms
+  (3.28x), memory 2.3/2.1 MB (1.11x); private 14 frames PASS. Bybit public
+  (3 runs): CPU 412.4/299.3 ms (1.38x), steady 270.7/170.7 ms (1.59x),
+  memory 3.1/2.2 MB (1.39x); private 18 frames PASS.
+- Latest checks PASS: Backpack 49 tests, engine 11 tests, harness eight tests,
+  real-WASM SDK seven tests, native/WASM clippy, bans, format and release build.
+  Root typecheck (44 tasks) and lint (28 tasks) PASS. CI on the previous PR head
+  passed; pushing the merged/optimized head and waiting for its CI before landing.
