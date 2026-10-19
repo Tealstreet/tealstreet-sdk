@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { bodyBytes, canonicalBody, canonicalUrl, replayStoreReady, ReplayClock, Tape } from './tape.mjs';
 
 const url = 'https://api.mexc.com/api/v1/private/order/cancel';
@@ -191,4 +192,54 @@ test('public replay starts with market/ticker seed while private replay waits fo
   assert.equal(replayStoreReady(31, true), true);
   assert.equal(replayStoreReady(8, false), false);
   assert.equal(replayStoreReady(4, false), false);
+});
+
+// Exercise the CLI subclass's actual startup implementation without starting a
+// venue or importing its CLI argument parsing. SharedTape alone has no venue hooks.
+const replaySource = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+const playStart = replaySource.indexOf('  async play(');
+const playEnd = replaySource.indexOf('\n  unusedWrites()', playStart);
+const ReplayStartup = new Function('within', 'venue', 'isPrivate',
+  `return class { ${replaySource.slice(playStart, playEnd)} }`)(
+  async (promise) => promise, { bootstrapFrame: (frame) => frame.bootstrap === true }, false,
+);
+
+test('replay readiness waits for the first recorded socket before deriving subscriptions', async () => {
+  const tape = new ReplayStartup();
+  const frame = { type: 'ws', t: 0, url: 'wss://stream.crypto.com/exchange/v1/market', socket: 3, text: 'ticker' };
+  tape.frames = [frame];
+  tape.pendingStartupSubscriptions = 0;
+  const seen = [];
+  let marketsReady = false;
+  let release;
+  const opened = new Promise((resolve) => { release = () => { marketsReady = true; resolve(); }; });
+  tape.socketFor = async (...args) => {
+    assert.deepEqual(args, [frame.url, frame.socket, frame.text]);
+    seen.push('socket');
+    await opened;
+    return { onMessage: () => seen.push('frame') };
+  };
+  const played = tape.play(undefined, async () => seen.push(`ready:${marketsReady}`));
+  try {
+    await new Promise(setImmediate);
+    assert.deepEqual(seen, ['socket']);
+  } finally {
+    release();
+    await played;
+  }
+  assert.deepEqual(seen, ['socket', 'ready:true', 'socket', 'frame']);
+});
+
+test('first-socket startup fence preserves private bootstrap delivery before readiness', async () => {
+  const tape = new ReplayStartup();
+  tape.frames = [{ type: 'ws', t: 0, url: 'wss://ws.phemex.com', bootstrap: true, text: 'auth-ack' }];
+  tape.pendingStartupSubscriptions = 0;
+  const seen = [];
+  tape.socketFor = async (...args) => {
+    assert.deepEqual(args, ['wss://ws.phemex.com', undefined, 'auth-ack']);
+    seen.push('socket');
+    return { onMessage: (text) => seen.push(text) };
+  };
+  assert.equal(await tape.play(undefined, async () => seen.push('ready')), 0);
+  assert.deepEqual(seen, ['socket', 'socket', 'auth-ack', 'ready']);
 });

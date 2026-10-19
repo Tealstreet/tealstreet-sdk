@@ -311,8 +311,8 @@ for (let run = 0; run < runs; run++) {
     if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
     if (values.venue === 'bybit') KNOWN_TS_FIXES.bybit(ts.account, rust.account, ts);
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
-      const left = JSON.stringify(ts.account[field]);
-      const right = JSON.stringify(rust.account[field]);
+      const left = JSON.stringify(stable(ts.account[field]));
+      const right = JSON.stringify(stable(rust.account[field]));
       if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
     }
   }

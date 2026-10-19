@@ -259,6 +259,10 @@ class Tape extends SharedTape {
 
   async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
     await within((async () => {
+      // Startup hooks may derive subscriptions from the market seed. Opening
+      // the first taped socket fences that seed before those hooks run.
+      const first = this.frames.find((frame) => frame.url);
+      if (first) await this.socketFor(first.url, first.socket, first.text);
       for (const frame of this.frames.filter((frame) => venue.bootstrapFrame?.(frame))) {
         const socket = await this.socketFor(frame.url, frame.socket, frame.text);
         socket.onMessage(frame.text);
