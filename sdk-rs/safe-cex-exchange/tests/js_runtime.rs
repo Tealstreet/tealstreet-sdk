@@ -5198,3 +5198,150 @@ fn audit_native_http_consumers_publish_config_numbers_and_proxy_classification()
         .unwrap()
         .block_on(tokio::task::LocalSet::new().run_until(run));
 }
+
+#[cfg(test)]
+mod builtin_global_input_contracts {
+    use super::*;
+
+    fn oracle() -> Value {
+        let output = std::process::Command::new("node")
+            .arg("tests/builtin_global_input_oracle.cjs")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    }
+    fn input(tag: &str, reads: &Rc<std::cell::Cell<usize>>) -> Js {
+        match tag {
+            "undefined" => Js::Undefined,
+            "null" => Js::Null,
+            "number" => Js::Number(7.0),
+            "boolean" => Js::Bool(true),
+            "text" => Js::str("x"),
+            "surrogate" => Js::utf16(&[0xd800]),
+            "object" => Js::object(vec![]),
+            "poison" => {
+                let value = Js::object(vec![]);
+                let reads = reads.clone();
+                value
+                    .define_accessor(
+                        "toString",
+                        Some(Rc::new(move |_| {
+                            reads.set(reads.get() + 1);
+                            Err(Thrown::error("Error", "unreached"))
+                        })),
+                        None,
+                    )
+                    .unwrap();
+                value
+            }
+            "array" => Js::array(vec![]),
+            "bigint" => Js::BigInt(Rc::new(3.into())),
+            "symbol" => Js::SymbolIterator,
+            _ => panic!("unknown input tag"),
+        }
+    }
+    fn error(result: Result<Js, Thrown>) -> Value {
+        match result {
+            Ok(_) => json!({"ok":true}),
+            Err(error) => {
+                json!({"ok":false,"name":error.value.get("name").unwrap().to_display(),"units":error.value.get("message").unwrap().to_js_string().unwrap().as_ref()})
+            }
+        }
+    }
+    #[test]
+    fn installed_callback_validation_keeps_source_operand_diagnostics() {
+        let expected = oracle();
+        let mut rows = vec![];
+        for row in expected["callbacks"].as_array().unwrap() {
+            let reads = Rc::new(std::cell::Cell::new(0));
+            let callback = input(row["tag"].as_str().unwrap(), &reads);
+            let kind = row["kind"].as_str().unwrap();
+            let owner = match kind {
+                "map" => Js::new_map(),
+                "set" => Js::new_set(),
+                _ => Js::array(vec![Js::Number(1.0)]),
+            };
+            let result = owner.call_method(
+                if kind == "array" { "map" } else { "forEach" },
+                vec![callback],
+            );
+            let mut actual = error(result);
+            actual["reads"] = json!(reads.get());
+            actual["reads"] = json!(reads.get());
+            actual["tag"] = row["tag"].clone();
+            actual["kind"] = row["kind"].clone();
+            rows.push(actual);
+        }
+        assert_eq!(
+            json!(rows),
+            expected["callbacks"],
+            "SOURCE_CALLBACK_DIAGNOSTICS"
+        );
+        let value = Js::array(vec![Js::Number(-0.0), Js::utf16(&[0xd800])]);
+        let mapped = value
+            .call_method(
+                "map",
+                vec![Js::function("identity", |_, args| Ok(arg(&args, 0)))],
+            )
+            .unwrap();
+        assert_eq!(
+            mapped.get("0").unwrap().to_number().unwrap().to_bits(),
+            (-0.0_f64).to_bits()
+        );
+        assert_eq!(
+            mapped.get("1").unwrap().to_js_string().unwrap().as_ref(),
+            &[0xd800]
+        );
+    }
+    #[test]
+    fn installed_array_from_and_map_keep_utf16_in_validation_errors() {
+        let expected = oracle();
+        let globals = library();
+        let mut from = vec![];
+        for row in expected["from"].as_array().unwrap() {
+            let reads = Rc::new(std::cell::Cell::new(0));
+            let mut actual = error(globals.get("Array").unwrap().call_method(
+                "from",
+                vec![
+                    Js::array(vec![Js::Number(1.0)]),
+                    input(row["tag"].as_str().unwrap(), &reads),
+                ],
+            ));
+            actual["reads"] = json!(reads.get());
+            actual["tag"] = row["tag"].clone();
+            from.push(actual);
+        }
+        assert_eq!(
+            json!(from),
+            expected["from"],
+            "SOURCE_ARRAY_FROM_DIAGNOSTICS"
+        );
+    }
+    #[test]
+    fn installed_map_entry_validation_keeps_utf16_diagnostics() {
+        let expected = oracle();
+        let globals = library();
+        let mut entries = vec![];
+        for row in expected["entries"].as_array().unwrap() {
+            let reads = Rc::new(std::cell::Cell::new(0));
+            let mut actual = error(globals.get("Map").unwrap().construct(
+                vec![Js::array(vec![input(row["tag"].as_str().unwrap(), &reads)])],
+                None,
+            ));
+            actual["reads"] = json!(reads.get());
+            actual["tag"] = row["tag"].clone();
+            entries.push(actual);
+        }
+        assert_eq!(
+            json!(entries),
+            expected["entries"],
+            "SOURCE_MAP_ENTRY_DIAGNOSTICS"
+        );
+    }
+}
