@@ -10,7 +10,7 @@ import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
 import { isRead, subscriptionKeys, requestKey as keyOf } from './requests.mjs';
-import { replayStoreReady, ReplayClock, Tape as SharedTape, canonicalUrl as sharedUrl } from './tape.mjs';
+import { replayStoreReady, replayBooksReady, ReplayClock, Tape as SharedTape, canonicalUrl as sharedUrl } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout, setInterval as realInterval, clearInterval as realClearInterval } from 'node:timers';
 import { parseRequestJson } from './request-json.mjs';
 import { retainedMemory, settledMemory } from './memory.mjs';
@@ -242,8 +242,10 @@ class Tape extends SharedTape {
         .map(([key, value]) => `${key}${value}`).join('').replace(/[=&]/g, '');
       this.verifySignature(headers, query, body);
     }
-    if (isWriteRequest(method, url)) this.outbound.push(requestKey(method, url, body));
-    return super.respond(method, url, body, headers);
+    const response = super.respond(method, url, body, headers);
+    const comparisonBody = Object.hasOwn(response, 'comparisonRequestBody') ? response.comparisonRequestBody : body;
+    if (isWriteRequest(method, url)) this.outbound.push(requestKey(method, url, comparisonBody));
+    return response;
   }
 
   assertSubscribed(socket, message, subscriptionKey) {
@@ -445,7 +447,8 @@ async function runRust() {
     async () => {
       for (;;) {
         host.flush();
-        if (replayStoreReady(status?.loaded ?? 0, isPrivate) && (!tape.audit || tape.audit.ready()) && tape.sockets.some((s) => s.opened && !s.closed)) break;
+        const booksReady = !venue.initialBookSnapshots || replayBooksReady(bookSymbols, Array.from(books.keys(), (market) => markets?.symbol(market)));
+        if (replayStoreReady(status?.loaded ?? 0, isPrivate) && booksReady && (!tape.audit || tape.audit.ready()) && tape.sockets.some((s) => s.opened && !s.closed)) break;
         await new Promise((r) => realTimeout(r, 5));
       }
     },
@@ -658,6 +661,7 @@ async function runTs() {
     async () => {
       await prepared;
       while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => realTimeout(r, 5));
+      while (venue.initialBookSnapshots && !replayBooksReady(bookSymbols, Object.keys(finalBooks))) await new Promise((r) => realTimeout(r, 5));
       const loaded = () => Object.values(store.loaded).every(Boolean);
       while (isPrivate && !loaded()) await new Promise((r) => realTimeout(r, 5));
     },

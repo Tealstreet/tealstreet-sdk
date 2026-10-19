@@ -499,3 +499,41 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   HyroTrader import timeouts under load; lower-worker retry also timed out on
   unrelated metadata imports. Focused verification and exact-head CI determine
   readiness; no test deadlines or unrelated venue implementation changed.
+
+### Ten-venue public gates PASS
+
+All ten public fixtures pass three-run correctness and strict CPU/memory gates
+on the 3,128,408-byte artifact. TS/Rust medians:
+
+| Venue | CPU ms | Retained MB | Sampled peak MB |
+| --- | ---: | ---: | ---: |
+| bitunix | 966.9 / 835.4 | 3.6 / 2.2 | 31.4 / 16.0 |
+| binance | 304.3 / 180.3 | 4.6 / 2.6 | 34.7 / 12.4 |
+| bybit | 506.2 / 352.4 | 6.6 / 2.7 | 33.1 / 10.6 |
+| okx | 359.1 / 199.4 | 4.8 / 2.9 | 32.2 / 10.5 |
+| cryptocom | 88.2 / 81.3 | 2.1 / 1.5 | 15.1 / 5.4 |
+| weex | 127.4 / 100.5 | 5.4 / 2.7 | 20.3 / 7.2 |
+| bingx | 111.8 / 73.4 | 3.9 / 2.1 | 22.7 / 5.1 |
+| mexc | 491.4 / 285.5 | 10.4 / 3.5 | 39.4 / 19.7 |
+| blofin | 106.4 / 80.9 | 3.5 / 2.0 | 16.6 / 5.7 |
+| backpack | 221.1 / 127.4 | 3.6 / 2.3 | 18.7 / 6.4 |
+
+Eight private venue gates pass. Backpack private differs only in outgoing
+market-bracket limit fields covered by its explicit fixture `tsRequestBody`;
+restore that narrow oracle during integration. Four OKX variants continue.
+
+Both exact-head root CI jobs on f23e987a5a PASS, confirming aggregate TS
+quality despite local import timeouts. Rust replay CI exposed a Backpack
+initial-book race not seen locally: ready depth handlers preceded completion
+of the rate-limited initial HTTP snapshot chain. Opt in Backpack to waiting
+for every requested initial book callback/view before legacy playback, for
+both implementations. Presence is required; initialized empty books count.
+
+Both Backpack corrections pass: public three runs with 32 matching book
+events per implementation and private one run. Other nine public and twelve
+private gates remain passing. All 91 helpers PASS, including strict fixture
+body aliases and delayed seed/wrong-symbol/empty-book readiness regressions.
+Independent re-review and new-head CI are tracked on PR #1309 before merge.
+Independent final re-review PASS: 91 helpers plus actual production callbacks
+prove wrong-symbol books keep startup waiting and delayed initialized-empty
+books satisfy readiness while the clock remains inactive. No open findings.

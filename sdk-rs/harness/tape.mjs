@@ -14,6 +14,10 @@ export const replayStoreReady = (loaded, isPrivate) => {
     : publicMask;
   return (loaded & required) === required;
 };
+export const replayBooksReady = (required, available) => {
+  const symbols = new Set(available);
+  return required.every((symbol) => symbols.has(symbol));
+};
 /** Per-request values: clocks, signatures and generated client ids. */
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
 export const canonicalUrl = (url, callerIds = new Set(), venue = {}) => {
@@ -234,6 +238,7 @@ export class ReplayClock {
 export class Tape {
   constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = venue.timeoutMs ?? 30000, impl = venue.impl, books = venue.books ?? []) {
     this.records = records;
+    this.impl = impl;
     this.canonicalize = venue.canonicalize ?? ((url) => canonicalUrl(url, this.callerIds, venue));
     this.explicitOpens = venue.explicitOpens ?? false;
     this.legacyLatest = venue.legacyLatest ?? true;
@@ -429,6 +434,8 @@ export class Tape {
       );
     }
     return { status: record.status, headers: record.headers ?? '', body: responseBody,
+      // Only an exactly validated fixture exception may repair the TS oracle.
+      ...(this.impl === 'ts' && record.tsRequestBody !== undefined ? { comparisonRequestBody: record.requestBody } : {}),
       ...(Number.isFinite(record.t) ? { recordedAt: record.t } : {}) };
   }
 

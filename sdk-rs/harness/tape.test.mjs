@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   bodyBytes,
   replayStoreReady,
+  replayBooksReady,
   ReplayClock,
   canonicalBody,
   canonicalUrl,
@@ -1000,4 +1001,54 @@ test('an explicit recorded open waiting before socket construction resolves befo
   await tape.lifecycle(frame);
   assert.equal(socket.opened, true);
   assert.equal(opens, 1);
+});
+
+test('declared TS body repair changes only the comparison of the exactly matched fixture write', () => {
+  const intended = { orderType: 'Market', quantity: '2.00', clientId: 'caller', stopLossTriggerPrice: '120.00' };
+  const declared = { ...intended, stopLossLimitPrice: '120.00' };
+  const row = { ...record('POST', intended), tsRequestBody: JSON.stringify(declared) };
+  const other = record('POST', { orderType: 'Limit', quantity: '1', price: '100' });
+  const records = [{ type: 'command', orders: [{ clientOrderId: 'caller' }] }, row, other];
+  const ts = new Tape(records, { compareWriteOrder: true }, false, 1000, 'ts');
+  for (const changed of [{ ...declared, reduceOnly: true }, { ...declared, clientId: 'changed' }, { ...declared, quantity: '3.00' }]) {
+    const rejected = ts.respond('POST', URL, changed);
+    assert.equal(rejected.status, 599);
+    assert.equal(Object.hasOwn(rejected, 'comparisonRequestBody'), false);
+  }
+  assert.equal(ts.missingWrites, 2);
+  const accepted = ts.respond('POST', URL, declared);
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.comparisonRequestBody, row.requestBody);
+  assert.equal(ts.missingWrites, 1);
+  assert.equal(ts.respond('POST', URL, { ...JSON.parse(other.requestBody), stopLossLimitPrice: '120.00' }).status, 599);
+  const ordinary = ts.respond('POST', URL, other.requestBody);
+  assert.equal(ordinary.status, 200);
+  assert.equal(Object.hasOwn(ordinary, 'comparisonRequestBody'), false);
+  assert.equal(ts.missingWrites, 0);
+  const rust = new Tape(records, { compareWriteOrder: true }, false, 1000, 'rust');
+  assert.equal(rust.respond('POST', URL, declared).status, 599);
+  const native = rust.respond('POST', URL, intended);
+  assert.equal(native.status, 200);
+  assert.equal(Object.hasOwn(native, 'comparisonRequestBody'), false);
+});
+
+test('Backpack legacy startup waits for every requested REST book before activating tape time', async () => {
+  assert.equal(venueOf('backpack').initialBookSnapshots, true);
+  assert.equal(replayBooksReady(['SOL', 'BTC'], ['SOL', 'ETH']), false);
+  assert.equal(replayBooksReady([], []), true);
+  const url = 'wss://example.test/bootstrap';
+  const tape = new Tape([{ type: 'ws', t: 1637, url, text: '{}' }]);
+  const clock = new ReplayClock(1700000000000);
+  const books = new Set(['SOL']);
+  const seen = [];
+  clock.install();
+  try {
+    tape.connect(url, () => {}, () => seen.push([...books]));
+    setTimeout(() => { assert.equal(clock.active, false); books.add('BTC'); }, 20);
+    await tape.play(undefined, async () => {
+      while (!replayBooksReady(['SOL', 'BTC'], books)) await new Promise((resolve) => setTimeout(resolve, 1));
+    }, undefined, clock);
+    assert.deepEqual(seen, [['SOL', 'BTC']]);
+    assert.equal(clock.active, true);
+  } finally { clock.restore(); }
 });

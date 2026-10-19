@@ -107,6 +107,9 @@ const okx = (name) => ({
 export const VENUES = {
   backpack: {
     rust: 'backpack',
+    // This venue publishes standalone REST snapshots during legacy bootstrap.
+    // Await both seeds before playback, including queued Axios limiter requests.
+    initialBookSnapshots: true,
     ts: { module: `${root}/backpack/backpack.exchange.ts`, className: 'BackpackExchange', name: 'backpack' },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depth.')).length >= count,
