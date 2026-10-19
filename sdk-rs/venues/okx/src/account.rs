@@ -72,7 +72,7 @@ impl Okx {
         self.account.join = None;
         self.account.generation += 1;
         self.account.revision += 1;
-        self.account_refresh(cx);
+        self.reconcile(cx, false);
     }
 
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -104,6 +104,10 @@ impl Okx {
     }
 
     pub(crate) fn account_refresh(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.reconcile(cx, true);
+    }
+
+    fn reconcile(&mut self, cx: &mut Cx<'_, Pending>, include_orders: bool) {
         if self.account.join.is_none() {
             let version = self.account.revision;
             self.account.generation += 1;
@@ -138,7 +142,7 @@ impl Okx {
                 }),
             );
         }
-        if !self.account.orders_in_flight {
+        if include_orders && !self.account.orders_in_flight {
             self.account.orders_in_flight = true;
             self.orders_page(
                 cx,

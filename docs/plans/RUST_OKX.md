@@ -98,3 +98,25 @@ Never touch master, rebase, or force-push.
   public trades. TS-only OKX and EEA-demo replay: zero unmatched requests.
 - Full release WASM build, public recording/performance gates and Binance
   regression gates are in progress. No gate numbers claimed yet.
+
+### Harness phase checkpoint
+
+- Recorded 20 seconds of live OKX traffic and committed a trimmed public
+  fixture: 8,902 frames, 494 linear stablecoin markets/tickers, two full books.
+  First complete public gate: identical output; TS/Rust median CPU 347.8/248.6
+  ms, steady CPU 262.9/160.4 ms, retained memory 1.7/1.6 MB. Final gates will
+  be repeated after the settings fix and release-size optimization.
+- Strengthened documented private tape: 12 commands, 29 frames, exact write
+  bodies, verified login HMAC/passphrase, staged leverage read and meaningful
+  final private pushes. Public-trades/fills/history/income/candles are compared.
+- Private replay caught settings refresh dropping terminal orders; refresh now
+  reconciles equity/positions without replacing orders, matching TS settings.
+- TS business socket bug fixed: keyless public subscriptions skip private
+  login/topics. Documented in KNOWN_TS_FIXES and covered by regression.
+- Fixed the recorder to tee streamed REST bodies rather than decode an async
+  iterator as bytes. Moved the WASM test out of the runtime tree, matching the
+  landing branch's independently committed boundary fix.
+- Repository typecheck and lint passed before the final keyless correction.
+  Full tests: 452 safe-cex suites passed; one unrelated HyroTrader suite timed
+  out under parallel runs. Serial repository retry and independent harness
+  review are in progress. No completion or landing claimed yet.

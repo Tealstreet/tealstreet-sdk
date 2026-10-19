@@ -16,7 +16,7 @@ const { values } = parseArgs({
     'no-egress': { type: 'boolean', default: false },
   },
 });
-const outDir = 'sdk-rs/harness/out';
+const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 
 const replay = (impl, run) => {
@@ -24,13 +24,19 @@ const replay = (impl, run) => {
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
   args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
   if (values['no-egress']) args.push('--no-egress');
-  const result = spawnSync(process.execPath, args, { encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(`${impl} replay failed:\n${result.stderr}`);
+  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125_000 });
+  if (result.status !== 0) throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
 };
 
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 
+// JSON object insertion order is immaterial; array order and values are exact.
+const stable = (value) => {
+  if (Array.isArray(value)) return value.map(stable);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+};
 const differences = [];
 const compare = (label, a, b) => {
   const keyed = (rows) => new Map(rows.map((row) => [row.symbol, row]));
@@ -71,6 +77,7 @@ const KNOWN_TS_FIXES = {
     'full books retain levels past a stale last trade',
     'public trades implement the inherited Not implemented method',
     'candle calendar bounds use UTC independently of host timezone',
+    'keyless/public-only business socket avoids empty-credential login and private topics',
     // Rust safety fixes: covered independently by documented-payload tests.
     'split bracket entries acquire SL/TP before the next entry is placed',
     'native OCO amend preserves its sibling protective leg',
@@ -86,14 +93,14 @@ const KNOWN_TS_FIXES = {
   },
 };
 if (isPrivate) {
-  KNOWN_TS_FIXES.account(ts.account, rust.account);
+  if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
   for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
     const left = JSON.stringify(ts.account[field]);
     const right = JSON.stringify(rust.account[field]);
     if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
   }
-  const left = JSON.stringify(ts.commands);
-  const right = JSON.stringify(rust.commands);
+  const left = JSON.stringify(stable(ts.commands));
+  const right = JSON.stringify(stable(rust.commands));
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
 }
 compare('market', ts.markets, rust.markets);

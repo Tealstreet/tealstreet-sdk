@@ -1131,3 +1131,8 @@ continues standalone cancel batches after item failures. These corrections are
 listed in the harness KNOWN_TS_FIXES; they are independently tested instead
 of normalizing away output differences. Newer account equity survives REST
 snapshots and subsequent local balance ticks.
+
+Public-only business sockets subscribe candles directly without sending an
+empty-credential login or private order topics. Private accounts authenticate
+before subscribing account-order channels. This also corrects the TS replay
+oracle's previous unconditional keyless login.
