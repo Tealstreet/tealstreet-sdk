@@ -47,7 +47,12 @@ for(const method of ['placement','completion'])for(const mode of ['ready','noop'
 }
 const completionProfiles=[];
 const bitBuffer=new DataView(new ArrayBuffer(8));
-const bits=value=>{bitBuffer.setFloat64(0,value);return bitBuffer.getBigUint64(0).toString(16).padStart(16,'0');};
+// NaN sign/payload is engine-dependent; every other bit remains exact.
+const bits=value=>{if(Number.isNaN(value))return 'NaN';bitBuffer.setFloat64(0,value);return bitBuffer.getBigUint64(0).toString(16).padStart(16,'0');};
+assert.equal(bits(0),'0000000000000000');assert.equal(bits(-0),'8000000000000000');
+for(const payload of [0x7ff8000000000000n,0xfff8000000000000n,0x7ff0000000000001n,0xfff8000000000123n]){
+ bitBuffer.setBigUint64(0,payload);assert.equal(bits(bitBuffer.getFloat64(0)),'NaN');
+}
 for(const size of [-0,Infinity,-Infinity,NaN,3])for(const clientId of [undefined,'','caller']){
  const f=fixture('bybit',false,size);
  if(clientId!==undefined)f.i.options.clientId=clientId;

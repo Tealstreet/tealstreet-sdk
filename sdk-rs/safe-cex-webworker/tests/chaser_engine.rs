@@ -1058,7 +1058,11 @@ fn completion_listener_retains_own_client_id_and_native_numbers() {
                 let Js::Number(value) = event.get(key).unwrap() else {
                     panic!("COMPLETION native Number {key}")
                 };
-                format!("{:016x}", value.to_bits())
+                if value.is_nan() {
+                    "NaN".into()
+                } else {
+                    format!("{:016x}", value.to_bits())
+                }
             };
             actual.push(json!({
                 "keys":event.own_keys().iter().map(|key|String::from_utf16_lossy(key)).collect::<Vec<_>>(),

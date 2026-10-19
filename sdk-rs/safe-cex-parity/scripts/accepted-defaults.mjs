@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 
 const telemetryTrait = 'safe_cex_types::telemetry::TelemetrySink';
 const exchangeTrait = 'safe_cex_exchange::exchange::Exchange';
-const reviewedExchangeMethods = ['find_order_by_client_order_id', 'listen_order_book', 'fetch_income_history_range', 'after_method_called_in_worker', 'fetch_historical_positions', 'fetch_positions', 'fetch_and_set_orders', 'fetch_orders', 'fetch_leverage_for_symbol', 'fetch_symbol_max_leverage', 'set_leverage', 'change_position_mode', 'change_margin_type', 'cancel_symbol_orders', 'fetch_public_trades', 'update_symbol_metadata'].sort();
+const reviewedExchangeMethods = ['find_order_by_client_order_id', 'listen_order_book', 'listen_ohlcv_retained', 'fetch_income_history_range', 'after_method_called_in_worker', 'fetch_historical_positions', 'fetch_positions', 'fetch_and_set_orders', 'fetch_orders', 'fetch_leverage_for_symbol', 'fetch_symbol_max_leverage', 'set_leverage', 'change_position_mode', 'change_margin_type', 'cancel_symbol_orders', 'fetch_public_trades', 'update_symbol_metadata'].sort();
 export function defaultTraitInventory(doc, paths, normalize, { classifications = {}, readSource } = {}) {
   const owners = [];
   const methodIds = new Set();
