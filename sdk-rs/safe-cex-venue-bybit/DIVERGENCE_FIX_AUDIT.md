@@ -2,8 +2,8 @@
 
 Authority: the 37 exact rows in `assignments/codex-0w5ohi.json`, linked from
 `non-utf8-assignment-index.json`, and the async ruling in
-`divergence-cluster-rulings.md`. Twenty-nine rows are reconciled below, including history rows6/16 from
-PR #1198 and socket rows25/35. The other eight delegated rows remain open.
+`divergence-cluster-rulings.md`. Thirty-three rows are reconciled below, including history rows 6/16 from
+PR #1198, socket rows 25/35 and public scheduling rows 1/2/12/13. Four delegated rows remain open.
 
 | Assignment rows | Source owner | Verdict | Production observation |
 | --- | --- | --- | --- |
@@ -73,10 +73,10 @@ failures, restores exact bytes and requires GREEN. No WebSocket bodies change.
 The position batch reconciles five rows. With the seven rows in PR #1182,
 row 37 ACCEPT-safety in PR #1188, the five Hyro rows below and delegated
 history rows 6/16 in PR #1198, plus the seven retained rows in PR #1212,
-29 of 37 are reconciled and eight remain after socket rows25/35 below.
+33 of 37 are reconciled and four remain after socket rows25/35 and the public scheduling audit below.
 
-The remaining eight rows belong to codex-0efu4x:
-1/2/3/7/8/12/13/23 (public/private socket lifecycle and position controls).
+The remaining four rows belong to codex-0efu4x:
+3/7/8/23 (private socket lifecycle and position controls).
 The seven rows retained by codex-0w5ohi, 18/24/26/27/32/33/36, are reconciled
 in the retained batch below. Existing WS carrier owners retain their separate
 body changes; the socket audit owner coordinates those boundaries first.
@@ -145,7 +145,7 @@ historical-fills reader visibly refuses malformed strict output fields after
 source paging and recovery, preserving valid neighbors and source error priority.
 The synchronous raw mapper and its original identity/alias guards are unchanged.
 See `DELEGATED_HISTORY_FIX_AUDIT.md` for the real-binding RED/GREEN, six compiled
-production controls and the ten remaining delegated rows.
+production controls and its original ten-row delegated remainder.
 
 ## Retained startup, markets, tickers and placement: rows 18/24/26/27/32/33/36
 
@@ -172,7 +172,7 @@ JSON mappers remain supplemental tests, with no production fallback through them
 
 This batch reconciles all seven rows retained by codex-0w5ohi. Delegated socket
 rows25/35 are reconciled below; history rows6/16 retain their separate #1198
-milestone. The other eight delegated rows remain open.
+milestone. The other four delegated rows remain open.
 
 
 ## Delegated private trade filter: row 35 FIX
@@ -218,11 +218,11 @@ reset. A compiled null-expiry production fault must fail this witness before an
 exact restored GREEN. No auth/signing carrier or production body changes here.
 
 This socket batch reconciles rows25 and35. History rows6/16 are merged from #1198;
-the eight other delegated rows remain open.
+the four other delegated rows remain open.
 
 
 The shared public-topic timing control is strengthened alongside this socket
-batch, without closing additional assignment rows. The older witness advanced
+batch; the public timing reconciliation below closes its assignment rows. The older witness advanced
 virtual time in50ms increments, so a first market-chunk wait changed from5ms to0ms
 could survive. `market_additions_wait_five_ms_between_real_socket_chunks` now
 runs actual Spot and dedicated Inverse sockets at unchanged time,4ms and5ms for
@@ -231,3 +231,33 @@ and existing pending-tail disposal/weak-owner guards. Both maintained TS methods
 independently execute with held sleeps, checking sends at0/5/10ms and the final
 wait through15ms. `public-topic-controls.py` requires each production fault to
 compile RED, restores every source byte and requires the full target GREEN.
+
+
+## Dedicated public scheduling: rows 1/2/12/13 ACCEPT
+
+| Rows | Live source member | Reason |
+| --- | --- | --- |
+| 1, 12 | Spot/Inverse onMarketsChanged | The installed markets listener commits topic state, sends the first chunk and creates its 5ms sleep synchronously. It then transfers the tail to the actual socket's owned operation, so emitter return does not discard it. |
+| 2, 13 | Spot/Inverse subscribe | Actual onOpen sends the first ten-topic chunk before ping. The owned continuation sends later chunks at 10ms boundaries without a caller waiter being polled. |
+
+The original first-poll/cancel-on-waiter-drop notes described a helper future in
+isolation. Neither production path exposes that waiter: PublicTopics immediately
+calls BaseWebSocket::start_message_operation. Explicit socket/owner disposal
+cancels the whole native operation under the accepted deterministic-teardown
+ruling and exchange-runtime-callback-choice decision. This audit does not widen
+typed topic/Market ingress or claim arbitrary executable input graphs.
+
+The new dedicated_subscribe_starts_before_ping_and_retains_ten_ms_continuation
+witness constructs real Spot and dedicated Inverse sockets with 25 active markets.
+Maintained source and native wire chunks agree at 0/9/10/19/20/29/30ms. Source
+settlement still awaits the final 10ms sleep and empty topics create no waits.
+The existing market_additions_wait_five_ms_between_real_socket_chunks retains
+its two dedicated protocols, exact 0/4/5/9/10ms sends, ordered topics and duplicate
+append behavior. The original 24 public-source compositions, old admission/alias
+assertions and socket-disposal/weak-owner checks remain intact.
+
+public-scheduling-controls.py compiles four independent production faults:
+deferred subscription prefix, zero first subscription wait, discarded subscription
+tail and discarded market tail. Every fault must fail its named real-socket test;
+exact source restoration must pass before the next fault. No production body or
+identity/alias guard changes in this batch. Four delegated rows remain: 3/7/8/23.

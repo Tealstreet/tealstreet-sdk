@@ -1,4 +1,6 @@
 //! Concrete socket pump witnesses; source topic/lifecycle helpers alone cannot pass these.
+#[path = "support/public_subscription_timing.rs"]
+mod public_subscription_timing;
 #[path = "support/binding_harness.rs"]
 mod support;
 use safe_cex_exchange::{socket_lifecycle::SocketSlot, websocket::WsEvent};
