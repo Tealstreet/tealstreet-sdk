@@ -8,14 +8,27 @@ export const VENUES = {
     ts: { module: `${root}/mexc/mexc.exchange.ts`, className: 'MexcExchange', name: 'mexc' },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depth.')).length >= count,
-    privateSocket: 'mexc-private',
+    // Public/private sockets share this URL; tapes identify their ordinal.
+    privateSocket: undefined,
+    independentLeverage: true,
+    tsSettings: (exchange, store) =>
+      store.markets.map((market) => {
+        const config = exchange.symbolSettings.get(market.symbol) ?? exchange.deriveSymbolConfig(market.symbol);
+        return {
+          symbol: market.symbol,
+          marginType: config.marginType,
+          buyLeverage: config.buyLeverage,
+          sellLeverage: config.sellLeverage,
+        };
+      }),
   },
   binance: {
     rust: 'binance',
     ts: { module: `${root}/binance/binance.exchange.ts`, className: 'BinanceExchange', name: 'binance' },
     /** Depth topics are registered once each book subscription reaches the socket. */
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >= count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >=
+      count,
     privateSocket: '/private/ws',
   },
 };

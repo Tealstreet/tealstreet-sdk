@@ -131,3 +131,19 @@ and cut a follow-up branch. Never touch master or force-push.
   lifecycle ordering. Public virtual timers now follow recorded timestamps.
   Gates remain pending: the trimmer dropped resync responses after the third
   identical URL; preserve complete recorded input before the final comparison.
+- Final raw snapshot audit fixed a TS normalization trap: validate the common
+  envelope, version and every raw numeric level before normalization can drop
+  invalid rows. Decimal strings are checked consistently. Rust requires both
+  REST sides and refuses malformed/negative levels. Public regression coverage
+  now includes malformed raw REST anchors.
+- Final replay results (three public runs, one paced private run, no output
+  exemptions): MEXC public 14701 frames / 1135 markets / 1135 tickers / 2 books,
+  CPU TS 369.2 -> Rust 154.5ms, steady 231.7 -> 81.3ms, retained 5.2 -> 2.7MB;
+  MEXC private 21 frames, PASS, zero unmatched requests. Binance public 873
+  frames / 3 books, CPU 147.3 -> 56.8ms, steady 79.7 -> 18.7ms, retained
+  2.3 -> 1.9MB; Binance private 14 frames, PASS. Private gates assert correctness.
+- All venue/engine/Binance Rust tests and fmt/clippy/bans pass; wasm clippy,
+  release bindings build, 8 tape tests, 5 host tests and 4 wasm exchange tests
+  pass. Final TS-focused run passes 110 tests. Full root checks rerun after
+  final edits before pushing. Browser build strips debug names only, retaining
+  the existing code optimization and the unchanged 1258291-byte CI budget.
