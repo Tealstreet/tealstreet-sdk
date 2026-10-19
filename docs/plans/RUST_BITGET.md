@@ -309,3 +309,8 @@ all focused tests pass. Final rebuild, replay and repeat audit in progress.
   2.25 MiB (2,359,296 bytes), accounting for the newly merged Crypto.com crate;
   CPU/memory replay thresholds remain unchanged. Workspace tests, native clippy
   and WASM clippy pass on this integration.
+
+- Independent final integration review is clear: request checking precedes
+  consumption, socket audits run once, write and ID contracts remain strict,
+  real worker transfer and memory accounting survive extraction. PR mergeability
+  restored; five-venue local replay regressions and current-head CI running.
