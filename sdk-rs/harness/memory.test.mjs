@@ -44,6 +44,14 @@ test('backing stores that never settle fail instead of choosing or clamping a sa
       sample: () => ({ arrayBuffers: time, heapUsed: 1000 }),
       timeoutMs: 200,
     }),
-    /Backing-buffer memory did not settle/,
+    (error) => {
+      assert.match(error.message, /Backing-buffer memory did not settle/);
+      assert.equal(error.sampleCount, 21);
+      assert.equal(error.transitionCount, 20);
+      assert.equal(error.lastArrayBuffers, 210);
+      assert.equal(error.elapsedMs, 210);
+      assert.match(error.message, /samples=21, transitions=20, lastArrayBuffers=210, elapsedMs=210/);
+      return true;
+    },
   );
 });

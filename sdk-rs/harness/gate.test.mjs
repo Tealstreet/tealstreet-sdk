@@ -13,17 +13,26 @@ const gate = (venue, isPrivate = false, defect) => {
   const tape = join(cwd, 'tape.jsonl');
   writeFileSync(tape, JSON.stringify({ type: 'meta', private: isPrivate }) + '\n');
   const script = `
+    import assert from 'node:assert/strict';
     import childProcess from 'node:child_process';
     import { writeFileSync } from 'node:fs';
     import { syncBuiltinESMExports } from 'node:module';
     const venue = ${JSON.stringify(venue)};
     const isPrivate = ${JSON.stringify(isPrivate)};
     const defect = ${JSON.stringify(defect ?? null)};
+    // The gate must override an explicit parent opt-in for both implementations,
+    // while retaining unrelated replay configuration in the child environment.
+    process.env.ESBUILD_WORKER_THREADS = '1';
+    process.env.HARNESS_TEST_INHERITED = 'retained';
     process.argv = ['node', 'gate.mjs', '--venue', venue, '--tape', ${JSON.stringify(tape)},
       '--books', 'BTCUSDT', '--runs', '2'];
-    childProcess.spawnSync = (_executable, args) => {
+    const spawned = new Set();
+    childProcess.spawnSync = (_executable, args, options) => {
+      assert.equal(options.env.ESBUILD_WORKER_THREADS, '0');
+      assert.equal(options.env.HARNESS_TEST_INHERITED, 'retained');
       const out = args[args.indexOf('--out') + 1];
       const impl = args[args.indexOf('--impl') + 1];
+      spawned.add(impl);
       const rust = impl === 'rust';
       const output = {
         frames: 1, unserved: 0, missingWrites: 0, unusedWrites: 0,
@@ -62,6 +71,7 @@ const gate = (venue, isPrivate = false, defect) => {
     };
     syncBuiltinESMExports();
     await import(${JSON.stringify(new URL('./gate.mjs', import.meta.url).href)});
+    assert.deepEqual([...spawned].sort(), ['rust', 'ts']);
   `;
   try {
     const runner = join(cwd, 'run.mjs');

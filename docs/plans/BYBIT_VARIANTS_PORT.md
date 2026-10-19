@@ -452,3 +452,17 @@ engine and Bitget O3, and use Bybit's `s` profile with the source allocation fix
 The resulting artifact is 3,658,339 bytes, within the unchanged inherited 3.5 MiB
 budget. The full matrix is now 31 gates (14 public, 17 private) and is running;
 final-head CI must be green before merge. No fixture or gate threshold changed.
+
+The first ten-venue replay stopped at TS memory settlement before producing
+metrics. The exact cause of that untraced failure is unproven. Cold-transform
+diagnostics found compiler-owned 8-byte shared buffers with esbuild's worker
+enabled (at least 100 allocations, 31 retained), and none with it disabled.
+Both warm controls settled; these diagnostic runs were not accepted gate retries.
+Bitget's checkpoint intended `ESBUILD_WORKER_THREADS=0` but its actual runner
+omitted it. Set that supported option before imports for both gate subprocesses
+and direct replay. Implementation modules remain included symmetrically. The
+100 ms quiet window, one-second deadline, four validity checks and performance
+comparisons are unchanged. Timeout errors now expose sample/transition counts,
+last buffer bytes and elapsed time for diagnosis. All 127 harness tests pass,
+including child-env preservation and deterministic timeout diagnostics. Restart
+the full matrix on this configuration; all 45 wasm and 28 host cases pass.

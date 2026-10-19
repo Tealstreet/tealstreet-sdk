@@ -48,7 +48,12 @@ const replay = (impl, run) => {
     out,
   );
   if (values['no-egress']) args.push('--no-egress');
-  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125000 });
+  // TSX's compiler worker retains shared buffers independently of engine work.
+  const result = spawnSync(process.execPath, args, {
+    encoding: 'utf8',
+    timeout: 125000,
+    env: { ...process.env, ESBUILD_WORKER_THREADS: '0' },
+  });
   if (result.status !== 0)
     throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
