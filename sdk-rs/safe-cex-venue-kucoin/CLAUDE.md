@@ -3,6 +3,10 @@
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/kucoin/CLAUDE.md).
 Core contract: [shared exchange](../safe-cex-exchange/CLAUDE.md).
 
+Both classes' native candle hook retains the actual receiver array. Their typed
+SDK candle method explicitly projects that same result; Spot's authored close
+before high/low key order survives the native account command boundary.
+
 Spot production reads and cancellation use `spot_native_order_reads`, installed
 by `spot_exchange_class.rs`. The unused typed `spot_reads` and `spot_writes`
 modules and their exclusive tests/oracles/contracts have been removed. The

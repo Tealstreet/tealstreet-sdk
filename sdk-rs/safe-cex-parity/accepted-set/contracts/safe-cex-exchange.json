@@ -39314,6 +39314,7 @@
     "evidence": "safe-cex-exchange/CCXT_NATIVE_INPUT_REVIEW.md; tests/js_ccxt_imports.rs actual installed native imports and original reference/coercion witnesses; tests/js_ccxt_imports_source.cjs unchanged maintained source operations. Exact compiler function API retained.",
     "reason": "Defines the nine constant descriptors and four native callable imports on an existing Js globals object. It does not inspect or decode a user payload. All installed CCXT binding tests execute this actual constructor through install_library and check every constant and callable; no decoder permission transfers to the installed callbacks."
   },
+<<<<<<< HEAD
   "safe_cex_exchange::js_runtime::collections::collection_iterator": {
     "category": "decoder",
     "api": {
@@ -39336,14 +39337,267 @@
               "resolved_path": {
                 "path": "safe_cex_exchange::js_runtime::collections::Kind",
                 "args": null
+=======
+  "safe_cex_exchange::js_runtime::library::NativeOutcome": {
+    "shape": "observed",
+    "evidence": "Private retained native handle for the single unknown-send algorithm; actual property/RegExp capabilities preserve the one Js referent without model serialization.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::remaining_utils::UnknownOutcomeValue",
+          "name": "outcome_get",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "The actual native property capability delegates canonical Get without enumerating, projecting or narrowing its referent. Keys select UTF16, inherited NaN, a retained child, absence or an original getter rejection.",
+        "call": "{ use safe_cex_store::remaining_utils::UnknownOutcomeValue as _;let child=super::Js::object(vec![]);let marker=super::Js::object(vec![]);let object=super::Js::object(vec![(\"a\",super::Js::utf16(&[0xd800])),(\"child\",child.clone())]);object.set_prototype(super::Js::object(vec![(\"inherited\",super::Js::Number(f64::NAN))])).unwrap();let reason=marker.clone();object.define_accessor(\"throws\",Some(std::rc::Rc::new(move |_| Err(super::Thrown::new(reason.clone())))),None).unwrap();match $type(object).outcome_get($value.as_str().unwrap()){Ok(value)=>match value.0{super::Js::String(units)=>serde_json::json!({\"tag\":\"text\",\"units\":units.as_ref()}),super::Js::Number(n)=>serde_json::json!({\"tag\":\"number\",\"nan\":n.is_nan()}),super::Js::Undefined=>serde_json::json!({\"tag\":\"undefined\"}),other=>serde_json::json!({\"tag\":\"child\",\"same\":other.same_reference(&child)})},Err(e)=>serde_json::json!({\"tag\":\"throw\",\"original\":e.value.same_reference(&marker)})}}",
+        "cases": [
+          {
+            "input": "a",
+            "output": {
+              "tag": "text",
+              "units": [
+                55296
+              ]
+            }
+          },
+          {
+            "input": "absent",
+            "output": {
+              "tag": "undefined"
+            }
+          },
+          {
+            "input": "inherited",
+            "output": {
+              "tag": "number",
+              "nan": true
+            }
+          },
+          {
+            "input": "child",
+            "output": {
+              "tag": "child",
+              "same": true
+            }
+          },
+          {
+            "input": "throws",
+            "output": {
+              "tag": "throw",
+              "original": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_store::remaining_utils::UnknownOutcomeValue",
+          "name": "outcome_test",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "pattern",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "ignore_case",
+                {
+                  "primitive": "bool"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "bool"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Runs the canonical native RegExp against UTF16 input before any diagnostic presentation. Both matching and nonmatching strings retain the authored lone unit.",
+        "call": "{ use safe_cex_store::remaining_utils::UnknownOutcomeValue as _;let input=$type(super::Js::utf16(&$value.as_array().unwrap().iter().map(|n|n.as_u64().unwrap() as u16).collect::<Vec<_>>()));serde_json::json!(input.outcome_test(\"timeout\",true).unwrap())}",
+        "cases": [
+          {
+            "input": [
+              84,
+              73,
+              77,
+              69,
+              79,
+              85,
+              84,
+              55296
+            ],
+            "output": true
+          },
+          {
+            "input": [
+              110,
+              111,
+              55296
+            ],
+            "output": false
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::library::is_unknown_outcome": {
+    "api": {
+      "kind": "function",
+      "name": "is_unknown_outcome",
+      "signature": {
+        "inputs": [
+          [
+            "error",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+>>>>>>> origin/master
               }
             }
           ]
         ],
         "output": {
           "resolved_path": {
+<<<<<<< HEAD
             "path": "safe_cex_exchange::js_runtime::value::Js",
             "args": null
+=======
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+>>>>>>> origin/master
           }
         },
         "is_c_variadic": false
@@ -39353,6 +39607,7 @@
         "where_predicates": []
       }
     },
+<<<<<<< HEAD
     "evidence": "Reads the original native Map/Set storage at each iterator step. Direct native and independent Node cases cover keys/values/entries, live clear/delete/reinsert, sticky exhaustion, signed zero, lone UTF-16 units and original object identity; it does not project through JSON. Fixtures: safe-cex-exchange/scripts/collection-input-observers.rs and tests/iterator_contract_oracle.cjs; src/js_runtime/collection_contract_tests.rs executes the same direct helpers. Bounded native default-feature profile only.",
     "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/collection-input-observers.rs\")); } observation::collection($value, $type) }",
     "cases": [
@@ -40364,6 +40619,58 @@
     "api": {
       "kind": "function",
       "name": "iterator_method",
+=======
+    "category": "decoder",
+    "evidence": "The public native binding delegates to the single lower unknown-send algorithm through a retained handle, with no JSON projection. Constructed primary/demo source comparisons cover live rejection identity and one-send behavior.",
+    "call": "{let marker=super::Js::object(vec![]);let object=super::Js::object(vec![]);if $value[\"throws\"].as_bool().unwrap_or(false){let reason=marker.clone();object.define_accessor(\"message\",Some(std::rc::Rc::new(move |_| Err(super::Thrown::new(reason.clone())))),None).unwrap();}else{object.define(\"message\",super::Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|n|n.as_u64().unwrap() as u16).collect::<Vec<_>>())).unwrap();}match $type(&object){Ok(value)=>serde_json::json!({\"unknown\":value,\"original\":false}),Err(error)=>serde_json::json!({\"unknown\":null,\"original\":error.value.same_reference(&marker)})}}",
+    "cases": [
+      {
+        "input": {
+          "units": [
+            116,
+            105,
+            109,
+            101,
+            111,
+            117,
+            116,
+            55296
+          ]
+        },
+        "output": {
+          "unknown": true,
+          "original": false
+        }
+      },
+      {
+        "input": {
+          "units": [
+            110,
+            111,
+            55296
+          ]
+        },
+        "output": {
+          "unknown": false,
+          "original": false
+        }
+      },
+      {
+        "input": {
+          "throws": true
+        },
+        "output": {
+          "unknown": null,
+          "original": true
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::ops::number": {
+    "api": {
+      "kind": "function",
+      "name": "number",
+>>>>>>> origin/master
       "signature": {
         "inputs": [
           [
@@ -40390,10 +40697,14 @@
                 "args": [
                   {
                     "type": {
+<<<<<<< HEAD
                       "resolved_path": {
                         "path": "safe_cex_exchange::js_runtime::value::Js",
                         "args": null
                       }
+=======
+                      "primitive": "f64"
+>>>>>>> origin/master
                     }
                   },
                   {
@@ -40417,6 +40728,7 @@
         "where_predicates": []
       }
     },
+<<<<<<< HEAD
     "evidence": "Acquires Symbol.iterator from the original native input. Direct native and independent Node cases distinguish data and absent accessors, preserve inherited getter receiver identity and propagate the exact thrown referent; this is executed raw-input behavior, not a non-decoder exemption. Fixtures: safe-cex-exchange/scripts/collection-input-observers.rs and tests/iterator_contract_oracle.cjs; src/js_runtime/collection_contract_tests.rs executes the same direct helpers. Bounded native default-feature profile only.",
     "call": "{ #[allow(dead_code)] mod observation { include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/collection-input-observers.rs\")); } observation::method($value, $type) }",
     "cases": [
@@ -40706,10 +41018,75 @@
           "original": false,
           "receivers": [
             true
+=======
+    "category": "decoder",
+    "evidence": "The installed Number builtin and retained unknown-outcome adapter share this single canonical Number conversion. Actual constructed Bybit primary/demo bindings compare BigInt response status and venue codes against maintained TS, including valueOf order and overflow.",
+    "call": "{let marker=super::Js::object(vec![]);let primitive=match $value[\"kind\"].as_str().unwrap(){\"negative-zero\"=>super::Js::Number(-0.0),\"nan\"=>super::Js::Number(f64::NAN),\"symbol\"=>super::Js::SymbolIterator,_=>super::Js::BigInt(std::rc::Rc::new($value[\"text\"].as_str().unwrap_or(\"0\").parse().unwrap()))};let trace=std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));let input=if $value[\"object\"].as_bool().unwrap_or(false){let seen=trace.clone();let reason=marker.clone();let throws=$value[\"throws\"].as_bool().unwrap_or(false);super::Js::object(vec![(\"valueOf\",super::Js::function(\"valueOf\",move |_,_|{seen.borrow_mut().push(\"number\");if throws {Err(super::Thrown::new(reason.clone()))}else{Ok(primitive.clone())}}))])}else{primitive};match $type(&input){Ok(number)=>serde_json::json!({\"bits\":format!(\"{:016x}\",number.to_bits()),\"events\":*trace.borrow()}),Err(error)=>serde_json::json!({\"throws\":true,\"original\":error.value.same_reference(&marker),\"events\":*trace.borrow()})}}",
+    "cases": [
+      {
+        "input": {
+          "kind": "bigint",
+          "text": "503"
+        },
+        "output": {
+          "bits": "407f700000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "bigint",
+          "text": "-1007"
+        },
+        "output": {
+          "bits": "c08f780000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "bigint",
+          "text": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "output": {
+          "bits": "7ff0000000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "negative-zero"
+        },
+        "output": {
+          "bits": "8000000000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "nan"
+        },
+        "output": {
+          "bits": "7ff8000000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "bigint",
+          "text": "503",
+          "object": true
+        },
+        "output": {
+          "bits": "407f700000000000",
+          "events": [
+            "number"
+>>>>>>> origin/master
           ]
         }
       },
       {
+<<<<<<< HEAD
         "input": "inherited-getter",
         "output": {
           "ok": true,
@@ -40895,5 +41272,31 @@
         }
       ]
     }
+=======
+        "input": {
+          "kind": "symbol"
+        },
+        "output": {
+          "throws": true,
+          "original": false,
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "bigint",
+          "object": true,
+          "throws": true
+        },
+        "output": {
+          "throws": true,
+          "original": true,
+          "events": [
+            "number"
+          ]
+        }
+      }
+    ]
+>>>>>>> origin/master
   }
 }

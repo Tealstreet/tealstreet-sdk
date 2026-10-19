@@ -1035,3 +1035,9 @@ unlimited/secondary routing checks and all 36 existing constructor profiles.
 The private onOpen specific-claims review records bounded disposal/recovery
 differences separately from the shared original-cause diagnostic correction.
 See `../safe-cex-exchange/PRIVATE_OPEN_REVIEW.md`; no Wasm-only row is closed.
+
+The unknown-send guard in primary/demo submitCreateOrders and the shared global
+uses the live rejection with the single lower decision algorithm. No whole-error
+JSON projection precedes recovery. `audit_unknown_outcome_preserves_native_submission_rejection`
+compares 56 submission/property profiles with actual TS, preserving the signing
+veto, response precedence, original rejection and exactly one send.
