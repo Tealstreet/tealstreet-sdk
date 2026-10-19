@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
 use safe_cex_venue_mexc::{MexcFutures, Options};
 
@@ -53,4 +54,67 @@ pub fn started() -> (TestEngine, SocketId) {
 }
 pub fn ws(e: &mut TestEngine, socket: SocketId, text: &str) {
     e.handle(200.0, Event::WsMessage { socket, text });
+}
+
+pub fn private_started() -> (
+    TestEngine,
+    SocketId,
+    Vec<HttpRequest>,
+    safe_cex_engine::TimerId,
+) {
+    let mut e = Engine::new(MexcFutures::new(Options {
+        public_data_only: false,
+        key: Some("replay-key".into()),
+        secret: Some("replay-secret".into()),
+    }));
+    e.start(0.0);
+    let r = requests(&mut e).remove(0);
+    response(&mut e, &r, MARKETS);
+    let r = requests(&mut e).remove(0);
+    response(&mut e, &r, TICKERS);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let sockets: Vec<_> = actions
+        .iter()
+        .filter_map(|a| {
+            if let Action::WsConnect { socket, .. } = a {
+                Some(*socket)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let mode = actions
+        .iter()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    response(&mut e, mode, r#"{"success":true,"code":0,"data":2}"#);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let timer = actions
+        .iter()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, at_ms } = a {
+                if *at_ms == 2100.0 { Some(*timer) } else { None }
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let reads = actions
+        .into_iter()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect();
+    e.handle(100.0, Event::WsOpened { socket: sockets[1] });
+    (e, sockets[1], reads, timer)
 }

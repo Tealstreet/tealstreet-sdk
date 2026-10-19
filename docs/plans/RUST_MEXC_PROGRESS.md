@@ -57,3 +57,21 @@ and cut a follow-up branch. Never touch master or force-push.
   leverage internally; stream snapshot rows into temporary typed collections;
   compare snapshot-start revision with order/position/setting updates before
   commit; preserve last-known-good data on failed envelopes or pages.
+- Merged landing layout at `d9e5d3f507`: venue is now `sdk-rs/venues/mexc`,
+  engine `sdk-rs/engine`, host `sdk-rs/hosts/wasm`, crypto `sdk-rs/crypto`.
+- Private phase implemented. Review `private_review` found and re-reviewed
+  fixes for private rate-limit pauses, flat authenticated leverage metadata,
+  canonical position IDs, zero equity, and a hedge-rail snapshot race.
+- Private verification: crate clippy and all 19 Rust tests pass; crypto's 28
+  unit tests pass. safe-cex typecheck/lint pass. Root typecheck: 44/44 tasks.
+  Runtime-boundary test passes after moving the existing wasm exchange test
+  from production code into audit-regressions (full root tests had exposed it).
+- Removed unused first-port `crypto::wallet_utils`; a repository-wide symbol
+  search found only its definitions and export, no callers.
+- Active-symbol metadata now has a `FetchLeverage` command through engine,
+  wasm and the Rust exchange shell; both internal leverage rails and the
+  authenticated max cap are retained even when flat.
+- Trading plan audit: preflight the entire placement batch before enqueue;
+  use typed sequenced jobs and exact serialized bodies; never retry a write
+  after transport failure; check per-row cancel results; retain stop routing
+  and native position IDs; reconcile settings only after accepted mutations.

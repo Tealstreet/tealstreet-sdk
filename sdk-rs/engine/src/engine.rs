@@ -133,6 +133,11 @@ pub enum Command {
         command: CommandId,
         hedged: bool,
     },
+    /// Refresh account-specific leverage rails and margin mode for a symbol.
+    FetchLeverage {
+        command: CommandId,
+        symbol: String,
+    },
     /// A rare request/response read (history, income, trades); the result is
     /// JSON in [`Notice::CommandDone`] and never enters the frame.
     Query {

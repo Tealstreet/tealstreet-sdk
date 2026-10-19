@@ -204,6 +204,10 @@ enum CommandIn {
         command: u32,
         hedged: bool,
     },
+    FetchLeverage {
+        command: u32,
+        symbol: String,
+    },
     #[serde(rename_all = "camelCase")]
     FetchFills {
         command: u32,
@@ -299,6 +303,7 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
+            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
                 command,
                 symbol,

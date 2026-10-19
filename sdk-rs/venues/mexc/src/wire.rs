@@ -187,3 +187,150 @@ pub fn interval(s: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+pub fn id<'de, D: Deserializer<'de>>(d: D) -> Result<Str<'de>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Id<'a> {
+        Text(#[serde(borrow)] Str<'a>),
+        Int(u64),
+        Signed(i64),
+    }
+    Ok(match Id::deserialize(d)? {
+        Id::Text(s) => s,
+        Id::Int(n) => Cow::Owned(n.to_string()),
+        Id::Signed(n) => Cow::Owned(n.to_string()),
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Asset<'a> {
+    #[serde(borrow)]
+    pub currency: Str<'a>,
+    #[serde(deserialize_with = "number")]
+    pub available_balance: f64,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub equity: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub cash_balance: Option<f64>,
+    #[serde(default, deserialize_with = "number")]
+    pub unrealized: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub frozen_balance: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionRow<'a> {
+    #[serde(borrow, deserialize_with = "id")]
+    pub position_id: Str<'a>,
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(default, deserialize_with = "number")]
+    pub position_type: f64,
+    #[serde(deserialize_with = "number")]
+    pub hold_vol: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub hold_avg_price: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub leverage: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub open_type: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub position_mode: f64,
+    #[serde(default, deserialize_with = "number", alias = "unrealizedPnl")]
+    pub unrealized: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub realised: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub liquidate_price: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub im: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub update_time: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderRow<'a> {
+    #[serde(default)]
+    pub reduce_only: bool,
+    #[serde(borrow, default, deserialize_with = "id")]
+    pub order_id: Str<'a>,
+    #[serde(borrow, default, alias = "stopPlanOrderId", deserialize_with = "id")]
+    pub id: Str<'a>,
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(default, deserialize_with = "number")]
+    pub side: f64,
+    #[serde(default, deserialize_with = "number", alias = "type")]
+    pub order_type: f64,
+    #[serde(deserialize_with = "number")]
+    pub state: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub vol: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub deal_vol: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub price: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub trigger_price: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub trigger_type: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub position_type: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub vol_type: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub trigger_side: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub take_profit_price: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub stop_loss_price: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub update_time: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub create_time: f64,
+    #[serde(default, deserialize_with = "number")]
+    pub error_code: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DealRow<'a> {
+    #[serde(borrow, default, deserialize_with = "id")]
+    pub trade_id: Str<'a>,
+    #[serde(borrow, default, deserialize_with = "id")]
+    pub id: Str<'a>,
+    #[serde(borrow, default, deserialize_with = "id")]
+    pub order_id: Str<'a>,
+    #[serde(borrow)]
+    pub symbol: Str<'a>,
+    #[serde(default, deserialize_with = "number")]
+    pub side: f64,
+    #[serde(deserialize_with = "number")]
+    pub price: f64,
+    #[serde(deserialize_with = "number")]
+    pub vol: f64,
+}
+
+pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    struct N(#[serde(deserialize_with = "number")] f64);
+    Ok(Option::<N>::deserialize(d)?.map(|n| n.0))
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeverageRow {
+    #[serde(deserialize_with = "number")]
+    pub position_type: f64,
+    #[serde(deserialize_with = "number")]
+    pub leverage: f64,
+    #[serde(deserialize_with = "number")]
+    pub open_type: f64,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub max_leverage_view: Option<f64>,
+    #[serde(default, deserialize_with = "optional_number")]
+    pub max_leverage: Option<f64>,
+}

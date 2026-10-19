@@ -4,6 +4,7 @@ import type {
   Candle,
   ExchangeName,
   ExchangeOptions,
+  FetchedLeverage,
   Execution,
   HistoricalOrder,
   IncomeHistoryOptions,
@@ -110,6 +111,12 @@ export class RustEngineExchange extends BaseExchange {
 
   /** The whole current state as one frame, for a consumer that starts late. */
   snapshotFrame = () => this.host?.snapshot();
+
+  updateSymbolMetadata = async (symbol: string) => {
+    if (this.name !== 'mexc' || this.options.publicDataOnly) return;
+    const rails = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+    this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: rails } });
+  };
 
   private receiveFrame = (buffer: ArrayBuffer) => {
     const frame = new Frame(buffer);

@@ -1,0 +1,266 @@
+mod support;
+use safe_cex_engine::{Action, Event};
+use support::*;
+
+const POSITION: &str = r#"{"positionId":739113577038255616,"symbol":"BTC_USDT","positionType":1,"holdVol":60,"holdAvgPrice":60000,"leverage":10,"openType":1,"positionMode":2,"unrealized":6,"liquidatePrice":50000,"im":36,"updateTime":1700000000000}"#;
+const ORDER: &str = r#"{"orderId":739113577038255617,"symbol":"BTC_USDT","side":4,"orderType":1,"vol":30,"dealVol":10,"price":65000,"state":2,"updateTime":1700000000000}"#;
+
+#[test]
+fn startup_signs_reads_and_login_filters_all_order_surfaces() {
+    let (mut e, socket, reads, _) = private_started();
+    assert_eq!(reads.len(), 5);
+    assert!(!e.store().hedged());
+    for r in &reads {
+        assert!(
+            r.headers
+                .iter()
+                .any(|(k, v)| *k == "ApiKey" && v == "replay-key")
+        );
+    }
+    let sent: Vec<_> = e.drain_actions().collect();
+    assert!(sent.iter().any(
+        |a| matches!(a,Action::WsSend{text,..}if text.contains("signature")&&text.contains("login"))
+    ));
+    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+    assert!(e.drain_actions().any(|a|matches!(a,Action::WsSend{text,..}if text.contains("stop.planorder")&&text.contains("order.deal"))));
+    for r in &reads {
+        let body = if r.url.contains("assets") {
+            r#"{"success":true,"code":0,"data":[{"currency":"USDT","availableBalance":964,"equity":1000,"unrealized":6,"frozenBalance":0}]}"#.to_owned()
+        } else if r.url.contains("open_positions") {
+            format!(r#"{{"success":true,"code":0,"data":[{POSITION}]}}"#)
+        } else if r.url.contains("open_orders") {
+            format!(r#"{{"success":true,"code":0,"data":[{ORDER}]}}"#)
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#.to_owned()
+        };
+        response(&mut e, r, &body);
+    }
+    assert_eq!(e.store().balance().total, 1000.0);
+    assert_eq!(e.store().positions()[0].id, "BTCUSDT");
+    assert_eq!(e.store().positions()[0].contracts, 0.006);
+    assert_eq!(
+        e.store().orders()[0]
+            .extra
+            .as_ref()
+            .unwrap()
+            .filled_in_placement_units,
+        Some(10.0)
+    );
+    assert!(e.store().loaded().orders);
+}
+
+#[test]
+fn terminal_stream_update_wins_over_older_full_snapshot() {
+    let (mut e, socket, reads, _) = private_started();
+    ws(
+        &mut e,
+        socket,
+        &format!(
+            r#"{{"channel":"push.personal.order","data":{}}}"#,
+            ORDER.replace("\"state\":2", "\"state\":4")
+        ),
+    );
+    for r in &reads {
+        let body = if r.url.contains("open_orders") {
+            format!(r#"{{"success":true,"code":0,"data":[{ORDER}]}}"#)
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#.into()
+        };
+        response(&mut e, r, &body);
+    }
+    assert!(
+        !e.store()
+            .orders()
+            .iter()
+            .any(|o| o.id == "739113577038255617"
+                && o.status == safe_cex_engine::model::OrderStatus::Open)
+    );
+}
+
+#[test]
+fn failed_full_snapshot_never_commits_successful_subset_as_complete() {
+    let (mut e, _, reads, timer) = private_started();
+    for r in &reads {
+        let body = if r.url.contains("planorder") {
+            r#"{"success":false,"code":510,"data":[]}"#
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#
+        };
+        response(&mut e, r, body);
+    }
+    assert!(!e.store().loaded().orders);
+    e.handle(2100.0, Event::TimerFired { timer });
+    assert_eq!(requests(&mut e).len(), 5);
+}
+
+#[test]
+fn fills_emit_once_and_never_increment_cumulative_order_fills() {
+    let (mut e, socket, _, _) = private_started();
+    ws(
+        &mut e,
+        socket,
+        &format!(r#"{{"channel":"push.personal.order","data":{ORDER}}}"#),
+    );
+    let deal = r#"{"channel":"push.personal.order.deal","data":{"tradeId":987654321123456789,"orderId":739113577038255617,"symbol":"BTC_USDT","side":4,"price":65000,"vol":10}}"#;
+    ws(&mut e, socket, deal);
+    ws(&mut e, socket, deal);
+    assert_eq!(e.store().order("739113577038255617").unwrap().filled, 0.001);
+    let frame = e.take_frame(200.0).unwrap();
+    let sections = u16::from_le_bytes(frame[6..8].try_into().unwrap());
+    let mut cursor = 16;
+    let mut fill_count = 0;
+    for _ in 0..sections {
+        let kind = u16::from_le_bytes(frame[cursor..cursor + 2].try_into().unwrap());
+        let bytes = u32::from_le_bytes(frame[cursor + 4..cursor + 8].try_into().unwrap()) as usize;
+        if kind == 11 {
+            fill_count = u32::from_le_bytes(frame[cursor + 8..cursor + 12].try_into().unwrap());
+        }
+        cursor += 8 + bytes;
+    }
+    assert_eq!(fill_count, 1);
+    assert!(!e.has_actions() || e.drain_actions().all(|a| !matches!(a, Action::Http(_))));
+}
+
+#[test]
+fn trigger_state_two_is_canceled_and_stale_open_frame_is_shielded() {
+    let (mut e, socket, _, _) = private_started();
+    let plan = r#"{"channel":"push.personal.plan.order","data":{"id":"p1","symbol":"BTC_USDT","side":4,"vol":10,"triggerPrice":55000,"triggerType":2,"state":2}}"#;
+    ws(&mut e, socket, plan);
+    ws(&mut e, socket, &plan.replace("\"state\":2", "\"state\":1"));
+    assert_eq!(
+        e.store().order("p1").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Canceled
+    );
+}
+
+#[test]
+fn zero_equity_is_a_value_and_does_not_fall_back_to_cash_balance() {
+    let (mut e, _, reads, _) = private_started();
+    let r = reads.iter().find(|r| r.url.contains("assets")).unwrap();
+    response(
+        &mut e,
+        r,
+        r#"{"success":true,"code":0,"data":[{"currency":"USDT","availableBalance":0,"equity":0,"cashBalance":100}]}"#,
+    );
+    assert_eq!(e.store().balance().total, 0.0);
+}
+
+#[test]
+fn private_429_pauses_periodic_reads() {
+    let (mut e, _, reads, timer) = private_started();
+    for r in &reads {
+        e.handle(
+            100.0,
+            Event::HttpResponse {
+                request: r.id,
+                response: safe_cex_engine::Response {
+                    status: 429,
+                    headers: "retry-after: 10",
+                    body: r#"{"success":false,"code":429,"message":"limited"}"#,
+                },
+            },
+        );
+    }
+    e.drain_actions().for_each(drop);
+    e.handle(2100.0, Event::TimerFired { timer });
+    assert!(requests(&mut e).is_empty());
+}
+
+#[test]
+fn flat_symbol_metadata_fetches_both_rails_and_authenticated_cap() {
+    let (mut e, _, _, _) = private_started();
+    e.drain_actions().for_each(drop);
+    e.handle(
+        200.0,
+        Event::Command(safe_cex_engine::Command::FetchLeverage {
+            command: 41,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    let r = requests(&mut e).remove(0);
+    assert!(r.url.contains("/position/leverage?symbol=BTC_USDT"));
+    response(
+        &mut e,
+        &r,
+        r#"{"success":true,"code":0,"data":[{"positionType":1,"leverage":10,"openType":1,"maxLeverageView":125,"maxLeverage":500},{"positionType":2,"leverage":15,"openType":1,"maxLeverageView":100,"maxLeverage":500}]}"#,
+    );
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 10.0);
+    assert_eq!(
+        e.store().market("BTCUSDT").unwrap().limits.leverage.max,
+        100.0
+    );
+    assert!(e.drain_actions().any(|a|matches!(a,Action::Notice(safe_cex_engine::Notice::CommandDone{command:41,result:Ok(s)}) if s.contains("\"sellLeverage\":15.0")&&s.contains("\"buyLeverage\":10.0"))));
+}
+
+#[test]
+fn unrelated_order_update_does_not_skip_the_second_hedge_rail() {
+    let (mut e, socket, reads, _) = private_started();
+    ws(
+        &mut e,
+        socket,
+        &format!(r#"{{"channel":"push.personal.order","data":{ORDER}}}"#),
+    );
+    let long = POSITION.replace("\"positionMode\":2", "\"positionMode\":1");
+    let short = long
+        .replace("739113577038255616", "739113577038255618")
+        .replace("\"positionType\":1", "\"positionType\":2")
+        .replace("\"leverage\":10", "\"leverage\":15");
+    let r = reads
+        .iter()
+        .find(|r| r.url.contains("open_positions"))
+        .unwrap();
+    response(
+        &mut e,
+        r,
+        &format!(r#"{{"success":true,"code":0,"data":[{long},{short}]}}"#),
+    );
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 15.0);
+}
+
+#[test]
+fn startup_mode_and_metadata_reads_respect_the_rate_limit_pause() {
+    let mut e = safe_cex_engine::Engine::new(safe_cex_venue_mexc::MexcFutures::new(
+        safe_cex_venue_mexc::Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            public_data_only: false,
+        },
+    ));
+    e.start(0.0);
+    let r = requests(&mut e).remove(0);
+    response(&mut e, &r, MARKETS);
+    let r = requests(&mut e).remove(0);
+    response(&mut e, &r, TICKERS);
+    let r = requests(&mut e).remove(0);
+    e.handle(
+        100.0,
+        Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 429,
+                headers: "retry-after: 10",
+                body: "limited",
+            },
+        },
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, .. } = a {
+                Some(timer)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(2100.0, Event::TimerFired { timer });
+    assert!(requests(&mut e).is_empty());
+    e.handle(
+        2200.0,
+        Event::Command(safe_cex_engine::Command::FetchLeverage {
+            command: 41,
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert!(e.drain_actions().all(|a| !matches!(a, Action::Http(_))));
+}
