@@ -217,7 +217,13 @@ fn fill_and_income_bindings_keep_raw_units_before_typed_model_projection() {
             .expect("fixture array property reads")
             .unwrap(),
         income["output"].as_array().unwrap(),
-        true,
+        false,
+    );
+    let typed: safe_cex_types::IncomeRecord =
+        safe_cex_exchange::js_runtime::value::to_typed(&actual.get("0").unwrap()).unwrap();
+    assert_eq!(
+        typed.tran_id, "\u{fffd}:pnl",
+        "only the final shared record projects String"
     );
     assert_eq!(
         actual

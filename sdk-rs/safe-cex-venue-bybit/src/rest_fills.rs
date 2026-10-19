@@ -250,6 +250,7 @@ pub(crate) async fn fetch_executions_fallback_from_order_history(
 pub(crate) fn fetch_historical_fills(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
     let rt = rt.clone();
     Ok(rt.clone().spawn(Box::pin(async move {
+        let rows: Result<Js, Thrown> = async {
         if rt.this.get("isPublicDataOnly")?.truthy() { return Ok(Js::array(vec![])); }
         let symbol = opts.get("symbol")?;
         if !symbol.truthy() { return Ok(Js::array(vec![])); }
@@ -292,5 +293,52 @@ pub(crate) fn fetch_historical_fills(rt: &Rt, opts: Js) -> Result<Js, Thrown> {
                 Ok(executions)
             }
         }
+        }.await;
+        admit_execution_rows(&rt, rows?)
     })))
+}
+
+// Shared decision 3: a malformed strict output refuses one row, never its neighbors.
+fn admit_execution_rows(rt: &Rt, rows: Js) -> Result<Js, Thrown> {
+    let Some(values) = rows.array_values()? else {
+        return Ok(rows);
+    };
+    let mut accepted = Vec::new();
+    let mut has_refused = false;
+    for (index, row) in values.into_iter().enumerate() {
+        let mut refused = Vec::new();
+        for (field, required) in [("symbol", true), ("commissionAsset", false)] {
+            let value = row.get(field)?;
+            if !value.is_string() && (required || !value.is_undefined()) {
+                let rendered = rt
+                    .shared
+                    .globals
+                    .get("JSON")?
+                    .call_method("stringify", vec![value.clone()])?;
+                let rendered = if rendered.is_undefined() {
+                    "undefined".into()
+                } else {
+                    text(&rendered)?
+                };
+                refused.push(format!("{field}={rendered}: expected string"));
+            }
+        }
+        if refused.is_empty() {
+            accepted.push(row);
+        } else {
+            has_refused = true;
+            log(
+                rt,
+                &format!(
+                    "Refused Bybit execution row {index}: {}",
+                    refused.join(", ")
+                ),
+            )?;
+        }
+    }
+    Ok(if has_refused {
+        Js::array(accepted)
+    } else {
+        rows
+    })
 }

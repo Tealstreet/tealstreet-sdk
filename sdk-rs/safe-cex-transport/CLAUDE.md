@@ -287,3 +287,7 @@ Native reqwest builder failures for protocols Axios rejects retain
 `ERR_BAD_REQUEST` and `Unsupported protocol <scheme>:`. They are request setup
 failures, not retryable connection resets. The constructed Aster validation
 regression compares the real native adapter with maintained Axios.
+
+Remote signing publishes diagnostic duration/signed-at/conditional signature age
+in config extensions after header merging. Both legacy and native-query signing
+profiles use the same stamp operation; skip/refusal paths leave those fields alone.

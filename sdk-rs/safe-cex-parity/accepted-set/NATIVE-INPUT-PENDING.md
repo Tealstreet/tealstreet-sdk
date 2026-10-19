@@ -13,3 +13,9 @@ Adding its ordinary contract requires changing its state to `classified` and
 recording the ruling; deletion requires `removed` and a ruling. Normal contract
 and native observation checks still apply. The ledger never filters inventory
 or supplies decoder or alias permission.
+
+Master integration adds three separately counted pending rows introduced by #1238:
+`structured_clone`, `copy`, and `hidden` in
+`safe_cex_exchange::js_runtime::structured_clone`. Their owner is codex-0xekzz.
+The original cohort remains 149; the current total is 152 (146 core, six AsterDEX).
+These additions grant no measurement permission and use the same exact-owner gate.

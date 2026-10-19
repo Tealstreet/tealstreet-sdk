@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "reason": "Exact newly discovered native Js input classification debt from #1193. No exemption/filter: normal measurements still require contracts. Any new owner or disappearance requires an explicit ledger update and ruling.",
+  "reason": "Exact native input classification debt: original149 from #1193 plus3 introduced on master by #1238, separately marked. No exemption/filter: normal measurements still require contracts. Any new owner or disappearance requires an explicit ledger update and ruling.",
   "owners": [
     {
       "package": "safe-cex-venue-asterdex",
@@ -753,6 +753,30 @@
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::runtime::exception_text",
       "state": "pending"
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::structured_clone::structured_clone",
+      "state": "pending",
+      "introduced": "introduced on master by #1238",
+      "owner": "codex-0xekzz",
+      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::structured_clone::copy",
+      "state": "pending",
+      "introduced": "introduced on master by #1238",
+      "owner": "codex-0xekzz",
+      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+    },
+    {
+      "package": "safe-cex-exchange",
+      "name": "safe_cex_exchange::js_runtime::structured_clone::hidden",
+      "state": "pending",
+      "introduced": "introduced on master by #1238",
+      "owner": "codex-0xekzz",
+      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
     }
   ]
 }

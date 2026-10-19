@@ -239,3 +239,26 @@ format/build passed, but workspace host clippy failed101 on the new pager
 budget's negated partial-order comparison. Its positive-or-NaN spelling retains
 the six-case native/source expectation. The follow-up delivery reruns the three
 required gates; earlier4473004413 exits do not transfer to that SHA.
+
+## Remote-signer waiter ownership follow-up
+
+FIX-audit row 80 now retains the pending wait through canonical `start_eager`.
+On f8110cd172, the compiled `discarded_signer_waiter_keeps_source_subscription_until_completion`
+regression failed at `SIGNER_DISCARDED keeps source subscription` (0 versus 1).
+Its Node instrument executes the maintained `BaseExchange.waitForRemoteSigner`
+method and real TinyEmitter; discarding the Promise keeps its subscription until
+availability or disposal, and either path removes it once. The native host and
+shared core tests cover both paths, independent waiters and capture release.
+The existing guard remains around the runtime-owned continuation. A connected
+listener throw from the installed callback still leaves the source promise pending after its settled latch,
+with the original listener diagnostic sent to the native host error channel.
+This supersedes the caller-owned cancellation choice in the earlier audit table;
+no broader host callback or raw thrown-value equivalence is claimed.
+
+The final dropped-rejection probe also compiled RED at `SIGNER_REJECTION`
+(0 host failures versus 1). The maintained source emits unhandledRejection when
+an unobserved disconnected status listener throws, or when availability changes
+during that event and the immediate connected status listener throws. Both
+rejected-return branches now use the same canonical eager driver. The native
+host reports each original error referent once; attaching a waiter before the
+checkpoint marks the rejection handled and returns that same diagnostic instead.

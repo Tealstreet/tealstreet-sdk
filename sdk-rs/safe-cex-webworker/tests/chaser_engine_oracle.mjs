@@ -45,4 +45,19 @@ for(const method of ['placement','completion'])for(const mode of ['ready','noop'
  await flush();assert.deepEqual(continuation,['returned','fulfilled']);
  timing.push({method,mode,returned,final:snapshot(),outcome,continuation});
 }
-process.stdout.write(JSON.stringify({timing,repriceEvents,unavailableReason,fillReason,retryEvents,lostEvents,ceilings,infiniteAmount,cleanupEvent,emptyRestFilled,monitorEvents:monitor.events,monitorReason:monitor.i.state.stopReason}));
+const completionProfiles=[];
+const bitBuffer=new DataView(new ArrayBuffer(8));
+const bits=value=>{bitBuffer.setFloat64(0,value);return bitBuffer.getBigUint64(0).toString(16).padStart(16,'0');};
+for(const size of [-0,Infinity,-Infinity,NaN,3])for(const clientId of [undefined,'','caller']){
+ const f=fixture('bybit',false,size);
+ if(clientId!==undefined)f.i.options.clientId=clientId;
+ f.i.markComplete('user');
+ await f.m.emitComplete(f.i);
+ assert.equal(f.completes.length,1);
+ const event=f.completes[0];
+ completionProfiles.push({keys:Object.keys(event),clientOwn:Object.hasOwn(event,'clientId'),
+  clientUndefined:event.clientId===undefined,clientText:event.clientId??null,
+  id:event.id,symbol:event.symbol,side:event.side,reduceOnly:event.reduceOnly,
+  sizeBits:bits(event.size),filledBits:bits(event.filled),stopReason:event.stopReason});
+}
+process.stdout.write(JSON.stringify({completionProfiles,timing,repriceEvents,unavailableReason,fillReason,retryEvents,lostEvents,ceilings,infiniteAmount,cleanupEvent,emptyRestFilled,monitorEvents:monitor.events,monitorReason:monitor.i.state.stopReason}));

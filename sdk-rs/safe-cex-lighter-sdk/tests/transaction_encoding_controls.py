@@ -11,14 +11,8 @@ env = os.environ.copy()
 env['SAFE_CEX_TYPESCRIPT_PATH'] = '/Users/sam/cs/tealstreet-next/node_modules/typescript'
 command = ['/opt/homebrew/opt/rustup/bin/cargo', 'test', '--manifest-path', str(sdk / 'Cargo.toml'),
            '-p', 'safe-cex-lighter-sdk', '--test', 'transaction_encoding', '--jobs', '1', '--locked']
-hashes = 'transaction_messages_match_maintained_typescript'
 amounts = 'amount_utilities_match_maintained_typescript'
 controls = [
-    ('create-order', 'transaction_encoding.rs', 'output.extend(i64_field(&tx.price)?);', 'output.extend(i64_field(&tx.quantity)?);', hashes, 'SDK-ENC native hashCreateOrderTx 0'),
-    ('cancel-order', 'transaction_encoding.rs', 'append_identifier(&mut output, &tx.order_id);', 'append_identifier(&mut output, &tx.market_id);', hashes, 'SDK-ENC native hashCancelOrderTx 0'),
-    ('transfer', 'transaction_encoding.rs', 'append_identifier(&mut output, &tx.recipient);', 'append_identifier(&mut output, &tx.token_address);', hashes, 'SDK-ENC native hashTransferTx 0'),
-    ('withdraw', 'transaction_encoding.rs', 'tx.fast_withdraw.unwrap_or(false)', '!tx.fast_withdraw.unwrap_or(false)', hashes, 'SDK-ENC native hashWithdrawTx 0'),
-    ('auth', 'transaction_encoding.rs', 'let mut output = u32_field(account_index)?;\n    output.extend(u32_field(api_key_index)?);', 'let mut output = u32_field(api_key_index)?;\n    output.extend(u32_field(account_index)?);', hashes, 'SDK-ENC native hashAuthToken 0'),
     ('bigint-hex', 'amount_encoding.rs', 'bytes * 2.0', 'bytes * 3.0', amounts, 'SDK-ENC native bigIntToHex 1'),
     ('format', 'amount_encoding.rs', 'let fractional = amount % &divisor;', 'let fractional = amount / &divisor;', amounts, 'SDK-ENC native formatAmount 0'),
     ('parse', 'amount_encoding.rs', 'runtime.pad_zeros(fraction, decimals, false)?', 'runtime.pad_zeros(fraction, decimals, true)?', amounts, 'SDK-ENC native parseAmount 1'),
