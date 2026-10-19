@@ -80,7 +80,8 @@ class Strings {
     const count = new Uint32Array(buffer, offset, 1)[0];
     this.offsets = new Uint32Array(buffer, offset + 4, count + 1);
     this.bytes = new Uint8Array(buffer, offset + 4 + 4 * (count + 1));
-    this.cache = new Array(count);
+    // Numeric-only readers never need slots for the frame's string table.
+    this.cache = [];
   }
 
   get(index) {
