@@ -1,4 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { parseRequestJson } from './request-json.mjs';
+import { Responses } from './responses.mjs';
 
 /** Per-request values: clocks, signatures and generated client ids. */
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
@@ -51,13 +53,16 @@ export const canonicalBody = (body, callerIds = new Set(), venue = {}) => {
     return value;
   };
   try {
-    const parsed =
+    let parsed =
       typeof body === 'string'
-        ? JSON.parse(body)
+        ? parseRequestJson(body)
         : ArrayBuffer.isView(body) || body instanceof ArrayBuffer
-          ? JSON.parse(new TextDecoder().decode(body))
+          ? parseRequestJson(new TextDecoder().decode(body))
           : body;
-    return JSON.stringify(clean(parsed));
+    if (venue.requestBodyParams && parsed?.method && parsed?.params) parsed = parsed.params;
+    return JSON.stringify(clean(parsed), (_key, value) =>
+      typeof value === 'bigint' ? { integer: String(value) } : value,
+    );
   } catch {
     return String(body);
   }
@@ -79,11 +84,12 @@ export const withTimeout = async (promise, label, ms = 30000) => {
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 export class Tape {
-  constructor(records, venue, isPrivate, timeoutMs = 30000, impl) {
+  constructor(records, venue, isPrivate, timeoutMs = 30000, impl, books = []) {
     this.venue = venue;
     this.isPrivate = isPrivate;
     this.timeoutMs = timeoutMs;
     this.commandIndex = 0;
+    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books, tickers: venue.publicTickers?.(records) });
     this.callerIds = new Set(
       records
         .flatMap((r) => r.orders ?? [])
@@ -98,7 +104,24 @@ export class Tape {
       const key = `${record.method} ${canonicalUrl(record.url)}${expectedBody === undefined ? '' : ` BODY ${canonicalBody(expectedBody, this.callerIds, this.venue)}`}`;
       if (!this.responses.has(key)) this.responses.set(key, []);
       this.responses.get(key).push(record);
-      if (record.method !== 'GET') this.writeOrder.push(record);
+      if (this.isWrite(record.method, record.url)) this.writeOrder.push(record);
+    }
+    if (venue.checkRequest) {
+      const responseKey = (method, url, body) => {
+        const base = `${method} ${canonicalUrl(url)}`;
+        const exact = `${base} BODY ${canonicalBody(body, this.callerIds, venue)}`;
+        return this.responses.has(exact) ? exact : base;
+      };
+      this.responseStore = new Responses(
+        records.map((record) =>
+          impl === 'ts' && record.tsRequestBody !== undefined
+            ? { ...record, requestBody: record.tsRequestBody }
+            : record,
+        ),
+        responseKey,
+        venue.checkRequest,
+        this.isWrite.bind(this),
+      );
     }
     this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
     this.open = new Map();
@@ -108,13 +131,22 @@ export class Tape {
 
   invalidSignatures = 0;
   subscriptions = new Set();
+  isWrite(method, url) {
+    return this.venue.isWrite?.(method, url) ?? method !== 'GET';
+  }
   get missingWrites() {
-    return [...this.responses].filter(([key]) => !key.startsWith('GET ')).reduce((n, [, queue]) => n + queue.length, 0);
+    if (this.responseStore) return this.responseStore.unusedWrites();
+    return [...this.responses.values()].flat().filter((record) => this.isWrite(record.method, record.url)).length;
   }
   respond(method, url, body, headers) {
     if (this.isPrivate && this.venue.verifyRequest && !this.venue.verifyRequest({ method, url, body, headers })) {
       this.invalidSignatures++;
       throw new Error(`invalid replay signature: ${method} ${url}`);
+    }
+    if (this.responseStore) {
+      const response = this.responseStore.respond(method, url, body, this.commandIndex);
+      this.unserved = this.responseStore.unserved;
+      return response;
     }
     const key = `${method} ${canonicalUrl(url)}`;
     const queue =
@@ -134,17 +166,27 @@ export class Tape {
     const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
     const current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
     const record = current[0];
-    if (method !== 'GET' && this.venue.compareWriteOrder && this.writeOrder[0] !== record) {
+    if (this.isWrite(method, url) && this.venue.compareWriteOrder && this.writeOrder[0] !== record) {
       this.unserved++;
       return { status: 599, body: '' };
     }
-    if (method !== 'GET') this.writeOrder.splice(this.writeOrder.indexOf(record), 1);
-    if (method !== 'GET' || current.length > 1) queue.splice(queue.indexOf(record), 1);
+    if (this.isWrite(method, url)) this.writeOrder.splice(this.writeOrder.indexOf(record), 1);
+    if (this.isWrite(method, url) || current.length > 1) queue.splice(queue.indexOf(record), 1);
     return { status: record.status, headers: record.headers ?? '', body: record.body };
   }
 
   connect(url, onOpen, onMessage) {
-    const socket = { url, onMessage, closed: false, subscriptions: new Set(), loginVerified: false, topics: new Map() };
+    const socket = {
+      url,
+      onMessage: (text) => {
+        this.audit?.received(url, text);
+        onMessage(text);
+      },
+      closed: false,
+      subscriptions: new Set(),
+      loginVerified: false,
+      topics: new Map(),
+    };
     setImmediate(() => {
       if (socket.closed) return;
       const key = canonicalUrl(url);
@@ -157,6 +199,7 @@ export class Tape {
   }
 
   send(socket, text) {
+    this.audit?.sent(socket.url, text);
     if (this.venue.respondToPing && text === 'ping') {
       setImmediate(() => {
         if (!socket.closed) socket.onMessage('pong');
@@ -169,7 +212,7 @@ export class Tape {
         this.invalidSignatures++;
         throw new Error('invalid replay websocket signature');
       }
-      for (const topic of message.params ?? []) {
+      for (const topic of Array.isArray(message.params) ? message.params : []) {
         if (message.method === 'SUBSCRIBE') {
           socket.subscriptions.add(topic);
           if (
@@ -299,7 +342,14 @@ export class Tape {
   async play(onTick, ready = async () => {}, runCommand = async () => {}) {
     const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
     for (const url of urls) await this.socketFor(url);
-    await withTimeout(ready(), 'account/books readiness', this.timeoutMs);
+    await withTimeout(
+      (async () => {
+        await ready();
+        while (this.audit && !this.audit.ready()) await new Promise((resolve) => setTimeout(resolve, 5));
+      })(),
+      'account/books readiness',
+      this.timeoutMs,
+    );
     const start = performance.now();
     let delivered = 0;
     const warm = Math.floor(this.frames.length / 4);

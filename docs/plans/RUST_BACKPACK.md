@@ -228,3 +228,16 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
 - Three-venue head 666993c597 finished fully green repository/Rust CI. Pushing
   the reviewed four-venue head, waiting for its CI, then merging PR #1299 into
   feat/rust-rewrite and creating a fresh follow-up branch as authorized.
+- Four-venue head 8dfb2ddf63 completed every repository and Rust CI job green.
+  CI Backpack public CPU 139.7/58.6 ms (2.38x), steady 68.9/22.3 ms (3.09x),
+  memory 1.7/1.5 MB (1.11x); all eleven CI replay gates pass. Before landing,
+  Crypto.com PR #1303 merged and caused harness conflicts. Integrated target
+  c63c3e5670 with standing conflict authorization and retained all five venues.
+- SDK/crypto review confirms unchanged Backpack ED25519, IDs, clock, bound
+  transport and windows. Shared Tape retains strict Backpack/OKX protocols and
+  actively reuses Crypto.com's response correlation/exact JSON helpers. Incoming
+  memory measurement counts retained frame ArrayBuffers and excludes GC from
+  CPU timing; retained these accuracy improvements without weakening thresholds.
+  All 22 harness tests pass, including integrated POST-read/write/signature and
+  exact-integer regressions. Backpack 49 and engine 17 native tests, workspace
+  native clippy, bans and format pass. Five-venue build/gates are pending.

@@ -256,7 +256,7 @@ Then: exchange-server moves to the native host and streams the same frames
 (with `BOOK_DELTA` sections for networked clients — full books every flush
 are ~450 KB/s for two 1,000-level books).
 
-### 7. CI — Binance, Bybit, Backpack and OKX
+### 7. CI — Binance, Bybit, Backpack, OKX and Crypto.com
 
 - Bans, fmt, clippy, native tests, wasm32 build and clippy.
 - Replay gate (`rust.yml`, job "replay gate"): release wasm with the pinned

@@ -213,3 +213,61 @@ test('OKX login, subscription coverage and ping behavior survive shared Tape ext
   await new Promise(setImmediate);
   assert.deepEqual(messages, ['pong']);
 });
+
+test('shared Tape correlates signed envelopes, preserves exact cursors and reuses POST reads', () => {
+  const read = 'https://api.example.test/private/get-trades';
+  const write = 'https://api.example.test/private/create-order';
+  const venue = {
+    matchRequestBody: true,
+    requestBodyParams: true,
+    checkRequest: (_method, _url, body) => JSON.parse(body).sig === 'valid',
+    isWrite: (_method, url) => url.endsWith('/create-order'),
+  };
+  const envelope = (params) => `{"id":123,"nonce":456,"sig":"valid","method":"private/get-trades","params":${params}}`;
+  const cursor = '{"end_time":1610000000000000001}';
+  const response = (url, requestBody) => ({ ...record('POST'), url, requestBody });
+  const tape = new Tape([response(read, cursor), response(write, '{"quantity":"1"}')], venue, true);
+  assert.equal(tape.missingWrites, 1);
+  assert.equal(tape.respond('POST', read, envelope(cursor)).status, 200);
+  assert.equal(tape.respond('POST', read, envelope(cursor)).status, 200);
+  assert.equal(tape.respond('POST', read, envelope('{"end_time":1610000000000000002}')).status, 599);
+  assert.equal(tape.respond('POST', write, envelope('{"quantity":"1"}').replace('valid', 'invalid')).status, 599);
+  assert.equal(tape.respond('POST', write, envelope('{"quantity":"1"}')).status, 200);
+  assert.equal(tape.respond('POST', write, envelope('{"quantity":"1"}')).status, 599);
+  assert.equal(tape.missingWrites, 0);
+  assert.equal(tape.unserved, 3);
+});
+
+test('shared Tape invokes socket audit hooks for object subscription params', async () => {
+  const events = [];
+  const tape = new Tape(
+    [],
+    {
+      createSocketAudit: (impl, { books }) => {
+        assert.equal(impl, 'rust');
+        assert.deepEqual(books, ['BTCUSD-PERP']);
+        return {
+          sent: (_url, text) => events.push(['sent', text]),
+          received: (_url, text) => events.push(['received', text]),
+        };
+      },
+    },
+    true,
+    200,
+    'rust',
+    ['BTCUSD-PERP'],
+  );
+  const socket = tape.connect(
+    'wss://example.test/user',
+    () => {},
+    () => {},
+  );
+  const message = JSON.stringify({ method: 'subscribe', params: { channels: ['user.order'] } });
+  tape.send(socket, message);
+  socket.onMessage('auth-ack');
+  assert.deepEqual(events, [
+    ['sent', message],
+    ['received', 'auth-ack'],
+  ]);
+  await new Promise(setImmediate);
+});

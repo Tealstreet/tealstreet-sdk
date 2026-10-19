@@ -8,6 +8,7 @@ import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
+import { Frame } from '../hosts/wasm/js/wire.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -69,8 +70,12 @@ const recording = {
 const { WasmEngine } = await loadEngine();
 let frames = 0;
 let updates = 0;
+const seenBooks = new Set();
 const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: false })), recording, {
-  onFrame: () => updates++,
+  onFrame: (buffer) => {
+    updates++;
+    for (const book of new Frame(buffer).books()) seenBooks.add(book.market);
+  },
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });
 host.start();
@@ -84,8 +89,8 @@ setTimeout(
     host.flush();
     host.dispose();
     tape.end(() => {
-      console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames }));
-      process.exit(0);
+      console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, books: seenBooks.size }));
+      process.exit(frames > 0 && seenBooks.size >= values.books.split(',').filter(Boolean).length ? 0 : 1);
     });
   },
   Number(values.seconds) * 1000,
