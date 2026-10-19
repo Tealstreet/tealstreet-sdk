@@ -1,0 +1,73 @@
+# Venue port brief (one lane per venue)
+
+You port one venue from TypeScript safe-cex to the Rust engine. Read
+`docs/plans/RUST_REWRITE.md` first; it is the spec.
+
+## Reference
+
+- The finished pattern: `sdk-rs/safe-cex-venue-binance/` — `lib.rs` (public
+  data, socket watchdog, `Venue` impl incl. `books()`), `account.rs` (private
+  stream, REST reconciliation, stale-snapshot guards), `trading.rs` (commands
+  as sequenced jobs, client-order-id contract), `history.rs` (rare reads as
+  JSON), `paths.rs`, `sign.rs`, `wire.rs` (borrowed serde structs), and
+  `tests/` (scripted tests from documented payloads, `tests/support/`).
+- The engine: `sdk-rs/safe-cex-engine/src/` — `Venue`, `Cx`
+  (`request_streamed` + `on_item` for large lists), `Store` (settings,
+  hedged), `json::ArraySplitter`, `paging::RangeWalk`, `num`, `wire`.
+- The TS you replace (behaviour, never code to transliterate):
+  `packages/safe-cex/src/exchanges/<venue>/` (its `CLAUDE.md` first), plus
+  `packages/safe-cex/src/exchanges/CLAUDE.md` and `packages/safe-cex/CLAUDE.md`
+  for cross-venue contracts: client order IDs, reads-only retries, one fill
+  per execution, reconciliation never commits a failed read as empty.
+
+## Build
+
+A crate `sdk-rs/safe-cex-venue-<venue>/` implementing `Venue`:
+
+- Public: markets, tickers (REST seed + stream), full-depth books with the
+  venue's sequence/gap rules, candles (stream + `FetchCandles`). Large REST
+  lists stream through `request_streamed`. No `serde_json::Value`.
+- Private: signing exactly as TS, private stream auth + subscriptions, REST
+  reconciliation as TS's tick does, position mode, per-market leverage and
+  margin into store settings, stale-snapshot guards.
+- Commands: place (brackets, conditional types as TS), amend, cancel,
+  cancel-all, leverage, margin type, position mode; queries (fills, order
+  history, income, public trades) in Binance `history.rs`'s JSON shapes.
+- A liveness watchdog on every socket with the venue's ping protocol.
+- Tests from the venue's documented payload examples.
+
+Register it: workspace `Cargo.toml`, `safe-cex-wasm` (`Cargo.toml` and the
+`WasmEngine::new` match), `RUST_VENUES` in
+`packages/safe-cex/src/exchanges/rust/rust.exchange.ts`, a `venues.mjs` entry,
+and `sdk-rs/harness/private-tape-<venue>.mjs` with a root `package.json`
+script beside `rust:private-tape`. Extend `replay.mjs` generically; never
+break Binance.
+
+## Gates (all must pass before you report done)
+
+Toolchain: `export PATH="$HOME/.rustup/toolchains/1.99.0-aarch64-apple-darwin/bin:$HOME/.cargo/bin:$PATH" DYLD_LIBRARY_PATH="$HOME/.rustup/toolchains/1.99.0-aarch64-apple-darwin/lib" CARGO_INCREMENTAL=0`, then from `sdk-rs/`:
+
+- `./scripts/check-bans.sh`
+- `cargo fmt -p <crate> --check`, `cargo clippy -p <crate> --all-targets -- -D warnings`, `cargo test -p <crate>`
+- `cargo clippy -p safe-cex-wasm --target wasm32-unknown-unknown -- -D warnings`
+- From the repo root: `corepack yarn -s rust:build-wasm`, your private tape
+  script, then `corepack yarn -s rust:gate --venue <venue> --tape sdk-rs/harness/tapes/<venue>-private.jsonl --runs 1 --books ''` → PASS.
+- Public: `corepack yarn -s rust:record --venue <venue> --seconds 20 --books <two symbols> --out sdk-rs/harness/tapes/<venue>-smoke.jsonl`, trim with `rust:trim-tape` into `sdk-rs/harness/fixtures/<venue>-public.jsonl.gz`, and `rust:gate` on it → PASS (identical output, Rust CPU and memory below TS).
+- Binance still passes: `rust:gate` on `sdk-rs/harness/fixtures/binance-public.jsonl.gz`, and `rust:private-tape` + its gate.
+
+## Rules
+
+- No JS emulation, transliterated TS method bodies, Axios/BaseExchange-shaped
+  facades or `serde_json::Value` (`check-bans.sh` enforces). Typed state
+  machines.
+- A genuine TS bug is fixed in Rust and listed (a `KNOWN_TS_FIXES` entry in
+  `gate.mjs` with a comment, and in your commit message). Never silently
+  diverge.
+- Short comments, only for non-obvious decisions; match Binance's density.
+- `corepack yarn` only, never `npx`; never `node <script>` directly (use the
+  yarn scripts). No load tests.
+- Commit on your lane branch with clear messages as you reach stable points.
+  Do not push, merge, rebase or force anything; the overseer merges into
+  `feat/rust-rewrite` after reviewing your gates.
+
+Report when done: the crate, gate numbers, TS bugs fixed, anything unfinished.
