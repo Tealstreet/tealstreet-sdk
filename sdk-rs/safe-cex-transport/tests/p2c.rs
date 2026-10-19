@@ -1840,6 +1840,23 @@ fn remote_native_query_path_preserves_inner_effective_config() {
         "/native-signed-before-terminal",
         "receipt_native_query_native_signed_target"
     );
+    let requests = venue.requests.lock().unwrap();
+    for key in ["safeCexRestDiagSignMs", "safeCexRestDiagSignedAt"] {
+        assert_eq!(
+            requests[0].config_extensions[key]
+                .as_f64()
+                .unwrap()
+                .to_bits(),
+            0.0_f64.to_bits(),
+            "receipt_native_query_diagnostic_stamp {key}"
+        );
+    }
+    assert!(
+        !requests[0]
+            .config_extensions
+            .contains_key("safeCexRestDiagSignatureAgeMs")
+    );
+    drop(requests);
     assert_eq!(
         execution.config.url, "/effective-returned",
         "receipt_native_query_native_config"

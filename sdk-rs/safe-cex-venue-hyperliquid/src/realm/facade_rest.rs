@@ -35,6 +35,7 @@ struct Client {
     kind: ClientKind,
     options: ExchangeOptions,
     api: Rc<ApiClient>,
+    error_owner: Rc<BaseExchange>,
 }
 
 fn arg(args: &[Value], i: usize) -> Value {
@@ -86,13 +87,23 @@ fn client_object(realm: &Realm, client: Client) -> Value {
         let url = r.to_rust_string(&arg(args, 0))?;
         let body = r.to_serde(&arg(args, 1))?;
         let api = client.api.clone();
+        let error_owner = client.error_owner.clone();
         let realm = r.clone();
         Ok(r.spawn_value(Box::pin(async move {
             let mut realm = realm;
             let request = api
                 .build_request(&url, &body)
                 .map_err(|error| thrown_from(&mut realm, ExchangeError::new(error.to_string())))?;
-            match api.execute(request, false).await {
+            match api
+                .execute_with_signing_emitter(request, false, &|message| {
+                    error_owner.emit_and_log_error(
+                        ExchangeErrorInput::Message(message.into()),
+                        None,
+                        None,
+                    )
+                })
+                .await
+            {
                 Ok(response) => {
                     let data = match &response.body {
                         RestResponseBody::Encoded(bytes) if bytes.is_empty() => Value::Null,
@@ -118,7 +129,7 @@ fn client_object(realm: &Realm, client: Client) -> Value {
                         ("headers", headers),
                     ]))
                 }
-                Err(failure) => Err(thrown_from(&mut realm, ExchangeError::from(failure))),
+                Err(failure) => Err(thrown_from(&mut realm, failure)),
             }
         })))
     });
@@ -138,7 +149,15 @@ pub(crate) fn bind_api_factories(realm: &Realm, base: Rc<BaseExchange>, deps: Re
         let factory = realm.native(name, 2, move |r, _, args| {
             let options: ExchangeOptions = r.to_typed(&arg(args, 0))?;
             let api = Rc::new(build(&deps, &base, kind, options.clone(), None));
-            Ok(client_object(r, Client { kind, options, api }))
+            Ok(client_object(
+                r,
+                Client {
+                    kind,
+                    options,
+                    api,
+                    error_owner: base.clone(),
+                },
+            ))
         });
         realm.bind_import(name, factory);
     }
@@ -164,6 +183,7 @@ pub(crate) fn bind_api_factories(realm: &Realm, base: Rc<BaseExchange>, deps: Re
                 kind: client.kind,
                 options: client.options.clone(),
                 api,
+                error_owner: base.clone(),
             },
         ))
     });

@@ -296,3 +296,7 @@ Under the accepted drop==dispose policy, cancellation visibly rejects queued
 admission instead of allowing TS's surviving timer to release requests afterward.
 The constructed Bybit controlled-clock regression covers idle windows and both
 cancellation paths; Hyperliquid startup also runs with fixed and advancing clocks.
+
+Remote signing publishes diagnostic duration/signed-at/conditional signature age
+in config extensions after header merging. Both legacy and native-query signing
+profiles use the same stamp operation; skip/refusal paths leave those fields alone.

@@ -2,6 +2,11 @@
 //! ported class constructor inside the realm; every trait method invokes the
 //! instance's ported method and converts its result at the typed boundary.
 #[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../tests/support/api_signing_audit.rs"]
+mod api_signing_audit;
+
+#[cfg(test)]
 #[path = "../tests/support/cloid_audit.rs"]
 mod cloid_audit;
 

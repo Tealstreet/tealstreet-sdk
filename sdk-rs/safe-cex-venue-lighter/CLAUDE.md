@@ -487,3 +487,8 @@ constructor and inherits its prototype. Optional captureStackTrace executes afte
 all source fields are assigned; its mutations and original throws remain visible.
 `ERROR_CONSTRUCTOR_REVIEW.md` records native regressions and the shared engine
 stack-generation residual.
+
+The standalone SDK TransactionSigner/SignerError and unused key-management
+helpers have been retired with their exclusive fixtures. The assembled venue
+still uses TransactionClient and its canonical signer/crypto binding. Caller and
+dependency evidence lives in `../safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md`.

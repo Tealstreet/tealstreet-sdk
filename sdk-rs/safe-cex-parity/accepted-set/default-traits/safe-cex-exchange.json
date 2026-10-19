@@ -3534,7 +3534,7 @@
         }
       }
     ],
-    "reason": "Source-only classification of 16 typed host/default operations; no fabricated concrete receiver or executed behavior claim. In particular, this does not classify all 53 defaults or the HTTP signing JSON parsing path. Reviewed fallible Delete: only the synchronous BaseExchange reporting cleanup after the trait propagates its canonical property-removal error. The complete Exchange trait declaration, all default method APIs/bodies and classifications are byte-unchanged. Re-reviewed #1111 / 59d48fbff1: the sole source change is BaseExchange::new below the Exchange trait, replacing its typed Store subscription with the native graph referent subscription. The complete prefix through the Exchange closing brace at line 521 (SHA256 60370c0429afa60dd2679d58d7b3449f07c5e4289ba5ef2274b7e3e6fb58faaf), all 53 default APIs/bodies and sixteen reviewed roles are byte-identical to the preceding source. This whole-file fingerprint refresh does not classify the constructor delivery path, whose native/source tests are maintained separately.",
+    "reason": "Source-only classification of 16 typed host/default operations; no fabricated concrete receiver or executed behavior claim. In particular, this does not classify all 53 defaults or the HTTP signing JSON parsing path. Reviewed fallible Delete: only the synchronous BaseExchange reporting cleanup after the trait propagates its canonical property-removal error. The complete Exchange trait declaration, all default method APIs/bodies and classifications are byte-unchanged. Re-reviewed #1111 / 59d48fbff1: the sole source change is BaseExchange::new below the Exchange trait, replacing its typed Store subscription with the native graph referent subscription. The complete prefix through the Exchange closing brace at line 521 (SHA256 60370c0429afa60dd2679d58d7b3449f07c5e4289ba5ef2274b7e3e6fb58faaf), all 53 default APIs/bodies and sixteen reviewed roles are byte-identical to the preceding source. This whole-file fingerprint refresh does not classify the constructor delivery path, whose native/source tests are maintained separately. Reviewed signer-waiter ownership follow-up: only the signer wait below the trait delegates its pending continuation and status-listener prefix rejections to canonical eager::start_eager; the complete Exchange declaration and every default method remain byte-identical. The dedicated source/native waiter tests classify that separate behavior.",
     "reviewedMethods": [
       {
         "name": "after_method_called_in_worker",
@@ -3601,6 +3601,6 @@
         "reason": "No-op returns Ok(()) and ignores its symbol selector."
       }
     ],
-    "sourceSha256": "f8c8ce60924e8321174a6a63f0e61262e7ab7f2e1d9ca343f144208e3f03802e"
+    "sourceSha256": "fc3800178a0eac60691cb170adc47c921aa8100e65961f0f8c77b36af93e07c1"
   }
 }
