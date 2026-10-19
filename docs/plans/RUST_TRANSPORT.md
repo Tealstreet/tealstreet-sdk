@@ -126,3 +126,16 @@ nested workspace.
   compatible; Node/Workers engine adapters own and dispose their tunnel clients.
 - Next: push, PR into `feat/rust-rewrite`, post independent adversarial reviews,
   address findings, wait for green CI, merge and cut a follow-up branch.
+
+### Eight-venue integration
+
+- Merged landing through `d9db55921c` as `2b27b5e608`, including BloFin, and
+  tagged its public/private sockets. Independent integration review confirmed
+  its forced HTTP proxy behavior and socket routing still match the TS factory.
+- Re-ran all workspace checks: **559 Rust tests**, workspace/all-target and
+  wasm32 Clippy, bans and formatting pass. Repository typecheck **44/44**, lint
+  **28/28**, test tasks **27/27** (**6,623 SDK tests per suite**) pass.
+- Fresh eight-venue wasm: **2,579,548 bytes**, below the unchanged
+  **2,621,440-byte** budget. **22 real SDK/wasm**, **23 host**, and **45 harness**
+  tests pass. The 59 routing and 46 HOW regressions remain green.
+- Running the full **eight public / eleven private** replay gates before PR.
