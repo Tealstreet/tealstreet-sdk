@@ -291,7 +291,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | BloFin | done (#1300) |
 | Hyperliquid perps | Rust port [#1306](https://github.com/Tealstreet/tealstreet-sdk/pull/1306); implementation and reviews complete, CI gated |
 | Backpack | done (#1299) |
-| Bitget | done (#1308) |
+| Bitget (USDT-M, USDC) | done (#1308); inverse sizing and UTA ledger/trailing parity next |
 | Bitunix | wave 1, PR in review |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | lane starting |
 | KuCoin, Phemex | wave 2 lanes running |
