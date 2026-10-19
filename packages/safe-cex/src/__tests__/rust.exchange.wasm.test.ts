@@ -1,13 +1,13 @@
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
-import type { OrderBook } from '../../types';
+import type { OrderBook } from '../types';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderType } from '../../types';
-import { BaseExchange } from '../base';
-import { loadNodeEngine } from './loadNodeEngine';
-import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from './rust.exchange';
+import { DefaultStore } from '../store/store.base';
+import { OrderSide, OrderType } from '../types';
+import { BaseExchange } from '../exchanges/base';
+import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
+import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 
 const EXCHANGE_INFO = JSON.stringify({
   symbols: [
