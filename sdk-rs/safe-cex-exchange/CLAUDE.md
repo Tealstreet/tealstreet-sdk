@@ -2114,3 +2114,14 @@ The differential rejects other Node versions: inconsistent comparator ordering i
 engine-dependent. Array sort compacts defined values before TimSort, then writes
 undefined values and deletes remaining holes; four native/Node profiles pin the
 comparator schedule as well as sparse output.
+
+## Worker structured clone
+
+js_runtime::structured_clone implements the recorder's platform clone operation
+for native primitives, ordinary objects, sparse arrays, Map/Set and intrinsic
+Errors. It preserves cycles/aliases, non-NaN binary64 bits and UTF16, invokes own
+enumerable getters in source order, and retains original getter failures.
+NaN payloads canonicalize as Node structuredClone does.
+Uncloneable values and unmodeled object kinds produce visible DataCloneError.
+The worker recorder intentionally drops clone failures as perfFixture.ts does;
+other callers receive the error. Node's real structuredClone supplies the oracle.
