@@ -371,3 +371,21 @@ all focused tests pass. Final rebuild, replay and repeat audit in progress.
   turns; negative deltas still fail. Reproduced Crypto.com and WEEX private
   negative-memory cases pass with the consistent boundary. No thresholds relaxed.
 - New BingX landing 9ddec5d0a4 requires another merge before PR can land.
+
+## BingX landing integration
+
+- Integrated landing 9ddec5d0a4 after it made the PR conflicting. Preserved
+  incoming gzip/worker support, typed BingX requests, staged snapshot visibility,
+  close/reconnect generations, seed subscription barriers and subscription oracles.
+  Bitget retains exact JSON bodies, generated aliases and per-topic socket routing.
+- Incoming private tapes gate correctness only; their unscored memory can shed
+  imported code. Public memory still requires finite, nonnegative components and
+  lower retained bytes. No public CPU/memory threshold changed.
+- Engine 35, Bitget 77 and BingX 92 native tests PASS with --locked; WASM target
+  check PASS. Harness 48 tests PASS. One earlier run exposed the incoming live-GC
+  memory unit test's existing sensitivity; final rerun passed without changing it.
+- Final measurement review now samples Wasm linear bytes after end settling,
+  via a callback, alongside heap/backing buffers. This prevents timer-driven
+  growth during settling from being missed.
+- Seven-venue release rebuild, replay verification and bundle remeasurement are
+  running before the next push. Earlier interrupted import runs are not passes.

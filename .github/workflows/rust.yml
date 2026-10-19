@@ -102,7 +102,7 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Six venues: measured 2,623,379 bytes; allow 2.75 MiB.
+      # Seven-venue merge: retain 2.75 MiB pending bundle remeasurement.
       WASM_BUDGET_BYTES: 2883584
     defaults:
       run:
@@ -129,7 +129,7 @@ jobs:
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
       - run: yarn install --frozen-lockfile --network-timeout 600000
-      - name: Replay transport contracts
+      - name: Harness transport and oracle regressions
         run: yarn rust:test-harness
       - name: Build the wasm engine
         run: yarn rust:build-wasm
@@ -137,8 +137,6 @@ jobs:
         run: yarn workspace @tealstreet/safe-cex test-wasm
       - name: The Cloudflare Workers host
         run: yarn workspace @tealstreet/safe-cex-wasm test
-      - name: Harness oracle regressions
-        run: corepack yarn -s rust:test-harness
       - name: Check the wasm size budget
         run: |
           size=$(stat -c%s sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm)
@@ -162,6 +160,12 @@ jobs:
         run: |
           yarn rust:private-tape-bitget
           yarn rust:gate --venue bitget --tape sdk-rs/harness/tapes/bitget-private.jsonl --runs 1 --books ''
+      - name: BingX public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue bingx --tape sdk-rs/harness/fixtures/bingx-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: BingX account and trading (correctness)
+        run: |
+          yarn rust:private-tape-bingx
+          yarn rust:gate --venue bingx --tape sdk-rs/harness/tapes/bingx-private.jsonl --runs 1 --books ''
       - name: Crypto.com public data (correctness, CPU and memory)
         run: yarn rust:gate --venue cryptocom --tape sdk-rs/harness/fixtures/cryptocom-public.jsonl.gz --books BTCUSD-PERP,ETHUSD-PERP
       - name: Crypto.com account and trading (correctness)

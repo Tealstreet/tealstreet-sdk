@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
 import { Responses } from './responses.mjs';
+import { requestKey as nativeRequestKey, subscriptionKeys } from './requests.mjs';
 export class ReplayTimeout extends Error {}
 export const within = async (promise, ms, label) => {
   let timer;
@@ -60,7 +61,8 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
     } catch {
       return String(body);
     }
-    if (venue.rust === 'cryptocom' && parsed?.method && parsed?.params) parsed = parsed.params;
+    if (venue.requestBody) parsed = venue.requestBody(parsed);
+    else if (venue.rust === 'cryptocom' && parsed?.method && parsed?.params) parsed = parsed.params;
     const sorted = (value) => {
       if (Array.isArray(value)) return value.map(sorted);
       if (value === null || typeof value !== 'object') return value;
@@ -92,7 +94,9 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
   };
   const topicKey = (arg) => `${arg.instType ?? ''}|${arg.channel ?? arg.topic}|${arg.instId ?? arg.symbol ?? ''}`;
   const requestKey = (method, url, body) =>
-    `${method} ${canonicalUrl(url)}${(bitget || venue.matchRequestBody) && method !== 'GET' ? ` ${canonicalBody(body, url)}` : ''}`;
+    venue.rust === 'bingx'
+      ? nativeRequestKey(method, url, body, callerIds, venue)
+      : `${method} ${canonicalUrl(url)}${(bitget || venue.matchRequestBody) && method !== 'GET' ? ` ${canonicalBody(body, url)}` : ''}`;
 
   /** Serves recorded HTTP responses and websocket frames in tape order. */
   class Tape {
@@ -106,14 +110,21 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
         records,
         requestKey,
         venue.checkRequest,
-        venue.isWrite ?? ((method) => method !== 'GET'),
+        venue.isWrite,
+        bitget || Boolean(venue.matchRequestBody || venue.isWrite),
       );
-      this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
+      this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command' || r.type === 'close');
       this.open = new Map();
       this.waiters = [];
       this.commandIndex = 0;
       this.time = 0;
       this.generated = new Set();
+      this.subscriptions = new Set();
+      this.startupSubscriptions = new Map(
+        Array.from(venue.startupSubscriptions?.(records, books) ?? [], (key) => [key, false]),
+      );
+      this.pendingStartupSubscriptions = this.startupSubscriptions.size;
+      this.generations = new Map();
     }
 
     respond(method, url, body, headers) {
@@ -171,8 +182,11 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
       );
     }
 
-    connect(url, onOpen, onMessage) {
-      const socket = { url, onMessage, closed: false, loginVerified: false, topics: new Map() };
+    connect(url, onOpen, onMessage, onClose) {
+      const key = canonicalUrl(url);
+      const generation = (this.generations.get(key) ?? 0) + 1;
+      this.generations.set(key, generation);
+      const socket = { url, generation, onMessage, onClose, closed: false, loginVerified: false, topics: new Map() };
       setImmediate(() => {
         if (socket.closed) return;
         // Bybit adds a generated requestId to each connection URL.
@@ -185,6 +199,13 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
     }
 
     send(socket, text) {
+      for (const key of subscriptionKeys(socket.url, text)) {
+        this.subscriptions.add(`${socket.generation} ${key}`);
+        if (this.startupSubscriptions.get(key) === false) {
+          this.startupSubscriptions.set(key, true);
+          this.pendingStartupSubscriptions--;
+        }
+      }
       this.audit?.sent(socket.url, text);
       if (venue.respondToPing && text === 'ping') {
         setImmediate(() => {
@@ -296,6 +317,13 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
     async deliver(frame) {
       await this.socketFor(frame.url);
       const sockets = this.sockets(frame.url);
+      if (frame.type === 'close') {
+        for (const socket of sockets) {
+          socket.closed = true;
+          socket.onClose?.(frame.code ?? 1006);
+        }
+        return;
+      }
       let arg;
       try {
         arg = JSON.parse(frame.text)?.arg;
@@ -328,8 +356,9 @@ export const createTape = (records, venue, isPrivate, { impl, books = [] } = {})
       const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
       await within(
         (async () => {
-          for (const url of urls) await this.socketFor(url);
+          if (urls.length) await this.socketFor(urls[0]);
           await ready();
+          while (this.pendingStartupSubscriptions) await new Promise((resolve) => setTimeout(resolve, 1));
         })(),
         15_000,
         'Replay startup',

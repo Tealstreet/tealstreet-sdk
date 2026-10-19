@@ -73,3 +73,9 @@ price (the TS fallback could create a duplicate).
 This lane ports linear USDT/USDC contracts. Inverse, spot and demo remain separate
 lanes. TS stays available as the replay oracle and as the base class of those
 unported variants; it cannot yet be deleted without breaking them.
+
+The shared outgoing-subscription gate also records the existing private
+protocol improvement: Rust requires `execution` and `wallet` on every connection.
+TS infers fills from cumulative order updates and waits for REST wallet reads.
+The declared exception adds those two required topics to the TS oracle; it does
+not copy Rust subscriptions or hide missing native topics.

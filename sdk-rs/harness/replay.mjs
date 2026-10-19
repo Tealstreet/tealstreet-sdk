@@ -28,7 +28,12 @@ const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes
   .toString('utf8')
   .split('\n')
   .filter(Boolean)
-  .map((line) => JSON.parse(line));
+  .map((line) => {
+    const record = JSON.parse(line);
+    // Both tape spellings describe the earliest time a snapshot is visible.
+    if (record.effectiveAt !== undefined) record.availableAfter ??= record.effectiveAt;
+    return record;
+  });
 const bookSymbols = values.books.split(',').filter(Boolean);
 // A wrong startup URL, missing socket or lost command must fail the gate.
 const replayDeadline = setTimeout(() => {
@@ -46,17 +51,17 @@ const isPrivate = records.some((r) =>
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 const PASSPHRASE = 'replay-passphrase';
-
 const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
 };
 
-const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
+const measure = async (cpuStart, wallStart, heapBefore, wasmMemory = 0, warmMark) => {
   const cpu = process.cpuUsage(cpuStart.process);
   const thread = process.threadCpuUsage(cpuStart.thread);
   const steady = warmMark ? process.threadCpuUsage(warmMark.thread) : { user: 0, system: 0 };
   const wallMs = performance.now() - wallStart;
   const memory = await baseline();
+  const linearBytes = typeof wasmMemory === 'function' ? wasmMemory() : wasmMemory;
   return {
     // The worker's own thread: what competes with its message handling.
     cpuMs: (thread.user + thread.system) / 1000,
@@ -71,9 +76,9 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
     bufferRetainedBytes: memory.arrayBuffers - heapBefore.arrayBuffers,
     buffersBefore: heapBefore.arrayBuffers,
     buffersAfter: memory.arrayBuffers,
-    wasmBytes,
+    wasmBytes: linearBytes,
     // What the implementation keeps alive beyond the harness and loaded code.
-    retainedBytes: retainedMemory(heapBefore, memory, wasmBytes),
+    retainedBytes: retainedMemory(heapBefore, memory, linearBytes),
   };
 };
 
@@ -148,9 +153,9 @@ async function runRust() {
   const transport = {
     now: () => Date.now(),
     webSocketHeaders: true,
-    connect: (url, { headers, onOpen, onMessage }) => {
+    connect: (url, { headers, onOpen, onMessage, onClose }) => {
       venue.validateSocket?.(url, headers);
-      const socket = tape.connect(url, onOpen, onMessage);
+      const socket = tape.connect(url, onOpen, onMessage, onClose);
       return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
     request: async ({ method, url, body: requestBody, headers }) => {
@@ -172,7 +177,21 @@ async function runRust() {
     ...venue.options,
     ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }),
   };
-  const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
+  const engine = new WasmEngine(venue.rust, JSON.stringify(options));
+  if (process.env.RUST_MEMORY_TRACE) {
+    let last = wasmMemoryBytes();
+    for (const method of ['start', 'httpStart', 'httpChunk', 'httpEnd', 'wsMessage', 'takeFrame']) {
+      const original = engine[method].bind(engine);
+      engine[method] = (...args) => {
+        const result = original(...args);
+        const bytes = wasmMemoryBytes();
+        if (bytes !== last) console.error(`memory ${method} ${args[0]}: ${last} -> ${bytes}`);
+        last = bytes;
+        return result;
+      };
+    }
+  }
+  const host = new EngineHost(engine, transport, {
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
       const received = values['no-egress'] ? buffer : structuredClone(buffer, { transfer: [buffer] });
@@ -222,7 +241,7 @@ async function runRust() {
   tape.assertWritesConsumed();
   clearInterval(flushTimer);
   host.flush();
-  const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
+  const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark);
   host.dispose();
 
   // Rebuild comparable records outside the measured window.
@@ -259,6 +278,7 @@ async function runRust() {
     frames,
     metrics,
     unserved: tape.unserved,
+    subscriptions: [...tape.subscriptions].sort(),
     unusedWrites: tape.unusedWrites,
     protocolErrors: tape.audit?.errors() ?? [],
     store: { markets: marketRows, tickers: tickerRows },
@@ -332,6 +352,11 @@ async function runTs() {
           for (const fn of this.listeners.message) fn({ data });
           this.onmessage?.({ data });
           venue.afterTsFrame?.(exchange);
+        },
+        (code) => {
+          this.readyState = 3;
+          for (const fn of this.listeners.close) fn({ code });
+          this.onclose?.({ code });
         },
       );
     }
@@ -416,7 +441,7 @@ async function runTs() {
       ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE }
       : { key: '', secret: '', publicDataOnly: true }),
   };
-  const exchange = new Exchange(venue.ts.name, options, store);
+  const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
   venue.configureTs?.(exchange);
   venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
@@ -499,6 +524,7 @@ async function runTs() {
     frames,
     metrics,
     unserved: tape.unserved,
+    subscriptions: [...tape.subscriptions].sort(),
     unusedWrites: tape.unusedWrites,
     protocolErrors: tape.audit?.errors() ?? [],
     store: snapshot,
@@ -602,6 +628,7 @@ writeFileSync(
     impl: values.impl,
     frames: result.frames,
     unserved: result.unserved,
+    subscriptions: result.subscriptions,
     unusedWrites: result.unusedWrites,
     protocolErrors: result.protocolErrors,
     metrics: result.metrics,

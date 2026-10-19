@@ -311,3 +311,102 @@ test('missing sockets fail after thirty seconds and remove their pending waiter'
   await pending;
   assert.equal(tape.waiters.length, 0);
 });
+
+test('BingX matches typed bodies and caller IDs while listen-key lifecycle responses remain reusable', () => {
+  const order = 'https://open-api.bingx.com/openApi/swap/v2/trade/order';
+  const listen = 'https://open-api.bingx.com/openApi/user/auth/userDataStream';
+  const tape = createTape(
+    [
+      { type: 'command', orders: [{ clientOrderId: 'caller' }] },
+      response({ quantity: 1, clientOrderId: 'caller', timestamp: 1 }, { url: order }),
+      ...['POST', 'PUT', 'DELETE'].map((method) => response(undefined, { method, url: listen })),
+    ],
+    { rust: 'bingx', matchRequestBody: true },
+    true,
+  );
+  assert.equal(tape.unusedWrites, 1);
+  assert.equal(tape.respond('POST', order, { quantity: '1', clientOrderId: 'caller' }).status, 599);
+  assert.equal(tape.respond('POST', order, { quantity: 1, clientOrderId: 'wrong' }).status, 599);
+  assert.equal(tape.respond('POST', order, { quantity: 1, clientOrderId: 'caller', timestamp: 2 }).status, 200);
+  assert.equal(tape.respond('POST', order, { quantity: 1, clientOrderId: 'caller' }).status, 599);
+  for (const method of ['POST', 'PUT', 'DELETE']) {
+    assert.equal(tape.respond(method, listen).status, 200);
+    assert.equal(tape.respond(method, listen).status, 200);
+  }
+  assert.equal(tape.unusedWrites, 0);
+});
+
+test('both time spellings and command stages prevent premature snapshots', () => {
+  const read = 'https://api-contract.weex.com/capi/v3/account/income';
+  const tape = createTape(
+    [
+      response(undefined, { method: 'POST', url: read, body: 'first', effectiveAt: 10 }),
+      response(undefined, { method: 'POST', url: read, body: 'second', availableAfter: 20, afterCommand: 2 }),
+    ],
+    { rust: 'weex', isWrite: null, matchRequestBody: true },
+    false,
+  );
+  // With no venue override POST is a write; it still cannot precede its time.
+  assert.equal(tape.respond('POST', read).status, 599);
+  tape.time = 10;
+  assert.equal(tape.respond('POST', read).body, 'first');
+  tape.time = 20;
+  assert.equal(tape.respond('POST', read).status, 599);
+  tape.commandIndex = 2;
+  assert.equal(tape.respond('POST', read).body, 'second');
+  assert.equal(tape.respond('POST', read).status, 599);
+});
+
+test('Bitget callback validation fails before consuming a matched mutation', () => {
+  const tape = createTape([response({ orderId: '1', newClientOid: 'recorded' })], venue, true);
+  assert.throws(() => tape.respond('POST', url, { orderId: '1', newClientOid: 'invalid id' }), /invalid generated/);
+  assert.equal(tape.unusedWrites, 1);
+  assert.equal(tape.respond('POST', url, { orderId: '1', newClientOid: 'fresh' }).status, 200);
+  assert.equal(tape.unusedWrites, 0);
+});
+
+test('close frames invoke callbacks and permit sockets first appearing after reconnection', async () => {
+  const first = 'wss://open-api-swap.bingx.com/swap-market?listenKey=first';
+  const next = 'wss://open-api-swap.bingx.com/swap-market?listenKey=next';
+  const seen = [];
+  const tape = createTape(
+    [
+      { type: 'ws', url: first, t: 0, text: 'before' },
+      { type: 'close', url: first, t: 1, code: 1012 },
+      { type: 'ws', url: next, t: 2, text: 'after' },
+    ],
+    { rust: 'bingx' },
+    false,
+  );
+  const socket = tape.connect(first, () => {}, (text) => seen.push(text), (code) => {
+    seen.push(code);
+    tape.connect(next, () => {}, (text) => seen.push(text));
+  });
+  assert.equal(await tape.play(), 3);
+  assert.equal(socket.closed, true);
+  assert.deepEqual(seen, ['before', 1012, 'after']);
+});
+
+test('startup waits for seed subscriptions to reach send and retains per-generation subscriptions', async () => {
+  const ws = 'wss://stream.bybit.com/v5/public/linear';
+  const topic = `${ws} subscribe tickers.BTCUSDT`;
+  const seen = [];
+  const tape = createTape(
+    [{ type: 'ws', url: ws, t: 0, text: '{}' }],
+    { rust: 'bybit', startupSubscriptions: () => [topic] },
+    false,
+  );
+  const socket = tape.connect(`${ws}?requestId=one`, () => {}, () => seen.push('frame'));
+  await tape.play(undefined, async () => {
+    setImmediate(() => {
+      tape.send(socket, '{"op":"subscribe","args":["tickers.BTCUSDT"]}');
+      seen.push('sent');
+    });
+  });
+  assert.deepEqual(seen, ['sent', 'frame']);
+  assert.equal(tape.pendingStartupSubscriptions, 0);
+  assert.equal(tape.startupSubscriptions.get(topic), true);
+  const replacement = tape.connect(`${ws}?requestId=two`, () => {}, () => {});
+  tape.send(replacement, '{"op":"subscribe","args":["tickers.BTCUSDT"]}');
+  assert.deepEqual([...tape.subscriptions], [`1 ${topic}`, `2 ${topic}`]);
+});
