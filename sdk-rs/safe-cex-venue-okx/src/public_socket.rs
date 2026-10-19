@@ -1,5 +1,9 @@
 //! Public OKX frame dispatch and sequence recovery, using the core handler registry.
-use safe_cex_exchange::{runtime::ExchangeError, websocket::BaseWebSocket};
+use safe_cex_exchange::{
+    js_runtime::value::{Js, from_retained_input},
+    runtime::ExchangeError,
+    websocket::BaseWebSocket,
+};
 use safe_cex_num::{JsCoercionError, JsJsonValue, js_json_stringify, js_string};
 use safe_cex_transport::socket::SocketFrame;
 use serde_json::{Value, json};
@@ -15,29 +19,33 @@ fn coercion(error: JsCoercionError) -> ExchangeError {
     error_result
 }
 
-fn sequence(value: Option<&Value>) -> Result<String, ExchangeError> {
-    match value.filter(|value| !value.is_null()) {
-        None => Ok(String::new()),
-        Some(value) => js_string(Some(value)).map_err(coercion),
+fn sequence(value: &Js) -> Result<String, ExchangeError> {
+    if value.is_nullish() {
+        Ok(String::new())
+    } else {
+        Ok(String::from_utf16_lossy(&value.to_js_string()?))
     }
 }
 
 pub fn accept_order_book_sequence(
     handler: &str,
-    data: &Value,
+    data: &Js,
     sequences: &RefCell<HashMap<String, String>>,
     recovering: &RefCell<HashSet<String>>,
     recover: &dyn Fn(&str) -> Result<(), ExchangeError>,
 ) -> Result<bool, ExchangeError> {
-    let update = data.get("data").and_then(|data| {
-        if data.is_object() {
-            data.get("0")
-        } else {
-            data.get(0)
-        }
-    });
-    let seq_id = sequence(update.and_then(|update| update.get("seqId")))?;
-    if data.get("action").and_then(Value::as_str) == Some("snapshot") && !seq_id.is_empty() {
+    let rows = data.get("data")?;
+    let update = if rows.is_nullish() {
+        Js::Undefined
+    } else {
+        rows.get("0")?
+    };
+    let seq_id = sequence(&if update.is_nullish() {
+        Js::Undefined
+    } else {
+        update.get("seqId")?
+    })?;
+    if data.get("action")?.strict_equals(&Js::str("snapshot")) && !seq_id.is_empty() {
         sequences.borrow_mut().insert(handler.into(), seq_id);
         recovering.borrow_mut().remove(handler);
         return Ok(true);
@@ -45,7 +53,11 @@ pub fn accept_order_book_sequence(
     if recovering.borrow().contains(handler) {
         return Ok(false);
     }
-    let previous = sequence(update.and_then(|update| update.get("prevSeqId")))?;
+    let previous = sequence(&if update.is_nullish() {
+        Js::Undefined
+    } else {
+        update.get("prevSeqId")?
+    })?;
     let expected = sequences.borrow().get(handler).cloned();
     if seq_id.is_empty()
         || previous.is_empty()
@@ -53,7 +65,6 @@ pub fn accept_order_book_sequence(
             .as_deref()
             .is_none_or(|expected| expected.is_empty() || expected != previous)
     {
-        // No state borrow survives this callback; send may synchronously reenter dispatch.
         recover(handler)?;
         return Ok(false);
     }
@@ -96,7 +107,7 @@ pub fn recover_order_book(
 pub fn dispatch_message_handler(
     socket: &Rc<BaseWebSocket>,
     handler: &str,
-    data: &Value,
+    data: &Js,
     sequences: &RefCell<HashMap<String, String>>,
     recovering: &RefCell<HashSet<String>>,
     recover: &dyn Fn(&str) -> Result<(), ExchangeError>,
@@ -139,6 +150,7 @@ pub fn on_message(
     if socket.is_disposed() {
         return Ok(());
     }
+    let _realm = socket.prototype_realm.bind();
     socket.track_last_received()?;
     socket.direct_fallback.borrow_mut().on_message();
     let SocketFrame::Text(text) = frame else {
@@ -148,25 +160,32 @@ pub fn on_message(
         socket.handle_pong_event(5_000)?;
         return Ok(());
     }
-    let data = safe_cex_transport::how::big_int_as_string_json_parse(text)
-        .into_value()
-        .map_err(|error| ExchangeError::new(error.to_string()))?;
-    if data.is_null() || data.get("event").and_then(Value::as_str) == Some("subscribe") {
+    let data = from_retained_input(safe_cex_transport::how::big_int_as_string_json_parse(text));
+    if data.is_nullish() || data.get("event")?.strict_equals(&Js::str("subscribe")) {
         return Ok(());
     }
-    let Some(channel) = data
-        .get("arg")
-        .and_then(|arg| arg.get("channel"))
-        .and_then(Value::as_str)
-        .filter(|channel| !channel.is_empty())
-    else {
+    let arg = data.get("arg")?;
+    let channel = if arg.is_nullish() {
+        Js::Undefined
+    } else {
+        arg.get("channel")?
+    };
+    let Js::String(channel) = channel else {
         return Ok(());
     };
-    let instrument = data
-        .get("arg")
-        .and_then(|arg| arg.get("instId"))
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    if channel.is_empty() {
+        return Ok(());
+    }
+    let channel = String::from_utf16_lossy(&channel);
+    let instrument = if arg.is_nullish() {
+        Js::Undefined
+    } else {
+        arg.get("instId")?
+    };
+    let instrument = match instrument {
+        Js::String(value) => String::from_utf16_lossy(&value),
+        _ => String::new(),
+    };
     let recover =
         |handler: &str| recover_order_book(socket, handler, sequences, recovering, topics);
     if !instrument.is_empty() {
@@ -179,7 +198,7 @@ pub fn on_message(
             &recover,
         )?;
     }
-    dispatch_message_handler(socket, channel, &data, sequences, recovering, &recover)
+    dispatch_message_handler(socket, &channel, &data, sequences, recovering, &recover)
 }
 
 fn ticker_update(data: &Value) -> Result<&Value, ExchangeError> {

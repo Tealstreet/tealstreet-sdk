@@ -421,3 +421,24 @@ The login signer also uses the shared eager boundary instead of manual first-pol
 code. Other direct typed readers retain their separate timing audit obligations.
 The constructed `exchange_trait` eager tests hold/release real terminal REST
 responses and observe production Store commits, throws and cancel/replace order.
+
+The nine non-UTF-8 FIX-audit rows are reviewed in `NON_UTF8_BOUNDARIES.md`:
+seven ACCEPT observations and two repaired request-prefix defects. Book listeners
+and private balance timeout callbacks must start actual HTTP synchronously via
+canonical eager startup; reactions and Store updates remain deferred. The socket
+fixture queues spawn bodies without first-polling them. NativeRuntime prefix
+witnesses and independent compiled controls prevent that fixture from hiding a
+regression; the maintained public-class oracle also pins live re-subscription
+iteration and captured handler arrays through the registered binding.
+
+Private reconnect's discarded snapshot also enters through canonical eager
+startup before reconnected. The order-row reader starts its terminal HTTP eagerly
+and awaits its canonical Promise waiter before mapping/Store continuations; even ready HTTP cannot
+commit loaded.orders inline. The native reconnect probe and maintained Base/MEXC
+snapshot bodies pin both sides of this boundary.
+
+Shared WebSocket message handlers now borrow the canonical `Js` frame graph.
+Restore retained ingress once per frame, preserve it across all callbacks, and
+project only reached typed output fields; see exchange/WS_CONTRACT.md and the
+actual-source/native retained-handler witnesses. Do not reintroduce Value frame
+projections or a second callback registry.

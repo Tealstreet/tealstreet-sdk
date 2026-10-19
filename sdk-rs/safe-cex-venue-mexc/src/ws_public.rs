@@ -1,10 +1,10 @@
 //! Public MEXC WebSocket protocol over the exchange-core lifecycle.
 use crate::{
     types::{BASE_WS_URL, is_mexc_control_channel},
-    utils::{from_mexc_symbol, normalize_order_book, normalize_ticker},
     ws::subscription_key,
 };
 use indexmap::IndexMap;
+use safe_cex_exchange::js_runtime::value::{Js, from_retained_input};
 use safe_cex_exchange::{
     OwnedOperation, exchange::Exchange, websocket::WsRuntime, ws_parent::WsExchangeParent,
 };
@@ -76,13 +76,9 @@ impl MexcPublicSocket {
             json!({"symbol":crate::utils::to_mexc_symbol(&opts.symbol), "interval":interval});
         let utc = self.protocol.local_to_utc.clone();
         let handler: MessageHandler = Rc::new(move |json| {
-            let raw = json
-                .get("data")
-                .filter(|v| safe_cex_num::js_truthy(Some(v)))
-                .unwrap_or(json);
-            if let Some(candle) = crate::utils::normalize_candle(raw, utc.as_ref())
-                .map_err(crate::exchange_errors::coercion)?
-            {
+            let data = json.get("data")?;
+            let raw = if data.truthy() { data } else { json.clone() };
+            if let Some(candle) = native_candle(&raw, utc.as_ref())? {
                 callback(candle);
             }
             Ok(())
@@ -132,12 +128,20 @@ impl MexcPublicSocket {
         let owner = self.clone();
         let selected = symbol.clone();
         let subscription = param.clone();
+        // The source invokes fetchOrderBook before attaching its reaction.
+        // Keep the existing owned callback/disposal guard, but start its
+        // independent request Promise before returning the listener.
+        let request_parent = parent.clone();
+        let request_symbol = selected.clone();
+        let snapshot = safe_cex_exchange::eager::start_eager(&parent.base().runtime, async move {
+            Ok(request_parent
+                .fetch_order_book(request_symbol, Some(100.))
+                .await)
+        });
         let lease = parent.clone();
         parent.base().start_owned_operation(async move {
             let result = async {
-                let (snapshot, _) =
-                    crate::sockets::reaction(lease.fetch_order_book(selected.clone(), Some(100.)))
-                        .await?;
+                let (snapshot, _) = crate::sockets::reaction(snapshot).await??;
                 if owner.base.is_disposed() {
                     return Ok(());
                 }
@@ -493,37 +497,31 @@ impl MexcPublicProtocol {
         Ok(())
     }
 
-    fn parse_frame(frame: &safe_cex_transport::socket::SocketFrame) -> Option<Value> {
+    fn parse_frame(frame: &safe_cex_transport::socket::SocketFrame) -> Option<Js> {
         let text = match frame {
-            safe_cex_transport::socket::SocketFrame::Text(text) => text.as_str(),
+            safe_cex_transport::socket::SocketFrame::Text(text) => {
+                std::borrow::Cow::Borrowed(text.as_str())
+            }
             safe_cex_transport::socket::SocketFrame::Binary(bytes) => {
-                // MEXC's JS handler calls String(data); Node Buffer conversion
-                // replaces invalid UTF-8, matching from_utf8_lossy here.
-                return safe_cex_transport::how::big_int_as_string_json_parse(
-                    &String::from_utf8_lossy(bytes),
-                )
-                .into_value()
-                .ok();
+                String::from_utf8_lossy(bytes)
             }
             safe_cex_transport::socket::SocketFrame::Close { .. } => return None,
         };
-        safe_cex_transport::how::big_int_as_string_json_parse(text)
-            .into_value()
-            .ok()
+        Some(from_retained_input(
+            safe_cex_transport::how::big_int_as_string_json_parse(&text),
+        ))
     }
 
     fn emit_receive_diagnostics(
         &self,
         socket: &Rc<BaseWebSocket>,
         raw: &str,
-        parsed: &Value,
+        parsed: &Js,
     ) -> Result<(), ExchangeError> {
-        let allow = parsed
-            .get("channel")
-            .and_then(Value::as_str)
-            .is_none_or(|channel| {
-                !matches!(channel, "push.ticker" | "push.depth" | "push.depth.full")
-            });
+        let channel = parsed.get("channel")?;
+        let allow = !["push.ticker", "push.depth", "push.depth.full"]
+            .iter()
+            .any(|name| channel.strict_equals(&Js::str(name)));
         if !allow {
             return Ok(());
         }
@@ -548,7 +546,7 @@ impl MexcPublicProtocol {
         &self,
         socket: &Rc<BaseWebSocket>,
         key: &str,
-        message: &Value,
+        message: &Js,
     ) -> Result<(), ExchangeError> {
         let Some(handlers) = socket.message_handlers.borrow().get(key).cloned() else {
             return Ok(());
@@ -565,7 +563,7 @@ impl MexcPublicProtocol {
         }
     }
 
-    fn handle_depth(&self, socket: &Rc<BaseWebSocket>, frame: &Value) -> Result<(), ExchangeError> {
+    fn handle_depth(&self, socket: &Rc<BaseWebSocket>, frame: &Js) -> Result<(), ExchangeError> {
         let Some((symbol, handler_key, book)) = handle_depth_frame(socket.store().as_ref(), frame)?
         else {
             return Ok(());
@@ -574,7 +572,7 @@ impl MexcPublicProtocol {
         self.route_handlers(socket, &handler_key, frame)
     }
 
-    fn handle_kline(&self, socket: &Rc<BaseWebSocket>, frame: &Value) -> Result<(), ExchangeError> {
+    fn handle_kline(&self, socket: &Rc<BaseWebSocket>, frame: &Js) -> Result<(), ExchangeError> {
         let key = kline_handler_key(frame)?;
         self.route_handlers(socket, &key, frame)
     }
@@ -598,49 +596,147 @@ fn inherited_handler_guard(
 /// Normalize one MEXC depth frame and return the symbol used for its handler key.
 pub fn handle_depth_frame(
     store: &dyn Store,
-    frame: &Value,
+    frame: &Js,
 ) -> Result<Option<(String, String, OrderBook)>, ExchangeError> {
-    let data = frame
-        .get("data")
-        .filter(|value| safe_cex_num::js_truthy(Some(value)));
-    let symbol_value = frame
-        .get("symbol")
-        .filter(|value| !value.is_null())
-        .or_else(|| data.and_then(|row| row.get("symbol")));
-    let symbol =
-        from_mexc_symbol(symbol_value).map_err(|error| ExchangeError::new(error.message))?;
-    let market = store.markets_by_symbol()?.get(&symbol).cloned();
-    let Some(market) = market else {
+    let data = frame.get("data")?;
+    let data = if data.truthy() { data } else { Js::Undefined };
+    let symbol = native_symbol(&frame.get("symbol")?, &data)?;
+    let Some(market) = store.markets_by_symbol()?.get(&symbol).cloned() else {
         return Ok(None);
     };
-    let raw = data.unwrap_or(frame);
-    let raw = raw.as_object().cloned().unwrap_or_default();
-    let book =
-        normalize_order_book(&raw, &market).map_err(|error| ExchangeError::new(error.message))?;
-    let handler_key = format!("depth.{symbol}");
-    Ok(Some((symbol, handler_key, book)))
+    let raw = if matches!(data, Js::Undefined) {
+        frame
+    } else {
+        &data
+    };
+    let book = native_book(raw, &market)?;
+    Ok(Some((symbol.clone(), format!("depth.{symbol}"), book)))
 }
 
-/// Return the exact MEXC callback key selected by a kline frame.
-pub fn kline_handler_key(frame: &Value) -> Result<String, ExchangeError> {
-    let data = frame.get("data");
-    let symbol_value = frame
-        .get("symbol")
-        .filter(|value| !value.is_null())
-        .or_else(|| data.and_then(|row| row.get("symbol")));
-    let symbol =
-        from_mexc_symbol(symbol_value).map_err(|error| ExchangeError::new(error.message))?;
-    let interval = data
-        .and_then(|row| {
-            row.get("interval")
-                .filter(|v| safe_cex_num::js_truthy(Some(v)))
-                .or_else(|| row.get("i").filter(|v| safe_cex_num::js_truthy(Some(v))))
-        })
-        .map(|value| safe_cex_num::js_string(Some(value)))
-        .transpose()
-        .map_err(|error| ExchangeError::new(error.message))?
-        .unwrap_or_default();
+pub fn kline_handler_key(frame: &Js) -> Result<String, ExchangeError> {
+    let data = frame.get("data")?;
+    let symbol = native_symbol(&frame.get("symbol")?, &data)?;
+    let mut interval = if data.is_nullish() {
+        Js::Undefined
+    } else {
+        data.get("interval")?
+    };
+    if !interval.truthy() && !data.is_nullish() {
+        interval = data.get("i")?;
+    }
+    let interval = if interval.truthy() {
+        native_text(&interval)?
+    } else {
+        String::new()
+    };
     Ok(format!("kline.{symbol}.{interval}"))
+}
+
+fn native_text(value: &Js) -> Result<String, ExchangeError> {
+    Ok(String::from_utf16_lossy(&value.to_js_string()?))
+}
+fn native_symbol(symbol: &Js, data: &Js) -> Result<String, ExchangeError> {
+    let symbol = if symbol.is_nullish() && !data.is_nullish() {
+        data.get("symbol")?
+    } else {
+        symbol.clone()
+    };
+    Ok(if symbol.is_nullish() {
+        String::new()
+    } else {
+        native_text(&symbol)?.replace('_', "")
+    })
+}
+fn native_pick(raw: &Js, keys: &[&str]) -> Result<Js, ExchangeError> {
+    for key in keys {
+        let value = raw.get(key)?;
+        if !value.is_nullish() {
+            return Ok(value);
+        }
+    }
+    Ok(Js::Undefined)
+}
+fn native_number(value: &Js, fallback: f64) -> Result<f64, ExchangeError> {
+    if value.is_nullish() || value.strict_equals(&Js::str("")) {
+        return Ok(fallback);
+    }
+    let number = value.parse_float()?;
+    Ok(if number.is_finite() { number } else { fallback })
+}
+fn native_timestamp(value: &Js, utc: &dyn Fn(f64) -> f64) -> Result<f64, ExchangeError> {
+    if value.is_nullish() || value.strict_equals(&Js::str("")) {
+        return Ok(0.);
+    }
+    let number = value.to_number()?;
+    if number.is_finite() && number > 0. {
+        return Ok(if number >= 1_000_000_000_000. {
+            number.floor()
+        } else {
+            (number * 1000.).floor()
+        });
+    }
+    let parsed = safe_cex_num::js_date_parse(&native_text(value)?, utc);
+    Ok(if parsed.is_finite() { parsed } else { 0. })
+}
+fn native_candle(
+    raw: &Js,
+    utc: &dyn Fn(f64) -> f64,
+) -> Result<Option<safe_cex_types::Candle>, ExchangeError> {
+    let timestamp =
+        (native_timestamp(&native_pick(raw, &["time", "t", "timestamp"])?, utc)? / 1000.).floor();
+    if timestamp == 0. || timestamp.is_nan() {
+        return Ok(None);
+    }
+    Ok(Some(safe_cex_types::Candle {
+        timestamp,
+        open: native_number(&native_pick(raw, &["open", "o"])?, 0.)?,
+        high: native_number(&native_pick(raw, &["high", "h"])?, 0.)?,
+        low: native_number(&native_pick(raw, &["low", "l"])?, 0.)?,
+        close: native_number(&native_pick(raw, &["close", "c"])?, 0.)?,
+        volume: native_number(&native_pick(raw, &["vol", "volume", "q", "amount"])?, 0.)?,
+        last_side: None,
+    }))
+}
+fn native_book(raw: &Js, market: &safe_cex_types::Market) -> Result<OrderBook, ExchangeError> {
+    let data = raw.get("data")?;
+    let data = if data.truthy() { &data } else { raw };
+    let side = |keys: &[&str]| -> Result<Vec<safe_cex_types::OrderBookOrders>, ExchangeError> {
+        let rows = native_pick(data, keys)?;
+        let Js::Array(items) = &rows else {
+            return Ok(vec![]);
+        };
+        let length = items.len();
+        let mut levels = vec![];
+        for index in 0..length {
+            let row = rows.get(&index.to_string())?;
+            let (price, amount) = match &row {
+                Js::Array(_) => (row.get("0")?, row.get("1")?),
+                Js::Object(_) => (
+                    native_pick(&row, &["p", "price"])?,
+                    native_pick(&row, &["v", "vol", "amount"])?,
+                ),
+                _ => (Js::Undefined, Js::Undefined),
+            };
+            let price = native_number(&price, 0.)?;
+            let amount =
+                native_number(&amount, 0.)? * crate::utils::get_contract_size(Some(market));
+            if price > 0. && amount >= 0. {
+                levels.push(safe_cex_types::OrderBookOrders {
+                    price,
+                    amount,
+                    total: 0.,
+                });
+            }
+        }
+        Ok(levels)
+    };
+    let mut book = OrderBook {
+        bids: side(&["bids", "bid"])?,
+        asks: side(&["asks", "ask"])?,
+    };
+    safe_cex_store::orderbook::sort_order_book(&mut book);
+    safe_cex_store::orderbook::calc_order_book_total(&mut book);
+    Ok(book)
 }
 
 impl WsProtocol for MexcPublicProtocol {
@@ -724,9 +820,10 @@ pub fn on_message(
     if socket.is_disposed() {
         return Ok(());
     }
+    let _realm = socket.prototype_realm.bind();
     socket.track_last_received()?;
-    let json = MexcPublicProtocol::parse_frame(frame).unwrap_or(Value::Null);
-    if !safe_cex_num::js_truthy(Some(&json)) {
+    let json = MexcPublicProtocol::parse_frame(frame).unwrap_or(Js::Null);
+    if !json.truthy() {
         return Ok(());
     }
     let raw = match frame {
@@ -737,34 +834,35 @@ pub fn on_message(
         safe_cex_transport::socket::SocketFrame::Close { .. } => return Ok(()),
     };
     protocol.emit_receive_diagnostics(socket, &raw, &json)?;
-    if ["channel", "msg", "method"]
-        .into_iter()
-        .any(|key| json.get(key).and_then(Value::as_str) == Some("pong"))
+    if json.get("channel")?.strict_equals(&Js::str("pong"))
+        || json.get("msg")?.strict_equals(&Js::str("pong"))
+        || json.get("method")?.strict_equals(&Js::str("pong"))
     {
         socket.handle_pong_event(15_000)?;
         return Ok(());
     }
-    if json.get("success") == Some(&Value::Bool(false)) {
-        let message = [json.get("message"), json.get("msg")]
-            .into_iter()
-            .find(|value| value.is_some_and(|value| safe_cex_num::js_truthy(Some(value))))
-            .map(|value| safe_cex_num::js_string(value))
-            .transpose()
-            .map_err(|error| ExchangeError::new(error.message))?
-            .unwrap_or_else(|| "unknown error".into());
+    if json.get("success")?.strict_equals(&Js::Bool(false)) {
+        let mut message = json.get("message")?;
+        if !message.truthy() {
+            message = json.get("msg")?;
+        }
+        let message = if message.truthy() {
+            native_text(&message)?
+        } else {
+            "unknown error".into()
+        };
         socket.emitter().log(
             &format!("MEXC public WS subscription failed: {message}"),
             LogSeverity::Warning,
         )?;
         return Ok(());
     }
-    let channel = json
-        .get("channel")
-        .filter(|value| safe_cex_num::js_truthy(Some(value)))
-        .map(|value| safe_cex_num::js_string(Some(value)))
-        .transpose()
-        .map_err(|error| ExchangeError::new(error.message))?
-        .unwrap_or_default();
+    let channel = json.get("channel")?;
+    let channel = if channel.truthy() {
+        native_text(&channel)?
+    } else {
+        String::new()
+    };
     if channel.is_empty() {
         return Ok(());
     }
@@ -783,8 +881,7 @@ pub fn on_message(
         "push.depth" | "push.depth.full" => protocol.handle_depth(socket, &json),
         "push.kline" => protocol.handle_kline(socket, &json),
         "push.deal" => {
-            let symbol = from_mexc_symbol(json.get("symbol"))
-                .map_err(|error| ExchangeError::new(error.message))?;
+            let symbol = native_symbol(&json.get("symbol")?, &Js::Undefined)?;
             protocol.route_handlers(socket, &format!("trade.{symbol}"), &json)
         }
         _ => Ok(()),
@@ -794,38 +891,60 @@ pub fn on_message(
 /// Apply the fields written by `MexcPublicWebsocket#handleTicker`.
 pub fn handle_ticker_frame(
     store: &dyn Store,
-    frame: &Value,
-    local_to_utc: &dyn Fn(f64) -> f64,
+    frame: &Js,
+    utc: &dyn Fn(f64) -> f64,
 ) -> Result<bool, ExchangeError> {
-    let data = frame.get("data").and_then(Value::as_object);
-    let symbol_value = frame
-        .get("symbol")
-        .filter(|value| !value.is_null())
-        .or_else(|| data.and_then(|row| row.get("symbol")));
-    let symbol =
-        from_mexc_symbol(symbol_value).map_err(|error| ExchangeError::new(error.message))?;
+    let data = frame.get("data")?;
+    let symbol = native_symbol(&frame.get("symbol")?, &data)?;
     let market = store.markets_by_symbol()?.get(&symbol).cloned();
     let current = store.tickers_by_symbol()?.get(&symbol).cloned();
-    let (Some(market), Some(_current)) = (market, current) else {
+    let (Some(market), Some(_)) = (market, current) else {
         return Ok(false);
     };
-    let mut raw = data.cloned().unwrap_or_default();
-    raw.insert("symbol".into(), Value::String(market.id.clone()));
-    let next = normalize_ticker(&raw, &market, local_to_utc)
-        .map_err(|error| ExchangeError::new(error.message))?;
+    let raw = if matches!(data, Js::Object(_)) {
+        data
+    } else {
+        Js::object(vec![])
+    };
+    let number = |keys: &[&str], fallback: f64| native_number(&native_pick(&raw, keys)?, fallback);
+    let last = number(&["lastPrice", "last"], 0.)?;
+    let mark = number(&["fairPrice", "markPrice"], last)?;
+    let open_interest =
+        number(&["holdVol", "openInterest"], 0.)? * crate::utils::get_contract_size(Some(&market));
     let mut patch = ModelPatch::default();
-    patch.set_number("bid", next.bid);
-    patch.set_number("ask", next.ask);
-    patch.set_number("last", next.last);
-    patch.set_number("mark", next.mark);
-    patch.set_native("index", next.index);
-    patch.set_number("percentage", next.percentage);
-    patch.set_number("openInterest", next.open_interest);
-    patch.set_number("fundingRate", next.funding_rate);
-    patch.set_number("fundingTime", next.funding_time);
-    patch.set_number("volume", next.volume);
-    patch.set_number("quoteVolume", next.quote_volume);
-    // TypeScript and Rust both commit before propagating subscriber failures.
+    patch.set_number("bid", number(&["bid1", "bidPrice"], last)?);
+    patch.set_number("ask", number(&["ask1", "askPrice"], last)?);
+    patch.set_number("last", last);
+    patch.set_number("mark", mark);
+    patch.set_native("index", Some(number(&["indexPrice"], last)?));
+    let percentage = number(&["riseFallRate", "priceChangePercent"], 0.)?;
+    patch.set_number(
+        "percentage",
+        if percentage.abs() <= 1. {
+            percentage * 100.
+        } else {
+            percentage
+        },
+    );
+    patch.set_number(
+        "openInterest",
+        open_interest
+            * if mark != 0. && !mark.is_nan() {
+                mark
+            } else {
+                last
+            },
+    );
+    patch.set_number("fundingRate", number(&["fundingRate"], 0.)?);
+    patch.set_number(
+        "fundingTime",
+        native_timestamp(&native_pick(&raw, &["fundingTime", "nextSettleTime"])?, utc)?,
+    );
+    patch.set_number(
+        "volume",
+        number(&["volume24", "volume"], 0.)? * crate::utils::get_contract_size(Some(&market)),
+    );
+    patch.set_number("quoteVolume", number(&["amount24", "quoteVolume"], 0.)?);
     store.update_ticker(&market.id, &patch)?;
     Ok(true)
 }

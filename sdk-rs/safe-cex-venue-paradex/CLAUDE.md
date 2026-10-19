@@ -287,3 +287,7 @@ stops comparison immediately and reaches the original catch/log path. The full
 maintained public class, real socket frames and constructed retained getter
 witnesses cover both sides. The shared TimSort scheduler also preserves the
 maintained 264-case ticker corpus, including finite levels separated by NaN.
+
+The private onOpen specific-claims review records bounded disposal/recovery
+differences separately from the shared original-cause diagnostic correction.
+See `../safe-cex-exchange/PRIVATE_OPEN_REVIEW.md`; no Wasm-only row is closed.

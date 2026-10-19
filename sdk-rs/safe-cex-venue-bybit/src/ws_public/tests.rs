@@ -292,6 +292,22 @@ fn fixture() -> (Rc<BaseWebSocket>, Rc<Parent>, Rc<Runtime>) {
 #[test]
 #[ignore = "requires frozen workspace Node dependencies; mandatory venue-oracle:bybit CI step"]
 fn dispatch_and_subscription_match_live_source() {
+    // Both sides observe ECMAScript Numbers; serde's integer/float storage tag
+    // is not part of the source callback value. Native signed-zero and graph
+    // witnesses below still assert their exact bits and identities before JSON.
+    fn numbers(value: &Value) -> Value {
+        match value {
+            Value::Number(number) => json!(number.as_f64().expect("source finite callback number")),
+            Value::Array(values) => Value::Array(values.iter().map(numbers).collect()),
+            Value::Object(values) => Value::Object(
+                values
+                    .iter()
+                    .map(|(key, value)| (key.clone(), numbers(value)))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
     let run = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -331,7 +347,7 @@ fn dispatch_and_subscription_match_live_source() {
                 callbacks.borrow_mut().push(Rc::new(move |value| {
                     output
                         .borrow_mut()
-                        .push(json!({"handler":label,"value":value}));
+                        .push(json!({"handler":label,"value":safe_cex_exchange::js_runtime::value::to_json(value)?}));
                     Ok(())
                 }));
             }
@@ -342,8 +358,8 @@ fn dispatch_and_subscription_match_live_source() {
         }
         on_message(&socket, case["data"].as_str().unwrap()).unwrap();
         assert_eq!(
-            json!(*calls.borrow()),
-            case["calls"],
+            numbers(&json!(*calls.borrow())),
+            numbers(&case["calls"]),
             "callbacks case {i}: {case}"
         );
         let mut keys: Vec<_> = socket
@@ -436,9 +452,16 @@ fn dispatch_and_subscription_match_live_source() {
         let (socket, _, _) = fixture();
         let calls = Rc::new(Cell::new(0));
         let count = calls.clone();
+        let kind = case["kind"].as_str().unwrap().to_owned();
+        let callback_kind = kind.clone();
         socket.message_handlers.borrow_mut().insert(
             "tickers".into(),
-            Rc::new(RefCell::new(vec![Rc::new(move |_| {
+            Rc::new(RefCell::new(vec![Rc::new(move |value| {
+                match callback_kind.as_str() {
+                    "overflow" => assert!(matches!(value.get("data")?, Js::Number(number) if number == f64::INFINITY)),
+                    "surrogate" => assert!(matches!(value.get("data")?, Js::String(units) if units.as_ref() == [0xd800])),
+                    _ => panic!("unreached prototype callback"),
+                }
                 count.set(count.get() + 1);
                 Ok(())
             })])),
@@ -446,8 +469,8 @@ fn dispatch_and_subscription_match_live_source() {
         on_message(&socket, case["data"].as_str().unwrap()).unwrap();
         assert_eq!(
             calls.get(),
-            0,
-            "Rust typed-map/scalar-boundary refusal: {case}"
+            usize::from(kind != "prototype"),
+            "retained scalar delivery matches the maintained source: {case}"
         );
         let has_stats = socket
             .message_handlers_stats
@@ -518,9 +541,15 @@ fn dispatch_retains_captured_lists_but_observes_array_mutations() {
 #[test]
 fn frame_numbers_round_once_and_retain_negative_zero() {
     let frame = parse_frame(r#"{"n":-0,"nested":[9007199254740993,1e21]}"#).unwrap();
-    assert!(frame["n"].as_f64().unwrap().is_sign_negative());
-    assert_eq!(frame["nested"][0].as_f64(), Some(9007199254740992.));
-    assert_eq!(frame["nested"][1].as_f64(), Some(1e21));
+    assert!(
+        matches!(frame.get("n").unwrap(), Js::Number(value) if value.to_bits() == 0x8000_0000_0000_0000)
+    );
+    assert!(
+        matches!(frame.get("nested").unwrap().get("0").unwrap(), Js::Number(value) if value == 9007199254740992.)
+    );
+    assert!(
+        matches!(frame.get("nested").unwrap().get("1").unwrap(), Js::Number(value) if value == 1e21)
+    );
 }
 
 #[test]
@@ -932,3 +961,54 @@ fn auth_declares_shared_response_and_native_expiry_boundaries() {
 }
 
 mod notification;
+
+#[test]
+fn retained_handler_frames_cross_the_production_core_registry() {
+    let (socket, _, _) = fixture();
+    let calls = Rc::new(Cell::new(0));
+    let seen = calls.clone();
+    let callback: safe_cex_exchange::websocket::MessageHandler = Rc::new(move |_| {
+        seen.set(seen.get() + 1);
+        Ok(())
+    });
+    socket
+        .message_handlers
+        .borrow_mut()
+        .insert("tickers".into(), Rc::new(RefCell::new(vec![callback])));
+    for marker in [r"\ud800", r"\udfff", r"\ud83e\udd80"] {
+        let frame = format!(
+            r#"{{"topic":"tickers.BTCUSDT","unused":{{"{marker}":["{marker}"]}},"overflow":1e400,"zero":-0}}"#
+        );
+        on_message(&socket, &frame).unwrap();
+    }
+    on_message(&socket, r#"{"topic":"tickers.BTCUSDT","neighbor":true}"#).unwrap();
+    assert_eq!(
+        calls.get(),
+        4,
+        "source-valid native graphs reach the shared registry"
+    );
+    socket.dispose();
+}
+
+#[cfg(test)]
+mod retained_handler_support {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../safe-cex-exchange/tests/support/retained_handlers.rs"
+    ));
+}
+#[test]
+fn shared_core_handlers_retain_the_source_graph_and_native_fields() {
+    let (socket, _, _) = fixture();
+    let cases = retained_handler_support::source_frames("bybit", "publicWebsocket");
+    let (handlers, calls) = retained_handler_support::pair(&cases, false);
+    socket
+        .message_handlers
+        .borrow_mut()
+        .insert("retainedProbe".into(), handlers);
+    for case in cases {
+        on_message(&socket, case["frame"].as_str().unwrap()).unwrap();
+    }
+    assert_eq!(calls.get(), 8);
+    socket.dispose();
+}

@@ -2140,6 +2140,9 @@ impl Js {
         match self {
             Js::Function(f) => (f.call)(this, args),
             Js::Builtin(reference) => match reference.member() {
+                safe_cex_num::BuiltinIdentity::Object(safe_cex_num::ProtoMember::ToString) => {
+                    Ok(Js::String(this.object_tag_string()))
+                }
                 safe_cex_num::BuiltinIdentity::FunctionPrototype => Ok(Js::Undefined),
                 safe_cex_num::BuiltinIdentity::FunctionMethod(
                     safe_cex_num::FunctionMethod::Call,

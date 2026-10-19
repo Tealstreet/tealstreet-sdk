@@ -536,7 +536,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-mexc/src/exchange.rs::MexcExchange::update_symbol_metadata"
 status = "divergent"
-note = "CHOSEN: the real wrapper/child/DefaultStore witnesses pin the private path committing market max60, catching the first subscriber error, then committing fallback21/7 and surfacing the second original cause; public-only makes one committed fallback write. Both paths abort later subscribers. The native error retains the exact opaque final cause through Error::source, while source rejects with that object directly. A materialized public-only call invokes one source subscriber before its Promise returns; constructing the native future invokes zero until polling. Retain the common borrowed ExchangeFuture and structured ExchangeError API instead of a venue-local owned-Promise/error interface. Two roots stop at three first-subscriber calls, zero later calls, one request and one warning-log call; the original first cause must not escape instead of the second. Implementation target safe-cex-venue-mexc/src/exchange.rs::MexcExchange::update_symbol_metadata."
+note = "ACCEPT non-UTF-8 FIX audit: the actual constructed metadata wrapper already uses canonical eager startup (#1071). Public-only DefaultStore notification occurs before waiter return; private held HTTP retains its continuation after waiter drop and ready HTTP keeps the await checkpoint plus the original second subscriber failure. Replayed exchange_trait::eager_wrappers and maintained source; the historical lazy-prefix claim is obsolete. Existing structured callback/owned-input costs remain scoped by MANIFEST-SPEC.md#exchange-runtime-callback-choice. See safe-cex-venue-mexc/NON_UTF8_BOUNDARIES.md."
 
 [[symbol]]
 ts = "MexcExchange.setLeverage"

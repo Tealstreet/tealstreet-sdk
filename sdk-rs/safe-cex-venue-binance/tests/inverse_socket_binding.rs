@@ -524,15 +524,15 @@ fn websocket_version_prevents_late_rest_position_snapshot_overwrite() {
 }
 
 #[test]
-fn public_escaped_surrogate_frame_retains_documented_family_refusal() {
+fn public_surrogate_frame_reaches_the_actual_inverse_ticker_binding() {
     let h = support::fixture(true, false);
     seed(&h);
     let socket = connect(&h, SocketSlot::Public);
     socket.on_message(&SocketFrame::Text(r#"{"e":"24hrTicker","s":"BTCUSD_PERP","c":"50020.5","P":"-1.25","v":"9","q":"1","extra":"\ud800"}"#.into())).unwrap();
     assert_eq!(
         h.store.tickers().unwrap()[0].last,
-        50000.,
-        "canonical family serde parser refuses escaped lone surrogate; source accepts and publishes50020.5"
+        50020.5,
+        "canonical retained family parser publishes the source ticker despite unrelated surrogate data"
     );
     frame(
         &socket,
