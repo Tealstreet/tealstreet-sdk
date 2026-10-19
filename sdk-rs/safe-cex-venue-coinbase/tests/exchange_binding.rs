@@ -514,63 +514,81 @@ fn public_stream_listeners_use_real_parser_and_shared_book_operations() {
     use safe_cex_exchange::websocket::WsEvent;
     use safe_cex_transport::socket::SocketFrame;
     use std::{cell::RefCell, rc::Rc};
-    let h = harness(ExchangeName::Coinbase, options(), script);
-    h.drive(h.venue().start()).unwrap();
-    h.runtime.pump();
-    let books = Rc::new(RefCell::new(Vec::new()));
-    let capture = books.clone();
-    let stop_book = h
-        .venue()
-        .listen_order_book(
-            "BTC-USDC".into(),
-            Rc::new(move |book| capture.borrow_mut().push(book)),
-        )
-        .unwrap();
-    let candles = Rc::new(RefCell::new(Vec::new()));
-    let capture = candles.clone();
-    let stop_candle = h
-        .venue()
-        .listen_ohlcv(
-            serde_json::from_value(json!({"symbol":"BTC-USDC","interval":"5m"})).unwrap(),
-            Rc::new(move |candle| capture.borrow_mut().push(candle)),
-        )
-        .unwrap();
-    let public = h
-        .runtime
-        .sockets
-        .borrow()
-        .iter()
-        .find(|(url, _)| url == "wss://advanced-trade-ws.coinbase.com")
-        .unwrap()
-        .1
-        .clone();
-    for frame in [
-        json!({"channel":"l2_data","events":[{"type":"snapshot","product_id":"BTC-USD","updates":[{"side":"bid","price_level":"40","new_quantity":"2"},{"side":"bid","price_level":"42","new_quantity":"3"},{"side":"offer","price_level":"43","new_quantity":"4"}]}]}),
-        json!({"channel":"candles","events":[{"type":"update","candles":[{"product_id":"BTC-USD","start":"1700000000","open":"40","high":"45","low":"39","close":"44","volume":"7"}]}]}),
-    ] {
-        public
-            .events
-            .borrow_mut()
-            .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
-    }
-    h.runtime.pump();
-    assert_eq!(books.borrow().len(), 1);
-    assert_eq!(books.borrow()[0].bids[0].price, 42.0);
-    assert_eq!(books.borrow()[0].bids[1].total, 5.0);
-    assert_eq!(books.borrow()[0].asks[0].amount, 4.0);
-    assert_eq!(candles.borrow().len(), 1);
-    assert_eq!(candles.borrow()[0].timestamp, 1700000000.0);
-    assert_eq!(candles.borrow()[0].close, 44.0);
-    stop_book().unwrap();
-    stop_candle().unwrap();
-    assert!(
-        public
-            .sent
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let h = harness(name, options(), script);
+        h.drive(h.venue().start()).unwrap();
+        h.runtime.pump();
+        let books = Rc::new(RefCell::new(Vec::new()));
+        let capture = books.clone();
+        let stop_book = h
+            .venue()
+            .listen_order_book(
+                "BTC-USDC".into(),
+                Rc::new(move |book| capture.borrow_mut().push(book)),
+            )
+            .unwrap();
+        let candles = Rc::new(RefCell::new(Vec::new()));
+        let capture = candles.clone();
+        let stop_candle = h
+            .venue()
+            .listen_ohlcv(
+                serde_json::from_value(json!({"symbol":"BTC-USDC","interval":"5m"})).unwrap(),
+                Rc::new(move |candle| capture.borrow_mut().push(candle)),
+            )
+            .unwrap();
+        let public = h
+            .runtime
+            .sockets
             .borrow()
             .iter()
-            .any(|message| message.contains("unsubscribe"))
-    );
-    h.venue().dispose().unwrap();
+            .find(|(url, _)| url == "wss://advanced-trade-ws.coinbase.com")
+            .unwrap()
+            .1
+            .clone();
+        for frame in [
+            json!({"channel":"l2_data","events":[{"type":"snapshot","product_id":"BTC-USD","updates":[{"side":"bid","price_level":"40","new_quantity":"2"},{"side":"bid","price_level":"42","new_quantity":"3"},{"side":"offer","price_level":"43","new_quantity":"4"}]}]}),
+            json!({"channel":"candles","events":[{"type":"update","candles":[{"product_id":"BTC-USD","start":"1700000000","open":"40","high":"45","low":"39","close":"44","volume":"7"}]}]}),
+        ] {
+            public
+                .events
+                .borrow_mut()
+                .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+        }
+        h.runtime.pump();
+        assert_eq!(books.borrow().len(), 1);
+        assert_eq!(books.borrow()[0].bids[0].price, 42.0);
+        assert_eq!(books.borrow()[0].bids[1].total, 5.0);
+        assert_eq!(books.borrow()[0].asks[0].amount, 4.0);
+        assert_eq!(candles.borrow().len(), 1);
+        assert_eq!(candles.borrow()[0].timestamp, 1700000000.0);
+        assert_eq!(candles.borrow()[0].close, 44.0);
+        let core = h
+            .venue()
+            .base()
+            .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public)
+            .unwrap();
+        let key = "candles.BTC-USD";
+        assert_eq!(
+            core.message_handlers_stats.borrow()[key].had_handlers,
+            Some(true),
+            "actual source candle handlers own the published statistics"
+        );
+        assert!(matches!(
+            core.message_handlers_stats.borrow()[key].last_callbacks_count,
+            safe_cex_num::PrototypeScalar::Number(1.0)
+        ));
+        stop_book().unwrap();
+        stop_candle().unwrap();
+        assert!(!core.message_handlers_stats.borrow().contains_key(key));
+        assert!(
+            public
+                .sent
+                .borrow()
+                .iter()
+                .any(|message| message.contains("unsubscribe"))
+        );
+        h.venue().dispose().unwrap();
+    }
 }
 #[test]
 fn public_book_copyback_preserves_duplicate_price_levels() {

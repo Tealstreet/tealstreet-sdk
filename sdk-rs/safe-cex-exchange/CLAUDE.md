@@ -1935,6 +1935,8 @@ one-argument precision-count helper. The installed native/source tests cover
 123 scalar cases, UTF16 results, original value/throw identity, repeated property
 reads and precision operand coercion. The separate Realm implementation is
 removed only with the atomic Hyperliquid family consolidation.
+The nine native-input owner classifications and their actual installed/direct
+probes are reviewed individually in CCXT_NATIVE_INPUT_REVIEW.md.
 
 Operator numeric/default-hint conversion of ordinary objects and functions uses
 `Js::ordinary_to_primitive`, the same live hook traversal as direct value coercion.
@@ -2173,3 +2175,8 @@ The 906-frame Phemex binding probe compares all 19 maintained-source callbacks.
 Private authentication recovery reports the supplied ExchangeError through the
 runtime exception sink before warning/reconnect, preserving its retained cause.
 See `PRIVATE_OPEN_REVIEW.md` for the bounded disposal/recovery differences.
+
+Native sockets with a separate callback owner use `install_native_handler_stats`
+to bind selected-key live counts into Base's record/pong/cleanup/reconciliation
+algorithm. They never copy callbacks into Base's registry or bypass the shared
+statistics writes. See [the owner census](NATIVE_HANDLER_STATS_REVIEW.md).

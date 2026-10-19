@@ -101,6 +101,9 @@ impl GrvtExchange {
         });
         let dyn_venue: Rc<dyn Exchange> = venue.clone();
         *shared.sockets.venue.borrow_mut() = Some(Rc::downgrade(&dyn_venue));
+        for public in shared.extra.public.borrow().iter() {
+            public.bind_handler_statistics()?;
+        }
         Ok(venue)
     }
 

@@ -615,7 +615,26 @@ fn bound_listen_ohlcv() {
     h.runtime.pump();
     assert_eq!(observed.borrow().len(), 1);
     assert_eq!(observed.borrow()[0].close, 101.0);
+    let core = h
+        .venue()
+        .base()
+        .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public)
+        .unwrap();
+    let key = "market.kline.BTC-USDT.1min.trade.utc+8";
+    assert_eq!(
+        core.message_handlers_stats.borrow()[key].had_handlers,
+        Some(true),
+        "native candle statistics read the actual callback registry"
+    );
+    assert!(matches!(
+        core.message_handlers_stats.borrow()[key].last_callbacks_count,
+        safe_cex_num::PrototypeScalar::Number(1.0)
+    ));
     cleanup().unwrap();
+    assert!(
+        !core.message_handlers_stats.borrow().contains_key(key),
+        "cleanup deletes the source topic statistics"
+    );
     assert!(
         socket
             .sent
