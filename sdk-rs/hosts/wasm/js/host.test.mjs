@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:net';
-import { EngineHost, nativeTransport } from './host.mjs';
+import { EngineHost, nativeTransport, socketMessages } from './host.mjs';
 
 test('required upgrade headers are forwarded only to capable transports', () => {
   for (const capable of [false, true]) {
@@ -144,5 +144,24 @@ test('already queued timers cannot enter the engine after disposal', () => {
   host.start();
   host.flush();
   assert.throws(() => host.snapshot(), /disposed/);
+  assert.equal(calls, 0);
+});
+
+test('an asynchronous binary message cannot enter a disposed engine', async () => {
+  let receive;
+  let delivered;
+  const decoded = new Promise((resolve) => { delivered = resolve; });
+  let calls = 0;
+  const host = new EngineHost({ wsMessage: () => { calls++; return ''; } }, {
+    now: () => 100,
+    connect: (_, handlers) => {
+      receive = socketMessages((text) => { handlers.onMessage(text); delivered(); }, assert.fail);
+      return { close() {}, send() {} };
+    },
+  });
+  host.execute({ op: 'wsConnect', socket: 1, url: 'wss://example.test' });
+  receive(new Blob(['late binary message']));
+  host.dispose();
+  await decoded;
   assert.equal(calls, 0);
 });
