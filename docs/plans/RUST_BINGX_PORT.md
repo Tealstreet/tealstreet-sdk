@@ -290,3 +290,12 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   suppress historical replay; placement ACK quantities do not hide first fills.
 - Independent repeat account audit is clear. Full BingX92 tests and clippy pass:
   5unit,25account,20history,7public,2sign,33trading. Final four-venue gates next.
+
+### Adversarial repeat clear
+
+- Independent repeat reviews of private execution and protective trading fixes
+  found no remaining issue in the covered contracts. Final bridge review caught
+  a lost BingX registry entry from the OKX merge; restored it. The inherited
+  combined price/amount forwarding remains intact with a no-write regression.
+- Pushing review fixes now for PR CI. Final rebuilt four-venue replay/SDK gates
+  and repository checks run before merge; no CI-green/landing claim yet.

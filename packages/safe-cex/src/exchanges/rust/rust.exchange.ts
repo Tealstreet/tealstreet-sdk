@@ -34,6 +34,7 @@ import { BROKER_ID } from '../okx/okx.types';
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   binancepm: 'binancepm',
+  bingx: 'bingx',
   bybit: 'bybit',
   okx: 'okx',
   okxeu: 'okxeu',
