@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createPrivateKey, sign } from 'node:crypto';
+import { createHmac, createPrivateKey, sign } from 'node:crypto';
 import { test } from 'node:test';
 import { canonicalBody, sameCommandResults, Tape, withTimeout } from './tape.mjs';
 import { venueOf } from './venues.mjs';
@@ -142,4 +142,74 @@ test('Bybit per-connection requestId is volatile for HTTP and sockets', async ()
     () => {},
   );
   assert.equal(await tape.socketFor('wss://example.test/v5/public/linear?requestId=recorded'), socket);
+});
+
+test('staged reads advance only after their command and preserve response headers', () => {
+  const early = { ...record('GET'), body: 'early' };
+  const later = { ...record('GET'), body: 'later', afterCommand: 1, headers: 'x-stage: later' };
+  const write = { ...record('POST', { quantity: '2' }), afterCommand: 1 };
+  const tape = new Tape([early, later, write], {}, false);
+  assert.equal(tape.respond('GET', URL).body, 'early');
+  assert.equal(tape.respond('POST', URL, write.requestBody).status, 599);
+  assert.equal(tape.missingWrites, 1);
+  tape.commandIndex = 1;
+  assert.deepEqual(tape.respond('GET', URL), { status: 200, headers: 'x-stage: later', body: 'later' });
+  assert.equal(tape.respond('POST', URL, write.requestBody).status, 200);
+  tape.assertWritesConsumed();
+});
+
+test('OKX generated IDs normalize without weakening caller IDs or wire types', () => {
+  const venue = {
+    matchRequestBody: true,
+    generatedBodyId: (key, value) => key === 'clOrdId' && value.startsWith('broker'),
+  };
+  assert.equal(
+    canonicalBody({ clOrdId: 'broker-one', sz: '1.00' }, new Set(), venue),
+    canonicalBody({ clOrdId: 'broker-two', sz: '1' }, new Set(), venue),
+  );
+  const caller = new Set(['broker-caller']);
+  assert.notEqual(
+    canonicalBody({ clOrdId: 'broker-caller' }, caller, venue),
+    canonicalBody({ clOrdId: 'broker-other' }, caller, venue),
+  );
+  assert.notEqual(canonicalBody({ sz: '1' }, caller, venue), canonicalBody({ sz: 1 }, caller, venue));
+  assert.equal(sameCommandResults([{ ok: { b: 2, a: 1 } }], [{ ok: { a: 1, b: 2 } }]), true);
+  assert.equal(sameCommandResults([{ ok: [1, 2] }], [{ ok: [2, 1] }]), false);
+});
+
+test('OKX login, subscription coverage and ping behavior survive shared Tape extraction', async () => {
+  const venue = { validateLogin: true, respondToPing: true };
+  const tape = new Tape([], venue, true);
+  const messages = [];
+  const socket = tape.connect(
+    'wss://example.test/ws/v5/private',
+    () => {},
+    (text) => messages.push(text),
+  );
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const arg = {
+    apiKey: 'replay-key',
+    passphrase: 'replay-passphrase',
+    timestamp,
+    sign: createHmac('sha256', 'replay-secret').update(`${timestamp}GET/users/self/verify`).digest('base64'),
+  };
+  assert.throws(
+    () => tape.send(socket, JSON.stringify({ op: 'login', args: [{ ...arg, sign: 'invalid' }] })),
+    /signature/,
+  );
+  assert.equal(socket.loginVerified, false);
+  tape.send(socket, JSON.stringify({ op: 'login', args: [arg] }));
+  assert.equal(socket.loginVerified, true);
+  const topic = { channel: 'orders', instType: 'SWAP' };
+  tape.send(socket, JSON.stringify({ op: 'subscribe', args: [topic] }));
+  tape.assertSubscribed(socket, { arg: { channel: 'orders' }, data: [{ instId: 'BTC-USDT-SWAP' }] });
+  assert.throws(
+    () => tape.assertSubscribed(socket, { arg: { channel: 'orders' }, data: [{ instId: 'BTC-USDT' }] }),
+    /Unsubscribed/,
+  );
+  tape.send(socket, JSON.stringify({ op: 'unsubscribe', args: [topic] }));
+  assert.throws(() => tape.assertSubscribed(socket, { arg: topic, data: [] }), /Unsubscribed/);
+  tape.send(socket, 'ping');
+  await new Promise(setImmediate);
+  assert.deepEqual(messages, ['pong']);
 });

@@ -328,13 +328,7 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
         });
       }
 
-      // Use O(1) hashmap lookup instead of O(n) find
-      const ticker = this.store.tickersBySymbol[market.symbol];
-
-      const lastPrice = ticker?.last || 0;
-      orderBook.asks = orderBook.asks.filter((a) => a.price >= lastPrice);
-      orderBook.bids = orderBook.bids.filter((b) => b.price <= lastPrice);
-
+      // A trade price can lag the book; filtering by it deletes valid depth.
       calcOrderBookTotal(orderBook);
 
       callback(orderBook);

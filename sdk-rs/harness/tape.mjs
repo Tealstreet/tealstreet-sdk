@@ -1,3 +1,5 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
 /** Per-request values: clocks, signatures and generated client ids. */
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
 export const canonicalUrl = (url) => {
@@ -9,18 +11,37 @@ export const canonicalUrl = (url) => {
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
 
-export const sameCommandResults = (ts, rust) => JSON.stringify(ts) === JSON.stringify(rust);
+const stable = (value) => {
+  if (Array.isArray(value)) return value.map(stable);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, stable(value[key])]),
+  );
+};
+export const sameCommandResults = (ts, rust) => JSON.stringify(stable(ts)) === JSON.stringify(stable(rust));
 
-export const canonicalBody = (body, callerIds = new Set()) => {
+export const canonicalBody = (body, callerIds = new Set(), venue = {}) => {
   if (!body) return '';
   const clean = (value, key = '') => {
     if (Array.isArray(value)) return value.map((v) => clean(v));
     if (value && typeof value === 'object')
       return Object.fromEntries(
         Object.entries(value)
-          .filter(([k, v]) => !(VOLATILE.has(k) || (k === 'clientId' && !callerIds.has(String(v)))))
+          .filter(
+            ([k, v]) =>
+              v !== undefined &&
+              !(
+                ((!venue.matchRequestBody || venue.volatileBodyFields) && VOLATILE.has(k)) ||
+                (k === 'clientId' && !callerIds.has(String(v)))
+              ),
+          )
           .sort(([a], [b]) => a.localeCompare(b))
-          .map(([k, v]) => [k, clean(v, k)]),
+          .map(([k, v]) => [
+            k,
+            !callerIds.has(String(v)) && venue.generatedBodyId?.(k, v) ? '<generated>' : clean(v, k),
+          ]),
       );
     if (typeof value === 'string' && !/id$/i.test(key) && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) {
       const [whole, fraction] = value.split('.');
@@ -30,7 +51,13 @@ export const canonicalBody = (body, callerIds = new Set()) => {
     return value;
   };
   try {
-    return JSON.stringify(clean(typeof body === 'string' ? JSON.parse(body) : body));
+    const parsed =
+      typeof body === 'string'
+        ? JSON.parse(body)
+        : ArrayBuffer.isView(body) || body instanceof ArrayBuffer
+          ? JSON.parse(new TextDecoder().decode(body))
+          : body;
+    return JSON.stringify(clean(parsed));
   } catch {
     return String(body);
   }
@@ -56,6 +83,7 @@ export class Tape {
     this.venue = venue;
     this.isPrivate = isPrivate;
     this.timeoutMs = timeoutMs;
+    this.commandIndex = 0;
     this.callerIds = new Set(
       records
         .flatMap((r) => r.orders ?? [])
@@ -67,7 +95,7 @@ export class Tape {
     for (const record of records.filter((r) => r.type === 'http')) {
       // Per-fixture KNOWN_TS_FIXES exception; never a fallback for Rust.
       const expectedBody = impl === 'ts' ? (record.tsRequestBody ?? record.requestBody) : record.requestBody;
-      const key = `${record.method} ${canonicalUrl(record.url)}${expectedBody === undefined ? '' : ` BODY ${canonicalBody(expectedBody, this.callerIds)}`}`;
+      const key = `${record.method} ${canonicalUrl(record.url)}${expectedBody === undefined ? '' : ` BODY ${canonicalBody(expectedBody, this.callerIds, this.venue)}`}`;
       if (!this.responses.has(key)) this.responses.set(key, []);
       this.responses.get(key).push(record);
       if (record.method !== 'GET') this.writeOrder.push(record);
@@ -89,23 +117,34 @@ export class Tape {
       throw new Error(`invalid replay signature: ${method} ${url}`);
     }
     const key = `${method} ${canonicalUrl(url)}`;
-    const queue = this.responses.get(`${key} BODY ${canonicalBody(body, this.callerIds)}`) ?? this.responses.get(key);
+    const queue =
+      this.responses.get(`${key} BODY ${canonicalBody(body, this.callerIds, this.venue)}`) ?? this.responses.get(key);
     if (!queue?.length) {
-      if (this.unserved < 10) console.error(`unserved ${method} ${url} ${canonicalBody(body, this.callerIds)}`);
+      if (this.unserved < 10)
+        console.error(`unserved ${method} ${url} ${canonicalBody(body, this.callerIds, this.venue)}`);
       this.unserved++;
       return { status: 599, body: '' };
     }
-    if (method !== 'GET' && this.venue.compareWriteOrder && this.writeOrder[0] !== queue[0]) {
+    // Reconciliation reads may advance to a new fixture stage after a command.
+    const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= this.commandIndex);
+    if (!eligible.length) {
       this.unserved++;
       return { status: 599, body: '' };
     }
-    if (method !== 'GET') this.writeOrder.shift();
-    const record = method !== 'GET' || queue.length > 1 ? queue.shift() : queue[0];
-    return { status: record.status, body: record.body };
+    const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
+    const current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
+    const record = current[0];
+    if (method !== 'GET' && this.venue.compareWriteOrder && this.writeOrder[0] !== record) {
+      this.unserved++;
+      return { status: 599, body: '' };
+    }
+    if (method !== 'GET') this.writeOrder.splice(this.writeOrder.indexOf(record), 1);
+    if (method !== 'GET' || current.length > 1) queue.splice(queue.indexOf(record), 1);
+    return { status: record.status, headers: record.headers ?? '', body: record.body };
   }
 
   connect(url, onOpen, onMessage) {
-    const socket = { url, onMessage, closed: false, subscriptions: new Set() };
+    const socket = { url, onMessage, closed: false, subscriptions: new Set(), loginVerified: false, topics: new Map() };
     setImmediate(() => {
       if (socket.closed) return;
       const key = canonicalUrl(url);
@@ -118,6 +157,12 @@ export class Tape {
   }
 
   send(socket, text) {
+    if (this.venue.respondToPing && text === 'ping') {
+      setImmediate(() => {
+        if (!socket.closed) socket.onMessage('pong');
+      });
+      return;
+    }
     try {
       const message = JSON.parse(text);
       if (this.isPrivate && this.venue.verifySubscribe && !this.venue.verifySubscribe(message)) {
@@ -137,9 +182,84 @@ export class Tape {
         if (message.method === 'UNSUBSCRIBE') socket.subscriptions.delete(topic);
       }
       for (const waiter of [...this.waiters]) waiter();
+      // OKX's opt-in auth validation also uses its v5 subscription argument model.
+      const validateTopics = this.venue.validateSubscriptions ?? this.venue.validateLogin;
+      if (validateTopics && ['subscribe', 'unsubscribe'].includes(message.op)) {
+        if (!Array.isArray(message.args)) throw new Error(`Invalid subscription on ${socket.url}`);
+        for (const topic of message.args) {
+          if (!topic || typeof topic.channel !== 'string' || !topic.channel)
+            throw new Error(`Invalid subscription topic on ${socket.url}`);
+          const key = JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
+          if (message.op === 'subscribe') socket.topics.set(key, topic);
+          else socket.topics.delete(key);
+        }
+        return;
+      }
+      if (
+        !this.venue.validateLogin ||
+        !/\/(private|business)$/.test(new URL(socket.url).pathname) ||
+        message.op !== 'login'
+      )
+        return;
+      const arg = message.args?.length === 1 ? message.args[0] : undefined;
+      const timestamp = String(arg?.timestamp ?? '');
+      if (
+        arg?.apiKey !== (this.venue.replayCredentials?.key ?? 'replay-key') ||
+        arg?.passphrase !== (this.venue.replayCredentials?.passphrase ?? 'replay-passphrase') ||
+        !/^\d+$/.test(timestamp) ||
+        !Number.isSafeInteger(Number(timestamp)) ||
+        Math.abs(Number(timestamp) - Date.now() / 1000) > 30
+      ) {
+        throw new Error(`Invalid OKX login credentials/timestamp on ${socket.url}`);
+      }
+      const expected = createHmac('sha256', this.venue.replayCredentials?.secret ?? 'replay-secret')
+        .update(`${timestamp}GET/users/self/verify`)
+        .digest('base64');
+      const supplied = Buffer.from(String(arg.sign ?? ''));
+      const expectedBytes = Buffer.from(expected);
+      if (supplied.length !== expectedBytes.length || !timingSafeEqual(supplied, expectedBytes)) {
+        throw new Error(`Invalid OKX login signature on ${socket.url}`);
+      }
+      socket.loginVerified = true;
     } catch (error) {
       if (!(error instanceof SyntaxError)) throw error;
     }
+  }
+
+  assertSubscribed(socket, message) {
+    if (
+      !(this.venue.validateSubscriptions ?? this.venue.validateLogin) ||
+      !message.arg?.channel ||
+      !Array.isArray(message.data)
+    )
+      return;
+    const topics = [...socket.topics.values()].filter((topic) => topic.channel === message.arg.channel);
+    // Some documented messages put instId only on each data row, not arg.
+    const rows = message.data.length ? message.data : [null];
+    for (const row of rows) {
+      const object = row && !Array.isArray(row) && typeof row === 'object' ? row : {};
+      const covered = topics.some((topic) =>
+        Object.entries(topic).every(([key, value]) => {
+          if (key === 'channel') return true;
+          if (key === 'instType' && value === 'ANY') return true;
+          const values = [message.arg[key], object[key]].filter((v) => v !== undefined && v !== '');
+          if (!values.length && key === 'instType') {
+            const id = object.instId ?? message.arg.instId;
+            if (id?.endsWith('-SWAP')) values.push('SWAP');
+          }
+          return values.length > 0 && values.every((v) => v === value);
+        }),
+      );
+      if (!covered) {
+        throw new Error(
+          `Unsubscribed ${message.arg.channel} frame on ${socket.url}: ${JSON.stringify(message.arg)}${object.instId ? ` instId=${object.instId}` : ''}`,
+        );
+      }
+    }
+  }
+
+  assertWritesConsumed() {
+    if (this.missingWrites) throw new Error(`${this.missingWrites} taped write(s) were not sent`);
   }
 
   async socketFor(url, text) {
@@ -190,6 +310,7 @@ export class Tape {
         if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
       }
       if (frame.type === 'command') {
+        this.commandIndex++;
         this.results.push(
           await withTimeout(runCommand(frame), `command ${frame.op}`, this.timeoutMs).then(
             (ids) => ({ ok: ids }),
@@ -201,6 +322,18 @@ export class Tape {
         );
       } else {
         const socket = await this.socketFor(frame.url, frame.text);
+        if ((this.venue.validateLogin || this.venue.validateSubscriptions) && frame.text.trimStart().startsWith('{')) {
+          const message = JSON.parse(frame.text);
+          if (
+            this.venue.validateLogin &&
+            message.event === 'login' &&
+            String(message.code) === '0' &&
+            !socket.loginVerified
+          ) {
+            throw new Error(`Taped login success preceded a valid login on ${frame.url}`);
+          }
+          this.assertSubscribed(socket, message);
+        }
         socket.onMessage(frame.text);
       }
       delivered++;

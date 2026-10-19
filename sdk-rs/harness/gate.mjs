@@ -38,8 +38,9 @@ const replay = (impl, run) => {
     out,
   );
   if (values['no-egress']) args.push('--no-egress');
-  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 90000 });
-  if (result.status !== 0) throw new Error(`${impl} replay failed: ${result.error ?? ''}\n${result.stderr}`);
+  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125000 });
+  if (result.status !== 0)
+    throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
 };
 
@@ -85,6 +86,23 @@ const isPrivate = Boolean(ts.account);
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  okx: [
+    'full books retain levels past a stale last trade',
+    'public trades implement the inherited Not implemented method',
+    'candle calendar bounds use UTC independently of host timezone',
+    'fill window filtering retains native milliseconds before output seconds are truncated',
+    'keyless/public-only business socket avoids empty-credential login and private topics',
+    // Rust safety fixes: covered independently by documented-payload tests.
+    'split bracket entries acquire SL/TP before the next entry is placed',
+    'native OCO amend preserves its sibling protective leg',
+    'negative protective sizes and market or terminal amends fail before writes',
+    'positive protective dust cannot round into a close-entire-position order',
+    'standalone protective limit amendment fails before cancel if execution price cannot be retained',
+    'standalone cancellation continues remaining batches after per-row failures',
+    'new account equity survives delayed snapshots and local balance ticks',
+    'acknowledged leverage survives failed post-write snapshots',
+  ],
+
   binance: (ts, rust) => {
     for (const position of ts.account?.positions ?? []) {
       const fixed = rust.account.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
@@ -226,7 +244,12 @@ for (let run = 0; run < runs; run++) {
   if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
   // Every request must match a taped one: an unserved request sent different parameters.
   for (const impl of ['ts', 'rust']) {
-    const unserved = results[impl][run].unserved;
+    const output = results[impl][run];
+    for (const symbol of values.books.split(',').filter(Boolean)) {
+      if (!output.books[symbol]) differences.push(`${impl}: requested book ${symbol} is missing`);
+    }
+    if (!output.markets.length || !output.tickers.length) differences.push(`${impl}: empty public seed`);
+    const unserved = output.unserved;
     if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
     const { missingWrites, invalidSignatures } = results[impl][run];
     if (missingWrites) differences.push(`${impl}: ${missingWrites} required taped write(s) never sent`);
@@ -236,7 +259,7 @@ for (let run = 0; run < runs; run++) {
     differences.push(
       `subscriptions differ: ts=${JSON.stringify(ts.subscriptions)} rust=${JSON.stringify(rust.subscriptions)}`,
     );
-  KNOWN_TS_FIXES[values.venue]?.(ts, rust);
+  if (typeof KNOWN_TS_FIXES[values.venue] === 'function') KNOWN_TS_FIXES[values.venue](ts, rust);
   if (isPrivate) {
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
       const left = JSON.stringify(ts.account[field]);
@@ -277,6 +300,10 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (ts.account) console.log('(private tape: paced in real time, so it gates correctness only)');
+if (values.venue.startsWith('okx'))
+  console.log(
+    `(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`,
+  );
 
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.

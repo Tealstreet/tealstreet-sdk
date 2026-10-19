@@ -198,3 +198,17 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   real-WASM SDK seven tests, native/WASM clippy, bans, format and release build.
   Root typecheck (44 tasks) and lint (28 tasks) PASS. CI on the previous PR head
   passed; pushing the merged/optimized head and waiting for its CI before landing.
+- Three-venue PR CI passed every Rust job and all six replay gates (Backpack
+  public CI CPU 185.0/90.0 ms, retained memory 1.7/1.5 MB). While waiting for
+  repository tests, OKX landed and made the PR conflict. Merged landing commit
+  693ad4f139 with authorized conflict resolution, preserving all four venue
+  constructors, client-ID rules, clock/transport handling, and SDK coverage.
+- Separate sub-agent merge reviews retained OKX's strict body/staged-read,
+  login/subscription/ping checks in the shared Tape with Backpack's exact
+  writes/auth validation. Eleven harness tests pass; all 17 real-WASM SDK tests
+  and both host tests pass. Backpack 49 tests, engine 15 tests, root typecheck
+  and lint, workspace native/WASM clippy, bans and format pass.
+- Four-venue release WASM is 1,791,671 bytes after retaining landing's name/
+  producer-section stripping, within the unchanged 1.8 MiB budget. Backpack
+  public/private gates pass; all eleven replay gates (including OKX's four
+  private variants) are running before the next push and green-CI wait.

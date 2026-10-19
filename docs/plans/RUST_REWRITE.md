@@ -256,7 +256,7 @@ Then: exchange-server moves to the native host and streams the same frames
 (with `BOOK_DELTA` sections for networked clients — full books every flush
 are ~450 KB/s for two 1,000-level books).
 
-### 7. CI — Binance, Bybit and Backpack
+### 7. CI — Binance, Bybit, Backpack and OKX
 
 - Bans, fmt, clippy, native tests, wasm32 build and clippy.
 - Replay gate (`rust.yml`, job "replay gate"): release wasm with the pinned
@@ -276,7 +276,9 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | --- | --- |
 | Binance USD-M, Binance PM | done |
 | Bybit linear | done ([#1298](https://github.com/Tealstreet/tealstreet-sdk/pull/1298)) |
-| OKX (+EU, demo), Bitget, Hyperliquid, BloFin, BingX, MEXC, WEEX, Bitunix, Crypto.com, Backpack | wave 1 lanes running |
+| OKX (+EU, demo) | done (#1302) |
+| Bitget, Hyperliquid, BloFin, BingX, MEXC, WEEX, Bitunix, Crypto.com, Backpack | wave 1 lanes running |
+| Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | WOO, KuCoin, Phemex, Lighter, Paradex, GRVT, AsterDEX, Orderly family, ApeX Omni, Kraken, Coinbase, Bitrue, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse, Bybit inverse/spot/demo | wave 2, as wave 1 lanes merge |
 
 ### 9. Delete TypeScript and merge

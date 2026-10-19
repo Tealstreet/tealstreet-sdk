@@ -63,6 +63,43 @@ const verifyBackpack = ({ method, url, headers, body }) => {
   return verify(null, Buffer.from(payload), backpackPublic, Buffer.from(h['x-signature'] ?? '', 'base64'));
 };
 
+const okx = (name) => ({
+  rust: name,
+  ts: {
+    module: `${root}/okx/${name.startsWith('okxeu') ? 'okxeu' : 'okx'}.exchange.ts`,
+    className: name.startsWith('okxeu') ? 'OKXEUExchange' : 'OKXExchange',
+    name,
+  },
+  options: { testnet: name.endsWith('demo') },
+  configureTs: (exchange) => {
+    // The Rust lane covers linear stablecoin swaps, including on the EEA class.
+    exchange.getInstrumentTypes = () => ['SWAP'];
+    exchange.isSupportedMarketInstrument = (m) =>
+      m.instType === 'SWAP' && m.ctType === 'linear' && ['USDT', 'USDC'].includes(m.settleCcy);
+  },
+  tsBooksSubscribed: (exchange, count) =>
+    Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('books.')).length >= count,
+  isPrivateRecord: (record) => {
+    if (record.type !== 'ws') return false;
+    const path = new URL(record.url).pathname;
+    if (path.endsWith('/private')) return true;
+    if (!path.endsWith('/business')) return false;
+    try {
+      const message = JSON.parse(record.text);
+      return message.event === 'login' || ['orders', 'orders-algo', 'algo-advance'].includes(message.arg?.channel);
+    } catch {
+      return false;
+    }
+  },
+  matchRequestBody: true,
+  // Caller IDs remain exact, even when the caller chooses a broker-prefixed ID.
+  generatedBodyId: (key, value) =>
+    ['clOrdId', 'algoClOrdId'].includes(key) && typeof value === 'string' && value.startsWith('e847386590ce4dBC'),
+  respondToPing: true,
+  validateLogin: true,
+  compareFillPrices: true,
+});
+
 export const VENUES = {
   backpack: {
     rust: 'backpack',
@@ -103,7 +140,10 @@ export const VENUES = {
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >=
       count,
     privateSocket: '/v5/private',
+    matchRequestBody: true,
+    volatileBodyFields: true,
   },
+  ...Object.fromEntries(['okx', 'okxeu', 'okxdemo', 'okxeudemo'].map((name) => [name, okx(name)])),
 };
 
 export const venueOf = (name) => {
