@@ -63,20 +63,20 @@ record('member',(p,t)=>p?raw(t)['\ud800map']:raw(t).map(v=>v));
 record('is_regexp',(p)=>p?({}) instanceof RegExp:new RegExp('x') instanceof RegExp);
 record('require_callback',(p)=>{[1].map(p?String.fromCharCode(0xd800):v=>v);return undefined;});
 record('array_from',(p,t)=>Array.from(raw(t),p?String.fromCharCode(0xd800):v=>v));
-record('iterate',(p,t)=>p?undefined:[...raw(t)]);
+record('iterate',(p,t)=>p?({})[Symbol.iterator]:[...raw(t)]);
 record('consume_iterator',(p,t)=>{const values=[];for(const v of raw(t)){if(p&&values.length===2)throw t;values.push(v);}return values;});
 record('map_from_entries',(p,t)=>p?new Map([String.fromCharCode(0xd800)]):new Map([[t,String.fromCharCode(0xd800)]]).get(t));
 record('not_iterable',(p)=>p?Array.from(null):new Set(7));
 for(const n of ['json_stringify','stringify_json']) record(n,(p,t)=>JSON.stringify(p?Object.defineProperty({},'x',{enumerable:true,get(){throw t;}}):{x:String.fromCharCode(0xd800),absent:undefined,n:-0,inf:Infinity}));
 record('v8_operand',(p)=>{try{[1].map(p?String.fromCharCode(0xd800):7);}catch(e){return e.message.slice(0,-' is not a function'.length);}});
-record('install_builtins',(p,t)=>{const g={sentinel:t,Array,Map,JSON};return [g.sentinel===t,typeof g.Array.from,typeof g.Map, g.JSON.stringify(p?undefined:String.fromCharCode(0xd800))];});
+record('install_builtins',(p,t)=>require('node:vm').runInNewContext('[sentinel===expected,typeof Array.from,typeof Map,JSON.stringify(raw)]',{sentinel:t,expected:t,raw:p?undefined:String.fromCharCode(0xd800)}));
 const fs=require('node:fs'),path=require('node:path'),ts=require('typescript'),vm=require('node:vm');
 const source=fs.readFileSync(path.resolve(__dirname,'../../../packages/safe-cex/src/types.ts'),'utf8');
 const ast=ts.createSourceFile('types.ts',source,ts.ScriptTarget.Latest,true);
 const names=['OrderType','OrderStatus','OrderSide','OrderTimeInForce','OrderStopTriggerType','PositionSide','PositionMode','MarginType','LogSeverity'];
 const enumSource=fs.readFileSync(path.resolve(__dirname,'../../../packages/logging/src/LogSeverity.ts'),'utf8')+'\n'+ast.statements.filter(n=>ts.isEnumDeclaration(n)&&names.includes(n.name.text)).map(n=>n.getText(ast)).join('\n');
 const namespace={exports:{}};vm.runInNewContext(ts.transpileModule(enumSource,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,namespace);
-record('install_enums',(p,t)=>[t===t, ...names.flatMap(n=>Object.entries(namespace.exports[n]).map(([k,v])=>`${n}.${k}=${v}`))]);
+record('install_enums',(p,t)=>{const g={sentinel:t};Object.assign(g,namespace.exports);if(p)Object.assign(g,namespace.exports);return [g.sentinel===t,...names.flatMap(n=>Object.entries(g[n]).map(([k,v])=>`${n}.${k}=${v}`))];});
 record('construct_promise',(p)=>{new Promise(p?String.fromCharCode(0xd800):7);});
 // Promise.finally keeps the original settlement referent after successful cleanup.
 (async()=>{
