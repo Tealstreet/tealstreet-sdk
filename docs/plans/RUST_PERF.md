@@ -354,3 +354,29 @@ BingX1507328→1441792, BloFin851968→786432, WEEX1572864→1376256,
 Binance1507328→1376256 bytes. These are allocation diagnostics, not final
 retained ratios or CPU numbers. All12 private fixtures regenerated; correctness
 gates passing through MEXC, with OKX variants and WEEX still in progress.
+
+All606 Rust tests, workspace fmt/bans/native+wasm clippy pass. All12 private
+variants pass (Backpack21frames, Binance14, BloFin29, Bybit18, Crypto21, BingX38,
+MEXC25, four OKX variants29 each, WEEX20). Nine current public gates pass. Eight
+controlled three-run pairs show wider main-thread CPU and retained ratios.
+MEXC's first control cohort was rejected by the existing negative-heap-baseline
+check: one initial heap sample had303KB extra, final heaps agreed within144B.
+The complete MEXC pair was discarded, without changing source or thresholds.
+The replacement valid three-run MEXC pair passes both gates but regresses CPU
+2.59→2.38x while retained improves3.90→4.74x. This remains a valid observation.
+Quiet same-binary diagnostics show batching188.51→149.86ms (WS gross61.37→31.91,
+calls14700→2596); later baseline profiles varied500/353/237ms with strong wall
+variation. Mixed native-ID search is outside MEXC's WS hot path. No speculative
+optimization is justified from these inconsistent loaded samples.
+
+Predeclared measurement follow-up, independently audited: collect10 valid MEXC
+crossover pairs, alternating AB/BA by accepted-pair index (5each), max15attempts.
+Each side uses the unchanged official gate, one run; preserve every attempt.
+Reject an entire pair only for the gate's existing invalid-memory/unsettled
+baseline checks, independent of CPU direction. Correctness failures stop work;
+CPU failures remain data. Stop inconclusive if fewer than10 valid pairs, with
+no favorable-result extension. Aggregate the official upper-middle median for
+TS/Rust CPU, steady CPU and retained bytes on the same accepted cohort; retain
+per-pair/order spreads. Report the earlier valid regression alongside it and
+acknowledge remaining shared-host noise. Optimize code if this fixed experiment
+still shows regression; do not search for a favorable repetition.
