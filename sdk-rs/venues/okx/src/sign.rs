@@ -64,6 +64,36 @@ fn iso_timestamp(ms: f64) -> String {
 mod tests {
     use super::*;
     #[test]
+    fn signs_exact_get_query_post_body_and_ws_preimages() {
+        let c = Credentials {
+            key: "test-key".into(),
+            secret: "test-secret".into(),
+            passphrase: "test-passphrase".into(),
+        };
+        assert_eq!(
+            c.signature(
+                "1970-01-01T00:00:00.000Z",
+                "GET",
+                "/api/v5/account/config",
+                ""
+            ),
+            "29klY97actzxrGqk1y/O9sExvXx4Rs9/13y6nq9tfi0="
+        );
+        assert_eq!(
+            c.signature("1234567890", "GET", "/users/self/verify", ""),
+            "qf8dggkdwH7IVTM6AIiNv9i1NS6Boqw3+pNUhrOWjWQ="
+        );
+        assert_eq!(
+            c.signature(
+                "1970-01-01T00:00:00.000Z",
+                "POST",
+                "/api/v5/trade/batch-orders",
+                r#"[{"instId":"BTC-USDT-SWAP"}]"#
+            ),
+            "J5gNN8urKafdLakUupoqtac2yY2yQukwhRQPZYuj1ss="
+        );
+    }
+    #[test]
     fn utc_milliseconds_and_leap_day() {
         assert_eq!(iso_timestamp(0.0), "1970-01-01T00:00:00.000Z");
         assert_eq!(

@@ -1,4 +1,5 @@
 //! OKX USDT/USDC linear swaps on the sans-I/O engine.
+mod account;
 mod sign;
 mod wire;
 
@@ -9,7 +10,7 @@ use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, num,
 };
 use sign::Credentials;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 const PUBLIC: usize = 0;
 const BUSINESS: usize = 2;
@@ -29,6 +30,7 @@ struct Connection {
     socket: Option<SocketId>,
     open: bool,
     authenticated: bool,
+    auth_deadline: Option<f64>,
     last_received: f64,
     ping_at: Option<f64>,
     watchdog: Option<TimerId>,
@@ -45,6 +47,7 @@ struct BookState {
 }
 
 pub enum Pending {
+    Account(account::Request),
     Markets {
         rows: Vec<Market>,
         invalid: bool,
@@ -63,8 +66,11 @@ pub enum Pending {
 pub struct Okx {
     options: Options,
     credentials: Option<Credentials>,
+    account: account::AccountState,
     connections: [Connection; 3],
     books: HashMap<String, BookState>,
+    marks: HashSet<String>,
+    indexes: HashSet<String>,
     candles: HashMap<(String, String), u32>,
 }
 
@@ -88,8 +94,11 @@ impl Okx {
         Self {
             options,
             credentials,
+            account: account::AccountState::default(),
             connections: std::array::from_fn(|_| Connection::default()),
             books: HashMap::new(),
+            marks: HashSet::new(),
+            indexes: HashSet::new(),
             candles: HashMap::new(),
         }
     }
@@ -226,6 +235,9 @@ impl Okx {
                 }
             }
         } else if channel == BUSINESS {
+            if self.credentials.is_some() && !self.connections[BUSINESS].authenticated {
+                return;
+            }
             for (symbol, interval) in self.candles.keys() {
                 if let Some(m) = cx.store.market(symbol) {
                     let id = m.id.clone();
@@ -335,6 +347,12 @@ impl Okx {
                 return;
             };
             let symbol = m.symbol.clone();
+            if channel == "mark-price" {
+                self.marks.insert(id.clone());
+            }
+            if channel == "index-tickers" {
+                self.indexes.insert(id.clone());
+            }
             cx.store.update_ticker(&symbol, |t| match channel {
                 "tickers" => {
                     t.bid = num::parse(p.bid_px);
@@ -385,7 +403,13 @@ impl Venue for Okx {
         c.open = true;
         c.attempts = 0;
         c.last_received = cx.now;
-        self.subscribe(cx, channel);
+        c.auth_deadline =
+            (channel != PUBLIC && self.credentials.is_some()).then_some(cx.now + 10_000.0);
+        if channel != PUBLIC && self.credentials.is_some() {
+            self.login(cx, channel);
+        } else {
+            self.subscribe(cx, channel);
+        }
         cx.send(socket, "ping");
         self.connections[channel].ping_at = Some(cx.now);
     }
@@ -404,13 +428,27 @@ impl Venue for Okx {
             return;
         };
         if message.event == "error" {
+            if channel != PUBLIC && !self.connections[channel].authenticated {
+                cx.close(socket);
+                self.on_close(cx, socket, 1008);
+            }
             cx.log(
                 LogLevel::Error,
                 format!("OKX {}: {}", message.code, message.msg),
             );
             return;
         }
-        self.public_message(cx, message);
+        if channel != PUBLIC
+            && (message.event == "login"
+                || matches!(
+                    message.arg.channel,
+                    "positions" | "orders" | "orders-algo" | "algo-advance" | "account"
+                ))
+        {
+            self.private_message(cx, channel, message);
+        } else {
+            self.public_message(cx, message);
+        }
     }
 
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
@@ -438,6 +476,7 @@ impl Venue for Okx {
 
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets { rows, invalid } => {
                 match serde_json::from_str::<wire::Instrument<'_>>(item) {
                     Ok(m) => {
@@ -567,6 +606,7 @@ impl Venue for Okx {
             return;
         }
         match pending {
+            Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Markets {
                 rows,
                 invalid: false,
@@ -589,6 +629,7 @@ impl Venue for Okx {
                 cx.store.set_tickers(rows);
                 self.connect(cx, PUBLIC);
                 self.connect(cx, BUSINESS);
+                self.account_start(cx);
             }
             Pending::Candles {
                 command,
@@ -606,7 +647,9 @@ impl Venue for Okx {
     }
 
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Candles { command, .. } = pending {
+        if let Pending::Account(request) = pending {
+            self.account_failed(cx, request, error);
+        } else if let Pending::Candles { command, .. } = pending {
             cx.done(command, Err(error.into()));
         } else {
             cx.log(LogLevel::Error, error);
@@ -614,6 +657,9 @@ impl Venue for Okx {
     }
 
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account_timer(cx, timer) {
+            return;
+        }
         for channel in 0..3 {
             let c = &mut self.connections[channel];
             if c.reconnect == Some(timer) {
@@ -624,7 +670,10 @@ impl Venue for Okx {
             if c.watchdog == Some(timer) {
                 c.watchdog = None;
                 if let Some(socket) = c.socket {
-                    if !c.open || c.ping_at.is_some_and(|at| cx.now - at >= 10_000.0) {
+                    if !c.open
+                        || c.auth_deadline.is_some_and(|at| cx.now >= at)
+                        || c.ping_at.is_some_and(|at| cx.now - at >= 10_000.0)
+                    {
                         cx.close(socket);
                         self.on_close(cx, socket, 1006);
                         return;

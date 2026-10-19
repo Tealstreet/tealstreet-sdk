@@ -58,3 +58,20 @@ Never touch master, rebase, or force-push.
 - Merged the overseer's nested workspace layout. The only merge overlap was
   Cargo workspace paths/members; applied the explicit venues/* layout and
   moved OKX to sdk-rs/venues/okx. No venue behavior conflict.
+
+### Private phase
+
+- Implemented ISO UTC REST signing of exact query/body bytes and passphrase,
+  plus epoch-second private/business login, auth deadlines, watchdog recovery,
+  and login-triggered reconciliation.
+- Typed snapshots join equity and positions, page all five order categories,
+  retain per-market settings, reject failed/malformed reads, and preserve newer
+  order/position/equity pushes. Terminal guards also reject late live events.
+- Independent private review found malformed-position acceptance, hedged ID
+  formatting, auth timeout, late-live finality, empty-push balance and metadata
+  retention bugs. Fixed with regression tests; 19 OKX native tests and clippy
+  pass. Engine tests passed at the public checkpoint (11 tests).
+- Crypto audit: removed wallet_utils and its module export; repository-wide
+  search found no callers. Retained uuid (Binance uses it).
+- Trading and queries remain to implement. Harness integration is being
+  prepared in a disjoint file scope by the public-phase reviewer.

@@ -105,3 +105,91 @@ pub fn candle(row: &[&str]) -> Option<safe_cex_engine::model::Candle> {
         volume: parse(row[7]),
     })
 }
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Config<'a> {
+    pub pos_mode: &'a str,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PositionRow<'a> {
+    pub inst_id: &'a str,
+    pub pos: &'a str,
+    pub pos_side: &'a str,
+    pub avg_px: &'a str,
+    pub lever: &'a str,
+    pub upl: &'a str,
+    pub liq_px: &'a str,
+    pub mgn_mode: &'a str,
+    pub imr: &'a str,
+    pub mmr: &'a str,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct OrderRow<'a> {
+    pub inst_id: &'a str,
+    pub ord_id: &'a str,
+    pub algo_id: &'a str,
+    pub cl_ord_id: &'a str,
+    pub algo_cl_ord_id: &'a str,
+    pub ord_type: &'a str,
+    pub state: &'a str,
+    pub side: &'a str,
+    pub sz: &'a str,
+    pub acc_fill_sz: &'a str,
+    pub px: &'a str,
+    pub fill_px: &'a str,
+    pub fill_sz: &'a str,
+    pub fill_time: &'a str,
+    pub u_time: &'a str,
+    pub trade_id: &'a str,
+    pub trigger_px: &'a str,
+    pub trigger_px_type: &'a str,
+    pub sl_trigger_px: &'a str,
+    pub sl_trigger_px_type: &'a str,
+    pub tp_trigger_px: &'a str,
+    pub tp_trigger_px_type: &'a str,
+    pub order_px: &'a str,
+    pub ord_px: &'a str,
+    pub callback_spread: &'a str,
+    pub move_trigger_px: &'a str,
+    pub last: &'a str,
+    pub lever: &'a str,
+    #[serde(deserialize_with = "boolean")]
+    pub reduce_only: bool,
+}
+
+fn boolean<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Bool<'a> {
+        Boolean(bool),
+        Text(&'a str),
+    }
+    Ok(match Bool::deserialize(d)? {
+        Bool::Boolean(b) => b,
+        Bool::Text(s) => s == "true",
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Equity<'a> {
+    pub ccy: &'a str,
+    pub eq: &'a str,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Risk<'a> {
+    #[serde(borrow)]
+    pub bal_data: Vec<Equity<'a>>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountPush<'a> {
+    #[serde(default)]
+    pub total_eq: &'a str,
+}
