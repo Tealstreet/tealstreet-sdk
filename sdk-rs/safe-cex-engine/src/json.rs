@@ -104,6 +104,8 @@ pub enum ArrayAt {
     Root,
     /// The array is this field of the top-level object.
     Field(&'static str),
+    /// Preserve the surrounding object (with an empty array) for envelope validation.
+    EnvelopeField(&'static str),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -130,6 +132,8 @@ pub struct ArraySplitter {
     /// The wanted key and its colon were just seen.
     armed: bool,
     item: Vec<u8>,
+    envelope: Vec<u8>,
+    envelope_truncated: bool,
 }
 
 impl ArraySplitter {
@@ -145,18 +149,36 @@ impl ArraySplitter {
             capturing_key: false,
             armed: false,
             item: Vec::new(),
+            envelope: Vec::new(),
+            envelope_truncated: false,
         }
     }
 
     /// Whether the array was found and closed.
     pub fn finished(&self) -> bool {
-        self.phase == Phase::Done
+        self.phase == Phase::Done && !self.envelope_truncated
+    }
+
+    /// Only opt-in streams retain metadata; old streams keep their empty response body.
+    pub fn envelope(&self) -> Option<&[u8]> {
+        matches!(self.at, ArrayAt::EnvelopeField(_)).then_some(&self.envelope)
     }
 
     pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
         for &byte in data {
+            if matches!(self.at, ArrayAt::EnvelopeField(_))
+                && (self.phase != Phase::InArray
+                    || (!self.in_string && self.depth == self.array_depth && byte == b']'))
+            {
+                // Oversized metadata fails JSON validation rather than retaining arbitrary bodies.
+                if self.envelope.len() < 16_384 {
+                    self.envelope.push(byte);
+                } else {
+                    self.envelope_truncated = true;
+                }
+            }
             if self.phase == Phase::Done {
-                return;
+                continue;
             }
             if self.in_string {
                 if self.phase == Phase::InArray {
@@ -188,8 +210,7 @@ impl ArraySplitter {
                     }
                 }
                 b':' if self.phase == Phase::Seeking && self.depth == 1 => {
-                    self.armed =
-                        matches!(self.at, ArrayAt::Field(name) if name.as_bytes() == self.key);
+                    self.armed = matches!(self.at, ArrayAt::Field(name) | ArrayAt::EnvelopeField(name) if name.as_bytes() == self.key);
                     continue;
                 }
                 b'[' | b'{' => {
@@ -198,7 +219,9 @@ impl ArraySplitter {
                         let found = byte == b'['
                             && match self.at {
                                 ArrayAt::Root => self.depth == 1,
-                                ArrayAt::Field(_) => self.armed && self.depth == 2,
+                                ArrayAt::Field(_) | ArrayAt::EnvelopeField(_) => {
+                                    self.armed && self.depth == 2
+                                }
                             };
                         self.armed = false;
                         if found {
@@ -273,6 +296,33 @@ mod tests {
         let mut splitter = ArraySplitter::new(ArrayAt::Field("symbols"));
         splitter.feed(br#"{"other":[1],"symbolsX":[2]}"#, |_| panic!("no match"));
         assert!(!splitter.finished());
+    }
+
+    #[test]
+    fn rejects_an_oversized_stream_envelope() {
+        let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
+        splitter.feed(
+            format!(r#"{{"code":0,"data":[]}}{}garbage"#, " ".repeat(16_384)).as_bytes(),
+            |_| {},
+        );
+        assert!(!splitter.finished());
+    }
+
+    #[test]
+    fn retains_envelope_fields_on_either_side_of_the_stream() {
+        let text = r#"{"code":0,"data":[{"n":[1,2],"s":"],}"},{"n":3}],"msg":"ok"}"#;
+        for size in [1, 2, 7, 1000] {
+            let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
+            let mut count = 0;
+            for chunk in text.as_bytes().chunks(size) {
+                splitter.feed(chunk, |_| count += 1)
+            }
+            assert_eq!(count, 2);
+            assert_eq!(
+                splitter.envelope(),
+                Some(br#"{"code":0,"data":[],"msg":"ok"}"#.as_slice())
+            );
+        }
     }
 
     #[derive(Deserialize)]

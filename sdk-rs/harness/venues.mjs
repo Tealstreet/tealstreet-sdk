@@ -3,6 +3,13 @@
 const root = '../../packages/safe-cex/src/exchanges';
 
 export const VENUES = {
+  bingx: {
+    rust: 'bingx',
+    ts: { module: `${root}/bingx/bingx.exchange.ts`, className: 'BingxExchange', name: 'bingx' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('market.depth.')).length >= count,
+    privateSocket: '?listenKey=',
+  },
   binance: {
     rust: 'binance',
     ts: { module: `${root}/binance/binance.exchange.ts`, className: 'BinanceExchange', name: 'binance' },

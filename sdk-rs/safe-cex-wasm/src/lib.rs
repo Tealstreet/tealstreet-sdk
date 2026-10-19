@@ -417,6 +417,11 @@ impl WasmEngine {
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
             }))),
+            "bingx" => Box::new(Engine::new(safe_cex_venue_bingx::Bingx::new(safe_cex_venue_bingx::Options {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };
         Ok(Self { inner })

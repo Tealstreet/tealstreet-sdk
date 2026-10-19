@@ -44,9 +44,15 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const body = new TextDecoder().decode(response.body);
-    write({ type: 'http', method: request.method, url: request.url, status: response.status, body });
-    return response;
+    const decoder = new TextDecoder();
+    let body = '';
+    if (response.body instanceof Uint8Array) body = decoder.decode(response.body);
+    else {
+      for await (const chunk of response.body) body += decoder.decode(chunk, { stream: true });
+      body += decoder.decode();
+    }
+    write({ type: 'http', method: request.method, url: request.url, requestBody: request.body, status: response.status, body });
+    return { ...response, body: new TextEncoder().encode(body) };
   },
 };
 

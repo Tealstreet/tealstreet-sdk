@@ -44,3 +44,16 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   Binance reference and TS BingX behavior. Fetched integration process update.
 - Official payload references: BingX-API/api-ai-skills `swap-market`,
   `swap-account`, `swap-trade`, `swap-ws-account` API references.
+
+### Public checkpoint
+
+- Public data implementation registered in engine/harness/SDK. Six public
+  regressions pass; engine's 11 tests pass. Public clippy passed before audit
+  follow-ups; final rerun pending. Binary host decoding tests pass (2); full
+  host suite awaits wasm build.
+- Independent reviewer found malformed depth defaults, Unicode interval panic,
+  missing startup retries, handshake timeout and envelope truncation issues.
+  Fixed all, including keeping heartbeat sends off connecting sockets.
+- In-progress private/trading/query modules are separate work, not yet wired.
+- Overseer requested integration of the nested workspace immediately; relocating
+  the crate before resuming account/trading/query verification.

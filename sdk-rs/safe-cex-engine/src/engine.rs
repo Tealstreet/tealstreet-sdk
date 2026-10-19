@@ -601,10 +601,16 @@ impl<V: Venue> Engine<V> {
                 self.venue.on_request_failed(&mut cx, pending, &message);
                 return;
             }
+            let envelope = splitter.envelope().unwrap_or_default();
+            let Ok(body) = std::str::from_utf8(envelope) else {
+                self.venue
+                    .on_request_failed(&mut cx, pending, "stream envelope is not UTF-8");
+                return;
+            };
             let response = Response {
                 status: incoming.status,
                 headers: &incoming.headers,
-                body: "",
+                body,
             };
             self.venue.on_response(&mut cx, pending, response);
             return;

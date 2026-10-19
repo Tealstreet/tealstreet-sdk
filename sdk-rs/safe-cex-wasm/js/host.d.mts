@@ -61,3 +61,6 @@ export class EngineHost {
 }
 
 export function nativeTransport(): Transport;
+
+/** Ordered text and gzip/deflate binary WebSocket message decoding. */
+export function socketMessages(onMessage: (text: string) => void, onError: (error: unknown) => void): (data: string | Blob | ArrayBuffer | ArrayBufferView) => void;
