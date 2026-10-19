@@ -6,6 +6,87 @@ Work is full auto under VENUE_PORT_BRIEF Process: phase reviews, commits,
 public/private replay gates, PR to feat/rust-rewrite, adversarial reviews,
 green CI, merge and fresh follow-up branch. No stash/rebase/force push.
 
+## Final local results (nine families)
+
+All nine current public gates and all twelve private variants pass. The table
+uses TS/Rust **main-thread gate CPU** and retained-memory ratios (higher is
+better); eight families use three-run medians. MEXC uses the predeclared ten-pair
+crossover below. These are shared-host point estimates, not significance claims.
+Raw runs, helper hashes and diagnostic summaries are committed in
+[`RUST_PERF_RESULTS.json`](RUST_PERF_RESULTS.json).
+
+| Venue | CPU ratio before → after | Retained ratio before → after | WASM bytes / budget |
+| --- | ---: | ---: | ---: |
+| Binance | 2.15x → 2.40x | 1.77x → 1.83x | 707200 / 817152 |
+| Bybit | 1.40x → 1.52x | 2.68x → 3.07x | 677935 / 796672 |
+| OKX | 1.43x → 1.62x | 1.62x → 1.80x | 720786 / 757760 |
+| Crypto.com | 1.39x → 1.41x | 1.30x → 1.43x | 628723 / 661504 |
+| WEEX | 1.50x → 1.67x | 2.27x → 2.45x | 735682 / 884736 |
+| BingX | 1.37x → 1.47x | 1.69x → 1.72x | 725181 / 856064 |
+| MEXC | 3.07x → 3.13x | 3.94x → 4.79x | 735159 / 778240 |
+| BloFin | 1.39x → 1.53x | 1.74x → 1.76x | 760623 / 783360 |
+| Backpack | 2.38x → 2.46x | 1.85x → 2.18x | 740712 / 763904 |
+
+Before: exact landing `eff4dcbb0f7bb5d5f19c28d6d9cf263eaf6cf0f5`, original
+unbatched aggregate host/binary, 2863225 bytes. After implementation source:
+`9bb403da6dbe3b36bff6579bb22f6c1c743c97c2`. Both use identical final replay
+helpers, fixtures, recorded cadence and strengthened memory accounting. The
+aggregate retains its original global opt=s/host=z settings; isolated builds use
+workspace opt=3/host=z. Node v26.7.0 on the same macOS host. Memory includes JS
+heap delta, backing-buffer delta and whole WASM linear memory once. CPU stops
+before final stable collection. Frame/state/egress/signature validation remains
+strict; inherited documented venue TS corrections are unchanged by this task.
+
+MEXC's fixed experiment accepted all ten attempts, five AB and five BA; all twenty
+gates pass. Upper-middle medians improve CPU 3.0730→3.1268 and retained
+3.9358→4.7911. The CPU gain is small relative to noise: six of ten paired wins,
+AB 3.1583→3.1268 versus BA 3.1087→3.1909. Earlier **valid** three-run results
+regressed 2.59→2.38; those remain in the raw report. The preceding invalid heap
+cohort was rejected in full by the existing gate. No source, thresholds or
+accounting changed to obtain the crossover result, and there was no extension
+based on CPU direction. Do not claim a stable MEXC CPU speedup. Process CPU is
+informational and sometimes increases (MEXC206.2→236.5ms); the table scores the
+main-thread CPU used by the public gate. Steady CPU still passes on every venue.
+
+### Where CPU goes
+
+Optional probes and instrumented replays use three runs and three probe rounds,
+separate from the uninstrumented gates. Raw whole-fixture string-crossing floors
+are3.54ms OKX and4.07ms Bybit; crossing plus JSON syntax validation is7.17/7.96ms.
+Prepared64-message batch crossing is0.096/0.102ms, excluding host packing.
+Syntax validation is a parser floor, not the typed venue decoder.
+
+| Same final Rust binary, single → batch | OKX | Bybit |
+| --- | ---: | ---: |
+| Engine message calls | 8904 → 229 (38.9x fewer) | 8742 → 218 (40.1x fewer) |
+| Gross WS main-thread CPU ms | 48.87 → 18.74 | 54.53 → 24.88 |
+| Frame calls | 66 → 66 | 25 → 25 |
+| Gross frame CPU ms | 2.87 → 2.69 | 3.74 → 3.61 |
+
+The WS bucket includes crossing, typed parsing/state updates and action JSON;
+the frame bucket includes binary writing and the wasm-bindgen return copy.
+Observed clock cost is about1.1us/call: count-scaled gross floor9.8→0.25ms;
+whole empty-wrapper cost about2.3us/call scales20.6→0.54ms. These are overhead
+estimates, never exact subtraction. Raw crossing alone is a small part of total
+processing; avoiding repeated dispatch/drains and allocations matters too. Batch
+counts vary with scheduling. OKX's8902 taped messages include two additional
+liveness replies during replay. Instrumented timings are diagnostic, not gate
+CPU values.
+
+### Verification and landing
+
+606 Rust tests, workspace fmt/bans/native+wasm clippy; nine isolated WASM clippys;
+67 host/socket/Workers/loader tests;25 SDK WASM tests;86 harness regressions;
+44 typecheck,28 lint and27 full repository test tasks pass. All nine web/Node
+packages meet fixed budgets. Native unit/integration tests cover ordered burst
+barriers, per-arrival times, fair draining and shutdown. JS tests cover malformed
+batch atomicity, binary decode order, reentrancy, disposal and command lifetimes.
+No venue TS bug is introduced or reclassified by this performance work.
+
+PR creation, fresh adversarial PR reviews and green CI/merge remain next. Earlier
+sections below retain the phase history; this section supersedes exploratory or
+invalid measurements there.
+
 ## Phases
 
 1. Baseline and profiling. Replay committed public recordings, measure total
