@@ -14,5 +14,13 @@
     "passed": 1,
     "logSha256": "c0f8bf7a4b1fb7dc0e8b14260c87b2a1d85f2e03286215d5c7bd77ae58897d0c"
   },
-  "releaseQualification": "Cold exact intrinsic call repair after frozen matched carrier experiment; no additional performance ratio is claimed."
+  "releaseQualification": "Cold exact intrinsic call repair after frozen matched carrier experiment; no additional performance ratio is claimed.",
+  "canonicalAsterFunctionReplay": {
+    "owners": 32,
+    "runtimeResults": 32,
+    "classifications": 0,
+    "failedOwners": 0,
+    "evidenceSha256": "aba72a2cb178f555eca6d24448d1c9e50d78c48b22de835649e82a80264d1bcb",
+    "scope": "account_helpers/ws_helpers plus exact5 private coercion helpers and3 exchange helpers; preserved full compiler inventory and original cases. Saved compiler spans reused only after byte-identical selected production source verification; production dependency rebuilt with exact Object.toString fix."
+  }
 }

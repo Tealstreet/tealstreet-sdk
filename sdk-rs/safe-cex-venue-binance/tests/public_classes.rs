@@ -665,13 +665,12 @@ fn public_classes_preserve_foreign_core_callback_on_listener_registration() {
     let calls = Rc::new(Cell::new(0));
     let count = calls.clone();
     let original: MessageHandler = Rc::new(move |events| {
-        assert_eq!(
+        assert!(
             events
                 .get("0")?
                 .get("k")?
                 .get("s")?
                 .strict_equals(&EventValue::str("BTC")),
-            true,
             "native foreign callback receives parsed envelope"
         );
         count.set(count.get() + 1);
