@@ -55,3 +55,6 @@ Never touch master, rebase, or force-push.
   WASM registration builds natively; SDK passphrase forwarding is wired.
 - Package typecheck passed. Package lint and focused regression are running.
 - Checkpoint requested by overseer before workspace-layout merge (b32847fca6).
+- Merged the overseer's nested workspace layout. The only merge overlap was
+  Cargo workspace paths/members; applied the explicit venues/* layout and
+  moved OKX to sdk-rs/venues/okx. No venue behavior conflict.
