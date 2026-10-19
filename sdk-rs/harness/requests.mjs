@@ -5,14 +5,23 @@ const CLIENT_IDS = new Set(['clientOrderId', 'newClientOrderId', 'clientAlgoId']
 const stable = (callerIds) => ([name, value]) =>
   !VOLATILE.has(name) && !(CLIENT_IDS.has(name) && !callerIds.has(value));
 
+const wireValue = (value) => {
+  if (value === null) return ['null'];
+  if (Array.isArray(value)) return ['array', value.map(wireValue)];
+  if (typeof value === 'object') return ['object', Object.entries(value).sort(([a],[b]) => a.localeCompare(b)).map(([key,value]) => [key,wireValue(value)])];
+  if (typeof value === 'bigint' || typeof value === 'number') return ['number', value.toString()];
+  return [typeof value, value];
+};
+
 export const requestKey = (method, url, body, callerIds = new Set()) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams].filter(stable(callerIds))
     .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"([^"]*)",?/g,
       (match, _field, id) => callerIds.has(id) ? match : '')])
     .sort(([a], [b]) => a.localeCompare(b));
-  const payload = typeof body === 'string' && body ? JSON.parse(body) : body ?? {};
-  const data = Object.entries(payload).filter(stable(callerIds)).sort(([a], [b]) => a.localeCompare(b));
+  const payload = typeof body === 'string' && body ? JSON.parse(body, (_key,value,context) =>
+    typeof value === 'number' && !Number.isSafeInteger(value) && context?.source && /^-?\d+$/.test(context.source) ? BigInt(context.source) : value) : body ?? {};
+  const data = Object.entries(payload).filter(stable(callerIds)).sort(([a], [b]) => a.localeCompare(b)).map(([key,value]) => [key,wireValue(value)]);
   return `${method} ${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)} ${JSON.stringify(data)}`;
 };
 

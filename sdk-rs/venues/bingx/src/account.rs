@@ -901,18 +901,18 @@ impl Account {
     }
 
     pub fn accept_placed(&mut self, cx: &mut Cx<'_, Pending>, native: &NativeOrder<'_>) {
-        if let Some(order) = map_order(native, cx) {
-            // Placement acknowledgements describe the order aggregate, not
-            // an emitted execution. Only historical REST snapshots seed z.
+        if let Some(order) = map_order(native, cx)
+            && order.status == OrderStatus::Open
+            && order.kind != OrderType::Market
+            && cx.store.order(&order.id).is_none()
+            && !self.terminal_orders.contains_key(&order.id)
+        {
+            // A stream row is authoritative even when its terminal row has
+            // since disappeared from the latest open-order snapshot.
             if native.complete_metadata() {
                 self.observations.push(observation(order.clone(), native));
             }
-            if order.status == OrderStatus::Open
-                && order.kind != OrderType::Market
-                && !self.terminal_orders.contains_key(&order.id)
-            {
-                cx.store.upsert_order(order);
-            }
+            cx.store.upsert_order(order);
         }
     }
 
@@ -1297,6 +1297,62 @@ mod tests {
                 },
             );
             assert!(engine.take_market_frame(3.0).is_none());
+        }
+    }
+
+    #[test]
+    fn late_placement_ack_preserves_private_partial_and_terminal_tombstone() {
+        for terminal in [false, true] {
+            let mut engine = Engine::new(PlacementVenue::default());
+            engine.start(0.0);
+            let request = engine
+                .drain_actions()
+                .find_map(|a| {
+                    if let Action::Http(r) = a {
+                        Some(r.id)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            engine.handle(1.0,Event::WsMessage{socket:SocketId(0),text:r#"{"e":"ORDER_TRADE_UPDATE","o":{"i":123,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"NEW","q":"0.2","z":"0","p":"60000"}}"#});
+            let status = if terminal {
+                "FILLED"
+            } else {
+                "PARTIALLY_FILLED"
+            };
+            let quantity = if terminal { 0.2 } else { 0.1 };
+            let event = format!(
+                r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"i":123,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"{status}","q":"0.2","z":"{quantity}","l":"{quantity}","L":"60000"}}}}"#
+            );
+            engine.handle(
+                2.0,
+                Event::WsMessage {
+                    socket: SocketId(0),
+                    text: &event,
+                },
+            );
+            if terminal {
+                engine.store_mut().set_orders(Vec::new());
+            }
+            let body = r#"{"code":0,"data":{"order":{"orderId":123,"type":"LIMIT","symbol":"BTC-USDT","side":"BUY","status":"NEW","quantity":"0.2","executedQty":"0","price":"60000"}}}"#;
+            engine.handle(
+                3.0,
+                Event::HttpResponse {
+                    request,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body,
+                    },
+                },
+            );
+            if terminal {
+                assert!(engine.store().orders().is_empty());
+            } else {
+                assert_eq!(engine.store().order("123").unwrap().filled, 0.1);
+            }
+            assert!(engine.venue().account.observations.is_empty());
         }
     }
 

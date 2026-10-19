@@ -8,10 +8,10 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub struct Store {
     markets: Vec<Market>,
-    market_by_symbol: HashMap<String, u32>,
-    market_by_id: HashMap<String, u32>,
+    market_by_symbol: HashMap<Box<str>, u32>,
+    market_by_id: HashMap<Box<str>, u32>,
     tickers: Vec<Ticker>,
-    ticker_by_symbol: HashMap<String, u32>,
+    ticker_by_symbol: HashMap<Box<str>, u32>,
     orders: Vec<Order>,
     positions: Vec<Position>,
     balance: Balance,
@@ -110,12 +110,12 @@ impl Store {
         self.market_by_symbol = markets
             .iter()
             .enumerate()
-            .map(|(index, market)| (market.symbol.clone(), index as u32))
+            .map(|(index, market)| (market.symbol.clone().into_boxed_str(), index as u32))
             .collect();
         self.market_by_id = markets
             .iter()
             .enumerate()
-            .map(|(index, market)| (market.id.clone(), index as u32))
+            .map(|(index, market)| (market.id.clone().into_boxed_str(), index as u32))
             .collect();
         self.markets = markets;
         self.changes.markets = true;
@@ -136,7 +136,7 @@ impl Store {
         self.ticker_by_symbol = tickers
             .iter()
             .enumerate()
-            .map(|(index, ticker)| (ticker.symbol.clone(), index as u32))
+            .map(|(index, ticker)| (ticker.symbol.clone().into_boxed_str(), index as u32))
             .collect();
         self.tickers = tickers;
         self.changes.tickers_replaced = true;

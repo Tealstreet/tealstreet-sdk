@@ -28,6 +28,12 @@ impl Request {
             Call::Leverage { .. } | Call::Margin { .. } | Call::Mode { .. }
         )
     }
+    pub fn accepts_placement(&self, response: Response<'_>) -> bool {
+        self.places_order() && validated_placement(response).is_ok()
+    }
+    pub fn reconciles_orders(&self) -> bool {
+        matches!(self.call, Call::Amend { .. } | Call::Replace { .. })
+    }
     pub fn places_order(&self) -> bool {
         matches!(self.call, Call::Place)
     }
@@ -45,8 +51,7 @@ enum Call {
         step: f64,
     },
     Replace {
-        old: Box<Order>,
-        price: f64,
+        old_id: String,
     },
     Leverage {
         symbol: String,
@@ -207,6 +212,25 @@ struct Envelope<'a> {
     msg: Cow<'a, str>,
     #[serde(default, borrow)]
     data: Option<Data<'a>>,
+}
+
+fn response_data<'a>(response: Response<'a>, absent_ok: bool) -> Result<(Data<'a>, bool), String> {
+    let envelope: Envelope<'_> = serde_json::from_str(response.body)
+        .map_err(|e| format!("Invalid BingX trading response: {e}"))?;
+    let absent = absent_ok && envelope.code == 80016;
+    if !(200..300).contains(&response.status) || (envelope.code != 0 && !absent) {
+        return Err(format!("BingX {}: {}", envelope.code, envelope.msg));
+    }
+    Ok((envelope.data.unwrap_or_default(), absent))
+}
+fn placement_id(data: &Data<'_>) -> Result<String, String> {
+    data.accepted()?;
+    data.id()?
+        .ok_or_else(|| "BingX place response omitted the order id".into())
+}
+fn validated_placement(response: Response<'_>) -> Result<String, String> {
+    let (data, _) = response_data(response, false)?;
+    placement_id(&data)
 }
 
 impl Trading {
@@ -376,28 +400,16 @@ impl Trading {
         response: Response<'_>,
     ) {
         let result = (|| {
-            let envelope: Envelope<'_> = serde_json::from_str(response.body)
-                .map_err(|e| format!("Invalid BingX trading response: {e}"))?;
-            let absent = matches!(
+            let absent_ok = matches!(
                 &request.call,
                 Call::Cancel {
                     absent_ok: true,
                     ..
                 }
-            ) && envelope.code == 80016;
-            if !(200..300).contains(&response.status) || (envelope.code != 0 && !absent) {
-                return Err(format!("BingX {}: {}", envelope.code, envelope.msg));
-            }
-            let data = envelope.data.unwrap_or_default();
+            );
+            let (data, absent) = response_data(response, absent_ok)?;
             match request.call {
-                Call::Place => {
-                    data.accepted()?;
-                    let id = data
-                        .id()?
-                        .filter(|s| !s.is_empty())
-                        .ok_or("BingX place response omitted the order id")?;
-                    Ok(vec![id])
-                }
+                Call::Place => Ok(vec![placement_id(&data)?]),
                 Call::Cancel { ids, .. } => {
                     if !absent {
                         data.canceled()?;
@@ -443,19 +455,19 @@ impl Trading {
                     self.observed.remove(&id);
                     Ok(vec![id])
                 }
-                Call::Replace { old, price } => {
+                Call::Replace { old_id } => {
                     let success = |s: &str| matches!(s, "SUCCESS" | "true" | "TRUE");
                     if !success(&data.cancel_result) {
                         return Err("BingX replacement did not confirm cancellation".into());
                     }
                     if cx
                         .store
-                        .order(&old.id)
+                        .order(&old_id)
                         .is_some_and(|o| o.status != OrderStatus::Closed)
                     {
-                        cx.store.set_order_status(&old.id, OrderStatus::Canceled);
+                        cx.store.set_order_status(&old_id, OrderStatus::Canceled);
                     }
-                    self.observed.remove(&old.id);
+                    self.observed.remove(&old_id);
                     if !success(&data.new_order_result) && !success(&data.replace_result) {
                         return Err("BingX replacement did not confirm placement".into());
                     }
@@ -470,17 +482,9 @@ impl Trading {
                             .into_iter()
                             .chain(data.new_order_id.as_ref().map(Id::text)),
                     )?
-                    .filter(|id| *id != old.id)
+                    .filter(|id| *id != old_id)
                     .ok_or("BingX replacement response omitted a fresh order id")?;
-                    // A stream can report a partial or terminal replacement before its HTTP acknowledgement.
-                    if cx.store.order(&id).is_none() {
-                        let mut new = *old;
-                        new.id = id.clone();
-                        new.price = price;
-                        new.client_order_id = None;
-                        new.last_update = cx.now;
-                        cx.store.upsert_order(new);
-                    }
+                    // The account stream and reconciliation own the replacement row.
                     Ok(vec![id])
                 }
                 Call::Leverage {
@@ -966,8 +970,7 @@ impl Trading {
             REPLACE,
             params,
             Call::Replace {
-                old: Box::new(o.clone()),
-                price,
+                old_id: o.id.clone(),
             },
         ))
     }

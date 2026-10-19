@@ -550,16 +550,17 @@ impl Venue for Bingx {
             Pending::Trade(request) => {
                 self.account.bump_orders();
                 self.account.bump_positions();
-                let settings = request.changes_settings() && success(response).is_ok();
-                if request.places_order() && (200..300).contains(&response.status) {
-                    self.account.accept_placed_response(cx, response.body);
-                }
+                let reconcile = (request.changes_settings() || request.reconciles_orders())
+                    && success(response).is_ok();
+                let accepted = request.accepts_placement(response);
                 self.trading
                     .on_response(cx, self.credentials.as_ref(), request, response);
-                if settings && let Some(c) = &self.credentials {
+                if accepted {
+                    self.account.accept_placed_response(cx, response.body);
+                }
+                if reconcile && let Some(c) = &self.credentials {
                     self.account.reconcile(cx, c);
                 }
-
                 self.observe_orders(cx);
                 return;
             }

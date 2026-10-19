@@ -52,6 +52,8 @@ ws(PRIVATE, trade({ X: 'PARTIALLY_FILLED', z: '0.4', l: '0.4', L: '2999.5', ap: 
 ws(PRIVATE, trade({ X: 'FILLED', z: '1', l: '0.6', L: '2999', ap: '2999.2' }));
 // Duplicate terminal event across the two supported event names: Rust emits no second fill.
 ws(PRIVATE, trade({ X: 'FILLED', z: '1', l: '0.6', L: '2999', ap: '2999.2' }, 'TRADE_UPDATE'));
+// Native numeric execution IDs exceed JS's safe-integer range.
+ws(PRIVATE, trade({ s: 'BTC-USDT', i: '@8389765519993909999', o: 'MARKET', X: 'FILLED', q: '0.002', z: '0.002', l: '0.002', p: '95000', L: '95000', ap: '95000' }));
 command({ op: 'placeOrders', orders: [{ symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 0.0021, price: 90500.04, clientOrderId: 'caller-lowercase' }] });
 http('POST', '/openApi/swap/v2/trade/order', { symbol: 'BTC-USDT', positionSide: 'BOTH', side: 'BUY', type: 'LIMIT', quantity: 0.0021, price: 90500, timeInForce: 'GTC', clientOrderId: 'caller-lowercase' }, ok({ order: native('1003', 'BTC-USDT', 'BUY', 'LIMIT', 0.0021, 90500, { clientOrderId: 'caller-lowercase' }) }));
 ws(PRIVATE, trade({ s: 'BTC-USDT', i: 1003, c: 'caller-lowercase', X: 'NEW', q: '0.0021', p: '90500' }));

@@ -37,3 +37,9 @@ test('Binance query matching preserves a caller ID while ignoring generated IDs'
   assert.equal(requestKey('POST', `${root}?newClientOrderId=x&timestamp=1`), requestKey('POST', `${root}?newClientOrderId=y&timestamp=2`));
   assert.notEqual(requestKey('POST', `${root}?newClientOrderId=caller`, undefined, ids), requestKey('POST', `${root}?newClientOrderId=changed`, undefined, ids));
 });
+
+test('nested map order is ignored and unsafe numeric order IDs remain exact', () => {
+  assert.equal(requestKey('POST',url,{stop:{price:1,quantity:2}}),requestKey('POST',url,{stop:{quantity:2,price:1}}));
+  assert.notEqual(requestKey('POST',url,'{"cancelOrderId":8389765519993909000}'),requestKey('POST',url,'{"cancelOrderId":8389765519993909001}'));
+  assert.notEqual(requestKey('POST',url,'{"cancelOrderId":8389765519993909000}'),requestKey('POST',url,'{"cancelOrderId":"8389765519993909000"}'));
+});

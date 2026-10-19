@@ -23,6 +23,7 @@ struct TestVenue {
     trading: Trading,
     initial: Option<(Order, String, String)>,
     credentials: Credentials,
+    acknowledgements: Vec<(bool, bool)>,
 }
 impl Venue for TestVenue {
     type Pending = Pending;
@@ -47,6 +48,10 @@ impl Venue for TestVenue {
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         let Pending::Trade(request) = pending;
         let _ = (request.places_order(), request.changes_settings());
+        self.acknowledgements.push((
+            request.accepts_placement(response),
+            request.reconciles_orders(),
+        ));
         self.trading
             .on_response(cx, Some(&self.credentials), request, response);
     }
@@ -79,6 +84,7 @@ impl Harness {
         let mut engine = Engine::new(TestVenue {
             trading: Trading::default(),
             initial: initial.map(|(o, k)| (o, k.into(), status.into())),
+            acknowledgements: Vec::new(),
             credentials: Credentials {
                 key: "key".into(),
                 secret: "secret".into(),
@@ -398,10 +404,7 @@ fn price_replace_is_atomic_and_uses_successful_new_id() {
         h.engine.store().order(&order().id).unwrap().status,
         OrderStatus::Canceled
     );
-    assert_eq!(
-        h.engine.store().order("9223372036854775807").unwrap().price,
-        96.0
-    );
+    assert!(h.engine.store().order("9223372036854775807").is_none());
 }
 #[test]
 fn cancel_continues_after_failure_and_marks_only_successes() {
@@ -777,5 +780,55 @@ fn trigger_replacement_requires_a_consistent_cancellation_acknowledgement() {
         h.reply(&format!(r#"{{"code":0,"data":{data}}}"#));
         assert!(h.requests.is_empty());
         assert!(h.done[0].is_err());
+    }
+}
+
+#[test]
+fn replacement_ack_never_recreates_a_terminal_row_removed_by_a_snapshot() {
+    let mut h = Harness::new(Some((order(), "LIMIT")));
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(96.0),
+        amount: None,
+    });
+    let mut terminal = order();
+    terminal.id = "replacement".into();
+    terminal.status = OrderStatus::Closed;
+    terminal.filled = terminal.amount;
+    terminal.remaining = 0.0;
+    h.engine.store_mut().upsert_order(terminal);
+    h.engine.store_mut().set_orders(vec![order()]);
+    h.reply(r#"{"code":0,"data":{"cancelResult":"SUCCESS","newOrderResult":"SUCCESS","newOrderId":"replacement"}}"#);
+    assert!(h.done[0].is_ok());
+    assert!(h.engine.store().order("replacement").is_none());
+    assert_eq!(h.engine.venue().acknowledgements, [(false, true)]);
+}
+
+#[test]
+fn placement_guard_rejects_contradictory_outer_identity_before_account_hook() {
+    for (body, accepted) in [
+        (
+            r#"{"code":0,"data":{"orderId":"wrong","order":{"orderId":"accepted","symbol":"BTC-USDT","side":"BUY","type":"LIMIT","origQty":"1","price":"95","status":"NEW"}}}"#,
+            false,
+        ),
+        (
+            r#"{"code":0,"data":{"orderId":"accepted","order":{"orderId":"accepted","orderID":"accepted","status":"NEW"}}}"#,
+            true,
+        ),
+        (
+            r#"{"code":0,"data":{"order":{"orderId":"accepted","status":"REJECTED"}}}"#,
+            false,
+        ),
+        (
+            r#"{"code":109400,"data":{"order":{"orderId":"accepted","status":"NEW"}}}"#,
+            false,
+        ),
+    ] {
+        let mut h = Harness::new(None);
+        h.place(vec![opts()]);
+        h.reply(body);
+        assert_eq!(h.engine.venue().acknowledgements, [(accepted, false)]);
+        assert_eq!(h.done[0].is_ok(), accepted);
     }
 }

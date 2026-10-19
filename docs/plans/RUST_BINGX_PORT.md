@@ -126,3 +126,15 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
 - Root typecheck44/44 and lint28/28 pass. Full tests found existing misplaced
   wasm tests violating exchange runtime boundary; moved them to audit tests.
   Boundary regression +4 wasm tests pass; full root test rerun underway.
+
+### Final race and memory corrections
+
+- Independent trading re-review is clean after strict shared ACK validation,
+  applying placement ACK only after validation, preserving private partials and
+  terminal tombstones, and reconciling Amend/Replace immediately. All28 trading
+  tests +3 account unit race tests pass; targeted clippy passes.
+- Added independent sorted HMAC/POST-type vector and unsigned listen-key tests
+  (2 pass). Extended tape with a numeric execution ID beyond JS safe integers.
+- Reduced shared index key size and frame interner metadata. Interner retains
+  full-string collision checks; forced-collision test passes (engine14 tests).
+  Rebuild and all four public/private venue gates underway.

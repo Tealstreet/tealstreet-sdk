@@ -67,6 +67,7 @@ const isPrivate = Boolean(ts.account);
 // - A rejected/ambiguous entry must stop its remaining bracket placement jobs.
 // - fillHistory uses startTs/endTs/pageSize/pageIndex, not TS's ignored params.
 // - Contradictory placement IDs or rejected ACK status must not advance jobs.
+// - Delayed placement/replacement ACKs must not reopen newer private state.
 //  - A position first seen on the user stream keeps the margin size of TS's
 //    zero-size placeholder (0); Rust takes the isolated wallet, or notional
 //    over leverage for cross.
