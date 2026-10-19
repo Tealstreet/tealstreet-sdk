@@ -124,3 +124,39 @@ Bulk normal+algo cancellation attempts both independently and never repairs.
 Margin selector writes affect defaults only; leverage targets selected mode;
 position mode is fixed OneWay. No write retries; retain partial accepted IDs
 if later sequenced steps fail. Review after native command/error/race tests.
+
+### Trading phase
+
+Implemented fully preflighted typed sequenced jobs, exact bounded quantity
+splits, verbatim ASCII client IDs on one regular order, broker attribution,
+native TIFs, strict REST-proven stable-ID amend, dual-mode settings and
+per-market leverage bounds. Positional replacement preserves only the opposite
+sibling and waits for old-parent terminal state or a fresh complete snapshot.
+New pairs wait for all authoritative children before another protective job.
+Uncertain writes retain scoped fences until a fresh successful snapshot;
+pre-write snapshots cannot release them. Bulk cancellation preempts queued
+placements and pair waits, attempts both families, and never repairs siblings.
+No write retries. Partial acceptance reports exact accepted IDs.
+
+Independent review rounds found and fixed terminal-before-ACK resurrection,
+unconfirmed-pair duplication, duplicate bracket scopes, global Cross leverage
+clamping and Isolated fallback mutation, uncertain Pair response loss, and
+bulk cancellation arriving before a Pair ACK. Final review has no blockers.
+Tests also cover stale snapshots failing to release uncertain-write fences and
+fresh reads restoring progress. Verification: 38 venue tests (16 trading),
+crate fmt/Clippy and bans pass. TS differences (TIF, split precision, child/root
+response shapes, sibling repair, cumulative fills and reconciliation) will be
+explicit KNOWN_TS_FIXES with independent tape oracles in the integration phase.
+
+### Queries plan audit
+
+Implement documented rare reads for fills, ordinary+algo completed orders,
+settled funding, and public market trades. Typed streamed rows, bounded page
+continuations, exact IDs, strict range/symbol/order filters and deduplication.
+Failed or malformed pages fail the whole command without changing account state.
+Use direct order-trades endpoint for order-specific fills so latest500 account
+trade retention does not hide an older order. Funding exposes settled Pay as
+negative and Receive as positive; other income types fail explicitly. Match
+Binance JSON shapes, including seconds execution/income/public timestamps and
+millisecond historical createdTime/updatedTime. Public rows without native IDs
+use a deterministic content key plus identical-row occurrence discriminator.

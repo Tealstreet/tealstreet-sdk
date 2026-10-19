@@ -49,7 +49,7 @@ pub struct Rest<'a> {
 }
 pub fn checked(response: safe_cex_engine::Response<'_>) -> Result<Rest<'_>, String> {
     let r: Rest<'_> = serde_json::from_str(response.body).map_err(|e| e.to_string())?;
-    if !(200..300).contains(&response.status) || !r.success || r.data.is_none() {
+    if !(200..300).contains(&response.status) || !r.success {
         return Err(format!("Orderly HTTP {}: {}", response.status, r.message));
     }
     Ok(r)

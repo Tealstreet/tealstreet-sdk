@@ -42,6 +42,7 @@ pub struct Account {
     pub defaults: HashMap<String, MarginType>,
     pub leverage: HashMap<(String, bool), f64>,
     pub fallback_leverage: f64,
+    pub algo_snapshots: u64,
     pub positions_revision: u64,
     pub order_revisions: [u64; 2],
     pub settings_revision: u64,
@@ -68,6 +69,7 @@ impl Default for Account {
             defaults: HashMap::new(),
             leverage: HashMap::new(),
             fallback_leverage: 1.0,
+            algo_snapshots: 0,
             positions_revision: 0,
             order_revisions: [0; 2],
             settings_revision: 0,
@@ -591,11 +593,14 @@ impl Orderly {
                             proofs.insert(
                                 o.id.clone(),
                                 Proof {
-                                    mode: margin(if r.margin_mode.is_empty() {
-                                        "CROSS"
-                                    } else {
-                                        &r.margin_mode
-                                    })?,
+                                    mode: margin(
+                                        r.child_orders
+                                            .iter()
+                                            .find(|c| c.algo_order_id.0 == o.id)
+                                            .filter(|c| !c.margin_mode.is_empty())
+                                            .map(|c| c.margin_mode.as_ref())
+                                            .unwrap_or(&r.margin_mode),
+                                    )?,
                                     amend: false,
                                 },
                             );
@@ -646,7 +651,10 @@ impl Orderly {
             return;
         }
         let rest = parsed.unwrap();
-        let data = rest.data.unwrap().get();
+        let Some(data) = rest.data.map(|d| d.get()) else {
+            self.account_failed(cx, request, "Orderly missing account response data");
+            return;
+        };
         match request {
             Request::Info => {
                 let Ok(info) = serde_json::from_str::<Info>(data) else {
@@ -783,11 +791,14 @@ impl Orderly {
                     return;
                 }
                 self.account.loaded[i] = true;
+                if algo {
+                    self.account.algo_snapshots += 1;
+                }
                 let mut combined: Vec<_> = cx
                     .store
                     .orders()
                     .iter()
-                    .filter(|o| o.parent_id.is_some() != algo)
+                    .filter(|o| o.parent_id.is_some() != algo || o.status == OrderStatus::Creating)
                     .cloned()
                     .collect();
                 self.account
@@ -889,7 +900,13 @@ impl Orderly {
             (1000.0 * 2f64.powi(self.account.socket.attempts.min(6) as i32 - 1)).min(30000.0),
         ));
     }
-    fn terminal_order(&mut self, id: &str) {
+    pub(crate) fn order_terminal(&self, id: &str) -> bool {
+        self.account.terminal.contains(id)
+    }
+    pub(crate) fn root_terminal(&self, parent: &str) -> bool {
+        self.account.terminal.contains(&format!("root:{parent}"))
+    }
+    pub(crate) fn terminal_order(&mut self, id: &str) {
         if self.account.terminal.insert(id.into()) {
             self.account.terminal_order.push_back(id.into());
         }
