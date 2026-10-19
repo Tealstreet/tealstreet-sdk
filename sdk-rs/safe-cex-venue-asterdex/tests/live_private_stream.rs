@@ -298,9 +298,12 @@ impl PrivateStreamParent for Parent {
         }
         Ok(())
     }
-    fn emit_account(&self, d: &Value) -> Result<(), ExchangeError> {
+    fn emit_account(
+        &self,
+        d: &safe_cex_exchange::js_runtime::value::Js,
+    ) -> Result<(), ExchangeError> {
         self.events.borrow_mut().push(Event::Account(
-            d.clone(),
+            safe_cex_exchange::js_runtime::value::to_json(d)?,
             self.store().balance().unwrap().clone(),
         ));
         Ok(())
@@ -900,8 +903,10 @@ fn native_positions_listener_can_mutate_store() {
     let c = json!({"initial":{},"reconnecting":false});
     let (s, p, _) = fixture(&c);
     p.mutate_on_positions.set(true);
-    s.handle_account_position_update(&json!({"E":1,"a":{"P":[]}}))
-        .unwrap();
+    s.handle_account_position_update(&safe_cex_exchange::js_runtime::value::from_json(
+        &json!({"E":1,"a":{"P":[]}}),
+    ))
+    .unwrap();
     assert_eq!(p.pv.get(), 1.0);
     assert_eq!(p.events.borrow().len(), 1);
 }
@@ -987,7 +992,7 @@ fn disclosed_native_boundaries_are_observable() {
         "source lone cutoff high surrogate"
     );
     drop(logs);
-    let error=s.handle_order_trade_update(&json!({"o":{"i":9,"X":"NEW","s":"BTCUSDT","o":"UNRECOGNIZED","S":"BUY","q":"1","z":"0"}})).unwrap_err();
+    let error=s.handle_order_trade_update(&safe_cex_exchange::js_runtime::value::from_json(&json!({"o":{"i":9,"X":"NEW","s":"BTCUSDT","o":"UNRECOGNIZED","S":"BUY","q":"1","z":"0"}}))).unwrap_err();
     assert_eq!(
         error.message,
         "Unknown order type cannot enter native OrderType"
@@ -1035,7 +1040,7 @@ fn native_dispatch_captures_original_handler_length() {
 fn cumulative_fill_is_written_before_emission() {
     let initial = json!({"orders":[{"id":"1","symbol":"BTCUSDT","status":"open","type":"limit","side":"buy","price":10,"amount":5,"filled":0,"remaining":5,"reduceOnly":false,"lastUpdate":1}]});
     let (s, p, _) = fixture(&json!({"initial":initial}));
-    s.handle_order_trade_update(&json!({"o":{"i":1,"s":"BTCUSDT","X":"PARTIALLY_FILLED","S":"BUY","q":"5","z":"7","l":"2","L":"12","T":99}})).unwrap();
+    s.handle_order_trade_update(&safe_cex_exchange::js_runtime::value::from_json(&json!({"o":{"i":1,"s":"BTCUSDT","X":"PARTIALLY_FILLED","S":"BUY","q":"5","z":"7","l":"2","L":"12","T":99}}))).unwrap();
     let events = p.events.borrow();
     let Event::Fill(_, orders) = &events[0] else {
         panic!("native cumulative fill must emit first")
@@ -1062,11 +1067,13 @@ fn missing_order_id_does_not_skip_quantity_coercion() {
         json!({"i":null,"z":{"toString":false},"q":"1"}),
         json!({"z":"1","q":{"toString":false}}),
     ] {
-        let result =
-            safe_cex_venue_asterdex::account_helpers::mirror_cumulative_order_fill(&data, || {
-                panic!("clock must remain lazy")
-            });
-        let error = result.expect_err("native missing ID still evaluates quantity coercion");
+        let result = safe_cex_venue_asterdex::account_helpers::mirror_cumulative_order_fill(
+            &safe_cex_exchange::js_runtime::value::from_json(&data),
+            || panic!("clock must remain lazy"),
+        );
+        let error = result
+            .expect_err("native missing ID still evaluates quantity coercion")
+            .to_exchange_error();
         assert_eq!(
             error.name, "TypeError",
             "native missing ID quantity exception class"
@@ -1078,7 +1085,7 @@ fn missing_order_id_does_not_skip_quantity_coercion() {
 fn null_account_payload_throws_before_emission() {
     let (s, p, _) = fixture(&json!({"initial":{}}));
     let error = s
-        .handle_account_update(&Value::Null)
+        .handle_account_update(&safe_cex_exchange::js_runtime::value::Js::Null)
         .expect_err("native null account must throw before emission");
     assert_eq!(error.name, "TypeError", "native null account error class");
     assert_eq!(

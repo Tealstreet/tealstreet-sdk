@@ -1897,7 +1897,7 @@ fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
 }
 
 #[test]
-fn private_escaped_surrogate_order_callback_loss_is_inventoried() {
+fn private_surrogate_frames_reach_the_source_order_dispatch() {
     for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
         let (owner, _, base, _, _) = fixture(venue);
         let ordinary = if venue == Venue::Spot {
@@ -1914,9 +1914,10 @@ fn private_escaped_surrogate_order_callback_loss_is_inventoried() {
         base.stats.borrow_mut().clear();
         let escaped = ordinary.replace("\"ok\"", r#""\ud800""#);
         owner.on_message(string(escaped)).unwrap();
-        assert!(
-            base.stats.borrow().is_empty(),
-            "FORCED native escaped surrogate suppresses private order callback"
+        assert_eq!(
+            *base.stats.borrow(),
+            ["order"],
+            "native escaped surrogate reaches private order callback"
         );
     }
     let source = std::process::Command::new("node")

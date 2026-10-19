@@ -52,11 +52,11 @@ pub fn execution(
 pub fn cumulative(
     result: Result<
         Option<crate::account_helpers::CumulativeOrderFill>,
-        safe_cex_num::JsCoercionError,
+        safe_cex_exchange::js_runtime::value::Thrown,
     >,
 ) -> Value {
     match result {
-        Err(error) => json!({"error":error.name}),
+        Err(error) => json!({"error":error.to_exchange_error().name}),
         Ok(None) => Value::Null,
         Ok(Some(row)) => {
             json!({"id":row.order_id,"status":row.status,"bits":[bits(row.filled),bits(row.remaining),bits(row.last_update)]})

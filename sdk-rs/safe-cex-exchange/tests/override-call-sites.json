@@ -548,18 +548,6 @@
     ]
   },
   {
-    "file": "safe-cex-exchange/src/js_runtime/client/factory.rs",
-    "function": "install_outcome_interceptor",
-    "edges": [
-      {
-        "receiver": "dynamic",
-        "kind": "call",
-        "hook": "name",
-        "count": 1
-      }
-    ]
-  },
-  {
     "file": "safe-cex-exchange/src/js_runtime/promise.rs",
     "function": "spawn",
     "edges": [
@@ -11603,6 +11591,18 @@
         "receiver": "dynamic",
         "kind": "call",
         "hook": "fetch_leverage_for_symbol",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-webworker/src/worker_session.rs",
+    "function": "drop",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "dispose",
         "count": 1
       }
     ]

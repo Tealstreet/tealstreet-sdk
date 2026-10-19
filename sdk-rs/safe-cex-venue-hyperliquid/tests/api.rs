@@ -134,7 +134,7 @@ fn retry_budget_uses_the_injected_limiter_clock() {
         )
         .unwrap();
     request.timeout_ms = Some(5);
-    let failure = run(client.execute(request, false)).unwrap_err();
+    let failure = run(client.execute(request, false, &|_| Ok(()))).unwrap_err();
     assert_eq!(
         adapter.calls.load(Ordering::SeqCst),
         1,
@@ -169,7 +169,7 @@ fn venue_refusal_retains_response_and_signed_request() {
     let body =
         serde_json::from_str(r#"{"action":{"type":"cancel","cancels":[]},"nonce":1}"#).unwrap();
     let request = client.build_request("/exchange", &body).unwrap();
-    let failure = run(client.execute(request.clone(), false)).unwrap_err();
+    let failure = run(client.execute(request.clone(), false, &|_| Ok(()))).unwrap_err();
     assert_eq!(failure.message, "venue rejection (HTTP 422)");
     assert_eq!(
         failure.response.as_deref(),
@@ -205,7 +205,7 @@ fn transformed_string_replay_keeps_source_signing_guard() {
     assert!(matches!(original, RestBody::Transformed(_)));
     let wire = original.wire_bytes().unwrap();
     request.body = Some(original.clone());
-    let replay = run(client.prepare_request(request, true)).unwrap();
+    let replay = run(client.prepare_request(request, true, &|_| Ok(()))).unwrap();
     assert_eq!(
         replay.body.as_ref(),
         Some(&original),
@@ -214,7 +214,7 @@ fn transformed_string_replay_keeps_source_signing_guard() {
     assert_eq!(replay.body.unwrap().wire_bytes().unwrap(), wire);
     let mut encoded = client.build_request("/exchange", &body).unwrap();
     encoded.body = Some(RestBody::Encoded(wire));
-    let failure = run(client.execute(encoded, true)).unwrap_err();
+    let failure = run(client.execute(encoded, true, &|_| Ok(()))).unwrap_err();
     assert_eq!(
         failure.message,
         "Signing requires untransformed request data"
@@ -350,7 +350,11 @@ fn actual_ts_relay_allowlist_and_unsigned_info_skip() {
         let request = client
             .build_request(case["url"].as_str().unwrap(), &raw(case, "raw"))
             .unwrap();
-        let prepared = run(client.prepare_request(request, false)).unwrap();
+        let prepared = run(client.prepare_request(request, false, &|message| {
+            emitted.lock().unwrap().push(message.into());
+            Ok(())
+        }))
+        .unwrap();
         let value: Value =
             serde_json::from_slice(&prepared.body.as_ref().unwrap().wire_bytes().unwrap()).unwrap();
         assert_eq!(normalize(value), case["prepared"], "relay prepared body");
@@ -481,7 +485,7 @@ fn lost_write_response_never_retries_but_posted_read_does() {
         let request = client
             .build_request(url, &serde_json::from_str(r#"{"type":"allMids"}"#).unwrap())
             .unwrap();
-        assert!(run(client.execute(request, false)).is_err());
+        assert!(run(client.execute(request, false, &|_| Ok(()))).is_err());
         assert_eq!(
             adapter.calls.load(Ordering::SeqCst),
             expected,
@@ -512,7 +516,7 @@ fn shared_weighted_pacing_and_capture_bypass_are_observable() {
             &serde_json::from_str(r#"{"type":"userRole"}"#).unwrap(),
         )
         .unwrap();
-    run(client.prepare_request(request, true)).unwrap();
+    run(client.prepare_request(request, true, &|_| Ok(()))).unwrap();
     assert_eq!(*clock.sleeps.lock().unwrap(), [1000, 3000]);
 }
 #[test]
@@ -927,7 +931,12 @@ fn signed_action_order_is_exactly_the_sent_action_order() {
     let body: Value =
         serde_json::from_str(r#"{"action":{"z":1,"type":"order","a":2},"nonce":1700000000000}"#)
             .unwrap();
-    run(client.execute(client.build_request("/exchange", &body).unwrap(), false)).unwrap();
+    run(client.execute(
+        client.build_request("/exchange", &body).unwrap(),
+        false,
+        &|_| Ok(()),
+    ))
+    .unwrap();
     let requests = adapter.0.lock().unwrap();
     let bytes = requests[0].body.as_ref().unwrap().wire_bytes().unwrap();
     let sent: Value = serde_json::from_slice(&bytes).unwrap();
@@ -1028,7 +1037,12 @@ fn source_bound_relay_guards_preserve_existing_signatures_and_capture_signing() 
         let request = client
             .build_request("/exchange", &raw(case, "raw"))
             .unwrap();
-        match run(client.prepare_request(request, case["capture"].as_bool().unwrap())) {
+        match run(
+            client.prepare_request(request, case["capture"].as_bool().unwrap(), &|message| {
+                emitted.lock().unwrap().push(message.into());
+                Ok(())
+            }),
+        ) {
             Ok(prepared) => assert_eq!(
                 normalize(
                     serde_json::from_slice(&prepared.body.as_ref().unwrap().wire_bytes().unwrap())
@@ -1095,7 +1109,7 @@ fn existing_signature_truthiness_prevents_resigning() {
         let request = client
             .build_request("/exchange", &raw(case, "raw"))
             .unwrap();
-        let prepared = run(client.prepare_request(request, false)).unwrap();
+        let prepared = run(client.prepare_request(request, false, &|_| Ok(()))).unwrap();
         assert_eq!(
             normalize(
                 serde_json::from_slice(&prepared.body.as_ref().unwrap().wire_bytes().unwrap())
@@ -1362,7 +1376,7 @@ fn signing_validates_wallet_before_invalid_vault_and_encoded_cancel_retains_acti
             &serde_json::json!({"action":{"type":"cancel"},"nonce":1,"vaultAddress":"0xzz"}),
         )
         .unwrap();
-    let error = run(client.prepare_request(request, true)).unwrap_err();
+    let error = run(client.prepare_request(request, true, &|_| Ok(()))).unwrap_err();
     assert_eq!(
         error.to_string(),
         "invalid private key",
@@ -1584,11 +1598,11 @@ fn audit_encoded_request_marker_uses_object_weight_in_actual_pacing() {
     first.body = Some(RestBody::Encoded(
         br#"{"type":"candleSnapshot","limit":{"$serde_json::private::Number":"120"}}"#.to_vec(),
     ));
-    run(client.prepare_request(first, false)).unwrap();
+    run(client.prepare_request(first, false, &|_| Ok(()))).unwrap();
     let second = client
         .build_request("/info", &serde_json::json!({"type":"allMids"}))
         .unwrap();
-    run(client.prepare_request(second, false)).unwrap();
+    run(client.prepare_request(second, false, &|_| Ok(()))).unwrap();
     assert_eq!(
         *clock.sleeps.lock().unwrap(),
         [1000],
@@ -1617,7 +1631,10 @@ fn audit_poisoned_action_type_throws_before_unknown_action_emission() {
             &serde_json::json!({"action":{"type":{"toString":0}},"nonce":1}),
         )
         .unwrap();
-    let result = run(client.prepare_request(request, false));
+    let result = run(client.prepare_request(request, false, &|message| {
+        emitted.lock().unwrap().push(message.into());
+        Ok(())
+    }));
     let Err(TransportError::JavaScript(error)) = result else {
         panic!("AUDIT native action type coercion must throw TypeError before emitter or wallet");
     };
@@ -1635,7 +1652,13 @@ fn audit_poisoned_action_type_throws_before_unknown_action_emission() {
             &serde_json::json!({"action":{"type":"unknown"},"nonce":1}),
         )
         .unwrap();
-    assert!(run(client.prepare_request(unknown, false)).is_ok());
+    assert!(
+        run(client.prepare_request(unknown, false, &|message| {
+            emitted.lock().unwrap().push(message.into());
+            Ok(())
+        }))
+        .is_ok()
+    );
     assert_eq!(
         *emitted.lock().unwrap(),
         ["Refusing to sign unexpected Hyperliquid action \"unknown\""]
@@ -1699,7 +1722,7 @@ fn audit_encoded_weight_parses_once_and_ignores_unused_native_strings() {
     for (index, (bytes, weight)) in cases.into_iter().enumerate() {
         let mut request = client.build_request("/info", &Value::Null).unwrap();
         request.body = Some(RestBody::Encoded(bytes));
-        run(client.prepare_request(request, false)).unwrap();
+        run(client.prepare_request(request, false, &|_| Ok(()))).unwrap();
         assert_eq!(
             clock.now.load(Ordering::SeqCst) as f64,
             expected_start,
@@ -1804,12 +1827,13 @@ fn audit_encoded_string_literal_weight_is_not_parsed_again() {
     );
     let mut request = client.build_request("/info", &Value::Null).unwrap();
     request.body = Some(RestBody::Encoded(br#""{\"type\":\"userRole\"}""#.to_vec()));
-    run(client.prepare_request(request, false)).unwrap();
+    run(client.prepare_request(request, false, &|_| Ok(()))).unwrap();
     run(client.prepare_request(
         client
             .build_request("/info", &serde_json::json!({"type":"allMids"}))
             .unwrap(),
         false,
+        &|_| Ok(()),
     ))
     .unwrap();
     assert_eq!(

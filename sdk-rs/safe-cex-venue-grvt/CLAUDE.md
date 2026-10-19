@@ -406,3 +406,9 @@ retained source tree before wire projection, including exact opaque string/key
 units, collection lengths/order and numeric bits. The original direct Serde
 route and ordinary Value-based native identity checks remain independently
 required; an expected-value parser failure cannot stand in for decoder refusal.
+
+The live SDK cookie parser follows locked set-cookie-parser date admission:
+invalid Expires attributes are ignored, preserving any earlier valid date.
+Without a valid expiry the SDK caches null and omits Cookie on its private
+request. The original 18-case maintained helper corpus plus valid-then-invalid
+and actual fetchPositions HTTP/cookie-reuse witnesses pin both branches.

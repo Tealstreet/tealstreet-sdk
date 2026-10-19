@@ -120,8 +120,19 @@ export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, r
     }
     return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, expanded(child, seen, bindings)]));
   }
+  // Native frame inputs must use the compiler's exact canonical identity. Source
+  // spelling and an alias named Js cannot substitute for the actual target.
+  const nativeJsInput = value => {
+    if (Array.isArray(value)) return value.some(nativeJsInput);
+    if (!value || typeof value !== 'object') return false;
+    const id = value.resolved_path?.id;
+    if (id != null && (doc.paths[String(id)]?.path ?? paths.get(String(id)))?.join('::')
+      === 'safe_cex_exchange::js_runtime::value::Js') return true;
+    return Object.values(value).some(nativeJsInput);
+  };
   // PatchSource admits the raw serde_json Map, so its dyn entrypoints are raw input.
-  const rawInput = value => /"primitive":"str"|"primitive":"u8"|serde_json::(?:value::)?(?:Value|Map)|alloc::string::String|safe_cex_types::retained_json::RetainedJsonInput|safe_cex_store::model_patch::PatchSource/.test(JSON.stringify(normalize(expanded(value))));
+  const otherRawInput = value => /"primitive":"str"|"primitive":"u8"|serde_json::(?:value::)?(?:Value|Map)|alloc::string::String|safe_cex_types::retained_json::RetainedJsonInput|safe_cex_store::model_patch::PatchSource/.test(JSON.stringify(normalize(expanded(value))));
+  const rawInput = value => nativeJsInput(expanded(value)) || otherRawInput(value);
   const apiSources = new Map();
   const decoderBounds = fn => /serde(?:_core)?::de::(?:DeserializeOwned|Deserializer|Deserialize)/.test(JSON.stringify(normalize(fn.generics)));
   const decodedOutput = value => {
@@ -138,6 +149,8 @@ export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, r
     assert.ok(path, `accepted-set: unaddressable type ${item.name}`);
     if (onlyOwners && !onlyOwners.includes(path.join('::'))) continue;
     const deserialize = deserializerIds.has(String(item.id));
+    // Discovery provenance enforces an exact pending ledger, never a filter.
+    let otherwiseInventoried = deserialize;
     const methods = [];
     const conversions = [];
     const traitMethods = [];
@@ -152,13 +165,16 @@ export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, r
       if (['core::convert::From', 'core::convert::TryFrom', 'core::str::traits::FromStr'].includes(trait)) {
         const api = { trait, args: normalize(implementation.trait.args) };
         conversions.push(api);
+        otherwiseInventoried = true;
         rawEntrypoints.set(api, trait === 'core::str::traits::FromStr' || rawInput(implementation.trait.args));
       }
       if (!implementation.trait) {
         for (const id of implementation.items ?? []) {
           const method = get(id);
           if (method?.visibility === 'public' && method.inner.function && (deserialize || returnsOwner(method.inner.function.sig.output, item.id) || rawInput(method.inner.function.sig.inputs) || decodedOutput(method.inner.function.sig.output) || decoderBounds(method.inner.function))) {
-            const api = { name: method.name, signature: normalize(method.inner.function.sig) };
+            const fn = method.inner.function;
+            otherwiseInventoried ||= deserialize || returnsOwner(fn.sig.output, item.id) || otherRawInput(fn.sig.inputs) || decodedOutput(fn.sig.output) || decoderBounds(fn);
+            const api = { name: method.name, signature: normalize(fn.sig) };
             methods.push(api);
             apiSources.set(api, method.span);
             rawEntrypoints.set(api, rawInput(method.inner.function.sig.inputs) || decoderBounds(method.inner.function));
@@ -174,6 +190,7 @@ export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, r
           if (reviewedDefaults.methodIds.has(String(method.id))) continue;
           const fn = method.inner.function;
           if (fn && (returnsOwner(fn.sig.output, item.id) || decodedOutput(fn.sig.output) || rawInput(fn.sig.inputs) || decoderBounds(fn))) {
+            otherwiseInventoried ||= returnsOwner(fn.sig.output, item.id) || decodedOutput(fn.sig.output) || otherRawInput(fn.sig.inputs) || decoderBounds(fn);
             assert.ok(trait, `${path.join('::')}: accepted-set assertion: unresolved constructor trait`);
             const api = { trait, name: method.name, signature: normalize(fn.sig), generics: normalize(fn.generics), ...(implementation.blanket_impl ? { blanket: normalize(implementation.generics) } : {}) };
             traitMethods.push(api);
@@ -190,6 +207,7 @@ export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, r
     if (!deserialize && !conversions.length && !methods.length && !traitMethods.length) continue;
     types.set(String(target.id), {
       deserialize, name: path.join('::'), ident: item.name, span: item.span,
+      ...(!otherwiseInventoried ? { nativeInputDiscovered: true } : {}),
       owner: modules.get(String(target.id))?.span,
       kind: item.inner.struct ? 'record' : 'enum',
       generics: declaration.generics,
@@ -205,6 +223,7 @@ export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, r
     if (!rawInput(fn.sig.inputs) && !decodedOutput(fn.sig.output) && !decoderBounds(fn)) continue;
     types.set(String(item.id), {
       deserialize: false, name: paths.get(String(item.id)).join('::'), ident: item.name,
+      ...(!otherRawInput(fn.sig.inputs) && !decodedOutput(fn.sig.output) && !decoderBounds(fn) ? { nativeInputDiscovered: true } : {}),
       span: item.span, owner: modules.get(String(item.id))?.span, kind: 'function',
       generics: fn.generics, decodedOutput: decodedOutput(fn.sig.output),
       methods: [{ kind: 'function', name: item.name, signature: normalize(fn.sig), generics: normalize(fn.generics) }], conversions: [], traitMethods: [],

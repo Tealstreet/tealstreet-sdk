@@ -8,7 +8,6 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-safe-cex-crypto.workspace = true
 safe-cex-num.workspace = true
 num-bigint = "=0.4.6"
 

@@ -320,6 +320,42 @@ fn validate_account_seeds_sdk_cookie_and_sends_null_funding_body() {
         "authenticate seeds cookie; SDK must not log in again"
     );
 }
+
+#[test]
+fn sdk_auth_ignores_invalid_expiration_before_private_http() {
+    for (expiry, cookie, logins) in [
+        ("; Expires=bad", None, 2),
+        (
+            "; Expires=Wed, 15 Nov 2023 00:00:00 GMT; Expires=bad",
+            Some("gravity=fixture-session"),
+            1,
+        ),
+    ] {
+        let h = setup();
+        *h.http.response_headers.borrow_mut() = Some(json!({
+            "set-cookie":[format!("gravity=fixture-session{expiry}")],
+            "x-grvt-account-id":"account-42"
+        }));
+        loaded(&h);
+        for _ in 0..2 {
+            h.drive(h.venue().fetch_positions(None)).unwrap();
+        }
+        let calls = h.http.calls("/lite/v1/positions");
+        assert_eq!(calls.len(), 2, "both actual private SDK requests");
+        for call in calls {
+            assert_eq!(
+                call.headers["Cookie"].as_str(),
+                cookie,
+                "SDK cookie admission: {expiry}"
+            );
+        }
+        assert_eq!(
+            h.http.calls("/auth/api_key/login").len(),
+            logins,
+            "SDK cookie reuse: {expiry}"
+        );
+    }
+}
 #[test]
 fn fetch_positions_maps_private_rows_and_preserves_source_filter_mapping() {
     let h = setup();

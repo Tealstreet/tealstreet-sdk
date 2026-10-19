@@ -50,14 +50,18 @@ fn public_ticker_update_matches_typescript() {
             .map(|ticker| (data["s"].as_str().unwrap(), ticker))
             .into_iter()
             .collect::<Vec<_>>();
-        let update = public_ticker_update(data, &entries).unwrap();
+        let update = public_ticker_update(
+            &safe_cex_exchange::js_runtime::value::from_json(&data),
+            &entries,
+        )
+        .unwrap();
         let mut actual = json!({"updates":[],"events":[]});
         if let Some(update) = update {
             let (target_type, target_string, event_target) = match update.ticker {
                 TableHit::Mapped(_) => (
                     "object",
                     "[object Object]".to_owned(),
-                    json!({"symbol":update.symbol}),
+                    json!({"symbol":safe_cex_exchange::js_runtime::value::to_json(&update.symbol).unwrap()}),
                 ),
                 TableHit::Inherited(ProtoMember::Prototype) => {
                     ("object", "[object Object]".to_owned(), json!({}))
@@ -83,7 +87,11 @@ fn public_ticker_update_matches_typescript() {
                 "targetString":target_string,
                 "update":patch
             }]);
-            actual["events"] = json!([["ticker", update.symbol, event_target]]);
+            actual["events"] = json!([[
+                "ticker",
+                safe_cex_exchange::js_runtime::value::to_json(&update.symbol).unwrap(),
+                event_target
+            ]]);
         }
         same(
             &actual,
@@ -275,7 +283,9 @@ fn public_depth_snapshot_matches_typescript() {
     let mut callback_comparisons = 0;
     for index in 0..15 {
         let case = &cases[index];
-        let book = public_depth_snapshot(&case["input"]);
+        let book = public_depth_snapshot(&safe_cex_exchange::js_runtime::value::from_json(
+            &case["input"],
+        ));
         let callbacks = case["output"]["callbacks"].as_array().unwrap();
         let expected_callback_count = match case["name"].as_str().unwrap() {
             "sorted-and-callback-isolation" => 2,
@@ -588,7 +598,11 @@ fn public_mark_price_update_matches_typescript() {
             .as_ref()
             .map(|ticker| vec![(data["s"].as_str().unwrap(), ticker)])
             .unwrap_or_default();
-        let plan = public_mark_price_update(data, &entries).unwrap();
+        let plan = public_mark_price_update(
+            &safe_cex_exchange::js_runtime::value::from_json(&data),
+            &entries,
+        )
+        .unwrap();
         let mut actual = json!({"updates":[],"events":[],"tickerHit":{"kind":"missing"}});
         let expected = case["output"].clone();
         match plan {
@@ -598,7 +612,7 @@ fn public_mark_price_update_matches_typescript() {
                     TableHit::Mapped(_) => (
                         "object",
                         "[object Object]",
-                        json!({"symbol":plan.symbol}),
+                        json!({"symbol":safe_cex_exchange::js_runtime::value::to_json(&plan.symbol).unwrap()}),
                         json!({"kind":"mapped"}),
                     ),
                     TableHit::Inherited(member) if member == ProtoMember::Prototype => (
@@ -626,14 +640,18 @@ fn public_mark_price_update_matches_typescript() {
                     update.insert("fundingRate".to_owned(), number(value));
                 }
                 if let Some(value) = plan.patch.funding_time {
-                    update.insert("fundingTime".to_owned(), number(value.as_f64().unwrap()));
+                    update.insert("fundingTime".to_owned(), number(value.to_number().unwrap()));
                 }
                 actual["updates"] = json!([{
                     "targetType":target_type,
                     "targetString":target_string,
                     "update":update
                 }]);
-                actual["events"] = json!([["markPrice", plan.symbol, event_ticker]]);
+                actual["events"] = json!([[
+                    "markPrice",
+                    safe_cex_exchange::js_runtime::value::to_json(&plan.symbol).unwrap(),
+                    event_ticker
+                ]]);
                 actual["tickerHit"] = ticker_hit.clone();
             }
         }
@@ -760,16 +778,21 @@ fn public_kline_update_matches_typescript() {
             .iter()
             .map(|value| value.as_str().unwrap())
             .collect::<Vec<_>>();
-        let actual = match public_kline_update(&data, &streams) {
+        let actual = match public_kline_update(
+            &safe_cex_exchange::js_runtime::value::from_json(&data),
+            &streams,
+        ) {
             Ok(None) => json!([]),
             Ok(Some(update)) => {
                 let timestamp = match update.candle.timestamp {
                     None => json!({"kind":"undefined"}),
-                    Some(Value::Number(value)) => json!({
+                    Some(safe_cex_exchange::js_runtime::value::Js::Number(value)) => json!({
                         "kind":"number",
-                        "bits":format!("{:016x}", value.as_f64().unwrap().to_bits())
+                        "bits":format!("{:016x}", value.to_bits())
                     }),
-                    Some(value) => json!({"kind":"value","value":value}),
+                    Some(value) => {
+                        json!({"kind":"value","value":safe_cex_exchange::js_runtime::value::to_json(&value).unwrap()})
+                    }
                 };
                 json!([{
                     "stream":update.stream,
@@ -781,7 +804,10 @@ fn public_kline_update_matches_typescript() {
                     "volumeBits":format!("{:016x}", update.candle.volume.to_bits()),
                 }])
             }
-            Err(error) => json!({"name":error.name,"message":error.message}),
+            Err(error) => {
+                let error = error.to_exchange_error();
+                json!({"name":error.name,"message":error.message})
+            }
         };
         let expected = if let Some(error) = case.get("error") {
             error.clone()

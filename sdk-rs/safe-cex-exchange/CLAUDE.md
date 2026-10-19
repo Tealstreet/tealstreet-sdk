@@ -11,6 +11,15 @@ ExchangeError-to-Thrown conversion and attaches the effective request config.
 Both JS factory request interceptors stamp the live config with integer
 request-start time after accounting. Read-only telemetry fields do not fail HTTP;
 the maintained-source comparison observes both prepared and terminal configs.
+Native proxy authorization carries its marker in config extensions, never headers;
+read-only diagnostic slots cannot reject the request. Remote signing publishes
+its timing stamps after the signed-header merge and preserves them in returned
+success/failure configs. Skipped or refused signing does not fabricate stamps.
+Both factories publish actual HTTP outcomes to the lower crate's single REST
+diagnostic cache, retaining numeric config values and bound header accessors.
+Direct failures are recorded before enhancement; routed failures are recorded
+afterwards. Config materialization follows installed Axios before terminal send,
+so accessor failures remain request-setup failures rather than phantom wire calls.
 Socket diagnostics reuse the shared auth-operation predicate after JSON parsing.
 The Bitget owned-transport regression pins retry eligibility after that boundary.
 Native network rejections retain the actual RestRequest as an opaque request
@@ -148,6 +157,9 @@ The shared JS Date.now facade rounds down an injected wall clock, while
 performance.now keeps the host's fractional precision.
 Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
+The pending signer wait delegates to `eager::start_eager`: discarding its waiter
+keeps the availability callback registered until availability or exchange disposal.
+Either terminal path unregisters exactly once and releases the listener captures.
 
 See the [socket host contract](WS_CONTRACT.md) for host scheduling and relay options.
 Opt-in replay hosts register the canonical per-dial parser counters when a
@@ -2079,6 +2091,12 @@ all loop host effects; remaining_utils compares invocation, continuation and
 callback scheduling with the maintained TypeScript function in Node.
 
 
+Shared WebSocket message handlers now borrow the canonical `Js` frame graph.
+Restore retained ingress once per frame, preserve it across all callbacks, and
+project only reached typed output fields; see exchange/WS_CONTRACT.md and the
+actual-source/native retained-handler witnesses. Do not reintroduce Value frame
+projections or a second callback registry.
+
 
 BaseExchange socket-health publication constructs own undefined timestamp/close-code properties and passes them to the canonical Store partial merge. It never removes keys through a JSON read/replacement. Typed Store notifications and prepared payloads retain the same health field.
 
@@ -2114,3 +2132,19 @@ The differential rejects other Node versions: inconsistent comparator ordering i
 engine-dependent. Array sort compacts defined values before TimSort, then writes
 undefined values and deletes remaining holes; four native/Node profiles pin the
 comparator schedule as well as sparse output.
+
+Direct calls of the canonical Object.prototype.toString referent use the same
+intrinsic object-tag implementation as ordinary coercion. The actual Aster
+private fill witness compares an object ID against its maintained TS constructor;
+an own noncallable toString shadow still refuses and emits no fill.
+
+## Worker structured clone
+
+js_runtime::structured_clone implements the recorder's platform clone operation
+for native primitives, ordinary objects, sparse arrays, Map/Set and intrinsic
+Errors. It preserves cycles/aliases, non-NaN binary64 bits and UTF16, invokes own
+enumerable getters in source order, and retains original getter failures.
+NaN payloads canonicalize as Node structuredClone does.
+Uncloneable values and unmodeled object kinds produce visible DataCloneError.
+The worker recorder intentionally drops clone failures as perfFixture.ts does;
+other callers receive the error. Node's real structuredClone supplies the oracle.
