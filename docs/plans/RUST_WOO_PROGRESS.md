@@ -110,10 +110,34 @@ Each received its own independent phase review before this checkpoint.
 - CPU initially failed on the small recording. Numeric visitors avoid generic
   untagged decoding, native ticker indexes avoid repeated symbol allocation and
   lookup, and WOO retains level-3 optimization inside a level-z aggregate.
-  Latest three-run CPU is below TS; a strict TS memory-baseline validity check
-  rejected one run, so acceptance is pending a complete valid rerun.
+  Initial reruns were marginal (63.2 ms TS / 64.8 ms Rust overall;
+  32.4 / 32.6 ms steady). The next optimization removes redundant REST decoding
+  and preallocates atomic WS batches. Acceptance is pending an integrated rerun.
 - Eight-venue wasm was 2,741,039 bytes at level-s. Level-z aggregate plus WOO
   level-3 is 2,605,267 bytes, below the unchanged 2,621,440-byte budget.
 - Private fixture is being reconciled against actual command stages. Exact
   request bodies/signatures, required write consumption, auth and subscriptions
   remain enforced. TS reliability repairs and final replay gates are pending.
+
+## Integration checkpoint
+
+- Integrated landing `b265a0bab0` (Backpack and BloFin). Preserve all protocol
+  guards in the new shared `tape.mjs`, including WOO connection resets and form
+  handling, and the generic global-cancel intent bridge. Integrated harness:
+  78 tests PASS. Landing now owns a 3 MiB budget; no budget increase by this lane.
+- Shared `maxSlippagePct` is optional; every explicit order constructor, including
+  new landing venues, defaults to None. No behavior change for those venues.
+- Crypto cleanup: deleted unused HMAC-SHA512. Retained SHA256 after landing
+  introduced a Backpack caller; no unused WOO replacement helpers retained.
+- WOO native phase coverage: 2 signing + 18 public + 26 account + 22 trading +
+  12 query tests. Public batch regressions retain atomic rejection and work past
+  the allocation capacity hint. Complete workspace checks are running.
+- Independent gate audit fixed sorted V1 parameter validation and server-ping
+  replies. Final fixture: 129 records, 18 commands, 22 seconds, 53 replay frames.
+  Includes opening entry with attached SL+TP, sized STOP inference, positional
+  sibling preservation, trailing, mode/leverage, and both V1 PnL/income axes.
+- Independent SDK audit fixed order-axis source provenance, implicit public-only
+  metadata reads, and JSON-aware exact integer decoding that preserves quoted
+  venue error messages. The original regex helper corrupts numbers inside text.
+- Root typecheck 44 tasks and lint 28 tasks passed before integration. Full tests
+  and the integrated release artifact are running; final acceptance remains open.
