@@ -34,7 +34,7 @@ controls = [
     ('subscribe-delay', lifecycle, 'Ok(Some((frames, sleep(10))))', 'Ok(Some((frames, sleep(0))))',
      'disposal_drops_pending_public_subscription_tails_and_weak_venue_references'),
     ('market-delay', topics, 'Ok(Some((chunks, sleep(5))))', 'Ok(Some((chunks, sleep(0))))',
-     'disposal_drops_pending_public_subscription_tails_and_weak_venue_references'),
+     'market_additions_wait_five_ms_between_real_socket_chunks'),
 ]
 
 if len(sys.argv) > 1:
@@ -48,7 +48,7 @@ def run(label):
     return result
 
 baseline = run('baseline')
-assert baseline.returncode == 0 and '6 passed; 0 failed' in baseline.stdout, baseline.stdout
+assert baseline.returncode == 0 and '7 passed; 0 failed' in baseline.stdout, baseline.stdout
 records = []
 try:
     for label, path, before, after, test in controls:
@@ -60,15 +60,15 @@ try:
         path.write_bytes(original[path])
         assert all(p.read_bytes() == data for p, data in original.items())
         restored = run(label + '-restored')
-        assert restored.returncode == 0 and '6 passed; 0 failed' in restored.stdout, restored.stdout
-        records.append(dict(control=label, compiled_runtime_red=True, exact_restore=True, green=True))
+        assert restored.returncode == 0 and '7 passed; 0 failed' in restored.stdout, restored.stdout
+        records.append(dict(control=label, named_test=test, compiled_runtime_red=True, exact_restore=True, green=True, red_sha256=hashlib.sha256(result.stdout.encode()).hexdigest(), green_sha256=hashlib.sha256(restored.stdout.encode()).hexdigest()))
         print(label + ': compiled named RED -> exact restored GREEN', flush=True)
 finally:
     for path, data in original.items():
         path.write_bytes(data)
 restored = run('restored')
-assert restored.returncode == 0 and '6 passed; 0 failed' in restored.stdout, restored.stdout
+assert restored.returncode == 0 and '7 passed; 0 failed' in restored.stdout, restored.stdout
 assert all(path.read_bytes() == data for path, data in original.items())
-print(str(len(controls)) + ' controls caught; exact restoration; 4 concrete tests plus2 support tests, including24 source compositions, pass.', flush=True)
+print(str(len(controls)) + ' controls caught; exact restoration; 5 concrete tests plus2 support tests, including24 source compositions, pass.', flush=True)
 
 (venue / 'evidence/delegated-public-controls.json').write_text(json.dumps(dict(executed=len(records), controls=records, source_sha256={str(p.relative_to(venue)):hashlib.sha256(data).hexdigest() for p,data in original.items()}), indent=2)+'\n')

@@ -2,8 +2,8 @@
 
 Authority: the 37 exact rows in `assignments/codex-0w5ohi.json`, linked from
 `non-utf8-assignment-index.json`, and the async ruling in
-`divergence-cluster-rulings.md`. Twenty-five rows are reconciled below; the other
-12 remain with the delegated production-binding audit owner.
+`divergence-cluster-rulings.md`. Twenty-seven rows are reconciled below. History rows6/16 are reconciled
+separately in PR #1198; the other eight delegated rows remain open.
 
 | Assignment rows | Source owner | Verdict | Production observation |
 | --- | --- | --- | --- |
@@ -161,8 +161,9 @@ restores exact production bytes and requires the named native witnesses GREEN. T
 primary placement targets retain their original cases and effects. The exported
 JSON mappers remain supplemental tests, with no production fallback through them.
 
-This batch reconciles all seven rows retained by codex-0w5ohi. The twelve rows
-delegated to codex-0efu4x retain that owner's separate milestones and verdicts.
+This batch reconciles all seven rows retained by codex-0w5ohi. Delegated socket
+rows25/35 are reconciled below; history rows6/16 retain their separate #1198
+milestone. The other eight delegated rows remain open.
 
 
 ## Delegated private trade filter: row 35 FIX
@@ -209,3 +210,15 @@ exact restored GREEN. No auth/signing carrier or production body changes here.
 
 This socket batch reconciles rows25 and35. History rows6/16 remain in #1198;
 the eight other delegated rows remain open.
+
+
+The shared public-topic timing control is strengthened alongside this socket
+batch, without closing additional assignment rows. The older witness advanced
+virtual time in50ms increments, so a first market-chunk wait changed from5ms to0ms
+could survive. `market_additions_wait_five_ms_between_real_socket_chunks` now
+runs actual Spot and dedicated Inverse sockets at unchanged time,4ms and5ms for
+each remaining chunk. It retains the eager first send, exact topic count/order,
+and existing pending-tail disposal/weak-owner guards. Both maintained TS methods
+independently execute with held sleeps, checking sends at0/5/10ms and the final
+wait through15ms. `public-topic-controls.py` requires each production fault to
+compile RED, restores every source byte and requires the full target GREEN.
