@@ -80,10 +80,6 @@ lto = "fat"
 codegen-units = 1
 opt-level = 3
 
-# Keep WOO's public decode path fast inside the size-optimized aggregate wasm.
-[profile.release.package.safe-cex-venue-woo]
-opt-level = 3
-
 # Optimize final dispatch for throughput; venue crates retain size profiles.
 [profile.release.package.safe-cex-wasm]
 opt-level = 3

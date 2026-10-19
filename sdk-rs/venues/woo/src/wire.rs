@@ -51,17 +51,32 @@ pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D
 }
 
 pub fn id<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Id {
-        Text(String),
-        Integer(u64),
+    struct Id;
+    impl<'de> serde::de::Visitor<'de> for Id {
+        type Value = String;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a string, unsigned integer or null ID")
+        }
+        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<String, E> {
+            Ok(value.into())
+        }
+        fn visit_string<E: serde::de::Error>(self, value: String) -> Result<String, E> {
+            Ok(value)
+        }
+        fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<String, E> {
+            Ok(value.to_string())
+        }
+        fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<String, E> {
+            self.visit_u64(value.try_into().map_err(E::custom)?)
+        }
+        fn visit_unit<E: serde::de::Error>(self) -> Result<String, E> {
+            Ok(String::new())
+        }
+        fn visit_none<E: serde::de::Error>(self) -> Result<String, E> {
+            self.visit_unit()
+        }
     }
-    Ok(match Option::<Id>::deserialize(d)? {
-        Some(Id::Text(s)) => s,
-        Some(Id::Integer(n)) => n.to_string(),
-        None => String::new(),
-    })
+    d.deserialize_any(Id)
 }
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
@@ -247,4 +262,51 @@ pub struct Kline {
     pub close: f64,
     #[serde(deserialize_with = "number")]
     pub volume: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[derive(Deserialize)]
+    struct Row {
+        #[serde(deserialize_with = "id")]
+        id: String,
+    }
+
+    #[test]
+    fn ids_preserve_string_integer_and_null_semantics() {
+        for (raw, expected) in [
+            ("null", ""),
+            (r#""""#, ""),
+            ("0", "0"),
+            (r#""0001""#, "0001"),
+            (r#""1.0""#, "1.0"),
+            (r#"" ""#, " "),
+            (r#""\u0031""#, "1"),
+            ("9007199254740993", "9007199254740993"),
+            ("18446744073709551615", "18446744073709551615"),
+        ] {
+            let row: Row = serde_json::from_str(&format!(r#"{{"id":{raw}}}"#)).unwrap();
+            assert_eq!(row.id, expected, "{raw}");
+        }
+    }
+    #[test]
+    fn ids_reject_noninteger_numeric_and_non_scalar_types() {
+        for raw in [
+            "-1",
+            "-0",
+            "1.0",
+            "1e0",
+            "18446744073709551616",
+            "true",
+            "false",
+            "[]",
+            "{}",
+        ] {
+            assert!(
+                serde_json::from_str::<Row>(&format!(r#"{{"id":{raw}}}"#)).is_err(),
+                "{raw}"
+            );
+        }
+    }
 }

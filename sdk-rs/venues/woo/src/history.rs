@@ -137,45 +137,52 @@ struct Trade {
 }
 
 fn exact_id<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Id {
-        Text(String),
-        Number(u64),
-    }
-    match Id::deserialize(d)? {
-        Id::Text(s) if !s.is_empty() => Ok(s),
-        Id::Number(n) => Ok(n.to_string()),
-        _ => Err(serde::de::Error::custom("empty history ID")),
+    let value = crate::wire::id(d)?;
+    if value.is_empty() {
+        Err(serde::de::Error::custom("empty history ID"))
+    } else {
+        Ok(value)
     }
 }
 fn optional_id<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Id {
-        Text(String),
-        Number(u64),
-    }
-    Ok(Option::<Id>::deserialize(d)?.and_then(|id| match id {
-        Id::Text(s) => (!s.is_empty()).then_some(s),
-        Id::Number(n) => Some(n.to_string()),
-    }))
+    let value = crate::wire::id(d)?;
+    Ok((!value.is_empty()).then_some(value))
 }
 fn maker<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Flag {
-        Bool(bool),
-        Number(u8),
-        Text(String),
+    struct Maker;
+    impl<'de> serde::de::Visitor<'de> for Maker {
+        type Value = Option<bool>;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a boolean, 0, 1 or null maker flag")
+        }
+        fn visit_bool<E: serde::de::Error>(self, value: bool) -> Result<Self::Value, E> {
+            Ok(Some(value))
+        }
+        fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Self::Value, E> {
+            match value {
+                0 => Ok(Some(false)),
+                1 => Ok(Some(true)),
+                _ => Err(E::custom("invalid maker flag")),
+            }
+        }
+        fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Self::Value, E> {
+            self.visit_u64(value.try_into().map_err(E::custom)?)
+        }
+        fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            match value {
+                "0" => Ok(Some(false)),
+                "1" => Ok(Some(true)),
+                _ => Err(E::custom("invalid maker flag")),
+            }
+        }
+        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            self.visit_unit()
+        }
     }
-    match Option::<Flag>::deserialize(d)? {
-        None => Ok(None),
-        Some(Flag::Bool(v)) => Ok(Some(v)),
-        Some(Flag::Number(v @ 0..=1)) => Ok(Some(v == 1)),
-        Some(Flag::Text(s)) if s == "0" || s == "1" => Ok(Some(s == "1")),
-        _ => Err(serde::de::Error::custom("invalid maker flag")),
-    }
+    d.deserialize_any(Maker)
 }
 #[derive(Deserialize)]
 struct FillRow<'a> {

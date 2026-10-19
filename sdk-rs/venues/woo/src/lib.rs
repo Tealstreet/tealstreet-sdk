@@ -558,6 +558,8 @@ impl Venue for Woo {
             }
         }
     }
+    // Keep public decoding in the host's speed-optimized dispatch.
+    #[inline(always)]
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         if self.account_message(cx, socket, text) {
             return;

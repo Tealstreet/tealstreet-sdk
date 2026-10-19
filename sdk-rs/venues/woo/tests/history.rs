@@ -449,3 +449,102 @@ fn bounded_income_range_without_limit_walks_past_five_hundred_records() {
     }
     assert_eq!(result(&mut e).unwrap().matches("tranId").count(), 501);
 }
+
+#[test]
+fn maker_flags_preserve_boolean_integer_string_and_null_semantics() {
+    #[derive(Deserialize)]
+    struct Execution {
+        maker: Option<bool>,
+    }
+    for (raw, expected) in [
+        ("false", Some(false)),
+        ("true", Some(true)),
+        ("0", Some(false)),
+        ("1", Some(true)),
+        (r#""0""#, Some(false)),
+        (r#""1""#, Some(true)),
+        ("null", None),
+    ] {
+        let mut e = ready();
+        let r = query(&mut e, fills(Some(1)));
+        let row = fill(1, NOW, "BUY").replace(r#""isMaker":0"#, &format!(r#""isMaker":{raw}"#));
+        response(
+            &mut e,
+            &r,
+            NOW + 1.0,
+            &format!(r#"{{"success":true,"data":{{"rows":[{row}]}}}}"#),
+        );
+        let rows: Vec<Execution> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+        assert_eq!(rows[0].maker, expected, "{raw}");
+    }
+    for raw in [
+        "-1",
+        "-0",
+        "2",
+        "255",
+        "256",
+        "1.0",
+        "1e0",
+        r#""true""#,
+        r#""""#,
+        r#""01""#,
+        r#"" 1""#,
+        "[]",
+        "{}",
+    ] {
+        let mut e = ready();
+        let r = query(&mut e, fills(Some(1)));
+        let row = fill(1, NOW, "BUY").replace(r#""isMaker":0"#, &format!(r#""isMaker":{raw}"#));
+        response(
+            &mut e,
+            &r,
+            NOW + 1.0,
+            &format!(r#"{{"success":true,"data":{{"rows":[{row}]}}}}"#),
+        );
+        assert!(result(&mut e).is_err(), "{raw}");
+    }
+}
+
+#[test]
+fn required_and_optional_history_ids_keep_distinct_empty_and_null_rules() {
+    #[derive(Deserialize)]
+    struct Execution {
+        id: String,
+        #[serde(rename = "orderId")]
+        order_id: Option<String>,
+    }
+    for (raw, expected) in [
+        ("null", None),
+        (r#""""#, None),
+        ("0", Some("0")),
+        (r#""0001""#, Some("0001")),
+        ("18446744073709551615", Some("18446744073709551615")),
+    ] {
+        let mut e = ready();
+        let r = query(&mut e, fills(Some(1)));
+        let row = fill(1, NOW, "BUY")
+            .replace("9007199254740993", raw)
+            .replace(r#""id":1"#, r#""id":18446744073709551615"#);
+        response(
+            &mut e,
+            &r,
+            NOW + 1.0,
+            &format!(r#"{{"success":true,"data":{{"rows":[{row}]}}}}"#),
+        );
+        let rows: Vec<Execution> = serde_json::from_str(&result(&mut e).unwrap()).unwrap();
+        assert_eq!(rows[0].id, "18446744073709551615");
+        assert_eq!(rows[0].order_id.as_deref(), expected, "{raw}");
+    }
+    for raw in ["null", r#""""#, "-1", "-0", "1.0", "true", "[]"] {
+        let mut e = ready();
+        let r = query(&mut e, fills(Some(1)));
+        let row = fill(1, NOW, "BUY").replace(r#""id":1"#, &format!(r#""id":{raw}"#));
+        response(
+            &mut e,
+            &r,
+            NOW + 1.0,
+            &format!(r#"{{"success":true,"data":{{"rows":[{row}]}}}}"#),
+        );
+        assert!(result(&mut e).is_err(), "{raw}");
+    }
+}
