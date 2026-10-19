@@ -1,5 +1,9 @@
 # Shared types
 
+The two gateway non-UTF-8 audit verdicts are in `per-row-rulings.md`. Production
+gateway ingress reads raw frames by channel; the stricter standalone
+GatewayMessage decoder must not become a precondition for that ingress.
+
 The bottom layer: every crate above — venues, store, transport, crypto,
 exchange core — reads its wire vocabulary from here, so a type added anywhere
 else is a second copy by definition. Naming, literal-union identifiers and
@@ -275,3 +279,5 @@ adapter. UTF-16 units decode into validated u16 storage without an intermediate
 Float-node tree or f64 vector. The tagged payload schema and malformed-unit
 refusals are unchanged. JSON string parsing copies unescaped spans together;
 escape/control validation and duplicate-property order keep their existing rules.
+
+StoreData.socketHealth uses RetainedJsonInput so own undefined diagnostic fields survive typed notifications and native Store payloads. Ordinary JSON output omits those keys. StoreUpdate and the Store health getter/merge use the same carrier; a JSON map is an explicit ingress conversion.

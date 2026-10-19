@@ -6,7 +6,7 @@ use crate::{
         host::{get_key, text},
         promise::await_js,
         rt::Rt,
-        value::{Js, Thrown, error_object, from_json, from_typed, to_json, to_typed},
+        value::{Js, Thrown, error_object, from_json, from_typed, to_json},
     },
     failure_diagnostics as diagnostics, public_data_recovery as recovery,
     ticker_readers::{self as tickers, TickerValue as DataValue},
@@ -452,20 +452,74 @@ pub(crate) fn fetch_tickers(rt: &Rt) -> Result<Js, Thrown> {
 
 // ts: BybitExchange.parseTickers
 pub(crate) fn parse_tickers(rt: &Rt, raw: Js) -> Result<Js, Thrown> {
-    let store = rt.this.get("store")?;
-    let markets: Vec<safe_cex_types::Market> = to_typed(&store.get("markets")?)?;
-    let cached: Vec<safe_cex_types::Ticker> = to_typed(&store.get("tickers")?)?;
-    let raw = if raw.truthy() {
-        Some(
-            to_json(&raw)?
-                .as_array()
-                .cloned()
-                .ok_or_else(|| type_error("rawTickers is not iterable"))?,
-        )
-    } else {
-        None
-    };
-    let parsed = crate::exchange_state::parse_tickers(raw.as_deref(), &markets, &cached)
-        .map_err(type_error)?;
-    from_typed(&parsed)
+    if !raw.truthy() {
+        let store = rt.this.get("store")?;
+        return store.get("tickers");
+    }
+    let spot = rt.shared.base.get().is_some_and(|base| base.is_spot);
+    let mut tickers = Vec::new();
+    let mut index = 0usize;
+    while (index as f64) < raw.get("length")?.to_number()? {
+        let row = raw.get(&index.to_string())?;
+        index += 1;
+        let market = rt
+            .this
+            .get("store")?
+            .get("marketsBySymbol")?
+            .get_key(&row.get("symbol")?.to_js_string()?)?;
+        if !market.truthy() {
+            continue;
+        }
+        let last = row.get("lastPrice")?.parse_float()?;
+        let volume = row
+            .get(if !spot && market.get("isInverse")?.truthy() {
+                "turnover24h"
+            } else {
+                "volume24h"
+            })?
+            .parse_float()?;
+        tickers.push(Js::object(vec![
+            ("id", market.get("id")?),
+            ("symbol", market.get("symbol")?),
+            ("bid", Js::Number(row.get("bid1Price")?.parse_float()?)),
+            ("ask", Js::Number(row.get("ask1Price")?.parse_float()?)),
+            ("last", Js::Number(last)),
+            ("mark", Js::Number(row.get("markPrice")?.parse_float()?)),
+            ("index", Js::Number(row.get("indexPrice")?.parse_float()?)),
+            (
+                "percentage",
+                Js::Number(row.get("price24hPcnt")?.parse_float()? * 100.),
+            ),
+            (
+                "openInterest",
+                Js::Number(row.get("openInterest")?.parse_float()?),
+            ),
+            (
+                "fundingRate",
+                Js::Number(if spot || market.get("isExpiring")?.truthy() {
+                    0.
+                } else {
+                    row.get("fundingRate")?.parse_float()?
+                }),
+            ),
+            (
+                "fundingTime",
+                Js::Number(if spot || market.get("isExpiring")?.truthy() {
+                    0.
+                } else {
+                    row.get("nextFundingTime")?.parse_float()?
+                }),
+            ),
+            ("volume", Js::Number(volume)),
+            (
+                "quoteVolume",
+                Js::Number(if !spot && market.get("isInverse")?.truthy() {
+                    row.get("volume24h")?.parse_float()?
+                } else {
+                    volume * last
+                }),
+            ),
+        ]));
+    }
+    Ok(Js::array(tickers))
 }

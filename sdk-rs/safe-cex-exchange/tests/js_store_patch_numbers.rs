@@ -1,4 +1,6 @@
 //! JS patch ingress into the production Store, before any JSON wire encoding.
+#[path = "support/store_correctness_source.rs"]
+mod store_correctness_source;
 use safe_cex_exchange::js_runtime::{
     store,
     value::{Js, from_json, from_typed},
@@ -152,7 +154,9 @@ fn all_model_patch_methods_keep_every_numeric_field() {
 
 #[test]
 fn numeric_patch_keeps_omission_null_and_other_field_policy() {
+    let source = store_correctness_source::capture();
     let (native, facade) = seeded();
+    let entry = Js::function("entry", |_, _| Ok(Js::Null));
     facade
         .call_method(
             "updatePosition",
@@ -160,7 +164,7 @@ fn numeric_patch_keeps_omission_null_and_other_field_policy() {
                 Js::object(vec![("id", Js::str("p"))]),
                 Js::object(vec![
                     ("leverage", Js::Undefined),
-                    ("entryPrice", Js::function("ignored", |_, _| Ok(Js::Null))),
+                    ("entryPrice", entry.clone()),
                     ("marginType", Js::str("isolated")),
                     ("info", Js::Null),
                     ("unknown", Js::Number(f64::NAN)),
@@ -168,28 +172,48 @@ fn numeric_patch_keeps_omission_null_and_other_field_policy() {
             ],
         )
         .unwrap();
-    assert_eq!(native.positions().unwrap()[0].leverage, 10.0);
-    assert_eq!(native.positions().unwrap()[0].entry_price, 20000.0);
-    assert_eq!(
-        native.positions().unwrap()[0].margin_type,
-        Some(safe_cex_types::MarginType::Isolated)
+    // The raw facade uses source for-in assignment; typed patch admission is separate.
+    let row = facade.get("positions").unwrap().get("0").unwrap();
+    let observed = json!({
+        "ownLeverage": row.has_own("leverage"),
+        "leverageUndefined": row.get("leverage").unwrap().is_undefined(),
+        "entryIdentity": row.get("entryPrice").unwrap().same_reference(&entry),
+        "marginType": row.get("marginType").unwrap().to_display(),
+        "infoNull": matches!(row.get("info").unwrap(), Js::Null),
+        "unknownNaN": row.get("unknown").unwrap().as_f64().unwrap().is_nan(),
+    });
+    assert_eq!(observed, source["patch"]);
+    assert!(
+        native.positions().is_err(),
+        "typed read must refuse the raw undefined/function fields"
     );
+    facade
+        .call_method(
+            "updatePosition",
+            vec![
+                Js::object(vec![("id", Js::str("p"))]),
+                from_json(&json!({"leverage":null})),
+            ],
+        )
+        .unwrap();
     assert_eq!(
-        native.positions().unwrap()[0].info,
-        Some(safe_cex_types::retained_json::RetainedJsonInput::Null)
+        matches!(row.get("leverage").unwrap(), Js::Null),
+        source["nullLeverage"].as_bool().unwrap()
     );
     assert!(
-        facade
-            .call_method(
-                "updatePosition",
-                vec![
-                    Js::object(vec![("id", Js::str("p"))]),
-                    from_json(&json!({"leverage":null})),
-                ]
-            )
-            .is_err(),
-        "explicit null is still refused as a numeric patch"
+        native.positions().is_err(),
+        "typed read must refuse null leverage"
     );
+    // A later valid raw patch restores typed readability without dropping extra raw fields.
+    facade
+        .call_method(
+            "updatePosition",
+            vec![
+                Js::object(vec![("id", Js::str("p"))]),
+                from_json(&json!({"leverage":10,"entryPrice":20000})),
+            ],
+        )
+        .unwrap();
     assert_eq!(native.positions().unwrap()[0].leverage, 10.0);
     for value in [42.0, f64::NAN] {
         facade

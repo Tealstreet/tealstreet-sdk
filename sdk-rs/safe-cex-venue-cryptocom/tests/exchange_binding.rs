@@ -1558,3 +1558,95 @@ fn production_ticker_coercion_matches_constructed_typescript() {
     );
     h.venue().dispose().unwrap();
 }
+
+fn book_sort_bits(value: f64) -> String {
+    if value.is_nan() {
+        "NaN".into()
+    } else {
+        format!("{:016x}", value.to_bits())
+    }
+}
+
+fn socket_book_sort_matches_source(side: &str) {
+    use std::{cell::RefCell, rc::Rc};
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/book-sort-source.mjs"
+        ))
+        .arg(side)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cases.len(), 13, "CRYPTO-BOOK-SORT source corpus");
+    let h = started(|_| {});
+    let books = Rc::new(RefCell::new(vec![]));
+    let sink = books.clone();
+    let cleanup = h
+        .venue()
+        .listen_order_book(
+            SYMBOL.into(),
+            Rc::new(move |book| {
+                sink.borrow_mut().push(book);
+            }),
+        )
+        .unwrap();
+    h.runtime.advance(50.0);
+    let mut mismatches = vec![];
+    for (case_index, case) in cases.iter().enumerate() {
+        let mut frame = case["update"].clone();
+        frame["channel"] = json!("book");
+        frame["subscription"] = json!(format!("book.{SYMBOL}.50"));
+        public_frame(&h, frame);
+        let books = books.borrow();
+        assert_eq!(
+            books.len(),
+            case_index + 1,
+            "CRYPTO-BOOK-SORT callback {side}/{case_index}"
+        );
+        let book = books.last().unwrap();
+        let (levels, other) = if side == "bids" {
+            (&book.bids, &book.asks)
+        } else {
+            (&book.asks, &book.bids)
+        };
+        assert!(
+            other.is_empty(),
+            "each side must reach its comparator independently"
+        );
+        let observed: Vec<_> = levels
+            .iter()
+            .map(|level| {
+                [
+                    book_sort_bits(level.price),
+                    book_sort_bits(level.amount),
+                    book_sort_bits(level.total),
+                ]
+            })
+            .collect();
+        if serde_json::to_value(observed).unwrap() != case["observed"] {
+            mismatches.push(case_index);
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "CRYPTO-BOOK-SORT {side} mismatched profiles {mismatches:?}"
+    );
+    cleanup().unwrap();
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn socket_book_bids_match_source_subtraction_sort() {
+    socket_book_sort_matches_source("bids");
+}
+
+#[test]
+fn socket_book_asks_match_source_subtraction_sort() {
+    socket_book_sort_matches_source("asks");
+}

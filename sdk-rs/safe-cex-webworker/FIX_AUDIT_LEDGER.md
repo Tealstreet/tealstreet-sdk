@@ -9,26 +9,26 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 | --- | --- | --- | --- |
 | 2 | ChaserOrderManager#tryPlaceOrders | FIX | Canonical eager continuation and await checkpoints; late-stop cancellation survives a dropped waiter. |
 | 3 | ChaserOrderManager#emitComplete | FIX | Canonical settlement and retained fill reconciliation after caller abandonment. |
-| 4 | chaserOrderManagerInstance | OPEN | Constructed module/receiver composition. |
+| 4 | chaserOrderManagerInstance | ACCEPT | Pure empty-list allocation; actual module/thread identity and real-engine witness below. |
 | 5 | TwapInstance.resume | FIX | Canonical Promise settlement; immediate prefix and rejection profiles below. |
 | 6 | TwapInstance.terminate | FIX | Same settlement boundary; synchronous cleanup and partial-commit order preserved. |
 | 7 | UpdatePositionsHandler.handleUpdatePositions | FIX | Shared eager boundary; source/native timing profiles below. |
 | 8 | UpdatePositionsHandler.handle | FIX | Same operation invoked during dispatch, without an extra spawn. |
 | 17 | StoreWorkerPayload | OPEN | Whole worker carrier and report boundary. |
-| 18 | WorkerConfig | OPEN | Actual admitted config and host reachability. |
+| 18 | WorkerConfig | ACCEPT | Unreachable strict codec removed; actual config/listener preserves the original native values. |
 | 19 | splitWorkerLogExtra | OPEN | Retained carrier across callers; no isolated JSON shim. |
-| 20 | start | OPEN | Constructed worker session/bootstrap lifecycle. |
+| 20 | start | FIX | Native Js ingress/config/dispatch, module-owned listeners and deterministic context teardown below. |
 | 21 | ChaserOrderState | OPEN | Native state and output boundary. |
 | 22 | defaultChaserState | OPEN | Native default ownership and caller mutation. |
-| 23 | ChaserOrderManager | OPEN | Constructed manager and receiver contracts. |
+| 23 | ChaserOrderManager | ACCEPT | Explicit required host composition; actual singleton/engine/Store binding below. |
 | 24 | ChaserTerminate | OPEN | Live termination admission. |
 | 25 | ChaserCompleteEvent | OPEN | Native event payload. |
 | 26 | CallMethodHandler.handleCallMethod | OPEN | Continuation timing repaired below; typed arguments/primitive rejection admission remains. |
 | 30 | readStringProperty | ACCEPT | Merged #1158: native Get, getter cause and approved typed String replacement. |
-| 71 | ExchangeWorker.start | OPEN | Real bootstrap construction and startup race. |
-| 72 | PerfFixtureFrame | OPEN | Recording/replay carrier reachability. |
-| 73 | PerfFixture | OPEN | Recording/replay envelope. |
-| 74 | PerfFixtureConfig | OPEN | Actual config admission. |
+| 71 | ExchangeWorker.start | FIX | Canonical eager startup, source await checkpoints and dropped-waiter continuation below. |
+| 72 | PerfFixtureFrame | OPEN | Dead codec removed; real native record/clone/cap/metronome/replay service is still a FIX. |
+| 73 | PerfFixture | OPEN | Dead codec removed; actual recording/dump/replay round trip remains a FIX. |
+| 74 | PerfFixtureConfig | OPEN | Native argument retained; actual perf-service modes/timers remain a FIX. |
 | 75 | ChaserOrderOptions | OPEN | Shared task model and live reads. |
 | 76 | TwapOptions | OPEN | Shared task model and live reads. |
 | 77 | TwapState | OPEN | Native state/serialization. |
@@ -144,3 +144,166 @@ Rows 26/78 remain OPEN: typed Exchange arguments still reject values TS forwards
 primitive throws are not ExchangeError, and raw dispatcher defaults still differ
 from source object spread. The retained carrier review must resolve those costs;
 this timing change supplies no authorization for accepting them.
+
+## Manager composition: rows 4 and 23
+
+The maintained manager has no constructor body: its only instance initializer is
+an empty array, and its module export constructs that manager once. Allocation
+runs no exchange, host callback, timer or Promise. The native accessor delays this
+allocation until first access and retains one manager per host thread. Independent
+threads model independent worker module realms, rather than a process-global
+non-Send Rc. This delay has no caller-visible prefix or continuation to lose.
+
+The explicit host/callback composition category ruling authorizes row 23's
+required native bindings. There are no default-success supervision, cancellation
+or completion leaves. The existing ChaserEngine implements those bodies; its
+ChaserHost supplies terminal venue/runtime capabilities. This classification
+covers linking and manager ownership, not arbitrary method replacement, startup
+ordering or the independently mapped method behavior.
+
+The real-engine composition test executes the maintained module in two separate
+VM realms and native singleton access on separate threads. It compares shared
+manager/list identity, independent managers, empty construction without terminal
+calls, immediate add registration/logging, stopped-instance cleanup and exactly
+one completion. Native size/fill bits are asserted before the finite source
+profile. The native path uses ChaserOrderManager, ChaserEngine, BaseExchange,
+DefaultStore and the canonical runtime; the supplied host owns only terminal
+capabilities. Existing dispatch and engine cases retain reentrant list changes,
+listener failures, cancellation, placement and reconciliation floors. A compiled
+control rebinds supervision to a fresh manager instead of the registered one;
+the named composition assertion fails with an uncleared singleton. Exact
+production bytes are restored before the positive replay and required gates.
+
+No worker-carrier or numeric-depth row is closed by this evidence. Rows 21/22,
+24/25 and 75 retain their independent state/default/event/options review.
+
+## Startup continuation: row 71 and the timing part of row 20
+
+ExchangeWorker.start awaits the real clock, dynamic loader and startup race.
+The native clock prefix already ran during entry, but dropping the returned
+future cancelled the remainder; ready leaves also crossed their source awaits
+within the caller's poll. Startup now uses canonical start_eager with native
+results and shared await checkpoints. The session listener owns its init/cleanup
+continuation through the same driver, so dropping its waiter cannot leave a
+failed worker in the table. Required runtime access comes from the bootstrap
+host; no new executor or per-method task registry is introduced.
+
+Three actual worker/session regressions fail on compiled master 35b178ba1c:
+ready-clock loader ordering, abandoned held-clock success/failure, and abandoned
+listener completion/failure cleanup. The maintained source oracle runs the real
+ExchangeWorker and complete store.webworker module. Native probes use the real
+worker, DefaultStore, BaseExchange and canonical runtime with only terminal
+venue/import/clock and port capabilities supplied. Seed latency bits are checked
+before source profiles. Held loader and venue-start cases also finish after
+waiter abandonment. Two independent compiled controls remove the clock await
+fence or session eager driver; their named regressions fail, then exact
+production bytes are restored before the positive gates. Disposal while the
+clock is pending suppresses later construction; existing cancellation, deadline, retained-loser, event wiring,
+buffer and forced-snapshot tests remain mandatory.
+
+Row 71's scheduling/ownership finding is repaired. Row 20 stays OPEN for raw
+init/config admission and independently declared session lifetime costs; this
+batch supplies no JSON/carrier/depth acceptance.
+
+## Native session ingress and ownership: completion of row 20
+
+The installed listener now accepts native Js directly. Config values, perf
+configure/dump/replay arguments, buffered messages and opaque handler calls use
+that same carrier; there is no JSON admission or fallback adapter. Unknown keys,
+array configs, nonfinite values, own undefined and UTF-16 text survive unchanged.
+Config uses the canonical in operator and ordinary Get in source order. Registered
+callbacks retain the same object, see live list appends, and may change the perf
+argument read after the loop. Console receives the original thrown value, not a
+name/message reconstruction. Shared options/settings/metadata and Store updates
+are decoded only where their existing typed consumers use them. Host identifiers
+keep their previously approved typed String boundary. Replay does not decode an
+unread exchange constructor, options or Store snapshot.
+
+The module owns its installed sessions, while sessions hold a weak reverse
+reference. Dropping the optional start return does not remove a live listener.
+The required registration cleanup detaches callbacks during module destruction.
+Maps and port state are removed before worker disposal; canonical native base
+teardown completes shared exchange cleanup. The required shutdown_context leaf
+releases remaining context runtime/replay/timer work, including startup losers.
+This implements the coordinator-approved native module drop-equals-dispose
+policy and prevents dangling callbacks without creating a module/session cycle.
+Teardown errors are reported and do not stop later cleanup stages or contexts.
+Source disposal and native teardown share one stage sequence with explicit error
+handling: the normal source entry returns the first error; native context cleanup
+reports it and continues. Native/actual-source observations preserve the normal
+first-handler throw, while module teardown disposes all nine exactly once even
+if the first fails. The two reviewed override edges moved with their shared
+function bodies; receiver/hook classifications and counts are unchanged.
+
+Compiled baseline 55d99ce37a (fresh master b10cec94d3 plus the now-merged #1203
+continuation prerequisite) fails three named real-listener tests: native NaN
+admission, array config delivery, and liveness after the start return is dropped.
+The actual-source oracle runs maintained ExchangeWorker and store.webworker.
+Native probes run WorkerModule/WorkerSession, the real worker, BaseExchange,
+DefaultStore and canonical runtime, supplying only terminal host capabilities.
+Additional observations pin config setter/callback/console/perf order, original
+non-Error cause identity, raw dump payload identity and binary64 bits, unknown-op
+fanout to all nine receivers, shared buffered identity and replay short circuit.
+A 150-level unread config remains intact; this is a preservation witness, not an
+accepted shared numeric-depth limit. Held startup teardown detaches listeners,
+disposes the actual exchange, clears timers/tasks, prevents a late snapshot and
+releases worker ownership even if a caller still holds the session handle.
+
+Independent compiled controls replace native config or buffering with JSON,
+remove module session ownership, omit context shutdown, or move constructor
+decoding before replay. All nine controls compiled and failed their named binding tests, including
+original-cause reconstruction, partial teardown, swallowed normal-dispose errors
+and a perf-dump JSON hop. Exact production bytes were restored before the
+positive gates. Existing numeric/field/source
+input corpora and worker lifecycle/buffer tests remain in place. The generic
+buffer helper keeps its owned-record fixture as a distinct parameter profile;
+production Js identity is proved through the actual worker binding.
+
+This closes row 20. It does not classify the separate legacy strict DTOs, worker
+logging/report carrier, or raw admission inside the called operation handlers
+(rows 17/18/19/26/72-79). Those remain OPEN with their original source cases.
+
+## Config and perf codec retirement: row 18; rows 72-74 stay OPEN
+
+After the native session cutover, a tracked-source Rust caller search finds the
+six WorkerConfig/PerfFixtureFrame/PerfFixture/PerfFixtureConfig/PerfFixtureVersion/
+PerfFixtureMode codecs only in their declarations, private serde/output helpers
+and test consumers. The installed listener, config callbacks, perf arguments,
+replay callback and dump result already use canonical Js. No runtime, FFI,
+registry or browser binding calls these decoders. Their strict record/literal,
+null and bounded-depth differences cannot affect that native session path.
+The six codecs, private companions, numeric eligibility and orphan-only tests
+are removed; the compiler checks that no real consumer depended on them.
+WorkerConfig row 18 is ACCEPT-as-removed, without a depth-bound acceptance.
+
+The native envelope remains independently live: its three public operation
+literal inventories, instanceId null rejection, explicit data null, nested
+Store/settings/error validation, and all ninety number-bit comparisons across
+the original ten spellings and nine encoding routes remain. Config/perf-only
+rejection and codec-only numeric/depth tests are retired with their subjects.
+The source-only eleven-field optionality census and its refusal controls remain
+unchanged, but its six retired config fields are no longer claimed native
+record-validation coverage.
+
+A real installed-listener supplement executes maintained store.webworker and
+native WorkerModule/WorkerSession. Ten original numeric spellings produce fifteen
+config deliveries, ten dump replies and sixty independent native bit assertions.
+It retains cfg/perf/frame/msg references, own undefined and UTF16 code units;
+non-record perf arguments, unknown mode, version 2 and explicit optional nulls
+reach the host exactly as source does. Existing config getter/callback ordering,
+array admission, original failure and unread-depth150 binding probes remain.
+These observations prove the carrier, not an implementation of imported perf
+functions: their terminal calls are explicitly supplied host capabilities.
+Two independent compiled production controls replace the configure argument or
+dump value with Null; each fails the named native identity assertion. Exact
+producer bytes are restored and the same binding probe passes.
+
+Rows 72-74 stay OPEN FIX. Maintained perfFixture.ts implements recording,
+structured clone, a 20000-frame cap, timestamps, mode/reset/interval/loop rules,
+and timer-based replay. The native host currently requires these callbacks but
+has no service implementation. The real app uses record/replay and dump, as
+confirmed by the coordinator; no dead-code or host-linking acceptance closes
+that behavior. Its own following PR must implement and compare real TS/native
+record-to-replay round trips. This batch closes one row: 8 FIX / 4 ACCEPT /
+15 OPEN. All other worker ownership remains with codex-0xekzz; codex-l89ogr has
+no active worker edits or source snapshot.

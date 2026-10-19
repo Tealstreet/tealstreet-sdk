@@ -11,10 +11,16 @@ use crate::{
     postprocessor_registry::PostprocessorRegistry,
     worker_logging::{self, WorkerLogLevel},
 };
-use safe_cex_exchange::js_runtime::value::Js;
+use safe_cex_exchange::{
+    eager::start_eager,
+    js_runtime::{
+        promise::await_js,
+        value::{Js, from_typed, to_typed},
+    },
+};
 use safe_cex_exchange::{
     exchange::Exchange,
-    runtime::{ExchangeError, ExchangeFuture},
+    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
 };
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, ExchangeOptions, StoreSubscriberError};
@@ -92,6 +98,7 @@ pub trait WorkerExchangeConstructor {
     ) -> Result<Rc<dyn Exchange>, ExchangeError>;
 }
 pub trait WorkerBootstrapHost: ExchangeWorkerHost {
+    fn runtime(&self) -> Rc<dyn ExchangeRuntime>;
     fn construct_clock_start(&self) -> ExchangeFuture<'static, ()>;
     fn load_exchange(
         &self,
@@ -110,7 +117,7 @@ pub trait WorkerBootstrapHost: ExchangeWorkerHost {
     fn invoke_handler(
         &self,
         handler: Rc<dyn WorkerHandler>,
-        payload: StoreWorkerPayload,
+        payload: Js,
     ) -> Result<(), ExchangeError>;
     fn post_payload(&self, payload: StoreWorkerPayload) -> Result<(), ExchangeError>;
     fn post_event(&self, payload: WorkerDataPayload) -> Result<(), ExchangeError>;
@@ -162,6 +169,16 @@ impl StartRace {
             }
         }
     }
+}
+async fn await_startup<T>(
+    runtime: &Rc<dyn ExchangeRuntime>,
+    future: ExchangeFuture<'static, T>,
+) -> Result<T, ExchangeError> {
+    let result = future.await;
+    await_js(runtime, Js::Undefined)
+        .await
+        .map_err(|error| error.to_exchange_error())?;
+    result
 }
 impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
     pub fn log_message(
@@ -222,9 +239,10 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
         }));
         let clock = self.construction.ctx.construct_clock_start();
         let worker = self.clone();
-        Box::pin(async move {
+        let runtime = self.construction.ctx.runtime();
+        start_eager(&runtime.clone(), async move {
             let result: Result<bool, ExchangeError> = async {
-                clock.await?;
+                await_startup(&runtime, clock).await?;
                 if token != worker.startup_token.get() {
                     return Ok(false);
                 }
@@ -236,7 +254,7 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                     .ok_or_else(|| {
                         ExchangeError::new(format!("Unknown exchange: {}", exchange_text(&name)))
                     })?;
-                let constructor = loader.await?;
+                let constructor = await_startup(&runtime, loader).await?;
                 if token != worker.startup_token.get() {
                     return Ok(false);
                 }
@@ -270,11 +288,12 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                     .exchange()
                     .ok_or_else(|| ExchangeError::new("Exchange cleared before startup"))?;
                 let starting = worker.construction.ctx.construct_exchange_start(exchange);
+                let start_runtime = runtime.clone();
                 worker
                     .construction
                     .ctx
                     .spawn_start_task(Box::pin(async move {
-                        let r = starting.await;
+                        let r = await_startup(&start_runtime, starting).await;
                         completion.settle(r.map(|_| true));
                         Ok(())
                     }));
@@ -287,17 +306,21 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                     }),
                     30_000.,
                 );
-                let race_result = std::future::poll_fn(|cx| {
-                    if let Some(r) = race.result.borrow_mut().take() {
-                        return std::task::Poll::Ready(r);
-                    }
-                    if signal.cancelled.get() {
-                        return std::task::Poll::Ready(Ok(false));
-                    }
-                    *race.waker.borrow_mut() = Some(cx.waker().clone());
-                    *signal.waker.borrow_mut() = Some(cx.waker().clone());
-                    std::task::Poll::Pending
-                })
+                let race_signal = signal.clone();
+                let race_result = await_startup(
+                    &runtime,
+                    Box::pin(std::future::poll_fn(move |cx| {
+                        if let Some(r) = race.result.borrow_mut().take() {
+                            return std::task::Poll::Ready(r);
+                        }
+                        if race_signal.cancelled.get() {
+                            return std::task::Poll::Ready(Ok(false));
+                        }
+                        *race.waker.borrow_mut() = Some(cx.waker().clone());
+                        *race_signal.waker.borrow_mut() = Some(cx.waker().clone());
+                        std::task::Poll::Pending
+                    })),
+                )
                 .await?;
                 if !race_result
                     || token != worker.startup_token.get()
@@ -310,7 +333,17 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                     |m, c| worker.log_message(WorkerLogLevel::Info, m, c.as_object()),
                     |p| worker.handle_payload(p.clone()),
                     |e: &ExchangeError| Ok(e.js_error_string()),
-                    |m, e, c| worker.report_error(m, &e, Some(c), true),
+                    |m, e, payload, index, total| {
+                        let op: Value = to_typed(&payload.get("op")?)?;
+                        worker.report_error(
+                            m,
+                            &e,
+                            Some(
+                                &json!({"payloadOp":op,"messageIndex":index,"totalBuffered":total}),
+                            ),
+                            true,
+                        )
+                    },
                 )?;
                 if token != worker.startup_token.get()
                     || worker.exchange().is_some_and(|e| e.base().is_disposed())
@@ -366,83 +399,94 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
         })
     }
     // ts: handlePayload. Read live handler list again on every iteration.
-    pub fn handle_payload(
-        self: &Rc<Self>,
-        payload: StoreWorkerPayload,
-    ) -> Result<(), ExchangeError> {
+    pub fn handle_payload(self: &Rc<Self>, payload: Js) -> Result<(), ExchangeError> {
         if self.exchange().is_none() {
             let count = self.message_buffer.borrow().len();
             if count < 1000 {
                 self.message_buffer.borrow_mut().push(payload);
             } else {
-                self.report_error(&format!("Message buffer full for {}, dropping message",exchange_text(&self.construction.exchange_name)),&ExchangeError::new("Message buffer overflow"),Some(&json!({"droppedPayload":payload.op,"maxBufferSize":1000,"bufferSize":count})),false)?;
+                let op: Value = to_typed(&payload.get("op")?)?;
+                self.report_error(
+                    &format!(
+                        "Message buffer full for {}, dropping message",
+                        exchange_text(&self.construction.exchange_name)
+                    ),
+                    &ExchangeError::new("Message buffer overflow"),
+                    Some(&json!({"droppedPayload":op,"maxBufferSize":1000,"bufferSize":count})),
+                    false,
+                )?;
             }
             return Ok(());
         }
-        match payload.op {
-            StoreWorkerOp::Store => {
-                let update = decode_update(payload.data.unwrap_or(Value::Null))?;
+        let op = payload.get("op")?;
+        match op.as_str().map(|value| value.as_ref()) {
+            Some(op) if op == safe_cex_exchange::js_runtime::value::utf16("store").as_ref() => {
                 self.exchange()
                     .unwrap()
                     .base()
                     .store
-                    .update(update, false)?;
+                    .update(decode_update(payload.get("data")?)?, false)?;
             }
-            StoreWorkerOp::MergeLoaded => {
-                if payload
-                    .data
-                    .as_ref()
-                    .is_some_and(|v| safe_cex_num::js_truthy(Some(v)))
+            Some(op)
+                if op == safe_cex_exchange::js_runtime::value::utf16("merge-loaded").as_ref() =>
+            {
+                let data = payload.get("data")?;
+                if data.truthy()
+                    && let Some(exchange) = self.exchange()
                 {
-                    if let Some(e) = self.exchange() {
-                        let mut loaded = serde_json::to_value(e.base().store.loaded()?.clone())
-                            .map_err(|e| ExchangeError::new(e.to_string()))?;
-                        if let (Some(a), Some(b)) = (
-                            loaded.as_object_mut(),
-                            payload.data.as_ref().and_then(Value::as_object),
-                        ) {
-                            a.extend(b.clone());
-                        }
-                        let loaded = serde_json::from_value(loaded)
-                            .map_err(|e| ExchangeError::new(e.to_string()))?;
-                        e.base().store.update(
-                            StoreUpdate {
-                                loaded: Some(loaded),
-                                ..Default::default()
-                            },
-                            false,
-                        )?;
+                    let loaded = from_typed(&exchange.base().store.loaded()?.clone())?;
+                    for (key, value) in data.own_entries()? {
+                        loaded.define_key(&key, value)?;
                     }
+                    exchange.base().store.update(
+                        StoreUpdate {
+                            loaded: Some(to_typed(&loaded)?),
+                            ..Default::default()
+                        },
+                        false,
+                    )?;
                 }
             }
-            StoreWorkerOp::MergeMessageHandlerStats => {
-                if payload
-                    .data
-                    .as_ref()
-                    .is_some_and(|v| safe_cex_num::js_truthy(Some(v)))
+            Some(op)
+                if op
+                    == safe_cex_exchange::js_runtime::value::utf16(
+                        "merge-message-handler-stats",
+                    )
+                    .as_ref() =>
+            {
+                let data = payload.get("data")?;
+                if data.truthy()
+                    && let Some(exchange) = self.exchange()
                 {
-                    if let Some(e) = self.exchange() {
-                        let mut stats =
-                            e.base().store.message_handler_stats()?.unwrap_or(json!({}));
-                        if !stats.is_object() {
-                            stats = json!({});
-                        }
-                        if let Some(b) = payload.data.as_ref().and_then(Value::as_object) {
-                            stats.as_object_mut().unwrap().extend(b.clone());
-                        }
-                        safe_cex_num::normalize_json_order(&mut stats);
-                        e.base().store.update(
-                            StoreUpdate {
-                                message_handler_stats: Some(stats),
-                                ..Default::default()
-                            },
-                            false,
-                        )?;
+                    let stats = exchange
+                        .base()
+                        .store
+                        .message_handler_stats()?
+                        .unwrap_or(json!({}));
+                    let previous = from_typed(&stats)?;
+                    let stats = Js::object(vec![]);
+                    for (key, value) in previous
+                        .own_entries()?
+                        .into_iter()
+                        .chain(data.own_entries()?)
+                    {
+                        stats.define_key(&key, value)?;
                     }
+                    exchange.base().store.update(
+                        StoreUpdate {
+                            message_handler_stats: Some(to_typed(&stats)?),
+                            ..Default::default()
+                        },
+                        false,
+                    )?;
                 }
             }
-            StoreWorkerOp::Dispose => self.dispose()?,
-            StoreWorkerOp::Deactivate => {
+            Some(op) if op == safe_cex_exchange::js_runtime::value::utf16("dispose").as_ref() => {
+                self.dispose()?
+            }
+            Some(op)
+                if op == safe_cex_exchange::js_runtime::value::utf16("deactivate").as_ref() =>
+            {
                 self.log_message(
                     WorkerLogLevel::Info,
                     &format!(
@@ -453,17 +497,17 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
                 )?;
                 self.deactivate()?;
             }
-            StoreWorkerOp::SayHi => {}
+            Some(op) if op == safe_cex_exchange::js_runtime::value::utf16("sayHi").as_ref() => {}
             _ => {
-                let mut i = 0;
+                let mut index = 0;
                 loop {
-                    let list = self.handlers.borrow().clone();
-                    let handler = list.borrow().get(i).cloned();
+                    let handlers = self.handlers.borrow().clone();
+                    let handler = handlers.borrow().get(index).cloned();
                     let Some(handler) = handler else { break };
                     self.construction
                         .ctx
                         .invoke_handler(handler, payload.clone())?;
-                    i += 1;
+                    index += 1;
                 }
             }
         }
@@ -587,8 +631,8 @@ impl<H: WorkerBootstrapHost> ExchangeWorker<H> {
         Ok(())
     }
 }
-pub fn decode_update(data: Value) -> Result<StoreUpdate, ExchangeError> {
-    serde_json::from_value(data).map_err(|e| ExchangeError::new(e.to_string()))
+pub fn decode_update(data: Js) -> Result<StoreUpdate, ExchangeError> {
+    Ok(to_typed(&data)?)
 }
 
 pub fn exchange_text(name: &ExchangeName) -> String {

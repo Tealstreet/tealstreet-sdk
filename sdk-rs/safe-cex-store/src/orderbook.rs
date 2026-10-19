@@ -15,36 +15,23 @@ pub fn calc_order_book_total(book: &mut OrderBook) {
 
 /// Stable source subtraction comparator, independent of total accumulation.
 pub fn sort_order_book(book: &mut OrderBook) {
-    fn sorted(levels: &mut [safe_cex_types::OrderBookOrders], descending: bool) {
-        if levels.len() < 2 {
-            return;
-        }
-        let mid = levels.len() / 2;
-        let (left, right) = levels.split_at_mut(mid);
-        sorted(left, descending);
-        sorted(right, descending);
-        let left = left.to_vec();
-        let right = right.to_vec();
-        let (mut l, mut r) = (0, 0);
-        for dest in levels {
-            // ts-bug: sortOrderBook — NaN subtraction compares as equality,
-            // so malformed NaN-price books have a nontransitive comparator.
-            let take_right = r < right.len()
-                && (l == left.len()
-                    || if descending {
-                        left[l].price - right[r].price < 0.0
-                    } else {
-                        right[r].price - left[l].price < 0.0
-                    });
-            if take_right {
-                *dest = right[r].clone();
-                r += 1;
-            } else {
-                *dest = left[l].clone();
-                l += 1;
-            }
+    for (levels, descending) in [(&mut book.asks, false), (&mut book.bids, true)] {
+        let result = safe_cex_num::sorting::stable_sort::<_, std::convert::Infallible>(
+            levels,
+            |left, right| {
+                let difference = if descending {
+                    right.price - left.price
+                } else {
+                    left.price - right.price
+                };
+                Ok(difference
+                    .partial_cmp(&0.0)
+                    .unwrap_or(std::cmp::Ordering::Equal))
+            },
+        );
+        match result {
+            Ok(()) => {}
+            Err(never) => match never {},
         }
     }
-    sorted(&mut book.asks, false);
-    sorted(&mut book.bids, true);
 }

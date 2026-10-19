@@ -742,11 +742,11 @@ fn update_order_book(book: &Js, side: &Js, update: &Js, upsert: &Js) -> Result<J
         None if !upsert || zero => -1.0,
         None => {
             let at = (left as usize).min(items.len());
-            levels.splice_array(at, 0, vec![update.clone()])?;
+            levels.splice_array(items.len(), at, 0, vec![update.clone()])?;
             at as f64
         }
         Some(index) if zero => {
-            levels.splice_array(index, 1, vec![])?;
+            levels.splice_array(items.len(), index, 1, vec![])?;
             -1.0
         }
         Some(index) => {

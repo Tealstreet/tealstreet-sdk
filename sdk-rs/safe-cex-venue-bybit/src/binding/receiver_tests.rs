@@ -50,11 +50,20 @@ fn run(future: impl Future<Output = ()>) {
         .block_on(tokio::task::LocalSet::new().run_until(future));
 }
 fn venue(name: ExchangeName) -> Rc<BybitExchange> {
-    let runtime = native_runtime();
-    BybitExchange::create(
+    venue_with_options(
         name,
         serde_json::from_value(serde_json::json!({"key":"", "secret":"", "publicDataOnly":true}))
             .unwrap(),
+    )
+}
+fn venue_with_options(
+    name: ExchangeName,
+    options: safe_cex_types::ExchangeOptions,
+) -> Rc<BybitExchange> {
+    let runtime = native_runtime();
+    BybitExchange::create(
+        name,
+        options,
         Rc::new(DefaultStore::new()),
         BybitDependencies {
             runtime,
@@ -774,6 +783,314 @@ fn divergence_sdk_account_starts_original_client_before_waiter_poll() {
 }
 
 #[test]
+fn hyro_divergence_account_configuration_receivers() {
+    if crate::types::HYROTRADER_PROD_URL["livenet"]
+        .as_str()
+        .unwrap_or("")
+        .is_empty()
+    {
+        let directory =
+            std::env::temp_dir().join(format!("bybit-hyro-account-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("configured.log");
+        let log = std::fs::File::create(&path).unwrap();
+        let mut child =
+            std::process::Command::new(std::env::var_os("CARGO").unwrap_or("cargo".into()))
+                .args([
+                    "test",
+                    "--locked",
+                    "-p",
+                    "safe-cex-venue-bybit",
+                    "--lib",
+                    "hyro_divergence_account_configuration_receivers",
+                    "--jobs",
+                    "1",
+                    "--",
+                    "--test-threads=1",
+                    "--nocapture",
+                ])
+                .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/.."))
+                .env("CARGO_INCREMENTAL", "0")
+                .env(
+                    "NEXT_PUBLIC_HYROTRADER_PROD_REST_URL",
+                    "https://hyro-audit.example",
+                )
+                .env(
+                    "NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL",
+                    "https://hyro-sim-audit.example",
+                )
+                .stdout(std::process::Stdio::from(log.try_clone().unwrap()))
+                .stderr(std::process::Stdio::from(log))
+                .spawn()
+                .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(600);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                let output = std::fs::read_to_string(&path).unwrap();
+                assert!(status.success(), "configured Hyro audit failed: {output}");
+                assert!(output.contains("1 passed; 0 failed"));
+                return;
+            }
+            if Instant::now() > deadline {
+                child.kill().expect("stop timed-out configured Hyro audit");
+                child.wait().unwrap();
+                panic!("configured Hyro audit timed out: {}", path.display());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    run(async {
+        for mode in ["production", "demo"] {
+            let options = serde_json::from_value(serde_json::json!({
+                "key":"", "secret":"", "publicDataOnly":true,
+                "enableOptionMarkets":true, "enableInverseMarkets":true,
+                "extra":{"hyrotraderMode":mode}
+            }))
+            .unwrap();
+            let exchange = venue_with_options(ExchangeName::Hyrotrader, options);
+            let this = &exchange.js.get().unwrap().this;
+            for name in ["optionsEnabled", "inverseEnabled"] {
+                assert!(
+                    this.call_method(name, vec![])
+                        .unwrap()
+                        .strict_equals(&Js::Bool(false)),
+                    "hyro_capability_flags_ignore_optins"
+                );
+            }
+            let poison = Js::object(vec![]);
+            poison
+                .define_accessor(
+                    "startTime",
+                    Some(Rc::new(|_| panic!("empty range must ignore arguments"))),
+                    None,
+                )
+                .unwrap();
+            let first = this
+                .call_method(
+                    "fetchIncomeHistoryRange",
+                    vec![
+                        poison.clone(),
+                        Js::Number(f64::NAN),
+                        Js::String(vec![0xd800].into()),
+                    ],
+                )
+                .unwrap();
+            let second = this
+                .call_method("fetchIncomeHistoryRange", vec![poison])
+                .unwrap();
+            assert!(
+                !first.strict_equals(&second),
+                "fresh source Promise per call"
+            );
+            let first = await_js(&exchange.base.runtime, first).await.unwrap();
+            let second = await_js(&exchange.base.runtime, second).await.unwrap();
+            assert_eq!(
+                first.array_values().unwrap().unwrap().len(),
+                0,
+                "hyro_empty_income_range"
+            );
+            assert!(!first.strict_equals(&second), "fresh empty array per call");
+            let messages = Rc::new(RefCell::new(Vec::<Js>::new()));
+            let seen = messages.clone();
+            this.define(
+                "emitAndLogError",
+                Js::function("emitAndLogError", move |_, args| {
+                    seen.borrow_mut().push(arg(&args, 0));
+                    Ok(Js::Undefined)
+                }),
+            )
+            .unwrap();
+            let balance = Js::object(vec![
+                ("total", Js::Number(-0.0)),
+                ("opaque", Js::String(vec![0xd800].into())),
+            ]);
+            let result_balance = balance.clone();
+            this.define(
+                "fetchBalance",
+                Js::function("fetchBalance", move |_, _| Ok(result_balance.clone())),
+            )
+            .unwrap();
+            let result = this.call_method("validateAccount", vec![]).unwrap();
+            let result = await_js(&exchange.base.runtime, result).await.unwrap();
+            assert!(result.get("balance").unwrap().strict_equals(&balance));
+            assert!(result.get("error").unwrap().strict_equals(&Js::str("")));
+            let published = Rc::new(RefCell::new(Vec::<Js>::new()));
+            let observed = published.clone();
+            this.get("store")
+                .unwrap()
+                .define(
+                    "update",
+                    Js::function("update", move |_, args| {
+                        observed.borrow_mut().push(arg(&args, 0));
+                        Ok(Js::Undefined)
+                    }),
+                )
+                .unwrap();
+            for disposed in [false, true] {
+                let pending = safe_cex_exchange::js_runtime::promise::Promise::pending(
+                    &exchange.base.runtime,
+                );
+                let request = pending.clone();
+                let calls = Rc::new(Cell::new(0));
+                let count = calls.clone();
+                this.define(
+                    "fetchBalance",
+                    Js::function("fetchBalance", move |_, _| {
+                        count.set(count.get() + 1);
+                        Ok(Js::Promise(request.clone()))
+                    }),
+                )
+                .unwrap();
+                let result = this.call_method("fetchMarginAccountInfos", vec![]).unwrap();
+                assert_eq!(calls.get(), 1, "Hyro balance begins before caller polling");
+                let before = published.borrow().len();
+                if disposed {
+                    exchange.base.dispose().unwrap();
+                }
+                pending.settle(Ok(balance.clone()));
+                let settled = tokio::time::timeout(
+                    Duration::from_secs(1),
+                    await_js(&exchange.base.runtime, result),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                assert!(settled.is_undefined());
+                assert_eq!(
+                    published.borrow().len(),
+                    before + usize::from(!disposed),
+                    "hyro_margin_disposal_guard"
+                );
+                if !disposed {
+                    assert!(
+                        published
+                            .borrow()
+                            .last()
+                            .unwrap()
+                            .get("balance")
+                            .unwrap()
+                            .strict_equals(&balance)
+                    );
+                }
+            }
+        }
+        let exchange = venue(ExchangeName::Hyrotrader);
+        let this = &exchange.js.get().unwrap().this;
+        let rt = exchange.js.get().unwrap();
+        let prototype = rt.global("Error").unwrap().get("prototype").unwrap();
+        let reason = Js::object(vec![("message", Js::String(vec![0xd800, 0x61].into()))]);
+        rt.global("Object")
+            .unwrap()
+            .call_method("setPrototypeOf", vec![reason.clone(), prototype])
+            .unwrap();
+        let rejected = reason.clone();
+        this.define(
+            "fetchBalance",
+            Js::function("fetchBalance", move |_, _| {
+                Err(Thrown::new(rejected.clone()))
+            }),
+        )
+        .unwrap();
+        let logged = Rc::new(RefCell::new(Js::Undefined));
+        let sink = logged.clone();
+        this.define(
+            "emitAndLogError",
+            Js::function("emitAndLogError", move |_, args| {
+                *sink.borrow_mut() = arg(&args, 0);
+                Ok(Js::Undefined)
+            }),
+        )
+        .unwrap();
+        let result = this.call_method("validateAccount", vec![]).unwrap();
+        let result = await_js(&exchange.base.runtime, result).await.unwrap();
+        assert_eq!(
+            units(&result.get("error").unwrap()),
+            [0xd800, 0x61],
+            "hyro_error_prototype_message"
+        );
+        assert_eq!(units(&logged.borrow()), [0xd800, 0x61]);
+        let raw_message = Js::object(vec![("zero", Js::Number(-0.0))]);
+        let raw_error = rt.global("Error").unwrap().construct(vec![], None).unwrap();
+        raw_error.set("message", raw_message.clone()).unwrap();
+        let detached = rt
+            .global("Error")
+            .unwrap()
+            .construct(vec![Js::str("original")], None)
+            .unwrap();
+        rt.global("Object")
+            .unwrap()
+            .call_method("setPrototypeOf", vec![detached.clone(), Js::Null])
+            .unwrap();
+        detached
+            .define(
+                "toString",
+                Js::function("toString", |_, _| Ok(Js::utf16(&[0xd800, 0x62]))),
+            )
+            .unwrap();
+        let custom = Js::object(vec![(
+            "toString",
+            Js::function("toString", |_, _| Ok(Js::utf16(&[0xd800, 0x63]))),
+        )]);
+        for (reason, expected) in [
+            (custom, Js::utf16(&[0xd800, 0x63])),
+            (Js::utf16(&[0xdfff]), Js::utf16(&[0xdfff])),
+            (raw_error, raw_message),
+            (detached, Js::utf16(&[0xd800, 0x62])),
+        ] {
+            for synchronous in [false, true] {
+                let failure = reason.clone();
+                let runtime = exchange.base.runtime.clone();
+                this.define(
+                    "fetchBalance",
+                    Js::function("fetchBalance", move |_, _| {
+                        if synchronous {
+                            Err(Thrown::new(failure.clone()))
+                        } else {
+                            Ok(Js::Promise(
+                                safe_cex_exchange::js_runtime::promise::Promise::settled(
+                                    &runtime,
+                                    Err(Thrown::new(failure.clone())),
+                                ),
+                            ))
+                        }
+                    }),
+                )
+                .unwrap();
+                let result = this.call_method("validateAccount", vec![]).unwrap();
+                let result = await_js(&exchange.base.runtime, result).await.unwrap();
+                assert!(result.get("error").unwrap().strict_equals(&expected));
+                assert!(logged.borrow().strict_equals(&expected));
+                assert!(!result.has_own("balance"));
+            }
+        }
+        let logging = Js::object(vec![("opaque", Js::utf16(&[0xd800]))]);
+        let thrown = logging.clone();
+        this.define(
+            "emitAndLogError",
+            Js::function("emitAndLogError", move |_, _| {
+                Err(Thrown::new(thrown.clone()))
+            }),
+        )
+        .unwrap();
+        let result = this.call_method("validateAccount", vec![]).unwrap();
+        assert!(
+            await_js(&exchange.base.runtime, result)
+                .await
+                .unwrap_err()
+                .value
+                .strict_equals(&logging)
+        );
+        assert!(
+            safe_cex_exchange::capabilities::is_base_capability_fallback(
+                &super::capabilities(&ExchangeName::Hyrotrader).fetch_income_history_range,
+                safe_cex_exchange::capabilities::BaseCapabilityMethod::FetchIncomeHistoryRange,
+            )
+        );
+        exchange.base.dispose().unwrap();
+    });
+}
+
+#[test]
 fn divergence_audit_order_index_keeps_live_options_and_rejection_identity() {
     run(async {
         for name in [
@@ -1054,6 +1371,441 @@ fn divergence_audit_position_mode_maps_with_the_original_array_and_receiver() {
             assert_eq!(count.get(), 1);
             assert!(published.borrow().get("0").unwrap().strict_equals(&mapped));
             exchange.base.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
+fn retained_audit_ticker_native_lookup_and_prefix() {
+    run(async {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+        ] {
+            let exchange = venue(name.clone());
+            let rt = exchange.js.get().unwrap();
+            let cache = Js::array(vec![Js::object(vec![("opaque", Js::utf16(&[0xd800]))])]);
+            let market = Js::object(vec![
+                ("id", Js::str("native")),
+                ("symbol", Js::str("BTC")),
+                ("isInverse", Js::Bool(true)),
+                ("isExpiring", Js::Bool(true)),
+            ]);
+            rt.this
+                .define(
+                    "store",
+                    Js::object(vec![
+                        ("tickers", cache.clone()),
+                        ("marketsBySymbol", Js::object(vec![("BTC", market)])),
+                    ]),
+                )
+                .unwrap();
+            let cached = rt.this.call_method("parseTickers", vec![Js::Null]).unwrap();
+            assert!(
+                cached.strict_equals(&cache),
+                "ticker_cached_identity {name:?}"
+            );
+            let row = Js::object(vec![
+                ("symbol", Js::str("BTC")),
+                ("lastPrice", Js::utf16(&[50, 0xd800])),
+                ("volume24h", Js::str("-0")),
+                ("turnover24h", Js::Number(f64::INFINITY)),
+            ]);
+            row.define_accessor(
+                "unused",
+                Some(Rc::new(|_| panic!("unread ticker field"))),
+                None,
+            )
+            .unwrap();
+            let store = rt.this.get("store").unwrap();
+            row.define_accessor(
+                "lastPrice",
+                Some(Rc::new(move |_| {
+                    store.set(
+                        "marketsBySymbol",
+                        Js::object(vec![(
+                            "ETH",
+                            Js::object(vec![("id", Js::str("next")), ("symbol", Js::str("ETH"))]),
+                        )]),
+                    )?;
+                    Ok(Js::utf16(&[50, 0xd800]))
+                })),
+                None,
+            )
+            .unwrap();
+            let second = Js::object(vec![
+                ("symbol", Js::str("ETH")),
+                ("lastPrice", Js::str("3")),
+                ("volume24h", Js::str("1")),
+            ]);
+            let result = rt
+                .this
+                .call_method("parseTickers", vec![Js::array(vec![row, second])])
+                .unwrap();
+            assert_eq!(
+                result.get("length").unwrap().to_number().unwrap(),
+                2.,
+                "ticker_live_dictionary"
+            );
+            assert!(
+                result
+                    .get("1")
+                    .unwrap()
+                    .get("id")
+                    .unwrap()
+                    .strict_equals(&Js::str("next"))
+            );
+            let ticker = result.get("0").unwrap();
+            assert_eq!(
+                ticker.get("last").unwrap().to_number().unwrap(),
+                2.,
+                "ticker_utf16_prefix"
+            );
+            let spot = name == ExchangeName::Bybitspot;
+            let volume = ticker.get("volume").unwrap().to_number().unwrap();
+            assert_eq!(
+                volume.to_bits(),
+                if spot {
+                    (-0.0f64).to_bits()
+                } else {
+                    f64::INFINITY.to_bits()
+                },
+                "ticker_inverse_volume"
+            );
+            assert_eq!(
+                ticker
+                    .get("quoteVolume")
+                    .unwrap()
+                    .to_number()
+                    .unwrap()
+                    .to_bits(),
+                (-0.0f64).to_bits()
+            );
+            assert!(ticker.get("bid").unwrap().to_number().unwrap().is_nan());
+            assert_eq!(ticker.get("fundingRate").unwrap().to_number().unwrap(), 0.);
+            exchange.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
+fn retained_audit_spot_market_native_info_and_eager_request() {
+    run(async {
+        let exchange = venue(ExchangeName::Bybitspot);
+        let rt = exchange.js.get().unwrap();
+        let info = Js::object(vec![
+            ("symbol", Js::str("BTCUSDT")),
+            ("baseCoin", Js::str("BTC")),
+            ("quoteCoin", Js::str("USDT")),
+            ("status", Js::str("Trading")),
+            (
+                "lotSizeFilter",
+                Js::object(vec![
+                    ("qtyStep", Js::str("0.001")),
+                    ("minOrderQty", Js::str("0.001")),
+                    ("maxOrderQty", Js::str("100")),
+                ]),
+            ),
+            (
+                "priceFilter",
+                Js::object(vec![("tickSize", Js::str("0.1"))]),
+            ),
+            (
+                "opaque",
+                Js::object(vec![
+                    ("missing", Js::Undefined),
+                    ("text", Js::utf16(&[0xd800])),
+                    ("number", Js::Number(f64::INFINITY)),
+                ]),
+            ),
+        ]);
+        let response = Js::object(vec![(
+            "data",
+            Js::object(vec![
+                ("retMsg", Js::str("OK")),
+                ("result", Js::object(vec![("list", Js::array(vec![info]))])),
+            ]),
+        )]);
+        let calls = Rc::new(Cell::new(0));
+        let count = calls.clone();
+        rt.this
+            .define(
+                "xhr",
+                Js::object(vec![(
+                    "get",
+                    Js::function("get", move |_, args| {
+                        assert_eq!(
+                            crate::binding::host::text(&args[0])?,
+                            "/v5/market/instruments-info"
+                        );
+                        assert_eq!(
+                            crate::binding::host::text(&args[1].get("params")?.get("category")?)?,
+                            "spot"
+                        );
+                        count.set(count.get() + 1);
+                        Ok(response.clone())
+                    }),
+                )]),
+            )
+            .unwrap();
+        let pending = rt
+            .this
+            .call_method("fetchMarketsHelper", vec![Js::str("spot")])
+            .unwrap();
+        assert_eq!(calls.get(), 1, "spot_market_eager_request");
+        let markets = await_js(&exchange.base.runtime, pending).await.unwrap();
+        let market = markets.get("0").unwrap();
+        let opaque = market.get("info").unwrap().get("opaque").unwrap();
+        assert_eq!(
+            units(&opaque.get("text").unwrap()),
+            [0xd800],
+            "spot_market_utf16_info"
+        );
+        assert!(opaque.has_own("missing"), "spot_market_own_undefined");
+        assert!(matches!(opaque.get("missing").unwrap(), Js::Undefined));
+        assert_eq!(
+            opaque.get("number").unwrap().to_number().unwrap(),
+            f64::INFINITY
+        );
+        assert_eq!(
+            market
+                .get("limits")
+                .unwrap()
+                .get("leverage")
+                .unwrap()
+                .get("max")
+                .unwrap()
+                .to_number()
+                .unwrap(),
+            1.
+        );
+        exchange.dispose().unwrap();
+    });
+}
+
+#[test]
+fn retained_audit_startup_dropped_waiter_and_native_warning() {
+    run(async {
+        for name in [ExchangeName::Bybit, ExchangeName::Bybitspot] {
+            let options =
+                serde_json::from_value(serde_json::json!({"key":"key", "secret":"secret"}))
+                    .unwrap();
+            let exchange = venue_with_options(name.clone(), options);
+            let rt = exchange.js.get().unwrap();
+            let runtime = exchange.base.runtime.clone();
+            let clock = safe_cex_exchange::js_runtime::promise::Promise::pending(&runtime);
+            let clock_result = clock.clone();
+            rt.global("virtualClock")
+                .unwrap()
+                .define(
+                    "start",
+                    Js::function("start", move |_, _| Ok(Js::Promise(clock_result.clone()))),
+                )
+                .unwrap();
+            rt.this
+                .define(
+                    "initExternalPublicData",
+                    Js::function("external", |_, _| Ok(Js::Bool(true))),
+                )
+                .unwrap();
+            let cache_error = Js::object(vec![("message", Js::utf16(&[0xdfff]))]);
+            let cache_reason = cache_error.clone();
+            rt.this
+                .define(
+                    "fetchAndCacheApiKeyInfo",
+                    Js::function("cache", move |_, _| {
+                        Ok(Js::Promise(
+                            safe_cex_exchange::js_runtime::promise::Promise::settled(
+                                &runtime,
+                                Err(Thrown::new(cache_reason.clone())),
+                            ),
+                        ))
+                    }),
+                )
+                .unwrap();
+            let reports = Rc::new(RefCell::new(Vec::<Js>::new()));
+            let reported = reports.clone();
+            rt.this
+                .define(
+                    "emitAndLogError",
+                    Js::function("report", move |_, args| {
+                        reported.borrow_mut().push(arg(&args, 0));
+                        Ok(Js::Undefined)
+                    }),
+                )
+                .unwrap();
+            let reason = Js::object(vec![("message", Js::utf16(&[0xd800, 120]))]);
+            let probe =
+                safe_cex_exchange::js_runtime::promise::Promise::pending(&exchange.base.runtime);
+            let held = probe.clone();
+            rt.this
+                .define(
+                    "fetchMarginAccountInfos",
+                    Js::function("probe", move |_, _| Ok(Js::Promise(held.clone()))),
+                )
+                .unwrap();
+            let messages = Rc::new(RefCell::new(Vec::<Vec<Js>>::new()));
+            let logs = messages.clone();
+            rt.this
+                .define(
+                    "log",
+                    Js::function("log", move |_, args| {
+                        logs.borrow_mut().push(args);
+                        Ok(Js::Undefined)
+                    }),
+                )
+                .unwrap();
+            let connected = Rc::new(Cell::new(0));
+            let count = connected.clone();
+            rt.this
+                .define(
+                    "privateWebsocket",
+                    Js::object(vec![(
+                        "connectAndSubscribe",
+                        Js::function("connect", move |_, _| {
+                            count.set(count.get() + 1);
+                            Ok(Js::Undefined)
+                        }),
+                    )]),
+                )
+                .unwrap();
+            rt.this
+                .define(
+                    "fetchOrdersPositionsAndBalance",
+                    Js::function("snapshots", |_, _| Ok(Js::Undefined)),
+                )
+                .unwrap();
+            rt.this
+                .define("tick", Js::function("tick", |_, _| Ok(Js::Undefined)))
+                .unwrap();
+            drop(exchange.start());
+            clock.settle(Ok(Js::Undefined));
+            probe.settle(Err(Thrown::new(reason)));
+            for _ in 0..20 {
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(connected.get(), 1, "startup_dropped_waiter {name:?}");
+            let logs = messages.borrow();
+            assert_eq!(logs.len(), 1);
+            let mut expected: Vec<u16> =
+                "Bybit market data is ready, but the private API was rejected ("
+                    .encode_utf16()
+                    .collect();
+            expected.extend([0xd800, 120]);
+            expected.extend(") — trading is unavailable".encode_utf16());
+            assert_eq!(
+                units(&logs[0][0]),
+                expected,
+                "startup_native_warning {name:?}"
+            );
+            assert_eq!(
+                units(&logs[0][1]),
+                "warning".encode_utf16().collect::<Vec<_>>()
+            );
+            assert_eq!(
+                reports.borrow().len(),
+                usize::from(name == ExchangeName::Bybit),
+                "startup_cache_failure_visible"
+            );
+            if name == ExchangeName::Bybit {
+                assert!(
+                    reports.borrow()[0].strict_equals(&cache_error),
+                    "startup_cache_failure_identity"
+                );
+            }
+            drop(logs);
+            exchange.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
+fn retained_audit_startup_preserves_family_request_order() {
+    run(async {
+        for name in [ExchangeName::Bybit, ExchangeName::Bybitspot] {
+            let exchange = venue(name.clone());
+            let rt = exchange.js.get().unwrap();
+            let runtime = exchange.base.runtime.clone();
+            rt.global("virtualClock")
+                .unwrap()
+                .define("start", Js::function("start", |_, _| Ok(Js::Undefined)))
+                .unwrap();
+            rt.this
+                .define(
+                    "initExternalPublicData",
+                    Js::function("external", |_, _| Ok(Js::Bool(false))),
+                )
+                .unwrap();
+            let markets = safe_cex_exchange::js_runtime::promise::Promise::pending(&runtime);
+            let held = markets.clone();
+            rt.this
+                .define(
+                    "fetchMarkets",
+                    Js::function("markets", move |_, _| Ok(Js::Promise(held.clone()))),
+                )
+                .unwrap();
+            let requests = Rc::new(Cell::new(0));
+            let calls = requests.clone();
+            let raw = Js::array(vec![]);
+            let raw_result = raw.clone();
+            rt.this
+                .define(
+                    "fetchTickersWithoutParse",
+                    Js::function("raw", move |_, _| {
+                        calls.set(calls.get() + 1);
+                        Ok(raw_result.clone())
+                    }),
+                )
+                .unwrap();
+            let parsed = Rc::new(Cell::new(0));
+            let calls = parsed.clone();
+            rt.this
+                .define(
+                    "parseTickers",
+                    Js::function("parse", move |_, args| {
+                        assert!(args[0].strict_equals(&raw));
+                        calls.set(calls.get() + 1);
+                        Ok(Js::array(vec![]))
+                    }),
+                )
+                .unwrap();
+            for key in ["publicWebsocket", "inversePublicWebsocket"] {
+                rt.this
+                    .define(
+                        key,
+                        Js::object(vec![(
+                            "connectAndSubscribe",
+                            Js::function("connect", |_, _| Ok(Js::Undefined)),
+                        )]),
+                    )
+                    .unwrap();
+            }
+            rt.this
+                .define("log", Js::function("log", |_, _| Ok(Js::Undefined)))
+                .unwrap();
+            let pending = rt.this.call_method("start", vec![]).unwrap();
+            for _ in 0..20 {
+                tokio::task::yield_now().await;
+            }
+            assert_eq!(
+                requests.get(),
+                usize::from(name == ExchangeName::Bybit),
+                "startup_parallel_vs_sequential"
+            );
+            assert_eq!(parsed.get(), 0);
+            markets.settle(Ok(Js::array(vec![])));
+            await_js(&runtime, pending).await.unwrap();
+            assert_eq!(requests.get(), 1);
+            assert_eq!(parsed.get(), 1);
+            let loaded = rt.this.get("store").unwrap().get("loaded").unwrap();
+            for key in ["markets", "tickers", "balance", "orders", "positions"] {
+                assert!(
+                    loaded.get(key).unwrap().truthy(),
+                    "startup_loaded_flag {key}"
+                );
+            }
+            exchange.dispose().unwrap();
         }
     });
 }

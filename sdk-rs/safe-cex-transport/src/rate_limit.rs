@@ -11,7 +11,7 @@ pub trait RateLimitClock {
 }
 #[derive(Default)]
 struct State {
-    start: u64,
+    reset: Option<TransportFuture<'static, ()>>,
     count: usize,
     next_ticket: u64,
     queue: VecDeque<(u64, Option<Waker>)>,
@@ -79,45 +79,67 @@ impl RateLimiter {
             state: &self.state,
             ticket,
         };
-        loop {
-            let wait = poll_fn(|cx| {
-                let now = self.clock.now_ms();
-                let mut state = self.state.lock().expect("rate limit lock");
-                if state
-                    .queue
-                    .front()
-                    .is_none_or(|(front, _)| *front != ticket)
+        let result = poll_fn(|cx| {
+            let mut state = self.state.lock().expect("rate limit lock");
+            if state
+                .queue
+                .front()
+                .is_none_or(|(front, _)| *front != ticket)
+            {
+                if let Some((_, waker)) =
+                    state.queue.iter_mut().find(|(queued, _)| *queued == ticket)
                 {
-                    if let Some((_, waker)) =
-                        state.queue.iter_mut().find(|(queued, _)| *queued == ticket)
-                    {
-                        *waker = Some(cx.waker().clone());
-                    }
-                    return Poll::Pending;
+                    *waker = Some(cx.waker().clone());
                 }
-                if state.count == 0 || now.saturating_sub(state.start) >= self.per_milliseconds {
-                    state.start = now;
-                    state.count = 0;
-                }
-                if state.count < self.max_requests {
-                    state.count += 1;
-                    Poll::Ready(None)
-                } else {
-                    Poll::Ready(Some(
-                        self.per_milliseconds
-                            .saturating_sub(now.saturating_sub(state.start)),
-                    ))
-                }
-            })
-            .await;
-            if let Some(wait) = wait {
-                self.clock.sleep_ms(wait).await?;
-            } else {
-                break;
+                return Poll::Pending;
             }
-        }
+            let reset = state.reset.take();
+            drop(state);
+            let (reset, completed) = match reset {
+                Some(mut reset) => match reset.as_mut().poll(cx) {
+                    Poll::Ready(result) => (None, Some(result)),
+                    Poll::Pending => (Some(reset), None),
+                },
+                None => (None, None),
+            };
+            let mut state = self.state.lock().expect("rate limit lock");
+            state.reset = reset;
+            if let Some(result) = completed {
+                state.count = 0;
+                if let Err(error) = result {
+                    return Poll::Ready(Err(error));
+                }
+            }
+            if state.count == self.max_requests {
+                return Poll::Pending;
+            }
+            state.count += 1;
+            if state.count == 1 {
+                drop(state);
+                let clock = self.clock.clone();
+                let delay = self.per_milliseconds;
+                let mut reset: TransportFuture<'static, ()> =
+                    Box::pin(async move { clock.sleep_ms(delay).await });
+                // Register at the first dispatch; later clock reads cannot
+                // postpone an elapsed window or strand a frozen replay clock.
+                let (reset, completed) = match reset.as_mut().poll(cx) {
+                    Poll::Pending => (Some(reset), None),
+                    Poll::Ready(result) => (None, Some(result)),
+                };
+                let mut state = self.state.lock().expect("rate limit lock");
+                state.reset = reset;
+                if let Some(result) = completed {
+                    state.count = 0;
+                    if let Err(error) = result {
+                        return Poll::Ready(Err(error));
+                    }
+                }
+            }
+            Poll::Ready(Ok(()))
+        })
+        .await;
         drop(guard);
-        Ok(())
+        result
     }
 }
 impl RestAdapter for RateLimitedAdapter {
