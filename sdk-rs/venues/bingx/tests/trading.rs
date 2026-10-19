@@ -433,6 +433,7 @@ fn cancel_continues_after_failure_and_marks_only_successes() {
 fn trigger_replacement_stops_when_cancel_fails() {
     let mut trigger = order();
     trigger.kind = OrderType::StopLoss;
+    trigger.trigger_type = Some(StopTriggerType::MarkPrice);
     trigger.side = OrderSide::Sell;
     trigger.price = 90.0;
     trigger.client_order_id = None;
@@ -471,6 +472,7 @@ fn hedged_leverage_updates_both_sides_sequentially() {
 fn an_absent_trigger_is_not_confirmation_to_place_a_replacement() {
     let mut trigger = order();
     trigger.kind = OrderType::StopLoss;
+    trigger.trigger_type = Some(StopTriggerType::MarkPrice);
     trigger.side = OrderSide::Sell;
     trigger.price = 90.0;
     trigger.client_order_id = None;
@@ -524,6 +526,7 @@ fn cancel_replace_preserves_numeric_int64_without_a_client_id() {
 fn raw_trigger_kind_is_authoritative_even_if_normalized_kind_was_reclassified() {
     let mut o = order();
     o.kind = OrderType::TakeProfit;
+    o.trigger_type = Some(StopTriggerType::MarkPrice);
     o.side = OrderSide::Sell;
     o.price = 90.0;
     o.time_in_force = None;
@@ -767,6 +770,7 @@ fn trigger_replacement_requires_a_consistent_cancellation_acknowledgement() {
     ] {
         let mut o = order();
         o.kind = OrderType::StopLoss;
+        o.trigger_type = Some(StopTriggerType::MarkPrice);
         o.side = OrderSide::Sell;
         o.price = 90.0;
         let mut h = Harness::new(Some((o, "STOP_MARKET")));
@@ -830,5 +834,174 @@ fn placement_guard_rejects_contradictory_outer_identity_before_account_hook() {
         h.reply(body);
         assert_eq!(h.engine.venue().acknowledgements, [(accepted, false)]);
         assert_eq!(h.done[0].is_ok(), accepted);
+    }
+}
+
+#[test]
+fn last_price_trigger_amendment_rejects_a_crossed_last_even_when_mark_is_safe() {
+    let mut trigger = order();
+    trigger.kind = OrderType::StopLoss;
+    trigger.side = OrderSide::Sell;
+    trigger.price = 90.0;
+    trigger.trigger_type = Some(StopTriggerType::LastPrice);
+    let mut h = Harness::new(Some((trigger, "STOP_MARKET")));
+    h.engine.store_mut().set_positions(vec![position()]);
+    h.engine.store_mut().update_ticker("BTCUSDT", |t| {
+        t.last = 100.0;
+        t.mark = 120.0;
+    });
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(110.0),
+        amount: None,
+    });
+    assert!(
+        h.requests.is_empty(),
+        "must not cancel the existing protective stop"
+    );
+    assert!(h.done[0].as_ref().unwrap_err().contains("immediately"));
+    assert_eq!(
+        h.engine.store().order(&order().id).unwrap().status,
+        OrderStatus::Open
+    );
+}
+
+#[test]
+fn last_price_trigger_amendment_uses_last_and_preserves_the_native_source() {
+    let mut trigger = order();
+    trigger.kind = OrderType::StopLoss;
+    trigger.side = OrderSide::Sell;
+    trigger.price = 90.0;
+    trigger.trigger_type = Some(StopTriggerType::LastPrice);
+    let mut h = Harness::new(Some((trigger, "STOP_MARKET")));
+    h.engine.store_mut().set_positions(vec![position()]);
+    h.engine.store_mut().update_ticker("BTCUSDT", |t| {
+        t.last = 120.0;
+        t.mark = 100.0;
+    });
+    h.command(Command::AmendOrder {
+        command: 1,
+        id: order().id,
+        price: Some(110.0),
+        amount: None,
+    });
+    assert_eq!(h.requests[0].method, safe_cex_engine::Method::Delete);
+    h.reply(r#"{"code":0,"data":{}}"#);
+    assert!(h.body().contains("\"workingType\":\"CONTRACT_PRICE\""));
+}
+
+#[test]
+fn trigger_amendment_requires_its_reconciled_supported_and_valid_source_before_cancellation() {
+    for (source, last, mark, missing_ticker) in [
+        (None, 100.0, 100.0, false),
+        (Some(StopTriggerType::IndexPrice), 100.0, 100.0, false),
+        (Some(StopTriggerType::LastPrice), 0.0, 100.0, false),
+        (Some(StopTriggerType::LastPrice), f64::NAN, 100.0, false),
+        (
+            Some(StopTriggerType::MarkPrice),
+            100.0,
+            f64::INFINITY,
+            false,
+        ),
+        (Some(StopTriggerType::MarkPrice), 100.0, 0.0, false),
+        (Some(StopTriggerType::MarkPrice), 100.0, 100.0, true),
+    ] {
+        let mut trigger = order();
+        trigger.kind = OrderType::StopLoss;
+        trigger.side = OrderSide::Sell;
+        trigger.price = 80.0;
+        trigger.trigger_type = source;
+        let mut h = Harness::new(Some((trigger, "STOP_MARKET")));
+        h.engine.store_mut().set_positions(vec![position()]);
+        h.engine.store_mut().update_ticker("BTCUSDT", |t| {
+            t.last = last;
+            t.mark = mark;
+        });
+        if missing_ticker {
+            h.engine.store_mut().set_tickers(Vec::new());
+        }
+        h.command(Command::AmendOrder {
+            command: 1,
+            id: order().id,
+            price: Some(90.0),
+            amount: None,
+        });
+        assert!(h.requests.is_empty());
+        assert!(h.done[0].is_err());
+    }
+}
+
+#[test]
+fn attached_brackets_preserve_each_explicit_source_and_the_venue_default() {
+    for (sl, tp, generic, expected_sl, expected_tp) in [
+        (
+            Some(StopTriggerType::LastPrice),
+            Some(StopTriggerType::MarkPrice),
+            None,
+            "CONTRACT_PRICE",
+            "MARK_PRICE",
+        ),
+        (
+            Some(StopTriggerType::MarkPrice),
+            Some(StopTriggerType::LastPrice),
+            None,
+            "MARK_PRICE",
+            "CONTRACT_PRICE",
+        ),
+        (
+            None,
+            None,
+            Some(StopTriggerType::LastPrice),
+            "CONTRACT_PRICE",
+            "CONTRACT_PRICE",
+        ),
+        (None, None, None, "MARK_PRICE", "MARK_PRICE"),
+    ] {
+        let mut h = Harness::new(None);
+        h.place(vec![PlaceOrderOpts {
+            stop_loss: Some(90.0),
+            take_profit: Some(110.0),
+            sl_trigger_type: sl,
+            tp_trigger_type: tp,
+            trigger_type: generic,
+            ..opts()
+        }]);
+        h.reply(r#"{"code":0,"data":{"orderId":1}}"#);
+        assert!(
+            h.body()
+                .contains(&format!("\"workingType\":\"{expected_sl}\""))
+        );
+        h.reply(r#"{"code":0,"data":{"orderId":2}}"#);
+        assert!(
+            h.body()
+                .contains(&format!("\"workingType\":\"{expected_tp}\""))
+        );
+        h.reply(r#"{"code":0,"data":{"orderId":3}}"#);
+        assert!(h.done[0].is_ok());
+    }
+}
+
+#[test]
+fn unsupported_attached_trigger_sources_reject_the_entire_batch_before_writes() {
+    for (sl, tp, generic) in [
+        (Some(StopTriggerType::IndexPrice), None, None),
+        (None, Some(StopTriggerType::IndexPrice), None),
+        (None, None, Some(StopTriggerType::IndexPrice)),
+    ] {
+        let mut h = Harness::new(None);
+        h.place(vec![
+            opts(),
+            PlaceOrderOpts {
+                stop_loss: Some(90.0),
+                take_profit: Some(110.0),
+                sl_trigger_type: sl,
+                tp_trigger_type: tp,
+                trigger_type: generic,
+                ..opts()
+            },
+        ]);
+        assert!(h.requests.is_empty());
+        assert!(h.done[0].is_err());
     }
 }

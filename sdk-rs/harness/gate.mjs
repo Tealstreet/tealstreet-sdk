@@ -68,6 +68,8 @@ const isPrivate = Boolean(ts.account);
 // - fillHistory uses startTs/endTs/pageSize/pageIndex, not TS's ignored params.
 // - Contradictory placement IDs or rejected ACK status must not advance jobs.
 // - Delayed placement/replacement ACKs must not reopen newer private state.
+// - Trigger replacement checks its selected source; TS always checks mark.
+// - Attached SL/TP keeps per-leg workingType; TS spreads the untyped entry.
 
 //  - A position first seen on the user stream keeps the margin size of TS's
 //    zero-size placeholder (0); Rust takes the isolated wallet, or notional

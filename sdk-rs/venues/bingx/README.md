@@ -22,5 +22,6 @@ update both hedge sides sequentially, matching the engine's symbol-level API.
 The gate declares TS fixes for zero decimal precision, descending asks,
 non-finite ticker placeholders, per-execution fills and terminal dedupe,
 `cp` close flags, required full-position stop quantity, fail-closed bracket
-sequencing, contradictory ACKs, and fill-history query parameters. Tests derive
+sequencing, contradictory ACKs, trigger-source preservation and checks, and
+fill-history query parameters. Tests derive
 from BingX's published payloads and the SDK's documented runtime contracts.

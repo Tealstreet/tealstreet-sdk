@@ -738,6 +738,13 @@ impl Trading {
             if !trigger.is_finite() || trigger <= 0.0 {
                 return Err("Bracket trigger rounds to zero".into());
             }
+            let source = match kind {
+                OrderType::StopLoss => o.sl_trigger_type,
+                OrderType::TakeProfit => o.tp_trigger_type,
+                _ => unreachable!("bracket leg kind"),
+            }
+            .or(o.trigger_type)
+            .unwrap_or(StopTriggerType::MarkPrice);
             let mut bracket = Params::new()
                 .str("symbol", &market.id)
                 .str(
@@ -747,8 +754,8 @@ impl Trading {
                 .str("side", side(o.side.opposite()))
                 .str("type", "TRIGGER_MARKET")
                 .num("stopPrice", trigger)
+                .str("workingType", working_type(source)?)
                 .str("timeInForce", "GTC");
-            let _ = kind;
             if !cx.store.hedged() {
                 bracket = bracket.boolean("reduceOnly", true);
             }
@@ -847,19 +854,31 @@ impl Trading {
             } else {
                 OrderType::TakeProfit
             };
-            if let Some(t) = cx
+            let source = o
+                .trigger_type
+                .ok_or("Trigger amendment requires a reconciled trigger price source")?;
+            working_type(source)?;
+            let ticker = cx
                 .store
                 .ticker(&o.symbol)
-                .filter(|t| t.mark.is_finite() && t.mark > 0.0)
-            {
-                let immediate = match (kind, o.side) {
-                    (OrderType::StopLoss, OrderSide::Sell)
-                    | (OrderType::TakeProfit, OrderSide::Buy) => next >= t.mark,
-                    _ => next <= t.mark,
-                };
-                if immediate {
-                    return Err("Replacement trigger would execute immediately".into());
-                }
+                .ok_or("Trigger amendment requires a current trigger price")?;
+            let reference = match source {
+                StopTriggerType::MarkPrice => ticker.mark,
+                StopTriggerType::LastPrice => ticker.last,
+                StopTriggerType::IndexPrice => unreachable!("validated trigger source"),
+            };
+            if !reference.is_finite() || reference <= 0.0 {
+                return Err(
+                    "Trigger amendment requires a valid price for its trigger source".into(),
+                );
+            }
+            let immediate = match (kind, o.side) {
+                (OrderType::StopLoss, OrderSide::Sell)
+                | (OrderType::TakeProfit, OrderSide::Buy) => next >= reference,
+                _ => next <= reference,
+            };
+            if immediate {
+                return Err("Replacement trigger would execute immediately".into());
             }
             let opts = PlaceOrderOpts {
                 symbol: o.symbol.clone(),
@@ -1092,6 +1111,15 @@ fn working(o: &PlaceOrderOpts) -> &'static str {
             } else {
                 "MARK_PRICE"
             }
+        }
+    }
+}
+fn working_type(source: StopTriggerType) -> Result<&'static str, String> {
+    match source {
+        StopTriggerType::MarkPrice => Ok("MARK_PRICE"),
+        StopTriggerType::LastPrice => Ok("CONTRACT_PRICE"),
+        StopTriggerType::IndexPrice => {
+            Err("BingX supports mark-price and last-price triggers".into())
         }
     }
 }

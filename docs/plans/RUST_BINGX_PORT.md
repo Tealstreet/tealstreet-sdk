@@ -269,3 +269,13 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
   invalid row indexes and mask equivalence. Engine26/public7 tests pass.
 - Four-venue Node22 public gate PASS:188frames,1268markets,1260tickers,2books;
   CPU80.5/58.9ms, steady30.9/23.3ms, retained1.8/1.7MB, wasm1.4MB.
+
+### Trigger review fixes
+
+- Replacements validate the reconciled mark/last trigger source and its finite
+  positive reference before cancellation; unknown/index sources fail closed.
+  Attached protective legs preserve explicit per-leg/generic trigger sources.
+  Unspecified attached SL/TP keep the existing MARK_PRICE venue default.
+- These also fix TS always-mark replacement checks and its attached workingType
+  omission, declared in KNOWN_TS_FIXES. Five new trading regressions pass
+  (33total); standalone take-profit defaults were not conflated with brackets.
