@@ -211,37 +211,49 @@ impl Okx {
 
     fn subscribe(&self, cx: &mut Cx<'_, Pending>, channel: usize) {
         if channel == PUBLIC {
-            let args: Vec<_> = [
+            // Serialize bounded topic batches while the store is borrowed;
+            // only the owned messages need to survive until Cx can send them.
+            let mut args = Vec::with_capacity(100);
+            let mut text = Vec::new();
+            for name in [
                 "tickers",
                 "mark-price",
                 "index-tickers",
                 "open-interest",
                 "funding-rate",
-            ]
-            .into_iter()
-            .flat_map(|name| {
-                cx.store.markets().iter().map(move |m| Topic {
-                    channel: name,
-                    inst_id: Some(if name == "index-tickers" {
-                        m.id.strip_suffix("-SWAP").unwrap_or(&m.id)
-                    } else {
-                        &m.id
-                    }),
-                    inst_type: None,
-                })
-            })
-            .collect();
-            // Release the store borrow before handing topics to Cx.
-            let text: Vec<_> = args
-                .chunks(100)
-                .map(|args| {
+            ] {
+                for m in cx.store.markets() {
+                    args.push(Topic {
+                        channel: name,
+                        inst_id: Some(if name == "index-tickers" {
+                            m.id.strip_suffix("-SWAP").unwrap_or(&m.id)
+                        } else {
+                            &m.id
+                        }),
+                        inst_type: None,
+                    });
+                    if args.len() == 100 {
+                        text.push(
+                            serde_json::to_string(&Subscription {
+                                op: "subscribe",
+                                args: &args,
+                            })
+                            .expect("topics"),
+                        );
+                        args.clear();
+                    }
+                }
+            }
+            if !args.is_empty() {
+                text.push(
                     serde_json::to_string(&Subscription {
                         op: "subscribe",
-                        args,
+                        args: &args,
                     })
-                    .expect("topics")
-                })
-                .collect();
+                    .expect("topics"),
+                );
+            }
+            drop(args);
             if let Some(socket) = self.connections[PUBLIC].socket {
                 for t in text {
                     cx.send(socket, t);

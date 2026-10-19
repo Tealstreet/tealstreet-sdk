@@ -1080,6 +1080,7 @@ impl Venue for BinanceFutures {
 
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
         match command {
+            Command::SetTickerSymbols { .. } => {}
             Command::SubscribeOrderBook { symbol } => self.subscribe_book(cx, symbol),
             Command::UnsubscribeOrderBook { symbol } => self.unsubscribe_book(cx, &symbol),
             Command::SubscribeCandles { symbol, interval } => {

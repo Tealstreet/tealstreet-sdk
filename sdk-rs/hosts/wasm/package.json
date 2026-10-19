@@ -28,5 +28,6 @@
     "test": "node --test js/*.test.mjs",
     "test-host": "node --test js/host.test.mjs"
   },
+  "dependencies": { "ws": "^8.21.3" },
   "license": "MIT"
 }

@@ -9,8 +9,10 @@ use safe_cex_engine::{
 };
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
+use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
+use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -61,6 +63,8 @@ struct EngineOptions {
     secret: Option<String>,
     #[serde(default)]
     passphrase: Option<String>,
+    #[serde(default)]
+    private_ws_headers: bool,
 }
 
 #[derive(Serialize)]
@@ -69,6 +73,8 @@ enum ActionOut<'a> {
     WsConnect {
         socket: u32,
         url: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        headers: Option<Vec<(&'static str, &'a str)>>,
     },
     WsSend {
         socket: u32,
@@ -115,6 +121,16 @@ fn encode(actions: &[Action]) -> String {
             Action::WsConnect { socket, url } => ActionOut::WsConnect {
                 socket: socket.0,
                 url,
+                headers: None,
+            },
+            Action::WsConnectWithHeaders {
+                socket,
+                url,
+                headers,
+            } => ActionOut::WsConnect {
+                socket: socket.0,
+                url,
+                headers: Some(headers.iter().map(|(k, v)| (*k, v.as_str())).collect()),
             },
             Action::WsSend { socket, text } => ActionOut::WsSend {
                 socket: socket.0,
@@ -159,6 +175,9 @@ fn encode(actions: &[Action]) -> String {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
+    SetTickerSymbols {
+        symbols: Vec<String>,
+    },
     SubscribeOrderBook {
         symbol: String,
     },
@@ -274,6 +293,7 @@ enum CommandIn {
 impl From<CommandIn> for Command {
     fn from(command: CommandIn) -> Self {
         match command {
+            CommandIn::SetTickerSymbols { symbols } => Self::SetTickerSymbols { symbols },
             CommandIn::SubscribeOrderBook { symbol } => Self::SubscribeOrderBook { symbol },
             CommandIn::UnsubscribeOrderBook { symbol } => Self::UnsubscribeOrderBook { symbol },
             CommandIn::SubscribeCandles { symbol, interval } => {
@@ -419,6 +439,12 @@ impl WasmEngine {
     #[wasm_bindgen(constructor)]
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: EngineOptions = serde_json::from_str(options_json)?;
+        if venue == "weex"
+            && !options.public_data_only
+            && options.passphrase.as_deref().is_none_or(str::is_empty)
+        {
+            return Err(JsError::new("WEEX requires a passphrase"));
+        }
         let inner: Box<dyn AnyEngine> = match venue {
             "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
                 public_data_only: options.public_data_only,
@@ -432,7 +458,20 @@ impl WasmEngine {
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
             }))),
+            "weex" => Box::new(Engine::new(WeexFutures::new(WeexOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
+                private_ws_headers: options.private_ws_headers,
+            }))),
             "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
+            "cryptocom" => Box::new(Engine::new(Cryptocom::new(CryptocomOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,

@@ -9,6 +9,7 @@ import { parseArgs } from 'node:util';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
 import { canonicalUrl } from './tape.mjs';
+import { Frame } from '../hosts/wasm/js/wire.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -34,6 +35,7 @@ const recording = {
     const socket = ordinals.get(key) ?? 0;
     ordinals.set(key, socket + 1);
     return live.connect(url, {
+      headers: handlers.headers,
       onOpen: () => {
         write({ type: 'open', url, socket });
         handlers.onOpen();
@@ -74,8 +76,10 @@ const recording = {
 
 const { WasmEngine } = await loadEngine();
 let frames = 0;
+let updates = 0;
+const seenBooks = new Set();
 const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: true })), recording, {
-  onFrame: () => frames++,
+  onFrame: (buffer) => { updates++; for (const book of new Frame(buffer).books()) seenBooks.add(book.market); },
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });
 host.start();
@@ -83,15 +87,12 @@ for (const symbol of values.books.split(',').filter(Boolean)) {
   host.command({ op: 'subscribeOrderBook', symbol });
 }
 const flush = setInterval(() => host.flush(), 250);
-setTimeout(
-  () => {
-    clearInterval(flush);
-    host.flush();
-    host.dispose();
-    tape.end(() => {
-      console.log(JSON.stringify({ out, seconds: Number(values.seconds), frames }));
-      process.exit(0);
-    });
-  },
-  Number(values.seconds) * 1000,
-);
+setTimeout(() => {
+  clearInterval(flush);
+  host.flush();
+  host.dispose();
+  tape.end(() => {
+    console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, books: seenBooks.size }));
+    process.exit(frames > 0 && seenBooks.size >= values.books.split(',').filter(Boolean).length ? 0 : 1);
+  });
+}, Number(values.seconds) * 1000);

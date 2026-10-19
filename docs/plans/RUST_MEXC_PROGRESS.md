@@ -230,3 +230,14 @@ and cut a follow-up branch. Never touch master or force-push.
 - All adversarial findings resolved and independently rereviewed; final review
   posted at PR1304#issuecomment-6273120982. Push final evidence and wait for
   fresh CI to be green before merging; then create a fresh follow-up branch.
+
+- Landing advanced again through Crypto.com/WEEX (4046db3826). Integrated all
+  six venues, stricter validated streamed JSON/1MiB envelope cap, protocol audits,
+  classified POST reads, timed snapshots, worker packer and audited retained
+  memory (heap plus backing buffers; collection outside timed CPU window).
+  Independent engine/host and harness merge audits complete. Added defaults to
+  incoming WEEX MarketSetting initializers for MEXC's optional leverage rails.
+- Current six-venue workspace359 tests, fmt/clippy/bans/wasm-clippy and root
+  typecheck44/lint28 pass. Incoming landing budget is2359296, retained exactly;
+  opt3 aggregate2481675 exceeds it, so wasm-only size optimization is remeasured
+  (native remains3). Final combined replay evidence/CI follows this merge.

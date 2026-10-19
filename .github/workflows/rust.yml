@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Browser engine size budget: 1.4 MiB (debug names excluded).
-      WASM_BUDGET_BYTES: 1468006
+      # Five venues: measured 2,150,200 bytes locally; allow 2.25 MiB.
+      WASM_BUDGET_BYTES: 2359296
     defaults:
       run:
         working-directory: .
@@ -135,10 +135,6 @@ jobs:
         run: yarn workspace @tealstreet/safe-cex test-wasm
       - name: The Cloudflare Workers host
         run: yarn workspace @tealstreet/safe-cex-wasm test
-      - name: Host and tape transport regressions
-        run: |
-          yarn workspace @tealstreet/safe-cex-wasm test-host
-          yarn rust:test-harness
       - name: Check the wasm size budget
         run: |
           size=$(stat -c%s sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm)
@@ -162,6 +158,14 @@ jobs:
         run: |
           yarn rust:private-tape-bybit
           yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''
+      - name: Harness protocol regressions
+        run: yarn rust:test-harness
+      - name: Crypto.com public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue cryptocom --tape sdk-rs/harness/fixtures/cryptocom-public.jsonl.gz --books BTCUSD-PERP,ETHUSD-PERP
+      - name: Crypto.com account and trading (correctness)
+        run: |
+          yarn rust:private-tape-cryptocom
+          yarn rust:gate --venue cryptocom --tape sdk-rs/harness/tapes/cryptocom-private.jsonl --runs 1 --books ''
       - name: OKX public data (correctness, CPU and memory)
         run: yarn rust:gate --venue okx --tape sdk-rs/harness/fixtures/okx-public.jsonl.gz --books BTCUSDT,ETHUSDT
       - name: OKX account and trading variants (correctness)
@@ -170,3 +174,9 @@ jobs:
             yarn rust:private-tape-okx --venue "$venue"
             yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
           done
+      - name: WEEX public data (correctness, CPU and memory)
+        run: corepack yarn -s rust:gate --venue weex --tape sdk-rs/harness/fixtures/weex-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: WEEX account and trading (correctness)
+        run: |
+          corepack yarn -s rust:private-tape:weex
+          corepack yarn -s rust:gate --venue weex --tape sdk-rs/harness/tapes/weex-private.jsonl --runs 1 --books ''
