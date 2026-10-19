@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Binance + Bybit: measured 1,332,666 bytes; allow 1.4 MiB.
-      WASM_BUDGET_BYTES: 1468006
+      # Binance + Bybit + Bitget: measured 1,892,956 bytes; allow 2 MiB.
+      WASM_BUDGET_BYTES: 2097152
     defaults:
       run:
         working-directory: .
@@ -129,6 +129,8 @@ jobs:
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
       - run: yarn install --frozen-lockfile --network-timeout 600000
+      - name: Replay transport contracts
+        run: yarn rust:test-harness
       - name: Build the wasm engine
         run: yarn rust:build-wasm
       - name: The TS exchange on the wasm engine
@@ -152,3 +154,9 @@ jobs:
         run: |
           yarn rust:private-tape-bybit
           yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''
+      - name: Bitget public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue bitget --tape sdk-rs/harness/fixtures/bitget-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: Bitget account and trading (correctness)
+        run: |
+          yarn rust:private-tape-bitget
+          yarn rust:gate --venue bitget --tape sdk-rs/harness/tapes/bitget-private.jsonl --runs 1 --books ''

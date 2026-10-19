@@ -182,3 +182,34 @@ range boundaries, malformed pages and retry failure; sub-agent review afterward.
   metadata retention, whole-envelope validation and malformed-list rejection.
 - Combined engine / Bitget / Binance / Bybit native tests PASS; harness 5 PASS.
   Integration sub-agent audit and full final gates still running. No PR yet.
+
+## Final local gates
+
+All venue gates now PASS on the integrated branch. Public numbers are medians
+of three runs (Bybit regression: one run); private tapes gate correctness only.
+
+| Gate | TS CPU ms | Rust CPU ms | TS steady ms | Rust steady ms | TS / Rust retained MB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Bitget public | 592.2 | 556.8 | 401.4 | 373.1 | 2.7 / 2.0 |
+| Binance public | 207.6 | 107.7 | 122.4 | 52.7 | 2.3 / 2.0 |
+| Bybit public | 305.5 | 133.1 | 185.8 | 73.8 | 3.1 / 2.1 |
+
+- Bitget private 11 frames, Binance private 14, Bybit private 18: PASS,
+  exact account/command output, zero untaped or omitted writes.
+- Bitget native 67 tests; workspace native tests and clippy; workspace fmt;
+  bans; WASM clippy/build; harness 5; TS WASM integration 6; Worker host 2: PASS.
+- Repository typecheck 44 tasks and lint 28 tasks PASS. Default full tests hit
+  existing HyroTrader 5s cold-import timeouts (also with serial Turbo tasks).
+  Equivalent safe-cex run with one worker / 30s timeout passes all 451 files,
+  6,489 assertions; the other 25 repository test tasks passed normally.
+- Fixed stale local workspace symlink to load `sdk-rs/hosts/wasm`, rather than
+  the old ignored build location. Fresh CI installs use the new workspace path.
+- Profile-driven optimizations remove envelope-string and singleton ticker-vector
+  allocations, redundant contract mapping and non-native ticker aliases. Simple
+  decimals use a bounded exact native division; broader grammar uses std parsing.
+- Added strict harness tests and Bitget public/private CI steps. Combined wasm
+  measures 1,892,956 bytes; fixed CI budget is 2 MiB (performance gates unchanged).
+- Final phase sub-agent reviews are clear. Next: fetch/merge latest landing,
+  push PR into feat/rust-rewrite, adversarial PR reviews/comments, green CI, merge,
+  and create a fresh follow-up branch. Inverse sizing and pre-existing unsupported
+  UTA bills/trailing remain outside this port's verified scope.

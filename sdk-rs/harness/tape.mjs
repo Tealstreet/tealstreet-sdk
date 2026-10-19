@@ -2,13 +2,17 @@
 export const createTape = (records, venue, isPrivate) => {
   /** Per-request values: clocks, signatures and generated client ids. */
   const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
+  const urlKeys = new Map();
   const canonicalUrl = (url) => {
+    if (urlKeys.has(url)) return urlKeys.get(url);
     const parsed = new URL(url);
     const query = [...parsed.searchParams]
       .filter(([name]) => !VOLATILE.has(name))
       .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"[^"]*",?/g, '')])
       .sort(([a], [b]) => a.localeCompare(b));
-    return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
+    const key = `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
+    urlKeys.set(url, key);
+    return key;
   };
 
   // Caller IDs are contractual; only IDs minted by the implementation are volatile.

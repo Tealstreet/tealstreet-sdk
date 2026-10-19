@@ -44,40 +44,37 @@ impl<'de> Deserialize<'de> for Number {
 // Feed decimals whose mantissa and divisor are exact doubles need one native
 // division. Exponents and longer inputs use Rust's general float parser.
 fn decimal(text: &str) -> Option<f64> {
-    const POWERS: [f64; 23] = [
-        1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16,
-        1e17, 1e18, 1e19, 1e20, 1e21, 1e22,
+    const POWERS: [f64; 16] = [
+        1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
     ];
     let bytes = text.as_bytes();
     let negative = bytes.first() == Some(&b'-');
     let digits = if negative { &bytes[1..] } else { bytes };
+    // This bound makes every intermediate integer exact without checking it
+    // again for each digit. Longer decimals use the standard parser.
+    if digits.is_empty() || digits.len() > 15 {
+        return text.parse().ok();
+    }
     let mut mantissa = 0u64;
-    let mut scale = 0usize;
-    let mut dot = false;
-    let mut count = 0;
-    for &byte in digits {
+    let mut point = None;
+    for (index, &byte) in digits.iter().enumerate() {
         if byte.is_ascii_digit() {
             mantissa = mantissa * 10 + u64::from(byte - b'0');
-            if mantissa > 9_007_199_254_740_991 {
-                return text.parse().ok();
-            }
-            count += 1;
-            if dot {
-                scale += 1;
-                if scale > 22 {
-                    return text.parse().ok();
-                }
-            }
-        } else if byte == b'.' && !dot {
-            dot = true;
+        } else if byte == b'.' && point.is_none() {
+            point = Some(index);
         } else {
             return text.parse().ok();
         }
     }
-    if count == 0 {
+    if digits.len() == usize::from(point.is_some()) {
         return text.parse().ok();
     }
-    let value = (mantissa as f64) / POWERS[scale];
+    let scale = point.map_or(0, |index| digits.len() - index - 1);
+    let value = if scale == 0 {
+        mantissa as f64
+    } else {
+        (mantissa as f64) / POWERS[scale]
+    };
     Some(if negative { -value } else { value })
 }
 
@@ -116,25 +113,25 @@ pub struct TickerRow<'a> {
     pub symbol: Cow<'a, str>,
     #[serde(default, borrow)]
     pub inst_id: Cow<'a, str>,
-    #[serde(default, alias = "bidPrice", alias = "bid")]
+    #[serde(default)]
     pub bid_pr: Number,
-    #[serde(default, alias = "askPrice", alias = "ask")]
+    #[serde(default)]
     pub ask_pr: Number,
-    #[serde(default, alias = "lastPrice", alias = "last")]
+    #[serde(default)]
     pub last_pr: Number,
-    #[serde(default, alias = "markPr", alias = "mark")]
+    #[serde(default)]
     pub mark_price: Number,
-    #[serde(default, alias = "indexPr", alias = "index")]
+    #[serde(default)]
     pub index_price: Number,
-    #[serde(default, alias = "change")]
+    #[serde(default)]
     pub change24h: Number,
     #[serde(default)]
     pub change_utc24h: Number,
     #[serde(default)]
     pub funding_rate: Number,
-    #[serde(default, alias = "fundingTime")]
+    #[serde(default)]
     pub next_funding_time: Number,
-    #[serde(default, alias = "volume")]
+    #[serde(default)]
     pub base_volume: Number,
     #[serde(default)]
     pub quote_volume: Number,
@@ -572,9 +569,75 @@ pub struct PublicHeader<'a> {
     pub arg: Argument<'a>,
 }
 
+// Most public messages contain one row; keep it inline rather than allocating
+// a vector for every ticker frame. Additional rows retain normal sequence order.
+pub struct Rows<T> {
+    head: Option<T>,
+    tail: Vec<T>,
+}
+impl<T> IntoIterator for Rows<T> {
+    type Item = T;
+    type IntoIter = std::iter::Chain<std::option::IntoIter<T>, std::vec::IntoIter<T>>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.head.into_iter().chain(self.tail)
+    }
+}
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Rows<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct RowsVisitor<T>(std::marker::PhantomData<T>);
+        impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for RowsVisitor<T> {
+            type Value = Rows<T>;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("an array of feed rows")
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                let head = seq.next_element()?;
+                let mut tail = Vec::new();
+                if head.is_none() {
+                    return Ok(Rows { head, tail });
+                }
+                while let Some(row) = seq.next_element()? {
+                    tail.push(row);
+                }
+                Ok(Rows { head, tail })
+            }
+        }
+        d.deserialize_seq(RowsVisitor(std::marker::PhantomData))
+    }
+}
+struct Text<'a>(Cow<'a, str>);
+impl<'de> Deserialize<'de> for Text<'de> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct TextVisitor;
+        impl<'de> serde::de::Visitor<'de> for TextVisitor {
+            type Value = Text<'de>;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("text")
+            }
+            fn visit_borrowed_str<E: serde::de::Error>(
+                self,
+                value: &'de str,
+            ) -> Result<Self::Value, E> {
+                Ok(Text(Cow::Borrowed(value)))
+            }
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(Text(Cow::Owned(value.into())))
+            }
+            fn visit_string<E: serde::de::Error>(self, value: String) -> Result<Self::Value, E> {
+                Ok(Text(Cow::Owned(value)))
+            }
+        }
+        d.deserialize_str(TextVisitor)
+    }
+}
+
+#[allow(clippy::large_enum_variant)] // The common ticker row stays inline on the hot path.
 pub enum PublicData<'a> {
     None,
-    Tickers(Vec<TickerRow<'a>>),
+    Tickers(Rows<TickerRow<'a>>),
     Books(Vec<Depth<'a>>),
     Candles(Vec<CandleRow>),
 }
@@ -635,13 +698,13 @@ impl<'de> Deserialize<'de> for PublicMessage<'de> {
                     seen |= bit;
                     match key {
                         PublicField::Arg => message.arg = map.next_value()?,
-                        PublicField::Action => message.action = map.next_value()?,
-                        PublicField::Event => message.event = map.next_value()?,
-                        PublicField::Msg => message.msg = map.next_value()?,
+                        PublicField::Action => message.action = map.next_value::<Text<'de>>()?.0,
+                        PublicField::Event => message.event = map.next_value::<Text<'de>>()?.0,
+                        PublicField::Msg => message.msg = map.next_value::<Text<'de>>()?.0,
                         PublicField::Data => {
                             message.data = match message.arg.channel.as_ref() {
                                 "ticker" => map
-                                    .next_value::<Option<Vec<TickerRow<'de>>>>()?
+                                    .next_value::<Option<Rows<TickerRow<'de>>>>()?
                                     .map(PublicData::Tickers)
                                     .unwrap_or(PublicData::None),
                                 "books" => map

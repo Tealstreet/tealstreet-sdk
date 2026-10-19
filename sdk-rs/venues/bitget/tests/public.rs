@@ -255,3 +255,12 @@ fn malformed_book_data_shape_invalidates_a_previously_synced_book() {
         assert!(h.engine.book("BTCUSDT").is_none());
     }
 }
+
+#[test]
+fn ticker_row_storage_preserves_empty_and_multiple_rows_and_escaped_envelopes() {
+    let mut h = Harness::public();
+    h.message(r#"{"arg":{"channel":"ticker"},"action":"snap\u0073hot","data":[]}"#);
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 100.0);
+    h.message(r#"{"arg":{"channel":"ticker"},"data":[{"instId":"BTCUSDT","lastPr":"101"},{"instId":"BTCUSDT","lastPr":"102"}]}"#);
+    assert_eq!(h.engine.store().ticker("BTCUSDT").unwrap().last, 102.0);
+}

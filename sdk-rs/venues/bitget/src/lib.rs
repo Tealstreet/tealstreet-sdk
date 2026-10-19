@@ -328,9 +328,15 @@ fn market(row: &Contract<'_>) -> Market {
         ),
         precision: Precision {
             amount: row.size_multiplier.get(),
-            price: format!("{}e-{}", row.price_end_step.get(), row.price_place.get())
-                .parse::<f64>()
-                .unwrap_or(0.0),
+            price: if row.price_end_step.get().fract() == 0.0
+                && row.price_end_step.get() <= 9_007_199_254_740_991.0
+            {
+                row.price_end_step.get() / 10f64.powi(row.price_place.get() as i32)
+            } else {
+                format!("{}e-{}", row.price_end_step.get(), row.price_place.get())
+                    .parse::<f64>()
+                    .unwrap_or(0.0)
+            },
         },
         limits: Limits {
             amount: MinMax {
@@ -482,14 +488,17 @@ impl Venue for BitgetFutures {
                         || row.price_place.0.is_none()
                         || row.price_place.get().fract() != 0.0
                         || !(0.0..=18.0).contains(&row.price_place.get())
-                        || !market(&row).precision.price.is_finite()
-                        || market(&row).precision.price <= 0.0
                         || row.price_end_step.get() <= 0.0
                         || row.size_multiplier.get() <= 0.0
                     {
                         *invalid = true;
                     } else {
-                        rows.push(market(&row));
+                        let mapped = market(&row);
+                        if !mapped.precision.price.is_finite() || mapped.precision.price <= 0.0 {
+                            *invalid = true;
+                        } else {
+                            rows.push(mapped);
+                        }
                     }
                 }
                 Ok(_) => {}
