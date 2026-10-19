@@ -1,6 +1,7 @@
-"""Compile independent Store/property/await-free splice faults; restore exact bytes."""
+"""Compile independent Store, terminal-memory and splice faults; restore exact bytes."""
 from pathlib import Path
 import os
+import signal
 import subprocess
 import sys
 
@@ -24,7 +25,34 @@ faults = [
      'this.splice_array(len, start, count, args.into_iter().skip(2).collect())?;',
      'this.splice_array(array_length(&this)?, start, count, args.into_iter().skip(2).collect())?;',
      'js_array_splice', 'installed_splice_captures_length_before_coercion_and_deleted_getters'),
+    ('terminal-registration', 'src/js_runtime/native_store/graph.rs',
+     '            "markOrdersTerminal",', '            "missingMarkOrdersTerminal",',
+     'js_store_terminal', 'terminal_memory_precedes_orders_and_filters_only_matching_stale_ids'),
+    ('terminal-memory', 'src/js_runtime/native_store/graph.rs',
+     '.call_method("set", vec![id, Js::Number(now)])?;',
+     '.call_method("has", vec![id, Js::Number(now)])?;',
+     'js_store_terminal', 'terminal_memory_precedes_orders_and_filters_only_matching_stale_ids'),
+    ('terminal-empty-store', 'src/js_runtime/native_store/graph.rs',
+     '    pub fn mark_terminal(&self, selectors: &Js, status: &Js) -> Result<(), Thrown> {',
+     '    pub fn mark_terminal(&self, selectors: &Js, status: &Js) -> Result<(), Thrown> {\n'
+     '        if length(&self.get("orders")?)? == 0 { return Ok(()); }',
+     'js_store_terminal', 'terminal_memory_precedes_orders_and_filters_only_matching_stale_ids'),
+    ('terminal-subscriber-error', 'src/js_runtime/native_store/graph.rs',
+     '"markOrdersTerminal" => self.mark_terminal(&a, &b)?,',
+     '"markOrdersTerminal" => { let _ = self.mark_terminal(&a, &b); },',
+     'js_store_terminal', 'terminal_subscriber_error_preserves_committed_status_response_and_origin'),
+    ('terminal-id-replacement', 'src/js_runtime/native_store/graph.rs',
+     '.call_method("set", vec![id, Js::Number(now)])?;',
+     '.call_method("set", vec![Js::str(&String::from_utf16_lossy(&id.to_js_string()?)), Js::Number(now)])?;',
+     'js_store_terminal', 'terminal_raw_ids_preserve_surrogates_without_replacement_aliasing'),
 ]
+terminal_assertions = {
+    'terminal-registration': 'JS terminal bridge exposes callable markOrdersTerminal',
+    'terminal-memory': 'JS terminal bridge remembers an ID before any order exists',
+    'terminal-empty-store': 'JS terminal bridge remembers an ID before any order exists',
+    'terminal-subscriber-error': 'JS terminal bridge must propagate subscriber failure',
+    'terminal-id-replacement': 'raw terminal memory preserves replacement-character row identity',
+}
 
 def run(label, target, test, red=False):
     result = subprocess.run(['cargo', 'test', '--locked', '-p', 'safe-cex-exchange', '--test', target,
@@ -34,12 +62,21 @@ def run(label, target, test, red=False):
     assert 'Finished `test`' in result.stdout and 'error[E' not in result.stdout, label + ': must compile'
     if red:
         assert result.returncode == 101 and f'test {test} ... FAILED' in result.stdout and 'panicked at' in result.stdout, label
+        assertion = terminal_assertions.get(label.removesuffix('-red'))
+        assert assertion is None or assertion in result.stdout, label + ': wrong failure'
     else:
         assert result.returncode == 0 and '1 passed; 0 failed' in result.stdout, label
-    print(label + (': compiled named RED' if red else ': exact-restored GREEN'), flush=True)
+    phase = 'compiled named RED' if red else 'baseline GREEN' if label.endswith('-baseline') else 'exact-restored GREEN'
+    print(label + ': ' + phase, flush=True)
 
 selected = set(sys.argv[1:])
 assert not selected.difference(row[0] for row in faults), "unknown control"
+
+def stop(signum, _frame):
+    raise SystemExit(128 + signum)
+
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
 for label, file, needle, fault, target, test in faults:
     if selected and label not in selected:
         continue
