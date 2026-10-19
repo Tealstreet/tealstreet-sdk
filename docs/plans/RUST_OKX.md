@@ -135,3 +135,27 @@ Never touch master, rebase, or force-push.
 - Size experiment: size-oriented LLVM profiles increased output. Retained the
   original release optimization and removed wasm-bindgen debug name/producers
   sections instead; this saves over 500 KB without changing instructions.
+
+### Final venue gates (landing merge f52132c2f2)
+
+| Replay | Frames | Markets/tickers | Books | TS/Rust main CPU | TS/Rust steady CPU | TS/Rust retained MB | Result |
+| --- | ---: | --- | ---: | --- | --- | --- | --- |
+| OKX public, 3 runs | 8,902 | 494/494 | 2 | 1287.9/1152.6 ms | 1034.2/887.4 ms | 2.3/2.2 | PASS |
+| Binance public, 3 runs | 871 | 917/783 | 3 | 238.0/92.1 ms | 142.8/44.0 ms | 2.3/2.0 | PASS |
+
+- OKX private: all four aliases PASS, each 54 records, 29 frames, 12 command
+  results, 2 markets/tickers, 2 executions and zero unmatched requests. Exact
+  account/query output, fill prices and expected writes match. Private tapes
+  gate correctness, not performance. Binance private: PASS, 14 frames, 3 command
+  results, 2 executions and zero unmatched requests.
+- Release build PASS; binary 1,074,448 bytes against unchanged 1,258,291 budget.
+  Bans, workspace fmt, OKX all-target clippy, WASM clippy and 67 engine/OKX
+  native tests PASS. Post-merge WASM exchange tests: 9 PASS; Workers host: 2 PASS.
+  Repository typecheck (44 tasks) and lint (28 tasks) PASS; post-merge package
+  typecheck/lint PASS. Root test retry with bounded workers and a 20-second
+  per-test deadline remains running under concurrent machine load.
+- Final independent harness review and negative probes PASS: missing private
+  topic, wrong instrument, unsubscribe, command timeout, unused write, bad login
+  signature and stale/millisecond timestamps all fail instead of passing parity.
+- Next: finish repository test retry, push PR into feat/rust-rewrite, adversarial
+  review/fix loop, merge and create a clean follow-up branch.
