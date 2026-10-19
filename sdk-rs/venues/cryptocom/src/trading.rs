@@ -412,7 +412,11 @@ impl Cryptocom {
                     let row: Created =
                         serde_json::from_str(envelope.result.ok_or("missing order result")?.get())
                             .map_err(|_| "missing order id")?;
-                    Ok(Some(id(row.order_id)))
+                    let id = id(row.order_id);
+                    if id.is_empty() || id == "null" || !id.bytes().all(|b| b.is_ascii_digit()) {
+                        return Err("invalid order id".into());
+                    }
+                    Ok(Some(id))
                 }
                 Call::LeverageAccount { leverage } => {
                     #[derive(Deserialize)]

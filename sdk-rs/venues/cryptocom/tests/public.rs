@@ -41,7 +41,7 @@ fn ready() -> (Engine<Cryptocom>, SocketId) {
     );
     answer(
         &mut engine,
-        r#"{"id":2,"result":{"data":[{"i":"BTCUSD-PERP","b":"100","k":"101","a":"100.5","c":"-0.01","v":"2","vv":"201"}]},"code":0}"#,
+        r#"{"id":2,"result":{"data":[{"i":"SHIB_BTC","b":null,"oi":null,"a":null},{"i":"BTCUSD-PERP","b":"100","k":"101","a":"100.5","c":"-0.01","v":"2","vv":"201"}]},"code":0}"#,
     );
     let socket = engine
         .drain_actions()

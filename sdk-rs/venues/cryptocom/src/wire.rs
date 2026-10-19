@@ -97,6 +97,11 @@ impl Instrument<'_> {
 }
 
 #[derive(Deserialize)]
+pub struct TickerName<'a> {
+    pub i: &'a str,
+}
+
+#[derive(Deserialize)]
 pub struct TickerRow<'a> {
     pub i: &'a str,
     #[serde(default)]

@@ -3623,6 +3623,7 @@ dependencies = [
  "js-sys",
  "safe-cex-engine",
  "safe-cex-venue-binance",
+ "safe-cex-venue-cryptocom",
  "serde",
  "serde_json",
  "wasm-bindgen",

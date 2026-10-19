@@ -115,3 +115,25 @@ uses Alloy TypedData directly: hashing/signing primitives remain, while ethers
 input-normalization/rejection emulation is deliberately removed. Retained
 primitive vectors, nonce scrubbing and independent Lighter corpus all pass:
 23 crypto unit tests, 1 corpus integration test and 3 doctests; clippy PASS.
+
+### Integration/gates in progress
+
+Wasm/TS/harness registrations and documented private tape implemented. Harness
+now matches signed POST params, independently verifies REST/WS HMACs and methods,
+checks private/book subscriptions and heartbeat ids, consumes mutations once and
+compares open interest. Crypto.com private gate PASS (21 frames); Binance public
+PASS (871 frames: TS CPU 234.1 ms / Rust 92.6 ms, retained 2.4 / 2.0 MB), Binance
+private PASS (14 frames). Numbers are provisional until final combined checks.
+
+Repository typecheck (44 tasks), lint (28 tasks) PASS. Full test run exposed an
+existing wasm test inside production exchanges; moved it into audit-regressions.
+Boundary regression and 4 real-wasm integration tests now PASS; full suite rerun
+is running. Public recorder needed its streaming body handling fixed. First live
+REST seed revealed null prices on irrelevant spot ticker rows; now identify and
+skip non-derivative rows before decoding ticker fields. Rebuilding wasm before
+the required fresh 20-second two-book recording and public performance gate.
+
+Remaining: finish public tape/gate, final fmt/bans/clippy/checks, review gate phase,
+commit fixture + results, merge latest origin/feat/rust-rewrite, push PR targeting
+that branch, adversarial sub-agent PR reviews/comments/fixes, merge PR and create
+fresh follow-up branch. No push/PR/merge landing action has occurred yet.

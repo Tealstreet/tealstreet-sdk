@@ -407,20 +407,25 @@ impl Venue for Cryptocom {
                 }
                 Err(_) => *invalid = true,
             },
-            Pending::Tickers { rows, invalid } => match serde_json::from_str::<TickerRow>(item) {
-                Ok(row) => {
-                    if cx.store.market(row.i).is_some() {
-                        let mut ticker = Ticker {
-                            id: row.i.into(),
-                            symbol: row.i.into(),
-                            ..Default::default()
-                        };
-                        row.apply(&mut ticker);
-                        rows.push(ticker);
-                    }
+            Pending::Tickers { rows, invalid } => {
+                // Spot rows may contain null prices; they are outside this venue.
+                match serde_json::from_str::<TickerName>(item) {
+                    Ok(name) if cx.store.market(name.i).is_none() => {}
+                    Err(_) => *invalid = true,
+                    Ok(_) => match serde_json::from_str::<TickerRow>(item) {
+                        Ok(row) => {
+                            let mut ticker = Ticker {
+                                id: row.i.into(),
+                                symbol: row.i.into(),
+                                ..Default::default()
+                            };
+                            row.apply(&mut ticker);
+                            rows.push(ticker);
+                        }
+                        Err(_) => *invalid = true,
+                    },
                 }
-                Err(_) => *invalid = true,
-            },
+            }
             Pending::Candles { rows, invalid, .. } => match serde_json::from_str::<CandleRow>(item)
             {
                 Ok(row) => rows.push(row.candle()),

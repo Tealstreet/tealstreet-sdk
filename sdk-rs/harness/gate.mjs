@@ -6,6 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { gunzipSync } from 'node:zlib';
 
 const { values } = parseArgs({
   options: {
@@ -54,6 +55,9 @@ if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${
 // Every request must match a taped one: an unserved request sent different parameters.
 for (const impl of ['ts', 'rust']) {
   const unserved = results[impl][0].unserved;
+  const result = results[impl][0];
+  if (result.unusedWrites) differences.push(impl + ': ' + result.unusedWrites + ' taped mutation(s) never sent');
+  for (const error of result.protocolErrors ?? []) differences.push(impl + ': ' + error);
   if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
 }
 const isPrivate = Boolean(ts.account);
@@ -64,6 +68,35 @@ const isPrivate = Boolean(ts.account);
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
+  if (values.venue === 'cryptocom') {
+    // TS never sets the hedged store flag despite mapping positions as hedged.
+    account.hedged = true;
+    // TS omits user.trade entirely. Derive the execution oracle from documented
+    // taped trade rows, independently of Rust's account output.
+    const bytes = readFileSync(values.tape);
+    const tape = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes).toString('utf8').trim().split('\n').map(JSON.parse);
+    const seen = new Set();
+    account.fills = [];
+    for (const record of tape) {
+      if (record.type !== 'ws' || !record.url.includes('/exchange/v1/user')) continue;
+      const result = JSON.parse(record.text).result;
+      if (result?.channel !== 'user.trade') continue;
+      for (const row of result.data) {
+        const id = String(row.trade_id);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        account.fills.push({ id: String(row.order_id), symbol: row.instrument_name, side: row.side.toLowerCase(), amount: Number(row.traded_quantity) });
+      }
+    }
+    // Further deliberate fixes are exercised by Rust regressions: failed reads
+    // retain state; client_oid survives mapping; terminal/stale frames cannot
+    // reopen orders/positions; REST retains live position enrichment; post-only
+    // uses exec_inst; account-wide leverage uses account_id + integer leverage;
+    // ignored brackets/opening triggers reject before writes; caller ids use a
+    // conservative 36-byte ceiling without JS string emulation.
+    // Public throttle correction is the afterTsFrame hook in venues.mjs.
+    return;
+  }
   for (const position of account.positions) {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
     if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;

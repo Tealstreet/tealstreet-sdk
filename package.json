@@ -18,8 +18,10 @@
     "rust:build-wasm": "bash sdk-rs/harness/build.sh",
     "rust:record": "node sdk-rs/harness/record.mjs",
     "rust:private-tape": "node sdk-rs/harness/private-tape.mjs",
+    "rust:private-tape-cryptocom": "node sdk-rs/harness/private-tape-cryptocom.mjs",
     "rust:trim-tape": "node sdk-rs/harness/trim-tape.mjs",
-    "rust:gate": "node sdk-rs/harness/gate.mjs"
+    "rust:gate": "node sdk-rs/harness/gate.mjs",
+    "rust:test-harness": "node --test sdk-rs/harness/venues.test.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
