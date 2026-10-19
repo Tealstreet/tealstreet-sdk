@@ -63,3 +63,26 @@ while recording. Byte-exact restoration must pass after each control.
 
 Nine of the 27 Store rows are reconciled here. The other 18 Store rows and the
 separate num row remain assigned for later batches.
+
+
+## Compressed Blob input
+
+| Census row | Verdict | Production observation and reason |
+| --- | --- | --- |
+| 445 `readBlob` | ACCEPT | The real Bitrue binary socket path invokes the shared inflater through the native Blob/arrayBuffer binding, then executes its ordinary parser and ping handler. Maintained TS widens every inflated byte to a single U+0000..U+00FF code unit; Rust does the same. UTF-8 multibyte text therefore produces the same byte-widened text on both sides, rather than a Rust-only decoding loss. JSON surrogate escapes are still interpreted by the subsequent parser. The typed byte-future capability does not change the observed socket replies. |
+
+The existing Bitrue `exchange_binding` target includes
+`audit_compressed_blob_bytes_reach_real_socket_pongs_without_utf8_decoding`.
+It starts the actual exchange with its canonical Store and production public
+socket. Its 28 profiles compare terminal pong UTF-16 units against the maintained
+TS `onMessage`, `handlePingEvent` and `readBlob` bodies with installed pako and
+Node Blob. Seven payloads cover ASCII, multibyte UTF-8, every high byte, escaped
+lone surrogates, escaped controls, negative zero and an unsafe integer. Each runs
+as gzip, zlib, concatenated gzip members and zero-padded gzip. All replies are
+observed after the actual async Blob continuation; no inflater is injected.
+
+The baseline already passes, so this is an ACCEPT verdict. Separate compiled
+controls replace byte widening with UTF-8 decoding or paired-byte reinterpretation.
+Each must fail this actual socket assertion; byte-exact restoration must pass.
+This verdict covers the compressed binary input boundary, not arbitrary Blob
+subclasses, malformed-stream error wording or other socket handler policies.

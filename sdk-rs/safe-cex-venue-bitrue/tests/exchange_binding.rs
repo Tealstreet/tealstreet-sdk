@@ -1501,3 +1501,93 @@ fn shared_dayjs_exposes_the_utc_offset_used_by_live_candles() {
         "shared Dayjs must expose source utcOffset"
     );
 }
+
+#[test]
+fn audit_compressed_blob_bytes_reach_real_socket_pongs_without_utf8_decoding() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/composition-streams-oracle.cjs"
+        ))
+        .arg("--blob-audit")
+        .output()
+        .expect("run maintained Bitrue/Blob source");
+    assert!(
+        output.status.success(),
+        "BLOB source: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let profiles = source["rows"].as_array().unwrap();
+    assert_eq!(profiles.len(), 28);
+    let runtime = Rc::new(support::Runtime::default());
+    let venue = BitrueExchange::new(
+        ExchangeName::Bitrue,
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap(),
+        Rc::new(DefaultStore::new()),
+        BitrueDependencies {
+            runtime: runtime.clone(),
+            http: Rc::new(Http(
+                runtime.clone(),
+                RefCell::new(vec![]),
+                Cell::new(false),
+            )),
+            external_public_data: None,
+        },
+    )
+    .unwrap();
+    complete(&runtime, venue.start()).unwrap();
+    let socket = runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.contains("/kline-api/ws"))
+        .map(|(_, socket)| socket.clone())
+        .expect("actual public socket");
+    runtime.pump();
+    let report_count = runtime.reports.borrow().len();
+    for profile in profiles {
+        socket.sent.borrow_mut().clear();
+        let bytes = profile["bytes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| u8::try_from(value.as_u64().unwrap()).unwrap())
+            .collect();
+        socket
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Binary(bytes)));
+        for _ in 0..4 {
+            runtime.pump();
+        }
+        let sent: Vec<Vec<u16>> = socket
+            .sent
+            .borrow()
+            .iter()
+            .map(|message| message.encode_utf16().collect())
+            .collect();
+        assert_eq!(
+            serde_json::to_value(&sent).unwrap(),
+            profile["sent"],
+            "BLOB actual socket byte widening {} / {}",
+            profile["id"],
+            profile["encoding"]
+        );
+        assert_eq!(
+            runtime.reports.borrow().len(),
+            report_count,
+            "BLOB valid frame rejected {profile}"
+        );
+    }
+    venue.dispose().unwrap();
+    assert!(
+        runtime
+            .sockets
+            .borrow()
+            .iter()
+            .all(|(_, socket)| socket.closed.get())
+    );
+}
