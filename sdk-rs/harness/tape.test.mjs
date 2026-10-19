@@ -703,3 +703,39 @@ test('a public command with no completion still hits its real timeout', async ()
     clock.restore();
   }
 });
+
+test('public routing waits pump subscription timers and still require the actual topic', async () => {
+  const epoch = 1700000000000;
+  const clock = new ReplayClock(epoch);
+  clock.install();
+  try {
+    const tape = new Tape(
+      [
+        { type: 'command', t: 0, op: 'subscribeLater' },
+        { type: 'ws', t: 0, url: 'wss://example.test', socket: 0, text: '{"stream":"account.orderUpdate"}' },
+      ],
+      { streamOf: (text) => JSON.parse(text).stream },
+      false,
+      500,
+    );
+    const delivered = [];
+    const socket = tape.connect(
+      'wss://example.test',
+      () => {},
+      () => delivered.push(Date.now() - epoch),
+    );
+    await tape.play(
+      undefined,
+      async () => {},
+      () => {
+        setTimeout(() => tape.send(socket, '{"method":"SUBSCRIBE","params":["ticker.SOL_USDC_PERP"]}'), 10);
+        setTimeout(() => tape.send(socket, '{"method":"SUBSCRIBE","params":["account.orderUpdate"]}'), 25);
+        return [];
+      },
+      clock,
+    );
+    assert.deepEqual(delivered, [25]);
+  } finally {
+    clock.restore();
+  }
+});

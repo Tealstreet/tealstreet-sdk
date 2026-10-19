@@ -194,7 +194,7 @@ export class ReplayClock {
     }
     this.time = target;
   }
-  async command(promise, label, timeoutMs) {
+  async wait(promise, label, timeoutMs) {
     let done = false;
     const result = Promise.resolve(promise).finally(() => {
       done = true;
@@ -512,18 +512,18 @@ export class Tape {
     if (ready) return ready;
     let waiter;
     try {
-      return await withTimeout(
-        new Promise((resolve) => {
-          waiter = () => {
-            const socket = find();
-            if (socket) resolve(socket);
-          };
-          this.waiters.add(waiter);
-          waiter();
-        }),
-        `socket ${url} ${stream ?? 'open'}`,
-        this.timeoutMs,
-      );
+      const pending = new Promise((resolve) => {
+        waiter = () => {
+          const socket = find();
+          if (socket) resolve(socket);
+        };
+        this.waiters.add(waiter);
+        waiter();
+      });
+      const label = `socket ${url} ${stream ?? 'open'}`;
+      return await (this.replayClock?.active
+        ? this.replayClock.wait(pending, label, this.timeoutMs)
+        : withTimeout(pending, label, this.timeoutMs));
     } finally {
       this.waiters.delete(waiter);
     }
@@ -565,7 +565,7 @@ export class Tape {
         this.results.push(
           await (
             clock
-              ? clock.command(runCommand(frame), `command ${frame.op}`, this.timeoutMs)
+              ? clock.wait(runCommand(frame), `command ${frame.op}`, this.timeoutMs)
               : withTimeout(runCommand(frame), `command ${frame.op}`, this.timeoutMs)
           ).then(
             (ids) => ({ ok: ids }),

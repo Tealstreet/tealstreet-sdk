@@ -335,3 +335,9 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   landing branch's size optimization, below the unchanged 3 MiB aggregate CI
   budget. Workspace WASM clippy, root typecheck44/lint28 also pass. Final SDK
   tests and nineteen replay gates now run against this exact artifact.
+- The first eight-venue live gate exposed a third clock integration case:
+  Backpack schedules ticker subscriptions after two seconds, so socket waits
+  also need to pump active public timers. Added bounded socket-wait pumping
+  without bypassing ordinal/topic checks, plus unrelated-topic then delayed
+  required-topic coverage. All 66 harness tests and independent re-review pass;
+  restarting the replay gates. Production wasm is unchanged.
