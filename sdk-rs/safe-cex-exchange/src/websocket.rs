@@ -2889,15 +2889,8 @@ fn redact_json(value: &mut Value, depth: usize, redact_strings: bool) {
         Value::Object(map) => {
             // Source rebuilds {}, whose local prototype setter creates no own key.
             map.remove("__proto__");
-            let auth = redact_strings
-                || ["op", "method", "type", "event"].iter().any(|key| {
-                    map.get(*key).and_then(Value::as_str).is_some_and(|text| {
-                        let lower = text.to_ascii_lowercase();
-                        ["auth", "login", "signature", "jwt"]
-                            .iter()
-                            .any(|part| lower.contains(part))
-                    })
-                });
+            let auth =
+                redact_strings || safe_cex_store::ws_diagnostics::is_auth_operation_object(map);
             for (key, value) in map {
                 let normalized: String = key
                     .chars()
@@ -4758,6 +4751,51 @@ mod tests {
         assert_eq!(events.len(), 202);
         assert!(events[200].1.contains("suppressed 1"));
         assert!(events[201].1.ends_with("...truncated (6000 chars)"));
+    }
+    #[test]
+    fn audit_auth_operation_own_data_reaches_real_socket_diagnostics() {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../safe-cex-store/tests/diagnostics_oracle.cjs"
+            ))
+            .arg("auth")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let profiles: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            profiles.len(),
+            44,
+            "AUTH_DIAGNOSTIC complete source profiles"
+        );
+        for profile in profiles {
+            let (socket, parent, runtime, _) = fixture();
+            runtime.diagnostics.set(true);
+            let input = profile["input"].as_str().unwrap();
+            let expected = profile["expected"].as_str().unwrap();
+            socket
+                .emit_ws_diagnostic_send(input, &WsDiagnosticSendOptions::default())
+                .unwrap();
+            socket
+                .emit_ws_diagnostic_receive(
+                    &Value::String(input.into()),
+                    &WsDiagnosticReceiveOptions::default(),
+                )
+                .unwrap();
+            assert_eq!(
+                *parent.events.borrow(),
+                vec![
+                    ("grafana-pws-sub".into(), expected.into()),
+                    ("grafana-pws".into(), expected.into()),
+                ],
+                "AUTH_DIAGNOSTIC actual send/receive emitters retain source auth scope: {input}"
+            );
+        }
     }
     #[test]
     fn diagnostics_format_order_and_custom_null_redaction_match_ts() {

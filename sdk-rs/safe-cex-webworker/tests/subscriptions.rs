@@ -109,6 +109,21 @@ fn trace_post(post: Rc<dyn Fn(StoreWorkerPayload)>) -> OrderBookPost {
 }
 #[test]
 fn bbo_reports_subscriber_identity_after_post_and_committed_write() {
+    let source_output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/subscriptions_oracle.mjs"
+        ))
+        .arg("--subscriber-identity")
+        .output()
+        .unwrap();
+    assert!(
+        source_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source_output.stderr)
+    );
+    let source: Vec<Value> = serde_json::from_slice(&source_output.stdout).unwrap();
+    assert_eq!(source.len(), 2);
     for name in ["Error", "TypeError"] {
         let runtime = Rc::new(Runtime::default());
         runtime.advance(10_000);
@@ -234,10 +249,39 @@ fn bbo_reports_subscriber_identity_after_post_and_committed_write() {
         );
         assert!(
             std::ptr::eq(
-                std::error::Error::source(error).expect("BBO-IDENTITY retained source"),
+                std::error::Error::source(
+                    error
+                        .store_subscriber_cause
+                        .as_ref()
+                        .expect("BBO-IDENTITY retained subscriber")
+                )
+                .expect("BBO-IDENTITY retained source"),
                 std::error::Error::source(&original_cause).unwrap(),
             ),
             "BBO-IDENTITY exact original subscriber cause pointer"
+        );
+        // Error::source prioritizes the retained transport response origin.
+        // Subscriber identity is separately retained in store_subscriber_cause.
+        assert!(
+            std::ptr::eq(
+                std::error::Error::source(error).unwrap(),
+                std::error::Error::source(&original).unwrap(),
+            ),
+            "BBO-IDENTITY original response origin also survives"
+        );
+        assert_eq!(
+            numbers(
+                source
+                    .iter()
+                    .find(|row| row["name"] == name)
+                    .unwrap()
+                    .clone()
+            ),
+            numbers(json!({
+                "name":name,"message":error.message,"identity":true,"posts":posts.borrow().len(),
+                "first":calls.get(),"later":later.get(),"bid":store.tickers().unwrap()[0].bid,
+                "ask":store.tickers().unwrap()[0].ask,
+            }))
         );
         let mut expected = original;
         expected.store_subscriber_ids.push(2);

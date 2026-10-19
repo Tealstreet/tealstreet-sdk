@@ -81,7 +81,7 @@ impl JournalFolder for Folder {
         from: f64,
         to: f64,
         symbol_scoped: bool,
-        settle: Box<dyn Fn(&str) -> Result<String, ExchangeError> + 'a>,
+        settle: Box<dyn Fn(&str) -> Result<String, ExchangeError>>,
     ) -> ExchangeFuture<'a, Vec<Value>> {
         self.calls.borrow_mut().push(
             json!({"account":account,"from":number(from),"to":number(to),

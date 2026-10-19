@@ -1002,3 +1002,9 @@ metadata plus primary/Spot ticker parsing without a whole-input JSON projection.
 `retained_audit_*` observes held startup, original cache/lookup identity, UTF-16,
 nonfinite bits and visible cache rejection. Placement extension refusal stays
 strictly input-only; malformed market strings remain row-only decision3 refusals.
+
+The constructor's rate-window fixture keeps sleeps pending until explicit virtual
+time advancement. Registering or polling a timer must not advance the clock.
+Its five/sixth-request witness matches the real axios-rate-limit dependency with
+the maintained constructor's options, including frozen wall time. Preserve the
+unlimited/secondary routing checks and all 36 existing constructor profiles.
