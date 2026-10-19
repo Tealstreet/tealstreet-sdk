@@ -393,3 +393,31 @@ branch's `s` dependency build, while retaining explicit engine/Bybit O3 and
 the allocation fixes, produces 3,117,529 bytes within the inherited 3 MiB
 budget. The full matrix is being rerun with that artifact, beginning with Hyro
 and BingX. All earlier failures remain recorded; fixtures and gates are exact.
+
+## Nine-venue passing checkpoint before Bitget
+
+All 29 gates PASS (13 public medians of three; 16 private), on the final
+3,117,529-byte artifact and `0d3ba72e58` runtime source. All 39 wasm boundary
+cases and 28 host/Workers cases pass again on that artifact; 87 harness and
+eight frame/copier regressions pass. The final independent adversarial review
+of buffer lifetimes, transferred ownership, book ordering, ticker masks and
+profile precedence passes. No further defects remain from that review.
+
+| Venue | Frames | Main CPU TS / Rust ms | Steady CPU TS / Rust ms | Retained TS / Rust MB |
+| --- | ---: | ---: | ---: | ---: |
+| bybitinverse | 708 | 130.2 / 35.1 | 82.3 / 15.9 | 15.9 / 1.5 |
+| bybitspot | 4339 | 126.4 / 90.1 | 73.0 / 41.9 | 16.9 / 2.1 |
+| bybitdemo | 5833 | 175.2 / 111.4 | 98.5 / 43.8 | 21.1 / 3.0 |
+| hyrotrader | 160 | 29.1 / 21.4 | 11.6 / 5.0 | 15.5 / 1.0 |
+| binance | 873 | 176.5 / 73.2 | 91.6 / 25.4 | 18.2 / 2.7 |
+| bybit | 8743 | 214.9 / 141.2 | 120.9 / 64.0 | 21.7 / 3.0 |
+| backpack | 1087 | 122.4 / 48.8 | 59.8 / 20.0 | 16.4 / 1.8 |
+| cryptocom | 2178 | 178.0 / 148.5 | 118.3 / 75.3 | 14.5 / 1.9 |
+| blofin | 2765 | 116.7 / 89.1 | 67.9 / 42.3 | 17.1 / 2.3 |
+| okx | 8904 | 670.4 / 617.5 | 498.1 / 455.1 | 19.2 / 3.9 |
+| weex | 2029 | 120.6 / 84.2 | 57.7 / 37.2 | 18.2 / 2.6 |
+| bingx | 189 | 151.0 / 87.1 | 68.9 / 38.7 | 17.7 / 2.5 |
+| mexc | 14701 | 464.1 / 205.2 | 271.1 / 106.7 | 23.6 / 3.3 |
+
+Bitget landed at `3a7b46407d` before the final push. Integrate its shared
+harness/host changes and rerun required gates and final-head CI before merge.
