@@ -1,34 +1,47 @@
+use safe_cex_exchange::{
+    js_runtime::value::{Js, Thrown, from_json, to_json},
+    runtime::ExchangeError,
+};
 use safe_cex_webworker::worker_logging::forward_error;
 use serde_json::{Value, json};
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 fn native(row: &Value) -> Value {
-    let cooldowns = RefCell::new(HashMap::new());
-    let error = json!({"safeCexSentryReportKey":"same","safeCexSentryReportCooldownMs":100,"safeCexSentryTags":{"source":"control","control":true},"safeCexSentryExtra":{"winner":"control"}});
+    let cooldowns = Js::new_map();
     let extra = match row["extraKind"].as_str().unwrap() {
         "absent" => None,
-        "suppress" => Some(json!({"suppressConsoleLog":true})),
-        "mixed" => Some(
-            json!({"winner":"plain","sentryTags":{"source":"split","module":"override","split":true},"sentryExtra":{"winner":"split","suppressedRepeatedReports":99}}),
-        ),
+        "suppress" => Some(from_json(&json!({"suppressConsoleLog":true}))),
+        "mixed" => Some(from_json(
+            &json!({"winner":"plain","sentryTags":{"source":"split","module":"override","split":true},"sentryExtra":{"winner":"split","suppressedRepeatedReports":99}}),
+        )),
         _ => panic!("source extra inventory"),
     };
-    let post_error = Rc::new("post");
+    let post_error = Rc::new(ExchangeError::new("post"));
     let calls: Vec<_> = [0,50,100,90,200].into_iter().map(|now| {
-        let events=RefCell::new(Vec::new());
+        let events=Rc::new(RefCell::new(Vec::new()));
+        let error=from_json(&json!({"safeCexSentryReportKey":"same","safeCexSentryReportCooldownMs":100,"safeCexSentryTags":{"source":"control","control":true},"safeCexSentryExtra":{"winner":"control"}}));
+        if row["errorKind"]=="getter-throw" {
+            let events=events.clone();
+            error.define_accessor("safeCexSentryReportKey",Some(Rc::new(move |_| {
+                events.borrow_mut().push(json!({"getter":true}));
+                Err(Thrown::from(ExchangeError::new("serialization")))
+            })),None).unwrap();
+        }
         let result = forward_error(
             &cooldowns,
             (safe_cex_types::ExchangeName::Binance,"account"),
-            "worker message", &error, extra.as_ref(), row["send"].as_bool().unwrap(),
+            &Js::str("worker message"), &error, extra.as_ref(), row["send"].as_bool().unwrap(),
             (|| {events.borrow_mut().push(json!({"clock":now}));Ok(f64::from(now))},
-             || {if row["errorKind"]=="string-throw" {events.borrow_mut().push(json!({"stringify":true}));return Err(Rc::new("serialization"));}
-                 Ok(if row["errorKind"]=="native" {json!({"message":"source message","name":"Error","stack":"host-stack"})}else{json!({"message":safe_cex_num::js_string(Some(&error)).unwrap(),"name":"UnknownError","stack":"host-stack"})})},
-             |payload| {events.borrow_mut().push(json!({"post":payload}));if row["postMode"]!="normal" {Err(post_error.clone())}else{Ok(())}},
-             |prefix,message,original,cause| {assert!(std::ptr::eq(original,&error),"WORKER-ERROR fallback original identity");assert!(Rc::ptr_eq(&cause,&post_error),"WORKER-ERROR fallback post identity");events.borrow_mut().push(json!({"fallback":{"prefix":prefix,"message":message}}));if row["postMode"]=="console-throw"{Err(Rc::new("console"))}else{Ok(())}}
+             || {if row["errorKind"]=="string-throw" {events.borrow_mut().push(json!({"stringify":true}));return Err(Rc::new(ExchangeError::new("serialization")));}
+                 Ok(from_json(&if row["errorKind"]=="native" {json!({"message":"source message","name":"Error","stack":"host-stack"})}else{json!({"message":"[object Object]","name":"UnknownError","stack":"host-stack"})}))},
+             |payload| {events.borrow_mut().push(json!({"post":{"op":"error","data":to_json(&payload.data).unwrap()}}));if row["postMode"]!="normal" {Err(post_error.clone())}else{Ok(())}},
+             |prefix,message,original,cause| {assert!(std::ptr::eq(original,&error),"WORKER-ERROR fallback original identity");assert!(Rc::ptr_eq(&cause,&post_error),"WORKER-ERROR fallback post identity");events.borrow_mut().push(json!({"fallback":{"prefix":prefix,"message":to_json(message).unwrap()}}));if row["postMode"]=="console-throw"{Err(Rc::new(ExchangeError::new("console")))}else{Ok(())}}
             ),
         );
-        let state:Vec<_>=cooldowns.borrow().iter().map(|(key,(last,count))|json!([key,{"lastReportedAt":last,"suppressedCount":count}])).collect();
-        json!({"now":now,"events":events.into_inner(),"failure":result.err().map(|e|*e),"cooldowns":state})
+        let previous=cooldowns.call_method("get",vec![Js::str("same")]).unwrap();
+        let state=if previous.is_undefined(){json!([])}else{json!([["same",to_json(&previous).unwrap()]])};
+        let observed=events.borrow().clone();
+        json!({"now":now,"events":observed,"failure":result.err().map(|e|e.message.clone()),"cooldowns":state})
     }).collect();
     json!({"calls":calls})
 }
@@ -47,64 +60,144 @@ fn reporting_matches_live_cooldown_delivery_and_callback_effects() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    // Preserve the source lone-surrogate witness as escaped JSON text; Value's
-    // UTF-8 ingress intentionally refuses that one string.
     let raw = String::from_utf8(output.stdout).unwrap();
     assert!(
         raw.contains("\\ud800"),
         "WORKER-ERROR escaped source surrogate witness"
     );
-    assert!(
-        serde_json::from_str::<Value>(&raw).is_err(),
-        "CHOSEN WORKER-ERROR UTF8 ingress refuses lone surrogate"
-    );
     let source: Value = serde_json::from_str(&raw.replace("\\ud800", "SURROGATE_WITNESS")).unwrap();
-    for case in source["textCases"].as_array().unwrap().iter().take(2) {
-        let message = case["message"].as_str().unwrap();
+    for (i, case) in source["textCases"].as_array().unwrap().iter().enumerate() {
+        let message = if i == 2 {
+            Js::utf16(&[0xd800])
+        } else {
+            from_json(&case["message"])
+        };
         let sent = RefCell::new(None);
         forward_error(
-            &RefCell::new(HashMap::new()),
+            &Js::new_map(),
             (safe_cex_types::ExchangeName::Binance, "account"),
-            message,
-            &json!({}),
+            &message,
+            &Js::object(vec![]),
             None,
             true,
             (
-                || Ok::<_, ()>(0.0),
-                || Ok(json!({"message":message,"name":"Error","stack":"host-stack"})),
+                || Ok::<_, ExchangeError>(0.0),
+                || {
+                    Ok(Js::object(vec![
+                        ("message", message.clone()),
+                        ("name", Js::str("Error")),
+                        ("stack", Js::str("host-stack")),
+                    ]))
+                },
                 |p| {
-                    *sent.borrow_mut() = p.data;
+                    *sent.borrow_mut() = Some(p.data);
                     Ok(())
                 },
-                |_, _, _, _| Err(()),
+                |_, _, _, e| Err(e),
             ),
         )
         .unwrap();
+        let reported = sent
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .get("1")
+            .unwrap()
+            .get("sentryData")
+            .unwrap()
+            .get("error")
+            .unwrap()
+            .get("message")
+            .unwrap();
         assert_eq!(
-            sent.borrow().as_ref().unwrap()[1]["sentryData"]["error"]["message"],
-            case["reported"],
-            "WORKER-ERROR scalar Unicode positive"
+            reported.to_js_string().unwrap(),
+            message.to_js_string().unwrap(),
+            "WORKER-ERROR original UTF16 units"
         );
     }
+    let map = Js::new_map();
+    let object_key = Js::object(vec![(
+        "toString",
+        Js::function("toString", |_, _| {
+            Err(Thrown::type_error("Map key must not stringify"))
+        }),
+    )]);
+    let key_reads = Rc::new(std::cell::Cell::new(0));
+    let key_error = Js::object(vec![("safeCexSentryReportCooldownMs", Js::Number(100.0))]);
+    let reads = key_reads.clone();
+    let key = object_key.clone();
+    key_error
+        .define_accessor(
+            "safeCexSentryReportKey",
+            Some(Rc::new(move |_| {
+                reads.set(reads.get() + 1);
+                Ok(if reads.get() % 3 == 0 {
+                    key.clone()
+                } else {
+                    Js::str("validated")
+                })
+            })),
+            None,
+        )
+        .unwrap();
+    let sends = RefCell::new(Vec::new());
+    for _ in 0..2 {
+        forward_error(
+            &map,
+            (safe_cex_types::ExchangeName::Binance, "account"),
+            &Js::str("changing-key"),
+            &key_error,
+            None,
+            true,
+            (
+                || Ok::<_, ExchangeError>(0.0),
+                || Ok(Js::object(vec![])),
+                |p| {
+                    sends
+                        .borrow_mut()
+                        .push(p.data.get("1")?.get("sendToSentry")?.truthy());
+                    Ok(())
+                },
+                |_, _, _, e| Err(e),
+            ),
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        json!({"reads":key_reads.get(),"size":map.get("size").unwrap().to_number().unwrap() as usize,"identity":map.call_method("has",vec![object_key]).unwrap().truthy(),"sends":*sends.borrow()}),
+        source["changingKey"],
+        "WORKER-ERROR source native Map key identity without String hop"
+    );
     let rows = source["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 72);
-    for probe in source["clockBits"].as_array().unwrap() {
-        let raw: Value = serde_json::from_str(probe["token"].as_str().unwrap()).unwrap();
-        let now = safe_cex_num::numeric_ingress::js_value_as_f64(&raw).unwrap();
-        let cooldowns = RefCell::new(HashMap::new());
-        let error = json!({"safeCexSentryReportKey":"same","safeCexSentryReportCooldownMs":100});
+    for row in rows {
+        assert_numeric_tree_eq(
+            &native(row)["calls"],
+            &row["calls"],
+            "WORKER-ERROR sequence",
+        );
+    }
+    let clocks = source["clockBits"].as_array().unwrap();
+    assert_eq!(clocks.len(), 6);
+    for probe in clocks {
+        let token = probe["token"].as_str().unwrap();
+        let now = safe_cex_num::number_from_string(token);
+        let cooldowns = Js::new_map();
+        let error = from_json(
+            &json!({"safeCexSentryReportKey":"same","safeCexSentryReportCooldownMs":100}),
+        );
         forward_error(
             &cooldowns,
             (safe_cex_types::ExchangeName::Binance, "account"),
-            "bits",
+            &Js::str("bits"),
             &error,
             None,
             true,
             (
-                || Ok::<_, ()>(now),
-                || Ok(json!({})),
+                || Ok::<_, ExchangeError>(now),
+                || Ok(Js::object(vec![])),
                 |_| Ok(()),
-                |_, _, _, _| Err(()),
+                |_, _, _, e| Err(e),
             ),
         )
         .unwrap();
@@ -112,95 +205,70 @@ fn reporting_matches_live_cooldown_delivery_and_callback_effects() {
             format!(
                 "{:016x}",
                 cooldowns
-                    .borrow()
-                    .get("same")
-                    .expect("WORKER-ERROR cooldown entry must be committed")
-                    .0
+                    .call_method("get", vec![Js::str("same")])
+                    .unwrap()
+                    .get("lastReportedAt")
+                    .unwrap()
+                    .to_number()
+                    .unwrap()
                     .to_bits()
             ),
             probe["last"].as_str().unwrap(),
-            "WORKER-ERROR clock bits before serialization"
+            "WORKER-ERROR native clock bits"
         );
     }
-    let caller = RefCell::new(json!({"safeCexSentryTags":{"phase":"before"}}));
-    let error = caller.borrow().clone();
+    let tags = Js::object(vec![("phase", Js::str("before"))]);
+    let error = Js::object(vec![("safeCexSentryTags", tags.clone())]);
     let sent = RefCell::new(None);
     forward_error(
-        &RefCell::new(HashMap::new()),
+        &Js::new_map(),
         (safe_cex_types::ExchangeName::Binance, "account"),
-        "alias",
+        &Js::str("alias"),
         &error,
         None,
         true,
         (
-            || Ok::<_, ()>(0.0),
+            || Ok::<_, ExchangeError>(0.0),
             || {
-                caller.borrow_mut()["safeCexSentryTags"]["phase"] = json!("after");
-                Ok(json!({"message":"alias-error","name":"UnknownError","stack":"host-stack"}))
+                tags.set("phase", Js::str("after"))?;
+                Ok(from_json(
+                    &json!({"message":"alias-error","name":"UnknownError","stack":"host-stack"}),
+                ))
             },
             |p| {
-                *sent.borrow_mut() = p.data;
+                *sent.borrow_mut() = Some(p.data);
                 Ok(())
             },
-            |_, _, _, _| Err(()),
+            |_, _, _, e| Err(e),
         ),
     )
     .unwrap();
     assert_eq!(
         source["alias"],
-        json!({"caller":"after","reported":"after"}),
-        "WORKER-ERROR source live coercion alias"
+        json!({"caller":"after","reported":"after"})
     );
     assert_eq!(
-        caller.borrow()["safeCexSentryTags"]["phase"],
-        "after",
-        "WORKER-ERROR caller clone mutation occurred"
+        tags.get("phase").unwrap().to_js_string().unwrap().as_ref(),
+        "after".encode_utf16().collect::<Vec<_>>().as_slice()
     );
     assert_eq!(
-        sent.borrow().as_ref().unwrap()[1]["sentryData"]["tags"]["phase"],
-        "before",
-        "CHOSEN WORKER-ERROR owned control tags snapshot"
+        sent.borrow()
+            .as_ref()
+            .unwrap()
+            .get("1")
+            .unwrap()
+            .get("sentryData")
+            .unwrap()
+            .get("tags")
+            .unwrap()
+            .get("phase")
+            .unwrap()
+            .to_js_string()
+            .unwrap()
+            .as_ref(),
+        "after".encode_utf16().collect::<Vec<_>>().as_slice(),
+        "WORKER-ERROR source live control tags after coercion"
     );
-    for row in rows {
-        let result = native(row);
-        let expected = if row["errorKind"] == "getter-throw" {
-            // The JSON materialization boundary cannot retain a callable getter.
-            for call in row["calls"].as_array().unwrap() {
-                assert_eq!(
-                    call["failure"], "serialization",
-                    "CHOSEN WORKER-ERROR source getter throws before clock"
-                );
-                assert_eq!(call["events"], json!([{"getter":true}]));
-            }
-            for call in result["calls"].as_array().unwrap() {
-                assert_eq!(
-                    call["events"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .filter(|event| event.get("post").is_some())
-                        .count(),
-                    1,
-                    "CHOSEN WORKER-ERROR materialized JSON getter omitted"
-                );
-            }
-            rows.iter()
-                .find(|r| {
-                    r["errorKind"] == "plain"
-                        && r["postMode"] == row["postMode"]
-                        && r["extraKind"] == row["extraKind"]
-                        && r["send"] == row["send"]
-                })
-                .unwrap()
-        } else {
-            row
-        };
-        assert_numeric_tree_eq(
-            &result["calls"],
-            &expected["calls"],
-            "WORKER-ERROR sequence",
-        );
-    }
 }
 fn assert_numeric_tree_eq(actual: &Value, expected: &Value, path: &str) {
     match (actual, expected) {
@@ -235,33 +303,47 @@ fn assert_numeric_tree_eq(actual: &Value, expected: &Value, path: &str) {
 
 #[test]
 fn reporting_releases_cooldown_borrows_and_preserves_native_clock_bits() {
-    let cooldowns = RefCell::new(HashMap::new());
-    let error = json!({"safeCexSentryReportKey":"same","safeCexSentryReportCooldownMs":100});
+    let cooldowns = Js::new_map();
+    let key = Js::str("same");
+    let error =
+        from_json(&json!({"safeCexSentryReportKey":"same","safeCexSentryReportCooldownMs":100}));
     let events = RefCell::new(Vec::new());
-    let failure = Rc::new("materialize");
+    let failure = Rc::new(ExchangeError::new("materialize"));
     let result = forward_error(
         &cooldowns,
         (safe_cex_types::ExchangeName::Binance, "account"),
-        "message",
+        &Js::str("message"),
         &error,
         None,
         true,
         (
             || {
-                cooldowns.borrow_mut().insert("other".into(), (1.0, 2.0));
+                cooldowns
+                    .call_method(
+                        "set",
+                        vec![
+                            Js::str("other"),
+                            Js::object(vec![
+                                ("lastReportedAt", Js::Number(1.0)),
+                                ("suppressedCount", Js::Number(2.0)),
+                            ]),
+                        ],
+                    )
+                    .unwrap();
                 events.borrow_mut().push("clock");
                 Ok(-0.0)
             },
             || {
                 assert_eq!(
                     cooldowns
-                        .borrow()
-                        .get("same")
-                        .expect("WORKER-ERROR cooldown entry must be committed")
-                        .0
+                        .call_method("get", vec![key.clone()])
+                        .unwrap()
+                        .get("lastReportedAt")
+                        .unwrap()
+                        .to_number()
+                        .unwrap()
                         .to_bits(),
-                    (-0.0_f64).to_bits(),
-                    "WORKER-ERROR native signed zero committed before materialization"
+                    (-0.0_f64).to_bits()
                 );
                 events.borrow_mut().push("materialize");
                 Err(failure.clone())
@@ -276,13 +358,6 @@ fn reporting_releases_cooldown_borrows_and_preserves_native_clock_bits() {
             },
         ),
     );
-    assert!(
-        Rc::ptr_eq(&result.unwrap_err(), &failure),
-        "WORKER-ERROR materialization failure identity"
-    );
-    assert_eq!(
-        *events.borrow(),
-        vec!["clock", "materialize"],
-        "WORKER-ERROR materialization failure effects"
-    );
+    assert!(Rc::ptr_eq(&result.unwrap_err(), &failure));
+    assert_eq!(*events.borrow(), vec!["clock", "materialize"]);
 }

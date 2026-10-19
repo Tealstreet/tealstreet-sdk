@@ -115,3 +115,22 @@ Has/Get or checked snapshots, propagate original getter failures, and route
 iterator state through the shared iterator record. Backpack returns the original
 Js array from NativeValue::array. Existing scalar coercion profiles, raw-decoder
 obligations, receiver binding and error selection remain independently classified.
+
+
+## Array constructor identity and bounded retention
+
+The installed Array prototype has an own writable, nonenumerable, configurable
+constructor descriptor pointing to the installed Array facade. Native and Node
+observations agree for prototype/instance identity, descriptor flags, replacement,
+own shadowing, deletion and restoration. The compiled baseline fails the named
+`ARRAY_CONSTRUCTOR` backlink assertion before this descriptor is installed.
+
+The accepted lifetime boundary is **Bounded native constructor/prototype cycle**
+in `.aimux/plans/audits/known-residuals.md`. The runtime has no general cycle
+collector: one strong constructor/prototype pair remains per disposed realm.
+`array_constructor_retention_is_bounded_to_one_pair_per_realm` checks eight
+realms, 32 installations per realm and 128 arrays per installation. It proves
+that every operation array and superseded facade releases, the prototype stays
+canonical, and exactly one pair remains per realm; teardown breaks those test
+cycles explicitly. No maintained venue source reads an array's constructor;
+base.ts's two `.constructor.name` reads apply to the exchange instance.
