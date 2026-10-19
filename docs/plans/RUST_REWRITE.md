@@ -301,14 +301,14 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | BingX | done (#1305) |
 | MEXC | done (#1304); conditional/trailing parity checked (#1311) |
 | BloFin | done (#1300) |
-| Hyperliquid perps | Rust port [#1306](https://github.com/Tealstreet/tealstreet-sdk/pull/1306); implementation and reviews complete, CI gated |
+| Hyperliquid perps | done (#1306) |
 | Backpack | done (#1299) |
 | Bitget (USDT-M, USDC) | done (#1308); inverse sizing and UTA ledger/trailing parity next |
 | Bitunix | wave 1, PR in review |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | Implemented; [PR #1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313) |
-| KuCoin, Phemex | wave 2 lanes running |
+| KuCoin, Phemex, WOO, Bitrue, Orderly family, Bybit inverse/spot/demo/Hyro, Bitget parity | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
-| WOO, Lighter, Paradex, GRVT, AsterDEX, Orderly family, ApeX Omni, Kraken, Coinbase, Bitrue, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse, Bybit inverse/spot/demo | wave 2, as wave 1 lanes merge |
+| Lighter, Paradex, GRVT, AsterDEX, ApeX Omni, Kraken, Coinbase, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse | next, as lanes free up |
 
 ### 9. Delete TypeScript and merge
 
