@@ -260,7 +260,7 @@ are ~450 KB/s for two 1,000-level books).
 
 - Bans, fmt, clippy, native tests, wasm32 build and clippy.
 - Replay gate (`rust.yml`, job "replay gate"): release wasm with the pinned
-  wasm-bindgen, a 2.25 MiB combined Binance/Bybit/Crypto.com/OKX/WEEX size budget, the committed public fixtures
+  wasm-bindgen, an explicit combined-venue size budget in `rust.yml`, committed public fixtures
   (`harness/fixtures/`) gated on identical output and lower CPU and memory,
   and the generated private tape gated on identical account state.
 

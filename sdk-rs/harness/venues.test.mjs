@@ -61,3 +61,38 @@ test('public audit requires ticker subscriptions before replay', () => {
   assert.equal(ready.ready(), true);
   assert.deepEqual(ready.errors(), []);
 });
+
+test('Bybit startup topics derive all successful seed pages independently of sent subscriptions', async () => {
+  const { subscriptionKeys } = await import('./requests.mjs');
+  const bybit = venueOf('bybit');
+  const row = (symbol, quoteCoin) => ({ symbol, quoteCoin });
+  const seed = (list, extra = {}) => ({ type: 'http', method: 'GET', status: 200,
+    url: 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000',
+    body: JSON.stringify({ retCode: 0, result: { list } }), ...extra });
+  const required = bybit.startupSubscriptions([
+    seed([row('BTCUSDT', 'USDT'), row('BTCUSD', 'USD'), row('BTCUSDT', 'USDT')]),
+    seed([row('ETHUSDC', 'USDC')], { url: 'https://api.bybit.com/v5/market/instruments-info?cursor=page2' }),
+    seed([row('NEXTUSDT', 'USDT')], { url: 'https://api.bybit.com/v5/market/instruments-info?status=PreLaunch' }),
+    seed([row('FAILEDUSDT', 'USDT')], { status: 503 }),
+    seed([row('FAILEDUSDT', 'USDT')], { body: JSON.stringify({ retCode: 10001, result: { list: [row('FAILEDUSDT', 'USDT')] } }) }),
+    seed([row('OTHERUSDT', 'USDT')], { url: 'https://api.bybit.com/v5/market/tickers' }),
+  ], ['BTCUSDT', 'ETHUSDC']);
+  const socket = 'wss://stream.bybit.com/v5/public/linear';
+  assert.deepEqual(required, [
+    `${socket} subscribe tickers.BTCUSDT`,
+    `${socket} subscribe tickers.ETHUSDC`,
+    `${socket} subscribe tickers.NEXTUSDT`,
+    `${socket} subscribe orderbook.1000.BTCUSDT`,
+    `${socket} subscribe orderbook.1000.ETHUSDC`,
+  ]);
+  const pending = new Set(required);
+  const sent = (url, args) => {
+    for (const key of subscriptionKeys(url, JSON.stringify({ op: 'subscribe', args }))) pending.delete(key);
+  };
+  sent('wss://stream.bybit.com/v5/private', ['tickers.BTCUSDT']);
+  assert.equal(pending.size, 5, 'wrong native socket cannot satisfy readiness');
+  sent(socket + '?requestId=generated', ['tickers.BTCUSDT', 'orderbook.1000.BTCUSDT']);
+  assert.equal(pending.size, 3, 'a partial outgoing batch cannot satisfy readiness');
+  sent(socket, ['tickers.ETHUSDC', 'tickers.NEXTUSDT', 'orderbook.1000.ETHUSDC']);
+  assert.equal(pending.size, 0);
+});
