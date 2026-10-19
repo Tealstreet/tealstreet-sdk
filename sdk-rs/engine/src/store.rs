@@ -9,8 +9,9 @@ use std::collections::HashMap;
 pub struct Store {
     markets: Vec<Market>,
     market_by_symbol: HashMap<Box<str>, u32>,
-    // When every instrument ID is its symbol, the symbol index serves both.
-    market_by_id: Option<HashMap<Box<str>, u32>>,
+    // Mixed IDs use sorted row indexes borrowing market identity. When every
+    // instrument ID is its symbol, the symbol index serves both.
+    market_by_id: Option<Vec<u32>>,
     tickers: Vec<Ticker>,
     // Sorted row indexes borrow ticker identity instead of copying every symbol.
     ticker_by_symbol: Vec<u32>,
@@ -105,19 +106,18 @@ impl Store {
     }
 
     pub fn market_index_by_id(&self, id: &str) -> Option<u32> {
-        self.market_by_id
-            .as_ref()
-            .unwrap_or(&self.market_by_symbol)
-            .get(id)
-            .copied()
+        match &self.market_by_id {
+            None => self.market_by_symbol.get(id).copied(),
+            Some(indices) => indices
+                .binary_search_by(|&index| self.markets[index as usize].id.as_str().cmp(id))
+                .ok()
+                .map(|slot| indices[slot]),
+        }
     }
 
     pub fn market_by_id(&self, id: &str) -> Option<&Market> {
-        self.market_by_id
-            .as_ref()
-            .unwrap_or(&self.market_by_symbol)
-            .get(id)
-            .map(|&index| &self.markets[index as usize])
+        self.market_index_by_id(id)
+            .map(|index| &self.markets[index as usize])
     }
 
     pub fn set_markets(&mut self, mut markets: Vec<Market>) {
@@ -132,11 +132,15 @@ impl Store {
             .iter()
             .any(|market| market.id != market.symbol)
             .then(|| {
-                markets
-                    .iter()
-                    .enumerate()
-                    .map(|(index, market)| (market.id.clone().into_boxed_str(), index as u32))
-                    .collect()
+                let mut indices: Vec<u32> = (0..markets.len() as u32).collect();
+                indices.sort_unstable_by(|&a, &b| {
+                    markets[a as usize]
+                        .id
+                        .cmp(&markets[b as usize].id)
+                        .then_with(|| b.cmp(&a))
+                });
+                indices.dedup_by(|a, b| markets[*a as usize].id == markets[*b as usize].id);
+                indices
             });
         self.markets = markets;
         self.changes.markets = true;
@@ -188,12 +192,7 @@ impl Store {
 
     /// Update by venue instrument ID without allocating a copy of its symbol.
     pub fn update_ticker_by_market_id(&mut self, id: &str, update: impl FnOnce(&mut Ticker)) {
-        let Some(&market) = self
-            .market_by_id
-            .as_ref()
-            .unwrap_or(&self.market_by_symbol)
-            .get(id)
-        else {
+        let Some(market) = self.market_index_by_id(id) else {
             return;
         };
         let Some(index) = self.ticker_index(&self.markets[market as usize].symbol) else {
@@ -372,10 +371,18 @@ impl Store {
         }
     }
 
-    /// Change market rows in place (indexes and symbols must not change).
+    /// Change market values in place; IDs and symbols must remain unchanged.
     pub fn update_markets(&mut self, mut update: impl FnMut(&mut Market)) {
         for market in &mut self.markets {
+            #[cfg(debug_assertions)]
+            let identity = (market.id.clone(), market.symbol.clone());
             update(market);
+            #[cfg(debug_assertions)]
+            debug_assert_eq!(
+                (&market.id, &market.symbol),
+                (&identity.0, &identity.1),
+                "market identity changes require set_markets"
+            );
         }
         self.changes.markets = true;
     }
@@ -438,7 +445,9 @@ impl Store {
         w.reserve(self.frame_size_hint(pending));
         w.reserve_strings(
             if changes.markets {
-                4 * self.markets.len()
+                // Identity IDs and symbols share a string-table entry.
+                let per_market = if self.market_by_id.is_none() { 3 } else { 4 };
+                per_market * self.markets.len()
             } else {
                 0
             } + if changes.orders {
@@ -513,9 +522,13 @@ impl Store {
             let count = self.markets.len();
             size += 8 + (4 + 20 * count).next_multiple_of(8) + 80 * count;
             for market in &self.markets {
-                for value in [&market.id, &market.symbol, &market.base, &market.quote] {
+                for value in [&market.id, &market.base, &market.quote] {
                     strings += 1;
                     string_bytes += value.len();
+                }
+                if market.id != market.symbol {
+                    strings += 1;
+                    string_bytes += market.symbol.len();
                 }
             }
         }
@@ -782,6 +795,76 @@ mod tests {
     }
 
     #[test]
+    fn market_string_bounds_preserve_identity_and_mixed_id_frames_without_growth() {
+        const COUNT: usize = 912;
+        for (mixed_ids, shared_base_quote) in
+            [(false, true), (true, true), (false, false), (true, false)]
+        {
+            let mut store = Store::default();
+            store.set_markets(
+                (0..COUNT)
+                    .map(|index| {
+                        let symbol = format!("S{index:04}USDT");
+                        let id = if mixed_ids && index % 2 == 0 {
+                            format!("contract{index}")
+                        } else {
+                            symbol.clone()
+                        };
+                        let mut row = market(&id, &symbol);
+                        row.base = if shared_base_quote {
+                            "BASE".into()
+                        } else {
+                            format!("base{index}")
+                        };
+                        row.quote = if shared_base_quote {
+                            "USDT".into()
+                        } else {
+                            format!("quote{index}")
+                        };
+                        row
+                    })
+                    .collect(),
+            );
+            let mut pending = store.take_pending();
+            pending.changes.status = false;
+            let size = 16 + store.frame_size_hint(&pending);
+            let buffer = Vec::with_capacity(size);
+            let capacity = buffer.capacity();
+            let mut writer = FrameWriter::new(buffer, 1.0);
+            store.write(&pending, &mut writer);
+            let frame = writer.finish();
+            assert!(frame.len() <= size);
+            if !shared_base_quote {
+                assert_eq!(frame.len(), size, "unique strings make the bound exact");
+            }
+            assert_eq!(frame.capacity(), capacity, "hint must avoid buffer growth");
+
+            let mut unreserved = FrameWriter::new(Vec::new(), 1.0);
+            store.write_markets(&mut unreserved);
+            assert_eq!(frame, unreserved.finish(), "reservation must preserve wire");
+            let payload = wire::sections(&frame)
+                .find(|(kind, _)| *kind == section::MARKETS)
+                .unwrap()
+                .1;
+            for index in 0..COUNT {
+                let refs = &payload[4 + 16 * index..12 + 16 * index];
+                assert_eq!(refs[..4] == refs[4..], !mixed_ids || index % 2 != 0);
+            }
+            let strings = wire::sections(&frame)
+                .find(|(kind, _)| *kind == section::STRINGS)
+                .unwrap()
+                .1;
+            let count = u32::from_le_bytes(strings[..4].try_into().unwrap()) as usize;
+            assert_eq!(
+                count,
+                COUNT
+                    + if shared_base_quote { 2 } else { 2 * COUNT }
+                    + if mixed_ids { COUNT / 2 } else { 0 }
+            );
+        }
+    }
+
+    #[test]
     fn settings_frame_hint_reserves_both_optional_leverage_columns() {
         for count in 0usize..=3 {
             for legs in 0..4 {
@@ -874,6 +957,15 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "market identity changes require set_markets")]
+    fn market_updates_cannot_change_ids_without_rebuilding_indexes() {
+        let mut store = Store::default();
+        store.set_markets(vec![market("X", "A"), market("Y", "B")]);
+        store.update_markets(|market| market.id = "Z".into());
+    }
+
+    #[test]
     fn instrument_updates_follow_symbol_mapping_after_replacement_and_reordering() {
         let mut store = Store::default();
         store.set_markets(vec![market("A-SWAP", "A"), market("B-SWAP", "B")]);
@@ -913,8 +1005,16 @@ mod tests {
         store.update_ticker_by_market_id("A", |ticker| ticker.bid = 3.0);
         assert_eq!(store.take_pending().ticker_deltas, [(0, 1)]);
 
-        store.set_markets(vec![market("X", "A"), market("X", "B")]);
+        store.set_markets(vec![
+            market("Z", "C"),
+            market("X", "A"),
+            market("Y", "D"),
+            market("X", "B"),
+        ]);
         assert!(store.market_by_id.is_some());
+        assert_eq!(store.market_index_by_id("Z"), Some(0));
+        assert_eq!(store.market_index_by_id("Y"), Some(2));
+        assert_eq!(store.market_index_by_id("X"), Some(3));
         assert_eq!(store.market_by_id("X").unwrap().symbol, "B");
         assert!(
             store.market_by_id("A").is_none(),

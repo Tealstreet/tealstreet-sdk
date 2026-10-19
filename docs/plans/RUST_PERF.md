@@ -293,3 +293,14 @@ continues until both margins widen. All ten private variants pass on seven-famil
 artifacts (MEXC21frames, other counts above). Optional CPU profiling now reports
 gross per-method thread CPU with a measured proxy/clock floor, labelled explicitly;
 normal gates still import no profiler. Final profile CPU runs remain pending.
+
+Memory follow-up passes45 engine tests/fmt/clippy and independent algorithm review:
+identity ID/symbol markets reserve3 candidate strings instead of4 and omit the
+duplicate string bytes/offset from the frame bound. Mixed native IDs now use
+sorted u32 row indexes borrowing market IDs instead of cloned-ID hash entries.
+Descending row tie order preserves last duplicate; replacements rebuild indexes.
+The existing immutable-identity contract is explicit and debug-asserted. Estimated
+BingX wasm allocation saving is at least38195 bytes before allocator overhead;
+actual pages and O(log n) mixed-ID lookup CPU remain gated after rebuilding.
+BloFin plus MEXC parity just landed at origin `a4d9e2ec84`; integration expands to
+eight families before the next single release rebuild. No final gate claim yet.
