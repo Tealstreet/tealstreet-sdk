@@ -698,6 +698,36 @@ pub struct FrameDrainReceipt {
     pub close_processed: u64,
 }
 
+type NativeHandlerCountReader = dyn Fn(&str) -> Result<Option<usize>, ExchangeError>;
+
+/// Bind statistics to a socket's existing native callback registry without
+/// copying callbacks or maintaining a second table. Own empty lists return
+/// Some(0); absent keys retain the shared source prototype/default behavior.
+pub fn install_native_handler_stats(
+    socket: &Rc<BaseWebSocket>,
+    count: Rc<NativeHandlerCountReader>,
+) {
+    let weak = Rc::downgrade(socket);
+    socket.set_handler_stats_reader(Rc::new(move |topic, missing| {
+        if let Some(count) = count(topic)? {
+            return Ok((
+                count > 0,
+                safe_cex_num::PrototypeScalar::Number(count as f64),
+            ));
+        }
+        let socket = weak
+            .upgrade()
+            .ok_or_else(|| ExchangeError::new("socket owner released"))?;
+        let count = socket.inherited_handler_stats_count(topic, missing)?;
+        let has = socket.prototype_realm.inherited(topic).truthy()
+            && safe_cex_num::PrototypeValue::from(count.clone()).truthy();
+        Ok((has, count))
+    }));
+}
+
+type HandlerStatsReader =
+    dyn Fn(&str, usize) -> Result<(bool, safe_cex_num::PrototypeScalar), ExchangeError>;
+
 pub struct BaseWebSocket {
     pub id: u64,
     frame_receipts: Rc<RefCell<Vec<FrameDrainReceipt>>>,
@@ -710,6 +740,9 @@ pub struct BaseWebSocket {
     pub order_book_inner_state: RefCell<HashMap<String, OrderBookInnerState>>,
     pub message_handlers: RefCell<indexmap::IndexMap<String, HandlerList>>,
     pub message_handlers_stats: RefCell<MessageHandlersStats>,
+    // Protocols with another registry owner read it in place. Other typed
+    // protocols own message_handlers directly; no callbacks are copied here.
+    handler_stats_reader: RefCell<Option<Rc<HandlerStatsReader>>>,
     pub prototype_realm: Rc<safe_cex_num::PrototypeRealm>,
     pub last_log: RefCell<VecDeque<String>>,
     pub treat_any_message_as_pong: Cell<bool>,
@@ -741,6 +774,7 @@ impl BaseWebSocket {
             order_book_inner_state: RefCell::new(HashMap::new()),
             message_handlers: RefCell::new(indexmap::IndexMap::new()),
             message_handlers_stats: RefCell::new(indexmap::IndexMap::new()),
+            handler_stats_reader: RefCell::new(None),
             prototype_realm: safe_cex_num::PrototypeRealm::current(),
             last_log: RefCell::new(VecDeque::with_capacity(20)),
             treat_any_message_as_pong: Cell::new(false),
@@ -857,9 +891,15 @@ impl BaseWebSocket {
             return Ok(());
         }
         let now = self.now();
-        let count = self.handler_stats_count(topic, 1)?;
-        let has = self.handler_stats_present(topic)
-            && safe_cex_num::PrototypeValue::from(count.clone()).truthy();
+        let reader = self.handler_stats_reader.borrow().clone();
+        let (has, count) = if let Some(reader) = reader {
+            reader(topic, 1)?
+        } else {
+            let count = self.handler_stats_count(topic, 1)?;
+            let has = self.handler_stats_present(topic)
+                && safe_cex_num::PrototypeValue::from(count.clone()).truthy();
+            (has, count)
+        };
         let own = self.message_handlers_stats.borrow().contains_key(topic);
         if own {
             let mut stats = self.message_handlers_stats.borrow_mut();
@@ -964,6 +1004,9 @@ impl BaseWebSocket {
         }
         Ok(())
     }
+    pub(crate) fn set_handler_stats_reader(&self, reader: Rc<HandlerStatsReader>) {
+        *self.handler_stats_reader.borrow_mut() = Some(reader);
+    }
     fn handler_stats_present(&self, topic: &str) -> bool {
         self.message_handlers.borrow().contains_key(topic)
             || self.prototype_realm.inherited(topic).truthy()
@@ -974,10 +1017,22 @@ impl BaseWebSocket {
         missing: usize,
     ) -> Result<safe_cex_num::PrototypeScalar, ExchangeError> {
         use safe_cex_num::PrototypeScalar as Scalar;
-        use safe_cex_num::PrototypeValue as Native;
+        let reader = self.handler_stats_reader.borrow().clone();
+        if let Some(reader) = reader {
+            return reader(topic, missing).map(|(_, count)| count);
+        }
         if let Some(handlers) = self.message_handlers.borrow().get(topic) {
             return Ok(Scalar::Number(handlers.borrow().len() as f64));
         }
+        self.inherited_handler_stats_count(topic, missing)
+    }
+    fn inherited_handler_stats_count(
+        &self,
+        topic: &str,
+        missing: usize,
+    ) -> Result<safe_cex_num::PrototypeScalar, ExchangeError> {
+        use safe_cex_num::PrototypeScalar as Scalar;
+        use safe_cex_num::PrototypeValue as Native;
         let handlers = self.prototype_realm.inherited(topic);
         if !handlers.truthy() {
             return Ok(Scalar::Number(missing as f64));
@@ -4279,6 +4334,98 @@ mod tests {
                 .borrow()
                 .contains_key("publicTrade.SOLUSDT")
         );
+    }
+    #[test]
+    fn native_registry_statistics_read_live_counts_for_pong_cleanup_and_reconcile() {
+        use safe_cex_num::PrototypeScalar as Scalar;
+        let (socket, _, runtime, _) = fixture();
+        let counts = Rc::new(RefCell::new(indexmap::IndexMap::from([
+            ("pong".to_owned(), 1usize),
+            ("book.BTC".to_owned(), 2usize),
+            ("empty".to_owned(), 0usize),
+        ])));
+        let weak_counts = Rc::downgrade(&counts);
+        let counts_watch = weak_counts.clone();
+        install_native_handler_stats(
+            &socket,
+            Rc::new(move |topic| Ok(weak_counts.upgrade().unwrap().borrow().get(topic).copied())),
+        );
+        socket.record_message_handler_stats("book.BTC").unwrap();
+        socket.record_message_handler_stats("empty").unwrap();
+        socket.record_message_handler_stats("bare").unwrap();
+        socket.handle_pong_event(5000).unwrap();
+        assert!(
+            socket.message_handlers.borrow().is_empty(),
+            "never mirror callbacks"
+        );
+        {
+            let stats = socket.message_handlers_stats.borrow();
+            assert_eq!(stats["pong"].had_handlers, Some(true));
+            assert_eq!(stats["book.BTC"].last_callbacks_count, Scalar::Number(2.0));
+            assert_eq!(stats["empty"].had_handlers, Some(false));
+            assert_eq!(stats["empty"].last_callbacks_count, Scalar::Number(0.0));
+            assert_eq!(stats["bare"].had_handlers, Some(false));
+            assert_eq!(stats["bare"].last_callbacks_count, Scalar::Number(1.0));
+        }
+        counts.borrow_mut().insert("book.BTC".into(), 1);
+        runtime.now.set(runtime.now.get() + 249.0);
+        socket.cleanup_message_handler_stats("bare").unwrap();
+        assert_eq!(
+            socket.message_handlers_stats.borrow()["book.BTC"].last_callbacks_count,
+            Scalar::Number(2.0)
+        );
+        runtime.now.set(runtime.now.get() + 1.0);
+        socket.cleanup_message_handler_stats("missing").unwrap();
+        assert_eq!(
+            socket.message_handlers_stats.borrow()["book.BTC"].last_callbacks_count,
+            Scalar::Number(1.0)
+        );
+        counts.borrow_mut().shift_remove("book.BTC");
+        runtime.now.set(runtime.now.get() + 5000.0);
+        socket.handle_pong_event(5000).unwrap();
+        assert_eq!(
+            socket.message_handlers_stats.borrow()["book.BTC"].last_callbacks_count,
+            Scalar::Number(0.0)
+        );
+        assert_eq!(
+            socket.message_handlers_stats.borrow()["book.BTC"].had_handlers,
+            Some(true)
+        );
+        socket.cleanup_message_handler_stats("book.BTC").unwrap();
+        assert!(
+            !socket
+                .message_handlers_stats
+                .borrow()
+                .contains_key("book.BTC")
+        );
+        let weak_socket = Rc::downgrade(&socket);
+        socket.dispose();
+        drop(socket);
+        drop(counts);
+        assert!(
+            weak_socket.upgrade().is_none(),
+            "reader cannot retain socket"
+        );
+        assert!(
+            counts_watch.upgrade().is_none(),
+            "reader cannot retain native registry"
+        );
+    }
+    #[test]
+    fn native_registry_statistics_propagate_reader_failure_before_stats_mutation() {
+        let (socket, _, _, _) = fixture();
+        install_native_handler_stats(
+            &socket,
+            Rc::new(|_| {
+                let mut error = ExchangeError::new("native count getter failed");
+                error.name = "CountFailure".into();
+                Err(error)
+            }),
+        );
+        let error = socket.record_message_handler_stats("book.BTC").unwrap_err();
+        assert_eq!(error.name, "CountFailure");
+        assert_eq!(error.message, "native count getter failed");
+        assert!(socket.message_handlers_stats.borrow().is_empty());
     }
     #[test]
     fn partial_message_stats_preserve_absence_until_source_assigns_fields() {
