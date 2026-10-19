@@ -1,7 +1,7 @@
 //! Command contract cases derived from the official exchange endpoint shapes.
 mod support;
 use safe_cex_engine::model::PlaceOrderOpts;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice};
+use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Response};
 use safe_cex_venue_hyperliquid::Hyperliquid;
 use serde_json::Value;
 use support::*;
@@ -312,4 +312,225 @@ fn configured_builder_pair_requires_the_configured_approval_rate() {
             assert_eq!(b["action"]["builder"]["f"], fee);
         }
     }
+}
+
+#[test]
+fn uncertain_margin_write_blocks_dependent_settings_until_fresh_account_state() {
+    for malformed_reply in [false, true] {
+        let (mut e, socket) = ready("disabled");
+        e.handle(
+            2000.0,
+            Event::Command(Command::SetMarginType {
+                command: 1,
+                symbol: "BTC-PERP".into(),
+                isolated: true,
+            }),
+        );
+        let first = write(&mut e);
+        e.handle(
+            2001.0,
+            Event::Command(Command::SetLeverage {
+                command: 2,
+                symbol: "BTC-PERP".into(),
+                leverage: 5.0,
+            }),
+        );
+        if malformed_reply {
+            e.handle(2002.0, Event::HttpResponse { request: first.id, response: Response {
+                status: 200, headers: "", body: r#"{"status":"ok","response":{"type":"order","data":{"statuses":[]}}}"#,
+            }});
+        } else {
+            e.handle(
+                2002.0,
+                Event::HttpFailed {
+                    request: first.id,
+                    error: "response lost",
+                },
+            );
+        }
+        let mut actions = e.drain_actions().collect::<Vec<_>>();
+        let mut timers = actions
+            .iter()
+            .filter_map(|a| match a {
+                Action::SetTimer { timer, at_ms } => Some((*timer, *at_ms)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        timers.sort_by(|a, b| a.1.total_cmp(&b.1));
+        for (timer, at_ms) in timers {
+            e.handle(at_ms, Event::TimerFired { timer });
+            actions.extend(e.drain_actions());
+        }
+        assert!(
+            !actions
+                .iter()
+                .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+        );
+        assert!(
+            actions
+                .iter()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
+            command: 2, result: Err(error),
+        }) if error.contains("settings are uncertain")))
+        );
+        message(
+            &mut e,
+            socket,
+            2900.0,
+            &format!(r#"{{"channel":"clearinghouseState","data":{STATE}}}"#),
+        );
+        e.handle(
+            3000.0,
+            Event::Command(Command::SetMarginType {
+                command: 3,
+                symbol: "BTC-PERP".into(),
+                isolated: false,
+            }),
+        );
+        assert!(
+            e.drain_actions()
+                .any(|a| matches!(a, Action::Notice(Notice::CommandDone {
+            command: 3, result: Err(ref error),
+        }) if error.contains("settings are uncertain")))
+        );
+
+        let fresh = STATE.replace("cross", "isolated").replace("1000}", "3500}");
+        message(
+            &mut e,
+            socket,
+            3500.0,
+            &format!(r#"{{"channel":"clearinghouseState","data":{fresh}}}"#),
+        );
+        e.handle(
+            3501.0,
+            Event::Command(Command::SetLeverage {
+                command: 4,
+                symbol: "BTC-PERP".into(),
+                leverage: 5.0,
+            }),
+        );
+        let recovered = write(&mut e);
+        assert_eq!(body(&recovered)["action"]["isCross"], false);
+        assert_eq!(body(&recovered)["action"]["leverage"], 5);
+    }
+}
+
+#[test]
+fn stale_account_snapshot_cannot_reverse_acknowledged_margin_change() {
+    let (mut e, socket) = ready("disabled");
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetMarginType {
+            command: 1,
+            symbol: "BTC-PERP".into(),
+            isolated: true,
+        }),
+    );
+    let first = write(&mut e);
+    e.handle(
+        2001.0,
+        Event::Command(Command::SetLeverage {
+            command: 2,
+            symbol: "BTC-PERP".into(),
+            leverage: 5.0,
+        }),
+    );
+    e.handle(
+        2002.0,
+        Event::HttpResponse {
+            request: first.id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body: r#"{"status":"ok","response":{"type":"default"}}"#,
+            },
+        },
+    );
+    let (timer, at_ms) = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, at_ms } => Some((timer, at_ms)),
+            _ => None,
+        })
+        .unwrap();
+    message(
+        &mut e,
+        socket,
+        2003.0,
+        &format!(r#"{{"channel":"clearinghouseState","data":{STATE}}}"#),
+    );
+    assert_eq!(
+        e.store().setting("BTC-PERP").unwrap().margin_type,
+        Some(safe_cex_engine::model::MarginType::Isolated)
+    );
+    assert_eq!(
+        e.store().positions()[0].margin_type,
+        Some(safe_cex_engine::model::MarginType::Isolated)
+    );
+    e.handle(at_ms, Event::TimerFired { timer });
+    let second = write(&mut e);
+    assert_eq!(body(&second)["action"]["isCross"], false);
+}
+
+#[test]
+fn signing_failure_restores_cancel_status_without_sending_a_request() {
+    let wallet = "0x14791697260e4c9a71f18484c9f997b308e59325";
+    let mut e = Engine::new(Hyperliquid::new(safe_cex_venue_hyperliquid::Options {
+        key: Some(wallet.into()),
+        application_id: Some(wallet.into()),
+        secret: Some("0x00".into()),
+        ..Default::default()
+    }));
+    e.start(1000.0);
+    for _ in 0..20 {
+        let requests = e
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if requests.is_empty() {
+            break;
+        }
+        for request in requests {
+            let fixture = match kind(&request).as_str() {
+                "metaAndAssetCtxs" => META,
+                "perpDexs" => "[null]",
+                "userAbstraction" => r#""disabled""#,
+                "maxBuilderFee" => "30",
+                "userFees" => r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#,
+                "clearinghouseState" => STATE,
+                "frontendOpenOrders" => {
+                    r#"[{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}]"#
+                }
+                other => panic!("unexpected read {other}"),
+            };
+            reply(&mut e, &request, 200, fixture);
+        }
+    }
+    assert_eq!(
+        e.store().order("9").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
+    e.handle(
+        2000.0,
+        Event::Command(Command::CancelOrders {
+            command: 1,
+            ids: vec!["9".into()],
+        }),
+    );
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 1,
+            result: Err(_),
+        })
+    )));
+    assert_eq!(
+        e.store().order("9").unwrap().status,
+        safe_cex_engine::model::OrderStatus::Open
+    );
 }

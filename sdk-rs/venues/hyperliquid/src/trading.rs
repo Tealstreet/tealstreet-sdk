@@ -21,6 +21,7 @@ pub struct Trading {
     retry: Option<TimerId>,
     retry_step: usize,
     expected: HashSet<String>,
+    uncertain_settings: HashSet<String>,
 }
 struct Job {
     command: CommandId,
@@ -500,6 +501,7 @@ impl Hyperliquid {
         ) {
             Ok(s) => s,
             Err(error) => {
+                self.restore_cancel(cx, &effect);
                 self.finish_trade(cx, Err(error));
                 return;
             }
@@ -652,6 +654,12 @@ impl Hyperliquid {
                 leverage,
                 isolated,
             } => {
+                if self.settings_uncertain(&symbol) {
+                    return Err(
+                        "Hyperliquid settings are uncertain; wait for account reconciliation"
+                            .into(),
+                    );
+                }
                 let setting = cx.store.setting(&symbol);
                 let leverage = leverage.unwrap_or_else(|| setting.map_or(20.0, |s| s.leverage));
                 let isolated = isolated.unwrap_or_else(|| {
@@ -724,6 +732,7 @@ impl Hyperliquid {
                     )
                 } else {
                     self.restore_cancel(cx, &request.effect);
+                    self.mark_settings_uncertain(cx, &request.effect);
                     self.schedule_orders(cx);
                     self.finish_trade(cx, Err(e));
                     return;
@@ -744,6 +753,7 @@ impl Hyperliquid {
         };
         if !valid_shape {
             self.restore_cancel(cx, &request.effect);
+            self.mark_settings_uncertain(cx, &request.effect);
             self.schedule_orders(cx);
             self.finish_trade(cx, Err("Invalid Hyperliquid command response".into()));
             return;
@@ -814,6 +824,7 @@ impl Hyperliquid {
             }
             Effect::Cancel(orders) => {
                 for o in orders {
+                    self.acknowledge_cancel(cx, &o.symbol);
                     self.account.suppressed.insert(o.id.clone(), cx.now);
                     cx.store.remove_orders(&[&o.id]);
                     self.account
@@ -827,6 +838,7 @@ impl Hyperliquid {
                 leverage,
                 isolated,
             } => {
+                self.acknowledge_settings(cx, &symbol);
                 let margin = if isolated {
                     MarginType::Isolated
                 } else {
@@ -845,6 +857,18 @@ impl Hyperliquid {
             }
         }
         self.pump_trades(cx);
+    }
+    fn mark_settings_uncertain(&mut self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
+        if let Effect::Leverage { symbol, .. } = effect {
+            self.trading.uncertain_settings.insert(symbol.clone());
+            self.refresh_uncertain_settings(cx, symbol);
+        }
+    }
+    pub(crate) fn settings_reconciled(&mut self, symbol: &str) {
+        self.trading.uncertain_settings.remove(symbol);
+    }
+    pub(crate) fn settings_uncertain(&self, symbol: &str) -> bool {
+        self.trading.uncertain_settings.contains(symbol)
     }
     fn restore_cancel(&self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
         if let Effect::Cancel(orders) = effect {
