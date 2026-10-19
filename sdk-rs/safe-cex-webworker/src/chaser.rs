@@ -12,19 +12,46 @@ pub fn placement_filled(order: &Order) -> f64 {
 
 use crate::task_types::{ChaserOrderOptions, ChaserOrderState, ChaserTerminateKind};
 use indexmap::{IndexMap, IndexSet};
-use safe_cex_exchange::{exchange::Exchange, runtime::ExchangeError};
+use safe_cex_exchange::{
+    exchange::Exchange,
+    js_runtime::{
+        globals::install_builtins,
+        value::{Js, Thrown, from_typed, to_typed},
+    },
+    runtime::ExchangeError,
+};
 use safe_cex_types::{OrderSide, PositionSide};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
 
-pub const DEFAULT_CHASER_STATE: ChaserOrderState = ChaserOrderState {
+const INITIAL_CHASER_STATE: ChaserOrderState = ChaserOrderState {
     attempts: 0.0,
     is_stopped: false,
     stop_reason: String::new(),
     current_orders_ids: Vec::new(),
 };
+
+thread_local! {
+    static CHASER_DEFAULT: std::cell::OnceCell<Js> = const { std::cell::OnceCell::new() };
+}
+
+pub fn default_chaser_state() -> Result<Js, Thrown> {
+    CHASER_DEFAULT.with(|slot| {
+        if let Some(value) = slot.get() {
+            return Ok(value.clone());
+        }
+        let value = from_typed(&INITIAL_CHASER_STATE)?;
+        let globals = Js::object(vec![]);
+        install_builtins::<()>(&globals, std::rc::Weak::new());
+        globals
+            .get("Object")?
+            .call_method("freeze", vec![value.clone()])?;
+        let _ = slot.set(value.clone());
+        Ok(value)
+    })
+}
 
 type Disposer = Box<dyn FnOnce() -> Result<(), ExchangeError>>;
 #[derive(Clone, Copy)]
@@ -55,6 +82,8 @@ impl ChaserOrderInstance {
         exchange: Rc<dyn Exchange>,
         options: Rc<RefCell<ChaserOrderOptions>>,
     ) -> Result<Self, ExchangeError> {
+        let id = exchange.base().runtime.unique_id();
+        let state = to_typed(&default_chaser_state()?)?;
         let input = options.borrow();
         let target_position_contracts = if input.reduce_only == Some(true) {
             None
@@ -80,10 +109,10 @@ impl ChaserOrderInstance {
         let size = input.size;
         drop(input);
         Ok(Self {
-            id: exchange.base().runtime.unique_id(),
+            id,
             exchange,
             options,
-            state: Rc::new(RefCell::new(DEFAULT_CHASER_STATE)),
+            state: Rc::new(RefCell::new(state)),
             remaining_size: Cell::new(size),
             filled_by_order_id: RefCell::new(IndexMap::new()),
             min_tick_distance: Cell::new(0.0),

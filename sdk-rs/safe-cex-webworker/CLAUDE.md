@@ -129,8 +129,9 @@ Fill totals reproduce plain-object inherited keys and integer-key enumeration;
 source attempt-limit and decreasing-fill behavior are deliberately preserved.
 Disposal releases its list before invoking fallible callbacks, so reentrant
 cleanup and newly registered disposers behave like the source without panic recovery.
-The owned current-order Vec and immutable default omit mutable array identity;
-live source mutation witnesses document those representation choices.
+The owned current-order Vec still omits caller array identity. The default is a
+shared shallow-frozen native template: nested ID edits seed future constructors,
+while each constructed typed state receives its own snapshot.
 
 CallMethod dispatch uses the shared Exchange override hooks for order refresh and
 private snapshots. Its oracle supplies distinct venue overrides and checks both
@@ -736,3 +737,9 @@ is asserted on the retained subscriber cause separately from Error::source's
 retained transport-response origin, with complete metadata still checked. The
 actual DefaultStore/handler source oracle verifies original Error identity after
 post and committed bid/ask writes.
+
+The default chaser state is one native Js template per worker module realm,
+modeled by the host thread like the existing singleton manager. The canonical
+Object.freeze builtin protects its outer fields while its nested ID array stays
+mutable. Constructors snapshot through the shared typed state decoder; remaining
+raw state admission and instance-array alias findings stay separate.
