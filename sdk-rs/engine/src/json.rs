@@ -109,6 +109,9 @@ pub enum ArrayAt {
     EnvelopeField(&'static str),
     /// The array sits under these nested object fields (`result.list`).
     Path(&'static [&'static str]),
+    /// Like `Path`, validating but omitting every other array in the envelope.
+    /// Use when product catalogs carry large unrelated lists beside the target.
+    PathOmitLists(&'static [&'static str]),
 }
 
 impl ArrayAt {
@@ -116,7 +119,7 @@ impl ArrayAt {
         match self {
             Self::Root => 0,
             Self::Field(_) | Self::EnvelopeField(_) => 1,
-            Self::Path(path) => path.len(),
+            Self::Path(path) | Self::PathOmitLists(path) => path.len(),
         }
     }
 
@@ -124,7 +127,7 @@ impl ArrayAt {
         match self {
             Self::Root => None,
             Self::Field(name) | Self::EnvelopeField(name) => (index == 0).then_some(name),
-            Self::Path(path) => path.get(index).copied(),
+            Self::Path(path) | Self::PathOmitLists(path) => path.get(index).copied(),
         }
     }
 }
@@ -164,6 +167,9 @@ pub struct ArraySplitter {
     envelope: Vec<u8>,
     // Metadata delivered to venues has the selected array emptied.
     outside: Vec<u8>,
+    // Only the opt-in catalog mode creates this validator for an unrelated
+    // list. Its Root mode keeps at most one element and a bounded skeleton.
+    ignored: Option<Box<ArraySplitter>>,
     invalid: bool,
 }
 
@@ -183,6 +189,7 @@ impl ArraySplitter {
             item: Vec::new(),
             envelope: Vec::new(),
             outside: Vec::new(),
+            ignored: None,
             invalid: false,
         }
     }
@@ -190,6 +197,7 @@ impl ArraySplitter {
     /// Whether the array was found and closed.
     pub fn finished(&self) -> bool {
         self.phase == Phase::Done
+            && self.ignored.is_none()
             && !self.invalid
             && std::str::from_utf8(&self.envelope).is_ok()
             && serde_json::from_slice::<IgnoredAny>(&self.envelope).is_ok()
@@ -221,13 +229,32 @@ impl ArraySplitter {
             if self.invalid {
                 return;
             }
+            if let Some(ignored) = self.ignored.as_mut() {
+                // A function pointer keeps this recursive generic call from
+                // generating a new callback type at each instantiation.
+                ignored.feed(std::slice::from_ref(&byte), ignore_item as fn(&str));
+                if ignored.invalid {
+                    self.invalid = true;
+                    return;
+                }
+                if ignored.phase == Phase::Done {
+                    if !ignored.finished() {
+                        self.invalid = true;
+                        return;
+                    }
+                    self.ignored = None;
+                    self.depth = self.depth.saturating_sub(1);
+                    self.keep(byte);
+                }
+                continue;
+            }
             if self.phase != Phase::InArray {
                 self.keep(byte);
                 if self.invalid {
                     return;
                 }
             }
-            if self.phase == Phase::Done {
+            if self.phase == Phase::Done && !matches!(self.at, ArrayAt::PathOmitLists(_)) {
                 continue;
             }
             let seek_depth = self.matched + 1;
@@ -288,6 +315,15 @@ impl ArraySplitter {
                             self.matched += 1;
                         }
                     }
+                    if byte == b'['
+                        && self.phase != Phase::InArray
+                        && matches!(self.at, ArrayAt::PathOmitLists(_))
+                    {
+                        let mut ignored = Box::new(Self::new(ArrayAt::Root));
+                        ignored.feed(b"[", ignore_item as fn(&str));
+                        self.ignored = Some(ignored);
+                        continue;
+                    }
                 }
                 b']' | b'}' => {
                     if at_array_level && byte == b']' {
@@ -344,9 +380,119 @@ impl ArraySplitter {
     }
 }
 
+fn ignore_item(_item: &str) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_mode_omits_only_unrelated_arrays_and_retains_objects_scalars() {
+        let body = r#"{"currencies":[{"nested":[1,2],"name":"[x]"}],"data":{"before":[[3]],"catalog":[{"symbol":"a","risk":[4]}],"after":[{"v":5}],"cursor":{"page":"next"}},"tail":[6],"msg":"[]","code":0}"#;
+        for size in [1, 2, 7, 1024] {
+            let mut splitter = ArraySplitter::new(ArrayAt::PathOmitLists(&["data", "catalog"]));
+            let mut rows = Vec::new();
+            for bytes in body.as_bytes().chunks(size) {
+                splitter.feed(bytes, |row| rows.push(row.to_owned()));
+            }
+            assert!(splitter.finished(), "chunk {size}");
+            assert_eq!(rows, [r#"{"symbol":"a","risk":[4]}"#]);
+            assert_eq!(
+                std::str::from_utf8(splitter.outside()).unwrap(),
+                r#"{"currencies":[],"data":{"before":[],"catalog":[],"after":[],"cursor":{"page":"next"}},"tail":[],"msg":"[]","code":0}"#
+            );
+            assert!(serde_json::from_str::<IgnoredAny>(splitter.envelope()).is_ok());
+        }
+        // Existing modes retain those lists exactly as before.
+        let mut splitter = ArraySplitter::new(ArrayAt::Path(&["data", "catalog"]));
+        splitter.feed(body.as_bytes(), |_| {});
+        assert!(splitter.finished());
+        assert!(
+            std::str::from_utf8(splitter.outside())
+                .unwrap()
+                .contains(r#""tail":[6]"#)
+        );
+    }
+
+    #[test]
+    fn catalog_mode_fails_closed_for_invalid_omitted_arrays_and_envelopes() {
+        for array in [
+            b"[,1]".as_slice(),
+            b"[1,]",
+            b"[1 2]",
+            b"[tru e]",
+            b"[\"bad\\q\"]",
+            b"[\"\xff\"]",
+            b"[{\"x\":1,}]",
+        ] {
+            for before in [false, true] {
+                let mut body = if before {
+                    b"{\"ignored\":".to_vec()
+                } else {
+                    b"{\"data\":{\"catalog\":[1]},\"ignored\":".to_vec()
+                };
+                body.extend_from_slice(array);
+                body.extend_from_slice(if before {
+                    b",\"data\":{\"catalog\":[1]}}"
+                } else {
+                    b"}"
+                });
+                let mut splitter = ArraySplitter::new(ArrayAt::PathOmitLists(&["data", "catalog"]));
+                for byte in body {
+                    splitter.feed(&[byte], |_| {});
+                }
+                assert!(!splitter.finished());
+            }
+        }
+        for body in [
+            r#"{"data":{"catalog":[1]},"ignored":[1"#,
+            r#"{"data":{"catalog":[1]},"ignored":[],}"#,
+            r#"{"data":{"catalog":[1]},"ignored":[]}garbage"#,
+            r#"{"ignored":[{"data":{"catalog":[1]}}]}"#,
+        ] {
+            let mut splitter = ArraySplitter::new(ArrayAt::PathOmitLists(&["data", "catalog"]));
+            splitter.feed(body.as_bytes(), |_| {});
+            assert!(!splitter.finished(), "{body}");
+        }
+    }
+
+    #[test]
+    fn catalog_mode_keeps_large_lists_bounded_without_relaxing_metadata_cap() {
+        // One catalog row and an unrelated list exceeding the metadata cap.
+        // This is a bounded-memory correctness fixture, not a throughput test.
+        let row = format!(r#"{{"description":"{}"}}"#, "x".repeat(32 * 1024));
+        let mut splitter = ArraySplitter::new(ArrayAt::PathOmitLists(&["data", "catalog"]));
+        splitter.feed(br#"{"ignored":["#, |_| panic!("not selected"));
+        for i in 0..33 {
+            if i > 0 {
+                splitter.feed(b",", |_| panic!("not selected"));
+            }
+            splitter.feed(row.as_bytes(), |_| panic!("not selected"));
+            assert!(splitter.envelope.len() < 64);
+            assert!(splitter.outside.len() < 64);
+            assert!(splitter.ignored.as_ref().unwrap().item.capacity() <= 64 * 1024);
+        }
+        let mut rows = Vec::new();
+        splitter.feed(
+            br#"],"data":{"catalog":[{"symbol":"a"}]},"code":0}"#,
+            |row| rows.push(row.to_owned()),
+        );
+        assert!(splitter.finished());
+        assert_eq!(rows, [r#"{"symbol":"a"}"#]);
+        assert_eq!(
+            splitter.outside(),
+            br#"{"ignored":[],"data":{"catalog":[]},"code":0}"#
+        );
+        let oversized = format!(
+            r#"{{"data":{{"catalog":[]}},"scalar":"{}"}}"#,
+            "x".repeat(METADATA_LIMIT)
+        );
+        let mut splitter = ArraySplitter::new(ArrayAt::PathOmitLists(&["data", "catalog"]));
+        splitter.feed(oversized.as_bytes(), |_| {});
+        assert!(!splitter.finished());
+        assert!(splitter.envelope.len() <= METADATA_LIMIT);
+        assert!(splitter.outside.len() <= METADATA_LIMIT);
+    }
 
     #[test]
     fn nested_envelopes_validate_items_and_preserve_suffixes() {

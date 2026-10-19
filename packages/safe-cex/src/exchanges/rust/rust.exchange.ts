@@ -41,6 +41,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   okxdemo: 'okxdemo',
   okxeudemo: 'okxeudemo',
   weex: 'weex',
+  phemex: 'phemex',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;

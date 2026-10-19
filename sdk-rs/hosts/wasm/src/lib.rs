@@ -11,6 +11,7 @@ use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
+use safe_cex_venue_phemex::{Options as PhemexOptions, PhemexPerpetuals};
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -446,6 +447,12 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
+            }))),
+            "phemex" => Box::new(Engine::new(PhemexPerpetuals::new(PhemexOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
             }))),
             "weex" => Box::new(Engine::new(WeexFutures::new(WeexOptions {
                 public_data_only: options.public_data_only,

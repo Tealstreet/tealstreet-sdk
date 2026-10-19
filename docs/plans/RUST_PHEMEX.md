@@ -18,3 +18,18 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 ## Progress
 
 - Read current landing brief/spec and Phemex runtime guidance. Full-auto user authorization overrides the plan skill confirmation pause.
+
+- Public initial native tests pass (4), typed market/ticker/candle/book implementation and wasm/SDK registration prepared. Root plan audit added malformed-row rejection, bounded book snapshot deadlines, native-symbol preservation and generation fences.
+- Private/trading/query implementations prepared in disjoint files with independent tests and cross-review in progress. Query policy uses documented textual `/api-data/g-futures/{trades,orders}` schemas; generic income remains an explicit unsupported result pending verified ledger semantics, matching the absence of a safe TS capability.
+- Public live recording exposed a real engine limitation: `/public/products` is 2.54MB with large unrelated arrays beside `perpProductsV2`, exceeding the 1MiB metadata cap. A bounded opt-in sibling-list omission mode is being implemented and independently reviewed; the memory limit will not be raised.
+- Harness now separates authenticated/private and public sockets sharing a URL, validates exact REST/WS signatures and subscription order, and explicitly bootstraps only flagged initial auth/snapshot records. Harness tests 17/17 pass.
+
+### Phase reviews and first gates
+
+- Public reviewed independently by private_impl; fixed strict two-sided REST depth validation, positive product precision, monotonic 429 backoff, native candle symbols. Added bounded `PathOmitLists` streaming for the 2.54MB catalog; engine 24 tests pass and root reviewed parser changes.
+- Private reviewed by trading_impl; fixed mutation of caches on malformed snapshots, permanently blocked amendments after fills, and stale currency balances. Account 14 and signing 2 tests pass. Triggered→Closed remains explicitly nonterminal.
+- Trading reviewed by public_review; fixed unready/disconnected cancel-all admission and settings ACK/context races. 23 tests pass, including real-value PUT routing, caller-ID guards, Init acknowledgements, partial cancel/fill races, brackets and exact split sizes.
+- Queries reviewed by trading_impl; fixed historical close-on-trigger reduce-only semantics, zero-sized close-entire stops, and trailing metadata. 12 tests pass. Generic income is explicitly unsupported pending verified ledger scope/sign semantics.
+- Live full-depth public fixture: 20 seconds, 533 replayed frames, 891 markets, 324 tickers, 2 books. First passing median gate: TS/Rust CPU 277.9/90.9ms, steady 178.4/30.6ms, retained 5.8/2.8MB. Further final gates follow landing merge.
+- TS bugs fixed and recorded in KNOWN_TS_FIXES: implicit depth30 subscription leaves deep levels stale; lost outer sequence discards buffered deltas; periodic full snapshots must replace old levels; zero-open percentage must remain finite; fills deduplicate by execution rather than order/message; cumulative executed exposure survives cancellation; exact split lots and partial-fill replacement remain bounded and fail closed.
+- Crypto audit: this port reuses only existing HMAC/SHA/UUID primitives and replaces no currently called crypto helper; no additional provably unused helper introduced.

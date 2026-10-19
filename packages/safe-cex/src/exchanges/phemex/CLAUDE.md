@@ -189,11 +189,11 @@ Bid and ask are optional fields -- only included if present (`phemex.ws-public.t
 
 **Orderbook management**: Snapshot-first approach:
 
-1. Subscribe to WS incremental updates (`orderbook_p.subscribe`)
+1. Subscribe to full-depth WS incremental updates (`orderbook_p.subscribe`, `[symbol, false, 0]`). The omitted depth defaults to 30 and leaves deeper REST levels stale. Full-depth periodic snapshots replace the book.
 2. On first WS message, trigger REST snapshot fetch via `/md/v2/fullbook` (limit: 1000)
 3. Buffer all WS updates while snapshot loads
 4. After snapshot arrives, filter buffered updates by `sequence` number (discard updates older than snapshot)
-5. Apply buffered updates, then process subsequent updates incrementally
+5. Apply buffered updates, then process subsequent updates incrementally. Dispatch preserves the outer frame sequence on the book payload; dropping it discards every buffered delta during a slow REST snapshot.
 6. `processOrderBookUpdate` applies each delta through shared `updateOrderBookByPrice`: bids stay descending, asks stay ascending, and zero-amount updates for absent levels are ignored.
 7. If the REST snapshot request fails or times out, the failure is caught locally, logged with a cooldown, and the buffered deltas are cleared so the next WS delta can retry snapshot loading without surfacing an unhandled promise rejection. Late snapshots after unsubscribe/disposal are ignored.
 
