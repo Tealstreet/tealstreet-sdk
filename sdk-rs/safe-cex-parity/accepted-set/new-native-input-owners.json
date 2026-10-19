@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "reason": "Exact native input classification debt: original149 from #1193 plus3 introduced on master by #1238, separately marked. No exemption/filter: normal measurements still require contracts. Any new owner or disappearance requires an explicit ledger update and ruling.",
+  "reason": "Exact native input classification debt: original149 from #1193 plus3 introduced on master by #1238 and2 ApexOmni owners introduced on master (251d9906de and #901), separately marked. No exemption/filter: normal measurements still require contracts. Any new owner or disappearance requires an explicit ledger update and ruling.",
   "owners": [
     {
       "package": "safe-cex-venue-asterdex",
@@ -770,6 +770,22 @@
       "introduced": "introduced on master by #1238",
       "owner": "codex-0xekzz",
       "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+    },
+    {
+      "package": "safe-cex-venue-apexomni",
+      "name": "safe_cex_venue_apexomni::api_runtime::ApexApi",
+      "state": "pending",
+      "introduced": "introduced on master by #901, commit 84b06aec6f",
+      "owner": "codex-0w5ohi",
+      "ruling": "Coordinator-approved exact pending addition for the native response_handler input exposed by #1193 discovery. Its ordinary contract and native binding receipt remain required; this row supplies no measurement permission."
+    },
+    {
+      "package": "safe-cex-venue-apexomni",
+      "name": "safe_cex_venue_apexomni::binding::http::carry_config",
+      "state": "pending",
+      "introduced": "introduced on master by commit 251d9906dea before #901",
+      "owner": "codex-0w5ohi",
+      "ruling": "Coordinator-approved exact pending addition for the native config capability input, found by complete Apex inventory after the ApexApi refusal. Its ordinary contract and native binding receipt remain required; this row supplies no measurement permission."
     }
   ]
 }
