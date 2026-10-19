@@ -11,6 +11,7 @@ use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bybit::{
     BybitLinear, Endpoints as BybitEndpoints, Options as BybitOptions, Variant as BybitVariant,
 };
+use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -59,6 +60,8 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
+    #[serde(default)]
+    passphrase: Option<String>,
     #[serde(default)]
     endpoints: Option<EndpointOptions>,
 }
@@ -451,6 +454,23 @@ impl WasmEngine {
                 };
                 options.validate().map_err(|e| JsError::new(&e))?;
                 Box::new(Engine::new(BybitLinear::new(options)))
+            }
+            "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
+                if !options.public_data_only
+                    && options.key.as_ref().is_some_and(|s| !s.is_empty())
+                    && options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                    && options.passphrase.as_ref().is_none_or(|s| s.is_empty())
+                {
+                    return Err(JsError::new("OKX requires a passphrase"));
+                }
+                Box::new(Engine::new(Okx::new(OkxOptions {
+                    testnet: options.testnet || venue.ends_with("demo"),
+                    eea: venue.starts_with("okxeu"),
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    passphrase: options.passphrase,
+                })))
             }
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };

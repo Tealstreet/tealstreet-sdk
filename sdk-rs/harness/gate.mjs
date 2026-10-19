@@ -25,13 +25,19 @@ const replay = (impl, run) => {
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
   args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
   if (values['no-egress']) args.push('--no-egress');
-  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 120000 });
-  if (result.status !== 0) throw new Error(`${impl} replay failed:\n${result.stderr}`);
+  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125_000 });
+  if (result.status !== 0) throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
 };
 
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 
+// JSON object insertion order is immaterial; array order and values are exact.
+const stable = (value) => {
+  if (Array.isArray(value)) return value.map(stable);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+};
 const differences = [];
 const compare = (label, a, b) => {
   const keyed = (rows) => new Map(rows.map((row) => [row.symbol, row]));
@@ -50,19 +56,14 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
-
-if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
-// Every request must match a taped one: an unserved request sent different parameters.
-for (const impl of ['ts', 'rust']) {
-  const unserved = results[impl][0].unserved;
-  if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
-}
 const isPrivate = Boolean(ts.account);
+
 const tapeBytes = readFileSync(values.tape);
 const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes).toString().trim().split('\n').map(JSON.parse);
 const instrumentRows = records.filter((r) => r.type === 'http' && new URL(r.url).pathname === '/v5/market/instruments-info')
   .flatMap((r) => JSON.parse(r.body).result?.list ?? []);
 const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
+
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 //  - A position first seen on the user stream keeps the margin size of TS's
 //    zero-size placeholder (0); Rust takes the isolated wallet, or notional
@@ -95,48 +96,87 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 //    orders instead of calling derivative position/trading-stop endpoints.
 //  - Hyro: seed cumulative fills from accepted reconnect snapshots; TS starts
 //    its incremental tracker empty and can re-emit the historical partial fill.
-const KNOWN_TS_FIXES = (account, rustAccount) => {
-  for (const position of account.positions) {
-    const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
-    if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
-  }
-  for (const order of account.orders) {
-    const fixed = rustAccount.orders.find((o) => o.id === order.id);
-    if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled') order.rejectReason = 'PostOnly';
-  }
+// OKX full-depth correction is also applied to the TS oracle: its old
+// last-trade filter permanently deleted valid levels when the trade lagged.
+const KNOWN_TS_FIXES = {
+  // Applied to the TS oracle itself (okx.ws-public.ts / okx.exchange.ts).
+  okx: [
+    'full books retain levels past a stale last trade',
+    'public trades implement the inherited Not implemented method',
+    'candle calendar bounds use UTC independently of host timezone',
+    'fill window filtering retains native milliseconds before output seconds are truncated',
+    'keyless/public-only business socket avoids empty-credential login and private topics',
+    // Rust safety fixes: covered independently by documented-payload tests.
+    'split bracket entries acquire SL/TP before the next entry is placed',
+    'native OCO amend preserves its sibling protective leg',
+    'negative protective sizes and market or terminal amends fail before writes',
+    'positive protective dust cannot round into a close-entire-position order',
+    'standalone protective limit amendment fails before cancel if execution price cannot be retained',
+    'standalone cancellation continues remaining batches after per-row failures',
+    'new account equity survives delayed snapshots and local balance ticks',
+    'acknowledged leverage survives failed post-write snapshots',
+  ],
+  account: (account, rustAccount) => {
+    for (const position of account.positions) {
+      const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
+      if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+    }
+  },
+  bybit: (account, rustAccount) => {
+    KNOWN_TS_FIXES.account(account, rustAccount);
+    for (const order of account.orders) {
+      const fixed = rustAccount.orders.find((o) => o.id === order.id);
+      if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled') order.rejectReason = 'PostOnly';
+    }
+  },
 };
-// Normalize documented TS defects from the taped upstream payload, never from
-// the Rust result: a wrong Rust mapper must still fail this comparison.
-if (values.venue === 'bybitspot') {
-  for (const market of ts.markets) {
-    const lot = instruments.get(market.symbol)?.lotSizeFilter;
-    if (!lot) continue;
-    market.precision.amount = Number(lot.qtyStep ?? lot.basePrecision);
-    const maxima = [lot.maxLimitOrderQty, lot.maxMarketOrderQty, lot.maxOrderQty].map(Number).filter((n) => Number.isFinite(n) && n > 0);
-    if (maxima.length) market.limits.amount.max = Math.min(...maxima);
+for (let run = 0; run < runs; run++) {
+  const ts = results.ts[run];
+  const rust = results.rust[run];
+  if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
+  // Every request must match a taped one: an unserved request sent different parameters.
+  for (const impl of ['ts', 'rust']) {
+    const output = impl === 'ts' ? ts : rust;
+    const unserved = output.unserved;
+    for (const symbol of values.books.split(',').filter(Boolean)) {
+      if (!output.books[symbol]) differences.push(`${impl}: requested book ${symbol} is missing`);
+    }
+    if (!output.markets.length || !output.tickers.length) differences.push(`${impl}: empty public seed`);
+    if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
   }
-}
-if (isPrivate) {
-  KNOWN_TS_FIXES(ts.account, rust.account);
-  if (values.venue === 'bybitinverse') {
-    const upnl = ts.account.positions.reduce((sum, p) => sum + (p.contracts > 0 ? p.unrealizedPnl * p.notional / p.contracts : 0), 0);
-    ts.account.balance.total = Math.round((ts.account.balance.total + ts.account.balance.upnl - upnl) * 1e8) / 1e8;
-    ts.account.balance.upnl = upnl;
+  if (values.venue === 'bybitspot') {
+    for (const market of ts.markets) {
+      const lot = instruments.get(market.symbol)?.lotSizeFilter;
+      if (!lot) continue;
+      market.precision.amount = Number(lot.qtyStep ?? lot.basePrecision);
+      const maxima = [lot.maxLimitOrderQty, lot.maxMarketOrderQty, lot.maxOrderQty].map(Number).filter((n) => Number.isFinite(n) && n > 0);
+      if (maxima.length) market.limits.amount.max = Math.min(...maxima);
+    }
   }
-  for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
-    const left = JSON.stringify(ts.account[field]);
-    const right = JSON.stringify(rust.account[field]);
-    if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
+  const isPrivate = Boolean(ts.account);
+  if (isPrivate) {
+    if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
+    if (['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue)) KNOWN_TS_FIXES.bybit(ts.account, rust.account);
+    if (values.venue === 'bybitinverse') {
+      const upnl = ts.account.positions.reduce((sum, p) => sum + (p.contracts > 0 ? p.unrealizedPnl * p.notional / p.contracts : 0), 0);
+      ts.account.balance.total = Math.round((ts.account.balance.total + ts.account.balance.upnl - upnl) * 1e8) / 1e8;
+      ts.account.balance.upnl = upnl;
+    }
+    for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
+      const left = JSON.stringify(ts.account[field]);
+      const right = JSON.stringify(rust.account[field]);
+      if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
+    }
   }
-  const left = JSON.stringify(ts.commands);
-  const right = JSON.stringify(rust.commands);
+  const left = JSON.stringify(stable(ts.commands));
+  const right = JSON.stringify(stable(rust.commands));
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
-}
-compare('market', ts.markets, rust.markets);
-compare('ticker', ts.tickers, rust.tickers);
-for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
-  if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
-    differences.push(`book ${symbol} differs`);
+  compare('market', ts.markets, rust.markets);
+  compare('ticker', ts.tickers, rust.tickers);
+  for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
+    if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
+      differences.push(`book ${symbol} differs`);
+    }
   }
 }
 
@@ -158,6 +198,7 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (ts.account) console.log('(private tape: paced in real time, so it gates correctness only)');
+if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
 
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.

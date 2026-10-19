@@ -4,6 +4,7 @@
 //   node --expose-gc --import tsx sdk-rs/harness/replay.mjs --impl ts --tape <file>
 //   node --expose-gc sdk-rs/harness/replay.mjs --impl rust --tape <file>
 import { readFileSync } from 'node:fs';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
@@ -34,15 +35,33 @@ if (values.venue === 'hyrotrader' && replayOptions.endpoints) {
   process.env.NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL = replayOptions.endpoints.privateWs;
 }
 const bookSymbols = values.books.split(',').filter(Boolean);
+// A wrong startup URL, missing socket or lost command must fail the gate.
+const replayDeadline = setTimeout(() => {
+  console.error('Replay exceeded its 120-second deadline');
+  process.exit(1);
+}, 120_000);
+replayDeadline.unref();
+class ReplayTimeout extends Error {}
+const within = async (promise, ms, label) => {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new ReplayTimeout(`${label} exceeded ${ms} ms`)), ms);
+    })]);
+  } finally { clearTimeout(timer); }
+};
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
-const isPrivate = records.some((r) => r.url?.includes(venue.privateSocket));
+const isPrivate = records.some((r) =>
+  venue.isPrivateRecord ? venue.isPrivateRecord(r) : Boolean(venue.privateSocket && r.url?.includes(venue.privateSocket)),
+);
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
+const PASSPHRASE = 'replay-passphrase';
+const callerIds = new Set(records.flatMap((r) => r.type === 'command' ? (r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean) : []));
 
 /** Per-request values: clocks, signatures, request ids and generated client ids. */
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
-// Hyro mandates generated IDs; identity/recovery is verified by the native tests.
 if (values.venue === 'hyrotrader') VOLATILE.add('orderLinkId');
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
@@ -59,28 +78,26 @@ const canonicalUrl = (url) => {
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
 
-/**
- * A JSON request body with its keys sorted and volatile fields dropped, so
- * venues that sign headers and send parameters in the body (Bybit) key their
- * writes by what they ask for. Empty for a body-less request.
- */
 const canonicalBody = (body) => {
   if (body === undefined || body === null || body === '') return '';
-  let parsed;
+  let parsed = body;
   try {
-    parsed = JSON.parse(typeof body === 'string' ? body : new TextDecoder().decode(body));
-  } catch {
-    return String(body);
-  }
-  const strip = (value) => {
-    if (Array.isArray(value)) return value.map(strip);
-    if (!value || typeof value !== 'object') return value;
-    const keys = Object.keys(value).filter((key) => !VOLATILE.has(key) && value[key] !== undefined).sort();
-    return Object.fromEntries(keys.map((key) => [key, strip(value[key])]));
+    if (typeof body === 'string') parsed = JSON.parse(body);
+    else if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) parsed = JSON.parse(new TextDecoder().decode(body));
+  } catch { return String(body); }
+  const sorted = (value) => {
+    if (Array.isArray(value)) return value.map(sorted);
+    if (value === null || typeof value !== 'object') return value;
+    const keys = Object.keys(value).filter((key) => value[key] !== undefined && !(venue.volatileBodyFields && VOLATILE.has(key))).sort();
+    return Object.fromEntries(keys.map((key) => [
+      key,
+      !callerIds.has(value[key]) && venue.generatedBodyId?.(key, value[key]) ? '<generated>' : sorted(value[key]),
+    ]));
   };
-  return JSON.stringify(strip(parsed));
+  return JSON.stringify(sorted(parsed));
 };
-const requestKey = (method, url, body) => `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
+const requestKey = (method, url, body) =>
+  `${method} ${canonicalUrl(url)}${venue.matchRequestBody && method !== 'GET' ? ` ${canonicalBody(body)}` : ''}`;
 
 const until = async (predicate, label) => {
   const deadline = Date.now() + 30000;
@@ -103,24 +120,37 @@ class Tape {
     this.open = new Map();
     this.waiters = [];
     this.unserved = 0;
+    this.commandIndex = 0;
   }
 
   respond(method, url, body) {
-    const queue = this.responses.get(requestKey(method, url, body));
+    const key = requestKey(method, url, body);
+    const queue = this.responses.get(key);
     if (!queue?.length) {
       this.unserved++;
-      console.error(`unserved: ${requestKey(method, url, body)}`);
+      if (venue.matchRequestBody) console.error(`Unserved request: ${key}`);
       return { status: 599, body: '' };
     }
-    const record = queue.length > 1 ? queue.shift() : queue[0];
-    return { status: record.status, body: record.body };
+    // Staged snapshots become available only once their command starts.
+    const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= this.commandIndex);
+    if (!eligible.length) {
+      this.unserved++;
+      console.error(`Request preceded its taped stage: ${key}`);
+      return { status: 599, body: '' };
+    }
+    const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
+    const current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
+    const record = current[0];
+    // Reads may reconcile repeatedly; every opted-in write needs its own row.
+    if (current.length > 1 || (venue.matchRequestBody && method !== 'GET')) queue.splice(queue.indexOf(record), 1);
+    return { status: record.status, headers: record.headers ?? '', body: record.body };
   }
 
   connect(url, onOpen, onMessage) {
-    const socket = { url, onMessage, closed: false, requests: new Map() };
+    const socket = { url, onMessage, closed: false, loginVerified: false, topics: new Map(), requests: new Map() };
     setImmediate(() => {
       if (socket.closed) return;
-      // Keyed without volatile query params (Bybit's per-connection requestId).
+      // Bybit adds a generated requestId to each connection URL.
       this.open.set(canonicalUrl(url), socket);
       onOpen();
       this.waiters = this.waiters.filter((waiter) => !waiter());
@@ -128,15 +158,82 @@ class Tape {
     return socket;
   }
 
-  sent(socket, text) {
-    if (values.venue !== 'hyrotrader') return;
-    const frame = JSON.parse(text);
-    if (frame.op && frame.req_id) socket.requests.set(frame.op, frame.req_id);
+  send(socket, text) {
+    if (values.venue === 'hyrotrader') {
+      const frame = JSON.parse(text);
+      if (frame.op && frame.req_id) socket.requests.set(frame.op, frame.req_id);
+      return;
+    }
+    if (venue.respondToPing && text === 'ping') {
+      setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
+      return;
+    }
+    // OKX's opt-in auth validation also uses its v5 subscription argument model.
+    const validateTopics = venue.validateSubscriptions ?? venue.validateLogin;
+    if (!venue.validateLogin && !validateTopics) return;
+    const message = JSON.parse(text);
+    if (validateTopics && ['subscribe', 'unsubscribe'].includes(message.op)) {
+      if (!Array.isArray(message.args)) throw new Error(`Invalid subscription on ${socket.url}`);
+      for (const topic of message.args) {
+        if (!topic || typeof topic.channel !== 'string' || !topic.channel) throw new Error(`Invalid subscription topic on ${socket.url}`);
+        const key = JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
+        if (message.op === 'subscribe') socket.topics.set(key, topic);
+        else socket.topics.delete(key);
+      }
+      return;
+    }
+    if (!venue.validateLogin || !/\/(private|business)$/.test(new URL(socket.url).pathname)) return;
+    if (message.op !== 'login') return;
+    const arg = message.args?.length === 1 ? message.args[0] : undefined;
+    const timestamp = String(arg?.timestamp ?? '');
+    if (arg?.apiKey !== KEY || arg?.passphrase !== PASSPHRASE || !/^\d+$/.test(timestamp)
+      || !Number.isSafeInteger(Number(timestamp)) || Math.abs(Number(timestamp) - Date.now() / 1000) > 30) {
+      throw new Error(`Invalid OKX login credentials/timestamp on ${socket.url}`);
+    }
+    const expected = createHmac('sha256', SECRET).update(`${timestamp}GET/users/self/verify`).digest('base64');
+    const supplied = Buffer.from(String(arg.sign ?? ''));
+    const expectedBytes = Buffer.from(expected);
+    if (supplied.length !== expectedBytes.length || !timingSafeEqual(supplied, expectedBytes)) {
+      throw new Error(`Invalid OKX login signature on ${socket.url}`);
+    }
+    socket.loginVerified = true;
+  }
+
+  assertSubscribed(socket, message) {
+    if (!(venue.validateSubscriptions ?? venue.validateLogin) || !message.arg?.channel || !Array.isArray(message.data)) return;
+    const topics = [...socket.topics.values()].filter((topic) => topic.channel === message.arg.channel);
+    // Some documented messages put instId only on each data row, not arg.
+    const rows = message.data.length ? message.data : [null];
+    for (const row of rows) {
+      const object = row && !Array.isArray(row) && typeof row === 'object' ? row : {};
+      const covered = topics.some((topic) => Object.entries(topic).every(([key, value]) => {
+        if (key === 'channel') return true;
+        if (key === 'instType' && value === 'ANY') return true;
+        const values = [message.arg[key], object[key]].filter((v) => v !== undefined && v !== '');
+        if (!values.length && key === 'instType') {
+          const id = object.instId ?? message.arg.instId;
+          if (id?.endsWith('-SWAP')) values.push('SWAP');
+        }
+        return values.length > 0 && values.every((v) => v === value);
+      }));
+      if (!covered) {
+        throw new Error(`Unsubscribed ${message.arg.channel} frame on ${socket.url}: ${JSON.stringify(message.arg)}${object.instId ? ` instId=${object.instId}` : ''}`);
+      }
+    }
+  }
+
+  assertWritesConsumed() {
+    if (!venue.matchRequestBody) return;
+    const missing = [...this.responses].flatMap(([key, rows]) =>
+      key.startsWith('GET ') ? [] : rows.map(() => key));
+    if (missing.length) throw new Error(`${missing.length} taped write(s) were not sent:\n${missing.join('\n')}`);
   }
 
   async socketFor(rawUrl) {
     const url = canonicalUrl(rawUrl);
-    await until(() => this.open.get(url) && !this.open.get(url).closed, `socket ${url}; unserved=${this.unserved}`);
+    while (!this.open.get(url) || this.open.get(url).closed) {
+      await new Promise((resolve) => this.waiters.push(() => (this.open.get(url) ? (resolve(), true) : false)));
+    }
     return this.open.get(url);
   }
 
@@ -147,8 +244,10 @@ class Tape {
    */
   async play(onTick, ready = async () => {}, runCommand = async () => {}) {
     const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
-    for (const url of urls) await this.socketFor(url);
-    await ready(false);
+    await within((async () => {
+      for (const url of urls) await this.socketFor(url);
+      await ready(false);
+    })(), 15_000, 'Replay startup');
     const start = performance.now();
     let delivered = 0;
     const warm = Math.floor(this.frames.length / 4);
@@ -159,10 +258,21 @@ class Tape {
         if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
       }
       if (frame.type === 'command') {
-        await ready(true);
-        this.results.push(await runCommand(frame).then((ids) => ({ ok: ids }), (error) => ({ error: String(error?.message ?? error) })));
+        await within(ready(true), 15_000, 'Account readiness');
+        this.commandIndex++;
+        this.results.push(await within(runCommand(frame), 15_000, `Command ${frame.op}`).then((ids) => ({ ok: ids }), (error) => {
+          if (error instanceof ReplayTimeout) throw error;
+          return { error: String(error?.message ?? error) };
+        }));
       } else {
         const socket = await this.socketFor(frame.url);
+        if ((venue.validateLogin || venue.validateSubscriptions) && frame.text.trimStart().startsWith('{')) {
+          const message = JSON.parse(frame.text);
+          if (venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified) {
+            throw new Error(`Taped login success preceded a valid login on ${frame.url}`);
+          }
+          this.assertSubscribed(socket, message);
+        }
         let text = frame.text;
         // Handshake IDs are connection-local; the documented ack echoes the
         // actual request instead of pinning either implementation's generator.
@@ -208,7 +318,7 @@ const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
     rssBytes: memory.rss,
     heapUsedBytes: memory.heapUsed,
     wasmBytes,
-    // The complete implementation heap plus reserved wasm, above the harness baseline.
+    // Complete implementation heap plus reserved wasm, above the harness baseline.
     retainedBytes: memory.heapUsed - heapBefore + wasmBytes,
   };
 };
@@ -224,7 +334,7 @@ const sortBook = (book) => ({
   asks: book.asks.map(({ price, amount }) => [price, amount]),
 });
 
-const tickerFields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume'];
+const tickerFields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume', 'openInterest'];
 const marketFields = (m) => ({
   id: m.id,
   symbol: m.symbol,
@@ -234,6 +344,7 @@ const marketFields = (m) => ({
   isInverse: Boolean(m.isInverse),
   isSpot: Boolean(m.isSpot),
   isExpiring: Boolean(m.isExpiring),
+  contractSize: m.contractSize ?? null,
   precision: m.precision,
   limits: { amount: m.limits.amount },
 });
@@ -260,16 +371,24 @@ async function runRust() {
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
       const socket = tape.connect(url, onOpen, onMessage);
-      return { send: (text) => tape.sent(socket, text), close: () => (socket.closed = true) };
+      return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
     request: async ({ method, url, body: requestBody }) => {
-      const { status, body } = tape.respond(method, url, requestBody);
-      return { status, headers: '', body: encoder.encode(body) };
+      const { status, headers = '', body } = tape.respond(method, url, requestBody);
+      // Model nativeTransport's chunks so streamed lists do not allocate a whole
+      // response in wasm before the venue sees the first item.
+      const chunks = async function* () {
+        const bytes = encoder.encode(body);
+        for (let offset = 0; offset < bytes.length; offset += 16 * 1024) {
+          yield bytes.subarray(offset, offset + 16 * 1024);
+        }
+      };
+      return { status, headers, body: chunks() };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
-  const options = { ...replayOptions, ...(isPrivate ? { key: KEY, secret: SECRET, publicDataOnly: false } : { publicDataOnly: true }) };
+  const options = { ...venue.options, ...replayOptions, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }) };
   const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
     onLog: (level, message) => { if (level === 'error') console.error(message); },
     onFrame: (buffer) => {
@@ -286,7 +405,7 @@ async function runRust() {
       status = frame.status() ?? status;
       const executed = frame.fills();
       for (let i = 0; i < (executed?.count ?? 0); i++) {
-        fills.push({ market: executed.market[i], side: executed.side[i], amount: executed.rows[i * 2 + 1], id: executed.orderId(i) });
+        fills.push({ market: executed.market[i], side: executed.side[i], amount: executed.rows[i * 2 + 1], price: executed.rows[i * 2], id: executed.orderId(i) });
       }
     },
   });
@@ -314,6 +433,7 @@ async function runRust() {
     },
   );
   await settle();
+  tape.assertWritesConsumed();
   clearInterval(flushTimer);
   host.flush();
   const metrics = measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
@@ -331,6 +451,7 @@ async function runRust() {
       isInverse: (markets.flags[i] & 2) !== 0,
       isSpot: (markets.flags[i] & 4) !== 0,
       isExpiring: (markets.flags[i] & 16) !== 0,
+      contractSize: markets.contractSize[i] || undefined,
       precision: { amount: markets[MARKET_COLUMNS[0]][i], price: markets[MARKET_COLUMNS[1]][i] },
       limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
     });
@@ -382,7 +503,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
     orders: orderRows,
     positions: positionRows,
     settings: settingRows,
-    fills: fills.map((f) => ({ id: f.id, symbol: symbol(f.market), side: f.side === 0 ? 'buy' : 'sell', amount: f.amount })),
+    fills: fills.map((f) => ({ id: f.id, symbol: symbol(f.market), side: f.side === 0 ? 'buy' : 'sell', amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
   };
 }
 
@@ -417,7 +538,7 @@ async function runTs() {
     removeEventListener(type, fn) {
       this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
     }
-    send(text) { tape.sent(this.socket, text); }
+    send(text) { tape.send(this.socket, text); }
     close() {
       this.readyState = 3;
       this.socket.closed = true;
@@ -444,8 +565,9 @@ async function runTs() {
     return response;
   };
   const store = new DefaultStore();
-  const options = { ...replayOptions, ...(isPrivate ? { key: KEY, secret: SECRET, publicDataOnly: false } : { key: '', secret: '', publicDataOnly: true }) };
+  const options = { ...venue.options, ...replayOptions, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { key: '', secret: '', publicDataOnly: true }) };
   const exchange = new Exchange(venue.ts.name, options, store);
+  venue.configureTs?.(exchange);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
@@ -474,26 +596,11 @@ async function runTs() {
       const loaded = () => accountReady ? Object.values(store.loaded).every(Boolean) : store.loaded.markets && store.loaded.tickers;
       if (isPrivate) await until(loaded, `TS loaded state ${accountReady ? 'account' : 'public'}; unserved=${tape.unserved}`);
     },
-    async (record) => {
-      if (record.op === 'placeOrders') return exchange.placeOrders(record.orders);
-      if (record.op === 'cancelOrders') {
-        await exchange.cancelOrders(store.orders.filter((order) => record.ids.includes(order.id)));
-        return [];
-      }
-      if (record.op === 'amendOrder') {
-        const order = store.orders.find((o) => o.id === record.id);
-        const update = { ...(record.price !== undefined && { price: record.price }), ...(record.amount !== undefined && { amount: record.amount }) };
-        return exchange.updateOrder({ order, update });
-      }
-      if (record.op === 'cancelSymbolOrders') {
-        await exchange.cancelSymbolOrders(record.symbol);
-        return [];
-      }
-      throw new Error(`unknown command ${record.op}`);
-    },
+    (record) => runTsCommand(exchange, store, record),
   );
-  await Promise.all([started, subscribed]);
+  await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
   await settle();
+  tape.assertWritesConsumed();
   const metrics = measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark);
   const snapshot = {
     markets: store.markets.map((m) => ({ ...m })),
@@ -510,11 +617,40 @@ async function runTs() {
         // Zero-size placeholders carry each market's leverage and margin type.
         positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
         settings: [...new Map(store.positions.filter((p) => p.leverage > 0).map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }])).values()],
-        fills: executions.map((f) => ({ id: f.id, symbol: f.symbol, side: f.side, amount: f.amount })),
+        fills: executions.map((f) => ({ id: f.id, symbol: f.symbol, side: f.side, amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
       }
     : undefined;
   exchange.dispose();
   return { frames, metrics, unserved: tape.unserved, store: snapshot, books: bookCopies, account, commands: tape.results };
+}
+
+async function runTsCommand(exchange, store, record) {
+  const { op, ...args } = commandArgs(record);
+  switch (op) {
+    case 'placeOrders': return exchange.placeOrders(args.orders);
+    case 'cancelOrders':
+      await exchange.cancelOrders(store.orders.filter((order) => args.ids.includes(order.id)));
+      return [];
+    case 'cancelSymbolOrders': await exchange.cancelSymbolOrders(args.symbol); return [];
+    case 'amendOrder': {
+      const order = store.orders.find((o) => o.id === args.id);
+      if (!order) throw new Error(`unknown order ${args.id}`);
+      const update = Object.fromEntries(['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]));
+      return exchange.updateOrder({ order, update });
+    }
+    case 'setLeverage': await exchange.setLeverage(args.symbol, args.leverage); return [];
+    case 'setMarginType': await exchange.changeMarginType(args.isolated, args.symbol); return [];
+    case 'setPositionMode': await exchange.changePositionMode(args.hedged); return [];
+    case 'fetchFills': return exchange.fetchHistoricalFills(args);
+    case 'fetchOrderHistory': return exchange.fetchHistoricalOrders(args);
+    case 'fetchIncome': {
+      const { from, to, ...options } = args;
+      return exchange.fetchIncomeHistory({ ...options, startTime: from, endTime: to });
+    }
+    case 'fetchPublicTrades': return exchange.fetchPublicTrades(args.symbol, args.limit);
+    case 'fetchCandles': return exchange.fetchOHLCV(args);
+    default: throw new Error(`unknown command ${op}`);
+  }
 }
 
 /** The fields both implementations carry, in one shape. */
@@ -558,10 +694,7 @@ function normalizeAccount(account) {
   };
 }
 
-const result = await Promise.race([
-  values.impl === 'ts' ? runTs() : runRust(),
-  new Promise((_, reject) => setTimeout(() => reject(new Error(`${values.impl} replay timed out waiting for taped I/O or readiness`)), 60000).unref()),
-]);
+const result = values.impl === 'ts' ? await runTs() : await runRust();
 const { writeFileSync } = await import('node:fs');
 writeFileSync(
   values.out,
@@ -577,4 +710,5 @@ writeFileSync(
     commands: result.commands,
   }),
 );
+clearTimeout(replayDeadline);
 process.exit(0);

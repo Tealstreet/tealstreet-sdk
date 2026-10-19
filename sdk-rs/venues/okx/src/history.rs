@@ -1,0 +1,768 @@
+//! Typed, streamed rare reads. Native SWAP quantities are contract counts.
+use crate::{Okx, Pending, scaled};
+use safe_cex_engine::{CommandId, Cx, LogLevel, Query, Response, TimerId, num};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+const PAGE: usize = 100;
+const RECENT_MS: f64 = 6.0 * 24.0 * 3_600_000.0;
+
+#[derive(Default)]
+pub struct HistoryState {
+    delayed: Vec<(TimerId, Request)>,
+}
+
+pub struct Request {
+    command: CommandId,
+    endpoint: &'static str,
+    symbol: Option<String>,
+    instrument: Option<String>,
+    order_id: Option<String>,
+    income_kind: Option<String>,
+    from: Option<f64>,
+    to: Option<f64>,
+    limit: usize,
+    pages: usize,
+    rows_seen: usize,
+    count: usize,
+    after: Option<String>,
+    oldest: Option<String>,
+    invalid: bool,
+    indices: HashMap<String, usize>,
+    rows: Rows,
+}
+
+enum Rows {
+    Fills(Vec<Execution>),
+    Orders(Vec<HistoricalOrder>),
+    Income(Vec<Income>),
+    Trades(Vec<Trade>),
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Execution {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    timestamp: f64,
+    symbol: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    order_id: Option<String>,
+    price: f64,
+    qty: f64,
+    side: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commission: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commission_asset: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    position_side: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    realized_pnl: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    maker: Option<bool>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoricalOrder {
+    id: String,
+    symbol: String,
+    side: String,
+    #[serde(rename = "type")]
+    kind: &'static str,
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    price: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    average_price: Option<f64>,
+    amount: f64,
+    filled: f64,
+    reduce_only: bool,
+    position_side: &'static str,
+    created_time: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated_time: Option<f64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Income {
+    symbol: String,
+    income_type: &'static str,
+    income: f64,
+    asset: String,
+    timestamp: f64,
+    tran_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trade_id: Option<String>,
+    category: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Trade {
+    id: String,
+    symbol: String,
+    price: f64,
+    qty: f64,
+    quote_qty: f64,
+    timestamp: f64,
+    side: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct FillRow<'a> {
+    inst_id: &'a str,
+    trade_id: &'a str,
+    bill_id: &'a str,
+    ord_id: &'a str,
+    side: &'a str,
+    fill_px: &'a str,
+    fill_sz: &'a str,
+    fill_time: &'a str,
+    ts: &'a str,
+    fee: &'a str,
+    fee_ccy: &'a str,
+    pos_side: &'a str,
+    fill_pnl: &'a str,
+    exec_type: &'a str,
+    px: &'a str,
+    avg_px: &'a str,
+    sz: &'a str,
+    acc_fill_sz: &'a str,
+    u_time: &'a str,
+    c_time: &'a str,
+    order_id: &'a str,
+    fill_fee: &'a str,
+    ccy: &'a str,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct OrderRow<'a> {
+    inst_id: &'a str,
+    ord_id: &'a str,
+    side: &'a str,
+    ord_type: &'a str,
+    state: &'a str,
+    px: &'a str,
+    avg_px: &'a str,
+    sz: &'a str,
+    acc_fill_sz: &'a str,
+    #[serde(borrow)]
+    reduce_only: Option<Bool<'a>>,
+    pos_side: &'a str,
+    c_time: &'a str,
+    u_time: &'a str,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Bool<'a> {
+    Flag(bool),
+    Text(&'a str),
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct BillRow<'a> {
+    inst_id: &'a str,
+    bill_id: &'a str,
+    trade_id: &'a str,
+    #[serde(rename = "type")]
+    kind: &'a str,
+    bal_chg: &'a str,
+    fee: &'a str,
+    pnl: &'a str,
+    ccy: &'a str,
+    ts: &'a str,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct TradeRow<'a> {
+    inst_id: &'a str,
+    trade_id: &'a str,
+    side: &'a str,
+    px: &'a str,
+    sz: &'a str,
+    ts: &'a str,
+}
+
+fn first<'a>(values: &[&'a str]) -> &'a str {
+    values.iter().copied().find(|v| !v.is_empty()).unwrap_or("")
+}
+fn fill_bound(value: Option<f64>) -> Option<f64> {
+    value.filter(|v| v.is_finite()).map(|v| {
+        if v > 1_000_000_000_000.0 {
+            v.floor()
+        } else {
+            (v * 1000.0).floor()
+        }
+    })
+}
+fn fill_seconds(value: f64) -> f64 {
+    if value > 1_000_000_000_000.0 {
+        (value / 1000.0).floor()
+    } else {
+        value.floor()
+    }
+}
+fn optional(value: &str) -> Option<f64> {
+    value.parse::<f64>().ok().filter(|v| v.is_finite())
+}
+fn positive(value: &str) -> Option<f64> {
+    optional(value).filter(|v| *v > 0.0)
+}
+fn text(value: &str) -> Option<String> {
+    (!value.is_empty()).then(|| value.into())
+}
+fn hedge(value: &str) -> &'static str {
+    match value {
+        "long" => "long",
+        "short" => "short",
+        _ => "both",
+    }
+}
+fn category(kind: &str) -> &'static str {
+    match kind {
+        "1" | "6" | "12" => "transfer",
+        "2" => "realized_pnl",
+        "5" | "9" => "liquidation",
+        "8" => "funding",
+        _ => "other",
+    }
+}
+fn income_type(category: &str) -> &'static str {
+    match category {
+        "realized_pnl" => "REALIZED_PNL",
+        "funding" => "FUNDING_FEE",
+        "commission" => "COMMISSION",
+        "rebate" => "REBATE",
+        "transfer" => "TRANSFER",
+        "liquidation" => "LIQUIDATION",
+        _ => "OTHER",
+    }
+}
+fn numeric_id(value: &str) -> &str {
+    let value = value.trim_start_matches('0');
+    if value.is_empty() { "0" } else { value }
+}
+fn id_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (a, b) = (numeric_id(a), numeric_id(b));
+    a.len().cmp(&b.len()).then_with(|| a.cmp(b))
+}
+
+impl Request {
+    fn within(&self, timestamp: f64) -> bool {
+        self.from.is_none_or(|v| timestamp >= v) && self.to.is_none_or(|v| timestamp <= v)
+    }
+    fn cursor(&mut self, value: &str) {
+        if !value.is_empty()
+            && value.bytes().all(|b| b.is_ascii_digit())
+            && self
+                .oldest
+                .as_deref()
+                .is_none_or(|old| id_cmp(value, old).is_lt())
+        {
+            self.oldest = Some(value.into());
+        }
+    }
+    fn put<T>(indices: &mut HashMap<String, usize>, rows: &mut Vec<T>, key: String, row: T) {
+        if let Some(index) = indices.get(&key) {
+            rows[*index] = row;
+        } else {
+            indices.insert(key, rows.len());
+            rows.push(row);
+        }
+    }
+    fn finish(mut self, cx: &mut Cx<'_, Pending>) {
+        let json = match &mut self.rows {
+            Rows::Fills(rows) => {
+                rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
+                rows.truncate(self.limit);
+                serde_json::to_string(rows)
+            }
+            Rows::Orders(rows) => {
+                rows.sort_by(|a, b| b.created_time.total_cmp(&a.created_time));
+                rows.truncate(self.limit);
+                serde_json::to_string(rows)
+            }
+            Rows::Income(rows) => {
+                rows.sort_by(|a, b| b.timestamp.total_cmp(&a.timestamp));
+                serde_json::to_string(rows)
+            }
+            Rows::Trades(rows) => serde_json::to_string(rows),
+        };
+        cx.done(self.command, json.map_err(|e| e.to_string()));
+    }
+}
+
+impl Okx {
+    pub(crate) fn start_query(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        query: Query,
+    ) {
+        if self.credentials.is_none() && !matches!(query, Query::PublicTrades { .. }) {
+            cx.done(command, Ok("[]".into()));
+            return;
+        }
+        let (endpoint, symbol, order_id, income_kind, from, to, limit, rows) = match query {
+            Query::Fills {
+                symbol,
+                order_id,
+                from_ms,
+                to_ms,
+                limit,
+            } => {
+                if symbol.is_none() {
+                    cx.done(command, Ok("[]".into()));
+                    return;
+                }
+                (
+                    "/api/v5/trade/fills",
+                    symbol,
+                    order_id,
+                    None,
+                    fill_bound(from_ms),
+                    fill_bound(to_ms),
+                    limit.unwrap_or(100).clamp(1, 100) as usize,
+                    Rows::Fills(Vec::new()),
+                )
+            }
+            Query::OrderHistory {
+                symbol,
+                from_ms,
+                to_ms,
+                limit,
+            } => (
+                "/api/v5/trade/orders-history",
+                symbol,
+                None,
+                None,
+                from_ms,
+                to_ms,
+                limit.filter(|v| *v > 0).map_or(usize::MAX, |v| v as usize),
+                Rows::Orders(Vec::new()),
+            ),
+            Query::Income {
+                symbol,
+                kind,
+                from_ms,
+                to_ms,
+                limit,
+            } => (
+                if from_ms.is_some_and(|from| cx.now - from > RECENT_MS) {
+                    "/api/v5/account/bills-archive"
+                } else {
+                    "/api/v5/account/bills"
+                },
+                symbol,
+                None,
+                kind,
+                from_ms,
+                to_ms,
+                limit.filter(|v| *v > 0).map_or(usize::MAX, |v| v as usize),
+                Rows::Income(Vec::new()),
+            ),
+            Query::PublicTrades { symbol, limit } => (
+                "/api/v5/market/trades",
+                Some(symbol),
+                None,
+                None,
+                None,
+                None,
+                limit.unwrap_or(100).clamp(1, 500) as usize,
+                Rows::Trades(Vec::new()),
+            ),
+        };
+        if [from, to].into_iter().flatten().any(|v| !v.is_finite())
+            || from.zip(to).is_some_and(|(from, to)| from > to)
+        {
+            cx.done(command, Err("invalid OKX history time bounds".into()));
+            return;
+        }
+        let instrument = symbol
+            .as_ref()
+            .and_then(|s| cx.store.market(s))
+            .map(|m| m.id.clone());
+        if symbol.is_some() && instrument.is_none() {
+            cx.done(command, Ok("[]".into()));
+            return;
+        }
+        self.history_request(
+            cx,
+            Request {
+                command,
+                endpoint,
+                symbol,
+                instrument,
+                order_id,
+                income_kind,
+                from,
+                to,
+                limit,
+                rows,
+                pages: 0,
+                rows_seen: 0,
+                count: 0,
+                after: None,
+                oldest: None,
+                invalid: false,
+                indices: HashMap::new(),
+            },
+        );
+    }
+
+    fn history_request(&self, cx: &mut Cx<'_, Pending>, mut r: Request) {
+        r.count = 0;
+        r.oldest = None;
+        r.pages += 1;
+        let page_limit = match r.rows {
+            Rows::Fills(_) | Rows::Trades(_) => r.limit,
+            _ => PAGE,
+        };
+        let mut path = format!("{}?", r.endpoint);
+        if !matches!(r.rows, Rows::Trades(_)) {
+            path.push_str("instType=SWAP&");
+        }
+        if let Some(id) = &r.instrument {
+            path.push_str(&format!("instId={id}&"));
+        }
+        if let Some(id) = &r.order_id {
+            // IDs are opaque. Percent encode rather than allowing query injection.
+            path.push_str(&format!("ordId={}&", encode(id)));
+        }
+        for (key, value) in [("begin", r.from), ("end", r.to)] {
+            if let Some(value) = value {
+                path.push_str(&format!("{key}={}&", num::format(value)));
+            }
+        }
+        if matches!(r.rows, Rows::Income(_)) {
+            let kind = match r.income_kind.as_deref() {
+                Some("REALIZED_PNL" | "COMMISSION" | "REBATE") => Some("2"),
+                Some("FUNDING_FEE") => Some("8"),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                path.push_str(&format!("type={kind}&"));
+            }
+        }
+        path.push_str(&format!("limit={page_limit}"));
+        if let Some(after) = &r.after {
+            path.push_str(&format!("&after={after}"));
+        }
+        let private = !matches!(r.rows, Rows::Trades(_));
+        self.list(cx, &path, private, Pending::History(r));
+    }
+
+    pub(crate) fn history_item(&self, cx: &mut Cx<'_, Pending>, r: &mut Request, item: &str) {
+        r.count += 1;
+        match r.rows {
+            Rows::Fills(_) => {
+                let Ok(row) = serde_json::from_str::<FillRow<'_>>(item) else {
+                    r.invalid = true;
+                    return;
+                };
+                let Some(m) = cx
+                    .store
+                    .market_by_id(row.inst_id)
+                    .or_else(|| r.symbol.as_ref().and_then(|symbol| cx.store.market(symbol)))
+                else {
+                    return;
+                };
+                let order_id = first(&[row.ord_id, row.order_id]);
+                let (Some(price), Some(size), Some(time)) = (
+                    positive(first(&[row.fill_px, row.px, row.avg_px])),
+                    positive(first(&[row.fill_sz, row.sz, row.acc_fill_sz])),
+                    positive(first(&[row.fill_time, row.ts, row.u_time, row.c_time])),
+                ) else {
+                    return;
+                };
+                let time_ms = if time > 1_000_000_000_000.0 {
+                    time
+                } else {
+                    time * 1000.0
+                };
+                if r.symbol.as_deref() != Some(m.symbol.as_str())
+                    || !matches!(row.side, "buy" | "sell")
+                    || !r.within(time_ms)
+                    || r.order_id
+                        .as_deref()
+                        .is_some_and(|id| !order_id.is_empty() && id != order_id)
+                {
+                    return;
+                }
+                let qty = scaled(size, m.contract_size.unwrap_or(1.0));
+                if !qty.is_finite() || qty <= 0.0 {
+                    return;
+                }
+                let id = text(row.trade_id).or_else(|| text(row.bill_id));
+                let timestamp = fill_seconds(time);
+                let key = id.as_ref().map(|id| format!("id:{id}")).unwrap_or_else(|| {
+                    format!("{}:{timestamp}:{price}:{qty}:{}", order_id, row.side)
+                });
+                let execution = Execution {
+                    id,
+                    timestamp,
+                    symbol: m.symbol.clone(),
+                    order_id: text(order_id),
+                    price,
+                    qty,
+                    side: row.side.into(),
+                    commission: {
+                        let value = first(&[row.fee, row.fill_fee]);
+                        optional(if value.is_empty() { "0" } else { value }).map(f64::abs)
+                    },
+                    commission_asset: text(first(&[row.fee_ccy, row.ccy])),
+                    position_side: (!row.pos_side.is_empty()).then(|| hedge(row.pos_side)),
+                    realized_pnl: optional(row.fill_pnl),
+                    maker: (!row.exec_type.is_empty())
+                        .then(|| row.exec_type.eq_ignore_ascii_case("M")),
+                };
+                if let Rows::Fills(rows) = &mut r.rows {
+                    Request::put(&mut r.indices, rows, key, execution);
+                }
+            }
+            Rows::Orders(_) => {
+                let Ok(row) = serde_json::from_str::<OrderRow<'_>>(item) else {
+                    r.invalid = true;
+                    return;
+                };
+                r.cursor(row.ord_id);
+                let Some(m) = cx.store.market_by_id(row.inst_id) else {
+                    return;
+                };
+                let Some(time) = positive(row.c_time) else {
+                    return;
+                };
+                if row.ord_id.is_empty()
+                    || !matches!(row.side, "buy" | "sell")
+                    || !r.within(time)
+                    || r.symbol.as_deref().is_some_and(|s| s != m.symbol)
+                {
+                    return;
+                }
+                let order = HistoricalOrder {
+                    id: row.ord_id.into(),
+                    symbol: m.symbol.clone(),
+                    side: row.side.into(),
+                    kind: if matches!(row.ord_type, "market" | "optimal_limit_ioc") {
+                        "market"
+                    } else {
+                        "limit"
+                    },
+                    status: match row.state {
+                        "live" | "partially_filled" => "open",
+                        "canceled" | "mmp_canceled" => "canceled",
+                        _ => "closed",
+                    },
+                    price: positive(row.px),
+                    average_price: positive(row.avg_px),
+                    amount: scaled(num::parse(row.sz), m.contract_size.unwrap_or(1.0)),
+                    filled: scaled(num::parse(row.acc_fill_sz), m.contract_size.unwrap_or(1.0)),
+                    reduce_only: matches!(
+                        row.reduce_only,
+                        Some(Bool::Flag(true) | Bool::Text("true"))
+                    ),
+                    position_side: hedge(row.pos_side),
+                    created_time: time,
+                    updated_time: positive(row.u_time),
+                };
+                if let Rows::Orders(rows) = &mut r.rows {
+                    Request::put(&mut r.indices, rows, row.ord_id.into(), order);
+                }
+            }
+            Rows::Income(_) => {
+                let Ok(row) = serde_json::from_str::<BillRow<'_>>(item) else {
+                    r.invalid = true;
+                    return;
+                };
+                r.cursor(row.bill_id);
+                let Some(timestamp) = positive(row.ts) else {
+                    return;
+                };
+                if !r.within(timestamp) {
+                    return;
+                }
+                let symbol = cx
+                    .store
+                    .market_by_id(row.inst_id)
+                    .map_or(row.inst_id, |m| m.symbol.as_str());
+                if r.symbol.as_deref().is_some_and(|s| s != symbol) {
+                    return;
+                }
+                let (fee, pnl, balance) = (
+                    num::parse(row.fee),
+                    num::parse(row.pnl),
+                    num::parse(row.bal_chg),
+                );
+                let residual = balance - fee - pnl;
+                let bill_id = if row.bill_id.is_empty() {
+                    row.ts
+                } else {
+                    row.bill_id
+                };
+                let cat = category(row.kind);
+                for (amount, category, suffix, include) in [
+                    (pnl, cat, "pnl", pnl != 0.0),
+                    (
+                        fee,
+                        if fee < 0.0 { "commission" } else { "rebate" },
+                        "fee",
+                        fee != 0.0,
+                    ),
+                    (
+                        residual,
+                        cat,
+                        "adj",
+                        residual.abs() > 1e-12f64.max(1e-9 * balance.abs()),
+                    ),
+                ] {
+                    if !include {
+                        continue;
+                    }
+                    let record = Income {
+                        symbol: symbol.into(),
+                        income_type: income_type(category),
+                        income: amount,
+                        asset: row.ccy.into(),
+                        timestamp,
+                        tran_id: format!("{bill_id}:{suffix}"),
+                        trade_id: text(row.trade_id),
+                        category,
+                    };
+                    if let Rows::Income(rows) = &mut r.rows {
+                        Request::put(&mut r.indices, rows, record.tran_id.clone(), record);
+                    }
+                }
+            }
+            Rows::Trades(_) => {
+                let Ok(row) = serde_json::from_str::<TradeRow<'_>>(item) else {
+                    r.invalid = true;
+                    return;
+                };
+                let Some(m) = cx.store.market_by_id(row.inst_id) else {
+                    return;
+                };
+                let (Some(price), Some(size), Some(timestamp)) =
+                    (positive(row.px), positive(row.sz), positive(row.ts))
+                else {
+                    return;
+                };
+                if row.trade_id.is_empty()
+                    || !matches!(row.side, "buy" | "sell")
+                    || r.symbol.as_deref() != Some(m.symbol.as_str())
+                {
+                    return;
+                }
+                let qty = scaled(size, m.contract_size.unwrap_or(1.0));
+                if !qty.is_finite() || qty <= 0.0 || !(price * qty).is_finite() {
+                    return;
+                }
+                let trade = Trade {
+                    id: row.trade_id.into(),
+                    symbol: m.symbol.clone(),
+                    price,
+                    qty,
+                    quote_qty: price * qty,
+                    timestamp,
+                    side: row.side.into(),
+                };
+                if let Rows::Trades(rows) = &mut r.rows {
+                    Request::put(&mut r.indices, rows, row.trade_id.into(), trade);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn history_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut r: Request,
+        _response: Response<'_>,
+    ) {
+        if r.invalid {
+            self.history_failed(cx, r, "malformed OKX history list item");
+            return;
+        }
+        r.rows_seen += r.count;
+        if matches!(r.rows, Rows::Fills(_)) {
+            if r.endpoint == "/api/v5/trade/fills" && r.count < r.limit {
+                r.endpoint = "/api/v5/trade/fills-history";
+                self.history_request(cx, r);
+            } else {
+                r.finish(cx);
+            }
+            return;
+        }
+        let (cap, enough) = match &r.rows {
+            Rows::Orders(_) => (50, false),
+            Rows::Income(_) => (200, r.rows_seen >= r.limit),
+            Rows::Trades(_) => {
+                r.finish(cx);
+                return;
+            }
+            Rows::Fills(_) => unreachable!(),
+        };
+        if r.count < PAGE || enough {
+            r.finish(cx);
+            return;
+        }
+        if r.pages >= cap {
+            cx.log(
+                LogLevel::Warning,
+                format!("OKX history hit {cap}-page cap; older rows were not fetched"),
+            );
+            r.finish(cx);
+            return;
+        }
+        // Decimal-string comparison avoids precision loss for 64-bit OKX IDs.
+        if r.oldest.as_deref().is_none_or(|next| {
+            r.after
+                .as_deref()
+                .is_some_and(|old| !id_cmp(next, old).is_lt())
+        }) {
+            cx.log(
+                LogLevel::Warning,
+                "OKX history cursor did not advance; older rows were not fetched",
+            );
+            r.finish(cx);
+            return;
+        }
+        r.after = r.oldest.take();
+        let timer = cx.set_timer(100.0);
+        self.history.delayed.push((timer, r));
+    }
+
+    pub(crate) fn history_failed(&mut self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {
+        cx.log(LogLevel::Error, format!("OKX history: {error}"));
+        cx.done(r.command, Ok("[]".into()));
+    }
+
+    pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {
+        let Some(index) = self.history.delayed.iter().position(|(id, _)| *id == timer) else {
+            return false;
+        };
+        let (_, request) = self.history.delayed.swap_remove(index);
+        self.history_request(cx, request);
+        true
+    }
+}
+
+fn encode(value: &str) -> String {
+    let mut result = String::new();
+    for b in value.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            result.push(char::from(b));
+        } else {
+            use std::fmt::Write;
+            let _ = write!(result, "%{b:02X}");
+        }
+    }
+    result
+}

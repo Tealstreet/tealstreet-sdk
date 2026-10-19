@@ -1108,3 +1108,36 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 - Sends `clOrdId`, rule `^[A-Za-z0-9]{1,32}$` (OKX: case-sensitive alphanumeric). Replaces the generated `BROKER_ID…` ID; no prefix is composed. Inherited by OKX EU and both demo variants.
 - The native amend keeps the order and its `clOrdId`; no new client ID is sent.
+
+## Rust replay depth correction
+
+Books retain every venue level. Never filter bids/asks by the last trade price:
+trades can lag book updates, so that filter permanently deletes valid liquidity.
+The Rust replay oracle includes this correction explicitly in `KNOWN_TS_FIXES`.
+
+## Rust engine scope and verified corrections
+
+`engine: 'rust'` supports USDT/USDC linear SWAPs under all four OKX names.
+Sizes sent to OKX remain contracts; fills and remaining quantities use ctVal,
+while the existing book contract uses lotSz. EEA X-Perps and inverse products
+remain outside this engine lane.
+
+The replay oracle also implements public trades (previously inherited an
+unimplemented method), and OHLCV request bounds use UTC calendar arithmetic
+so a local timezone cannot move the monthly boundary. Rust additionally
+isolates bracket entries with their protective legs, amends OCO legs natively,
+refuses negative protective sizes and unsafe market/terminal amends, and
+continues standalone cancel batches after item failures. These corrections are
+listed in the harness KNOWN_TS_FIXES; they are independently tested instead
+of normalizing away output differences. Newer account equity survives REST
+snapshots and subsequent local balance ticks.
+
+Public-only business sockets subscribe candles directly without sending an
+empty-credential login or private order topics. Private accounts authenticate
+before subscribing account-order channels. This also corrects the TS replay
+oracle's previous unconditional keyless login.
+
+Rust oracle audit: historical fill windows compare native millisecond timestamps
+before truncating public execution timestamps to seconds. Positive protective
+dust must not become close-all; ambiguous standalone protective limit amends
+fail before cancellation in Rust, preserving the existing execution price.

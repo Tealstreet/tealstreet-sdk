@@ -91,11 +91,9 @@ if (!spot) {
 command('amendOrder', { id: 'resting', price: 2810 });
 http('/v5/order/amend', null, ok({ orderId: 'resting' }), 'POST', { category, symbol: symbols[1], orderId: 'resting', price: '2810' });
 stream('order', [{ ...resting, price: '2810' }]);
-command('cancelSymbolOrders', { symbol: symbols[1] });
-http('/v5/order/cancel-all', null, ok({ list: [{ orderId: 'resting' }], success: '1' }), 'POST', { category, symbol: symbols[1] });
-if (hyro) {
-  for (const orderId of ['resting', 'filled']) http('/v5/order/cancel', null, ok({ orderId }), 'POST', { category, symbol: symbols[1], orderId });
-}
+command(hyro ? 'cancelOrders' : 'cancelSymbolOrders', hyro ? { ids: ['resting'] } : { symbol: symbols[1] });
+if (hyro) http('/v5/order/cancel', null, ok({ orderId: 'resting' }), 'POST', { category, symbol: symbols[1], orderId: 'resting' });
+else http('/v5/order/cancel-all', null, ok({ list: [{ orderId: 'resting' }], success: '1' }), 'POST', { category, symbol: symbols[1] });
 stream('order', [{ ...resting, price: '2810', orderStatus: 'Cancelled', leavesQty: '0', rejectReason: 'EC_PerCancelRequest' }]);
 if (values.public) {
   if (!hyro) throw new Error('documented public tape is for Hyro; record live Bybit variants');
