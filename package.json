@@ -5,7 +5,7 @@
     "packages/*",
     "apps/cli",
     "apps/documentation",
-    "sdk-rs/safe-cex-wasm",
+    "sdk-rs/hosts/wasm",
     "thirdparty/*"
   ],
   "scripts": {
