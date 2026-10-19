@@ -1550,7 +1550,10 @@ describe('MEXC futures audit regressions', () => {
       .mockResolvedValueOnce({ data: { success: true, code: 0 } })
       .mockResolvedValueOnce({ data: { success: true, code: 0, data: 'replacement-1' } });
     exchange.store.update({ markets: [market] });
-    exchange.xhr = { post } as any;
+    const get = vi.fn().mockResolvedValue({ data: { success: true, code: 0, data: {
+      orderId: 'regular-1', symbol: 'BTC_USDT', side: 1, orderType: 1, vol: 8004, dealVol: 0, price: 80000, state: 4,
+    } } });
+    exchange.xhr = { post, get } as any;
 
     await expect(
       exchange.updateOrder({

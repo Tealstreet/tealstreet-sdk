@@ -312,13 +312,6 @@ impl Okx {
             return;
         }
         let (endpoint, symbol, order_id, income_kind, from, to, limit, rows) = match query {
-            Query::Leverage { .. } => {
-                cx.done(
-                    command,
-                    Err("OKX leverage lookup is not implemented".into()),
-                );
-                return;
-            }
             Query::Fills {
                 symbol,
                 order_id,

@@ -249,13 +249,6 @@ impl BybitLinear {
             return;
         }
         let walk = match read {
-            Read::Leverage { .. } => {
-                cx.done(
-                    command,
-                    Err("Bybit leverage lookup is not implemented".into()),
-                );
-                return;
-            }
             Read::Fills {
                 symbol,
                 order_id,

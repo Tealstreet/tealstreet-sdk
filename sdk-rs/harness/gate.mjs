@@ -84,11 +84,13 @@ for (let run = 0; run < runs; run++) {
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
 const venue = venueOf(values.venue);
-const isPrivate = tapeRecords.some((record) =>
-  venue.isPrivateRecord
-    ? venue.isPrivateRecord(record)
-    : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
-);
+const isPrivate =
+  tapeRecords.find((record) => record.type === 'meta')?.private ??
+  tapeRecords.some((record) =>
+    venue.isPrivateRecord
+      ? venue.isPrivateRecord(record)
+      : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
+  );
 
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 // BingX additionally fixes write/read defects covered by native contract tests:
@@ -118,48 +120,21 @@ const isPrivate = tapeRecords.some((record) =>
 //    Rust amends the existing native order ID.
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
+const binanceFixes = (account, rustAccount) => {
+  for (const position of account.positions) {
+    const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
+    if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+  }
+};
+// The MEXC reference will receive these same repairs: this entry documents
+// deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
-  // Applied to the TS oracle itself (okx.ws-public.ts / okx.exchange.ts).
-  okx: [
-    'full books retain levels past a stale last trade',
-    'public trades implement the inherited Not implemented method',
-    'candle calendar bounds use UTC independently of host timezone',
-    'fill window filtering retains native milliseconds before output seconds are truncated',
-    'keyless/public-only business socket avoids empty-credential login and private topics',
-    // Rust safety fixes: covered independently by documented-payload tests.
-    'split bracket entries acquire SL/TP before the next entry is placed',
-    'native OCO amend preserves its sibling protective leg',
-    'negative protective sizes and market or terminal amends fail before writes',
-    'positive protective dust cannot round into a close-entire-position order',
-    'standalone protective limit amendment fails before cancel if execution price cannot be retained',
-    'standalone cancellation continues remaining batches after per-row failures',
-    'new account equity survives delayed snapshots and local balance ticks',
-    'acknowledged leverage survives failed post-write snapshots',
-  ],
-  blofin: (account, rustAccount) => {
-    KNOWN_TS_FIXES.account(account, rustAccount);
+  blofin(account, rustAccount) {
+    binanceFixes(account, rustAccount);
     if (account.positions.length === 0) {
       account.balance.used = 0;
       account.balance.upnl = 0;
     }
-  },
-  weex(account) {
-    // TS reads opening STOP/TP stream rows as protective orders and displays
-    // the execution price as their trigger, corrupting conditional size amends.
-    const bytes = readFileSync(values.tape);
-    const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
-      .toString('utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line));
-    fixWeexConditionals(account, records);
-    // Additional deliberate fixes, covered by native regressions: failed
-    // normal/algo reads retain the complete last snapshot; stale depth/private
-    // frames cannot undo newer state; repeated fill IDs emit once; missing
-    // placement IDs fail rather than fabricating an ID; rejected cancellations
-    // retain their order; per-symbol margin changes preserve that symbol's mode.
-    // Price-only replacement preserves remaining quantity and refuses uncertain
-    // fill/bracket state; positive income cursors always report INCOMPLETE.
   },
   bingx: (account, rustAccount) => {
     if (values.venue === 'bingx') {
@@ -222,26 +197,73 @@ const KNOWN_TS_FIXES = {
       return;
     }
   },
-  account: (account, rustAccount) => {
-    for (const position of account.positions) {
-      const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
-      if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
-    }
+  account: binanceFixes,
+  cryptocom: fixCryptocomAccount,
+  weex(account) {
+    // TS reads opening STOP/TP stream rows as protective orders and displays
+    // the execution price as their trigger, corrupting conditional size amends.
+    const bytes = readFileSync(values.tape);
+    const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
+      .toString('utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    fixWeexConditionals(account, records);
+    // Additional deliberate fixes, covered by native regressions: failed
+    // normal/algo reads retain the complete last snapshot; stale depth/private
+    // frames cannot undo newer state; repeated fill IDs emit once; missing
+    // placement IDs fail rather than fabricating an ID; rejected cancellations
+    // retain their order; per-symbol margin changes preserve that symbol's mode.
+    // Price-only replacement preserves remaining quantity and refuses uncertain
+    // fill/bracket state; positive income cursors always report INCOMPLETE.
   },
+
+  okx: [
+    'full books retain levels past a stale last trade',
+    'public trades implement the inherited Not implemented method',
+    'candle calendar bounds use UTC independently of host timezone',
+    'fill window filtering retains native milliseconds before output seconds are truncated',
+    'keyless/public-only business socket avoids empty-credential login and private topics',
+    // Rust safety fixes: covered independently by documented-payload tests.
+    'split bracket entries acquire SL/TP before the next entry is placed',
+    'native OCO amend preserves its sibling protective leg',
+    'negative protective sizes and market or terminal amends fail before writes',
+    'positive protective dust cannot round into a close-entire-position order',
+    'standalone protective limit amendment fails before cancel if execution price cannot be retained',
+    'standalone cancellation continues remaining batches after per-row failures',
+    'new account equity survives delayed snapshots and local balance ticks',
+    'acknowledged leverage survives failed post-write snapshots',
+  ],
+  binance: binanceFixes,
+  binancepm: binanceFixes,
+  // Bybit shares the zero-size-placeholder margin-size defect. Its PostOnly
+  // rejection reason is recovered from the original TS row in venues.mjs.
+  // Other native regressions intentionally corrected by the Bybit port:
+  // exact split remainders, no fallback after ambiguous batch-write failure,
+  // ticker seeding before connecting, and native Partial-stop amendment.
   bybit: (account, rustAccount, output) => {
-    // Rust uses execution/wallet feeds instead of cumulative orders and REST-only wallet.
+    binanceFixes(account, rustAccount);
     const required = output.subscriptions
       .filter((key) => key.endsWith('/v5/private subscribe order'))
       .flatMap((key) => ['execution', 'wallet'].map((topic) => key.replace(/order$/, topic)));
     output.subscriptions = [...new Set([...output.subscriptions, ...required])].sort();
-    KNOWN_TS_FIXES.account(account, rustAccount);
-    for (const order of account.orders) {
-      const fixed = rustAccount.orders.find((o) => o.id === order.id);
-      if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled')
-        order.rejectReason = 'PostOnly';
-    }
+  },
+  mexc: () => {
+    // Full incremental depth, rather than replacing a 20-level snapshot.
+    // Sized stops choose the closing leverage rail even without reduceOnly.
+    // Bracket prices reach the native entry; unsupported opening triggers reject.
+    // Cancel-all reaches regular, plan and position-stop endpoints.
+    // Cancel/replace recomputes remaining size after racing fills; Closed wins
+    // over a late cancellation acknowledgement. Failed reads preserve state.
+    // Regular cumulative fills stay monotonic; terminal rows never reopen.
+    // Stale amend reads cannot regress those fills or place a replacement.
+    // REST/optimistic rows retain cumulative fills; amendments retain attached
+    // brackets and standalone stop sources through venue reconciliation.
+    // Native bracket clears and corrected sources win over delayed placement acks.
+    // Repeated private execution IDs emit one fill within the replay window.
   },
 };
+
 const normalizeBingxPublic = (ts) => {
   // KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
   // integer step 1. Correct that precision and its synthetic ticker touch only.
@@ -285,6 +307,7 @@ const normalizeBingxPublic = (ts) => {
     }
   }
 };
+
 function fixCryptocomAccount(account) {
   // TS never sets the hedged store flag despite mapping positions as hedged.
   account.hedged = true;
@@ -349,8 +372,6 @@ for (let run = 0; run < runs; run++) {
   if (isPrivate && ts.account && rust.account) {
     const fix = KNOWN_TS_FIXES[values.venue];
     if (typeof fix === 'function') fix(ts.account, rust.account, ts);
-    if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
-    if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
       const left = JSON.stringify(ts.account[field]);
       const right = JSON.stringify(rust.account[field]);

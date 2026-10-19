@@ -503,3 +503,23 @@ using Node22.23.3 and three-run medians:
   BloFin29/Binance14/BingX38/Bybit18/Crypto.com21/WEEX20/OKX variants29 each.
   MEXC landed at63d521a860 during validation, making PR1300 conflict again.
   Integrate its shared quantity-unit/parser/transport changes before final CI.
+
+### MEXC landing integration
+
+- Merging63d521a860 after all17 seven-venue local gates passed. Preserve
+  eight registrations, MEXC-only derived native order extras, stop provenance,
+  strict client-ID decoding and optional independent SETTINGS columns. BloFin
+  base quantities remain unchanged. Host review passes15 JS +3 frame-unit tests;
+  engine43 tests/clippy and harness45 tests/microchecks pass.
+- Adopt canonical landing Command::FetchLeverage for both MEXC and BloFin;
+  remove this lane's unmerged duplicate Query variant and six unrelated venue
+  rejection arms. Migrate BloFin's eight leverage regressions to the canonical
+  command; SDK JSON operation stays identical. This reduces future merge scope.
+- Adopt shared ordinal tape/virtual public replay clock and preserve all prior
+  exact caller IDs, semantic payloads, signatures, subscription/write checks,
+  full execution prices and isolated outputs. Memory settling uses real timer
+  turns even when replay timers are virtual; signed accounting is unchanged.
+- Landing builds wasm with opt-levels while native release remains3. Preserve
+  that wasm-only setting and remeasure the aggregate artifact, all public CPU/
+  memory gates and private parity under inherited2,621,440-byte budget. Native,
+  SDK, root typecheck/lint and final exact-artifact replay verification run next.

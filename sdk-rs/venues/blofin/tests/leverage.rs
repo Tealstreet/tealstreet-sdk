@@ -1,5 +1,5 @@
 mod support;
-use safe_cex_engine::{Action, Command, Event, Notice, Query};
+use safe_cex_engine::{Action, Command, Event, Notice};
 use support::*;
 
 fn flat() -> Harness {
@@ -14,11 +14,9 @@ fn flat() -> Harness {
 fn lookup(h: &mut Harness) {
     h.e.handle(
         1.0,
-        Event::Command(Command::Query {
+        Event::Command(Command::FetchLeverage {
             command: 71,
-            query: Query::Leverage {
-                symbol: "BTCUSDT".into(),
-            },
+            symbol: "BTCUSDT".into(),
         }),
     );
     h.collect();
@@ -186,11 +184,9 @@ fn unknown_symbol_does_not_issue_a_request() {
     let mut h = flat();
     h.e.handle(
         1.0,
-        Event::Command(Command::Query {
+        Event::Command(Command::FetchLeverage {
             command: 71,
-            query: Query::Leverage {
-                symbol: "UNKNOWN".into(),
-            },
+            symbol: "UNKNOWN".into(),
         }),
     );
     h.collect();

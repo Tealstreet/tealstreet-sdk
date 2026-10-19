@@ -360,21 +360,12 @@ impl WeexFutures {
         command: CommandId,
         read: Query,
     ) {
-        if self.credentials.is_none()
-            && !matches!(read, Query::PublicTrades { .. } | Query::Leverage { .. })
-        {
+        if self.credentials.is_none() && !matches!(read, Query::PublicTrades { .. }) {
             cx.done(command, Ok("[]".into()));
             return;
         }
         let mut requests = VecDeque::new();
         let (kind, order_id, symbol) = match read {
-            Query::Leverage { .. } => {
-                cx.done(
-                    command,
-                    Err("Leverage query is not supported for WEEX".into()),
-                );
-                return;
-            }
             Query::Fills {
                 symbol,
                 order_id,

@@ -293,9 +293,7 @@ impl History {
         command: u32,
         query: Query,
     ) {
-        if credentials.is_none()
-            && !matches!(query, Query::PublicTrades { .. } | Query::Leverage { .. })
-        {
+        if credentials.is_none() && !matches!(query, Query::PublicTrades { .. }) {
             cx.done(command, Ok("[]".into()));
             return;
         }
@@ -313,13 +311,6 @@ impl History {
             timer: None,
         };
         match query {
-            Query::Leverage { .. } => {
-                cx.done(
-                    command,
-                    Err("Leverage query is not supported for BingX".into()),
-                );
-                return;
-            }
             Query::Fills {
                 symbol,
                 order_id,

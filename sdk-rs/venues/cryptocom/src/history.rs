@@ -212,13 +212,6 @@ impl Request {
 impl Cryptocom {
     pub(crate) fn query(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId, query: Query) {
         let (kind, path, symbol, order_id, income_kind, from_ms, to_ms, limit) = match query {
-            Query::Leverage { .. } => {
-                cx.done(
-                    command,
-                    Err("Leverage query is not supported for Crypto.com".into()),
-                );
-                return;
-            }
             Query::Fills {
                 symbol,
                 order_id,

@@ -773,10 +773,7 @@ impl Venue for Blofin {
                     cx.done(command, Err(format!("Unknown market {symbol}")));
                 }
             }
-            Command::Query {
-                command,
-                query: safe_cex_engine::Query::Leverage { symbol },
-            } => self.fetch_leverage(cx, command, symbol),
+            Command::FetchLeverage { command, symbol } => self.fetch_leverage(cx, command, symbol),
             Command::Query { command, query } => self.start_query(cx, command, query),
             other => self.trading_command(cx, other),
         }

@@ -604,11 +604,19 @@ impl Store {
         );
         w.pad();
         w.f64s(rows.iter().map(|(_, s)| s.leverage));
-        w.f64s(rows.iter().map(|(_, s)| s.buy_leverage.unwrap_or(f64::NAN)));
-        w.f64s(
-            rows.iter()
-                .map(|(_, s)| s.sell_leverage.unwrap_or(f64::NAN)),
-        );
+        if rows
+            .iter()
+            .any(|(_, s)| s.buy_leverage.is_some() || s.sell_leverage.is_some())
+        {
+            w.f64s(
+                rows.iter()
+                    .map(|(_, s)| s.buy_leverage.unwrap_or(s.leverage)),
+            );
+            w.f64s(
+                rows.iter()
+                    .map(|(_, s)| s.sell_leverage.unwrap_or(s.leverage)),
+            );
+        }
         w.end();
     }
 
@@ -717,6 +725,28 @@ mod tests {
     }
 
     #[test]
+    fn scalar_settings_keep_the_original_payload_without_side_columns() {
+        let mut store = Store::default();
+        store.set_settings([(
+            0,
+            MarketSetting {
+                leverage: 15.0,
+                margin_type: Some(MarginType::Cross),
+                ..MarketSetting::default()
+            },
+        )]);
+        let mut writer = FrameWriter::new(vec![], 0.0);
+        store.write_settings(&mut writer);
+        let frame = writer.finish();
+        let (_, payload) = crate::wire::sections(&frame).next().unwrap();
+        assert_eq!(payload.len(), 24);
+        assert_eq!(
+            f64::from_le_bytes(payload[16..24].try_into().unwrap()),
+            15.0
+        );
+    }
+
+    #[test]
     fn settings_append_independent_leverages_after_the_original_scalar_column() {
         let mut store = Store::default();
         store.set_settings([
@@ -745,6 +775,6 @@ mod tests {
         assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 2);
         assert_eq!((value(24), value(32)), (20.0, 15.0));
         assert_eq!((value(40), value(56)), (20.0, 30.0));
-        assert!(value(48).is_nan() && value(64).is_nan());
+        assert_eq!((value(48), value(64)), (15.0, 15.0));
     }
 }
