@@ -2143,3 +2143,8 @@ NaN payloads canonicalize as Node structuredClone does.
 Uncloneable values and unmodeled object kinds produce visible DataCloneError.
 The worker recorder intentionally drops clone failures as perfFixture.ts does;
 other callers receive the error. Node's real structuredClone supplies the oracle.
+
+Native sockets with a separate callback owner use `install_native_handler_stats`
+to bind selected-key live counts into Base's record/pong/cleanup/reconciliation
+algorithm. They never copy callbacks into Base's registry or bypass the shared
+statistics writes. See [the owner census](NATIVE_HANDLER_STATS_REVIEW.md).
