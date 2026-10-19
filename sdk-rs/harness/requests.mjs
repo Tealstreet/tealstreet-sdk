@@ -49,11 +49,11 @@ export const takeResponse = (queue, method, url, time = 0, commandIndex = Infini
 export const subscriptionKeys = (url, text) => {
   let message;
   try { message = JSON.parse(text); } catch { return []; }
-  const method = String(message.method ?? message.reqType ?? message.op ?? '').toUpperCase();
+  const method = String(message.method ?? message.reqType ?? message.op ?? message.event ?? '').toUpperCase();
   if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return [];
   const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
   const parsed = new URL(url);
-  const topics = message.params?.channels ?? message.params ?? message.args ?? (message.dataType ? [message.dataType] : []);
+  const topics = message.params?.channels ?? message.params ?? message.args ?? (message.dataType ? [message.dataType] : typeof message.topic === 'string' ? [message.topic] : []);
   if (!Array.isArray(topics)) return [];
   return topics.map((topic) => `${parsed.origin}${parsed.pathname} ${op} ${typeof topic === 'object' ? JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a],[b]) => a.localeCompare(b)))) : topic}`);
 };

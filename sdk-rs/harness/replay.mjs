@@ -159,11 +159,16 @@ class Tape extends SharedTape {
     const record = timedRead ? (timed.at(-1) ?? (current.some((r) => r.availableAfter !== undefined) ? current.at(-1) : current[0])) : current[0];
     // Every mutation needs its own row; ordinary reads may reconcile repeatedly.
     if (!timedRead && (current.length > 1 || isWriteRequest(method, url))) queue.splice(queue.indexOf(record), 1);
-    const sent = body ? (typeof body === 'string' ? parseRequestJson(body) : body) : {};
+    // Form bodies have no generated JSON fields to interpolate.
+    let sent = {};
+    if (body && (typeof body !== 'string' || /^[\[{]/.test(body.trimStart()))) {
+      sent = typeof body === 'string' ? parseRequestJson(body) : body;
+    }
     const responseBody = record.body.replace(/"\$(clientAlgoId|newClientOrderId)"/g, (_, field) => JSON.stringify(sent[field] ?? null));
     return { status: record.status, headers: record.headers ?? '', body: responseBody };
   }
   connect(url, onOpen, onMessage, onClose) {
+    this.audit?.connected?.(url);
     let socket;
     socket = super.connect(url, onOpen, (text) => {
       this.audit?.received(url, text);
@@ -251,7 +256,10 @@ class Tape extends SharedTape {
 
   assertWritesConsumed() {
     const missing = this.responses.unusedWrites();
-    if (missing) throw new Error(`${missing} taped write(s) were not sent`);
+    if (missing) {
+      const keys = [...this.responses.queues].filter(([, rows]) => rows.some((r) => isWriteRequest(r.method, r.url))).map(([key]) => key);
+      throw new Error(`${missing} taped write(s) were not sent:\n${keys.join('\n')}`);
+    }
   }
 
   async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
@@ -527,7 +535,8 @@ async function tsCommand(exchange, store, record) {
       await exchange.cancelOrders(store.orders.filter((order) => args.ids.includes(order.id)));
       return [];
     case 'cancelSymbolOrders':
-      await exchange.cancelSymbolOrders(args.symbol);
+      if (args.symbol === '') await exchange.cancelAllOrders();
+      else await exchange.cancelSymbolOrders(args.symbol);
       return [];
     case 'amendOrder': {
       const order = store.orders.find((o) => o.id === args.id);

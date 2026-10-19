@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { requestKey, takeResponse, subscriptionKeys } from './requests.mjs';
+
+test('event/topic subscriptions retain native channels and operations', () => {
+  const url = 'wss://wss.woox.io/ws/stream/undefined';
+  assert.deepEqual(subscriptionKeys(url, '{"event":"subscribe","topic":"tickers"}'), [`${url} subscribe tickers`]);
+  assert.deepEqual(subscriptionKeys(url, '{"event":"unsubscribe","topic":"PERP_BTC_USDT@orderbookupdate"}'), [`${url} unsubscribe PERP_BTC_USDT@orderbookupdate`]);
+  assert.deepEqual(subscriptionKeys(url, '{"event":"ping"}'), []);
+});
 const url = 'https://open-api.bingx.com/openApi/swap/v2/trade/order';
 
 test('write matching preserves numeric/body types and exact caller IDs', () => {

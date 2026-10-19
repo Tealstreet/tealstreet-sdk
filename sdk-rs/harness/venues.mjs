@@ -2,6 +2,7 @@
 // against, and the name the Rust engine is built with.
 import { createHmac } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
+import { createWooSocketAudit, validateWooRequest } from './woo-protocol.mjs';
 
 const root = '../../packages/safe-cex/src/exchanges';
 
@@ -44,6 +45,18 @@ const okx = (name) => ({
 });
 
 export const VENUES = {
+  woo: {
+    rust: 'woo',
+    ts: { module: `${root}/woo/woo.exchange.ts`, className: 'WOOXExchange', name: 'woo' },
+    privateSocket: '/v2/ws/private/',
+    matchRequestBody: true,
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.endsWith('@orderbookupdate')).length >= count,
+    respondToPing: true,
+    createSocketAudit: createWooSocketAudit,
+    validateRequest: validateWooRequest,
+    compareFillPrices: true,
+  },
   mexc: {
     rust: 'mexc',
     matchRequestBody: true,
