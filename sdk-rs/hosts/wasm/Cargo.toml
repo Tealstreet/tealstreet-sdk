@@ -12,6 +12,7 @@ safe-cex-engine.workspace = true
 safe-cex-venue-binance.workspace = true
 safe-cex-venue-bitunix.workspace = true
 safe-cex-venue-bybit.workspace = true
+safe-cex-venue-cryptocom.workspace = true
 safe-cex-venue-okx.workspace = true
 serde.workspace = true
 serde_json.workspace = true

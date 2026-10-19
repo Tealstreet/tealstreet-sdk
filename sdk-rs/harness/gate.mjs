@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
+import { parseRequestJson } from './request-json.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -151,11 +152,40 @@ const fixHistoricalFills = (commands) => {
       commands[index].ok = executions.sort((a, b) => b.timestamp - a.timestamp);
   });
 };
+const fixCryptocomAccount = (account) => {
+    // TS never sets the hedged store flag despite mapping positions as hedged.
+    account.hedged = true;
+    // TS omits user.trade entirely. Derive the execution oracle from documented
+    // taped trade rows, independently of Rust's account output.
+    const tapeRecords = tape;
+    const seen = new Set();
+    account.fills = [];
+    for (const record of tapeRecords) {
+      if (record.type !== 'ws' || !record.url.includes('/exchange/v1/user')) continue;
+      const result = parseRequestJson(record.text).result;
+      if (result?.channel !== 'user.trade') continue;
+      for (const row of result.data) {
+        const id = String(row.trade_id);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        account.fills.push({ id: String(row.order_id), symbol: row.instrument_name, side: row.side.toLowerCase(), amount: Number(row.traded_quantity) });
+      }
+    }
+    // Further deliberate fixes are exercised by Rust regressions: failed reads
+    // retain state; client_oid survives mapping; terminal/stale frames cannot
+    // reopen orders/positions; REST retains live position enrichment; post-only
+    // uses exec_inst; account-wide leverage uses account_id + integer leverage;
+    // ignored brackets/opening triggers reject before writes; caller ids use a
+    // conservative 36-byte ceiling without JS string emulation.
+    // Public throttle and public-only subscription corrections are the
+    // afterTsFrame and prepareTs hooks in venues.mjs.
+};
 for (let run = 0; run < runs; run++) {
   const result = { ts: results.ts[run], rust: results.rust[run] };
   const { ts, rust } = result;
   if (ts.frames !== rust.frames) differences.push(`run ${run} frames: ts=${ts.frames} rust=${rust.frames}`);
   if (isPrivate) {
+    if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
     KNOWN_TS_FIXES(ts.account, rust.account);
     fixHistoricalFills(ts.commands);
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
@@ -166,6 +196,10 @@ for (let run = 0; run < runs; run++) {
   }
   if (!equal(ts.commands, rust.commands)) differences.push(`command results: ts=${JSON.stringify(ts.commands)} rust=${JSON.stringify(rust.commands)}`);
   for (const impl of ['ts', 'rust']) {
+    const output = result[impl];
+    if (output.metrics.retainedBytes < 0 || output.metrics.bufferRetainedBytes < 0) differences.push(`${impl}: negative retained memory component; baseline is invalid`);
+    if (output.unusedWrites) differences.push(`${impl}: ${output.unusedWrites} taped mutation(s) never sent`);
+    for (const error of output.protocolErrors ?? []) differences.push(`${impl}: ${error}`);
     if (!result[impl].markets.length || !result[impl].tickers.length) differences.push(`${impl}: empty public seed`);
     if (result[impl].signatures?.length) differences.push(`${impl}: ${result[impl].signatures.join('; ')}`);
     if (result[impl].socketErrors?.length) differences.push(`${impl}: ${result[impl].socketErrors.join('; ')}`);
@@ -207,6 +241,12 @@ for (let run = 0; run < runs; run++) {
       const corrected = Number.isFinite(Number(value)) ? Number(value) : Date.parse(value);
       if (ticker.fundingTime === Number.parseFloat(price.ft)) ticker.fundingTime = corrected;
       else if (ticker.fundingTime !== corrected) differences.push(`unexpected TS funding time for ${ticker.symbol}`);
+    }
+  }
+  // KNOWN_TS_FIXES: unavailable Crypto.com quotes produce NaN in TS.
+  if (values.venue === 'cryptocom') for (const ticker of ts.tickers) {
+    for (const field of ['bid', 'ask', 'last', 'percentage', 'volume', 'quoteVolume', 'openInterest']) {
+      if (ticker[field] === null) ticker[field] = 0;
     }
   }
   compare('market', ts.markets, rust.markets);

@@ -9,6 +9,9 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
+import { parseRequestJson } from './request-json.mjs';
+import { retainedMemory } from './memory.mjs';
+import { Responses } from './responses.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -65,11 +68,12 @@ const canonicalObject = (value) => {
 };
 const canonicalBody = (body) => {
   if (body == null || body === '') return '';
-  let parsed = body;
+  let value = body;
   try {
-    if (typeof body === 'string') parsed = JSON.parse(body);
-    else if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) parsed = JSON.parse(new TextDecoder().decode(body));
+    if (typeof body === 'string') value = parseRequestJson(body);
+    else if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) value = parseRequestJson(new TextDecoder().decode(body));
   } catch { return String(body); }
+  if (values.venue === 'cryptocom' && value?.method && value?.params) value = value.params;
   const sorted = (value) => {
     if (Array.isArray(value)) return value.map(sorted);
     if (!value || typeof value !== 'object') return value;
@@ -79,7 +83,7 @@ const canonicalBody = (body) => {
         !callerIds.has(v) && venue.generatedBodyId?.(key, v) ? '<generated>' : sorted(v),
       ]));
   };
-  return JSON.stringify(sorted(parsed));
+  return JSON.stringify(sorted(value), (_key, value) => typeof value === 'bigint' ? { integer: String(value) } : value);
 };
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
@@ -97,13 +101,10 @@ const apiSupported = (value) => value == null || value === '' ? true
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
-  constructor() {
-    this.responses = new Map();
-    for (const record of records.filter((r) => r.type === 'http')) {
-      const key = requestKey(record.method, record.url, record.requestBody);
-      if (!this.responses.has(key)) this.responses.set(key, []);
-      this.responses.get(key).push(record);
-    }
+  constructor(impl) {
+    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records) });
+    this.responses = new Responses(records, requestKey, venue.checkRequest, venue.isWrite,
+      venue.matchRequestBody ? undefined : (method, url) => requestKey(method, url));
     this.frames = records.filter((r) => ['ws', 'command', 'open', 'close'].includes(r.type)).map((r) => {
       if (r.url) r = { ...r, url: canonicalUrl(r.url) };
       if (r.type !== 'ws') return r;
@@ -114,9 +115,10 @@ class Tape {
     this.sockets = [];
     this.connectionCounts = new Map();
     this.byConnection = new Map();
-    this.unserved = 0;
     this.commandIndex = 0;
   }
+
+  get unserved() { return this.responses.unserved; }
 
   time = 0;
   outbound = [];
@@ -126,6 +128,7 @@ class Tape {
 
   send(socket, text) {
     const { url, connection } = socket;
+    this.audit?.sent(socket.rawUrl, text);
     if (venue.respondToPing && text === 'ping') {
       setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
       return;
@@ -188,39 +191,16 @@ class Tape {
         .map(([key, value]) => `${key}${value}`).join('').replace(/[=&]/g, '');
       this.verifySignature(headers, query, body);
     }
-    const key = requestKey(method, url, body);
-    if (method !== 'GET') this.outbound.push(key);
-    const queue = this.responses.get(key)
-      ?? (!venue.matchRequestBody ? this.responses.get(requestKey(method, url)) : undefined);
-    if (!queue?.length) {
-      this.unserved++;
-      console.error(`unserved ${key}`);
-      return { status: 599, body: '' };
-    }
-    // Venues stage reconciliation by elapsed tape time or command number.
-    const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= this.commandIndex && (r.after ?? 0) <= this.time);
-    if (!eligible.length) {
-      this.unserved++;
-      console.error(`Request preceded its taped stage: ${key}`);
-      return { status: 599, body: '' };
-    }
-    const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
-    let current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
-    const timed = queue.some((r) => r.after !== undefined);
-    if (timed) {
-      const after = Math.max(...current.map((r) => r.after ?? 0));
-      current = current.filter((r) => (r.after ?? 0) === after);
-    }
-    const record = timed ? current.at(-1) : current[0];
-    if ((!timed && current.length > 1) || (venue.matchRequestBody && method !== 'GET')) queue.splice(queue.indexOf(record), 1);
-    return { status: record.status, headers: record.headers ?? '', body: record.body };
+    if (venue.isWrite?.(method, url) ?? method !== 'GET') this.outbound.push(requestKey(method, url, body));
+    return this.responses.respond(method, url, body, this.commandIndex, this.time);
   }
 
   connect(url, onOpen, onMessage, onClose) {
+    const rawUrl = url;
     url = canonicalUrl(url);
     const connection = this.connectionCounts.get(url) ?? 0;
     this.connectionCounts.set(url, connection + 1);
-    const socket = { url, connection, onOpen, onMessage, onClose, closed: false, opened: false, topics: new Set(), publicTopics: new Set(), subscriptionArgs: new Map(), loginVerified: false };
+    const socket = { url, rawUrl, connection, onOpen, onMessage, onClose, closed: false, opened: false, topics: new Set(), publicTopics: new Set(), subscriptionArgs: new Map(), loginVerified: false };
     this.sockets.push(socket);
     this.byConnection.set(`${url}:${connection}`, socket);
     // Old synthetic fixtures have no lifecycle records; live tapes drive every
@@ -274,10 +254,8 @@ class Tape {
   }
 
   assertWritesConsumed() {
-    if (!venue.matchRequestBody) return;
-    const missing = [...this.responses].flatMap(([key, rows]) =>
-      key.startsWith('GET ') ? [] : rows.map(() => key));
-    if (missing.length) throw new Error(`${missing.length} taped write(s) were not sent:\n${missing.join('\n')}`);
+    const missing = this.responses.unusedWrites();
+    if (missing) throw new Error(`${missing} taped write(s) were not sent`);
   }
 
   async socketFor(frame) {
@@ -394,6 +372,10 @@ class Tape {
     return delivered;
   }
 
+  unusedWrites() {
+    return this.responses.unusedWrites();
+  }
+
   results = [];
 }
 
@@ -402,14 +384,11 @@ const settle = async () => {
 };
 
 const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark, peakBytes = 0) => {
-  globalThis.gc?.();
-  await settle();
-  globalThis.gc?.();
-  await settle();
   const cpu = process.cpuUsage(cpuStart.process);
   const thread = process.threadCpuUsage(cpuStart.thread);
   const steady = warmMark ? process.threadCpuUsage(warmMark.thread) : { user: 0, system: 0 };
-  const memory = process.memoryUsage();
+  const wallMs = performance.now() - wallStart;
+  const memory = await baseline();
   return {
     // The worker's own thread: what competes with its message handling.
     cpuMs: (thread.user + thread.system) / 1000,
@@ -417,29 +396,34 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark,
     steadyCpuMs: (steady.user + steady.system) / 1000,
     // All threads, including V8 background compilation and GC helpers.
     processCpuMs: (cpu.user + cpu.system) / 1000,
-    wallMs: performance.now() - wallStart,
+    wallMs,
     rssBytes: memory.rss,
     heapUsedBytes: memory.heapUsed,
-    arrayBufferBytes: memory.arrayBuffers,
-    jsBaselineBytes: heapBefore,
+    heapRetainedBytes: memory.heapUsed - heapBefore.heapUsed,
+    bufferRetainedBytes: memory.arrayBuffers - heapBefore.arrayBuffers,
+    buffersBefore: heapBefore.arrayBuffers,
+    buffersAfter: memory.arrayBuffers,
     wasmBytes,
     // What the implementation keeps alive beyond the harness and loaded code.
-    retainedBytes: memory.heapUsed + memory.arrayBuffers - heapBefore + wasmBytes,
-    peakBytes: Math.max(peakBytes, memory.heapUsed + memory.arrayBuffers - heapBefore + wasmBytes),
+    retainedBytes: retainedMemory(heapBefore, memory, wasmBytes),
+    peakBytes: Math.max(peakBytes, retainedMemory(heapBefore, memory, wasmBytes)),
+    arrayBufferBytes: memory.arrayBuffers,
   };
 };
 
-/** Heap retained before the implementation loads, so both start from zero. */
-// Node excludes WebAssembly.Memory from arrayBuffers (verified by grow);
-// count JS backing buffers explicitly and add wasm linear memory separately.
-const jsMemoryBytes = () => { const m = process.memoryUsage(); return m.heapUsed + m.arrayBuffers; };
+/** Loaded code is excluded; collect before I/O and after replay state settles. */
 const baseline = async () => {
-  globalThis.gc?.();
-  await settle();
-  globalThis.gc?.();
-  await settle();
-  const m = process.memoryUsage();
-  return m.heapUsed + m.arrayBuffers;
+  let previous;
+  let stable = 0;
+  for (let i = 0; i < 8; i++) {
+    globalThis.gc?.();
+    await new Promise(setImmediate);
+    const memory = process.memoryUsage();
+    stable = memory.arrayBuffers === previous ? stable + 1 : 0;
+    if (stable >= 2) return memory;
+    previous = memory.arrayBuffers;
+  }
+  throw new Error('Backing-buffer memory did not settle');
 };
 
 const bookHash = (t, symbol, book, packed = false) => {
@@ -452,7 +436,7 @@ const sortBook = (book) => ({
   asks: book.asks.map(({ price, amount }) => [price, amount]),
 });
 
-const tickerFields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume', 'openInterest'];
+const tickerFields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'openInterest', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume'];
 const marketFields = (m) => ({
   id: m.id,
   symbol: m.symbol,
@@ -460,7 +444,7 @@ const marketFields = (m) => ({
   quote: m.quote,
   active: m.active,
   contractSize: m.contractSize ?? null,
-  precision: m.precision,
+  precision: { amount: m.precision.amount, price: m.precision.price },
   limits: { amount: { min: Number(m.limits.amount.min), max: Number(m.limits.amount.max) } },
 });
 
@@ -469,7 +453,7 @@ async function runRust() {
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine();
-  const tape = new Tape();
+  const tape = new Tape('rust');
   const encoder = new TextEncoder();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
@@ -486,7 +470,7 @@ async function runRust() {
   const transport = {
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage, onClose }) => {
-      const socket = tape.connect(url, onOpen, onMessage, onClose);
+      const socket = tape.connect(url, onOpen, (text) => { tape.audit?.received(url, text); onMessage(text); }, onClose);
       return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
     request: async ({ method, url, body: requestBody, headers }) => {
@@ -503,7 +487,7 @@ async function runRust() {
   const options = { ...venue.options, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }) };
   await settle();
   const heapBefore = await baseline();
-  tape.sampleMemory = () => jsMemoryBytes() - heapBefore + wasmMemoryBytes();
+  tape.sampleMemory = () => retainedMemory(heapBefore, process.memoryUsage(), wasmMemoryBytes());
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
@@ -545,7 +529,7 @@ async function runRust() {
       }
     },
     async () => {
-      while (isPrivate && (status?.loaded ?? 0) !== allLoaded) await new Promise((r) => setTimeout(r, 5));
+      while ((isPrivate && (status?.loaded ?? 0) !== allLoaded) || (tape.audit && !tape.audit.ready())) await new Promise((r) => setTimeout(r, 5));
     },
     (record) => {
       const { op, ...rest } = record;
@@ -553,7 +537,6 @@ async function runRust() {
     },
   );
   await settle();
-  tape.assertWritesConsumed();
   tape.assertWritesConsumed();
   clearInterval(flushTimer);
   host.flush();
@@ -591,7 +574,7 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, bookEvents, unserved: tape.unserved, signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return { frames, metrics, bookEvents, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
 }
 
 const commandArgs = ({ t, type, ...args }) => args;
@@ -627,7 +610,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 }
 
 async function runTs() {
-  const tape = new Tape();
+  const tape = new Tape('ts');
   class TapeWebSocket {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -645,8 +628,10 @@ async function runTs() {
           this.onopen?.({});
         },
         (data) => {
+          tape.audit?.received(url, data);
           for (const fn of this.listeners.message) fn({ data });
           this.onmessage?.({ data });
+          venue.afterTsFrame?.(exchange);
         },
         (code) => { this.readyState = 3; for (const fn of this.listeners.close) fn({ code }); this.onclose?.({ code }); },
       );
@@ -683,17 +668,28 @@ async function runTs() {
     }
     return response;
   };
+  const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
   const finalBooks = {};
   const bookEvents = [];
   const candleUpdates = [];
   const candleListeners = new Map();
-  const consumerBooks = {};
+  const mainBooks = {};
   await settle();
   const heapBefore = await baseline();
-  tape.sampleMemory = () => jsMemoryBytes() - heapBefore;
+  tape.sampleMemory = () => retainedMemory(heapBefore, process.memoryUsage());
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   const store = new DefaultStore();
+  const mainStore = new DefaultStore();
+  // Exercise the production browser-worker packer, including its ticker
+  // baseline, and the real receiver. Rust already transfers every store table.
+  const worker = new ExchangeWorker({}, 'replay', venue.ts.name, {}, {}, {}, 'replay');
+  worker._store = store;
+  let state;
+  store.subscribe((data) => { state = data; });
+  const postStore = () => {
+    if (!values['no-egress'] && state) mainStore.update(structuredClone(worker._prepareStorePayload(state)), true);
+  };
   const options = { ...venue.options, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { key: '', secret: '', publicDataOnly: true }) };
   const exchange = new Exchange(venue.ts.name, options, store);
   venue.configureTs?.(exchange);
@@ -702,27 +698,26 @@ async function runTs() {
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
   const sampling = setInterval(() => { tape.peakBytes = Math.max(tape.peakBytes ?? 0, tape.sampleMemory()); }, 5);
   const started = exchange.start();
+  const prepared = started.then(() => venue.prepareTs?.(exchange, { isPrivate }));
   const subscribed = (async () => {
     while (!store.markets.length) await new Promise((r) => setTimeout(r, 1));
     for (const symbol of bookSymbols) exchange.listenOrderBook(symbol, (book) => (finalBooks[symbol] = book));
   })();
   // Model the worker posting each subscribed book to main every 250 ms.
   let lastFlush = -Infinity;
-  let posted = 0;
   const frames = await tape.play(
     (t) => {
       if (t - lastFlush >= 250) {
         for (const [symbol, book] of Object.entries(finalBooks)) bookEvents.push(bookHash(t, symbol, book));
+        postStore();
         if (!values['no-egress']) {
-          for (const [symbol, book] of Object.entries(finalBooks)) {
-            consumerBooks[symbol] = structuredClone(book);
-            posted += consumerBooks[symbol].bids.length;
-          }
+          for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
         }
         lastFlush = t;
       }
     },
     async () => {
+      await prepared;
       while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
       const loaded = () => Object.values(store.loaded).every(Boolean);
       while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
@@ -732,14 +727,16 @@ async function runTs() {
   await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
   await settle();
   tape.assertWritesConsumed();
+  postStore();
+  if (!values['no-egress']) for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
   clearInterval(sampling);
   const metrics = await measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark, tape.peakBytes);
   const snapshot = {
-    markets: store.markets.map((m) => ({ ...m })),
-    tickers: store.tickers.map((t) => ({ ...t })),
+    markets: (values['no-egress'] ? store : mainStore).markets.map((m) => ({ ...m })),
+    tickers: (values['no-egress'] ? store : mainStore).tickers.map((t) => ({ ...t })),
   };
   const bookCopies = Object.fromEntries(
-    Object.entries(finalBooks).map(([symbol, book]) => [symbol, JSON.parse(JSON.stringify(book))]),
+    Object.entries(values['no-egress'] ? finalBooks : mainBooks).map(([symbol, book]) => [symbol, JSON.parse(JSON.stringify(book))]),
   );
   const account = isPrivate
     ? {
@@ -753,8 +750,7 @@ async function runTs() {
       }
     : undefined;
   exchange.dispose();
-  if (posted && !Object.keys(consumerBooks).length) throw new Error('lost consumer books');
-  return { frames, metrics, bookEvents, unserved: tape.unserved, signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
+  return { frames, metrics, bookEvents, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
 }
 
 async function runTsCommand(exchange, store, record, { candleListeners, candleUpdates }) {
@@ -849,9 +845,11 @@ writeFileSync(
     impl: values.impl,
     frames: result.frames,
     unserved: result.unserved,
+    unusedWrites: result.unusedWrites,
+    protocolErrors: result.protocolErrors,
     metrics: result.metrics,
     markets: result.store.markets.map(marketFields),
-    tickers: result.store.tickers.map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, t[f]])])),
+    tickers: result.store.tickers.map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, f === 'openInterest' ? (t[f] ?? 0) : t[f]])])),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
     commands: result.commands,

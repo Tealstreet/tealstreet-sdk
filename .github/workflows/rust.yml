@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Four venue engines: measured 1,816,352 bytes; cap the bundle at 1.8 MiB.
-      WASM_BUDGET_BYTES: 1887436
+      # Five venues: measured 2,058,973 bytes; allow 2.1 MiB.
+      WASM_BUDGET_BYTES: 2202010
     defaults:
       run:
         working-directory: .
@@ -158,6 +158,14 @@ jobs:
         run: |
           yarn rust:private-tape-bybit
           yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''
+      - name: Harness protocol regressions
+        run: yarn rust:test-harness
+      - name: Crypto.com public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue cryptocom --tape sdk-rs/harness/fixtures/cryptocom-public.jsonl.gz --books BTCUSD-PERP,ETHUSD-PERP
+      - name: Crypto.com account and trading (correctness)
+        run: |
+          yarn rust:private-tape-cryptocom
+          yarn rust:gate --venue cryptocom --tape sdk-rs/harness/tapes/cryptocom-private.jsonl --runs 1 --books ''
       - name: OKX public data (correctness, CPU and memory)
         run: yarn rust:gate --venue okx --tape sdk-rs/harness/fixtures/okx-public.jsonl.gz --books BTCUSDT,ETHUSDT
       - name: OKX account and trading variants (correctness)

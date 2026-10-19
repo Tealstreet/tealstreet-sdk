@@ -249,3 +249,20 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
 - Fetch found Crypto.com newly landed at e6e410146e. Commit this checkpoint before
   merging it; preserve the new response/protocol audits and worker transport
   measurement. Rerun integrated checks before publishing the Bitunix PR.
+
+- Second integration audits preserve all five factories/aliases and both
+  streaming validation paths. Updated the old malformed-item callback assertion
+  for the landing branch's stricter item validation. Fixed shared adapter's
+  missing Crypto.com client-ID rule to match its TS venue exactly.
+- New public-worker transport, stable backing-buffer collection, signed-POST read
+  classification and Crypto.com socket audits must survive harness resolution;
+  integrated gate measurements below supersede the four-venue checkpoint.
+- Crypto.com integration verified: full workspace bans/fmt/clippy/tests, wasm
+  clippy/build, root typecheck 44/lint 28/tests 27 tasks, adapter 16 and host 12
+  tests PASS. Harness helpers 12 PASS. Aggregate wasm 2,058,973 bytes.
+- Harness review retained lifecycle IDs, exact writes/caller IDs, per-frame
+  validation and independent oracles; adopted worker/mainStore transport,
+  signed-POST read classification and stable buffer metrics. Final forced GC is
+  outside both CPU windows. Timed snapshots remain ineligible until their time.
+- WEEX landed at 4046db3826 while this merge ran. Integrate it before the final
+  combined replay run and PR, avoiding repeat measurements on a superseded build.
