@@ -501,7 +501,7 @@ impl Venue for BitgetFutures {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
-            Pending::History(request) => self.query_item(request, item),
+            Pending::History(request) => self.query_item(cx, request, item),
             Pending::Trade(_) => {}
             Pending::Account {
                 generation,

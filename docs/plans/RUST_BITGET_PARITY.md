@@ -92,3 +92,15 @@ green final-head CI. No stash, rebase, force push or master changes.
 - Native trading20 tests plus inverse amend regression and strict clippy PASS.
   Intentional TS fixes are listed in gate notes, including invalid callback
   preflight, documented Classic hedge side and native trailing amend/cancel.
+
+## Queries checkpoint
+
+- UTA income uses financial-records with streamed documented rows, bounded 30-day
+  windows, cursor walking, exact IDs, product/symbol filters and atomic failure.
+- Preserve raw signed amount and optional signed fee metadata. Funding, explicit
+  fee and transfer enums are classified; trade remains other because docs do not
+  establish gross/net PnL. No additive fee duplication or invented decomposition.
+- Inverse missing fee currency resolves each symbol's base coin, including ETH.
+- Independent query review clear. Existing history13 + new UTA ledger10 tests and
+  strict clippy PASS; tests include byte-wise streamed decoding, late UTA signal,
+  malformed lists, failed later pages, repeated cursors and nonoverlapping windows.
