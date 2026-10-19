@@ -487,3 +487,17 @@ weex: main-thread cpu  ts    120.1 ms   rust     79.9 ms   1.50x; steady cpu    
 - Registration, parent replay/gate/Cargo and factory reviews are all clear.
   Nine-venue WASM3,083,413bytes < unchanged3,407,872byte budget. Native and
   replay regressions plus current-head CI remain required before merge.
+
+## Nine-venue throughput checkpoint
+
+- Native workspace, native/WASM clippy/fmt/bans, repository typecheck/lint,
+  WASM adapter24 and Worker/wire15 tests PASS. Harness70 tests PASS.
+  All private variants PASS, including BloFin and MEXC's updated fixture.
+- Local final-dispatch size profiles had unstable CPU margins: level z failed
+  Crypto.com; balanced s failed Bitget. Natural machine contention prevents
+  assigning isolated causation. Chose throughput optimization for the final
+  WASM host while keeping incoming venue z overrides and engine/Bitget3.
+- Resulting artifact3,202,529bytes remains below fixed3,407,872bytes. Fresh
+  Bitget, Crypto.com and Binance three-run public gates PASS. Bitget TS/Rust
+  CPU713.4/632.4ms, steady458.7/440.8ms, retained5.9/2.5MB; remaining
+  public regressions and final-head CI required before merge.

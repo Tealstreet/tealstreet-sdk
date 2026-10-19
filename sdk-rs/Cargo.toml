@@ -79,9 +79,9 @@ lto = "fat"
 codegen-units = 1
 opt-level = 3
 
-# Keep dispatch/serialization glue compact. The shared engine stays at O3.
+# Optimize final dispatch for throughput; venue crates retain size profiles.
 [profile.release.package.safe-cex-wasm]
-opt-level = "z"
+opt-level = 3
 
 [profile.release.package.safe-cex-venue-binance]
 opt-level = "z"
