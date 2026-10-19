@@ -1,0 +1,137 @@
+{
+  "base": "c1ad856cebbf5659d702575b4a72b9e5b9f31555",
+  "source_commit": "fa33071170747ba7e7f45f53ca4e9f0dc8f61111",
+  "assignment_rows": [
+    35
+  ],
+  "compiled_missing_contract_red": {
+    "log": "/tmp/bybit-private-filter-master-red.log",
+    "sha256": "2cd98ec5cc06e4aa46352d5d412f42c408dd251a03147d66d4a0d605b791c8f1",
+    "test": "private_filter_reads_live_indices_through_real_frame_binding"
+  },
+  "gates": [
+    {
+      "source_commit": "fa33071170747ba7e7f45f53ca4e9f0dc8f61111",
+      "gate": "core-gates",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--jobs",
+        "2",
+        "-p",
+        "safe-cex-exchange",
+        "--all-features",
+        "--test",
+        "cancellable_future_inventory",
+        "--test",
+        "override_contract",
+        "--test",
+        "venue_binding_gate",
+        "--",
+        "--include-ignored"
+      ],
+      "exit": 0,
+      "seconds": 179.8,
+      "log": "/tmp/bybit-private-filter-gate-core-gates.log",
+      "sha256": "431e9ace403e7f9cf49d62b7a12156b272d71fa537d374e78cbf490ab9b3477b"
+    },
+    {
+      "source_commit": "fa33071170747ba7e7f45f53ca4e9f0dc8f61111",
+      "gate": "full-index",
+      "command": [
+        "cargo",
+        "run",
+        "--locked",
+        "--jobs",
+        "2",
+        "-p",
+        "safe-cex-parity",
+        "--bin",
+        "parity-check",
+        "--"
+      ],
+      "exit": 0,
+      "seconds": 41.12,
+      "log": "/tmp/bybit-private-filter-gate-full-index.log",
+      "sha256": "c4405f505981ec89805abceffed1c62eda666d83ec676ecea873c167713bee1c"
+    },
+    {
+      "source_commit": "fa33071170747ba7e7f45f53ca4e9f0dc8f61111",
+      "gate": "fmt",
+      "command": [
+        "cargo",
+        "fmt",
+        "--check"
+      ],
+      "exit": 0,
+      "seconds": 49.49,
+      "log": "/tmp/bybit-private-filter-gate-fmt.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source_commit": "fa33071170747ba7e7f45f53ca4e9f0dc8f61111",
+      "gate": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--jobs",
+        "2",
+        "-p",
+        "safe-cex-venue-bybit",
+        "--all-features",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 36.71,
+      "log": "/tmp/bybit-private-filter-gate-clippy.log",
+      "sha256": "d690d7ac72a2ea43efa2df095d7b4a81fde8661478e5f5958d146a0211e121df"
+    },
+    {
+      "source_commit": "fa33071170747ba7e7f45f53ca4e9f0dc8f61111",
+      "gate": "wasm-clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--jobs",
+        "2",
+        "-p",
+        "safe-cex-venue-bybit",
+        "--all-features",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--lib",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit": 0,
+      "seconds": 10.46,
+      "log": "/tmp/bybit-private-filter-gate-wasm-clippy.log",
+      "sha256": "9ba681652627f0d62a608e1aa74b17888d4b7708dff0ff857cda34b24439c73d"
+    }
+  ],
+  "additional_gates": {
+    "wiring": {
+      "log": "/tmp/bybit-private-filter-wiring.log",
+      "sha256": "c740694c69eca1ee70adc9e8c2c4d4cc9355a2c69799dfc18e09fa7e2cc05024",
+      "proof": "pass 376"
+    },
+    "node-cancellation": {
+      "log": "/tmp/bybit-private-filter-node-cancellation.log",
+      "sha256": "4f9038e076e25a5d84487b24d1558bfe4f06635d806df37d519a1518a429f1ae",
+      "proof": "pass 11"
+    },
+    "extractor": {
+      "log": "/tmp/bybit-private-filter-extractor.log",
+      "sha256": "4f918d284df8478694edf3f6abbb54e3f1cfdb4a663077d431f347c412f36e31",
+      "proof": "Would update 0 manifests; 0 added, 0 orphaned symbols."
+    }
+  },
+  "full_venue": "PENDING: inherit1228 clock fixture then replay full all-target all-feature venue tests before READY"
+}
