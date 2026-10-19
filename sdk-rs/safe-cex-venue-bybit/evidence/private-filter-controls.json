@@ -6,21 +6,21 @@
       "control": "snapshot-indices",
       "compiled_runtime_red": true,
       "red_log": "/tmp/bybit-private-filter-snapshot-indices-red.log",
-      "red_sha256": "5e6cc059a62803ba6f117230022c5f04754ee122b1c355877503de970885ba35",
+      "red_sha256": "15494a6ac019d5a5d93158092e786a26ead2d2c43b8c97e976ff9d90b2893e08",
       "exact_restore": true,
       "green": true,
       "green_log": "/tmp/bybit-private-filter-snapshot-indices-restore-green.log",
-      "green_sha256": "a265e05b094c5f7cf25b7232bc379db1f3cef46dca2418f07f3812961e6d4925"
+      "green_sha256": "669f23f08c5d9b1105939764d806e95bca57bcce24a1a4396af173c6fd35d506"
     },
     {
       "control": "ignore-selector",
       "compiled_runtime_red": true,
       "red_log": "/tmp/bybit-private-filter-ignore-selector-red.log",
-      "red_sha256": "d2583b791278699b76f168bcdd25ded2854154c38f3cbc055978bfff4a226c42",
+      "red_sha256": "13c6f0b61cc6ff9b9afcd752a02f6a15284fbfd0863525b90a8910d017ade03e",
       "exact_restore": true,
       "green": true,
       "green_log": "/tmp/bybit-private-filter-ignore-selector-restore-green.log",
-      "green_sha256": "a093f7d4eb21ed2da6aef0b9fd634cdf54ea79b54bcfb5183010517b36c85b1d"
+      "green_sha256": "b8eb58443139fe78f327c3d12f6fcaccf1ab72d91e87fff2b9083c392a86a6f6"
     }
   ]
 }
