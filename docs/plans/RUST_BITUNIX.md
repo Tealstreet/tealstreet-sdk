@@ -348,3 +348,27 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
 - Full workspace bans/fmt/clippy/tests and wasm clippy/build PASS. Root typecheck
   44/lint 28/test 27 tasks PASS. Adapter 19 tests PASS; WASM 2,935,585 bytes,
   aggregate budget 3 MiB. Final combined replays and updated-head CI remain.
+
+### Reviewed seven-venue public gates PASS — PR #1309
+
+| Public tape (3 runs) | CPU TS / Rust ms | Retained TS / Rust MB | Peak TS / Rust MB |
+| --- | ---: | ---: | ---: |
+| bitunix | 1013.1 / 903.2 | 3.6 / 2.2 | 31.2 / 16.0 |
+| binance | 269.1 / 143.4 | 4.6 / 2.4 | 34.4 / 12.6 |
+| bybit | 449.9 / 346.0 | 6.5 / 2.7 | 33.8 / 10.6 |
+| okx | 308.4 / 167.1 | 4.8 / 2.9 | 31.9 / 10.5 |
+| cryptocom | 78.0 / 70.3 | 2.1 / 1.5 | 14.7 / 5.6 |
+| weex | 114.0 / 76.6 | 5.3 / 2.7 | 20.0 / 7.2 |
+| bingx | 139.5 / 83.2 | 3.8 / 2.1 | 25.7 / 5.2 |
+
+- All seven public outputs match with lower Rust main-thread CPU, retained
+  memory and sampled peak. Workspace/root checks, 56 Bitunix, 43 engine, 34
+  harness, 19 adapter and 23 host tests PASS; bundle 2,935,585 bytes / 3 MiB.
+- Three original adversarial reviews, independent fix re-reviews and final
+  integration review PASS; all reports are posted on PR #1309. Four actionable
+  findings are fixed. Actual rebuilt WASM through FrameApplier verifies full
+  to empty clearing, snapshot decoding and uninitialized-book suppression.
+- Private replays passed before BingX integration; final ten-variant private
+  replay results and exact-head CI are tracked on PR #1309. Landing is authorized
+  only after those checks are green; then cut a fresh follow-up branch from the
+  merged landing. No push to master, rebase, force-push or stash was used.
