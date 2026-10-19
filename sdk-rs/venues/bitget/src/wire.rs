@@ -106,35 +106,82 @@ pub struct Contract<'a> {
     pub max_lever: Number,
 }
 
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub struct TickerRow<'a> {
-    #[serde(default, borrow)]
     pub symbol: Cow<'a, str>,
-    #[serde(default, borrow)]
     pub inst_id: Cow<'a, str>,
-    #[serde(default)]
-    pub bid_pr: Number,
-    #[serde(default)]
-    pub ask_pr: Number,
-    #[serde(default)]
-    pub last_pr: Number,
-    #[serde(default)]
-    pub mark_price: Number,
-    #[serde(default)]
-    pub index_price: Number,
-    #[serde(default)]
-    pub change24h: Number,
-    #[serde(default)]
-    pub change_utc24h: Number,
-    #[serde(default)]
-    pub funding_rate: Number,
-    #[serde(default)]
-    pub next_funding_time: Number,
-    #[serde(default)]
-    pub base_volume: Number,
-    #[serde(default)]
-    pub quote_volume: Number,
+    // One presence mask avoids a separate optional tag per numeric field.
+    values: [f64; 11],
+    present: u16,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(field_identifier, rename_all = "camelCase")]
+pub enum TickerField {
+    BidPr,
+    AskPr,
+    LastPr,
+    MarkPrice,
+    IndexPrice,
+    Change24h,
+    ChangeUtc24h,
+    FundingRate,
+    NextFundingTime,
+    BaseVolume,
+    QuoteVolume,
+    Symbol,
+    InstId,
+    #[serde(other)]
+    Other,
+}
+
+impl TickerRow<'_> {
+    pub fn value(&self, field: TickerField) -> Option<f64> {
+        let index = field as usize;
+        (self.present & (1 << index) != 0).then(|| self.values[index])
+    }
+}
+
+impl<'de> Deserialize<'de> for TickerRow<'de> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Ticker;
+        impl<'de> serde::de::Visitor<'de> for Ticker {
+            type Value = TickerRow<'de>;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a Bitget ticker")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut map: M,
+            ) -> Result<Self::Value, M::Error> {
+                let mut row = TickerRow::default();
+                let mut seen = 0u16;
+                while let Some(field) = map.next_key::<TickerField>()? {
+                    if matches!(field, TickerField::Other) {
+                        let _ = map.next_value::<serde::de::IgnoredAny>()?;
+                        continue;
+                    }
+                    let bit = 1 << field as usize;
+                    if seen & bit != 0 {
+                        return Err(serde::de::Error::custom("duplicate Bitget ticker field"));
+                    }
+                    seen |= bit;
+                    match field {
+                        TickerField::Symbol => row.symbol = map.next_value::<Text<'de>>()?.0,
+                        TickerField::InstId => row.inst_id = map.next_value::<Text<'de>>()?.0,
+                        field => {
+                            if let Some(value) = map.next_value::<Number>()?.0 {
+                                row.values[field as usize] = value;
+                                row.present |= bit;
+                            }
+                        }
+                    }
+                }
+                Ok(row)
+            }
+        }
+        d.deserialize_map(Ticker)
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -746,6 +793,58 @@ impl<'de> Deserialize<'de> for PublicMessage<'de> {
             }
         }
         d.deserialize_map(Public)
+    }
+}
+
+#[cfg(test)]
+mod ticker_tests {
+    use super::{TickerField, TickerRow};
+    use std::borrow::Cow;
+
+    #[test]
+    fn compact_tickers_preserve_absence_signed_zero_and_native_fields() {
+        let row: TickerRow<'_> = serde_json::from_str(
+            r#"{"symbol":"BTCUSDT","instId":"BTC\u0055SDT","bidPr":null,"askPr":"bad","lastPr":"-0","markPrice":"NaN","indexPrice":103.5,"change24h":"0.2","changeUtc24h":"0.1","fundingRate":"-0.01","nextFundingTime":"0","baseVolume":"1.5","quoteVolume":"2.5","futureField":{"nested":[1,2]}}"#,
+        )
+        .unwrap();
+        assert!(matches!(row.symbol, Cow::Borrowed("BTCUSDT")));
+        assert!(matches!(&row.inst_id, Cow::Owned(value) if value == "BTCUSDT"));
+        assert_eq!(row.value(TickerField::BidPr), None);
+        assert_eq!(row.value(TickerField::AskPr), None);
+        assert_eq!(row.value(TickerField::MarkPrice), None);
+        assert_eq!(
+            row.value(TickerField::LastPr).unwrap().to_bits(),
+            (-0.0f64).to_bits()
+        );
+        for (field, value) in [
+            (TickerField::IndexPrice, 103.5),
+            (TickerField::Change24h, 0.2),
+            (TickerField::ChangeUtc24h, 0.1),
+            (TickerField::FundingRate, -0.01),
+            (TickerField::NextFundingTime, 0.0),
+            (TickerField::BaseVolume, 1.5),
+            (TickerField::QuoteVolume, 2.5),
+        ] {
+            assert_eq!(row.value(field), Some(value));
+        }
+        let empty: TickerRow<'_> = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty.value(TickerField::LastPr), None);
+    }
+
+    #[test]
+    fn compact_tickers_reject_duplicates_and_invalid_numeric_types() {
+        for text in [
+            r#"{"bidPr":null,"bidPr":"1"}"#,
+            r#"{"lastPr":"bad","lastPr":"1"}"#,
+            r#"{"symbol":"BTCUSDT","symbol":"ETHUSDT"}"#,
+            r#"{"instId":"BTCUSDT","instId":"ETHUSDT"}"#,
+            r#"{"lastPr":true}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<TickerRow<'_>>(text).is_err(),
+                "{text}"
+            );
+        }
     }
 }
 

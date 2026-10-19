@@ -296,21 +296,24 @@ impl BitgetFutures {
 
 fn update_ticker(t: &mut Ticker, row: &TickerRow<'_>) {
     for (target, value) in [
-        (&mut t.bid, row.bid_pr),
-        (&mut t.ask, row.ask_pr),
-        (&mut t.last, row.last_pr),
-        (&mut t.mark, row.mark_price),
-        (&mut t.index, row.index_price),
-        (&mut t.funding_rate, row.funding_rate),
-        (&mut t.funding_time, row.next_funding_time),
-        (&mut t.volume, row.base_volume),
-        (&mut t.quote_volume, row.quote_volume),
+        (&mut t.bid, row.value(TickerField::BidPr)),
+        (&mut t.ask, row.value(TickerField::AskPr)),
+        (&mut t.last, row.value(TickerField::LastPr)),
+        (&mut t.mark, row.value(TickerField::MarkPrice)),
+        (&mut t.index, row.value(TickerField::IndexPrice)),
+        (&mut t.funding_rate, row.value(TickerField::FundingRate)),
+        (&mut t.funding_time, row.value(TickerField::NextFundingTime)),
+        (&mut t.volume, row.value(TickerField::BaseVolume)),
+        (&mut t.quote_volume, row.value(TickerField::QuoteVolume)),
     ] {
-        if let Some(value) = value.0 {
+        if let Some(value) = value {
             *target = value;
         }
     }
-    if let Some(change) = row.change24h.0.or(row.change_utc24h.0) {
+    if let Some(change) = row
+        .value(TickerField::Change24h)
+        .or(row.value(TickerField::ChangeUtc24h))
+    {
         t.percentage = change * 100.0;
     }
 }
@@ -510,13 +513,14 @@ impl Venue for BitgetFutures {
                         let mut ticker = Ticker {
                             id: m.id.clone(),
                             symbol: m.symbol.clone(),
-                            mark: row.last_pr.get(),
+                            mark: row.value(TickerField::LastPr).unwrap_or(0.0),
                             ..Ticker::default()
                         };
                         update_ticker(&mut ticker, &row);
-                        ticker.mark = row.last_pr.get();
+                        ticker.mark = row.value(TickerField::LastPr).unwrap_or(0.0);
                         // The REST seed uses the UTC change; the live stream uses change24h.
-                        ticker.percentage = row.change_utc24h.get() * 100.0;
+                        ticker.percentage =
+                            row.value(TickerField::ChangeUtc24h).unwrap_or(0.0) * 100.0;
                         ticker.funding_time = 0.0;
                         rows.push(ticker);
                     }

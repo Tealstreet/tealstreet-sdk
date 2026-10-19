@@ -81,16 +81,19 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
 const baseline = async () => {
   let previous;
   let stable = 0;
-  // Module/native cleanup may finish on timer turns after immediate callbacks.
-  for (let i = 0; i < 50; i++) {
+  // Imported code cleanup spans timer turns; both heap and buffers must settle.
+  for (let i = 0; i < 40; i++) {
     globalThis.gc?.();
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 50));
     const memory = process.memoryUsage();
-    stable = memory.arrayBuffers === previous ? stable + 1 : 0;
+    stable =
+      previous && memory.arrayBuffers === previous.arrayBuffers && Math.abs(memory.heapUsed - previous.heapUsed) < 4096
+        ? stable + 1
+        : 0;
     if (stable >= 5) return memory;
-    previous = memory.arrayBuffers;
+    previous = memory;
   }
-  throw new Error('Backing-buffer memory did not settle');
+  throw new Error('Heap and backing-buffer memory did not settle');
 };
 
 const sortBook = (book) => ({
@@ -129,6 +132,9 @@ async function runRust() {
   const { WasmEngine, wasmMemoryBytes } = await loadEngine();
   const tape = createTape(records, venue, isPrivate, { impl: 'rust', books: bookSymbols });
   const encoder = new TextEncoder();
+  const heapBefore = await baseline();
+  const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
+  const wallStart = performance.now();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
   const tickers = new TickerState();
@@ -191,9 +197,6 @@ async function runRust() {
       }
     },
   });
-  const heapBefore = await baseline();
-  const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
-  const wallStart = performance.now();
   host.start();
   for (const symbol of bookSymbols) host.command({ op: 'subscribeOrderBook', symbol });
   let lastFlush = -Infinity;
@@ -391,6 +394,9 @@ async function runTs() {
     return response;
   };
   const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
+  const heapBefore = await baseline();
+  const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
+  const wallStart = performance.now();
   const store = new DefaultStore();
   const mainStore = new DefaultStore();
   // Exercise the production browser-worker packer, including its ticker
@@ -417,9 +423,6 @@ async function runTs() {
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
   const finalBooks = {};
-  const heapBefore = await baseline();
-  const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
-  const wallStart = performance.now();
   const started = exchange.start();
   const subscribed = (async () => {
     while (!store.markets.length) await new Promise((r) => setTimeout(r, 1));

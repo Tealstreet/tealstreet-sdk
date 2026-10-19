@@ -351,3 +351,23 @@ all focused tests pass. Final rebuild, replay and repeat audit in progress.
   scan/rebuilt strings across846topics for every frame. Both implementations
   use the same transport and retain exact routing/unsubscribe checks.
 - All29harness tests pass; six-venue replays running against frozen code.
+
+## Final performance and measurement checkpoint
+
+- Current PR revision passed every Linux Rust CI gate, including all six public
+  and private venue gates. Local steady CPU margin was narrow, so profiled the
+  actual fixture: typed ticker decoding was the largest venue cost.
+- Compact typed ticker storage uses eleven floats and a presence mask, with
+  an independent seen mask for duplicate rejection. Borrowed text, invalid/null
+  values, signed zero, live/REST percentage precedence and seed mark stay exact.
+  Native 77 tests and clippy pass. Profiling-only script/files were removed.
+- Fresh three-run Bitget gate PASS: TS/Rust CPU 550.2/501.1 ms, steady CPU
+  364.8/337.3 ms, retained 5.5/2.3 MB; same 36,631 frames, 846 markets/tickers
+  and two books. Binance PASS: CPU 205.9/80.5 ms, steady 107.8/29.6 ms,
+  retained 4.4/2.3 MB. Other regression reruns in progress.
+- Measurement review found constructors were excluded unevenly. Both baselines
+  now precede actual runtime/host/main-receiver construction, after imports and
+  initial Tape state. Both heap and backing buffers must stabilize over timer
+  turns; negative deltas still fail. Reproduced Crypto.com and WEEX private
+  negative-memory cases pass with the consistent boundary. No thresholds relaxed.
+- New BingX landing 9ddec5d0a4 requires another merge before PR can land.
