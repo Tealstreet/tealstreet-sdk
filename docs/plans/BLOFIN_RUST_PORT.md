@@ -42,3 +42,32 @@ merge that PR, and create a fresh follow-up branch. No rebase or force push.
   Binance reference. Fetched current process instructions from origin.
 - Official payload reference: https://docs.blofin.com/index.html .
 - No implementation or gates yet.
+
+### Phase 1 verification
+
+- Added public crate, bounded subscriptions, books/gap recovery, candles and
+  liveness watchdog. `ArrayAt::EnvelopeField` retains API status around streamed
+  data without retaining the list; validates separators, item syntax and UTF-8.
+- Phase review found and corrected books5 ordering corruption (also fixed in
+  TS, with whole-book gate comparison retained), duplicate candle emission,
+  malformed-list acceptance and candle-window request differences.
+- Rust: 8 public tests + 11 engine tests pass; venue clippy and bans pass.
+- safe-cex typecheck and lint pass; focused BloFin TS regressions: 10 pass.
+  Full TS suite still running; required final root checks remain in phase 5.
+- Review recheck added malformed whitespace rejection, exact integer sequences,
+  and authoritative replacement for thin/empty books5 sides.
+
+### Phase 2 implementation plan
+
+- `sign.rs`: request path+query/method/ms/unique nonce/body, HMAC hex then base64;
+  private WS signs `/users/self/verifyGET...` and subscribes after login success.
+- `account.rs` + borrowed `wire.rs`: independent account and order snapshot jobs;
+  normal/TPSL/trigger cursor families complete only at empty pages, with
+  non-advancing cursor and page caps rejecting the entire snapshot. Signed read
+  retries only, bounded backoff; failed reads preserve state.
+- Snapshot revisions protect orders, positions, balances and settings against
+  newer socket/command updates. Settings survive closed positions. Streams map
+  native contracts to base once; bounded cumulative fill tracker (500 rows)
+  differences quantity and traded value to recover execution price.
+- Verify signatures, login, fills/replays/regressions, setting preservation,
+  stale snapshots, later-page failures, and private socket watchdog/reconnect.

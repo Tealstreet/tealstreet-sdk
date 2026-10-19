@@ -604,7 +604,20 @@ impl<V: Venue> Engine<V> {
             let response = Response {
                 status: incoming.status,
                 headers: &incoming.headers,
-                body: "",
+                body: match splitter.envelope() {
+                    Some(bytes) => match std::str::from_utf8(bytes) {
+                        Ok(body) => body,
+                        Err(_) => {
+                            self.venue.on_request_failed(
+                                &mut cx,
+                                pending,
+                                "response envelope is not UTF-8",
+                            );
+                            return;
+                        }
+                    },
+                    None => "",
+                },
             };
             self.venue.on_response(&mut cx, pending, response);
             return;

@@ -63,6 +63,9 @@ const isPrivate = Boolean(ts.account);
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
+// BloFin books5 formerly overwrote N array slots, corrupting ordering when the
+// top moved. Both TS and Rust now merge by price boundary; full books are still
+// compared without normalization or exclusions for this corrected TS defect.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
   for (const position of account.positions) {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);

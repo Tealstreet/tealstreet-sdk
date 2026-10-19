@@ -422,6 +422,14 @@ Execution history follows the same conversion rule (`qty = nativeQty * contractS
 
 BloFin's public `Order.filled` remains base quantity. `Order.extra.filledInPlacementUnits` preserves the same cumulative native-contract value accepted by `PlaceOrderOpts.amount`, so chaser remainder arithmetic does not mix base quantity with placement units.
 
+### Book snapshots
+
+`books5` replaces the price range covered by its top levels, preserving only
+levels deeper than that range. Replacing the first N array entries loses sorted
+price order and can duplicate a price after the top of book moves. The Rust
+engine uses the same merge and requires matching `prevSeqId` for full-book
+updates; a gap clears sequence state and requests a fresh snapshot.
+
 ### Order Book Amount Conversion
 
 Order book amounts from WS are contract counts. Keep them in native contracts in `blofin.ws-public.ts`; web orderbook/DOM grouping utilities convert to base or quote exactly once using `contractSize`.
