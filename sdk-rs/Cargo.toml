@@ -87,6 +87,9 @@ opt-level = 3
 [profile.release.package.safe-cex-venue-backpack]
 opt-level = "z"
 
+[profile.release.package.safe-cex-venue-cryptocom]
+opt-level = 3
+
 [profile.release.package.safe-cex-venue-bitunix]
 opt-level = "z"
 
@@ -118,3 +121,7 @@ opt-level = 3
 
 [profile.release.package.safe-cex-engine]
 opt-level = 3
+
+# Ed25519 signing is outside the public replay hot path.
+[profile.release.package.curve25519-dalek]
+opt-level = "z"
