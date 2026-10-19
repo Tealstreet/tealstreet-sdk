@@ -73,7 +73,7 @@ impl BackpackExchange {
             factory.clone(),
             Rc::new(RefCell::new(options.clone())),
         )?;
-        primary.limit_requests(base.runtime.clone(), 10);
+        primary.limit_requests(10);
         let reader = if let Some(key) = options.secondary_key.as_ref().filter(|key| !key.is_empty())
         {
             let mut secondary = options.clone();

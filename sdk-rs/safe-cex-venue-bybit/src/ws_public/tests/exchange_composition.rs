@@ -14,6 +14,7 @@ struct Clock {
     now: Cell<u64>,
     sleeps: RefCell<Vec<u64>>,
     waiters: RefCell<Vec<Waker>>,
+    reset: RefCell<Option<ScheduledReset>>,
 }
 impl Clock {
     fn advance_to(&self, milliseconds: u64) {
@@ -22,6 +23,20 @@ impl Clock {
         let waiters = std::mem::take(&mut *self.waiters.borrow_mut());
         for waiter in waiters {
             waiter.wake();
+        }
+        let reset = {
+            let mut reset = self.reset.borrow_mut();
+            if reset
+                .as_ref()
+                .is_some_and(|timer| timer.deadline <= milliseconds)
+            {
+                reset.take()
+            } else {
+                None
+            }
+        };
+        if let Some(reset) = reset {
+            (reset.callback)(Ok(()));
         }
     }
 }
@@ -43,6 +58,36 @@ impl RateLimitClock for Clock {
                 Poll::Pending
             }
         }))
+    }
+}
+struct ScheduledReset {
+    deadline: u64,
+    callback: Box<dyn FnOnce(Result<(), TransportError>)>,
+}
+struct Reset(std::rc::Rc<std::cell::Cell<bool>>);
+impl safe_cex_transport::rate_limit::RateLimitTimer for Reset {
+    fn cancel(&self) {
+        self.0.set(true);
+    }
+}
+impl safe_cex_transport::rate_limit::RateLimitScheduler for Clock {
+    fn schedule_reset(
+        &self,
+        delay: u64,
+        callback: Box<dyn FnOnce(Result<(), TransportError>)>,
+    ) -> Result<Box<dyn safe_cex_transport::rate_limit::RateLimitTimer>, TransportError> {
+        self.sleeps.borrow_mut().push(delay);
+        let canceled = std::rc::Rc::new(std::cell::Cell::new(false));
+        let active = canceled.clone();
+        *self.reset.borrow_mut() = Some(ScheduledReset {
+            deadline: self.now.get() + delay,
+            callback: Box::new(move |result| {
+                if !active.get() {
+                    callback(result);
+                }
+            }),
+        });
+        Ok(Box::new(Reset(canceled)))
     }
 }
 struct Adapter {

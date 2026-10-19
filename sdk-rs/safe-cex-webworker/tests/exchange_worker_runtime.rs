@@ -283,7 +283,14 @@ fn construction_retains_handles_and_binary64_throttle_configuration() {
             .borrow()
             .is_empty()
     );
-    assert!(w.sentry_report_cooldowns.borrow().is_empty());
+    assert_eq!(
+        w.sentry_report_cooldowns
+            .get("size")
+            .unwrap()
+            .to_number()
+            .unwrap(),
+        0.0
+    );
     assert_eq!(
         w.handler_kinds,
         [
