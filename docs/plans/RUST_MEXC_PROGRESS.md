@@ -156,3 +156,16 @@ and cut a follow-up branch. Never touch master or force-push.
 - The updated Process explicitly requires green PR CI before merging; wait for
   those checks after local adversarial PR reviews. The landing branch's wasm
   budget is now 1468006 bytes and is retained unchanged.
+- Post-merge acceptance: all SIX replay gates pass (MEXC/Binance/Bybit public
+  and private). Public medians: MEXC CPU 839.9 -> 520.2ms, steady 550.8 ->
+  352.8ms, retained 5.2 -> 2.8MB; Binance 218.9 -> 96.8ms, steady 125.7 ->
+  40.8ms, retained 2.4 -> 2.0MB; Bybit 409.0 -> 294.5ms, steady 289.2 ->
+  190.0ms, retained 3.1 -> 2.2MB. Public frame counts 14701 / 873 / 8743;
+  private correctness frame counts 21 / 14 / 18. Every request matched.
+- Post-merge engine/venue tests: 102 pass (14 engine, 45 MEXC, 43 Bybit).
+  Bans/fmt/crate clippy/wasm clippy pass; 11 harness, 5 host and 6 wasm shell
+  tests pass. Binary 1458627 bytes < unchanged landing limit 1468006 bytes.
+  Shared-engine and harness merge audits independently pass.
+- Post-merge root typecheck 44/44 and lint 28/28 pass. Parallel root tests hit
+  one unrelated HyroTrader dynamic-import 5s timeout (6535 other tests passed);
+  all 10 isolated HyroTrader tests pass. A serial root rerun is in progress.
