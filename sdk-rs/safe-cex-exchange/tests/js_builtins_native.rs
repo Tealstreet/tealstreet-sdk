@@ -407,3 +407,82 @@ fn native_array_join_preserves_utf16_elements_separators_and_coercions() {
         }
     });
 }
+
+mod regexp_native_observers {
+    use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/scripts/regexp-native-observers.rs"
+    ));
+}
+
+#[test]
+fn native_regexp_pending_inputs_match_node_at_the_public_facade() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/regexp-native-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let mut count = 0;
+    run_native(|_scope| {
+        for (owner, rows) in source["publicCases"].as_object().unwrap() {
+            for row in rows.as_array().unwrap() {
+                let input = &row["input"];
+                let audit = regexp_native_observers::Audit::new();
+                let value = audit.input(&input["input"]);
+                let (pattern, flags) = match owner.as_str() {
+                    "to_string" => ("[\\s\\S]*", ""),
+                    "to_length" => (".", "g"),
+                    "split_limit" => ("(?:)", ""),
+                    _ => (
+                        input["pattern"].as_str().unwrap(),
+                        input["flags"].as_str().unwrap(),
+                    ),
+                };
+                let regexp = safe_cex_exchange::js_runtime::regexp::regexp(
+                    &pattern.encode_utf16().collect::<Vec<_>>(),
+                    &flags.encode_utf16().collect::<Vec<_>>(),
+                )
+                .unwrap();
+                let previous = (owner == "search").then(|| {
+                    Js::object(vec![(
+                        "marker",
+                        Js::Number(input["previous"].as_f64().unwrap()),
+                    )])
+                });
+                if let Some(previous) = &previous {
+                    regexp.set("lastIndex", previous.clone()).unwrap();
+                }
+                let result = match owner.as_str() {
+                    "to_string" => regexp.call_method("exec", vec![value]),
+                    "to_length" => {
+                        regexp.set("lastIndex", value).unwrap();
+                        regexp.call_method("exec", vec![Js::str("abcdef")])
+                    }
+                    "split_limit" => regexp.call_method("@@split", vec![Js::str("abcd"), value]),
+                    "replace" => regexp
+                        .call_method("@@replace", vec![value, audit.input(&input["replacement"])]),
+                    "match_all_or_first" => regexp.call_method("@@match", vec![value]),
+                    "search" => regexp.call_method("@@search", vec![value]),
+                    "split" => {
+                        regexp.call_method("@@split", vec![value, audit.input(&input["limit"])])
+                    }
+                    _ => panic!("unreviewed owner {owner}"),
+                };
+                let actual =
+                    audit.finish(result, Some(&regexp), previous.as_ref(), owner == "replace");
+                assert_eq!(actual, row["output"], "{owner}: {input}");
+                count += 1;
+            }
+        }
+    });
+    assert_eq!(count, 28);
+}
