@@ -1,11 +1,7 @@
 use super::Host;
 use crate::{agent, browser_approval_flows as browser, builder_fee, constants};
-use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 use std::rc::Rc;
-
-fn arg(args: &[Js], index: usize) -> Js {
-    args.get(index).cloned().unwrap_or(Js::Undefined)
-}
 
 impl agent::EthereumWindow for Host {
     type Error = Thrown;

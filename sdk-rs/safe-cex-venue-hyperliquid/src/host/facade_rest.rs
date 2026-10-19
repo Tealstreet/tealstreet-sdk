@@ -6,7 +6,7 @@ use crate::{
     api::{ApiClient, create_exchange_api, create_info_api},
     rate_limit::RateLimiter,
 };
-use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput, exchange::BaseExchange, runtime::ExchangeError,
 };
@@ -34,10 +34,6 @@ struct Client {
     options: ExchangeOptions,
     api: Rc<ApiClient>,
     error_owner: Rc<BaseExchange>,
-}
-
-fn arg(args: &[Js], i: usize) -> Js {
-    args.get(i).cloned().unwrap_or(Js::Undefined)
 }
 
 pub(crate) fn thrown_from(r: &mut Host, error: ExchangeError) -> Thrown {

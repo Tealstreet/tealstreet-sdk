@@ -31,12 +31,9 @@ use crate::{
     ws_emission::{self, DiagnosticScope, WsEmissionHost},
     ws_transport_leaves::{WsTransportHost, WsVenue},
 };
-use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 use std::future::Future;
 
-fn first(args: &[Js]) -> Js {
-    args.first().cloned().unwrap_or(Js::Undefined)
-}
 fn pair(v: Vec<Js>) -> [Js; 2] {
     [v[0].clone(), v[1].clone()]
 }
@@ -71,7 +68,8 @@ impl AccountPositionHost for Host {
     }
     fn opposite_predicate(&mut self, capture: OppositePredicate<Js>) -> Result<Js, Thrown> {
         Ok(self.native("", 1, move |r, _, args| {
-            account_position_leaves::run_opposite_predicate(r, &capture, &first(args)).map(Js::Bool)
+            account_position_leaves::run_opposite_predicate(r, &capture, &arg(args, 0))
+                .map(Js::Bool)
         }))
     }
 }
@@ -143,7 +141,7 @@ impl BalanceHost for Host {
     }
     fn spot_market_predicate(&mut self, capture: SpotMarketPredicate<Js>) -> Result<Js, Thrown> {
         Ok(self.native("", 1, move |r, _, args| {
-            balance_state::run_spot_market_predicate(r, &capture, &first(args)).map(Js::Bool)
+            balance_state::run_spot_market_predicate(r, &capture, &arg(args, 0)).map(Js::Bool)
         }))
     }
 }
@@ -249,14 +247,14 @@ impl CoreExchangeLeafHost for Host {
                 core_exchange_leaves::run_exchange_predicate(
                     r,
                     &ExchangePredicate::FinitePositive,
-                    &first(args),
+                    &arg(args, 0),
                 )
             })
         }))
     }
     fn exchange_predicate(&mut self, capture: ExchangePredicate<Js>) -> Result<Js, Thrown> {
         Ok(self.native("", 1, move |r, _, args| {
-            core_exchange_leaves::run_exchange_predicate(r, &capture, &first(args))
+            core_exchange_leaves::run_exchange_predicate(r, &capture, &arg(args, 0))
         }))
     }
 }
@@ -285,7 +283,7 @@ impl CoreSnapshotHost for Host {
     }
     fn snapshot_predicate(&mut self, capture: SnapshotPredicate<Js>) -> Result<Js, Thrown> {
         Ok(self.native("", 1, move |r, _, args| {
-            core_account_snapshots::run_snapshot_predicate(r, &capture, &first(args))
+            core_account_snapshots::run_snapshot_predicate(r, &capture, &arg(args, 0))
         }))
     }
     fn array_define(&mut self, array: &Js, index: usize, value: &Js) -> Result<(), Thrown> {
@@ -385,7 +383,7 @@ impl LifecycleHost for Host {
                     lifecycle_delegates::run_order_refresh_error(
                         r,
                         &capture.exchange,
-                        &first(args),
+                        &arg(args, 0),
                     )?
                 }
             }
@@ -654,7 +652,7 @@ impl PrivateMessageHost for Host {
     }
     fn valid_fill_predicate(&mut self) -> Result<Js, Thrown> {
         Ok(self.native("", 1, |r, _, args| {
-            private_message_dispatch::run_valid_fill_predicate(r, &first(args))
+            private_message_dispatch::run_valid_fill_predicate(r, &arg(args, 0))
         }))
     }
     fn for_in(&mut self, object: &Js) -> Result<Js, Thrown> {
@@ -813,7 +811,7 @@ impl WsEmissionHost for Host {
     }
     fn formatter(&mut self, scope: DiagnosticScope) -> Result<Js, Thrown> {
         Ok(self.native("", 1, move |r, _, args| {
-            ws_emission::run_diagnostic_formatter(r, scope, &first(args))
+            ws_emission::run_diagnostic_formatter(r, scope, &arg(args, 0))
         }))
     }
 }

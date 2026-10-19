@@ -2,7 +2,7 @@
 //! extends. Each inherited member the venue bodies use delegates to the Rust
 //! BaseExchange; members the bodies never reach are absent rather than stubbed.
 use super::Host;
-use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput, exchange::BaseExchange,
     js_runtime::base_exchange::ExternalPublicDataFactory,
@@ -10,9 +10,6 @@ use safe_cex_exchange::{
 use safe_cex_types::PlaceOrderOpts;
 use std::rc::Rc;
 
-fn arg(args: &[Js], i: usize) -> Js {
-    args.get(i).cloned().unwrap_or(Js::Undefined)
-}
 fn thrown(_: &Host, e: safe_cex_exchange::runtime::ExchangeError) -> Thrown {
     e.into()
 }

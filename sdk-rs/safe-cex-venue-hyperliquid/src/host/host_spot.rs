@@ -8,12 +8,9 @@ use crate::{
     spot_trading::{self, SpotTradingHost, TradingCallback},
     spot_ws_dispatch::{self as private, PrivateMethod, SpotWsHost},
 };
-use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 use std::rc::Rc;
 
-fn arg(args: &[Js], index: usize) -> Js {
-    args.get(index).cloned().unwrap_or(Js::Undefined)
-}
 fn class_pair(realm: &mut Host, name: &str) -> Result<(Js, Js), Thrown> {
     let class = realm.global_binding(name)?;
     let prototype = realm.get_str(&class, "prototype")?;

@@ -8,7 +8,7 @@
 //! the Rust core runs the close/reconnect path the base `onClose` would.
 use super::{Host, WeakHost};
 use safe_cex_exchange::js_runtime::value::ObjectData;
-use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
@@ -48,10 +48,6 @@ struct Bridge {
 struct Handle {
     socket: Rc<BaseWebSocket>,
     bridge: Rc<Bridge>,
-}
-
-fn arg(args: &[Js], i: usize) -> Js {
-    args.get(i).cloned().unwrap_or(Js::Undefined)
 }
 
 impl Bridge {

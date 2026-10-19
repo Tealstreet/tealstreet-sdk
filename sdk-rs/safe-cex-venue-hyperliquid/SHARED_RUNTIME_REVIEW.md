@@ -54,6 +54,16 @@ value carrier, conversion fallback or runtime-selection flag.
   family and drops its exchange. The old strong socket bridge fails the release
   assertion; the weak bridge releases the scope while preserving live callbacks.
 
+## Native-input follow-up
+
+Ten duplicate argument helpers are deleted in favor of canonical `value::arg`.
+The coordinator approved exactly thirteen newly visible native Host adapters as
+pending in `accepted-set/new-native-input-owners.json`, introduced by #1264 and
+owned by codex-l89ogr. These entries grant no decoder classification or exemption.
+The immediate follow-up adds a bounded feature forwarding the existing native
+runtime capability and executes those adapters on this same real Host; it does
+not introduce a fake runtime or an alternate value path.
+
 ## Validation boundary
 
 The actual host library, both binding families and shared capability targets

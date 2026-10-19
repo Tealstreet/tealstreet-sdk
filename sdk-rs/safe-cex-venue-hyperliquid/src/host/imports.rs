@@ -3,11 +3,8 @@
 //! ReferenceError rather than resolving to a stand-in.
 use super::Host;
 use crate::{cloid, types};
-use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 
-fn arg(args: &[Js], i: usize) -> Js {
-    args.get(i).cloned().unwrap_or(Js::Undefined)
-}
 fn table(r: &Host, rows: &[(&str, &str)]) -> Js {
     r.object_from(rows.iter().map(|(k, v)| (*k, Js::str(v))).collect())
 }

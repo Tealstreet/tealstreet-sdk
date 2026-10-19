@@ -1,11 +1,7 @@
 //! Small shared utility imports (lodash, utils/*, json-parse), implemented over
 //! realm values because several mutate or return their argument's identity.
 use super::Host;
-use safe_cex_exchange::js_runtime::value::Js;
-
-fn arg(args: &[Js], i: usize) -> Js {
-    args.get(i).cloned().unwrap_or(Js::Undefined)
-}
+use safe_cex_exchange::js_runtime::value::{Js, arg};
 
 pub(crate) fn bind(realm: &Host) {
     // utils/get-key `v`: exact, then snake_case, then camelCase `in` checks.

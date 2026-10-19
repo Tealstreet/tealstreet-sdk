@@ -8,16 +8,13 @@ use crate::{
     public_class::{self, CorePublicClassHost},
     public_constructor::{PublicConstructorHost, PublicSocketCapture},
 };
-use safe_cex_exchange::js_runtime::value::{FunctionData, Js, Thrown};
+use safe_cex_exchange::js_runtime::value::{FunctionData, Js, Thrown, arg};
 use std::{
     cell::RefCell,
     rc::{Rc, Weak},
 };
 
 type ClassBody = Rc<dyn Fn(&mut Host, &Js, &[Js], &Js) -> Result<Js, Thrown>>;
-fn arg(args: &[Js], index: usize) -> Js {
-    args.get(index).cloned().unwrap_or(Js::Undefined)
-}
 impl Host {
     pub(crate) fn derived_class(
         &mut self,

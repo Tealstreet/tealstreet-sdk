@@ -4,12 +4,9 @@ use crate::{
     constants, exchange_helpers, income, json_boundaries, market_helpers, order_inference,
     rate_limit,
 };
-use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
 use std::borrow::Cow;
 
-fn arg(args: &[Js], i: usize) -> Js {
-    args.get(i).cloned().unwrap_or(Js::Undefined)
-}
 fn num(r: &mut Host, v: &Js) -> Result<f64, Thrown> {
     r.to_number(v)
 }
