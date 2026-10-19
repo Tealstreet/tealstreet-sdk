@@ -130,3 +130,13 @@ executing that actual source initializer records `[message, "info"]` for both
 inputs. The native primitive console renders those arguments as `message info`.
 The two console expectations now include that severity; no runtime code changed.
 Source receipt: `/tmp/kxakrb-aster-parent-log-source.log`.
+
+Normal master merges inherit #1251's reviewed worker-dispose edge and #1193's
+Parent stream carriers. The post-merge canonical replay reports two actual
+runtime owners, zero classifications and zero failures: sixteen Parent cases
+and nineteen constructor cases. Isolating only the former row-2 API still fails
+the maintained compiler contract check; the current eight-entry API passes.
+Full index (7563/16268), cancellation (6/1 explicit ignore), override (7/1),
+scoped fmt, Aster/parity native all-target/all-feature Clippy, Aster WASM Clippy,
+wiring (376) and extractor (zero drift) pass. Logs use the
+`/tmp/kxakrb-aster-parent-` prefix.
