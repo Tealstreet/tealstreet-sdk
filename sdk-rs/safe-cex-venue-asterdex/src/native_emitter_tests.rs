@@ -169,6 +169,53 @@ fn native_shared_facade_fill_is_the_first_event_argument() {
     });
 }
 #[test]
+fn private_fill_object_id_calls_the_inherited_object_intrinsic() {
+    let source = std::process::Command::new("node")
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .args(["--import", "tsx", "-e", r#"
+const assert = require('node:assert/strict');
+const {AsterDEXExchange} = require('./packages/safe-cex/src/exchanges/asterdex/asterdex.exchange.ts');
+const {DefaultStore} = require('./packages/safe-cex/src/store/store.base.ts');
+const exchange = new AsterDEXExchange('asterdex', {publicDataOnly:true,tuning:{consoleLogging:false}}, new DefaultStore());
+const fills=[]; exchange.on('fill', value=>fills.push(value));
+for (const id of [{}, {toString:null}]) {
+  exchange.privateWebsocket.onMessage({data:JSON.stringify({e:'ORDER_TRADE_UPDATE',o:{i:id,s:'BTCUSDT',X:'PARTIALLY_FILLED',S:'BUY',l:'2',L:'3',ap:'3'}})});
+}
+assert.equal(fills.length,1); assert.equal(fills[0].orderId,'[object Object]');
+const bits = value => {const bytes=Buffer.alloc(8);bytes.writeDoubleBE(value);return bytes.toString('hex');};
+exchange.dispose(); process.stdout.write(JSON.stringify(fills.map(fill=>({...fill,price:bits(fill.price),amount:bits(fill.amount)}))),()=>process.exit(0));
+"#])
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let expected: Value = serde_json::from_slice(&source.stdout).unwrap();
+    run(|venue, _| {
+        let fills = watch(&venue, "fill");
+        for id in [json!({}), json!({"toString":null})] {
+            frame(
+                &venue,
+                json!({"e":"ORDER_TRADE_UPDATE","o":{"i":id,"s":"BTCUSDT","X":"PARTIALLY_FILLED","S":"BUY","l":"2","L":"3","ap":"3"}}),
+            );
+        }
+        assert_eq!(
+            fills.borrow().len(),
+            1,
+            "inherited Object.toString must emit the first fill; own noncallable shadow still refuses"
+        );
+        let mut observed = serde_json::to_value(&*fills.borrow()).unwrap();
+        for fill in observed.as_array_mut().unwrap() {
+            for field in ["price", "amount"] {
+                fill[field] = json!(format!("{:016x}", fill[field].as_f64().unwrap().to_bits()));
+            }
+        }
+        assert_eq!(observed, expected);
+    });
+}
+#[test]
 fn native_private_balance_frame_commits_store_and_emits_account() {
     run(|venue, store| {
         let account = watch(&venue, "account");

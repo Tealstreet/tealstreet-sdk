@@ -2120,3 +2120,8 @@ The differential rejects other Node versions: inconsistent comparator ordering i
 engine-dependent. Array sort compacts defined values before TimSort, then writes
 undefined values and deletes remaining holes; four native/Node profiles pin the
 comparator schedule as well as sparse output.
+
+Direct calls of the canonical Object.prototype.toString referent use the same
+intrinsic object-tag implementation as ordinary coercion. The actual Aster
+private fill witness compares an object ID against its maintained TS constructor;
+an own noncallable toString shadow still refuses and emits no fill.
