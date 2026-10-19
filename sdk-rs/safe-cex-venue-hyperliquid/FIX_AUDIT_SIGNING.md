@@ -39,3 +39,7 @@ external arbitrary ethers Wallet callback object. The audit retains the explicit
 raw-key interface distinction rather than inferring arbitrary wallet equivalence
 from successful signatures. The legacy Realm adapter itself remains owned by
 the separate atomic shared-runtime cutover.
+
+The Node/NativeRuntime probes run only in native test builds, matching the
+existing BytesLike signing fixture. Wasm all-target Clippy still checks the
+production signing code; it does not execute a Node oracle or Tokio executor.

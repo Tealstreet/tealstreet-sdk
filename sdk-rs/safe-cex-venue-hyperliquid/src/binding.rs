@@ -10,6 +10,7 @@ mod cloid_audit;
 mod order_error_audit;
 
 #[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "../tests/support/signing_audit.rs"]
 mod signing_audit;
 
