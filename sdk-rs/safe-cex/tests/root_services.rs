@@ -1,3 +1,5 @@
+#[path = "../../safe-cex-exchange/tests/support/runtime.rs"]
+mod runtime;
 use safe_cex::{account::*, factory::*, options_patch::*};
 use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_store::{Store, virtual_clock::VirtualClock};
@@ -39,17 +41,29 @@ fn factory_cache_native_options_and_store_identity() {
         let constructor = constructor.clone();
         Box::pin(async move { Ok(constructor) })
     });
+    let runtime = Rc::new(runtime::Runtime::default());
     let factory = ExchangeFactory::new(
         [("bybit".into(), loader.clone()), ("binance".into(), loader)]
             .into_iter()
             .collect(),
         VirtualClock::default(),
         TransportRegistry::default(),
+        runtime.clone(),
     );
     assert_eq!(factory.get_available_exchanges(), vec!["bybit", "binance"]);
     assert!(!factory.is_exchange_loaded("bybit"));
     ready(factory.preload_exchange("bybit")).unwrap();
-    ready(factory.preload_exchanges(&["bybit".into(), "binance".into()])).unwrap();
+    let preload = factory.preload_exchanges(&["bybit".into(), "binance".into()]);
+    runtime.advance(0);
+    let mut preload = std::pin::pin!(preload);
+    assert!(
+        preload
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    runtime.advance(0);
+    ready(preload).unwrap();
     assert_eq!(calls.get(), 2);
     assert!(factory.is_exchange_loaded("bybit"));
     assert_eq!(
@@ -234,6 +248,7 @@ fn account_native_forwarding_overrides_and_broker_clear() {
         [("bybit".into(), loader)].into_iter().collect(),
         VirtualClock::default(),
         TransportRegistry::default(),
+        Rc::new(runtime::Runtime::default()),
     );
     let created = ready(create_exchange_from_account(
         &factory,
@@ -263,6 +278,7 @@ fn facade_construction_preserves_polymarket_patch_credentials_and_native_signer_
         [("polymarket".into(), loader)].into_iter().collect(),
         VirtualClock::default(),
         TransportRegistry::default(),
+        Rc::new(runtime::Runtime::default()),
     );
     let account: ExchangeAccountConfig = serde_json::from_value(serde_json::json!({
         "exchange":"polymarket", "name":"account", "apiKey":"", "apiSecret":""
@@ -378,6 +394,7 @@ fn option_and_inverse_toggles_reach_constructors_with_source_metadata_and_overri
             .collect(),
         VirtualClock::default(),
         TransportRegistry::default(),
+        Rc::new(runtime::Runtime::default()),
     );
     assert_eq!(factory.get_available_exchanges().len(), 49);
     let registry = TransportRegistry::default();

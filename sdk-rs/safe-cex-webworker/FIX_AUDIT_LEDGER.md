@@ -19,10 +19,10 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 | 19 | splitWorkerLogExtra | OPEN | Retained carrier across callers; no isolated JSON shim. |
 | 20 | start | FIX | Native Js ingress/config/dispatch, module-owned listeners and deterministic context teardown below. |
 | 21 | ChaserOrderState | OPEN | Native state and output boundary. |
-| 22 | defaultChaserState | OPEN | Native default ownership and caller mutation. |
+| 22 | defaultChaserState | FIX | Shared shallow-frozen native template; actual constructor snapshots and compiled old-constructor refusal below. |
 | 23 | ChaserOrderManager | ACCEPT | Explicit required host composition; actual singleton/engine/Store binding below. |
 | 24 | ChaserTerminate | OPEN | Live termination admission. |
-| 25 | ChaserCompleteEvent | OPEN | Native event payload. |
+| 25 | ChaserCompleteEvent | FIX | Dead inbound codec removed; canonical native output retains own undefined clientId. |
 | 26 | CallMethodHandler.handleCallMethod | OPEN | Continuation timing repaired below; typed arguments/primitive rejection admission remains. |
 | 30 | readStringProperty | ACCEPT | Merged #1158: native Get, getter cause and approved typed String replacement. |
 | 71 | ExchangeWorker.start | FIX | Canonical eager startup, source await checkpoints and dropped-waiter continuation below. |
@@ -344,3 +344,60 @@ The transferred cohort now has 11 FIX, 4 ACCEPT and 12 OPEN rows.
 A compiled missing-NaN-normalization control fails the actual Node clone-bit
 comparison; exact restoration passes. The real listener additionally records a
 negative NaN with a non-default payload and checks Node's canonical output bits.
+
+## Mutable default template: row 22
+
+The source exports a shallow-frozen default, so edits to its nested ID array
+seed later instances without changing earlier constructor snapshots. The native
+constant always supplied a new empty array. One thread-local native Js template
+now models the worker module realm and uses the existing Object.freeze builtin.
+The constructor snapshots it at the existing shared typed state leaf before
+reading options/positions; no JSON carrier or second default path is retained.
+
+The compiled original constructor body on master 2a9ed2be9a, with the new template
+access seam available, fails constructors_snapshot_the_live_shallow_frozen_default:
+its first and second arrays lack the source seed/later IDs. The actual TS module
+and native constructor compare empty, seeded and later snapshots, independent
+instance mutations, retained template identity, outer freeze and mutable nested
+arrays. A second native realm starts empty. The exact original constructor state
+initialization is independently restored as a compiled control, then the fixed
+bytes are restored for positive replay. Existing 648 source transition scenarios
+and owned-instance-array mutation witnesses remain intact.
+
+This closes the mutable default finding only. Rows 21/24/25/75-79 concern distinct
+model/dispatcher consumers, so sharing task_types.rs does not make their raw
+admission, output or depth questions evidence for acceptance. They remain OPEN.
+With merged perf rows 72-74 in #1238, the transferred cohort now has 12 FIX,
+4 ACCEPT and 11 OPEN rows.
+
+## Completion event output and codec retirement: row 25
+
+The maintained manager constructs its event at ChaserOrderManager.ts:937 with
+`clientId: instance.options.clientId`, creating an own property even when that
+option is absent. The native derived serializer omitted that property. The
+output now uses canonical MODEL_RECORD and ModelField::into_property, retaining
+own undefined in native Js while ordinary JSON continues to omit it. All eight
+fields keep the source insertion order; no JSON adapter or alternate event path
+is introduced.
+
+The old ChaserCompleteEvent inbound Deserialize/Wire codec has no production
+caller: the actual engine constructs the record, then passes it to the required
+ChaserHost::emit_completion output capability. Tracked registry, FFI, worker and
+venue searches find no decoder consumer. Its orphan-only codec assertions are
+removed with it; compiler checks cover the remaining callers. Row 25 closes by
+that retirement plus the observable output repair, not by accepting a depth
+limit. The other task/options/state decoder findings stay OPEN.
+
+The actual engine/emitter listener compares 15 maintained-TS completion profiles:
+absent, empty and present clientId across negative zero, infinities, NaN and a
+finite size. It observes exactly one argument/event, eight ordered own keys,
+undefined presence, all fields and native binary64 bits. The compiled original
+serializer at master 49c825adc6 fails the named completion listener regression
+with seven own keys when clientId is absent; exact repaired bytes restore it.
+The original ten identity cases/eight leaves remain as output observations.
+The retired decoder's two numeric fields no longer claim ingress coverage:
+the five remaining records keep 45 requiredness and 13 optional-null checks;
+scalar ingress checks retain 18 fields/378 comparisons, and the separate
+terminate/state numeric matrix retains its three fields/270 comparisons with
+unchanged inputs/routes. Source inventories keep the retired event declarations
+as output evidence. The cohort now has 13 FIX, 4 ACCEPT and 10 OPEN rows.

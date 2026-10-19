@@ -1,5 +1,6 @@
 //! Pure decisions for the AsterDEX websocket adapters.
 
+use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use safe_cex_exchange::{
     runtime::{ExchangeError, LogSeverity},
     websocket::BaseWebSocket,
@@ -32,25 +33,31 @@ pub enum PublicStreamDispatch {
 }
 
 // ts: AsterDEXPublicWebsocket#handleDepthSnapshot
-pub fn public_depth_snapshot(data: &serde_json::Value) -> Option<safe_cex_types::OrderBook> {
+pub fn public_depth_snapshot(data: &Js) -> Option<safe_cex_types::OrderBook> {
     use safe_cex_num::{js_trim, number_from_string};
     use safe_cex_types::{OrderBook, OrderBookOrders};
 
-    fn parse_levels(levels: &serde_json::Value) -> Option<Vec<OrderBookOrders>> {
-        let levels = levels.as_array()?;
+    fn parse_levels(levels: &Js) -> Option<Vec<OrderBookOrders>> {
+        let levels = levels.array_values().ok()??;
         let mut parsed = Vec::with_capacity(levels.len());
         for level in levels {
-            let pair = level.as_array()?;
+            let pair = level.array_values().ok()??;
             if pair.len() != 2 {
                 return None;
             }
-            let raw_price = pair[0].as_str()?;
-            let raw_amount = pair[1].as_str()?;
-            if js_trim(raw_price).is_empty() || js_trim(raw_amount).is_empty() {
+            let Js::String(raw_price) = &pair[0] else {
+                return None;
+            };
+            let raw_price = String::from_utf16_lossy(raw_price);
+            let Js::String(raw_amount) = &pair[1] else {
+                return None;
+            };
+            let raw_amount = String::from_utf16_lossy(raw_amount);
+            if js_trim(&raw_price).is_empty() || js_trim(&raw_amount).is_empty() {
                 return None;
             }
-            let price = number_from_string(raw_price);
-            let amount = number_from_string(raw_amount);
+            let price = number_from_string(&raw_price);
+            let amount = number_from_string(&raw_amount);
             if !price.is_finite() || !amount.is_finite() || price <= 0.0 || amount <= 0.0 {
                 return None;
             }
@@ -64,13 +71,15 @@ pub fn public_depth_snapshot(data: &serde_json::Value) -> Option<safe_cex_types:
     }
 
     let levels_or_empty = |key: &str| {
-        data.get(key)
-            .filter(|value| safe_cex_num::js_truthy(Some(*value)))
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!([]))
+        let value = data.get(key).ok()?;
+        Some(if value.truthy() {
+            value
+        } else {
+            Js::array(vec![])
+        })
     };
-    let mut bids = parse_levels(&levels_or_empty("b"))?;
-    let mut asks = parse_levels(&levels_or_empty("a"))?;
+    let mut bids = parse_levels(&levels_or_empty("b")?)?;
+    let mut asks = parse_levels(&levels_or_empty("a")?)?;
     if bids.is_empty() || asks.is_empty() {
         return None;
     }
@@ -98,12 +107,12 @@ pub fn public_depth_snapshot(data: &serde_json::Value) -> Option<safe_cex_types:
     Some(OrderBook { bids, asks })
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum PublicEventDataDispatch {
     Ignore,
     Handlers {
         event_type: String,
-        data: serde_json::Value,
+        data: Js,
     },
     InheritedHandlerFailure {
         event_type: String,
@@ -113,22 +122,14 @@ pub enum PublicEventDataDispatch {
 
 // ts: AsterDEXPublicWebsocket#handleEventData
 pub fn public_event_data_dispatch(
-    data: &serde_json::Value,
+    data: &Js,
     handler_keys: &[(&str, ())],
-) -> Result<PublicEventDataDispatch, safe_cex_num::JsCoercionError> {
-    use safe_cex_num::{js_string, js_truthy};
-
-    if data.is_null() {
-        return Err(safe_cex_num::JsCoercionError {
-            name: "TypeError",
-            message: "Cannot read properties of null (reading 'e')",
-        });
-    }
-    let event_type = data.get("e");
-    if !js_truthy(event_type) {
+) -> Result<PublicEventDataDispatch, Thrown> {
+    let event_type = data.get("e")?;
+    if !event_type.truthy() {
         return Ok(PublicEventDataDispatch::Ignore);
     }
-    let event_type = js_string(event_type)?;
+    let event_type = String::from_utf16_lossy(&event_type.to_js_string()?);
     match js_table_lookup(handler_keys, &event_type) {
         TableHit::Mapped(_) => Ok(PublicEventDataDispatch::Handlers {
             event_type,
@@ -141,9 +142,9 @@ pub fn public_event_data_dispatch(
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PublicKlineCandle {
-    pub timestamp: Option<serde_json::Value>,
+    pub timestamp: Option<Js>,
     pub open: f64,
     pub high: f64,
     pub low: f64,
@@ -151,7 +152,7 @@ pub struct PublicKlineCandle {
     pub volume: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PublicKlineUpdate {
     pub stream: String,
     pub candle: PublicKlineCandle,
@@ -159,46 +160,43 @@ pub struct PublicKlineUpdate {
 
 // ts: AsterDEXPublicWebsocket#handleKlineUpdate
 pub fn public_kline_update(
-    data: &serde_json::Value,
+    data: &Js,
     callback_streams: &[&str],
-) -> Result<Option<PublicKlineUpdate>, safe_cex_num::JsCoercionError> {
-    use safe_cex_num::{js_string, js_truthy, parse_float};
-
-    if data.is_null() {
-        return Err(safe_cex_num::JsCoercionError {
-            name: "TypeError",
-            message: "Cannot read properties of null (reading 'k')",
-        });
-    }
-    let Some(kline) = data.get("k").filter(|value| js_truthy(Some(*value))) else {
+) -> Result<Option<PublicKlineUpdate>, Thrown> {
+    let kline = data.get("k")?;
+    if !kline.truthy() {
         return Ok(None);
+    }
+    let mut symbol = data.get("s")?;
+    if !symbol.truthy() {
+        symbol = kline.get("s")?;
+    }
+    if !symbol.truthy() {
+        symbol = Js::str("");
+    }
+    let Js::String(symbol) = symbol else {
+        return Err(Thrown::type_error(
+            "(data.s || kline.s || \"\").toLowerCase is not a function",
+        ));
     };
-    let symbol = data
-        .get("s")
-        .filter(|value| js_truthy(Some(*value)))
-        .or_else(|| kline.get("s").filter(|value| js_truthy(Some(*value))));
-    let symbol = match symbol {
-        None => String::new(),
-        Some(serde_json::Value::String(value)) => value.to_lowercase(),
-        Some(_) => {
-            return Err(safe_cex_num::JsCoercionError {
-                name: "TypeError",
-                message: "(data.s || kline.s || \"\").toLowerCase is not a function",
-            });
-        }
-    };
-    let interval = js_string(kline.get("i"))?;
+    let symbol = String::from_utf16_lossy(&symbol).to_lowercase();
+    let interval = String::from_utf16_lossy(&kline.get("i")?.to_js_string()?);
     let stream = format!("{symbol}@kline_{interval}");
     if !callback_streams.contains(&stream.as_str()) {
         return Ok(None);
     }
-    let parse = |key: &str| -> Result<f64, safe_cex_num::JsCoercionError> {
-        Ok(parse_float(&js_string(kline.get(key))?))
-    };
+    let parse = |key: &str| -> Result<f64, Thrown> { kline.get(key)?.parse_float() };
     Ok(Some(PublicKlineUpdate {
         stream,
         candle: PublicKlineCandle {
-            timestamp: kline.get("t").cloned(),
+            timestamp: {
+                let value = kline.get("t")?;
+                if matches!(value, Js::Undefined) {
+                    None
+                } else {
+                    Some(value)
+                }
+            },
             open: parse("o")?,
             high: parse("h")?,
             low: parse("l")?,
@@ -250,17 +248,17 @@ pub fn public_stream_trade_update<'a>(
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PublicMarkPricePatch {
     pub mark: Option<f64>,
     pub index: Option<f64>,
     pub funding_rate: Option<f64>,
-    pub funding_time: Option<serde_json::Value>,
+    pub funding_time: Option<Js>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PublicMarkPriceUpdate<'a> {
-    pub symbol: serde_json::Value,
+    pub symbol: Js,
     pub ticker: TableHit<&'a safe_cex_types::Ticker>,
     pub patch: PublicMarkPricePatch,
 }
@@ -273,28 +271,20 @@ pub struct PublicTickerPatch {
     pub quote_volume: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PublicTickerUpdate<'a> {
-    pub symbol: serde_json::Value,
+    pub symbol: Js,
     pub ticker: TableHit<&'a safe_cex_types::Ticker>,
     pub patch: PublicTickerPatch,
 }
 
 // ts: AsterDEXPublicWebsocket#handleTickerUpdate
 pub fn public_ticker_update<'a>(
-    data: &serde_json::Value,
+    data: &Js,
     ticker_entries: &[(&str, &'a safe_cex_types::Ticker)],
-) -> Result<Option<PublicTickerUpdate<'a>>, safe_cex_num::JsCoercionError> {
-    use safe_cex_num::{js_string, js_truthy, parse_float};
-
-    if data.is_null() {
-        return Err(safe_cex_num::JsCoercionError {
-            name: "TypeError",
-            message: "Cannot read properties of null (reading 's')",
-        });
-    }
-    let symbol = data.get("s").cloned().unwrap_or(serde_json::Value::Null);
-    let ticker_key = js_string(data.get("s"))?;
+) -> Result<Option<PublicTickerUpdate<'a>>, Thrown> {
+    let symbol = data.get("s")?;
+    let ticker_key = String::from_utf16_lossy(&symbol.to_js_string()?);
     let ticker = match js_table_lookup(ticker_entries, &ticker_key) {
         TableHit::Mapped(ticker) => TableHit::Mapped(*ticker),
         TableHit::Inherited(member) => TableHit::Inherited(member),
@@ -303,12 +293,12 @@ pub fn public_ticker_update<'a>(
     if matches!(ticker, TableHit::Missing) {
         return Ok(None);
     }
-    let parse_truthy = |key: &str| -> Result<Option<f64>, safe_cex_num::JsCoercionError> {
-        let value = data.get(key);
-        if !js_truthy(value) {
+    let parse_truthy = |key: &str| -> Result<Option<f64>, Thrown> {
+        let value = data.get(key)?;
+        if !value.truthy() {
             return Ok(None);
         }
-        Ok(Some(parse_float(&js_string(value)?)))
+        Ok(Some(data.get(key)?.parse_float()?))
     };
     Ok(Some(PublicTickerUpdate {
         symbol,
@@ -324,19 +314,11 @@ pub fn public_ticker_update<'a>(
 
 // ts: AsterDEXPublicWebsocket#handleMarkPriceUpdate
 pub fn public_mark_price_update<'a>(
-    data: &serde_json::Value,
+    data: &Js,
     ticker_entries: &[(&str, &'a safe_cex_types::Ticker)],
-) -> Result<Option<PublicMarkPriceUpdate<'a>>, safe_cex_num::JsCoercionError> {
-    use safe_cex_num::{js_string, js_truthy, parse_float};
-
-    if data.is_null() {
-        return Err(safe_cex_num::JsCoercionError {
-            name: "TypeError",
-            message: "Cannot read properties of null (reading 's')",
-        });
-    }
-    let symbol = data.get("s").cloned().unwrap_or(serde_json::Value::Null);
-    let ticker_key = js_string(data.get("s"))?;
+) -> Result<Option<PublicMarkPriceUpdate<'a>>, Thrown> {
+    let symbol = data.get("s")?;
+    let ticker_key = String::from_utf16_lossy(&symbol.to_js_string()?);
     let ticker = match js_table_lookup(ticker_entries, &ticker_key) {
         TableHit::Mapped(ticker) => TableHit::Mapped(*ticker),
         TableHit::Inherited(member) => TableHit::Inherited(member),
@@ -346,29 +328,34 @@ pub fn public_mark_price_update<'a>(
         return Ok(None);
     }
 
-    let parse_truthy = |key: &str| -> Result<Option<f64>, safe_cex_num::JsCoercionError> {
-        let value = data.get(key);
-        if !js_truthy(value) {
+    let parse_truthy = |key: &str| -> Result<Option<f64>, Thrown> {
+        let value = data.get(key)?;
+        if !value.truthy() {
             return Ok(None);
         }
-        Ok(Some(parse_float(&js_string(value)?)))
+        Ok(Some(data.get(key)?.parse_float()?))
     };
-    let funding_rate = match data.get("r") {
-        None | Some(serde_json::Value::Null) => None,
-        Some(serde_json::Value::String(s)) if s.is_empty() => None,
-        value => Some(parse_float(&js_string(value)?)),
+    let mark = parse_truthy("p")?;
+    let index = parse_truthy("i")?;
+    let rate = data.get("r")?;
+    let funding_rate = if rate.is_nullish() || rate.strict_equals(&Js::str("")) {
+        None
+    } else {
+        Some(rate.parse_float()?)
     };
-    let funding_time = data
-        .get("T")
-        .filter(|value| js_truthy(Some(*value)))
-        .cloned();
+    let time = data.get("T")?;
+    let funding_time = if time.truthy() {
+        Some(data.get("T")?)
+    } else {
+        None
+    };
 
     Ok(Some(PublicMarkPriceUpdate {
         symbol,
         ticker,
         patch: PublicMarkPricePatch {
-            mark: parse_truthy("p")?,
-            index: parse_truthy("i")?,
+            mark,
+            index,
             funding_rate,
             funding_time,
         },

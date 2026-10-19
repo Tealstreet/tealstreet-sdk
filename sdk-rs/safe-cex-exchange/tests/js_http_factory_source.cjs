@@ -92,7 +92,76 @@ async function requestStartAudit() {
  } finally { Date.now=originalNow; }
  assert.equal(rows.length,32);return rows;
 }
+async function diagnosticBindingAudit(kind) {
+ const cache=new Map();
+ let token='';
+ const mocks={
+  nanoid:{nanoid:()=> 'audit-id'},
+  '../../accessToken':{getProxyToken:async()=>token},
+  '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter':{},
+  './routing/resolveExchangeRouting':{resolveExchangeRouting:()=>({restProxyHost:'https://proxy'})},
+  './transportResolution':{getPublicCorsProxy:()=> 'https://proxy'},
+  '@tealstreet/http-over-websocket/src/tunnelEndpoints':{isRelayUrl:()=>false},
+ };
+ function load(file){
+  file=path.resolve(file);if(cache.has(file))return cache.get(file).exports;
+  const mod={exports:{}};cache.set(file,mod);
+  const js=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
+  new Function('require','module','exports',js)(name=>{
+   if(Object.hasOwn(mocks,name))return mocks[name];
+   if(name==='axios')return axios;
+   if(name.startsWith('.'))return load(path.resolve(path.dirname(file),name)+'.ts');
+   return require(name);
+  },mod,mod.exports);return mod.exports;
+ }
+ const names=['safeCexRestDiagProxyHeader','safeCexRestDiagSignMs','safeCexRestDiagSignedAt','safeCexRestDiagSignatureAgeMs'];
+ const bits=n=>{const b=Buffer.alloc(8);b.writeDoubleBE(n);return b.toString('hex');};
+ const view=config=>({...Object.fromEntries(names.map(key=>[key,!Object.hasOwn(config,key)?{kind:'absent'}:typeof config[key]==='number'?{kind:'number',bits:bits(config[key])}:{kind:typeof config[key],value:config[key]}])),order:Object.keys(config).filter(key=>names.includes(key))});
+ const rows=[];
+ const originalNow=Date.now;Date.now=()=>1000;
+ try {
+  if(kind==='proxy'){
+   const {tealstreetTransport}=load(path.join(root,'packages/safe-cex/src/transport/tealstreet/tealstreetTransport.ts'));
+   for(const exchange of ['okx','grvt','mexc'])for(token of ['', 'audit-token'])for(const replacement of [false,true])for(const mode of ['fresh','readonly','readonly-undefined']){
+    provider=tealstreetTransport;
+    imported['./transport/registry'].getTransport=()=>({rest:context=>tealstreetTransport.rest({...context,exchange})});
+    const xhr=moduleValue.exports.safeCexAxiosCreate({baseURL:'https://venue',adapter:async config=>{
+     if(replacement)config.headers=new axios.AxiosHeaders({'X-Venue':'replacement'});
+     return {status:200,data:{},headers:{},config};
+    }},{key:'',secret:'',tealstreetProxy:true},{name:exchange,grafanaEndpointsEvery:[],grafanaEndpointsPeriodic:[],emitter:{emit:()=>{}}});
+    xhr.interceptors.request.use(config=>{
+     if(mode!=='fresh')Object.defineProperty(config,names[0],{value:mode==='readonly-undefined'?undefined:-0,writable:false,enumerable:true,configurable:true});
+     return config;
+    });
+    const {config}=await xhr.get('/diagnostic');
+    assert.ok(Object.is(config[names[0]],mode==='fresh'?(token?'present':'empty'):mode==='readonly'?-0:undefined));
+    assert.ok(!Object.hasOwn(config.headers,names[0]));
+    rows.push({exchange,token:!!token,replacement,mode,view:view(config),authorization:config.headers.get(exchange==='okx'?'Authorization':'Tealstreet-Authorization')??null});
+   }
+   assert.equal(rows.length,36);
+  }else{
+   const {createRemoteSigningAdapter}=load(path.join(root,'packages/safe-cex/src/remoteSigningAdapter.ts'));
+   for(const stamp of ['900','1000','1100','0','Infinity','garbage'])for(const mode of ['signed','skip','network','sign-error'])for(const delay of [0,17]){
+    Date.now=()=>1000;let sent,signs=0,error=null;
+    const signer={sign:async request=>{signs++;Date.now=()=>1000+delay;if(mode==='sign-error')return {id:request.id,error:'audit signer refused'};return {id:request.id,config:{headers:{'X-BAPI-TIMESTAMP':stamp}}};}};
+    const adapter=createRemoteSigningAdapter(signer,'bybit',()=>async config=>{
+     sent=config;
+     if(mode==='network')throw Object.assign(Error('audit network failure'),{config});
+     return {status:200,data:{},headers:{},config};
+    });
+    const request={method:'get',url:'/diagnostic',headers:new axios.AxiosHeaders(),safeCexSkipRemoteSigning:mode==='skip',safeCexRestDiagSignatureAgeMs:-0};
+    try{await adapter(request);}catch(e){error=e.message;}
+    assert.equal(signs,mode==='skip'?0:1);
+    if(mode!=='skip'&&mode!=='sign-error')assert.equal(sent[names[1]],delay);
+    rows.push({stamp,mode,delay,signs,error,view:sent?view(sent):null});
+   }
+   assert.equal(rows.length,48);
+  }
+ } finally {Date.now=originalNow;}
+ return rows;
+}
 (async()=>{
+ if(process.argv[2]==='proxy-diagnostics'||process.argv[2]==='sign-diagnostics'){process.stdout.write(JSON.stringify(await diagnosticBindingAudit(process.argv[2]==='proxy-diagnostics'?'proxy':'sign')));return;}
  if(process.argv[2]==='request-start'){process.stdout.write(JSON.stringify(await requestStartAudit()));return;}
  if(process.argv[2]==='outcomes'){process.stdout.write(JSON.stringify(await outcomeAudit()));return;}
  const rows=[];
