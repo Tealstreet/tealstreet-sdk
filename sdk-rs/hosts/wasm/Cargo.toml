@@ -9,15 +9,17 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 profiling = []
-default = ["venue-binance", "venue-bybit", "venue-okx"]
+default = ["venue-binance", "venue-bybit", "venue-cryptocom", "venue-okx"]
 venue-binance = ["dep:safe-cex-venue-binance"]
 venue-bybit = ["dep:safe-cex-venue-bybit"]
+venue-cryptocom = ["dep:safe-cex-venue-cryptocom"]
 venue-okx = ["dep:safe-cex-venue-okx"]
 
 [dependencies]
 safe-cex-engine.workspace = true
 safe-cex-venue-binance = { workspace = true, optional = true }
 safe-cex-venue-bybit = { workspace = true, optional = true }
+safe-cex-venue-cryptocom = { workspace = true, optional = true }
 safe-cex-venue-okx = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true

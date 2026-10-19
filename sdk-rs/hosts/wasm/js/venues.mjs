@@ -3,6 +3,7 @@ const families = Object.freeze({
   binance: 'binance',
   binancepm: 'binance',
   bybit: 'bybit',
+  cryptocom: 'cryptocom',
   okx: 'okx',
   okxeu: 'okx',
   okxdemo: 'okx',

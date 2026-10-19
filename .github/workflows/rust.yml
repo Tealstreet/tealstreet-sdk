@@ -153,6 +153,14 @@ jobs:
         run: |
           yarn rust:private-tape-bybit
           yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''
+      - name: Harness protocol regressions
+        run: yarn rust:test-harness
+      - name: Crypto.com public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue cryptocom --tape sdk-rs/harness/fixtures/cryptocom-public.jsonl.gz --books BTCUSD-PERP,ETHUSD-PERP
+      - name: Crypto.com account and trading (correctness)
+        run: |
+          yarn rust:private-tape-cryptocom
+          yarn rust:gate --venue cryptocom --tape sdk-rs/harness/tapes/cryptocom-private.jsonl --runs 1 --books ''
       - name: OKX public data (correctness, CPU and memory)
         run: yarn rust:gate --venue okx --tape sdk-rs/harness/fixtures/okx-public.jsonl.gz --books BTCUSDT,ETHUSDT
       - name: OKX account and trading variants (correctness)

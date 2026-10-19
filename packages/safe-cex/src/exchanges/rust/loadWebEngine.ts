@@ -10,6 +10,7 @@ const importEngine = (family: VenueFamily) => {
   switch (family) {
     case 'binance': return import('@tealstreet/safe-cex-wasm/web/binance');
     case 'bybit': return import('@tealstreet/safe-cex-wasm/web/bybit');
+    case 'cryptocom': return import('@tealstreet/safe-cex-wasm/web/cryptocom');
     case 'okx': return import('@tealstreet/safe-cex-wasm/web/okx');
   }
 };

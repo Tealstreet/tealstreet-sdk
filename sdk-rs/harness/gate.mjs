@@ -6,6 +6,8 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { gunzipSync } from 'node:zlib';
+import { parseRequestJson } from './request-json.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -18,6 +20,8 @@ const { values } = parseArgs({
     cadence: { type: 'string', default: 'recorded' },
   },
 });
+const tapeBytes = readFileSync(values.tape);
+const tapeRecords = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes).toString('utf8').trim().split('\n').map(JSON.parse);
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 
@@ -47,8 +51,8 @@ const compare = (label, a, b) => {
   const ta = keyed(a);
   const tb = keyed(b);
   for (const symbol of new Set([...ta.keys(), ...tb.keys()])) {
-    const left = JSON.stringify(ta.get(symbol));
-    const right = JSON.stringify(tb.get(symbol));
+    const left = JSON.stringify(stable(ta.get(symbol)));
+    const right = JSON.stringify(stable(tb.get(symbol)));
     if (left !== right) differences.push(`${label} ${symbol}: ts=${left} rust=${right}`);
   }
 };
@@ -112,6 +116,34 @@ const KNOWN_TS_FIXES = {
     }
   },
 };
+const fixCryptocomAccount = (account) => {
+    // TS never sets the hedged store flag despite mapping positions as hedged.
+    account.hedged = true;
+    // TS omits user.trade entirely. Derive the execution oracle from documented
+    // taped trade rows, independently of Rust's account output.
+    const tape = tapeRecords;
+    const seen = new Set();
+    account.fills = [];
+    for (const record of tape) {
+      if (record.type !== 'ws' || !record.url.includes('/exchange/v1/user')) continue;
+      const result = parseRequestJson(record.text).result;
+      if (result?.channel !== 'user.trade') continue;
+      for (const row of result.data) {
+        const id = String(row.trade_id);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        account.fills.push({ id: String(row.order_id), symbol: row.instrument_name, side: row.side.toLowerCase(), amount: Number(row.traded_quantity) });
+      }
+    }
+    // Further deliberate fixes are exercised by Rust regressions: failed reads
+    // retain state; client_oid survives mapping; terminal/stale frames cannot
+    // reopen orders/positions; REST retains live position enrichment; post-only
+    // uses exec_inst; account-wide leverage uses account_id + integer leverage;
+    // ignored brackets/opening triggers reject before writes; caller ids use a
+    // conservative 36-byte ceiling without JS string emulation.
+    // Public throttle and public-only subscription corrections are the
+    // afterTsFrame and prepareTs hooks in venues.mjs.
+};
 for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
@@ -120,6 +152,9 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) {
     const output = impl === 'ts' ? ts : rust;
     const unserved = output.unserved;
+    if (output.metrics.retainedBytes < 0 || output.metrics.bufferRetainedBytes < 0) differences.push(impl + ': negative retained memory component; baseline is invalid');
+    if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
+    for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
     for (const symbol of values.books.split(',').filter(Boolean)) {
       if (!output.books[symbol]) differences.push(`${impl}: requested book ${symbol} is missing`);
     }
@@ -128,6 +163,7 @@ for (let run = 0; run < runs; run++) {
   }
   const isPrivate = Boolean(ts.account);
   if (isPrivate) {
+    if (values.venue === 'cryptocom') fixCryptocomAccount(ts.account);
     if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
     if (values.venue === 'bybit') KNOWN_TS_FIXES.bybit(ts.account, rust.account);
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
@@ -139,6 +175,12 @@ for (let run = 0; run < runs; run++) {
   const left = JSON.stringify(stable(ts.commands));
   const right = JSON.stringify(stable(rust.commands));
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
+  // KNOWN_TS_FIXES: unavailable Crypto.com quotes produce NaN in TS.
+  if (values.venue === 'cryptocom') for (const ticker of ts.tickers) {
+    for (const field of ['bid', 'ask', 'last', 'percentage', 'volume', 'quoteVolume', 'openInterest']) {
+      if (ticker[field] === null) ticker[field] = 0;
+    }
+  }
   compare('market', ts.markets, rust.markets);
   compare('ticker', ts.tickers, rust.tickers);
   for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {

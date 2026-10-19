@@ -41,6 +41,14 @@
     "./node/okx": {
       "types": "./js/engine.d.mts",
       "default": "./pkg/node/okx/safe_cex_wasm.js"
+    },
+    "./web/cryptocom": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/cryptocom/safe_cex_wasm.js"
+    },
+    "./node/cryptocom": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/cryptocom/safe_cex_wasm.js"
     }
   },
   "scripts": {

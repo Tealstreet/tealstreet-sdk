@@ -9,6 +9,9 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
+import { parseRequestJson } from './request-json.mjs';
+import { retainedMemory } from './memory.mjs';
+import { Responses } from './responses.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -73,62 +76,40 @@ const canonicalUrl = (url) => {
 
 const canonicalBody = (body) => {
   if (body === undefined || body === null || body === '') return '';
-  let parsed = body;
+  let value = body;
   try {
-    if (typeof body === 'string') parsed = JSON.parse(body);
-    else if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) parsed = JSON.parse(new TextDecoder().decode(body));
+    if (typeof body === 'string') value = parseRequestJson(body);
+    else if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) value = parseRequestJson(new TextDecoder().decode(body));
   } catch { return String(body); }
+  if (values.venue === 'cryptocom' && value?.method && value?.params) value = value.params;
   const sorted = (value) => {
     if (Array.isArray(value)) return value.map(sorted);
     if (value === null || typeof value !== 'object') return value;
     const keys = Object.keys(value).filter((key) => value[key] !== undefined && !(venue.volatileBodyFields && VOLATILE.has(key))).sort();
-    return Object.fromEntries(keys.map((key) => [
-      key,
+    return Object.fromEntries(keys.map((key) => [key,
       !callerIds.has(value[key]) && venue.generatedBodyId?.(key, value[key]) ? '<generated>' : sorted(value[key]),
     ]));
   };
-  return JSON.stringify(sorted(parsed));
+  return JSON.stringify(sorted(value), (_key, value) => typeof value === 'bigint' ? { integer: String(value) } : value);
 };
 const requestKey = (method, url, body) =>
   `${method} ${canonicalUrl(url)}${venue.matchRequestBody && method !== 'GET' ? ` ${canonicalBody(body)}` : ''}`;
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
-  constructor() {
-    this.responses = new Map();
-    for (const record of records.filter((r) => r.type === 'http')) {
-      const key = requestKey(record.method, record.url, record.requestBody);
-      if (!this.responses.has(key)) this.responses.set(key, []);
-      this.responses.get(key).push(record);
-    }
+  constructor(impl) {
+    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records) });
+    this.responses = new Responses(records, requestKey, venue.checkRequest, venue.isWrite);
     this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
     this.open = new Map();
     this.waiters = [];
-    this.unserved = 0;
     this.commandIndex = 0;
   }
 
+  get unserved() { return this.responses.unserved; }
+
   respond(method, url, body) {
-    const key = requestKey(method, url, body);
-    const queue = this.responses.get(key);
-    if (!queue?.length) {
-      this.unserved++;
-      if (venue.matchRequestBody) console.error(`Unserved request: ${key}`);
-      return { status: 599, body: '' };
-    }
-    // Staged snapshots become available only once their command starts.
-    const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= this.commandIndex);
-    if (!eligible.length) {
-      this.unserved++;
-      console.error(`Request preceded its taped stage: ${key}`);
-      return { status: 599, body: '' };
-    }
-    const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
-    const current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
-    const record = current[0];
-    // Reads may reconcile repeatedly; every opted-in write needs its own row.
-    if (current.length > 1 || (venue.matchRequestBody && method !== 'GET')) queue.splice(queue.indexOf(record), 1);
-    return { status: record.status, headers: record.headers ?? '', body: record.body };
+    return this.responses.respond(method, url, body, this.commandIndex);
   }
 
   connect(url, onOpen, onMessage) {
@@ -144,6 +125,7 @@ class Tape {
   }
 
   send(socket, text) {
+    this.audit?.sent(socket.url, text);
     if (venue.respondToPing && text === 'ping') {
       setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
       return;
@@ -203,10 +185,8 @@ class Tape {
   }
 
   assertWritesConsumed() {
-    if (!venue.matchRequestBody) return;
-    const missing = [...this.responses].flatMap(([key, rows]) =>
-      key.startsWith('GET ') ? [] : rows.map(() => key));
-    if (missing.length) throw new Error(`${missing.length} taped write(s) were not sent:\n${missing.join('\n')}`);
+    const missing = this.responses.unusedWrites();
+    if (missing) throw new Error(`${missing} taped write(s) were not sent`);
   }
 
   async socketFor(rawUrl) {
@@ -264,6 +244,10 @@ class Tape {
     return delivered;
   }
 
+  unusedWrites() {
+    return this.responses.unusedWrites();
+  }
+
   results = [];
 }
 
@@ -271,12 +255,12 @@ const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
 };
 
-const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
-  globalThis.gc?.();
+const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
   const cpu = process.cpuUsage(cpuStart.process);
   const thread = process.threadCpuUsage(cpuStart.thread);
   const steady = warmMark ? process.threadCpuUsage(warmMark.thread) : { user: 0, system: 0 };
-  const memory = process.memoryUsage();
+  const wallMs = performance.now() - wallStart;
+  const memory = await baseline();
   return {
     // The worker's own thread: what competes with its message handling.
     cpuMs: (thread.user + thread.system) / 1000,
@@ -284,21 +268,32 @@ const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
     steadyCpuMs: (steady.user + steady.system) / 1000,
     // All threads, including V8 background compilation and GC helpers.
     processCpuMs: (cpu.user + cpu.system) / 1000,
-    wallMs: performance.now() - wallStart,
+    wallMs,
     rssBytes: memory.rss,
     heapUsedBytes: memory.heapUsed,
-    arrayBufferBytes: memory.arrayBuffers - heapBefore.arrayBuffers,
+    heapRetainedBytes: memory.heapUsed - heapBefore.heapUsed,
+    bufferRetainedBytes: memory.arrayBuffers - heapBefore.arrayBuffers,
+    buffersBefore: heapBefore.arrayBuffers,
+    buffersAfter: memory.arrayBuffers,
     wasmBytes,
     // What the implementation keeps alive beyond the harness and loaded code.
-    retainedBytes: memory.heapUsed - heapBefore.heapUsed + memory.arrayBuffers - heapBefore.arrayBuffers + wasmBytes,
+    retainedBytes: retainedMemory(heapBefore, memory, wasmBytes),
   };
 };
 
-/** Heap retained before the implementation loads, so both start from zero. */
-const baseline = () => {
-  globalThis.gc?.();
-  const { heapUsed, arrayBuffers } = process.memoryUsage();
-  return { heapUsed, arrayBuffers };
+/** Loaded code is excluded; collect before I/O and after replay state settles. */
+const baseline = async () => {
+  let previous;
+  let stable = 0;
+  for (let i = 0; i < 8; i++) {
+    globalThis.gc?.();
+    await new Promise(setImmediate);
+    const memory = process.memoryUsage();
+    stable = memory.arrayBuffers === previous ? stable + 1 : 0;
+    if (stable >= 2) return memory;
+    previous = memory.arrayBuffers;
+  }
+  throw new Error('Backing-buffer memory did not settle');
 };
 
 const sortBook = (book) => ({
@@ -306,7 +301,7 @@ const sortBook = (book) => ({
   asks: book.asks.map(({ price, amount }) => [price, amount]),
 });
 
-const tickerFields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume', 'openInterest'];
+const tickerFields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'openInterest', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume'];
 const marketFields = (m) => ({
   id: m.id,
   symbol: m.symbol,
@@ -314,7 +309,7 @@ const marketFields = (m) => ({
   quote: m.quote,
   active: m.active,
   contractSize: m.contractSize ?? null,
-  precision: m.precision,
+  precision: { amount: m.precision.amount, price: m.precision.price },
   limits: { amount: m.limits.amount },
 });
 
@@ -323,7 +318,7 @@ async function runRust() {
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine(venue.rust);
-  const tape = new Tape();
+  const tape = new Tape('rust');
   const encoder = new TextEncoder();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
@@ -338,7 +333,7 @@ async function runRust() {
   const transport = {
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
-      const socket = tape.connect(url, onOpen, onMessage);
+      const socket = tape.connect(url, onOpen, (text) => { tape.audit?.received(url, text); onMessage(text); });
       return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
     request: async ({ method, url, body: requestBody }) => {
@@ -378,7 +373,7 @@ async function runRust() {
       }
     },
   }, { batchMessages: values.delivery === 'batch' });
-  const heapBefore = baseline();
+  const heapBefore = await baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   host.start();
@@ -394,7 +389,7 @@ async function runRust() {
       }
     },
     async () => {
-      while (isPrivate && (status?.loaded ?? 0) !== allLoaded) await new Promise((r) => setTimeout(r, 5));
+      while ((isPrivate && (status?.loaded ?? 0) !== allLoaded) || (tape.audit && !tape.audit.ready())) await new Promise((r) => setTimeout(r, 5));
     },
     (record) => {
       const { op, ...rest } = record;
@@ -405,7 +400,7 @@ async function runRust() {
   tape.assertWritesConsumed();
   clearInterval(flushTimer);
   host.flush();
-  const metrics = measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
+  const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
   if (profile) metrics.profile = profile.methods;
   host.dispose();
 
@@ -439,7 +434,7 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, unserved: tape.unserved, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return { frames, metrics, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
 }
 
 const commandArgs = ({ t, type, ...args }) => args;
@@ -475,7 +470,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 }
 
 async function runTs() {
-  const tape = new Tape();
+  const tape = new Tape('ts');
   class TapeWebSocket {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -493,8 +488,10 @@ async function runTs() {
           this.onopen?.({});
         },
         (data) => {
+          tape.audit?.received(url, data);
           for (const fn of this.listeners.message) fn({ data });
           this.onmessage?.({ data });
+          venue.afterTsFrame?.(exchange);
         },
       );
     }
@@ -530,7 +527,18 @@ async function runTs() {
     }
     return response;
   };
+  const { ExchangeWorker } = await import('../../packages/safe-cex/src/webworker/ExchangeWorker.ts');
   const store = new DefaultStore();
+  const mainStore = new DefaultStore();
+  // Exercise the production browser-worker packer, including its ticker
+  // baseline, and the real receiver. Rust already transfers every store table.
+  const worker = new ExchangeWorker({}, 'replay', venue.ts.name, {}, {}, {}, 'replay');
+  worker._store = store;
+  let state;
+  store.subscribe((data) => { state = data; });
+  const postStore = () => {
+    if (!values['no-egress'] && state) mainStore.update(structuredClone(worker._prepareStorePayload(state)), true);
+  };
   const options = { ...venue.options, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { key: '', secret: '', publicDataOnly: true }) };
   const exchange = new Exchange(venue.ts.name, options, store);
   venue.configureTs?.(exchange);
@@ -538,7 +546,7 @@ async function runTs() {
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
   const finalBooks = {};
-  const heapBefore = baseline();
+  const heapBefore = await baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
   const started = exchange.start();
@@ -548,17 +556,19 @@ async function runTs() {
   })();
   // Model the worker posting each subscribed book to main every 250 ms.
   let lastFlush = -Infinity;
-  let posted = 0;
+  const mainBooks = {};
   const frames = await tape.play(
     (t) => {
       if (t - lastFlush >= 250) {
+        postStore();
         if (!values['no-egress']) {
-          for (const book of Object.values(finalBooks)) posted += structuredClone(book).bids.length;
+          for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
         }
         lastFlush = t;
       }
     },
     async () => {
+      venue.prepareTs?.(exchange, { isPrivate });
       while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
       const loaded = () => Object.values(store.loaded).every(Boolean);
       while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
@@ -568,13 +578,15 @@ async function runTs() {
   await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
   await settle();
   tape.assertWritesConsumed();
-  const metrics = measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark);
+  postStore();
+  if (!values['no-egress']) for (const [symbol, book] of Object.entries(finalBooks)) mainBooks[symbol] = structuredClone(book);
+  const metrics = await measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark);
   const snapshot = {
-    markets: store.markets.map((m) => ({ ...m })),
-    tickers: store.tickers.map((t) => ({ ...t })),
+    markets: (values['no-egress'] ? store : mainStore).markets.map((m) => ({ ...m })),
+    tickers: (values['no-egress'] ? store : mainStore).tickers.map((t) => ({ ...t })),
   };
   const bookCopies = Object.fromEntries(
-    Object.entries(finalBooks).map(([symbol, book]) => [symbol, JSON.parse(JSON.stringify(book))]),
+    Object.entries(values['no-egress'] ? finalBooks : mainBooks).map(([symbol, book]) => [symbol, JSON.parse(JSON.stringify(book))]),
   );
   const account = isPrivate
     ? {
@@ -588,7 +600,7 @@ async function runTs() {
       }
     : undefined;
   exchange.dispose();
-  return { frames, metrics, unserved: tape.unserved, store: snapshot, books: bookCopies, account, commands: tape.results };
+  return { frames, metrics, unserved: tape.unserved, unusedWrites: tape.unusedWrites(), protocolErrors: tape.audit?.errors() ?? [], store: snapshot, books: bookCopies, account, commands: tape.results };
 }
 
 async function runTsCommand(exchange, store, record) {
@@ -669,9 +681,11 @@ writeFileSync(
     impl: values.impl,
     frames: result.frames,
     unserved: result.unserved,
+    unusedWrites: result.unusedWrites,
+    protocolErrors: result.protocolErrors,
     metrics: result.metrics,
     markets: result.store.markets.map(marketFields),
-    tickers: result.store.tickers.map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, t[f]])])),
+    tickers: result.store.tickers.map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, f === 'openInterest' ? (t[f] ?? 0) : t[f]])])),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
     commands: result.commands,

@@ -6,6 +6,7 @@
 #[cfg(not(any(
     feature = "venue-binance",
     feature = "venue-bybit",
+    feature = "venue-cryptocom",
     feature = "venue-okx"
 )))]
 compile_error!("safe-cex-wasm requires at least one venue-* feature");
@@ -18,6 +19,8 @@ use safe_cex_engine::{
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 #[cfg(feature = "venue-bybit")]
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
+#[cfg(feature = "venue-cryptocom")]
+use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 #[cfg(feature = "venue-okx")]
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 use serde::{Deserialize, Serialize};
@@ -66,6 +69,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
 #[cfg(any(
     feature = "venue-binance",
     feature = "venue-bybit",
+    feature = "venue-cryptocom",
     feature = "venue-okx"
 ))]
 #[derive(Deserialize)]
@@ -482,6 +486,7 @@ impl WasmEngine {
     #[cfg(any(
         feature = "venue-binance",
         feature = "venue-bybit",
+        feature = "venue-cryptocom",
         feature = "venue-okx"
     ))]
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
@@ -497,6 +502,13 @@ impl WasmEngine {
             }))),
             #[cfg(feature = "venue-bybit")]
             "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
+            #[cfg(feature = "venue-cryptocom")]
+            "cryptocom" => Box::new(Engine::new(Cryptocom::new(CryptocomOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
