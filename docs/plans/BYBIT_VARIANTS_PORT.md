@@ -28,8 +28,8 @@ to completion before implementation. All six Rust checks, both TS CI runs
 
 ## Review and verification
 
-Implementation is in progress. Each phase receives a local sub-agent audit;
-final numbers and review findings will be recorded here before merge.
+Each implementation phase and the opened PR received local sub-agent audits.
+Final integration gates and CI are recorded below before merge.
 
 Public tests and private tapes derive from current Bybit V5 documentation and
 the repository's documented contracts. Hyro uses the October 6 simulator subset
@@ -71,9 +71,9 @@ The harness now includes module allocations symmetrically in retained memory
 market flags, isolates concurrent output files and fails bounded I/O/readiness
 waits. No correctness or performance threshold was relaxed.
 
-## Integrated local gates
+## First integrated gates (superseded measurements)
 
-Integrated with the green OKX landing branch at `693ad4f139`; all gates passed:
+Before final review fixes and the Crypto.com integration, integrated with the green OKX landing branch at `693ad4f139`; all gates passed:
 
 - Banned patterns; workspace fmt; strict Bybit and wasm-target Clippy.
 - Bybit 89 native tests, engine 15, Binance 29; OKX trading 21.
@@ -105,4 +105,35 @@ Bybit linear 18, Binance 14 and each OKX variant 29. Private tapes are paced
 and do not gate performance. Hyro numbers validate the documented fixture;
 they are not a claim of live simulator connectivity.
 
-PR adversarial review and CI must pass before merge.
+## Final adversarial review
+
+PR [#1307](https://github.com/Tealstreet/tealstreet-sdk/pull/1307).
+[Findings and resolutions](https://github.com/Tealstreet/tealstreet-sdk/pull/1307#issuecomment-6273094487)
+are posted on the PR. All six confirmed blockers were fixed:
+
+- Spot cancel-all covers all three native families and retains failed families.
+- Demo acknowledgement publication respects newer snapshots/private sessions.
+- Hyro retries key validated original caller intent before dynamic formatting;
+  original lots, payload and identity survive price/position changes. This also
+  fixes a reproduced TS bug: its inner recovery key uses re-rendered payloads.
+- Healthy Hyro snapshots preserve unreported fill deltas. Absent orders retain
+  bounded recent cursors; recovery snapshots seed terminal duplicate protection.
+- Non-finite tick slippage protection fails the whole batch before JSON/I/O.
+
+Independent follow-up reviews pass: 31 trading cases, 20 state reproducers and
+additional cases, and all three non-finite wasm preflight cases with zero writes.
+Native suite now has 98 Bybit cases plus 15 engine cases before Crypto.com merge.
+
+The first push scan found Binance's public documentation signing vector in an
+inherited commit. One exact historical fingerprint is exempted in
+`.gitleaksignore`; the complete `origin/master..HEAD` scan reports zero findings.
+No secret rule or production-source path was broadly exempted.
+
+Crypto.com landed concurrently at `c63c3e5670` and is integrated before the final
+push. Its typed protocol/request audits, stable heap + ArrayBuffer + wasm memory
+measurement, production TS store transport, and CPU sampling before forced GC
+are preserved. Both implementations still start memory measurement before module
+imports. These corrected measurements supersede the earlier table.
+All four venues and all Bybit/OKX variants will be revalidated together.
+
+Final CI must be green before merge.

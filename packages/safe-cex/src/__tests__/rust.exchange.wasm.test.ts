@@ -433,6 +433,56 @@ describe('RustEngineExchange', () => {
     expect(tape.requests.filter((request) => request.method === 'POST')).toHaveLength(1);
   });
 
+  it('honors Crypto.com caller IDs through the inherited shell helpers', async () => {
+    // Reuse the existing wasm fixture to seed the shell's market preflight.
+    const tape = recordedTransport();
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    const store = new DefaultStore();
+    exchange = new RustEngineExchange('binance', { key: '', secret: '', publicDataOnly: true }, store);
+    await exchange.start();
+    const market = store.markets[0];
+    exchange.dispose();
+    store.update({ markets: [{ ...market, id: 'BTCUSD-PERP', symbol: 'BTCUSD-PERP', quote: 'USD' }] });
+    exchange = new RustEngineExchange('cryptocom', { key: 'k', secret: 's' }, store);
+    const opts = {
+      symbol: 'BTCUSD-PERP',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 0.012,
+      price: 90000,
+      clientOrderId: 'Caller.crypto:01',
+    };
+    const sent: string[] = [];
+    exchange.placeOrder = async (order) => {
+      sent.push(order.clientOrderId!);
+      return ['crypto-4242'];
+    };
+    await expect(exchange.placeOrderWithClientOrderId(opts)).resolves.toEqual({
+      orderIds: ['crypto-4242'],
+      clientOrderId: opts.clientOrderId,
+    });
+    expect(sent).toEqual([opts.clientOrderId]);
+    expect(exchange.mintClientOrderId(opts)).toMatch(/^.{1,36}$/);
+    store.addOrder({
+      ...opts,
+      id: 'crypto-4242',
+      status: OrderStatus.Open,
+      filled: 0,
+      remaining: opts.amount,
+      reduceOnly: false,
+      lastUpdate: 1,
+    });
+    await expect(exchange.findOrderByClientOrderId(opts.symbol, opts.clientOrderId)).resolves.toMatchObject({
+      found: true,
+      order: { id: 'crypto-4242', clientOrderId: opts.clientOrderId },
+    });
+    await expect(exchange.findOrderByClientOrderId(opts.symbol, 'missing')).resolves.toEqual({
+      found: false,
+      definitive: false,
+    });
+  });
+
   it('honors Bybit client IDs through the inherited helpers and finds streamed orders', async () => {
     const tape = bybitTransport();
     setWasmEngineLoader(loadNodeEngine);

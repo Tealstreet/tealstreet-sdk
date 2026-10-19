@@ -9,6 +9,7 @@ import { parseArgs } from 'node:util';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
 import { configuredOptions } from './venues.mjs';
+import { Frame } from '../hosts/wasm/js/wire.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -79,9 +80,11 @@ const options = { ...configuredOptions(values.venue), publicDataOnly: true };
 if (options.endpoints) write({ type: 'config', options });
 const { WasmEngine } = await loadEngine();
 let frames = 0;
-let updates = 0;
+const seenBooks = new Set();
 const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify(options)), recording, {
-  onStoreUpdate: () => updates++,
+  onFrame: (buffer) => {
+    for (const book of new Frame(buffer).books()) seenBooks.add(book.market);
+  },
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });
 host.start();
@@ -95,8 +98,8 @@ setTimeout(
     host.flush();
     host.dispose();
     tape.end(() => {
-      console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames }));
-      process.exit(0);
+      console.log(JSON.stringify({ out, seconds: Number(values.seconds), frames, books: seenBooks.size }));
+      process.exit(frames > 0 && seenBooks.size >= values.books.split(',').filter(Boolean).length ? 0 : 1);
     });
   },
   Number(values.seconds) * 1000,

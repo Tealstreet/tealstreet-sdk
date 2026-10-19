@@ -45,6 +45,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   bybitspot: 'bybitspot',
   bybitdemo: 'bybitdemo',
   hyrotrader: 'hyrotrader',
+  cryptocom: 'cryptocom',
   okx: 'okx',
   okxeu: 'okxeu',
   okxdemo: 'okxdemo',
@@ -58,6 +59,7 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
 });
 const bybitClientOrderIdRule = patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/);
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  cryptocom: patternClientOrderIdRule('Crypto.com', /^.{1,36}$/),
   bybit: bybitClientOrderIdRule,
   bybitinverse: bybitClientOrderIdRule,
   bybitspot: bybitClientOrderIdRule,
