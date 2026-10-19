@@ -15,16 +15,17 @@ use crate::{
 };
 use safe_cex_exchange::{
     js_runtime::{
+        iterator::IteratorRecord,
         promise::await_js,
         scope::{bound_member, scope_of},
         sockets::{base_websocket, core_of},
         value::{Getter, Js, Thrown, arg, error_object, from_json, from_typed, to_json, to_typed},
     },
     runtime::ExchangeError,
-    websocket::{BaseWebSocket, MessageHandler},
+    websocket::BaseWebSocket,
 };
 use safe_cex_store::config::ENABLE_RECONNECTING_WEBSOCKET;
-use safe_cex_transport::{RoutingOptions, socket::SocketFrame};
+use safe_cex_transport::RoutingOptions;
 use serde_json::Value;
 use std::{
     cell::{Cell, RefCell},
@@ -484,23 +485,43 @@ fn business_message(s: &OkxScope, event: &Js) -> Result<(), Thrown> {
 }
 
 fn business_dispatch(s: &OkxScope, handler: Js, json: Js) -> Result<(), Thrown> {
+    dispatch_handlers(s, handler, json, false)
+}
+
+fn dispatch_handlers(
+    s: &OkxScope,
+    handler: Js,
+    json: Js,
+    check_sequence: bool,
+) -> Result<(), Thrown> {
     let this = &s.this;
-    message_routing::dispatch_message_handler(
-        &handler,
-        &Rc::new(json),
-        |h| {
-            let callbacks = this.get("messageHandlers")?.get_key(&h.to_js_string()?)?;
-            Ok((!callbacks.is_nullish()).then(|| Rc::new(callbacks)))
-        },
-        |callbacks| Ok(callbacks.get("length")?.truthy()),
-        |h| unit(this.call_method("recordMessageHandlerStats", vec![h.clone()])),
-        |callbacks, json| {
-            for callback in items(&callbacks)? {
-                callback.call(Js::Undefined, vec![(**json).clone()])?;
-            }
-            Ok(())
-        },
-    )
+    let callbacks = this
+        .get("messageHandlers")?
+        .get_key(&handler.to_js_string()?)?;
+    if callbacks.is_nullish() || !callbacks.get("length")?.truthy() {
+        return Ok(());
+    }
+    if check_sequence
+        && handler
+            .call_method("startsWith", vec![Js::str("books.")])?
+            .truthy()
+        && !this
+            .call_method(
+                "acceptOrderBookSequence",
+                vec![handler.clone(), json.clone()],
+            )?
+            .truthy()
+    {
+        return Ok(());
+    }
+    this.call_method("recordMessageHandlerStats", vec![handler])?;
+    let iterator = IteratorRecord::get(&callbacks)?;
+    while let Some(callback) = iterator.step_value()? {
+        if let Err(error) = callback.call(Js::Undefined, vec![json.clone()]) {
+            return Err(iterator.close_after_throw(error));
+        }
+    }
+    Ok(())
 }
 
 /// Members the private class declares and the business class inherits.
@@ -735,41 +756,12 @@ fn store_state(this: &Js, state: &BookState) -> Result<(), Thrown> {
     Ok(())
 }
 
-/// The core dispatch reads its own handler registry; mirror `this.messageHandlers` into it.
-fn sync_handlers(this: &Js, socket: &BaseWebSocket) -> Result<(), Thrown> {
-    let handlers = this.get("messageHandlers")?;
-    let mut registry = socket.message_handlers.borrow_mut();
-    registry.clear();
-    for (key, list) in handlers.own_entries()? {
-        let Some(callbacks) = list.array_values()? else {
-            continue;
-        };
-        let callbacks: Vec<MessageHandler> = callbacks
-            .into_iter()
-            .map(|callback| {
-                Rc::new(move |value: &Js| {
-                    callback
-                        .call(Js::Undefined, vec![value.clone()])
-                        .map(|_| ())
-                        .map_err(|e| e.to_exchange_error())
-                }) as MessageHandler
-            })
-            .collect();
-        registry.insert(
-            String::from_utf16_lossy(&key),
-            Rc::new(RefCell::new(callbacks)),
-        );
-    }
-    Ok(())
-}
-
 /// Run a typed order-book body over the loaded state, then write the state back.
 fn with_book<T>(
     s: &OkxScope,
     body: impl FnOnce(&Rc<BaseWebSocket>, &BookState) -> Result<T, ExchangeError>,
 ) -> Result<T, Thrown> {
     let socket = core(s)?;
-    sync_handlers(&s.this, &socket)?;
     let state = load_state(&s.this)?;
     let result = body(&socket, &state);
     store_state(&s.this, &state)?;
@@ -1015,6 +1007,56 @@ fn ticker_members(s: &OkxScope) {
     });
 }
 
+fn public_message(s: &OkxScope, data: Js) -> Result<(), Thrown> {
+    let this = &s.this;
+    if this.get("isDisposed")?.truthy() {
+        return Ok(());
+    }
+    this.call_method("trackLastReceived", vec![])?;
+    this.get("directFallback")?
+        .call_method("onMessage", vec![])?;
+    if data.strict_equals(&Js::str("pong")) {
+        return unit(this.call_method("handlePongEvent", vec![]));
+    }
+    let json = safe_cex_exchange::js_runtime::value::from_retained_input(
+        safe_cex_transport::how::big_int_as_string_json_parse(&text(&data)?),
+    );
+    if !json.truthy() || json.get("event")?.strict_equals(&Js::str("subscribe")) {
+        return Ok(());
+    }
+    let read_arg = |key| {
+        let arg = json.get("arg")?;
+        if arg.is_nullish() {
+            Ok(Js::Undefined)
+        } else {
+            arg.get(key)
+        }
+    };
+    let channel = if matches!(read_arg("channel")?, Js::String(_)) {
+        json.get("arg")?.get("channel")?
+    } else {
+        Js::str("")
+    };
+    let instrument = if matches!(read_arg("instId")?, Js::String(_)) {
+        json.get("arg")?.get("instId")?
+    } else {
+        Js::str("")
+    };
+    if !channel.truthy() {
+        return Ok(());
+    }
+    if instrument.truthy() {
+        let mut key = channel.to_js_string()?.to_vec();
+        key.push(b'.' as u16);
+        key.extend_from_slice(&instrument.to_js_string()?);
+        this.call_method(
+            "dispatchMessageHandler",
+            vec![Js::String(key.into()), json.clone()],
+        )?;
+    }
+    unit(this.call_method("dispatchMessageHandler", vec![channel, json]))
+}
+
 fn new_public(s: &OkxScope) -> Result<(), Thrown> {
     let state = PublicSocketState::initialize(socket_ops(s))?;
     define_fields(
@@ -1047,27 +1089,11 @@ fn new_public(s: &OkxScope) -> Result<(), Thrown> {
         Ok(Js::Undefined)
     });
     sync_member(s, "onMessage", |s, a| {
-        let data = arg(&a, 0).get("data")?;
-        let frame = SocketFrame::Text(text(&data)?);
-        with_book(s, |socket, st| {
-            public_socket::on_message(socket, &frame, &st.sequences, &st.recovering, &st.topics)
-        })?;
+        public_message(s, arg(&a, 0).get("data")?)?;
         Ok(Js::Undefined)
     });
     sync_member(s, "dispatchMessageHandler", |s, a| {
-        let handler = text(&arg(&a, 0))?;
-        let json = arg(&a, 1);
-        with_book(s, |socket, st| {
-            let recover = |h: &str| recover(socket, st, h);
-            public_socket::dispatch_message_handler(
-                socket,
-                &handler,
-                &json,
-                &st.sequences,
-                &st.recovering,
-                &recover,
-            )
-        })?;
+        dispatch_handlers(s, arg(&a, 0), arg(&a, 1), true)?;
         Ok(Js::Undefined)
     });
     sync_member(s, "acceptOrderBookSequence", |s, a| {
