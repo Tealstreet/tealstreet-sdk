@@ -1,13 +1,13 @@
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
-import type { OrderBook } from '../../types';
+import type { ExchangeOptions, OrderBook } from '../../types';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderType } from '../../types';
 import { BaseExchange } from '../../exchanges/base';
 import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
+import { DefaultStore } from '../../store/store.base';
+import { OrderSide, OrderType } from '../../types';
 
 const EXCHANGE_INFO = JSON.stringify({
   symbols: [
@@ -39,7 +39,8 @@ const RESPONSES: Record<string, string> = {
   dual: '{"dualSidePosition":false}',
   positionRisk: '[]',
   symbolConfig: '[{"symbol":"BTCUSDT","marginType":"CROSSED","leverage":20}]',
-  account: '{"assets":[{"asset":"USDT","walletBalance":"1000","availableBalance":"900","initialMargin":"100","unrealizedProfit":"0"}]}',
+  account:
+    '{"assets":[{"asset":"USDT","walletBalance":"1000","availableBalance":"900","initialMargin":"100","unrealizedProfit":"0"}]}',
   openOrders: '[]',
   openAlgoOrders: '[]',
   order: '{"orderId":4242,"status":"NEW"}',
@@ -107,6 +108,64 @@ describe('RustEngineExchange', () => {
 
     publicSocket('{"e":"bookTicker","s":"BTCUSDT","b":"99.5","a":"99.6"}');
     await until(() => store.tickersBySymbol.BTCUSDT.bid === 99.5);
+  });
+
+  it.each([
+    { key: '', secret: '' },
+    { key: 'k', secret: '' },
+    { key: '', secret: 's' },
+  ])('starts public data with incomplete credentials %o', async (options) => {
+    const tape = recordedTransport();
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    const store = new DefaultStore();
+    exchange = new RustEngineExchange('binance', options, store);
+
+    await exchange.start();
+    expect(store.loaded.markets && store.loaded.tickers).toBe(true);
+    expect(tape.requests.some((request) => /account|listenKey|openOrders|leverageBracket/.test(request))).toBe(false);
+    expect([...tape.sockets.keys()].some((path) => path.includes('/private'))).toBe(false);
+  });
+
+  it('rejects remote-only private signing before transport starts', async () => {
+    const tape = recordedTransport();
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    exchange = new RustEngineExchange(
+      'binance',
+      {
+        key: 'k',
+        secret: '',
+        remoteSigner: {
+          accountName: 'test',
+          sign: async () => ({ id: 'unused', error: 'must not be called' }),
+          isAvailable: () => true,
+          onAvailabilityChange: () => () => undefined,
+        },
+      },
+      new DefaultStore(),
+    );
+
+    await expect(exchange.start()).rejects.toThrow('remote signing is unsupported');
+    expect(tape.requests).toEqual([]);
+  });
+
+  it('rejects payload-only private signing before transport starts', async () => {
+    const tape = recordedTransport();
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    exchange = new RustEngineExchange(
+      'binance',
+      {
+        key: 'k',
+        secret: '',
+        payloadSigner: async () => ({ signature: 'unused' }),
+      } satisfies ExchangeOptions,
+      new DefaultStore(),
+    );
+
+    await expect(exchange.start()).rejects.toThrow('remote signing is unsupported');
+    expect(tape.requests).toEqual([]);
   });
 
   it('turns trading methods into engine commands and loads the account', async () => {

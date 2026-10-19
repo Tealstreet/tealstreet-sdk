@@ -5,6 +5,7 @@ import type {
   ExchangeName,
   ExchangeOptions,
   Execution,
+  ExecutionsOptions,
   HistoricalOrder,
   IncomeHistoryOptions,
   IncomeRecord,
@@ -15,7 +16,6 @@ import type {
   PlaceOrderOpts,
   PublicTrade,
   UpdateOrderOpts,
-  ExecutionsOptions,
   ValidateAccountResult,
 } from '../../types';
 
@@ -87,10 +87,14 @@ export class RustEngineExchange extends BaseExchange {
   }
 
   start = async () => {
+    if (!this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
+      throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
+    }
     if (!loadWasmEngine) throw new Error('No wasm engine loader registered (setWasmEngineLoader)');
     const { WasmEngine } = await loadWasmEngine();
     if (this.isDisposed) return;
-    const { key, secret, passphrase, testnet, publicDataOnly } = this.options;
+    const { key, secret, passphrase, testnet } = this.options;
+    const publicDataOnly = this.isPublicDataOnly;
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
       JSON.stringify({ key, secret, passphrase, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly) }),
@@ -139,7 +143,7 @@ export class RustEngineExchange extends BaseExchange {
     new Promise<void>((resolve) => {
       const ready = () => {
         const loaded = this.store.loaded;
-        const account = this.options.publicDataOnly || (loaded.balance && loaded.orders && loaded.positions);
+        const account = this.isPublicDataOnly || (loaded.balance && loaded.orders && loaded.positions);
         return loaded.markets && loaded.tickers && account;
       };
       if (ready()) return resolve();
@@ -227,8 +231,7 @@ export class RustEngineExchange extends BaseExchange {
       to: opts.to,
     });
 
-  fetchHistoricalFills = (opts: ExecutionsOptions) =>
-    this.command<Execution[]>({ op: 'fetchFills', ...opts });
+  fetchHistoricalFills = (opts: ExecutionsOptions) => this.command<Execution[]>({ op: 'fetchFills', ...opts });
 
   fetchHistoricalOrders = (opts?: OrderHistoryOptions) =>
     this.command<HistoricalOrder[]>({

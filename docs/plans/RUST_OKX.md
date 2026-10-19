@@ -120,3 +120,18 @@ Never touch master, rebase, or force-push.
   Full tests: 452 safe-cex suites passed; one unrelated HyroTrader suite timed
   out under parallel runs. Serial repository retry and independent harness
   review are in progress. No completion or landing claimed yet.
+
+### Final audit corrections
+
+- Independent reconnect review found pre-disconnect REST reads surviving login.
+  Account and order generations now retire those reads on authenticated reopen;
+  settings-only refresh preserves the active order walk. 10 account tests pass.
+- Effective keyless/partial-credential public mode now reaches startup readiness;
+  unsupported remote/payload-only private signing fails before transport starts.
+  Targeted WASM exchange tests: 9 pass; package typecheck/lint pass.
+- Harness audit tightened command deadlines, actual subscription coverage,
+  login seconds freshness, every replay run and public command result comparison.
+  Mutations and final fixture gates are being checked.
+- Size experiment: size-oriented LLVM profiles increased output. Retained the
+  original release optimization and removed wasm-bindgen debug name/producers
+  sections instead; this saves over 500 KB without changing instructions.

@@ -23,6 +23,7 @@ pub enum Request {
         invalid: bool,
     },
     Orders {
+        generation: u64,
         version: u64,
         kind: usize,
         rows: Vec<Order>,
@@ -58,6 +59,8 @@ pub struct AccountState {
     join: Option<Join>,
     generation: u64,
     orders_in_flight: bool,
+    orders_generation: u64,
+    authenticated_once: [bool; 3],
     risk: HashMap<String, RiskValues>,
     order_leverage: HashMap<String, f64>,
     equity: Vec<(String, f64)>,
@@ -144,9 +147,12 @@ impl Okx {
         }
         if include_orders && !self.account.orders_in_flight {
             self.account.orders_in_flight = true;
+            self.account.orders_generation += 1;
+            let generation = self.account.orders_generation;
             self.orders_page(
                 cx,
                 Request::Orders {
+                    generation,
                     version: self.account.revision,
                     kind: 0,
                     rows: Vec::new(),
@@ -244,12 +250,27 @@ impl Okx {
         self.topics(cx, channel, "subscribe", &args);
     }
 
+    fn account_request_current(&self, request: &Request) -> bool {
+        match request {
+            Request::Balance { generation, .. } | Request::Positions { generation, .. } => self
+                .account
+                .join
+                .as_ref()
+                .is_some_and(|join| join.generation == *generation),
+            Request::Orders { generation, .. } => self.account.orders_generation == *generation,
+            Request::Config => true,
+        }
+    }
+
     pub(crate) fn account_item(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         request: &mut Request,
         item: &str,
     ) {
+        if !self.account_request_current(request) {
+            return;
+        }
         match request {
             Request::Config => {}
             Request::Balance {
@@ -318,6 +339,9 @@ impl Okx {
         request: Request,
         response: Response<'_>,
     ) {
+        if !self.account_request_current(&request) {
+            return;
+        }
         let data = match envelope(response.body) {
             Ok(data) => data,
             Err(e) => {
@@ -376,6 +400,7 @@ impl Okx {
                 self.finish_join(cx);
             }
             Request::Orders {
+                generation,
                 version,
                 mut kind,
                 rows,
@@ -399,6 +424,7 @@ impl Okx {
                     self.orders_page(
                         cx,
                         Request::Orders {
+                            generation,
                             version,
                             kind,
                             rows,
@@ -416,6 +442,7 @@ impl Okx {
                     self.orders_page(
                         cx,
                         Request::Orders {
+                            generation,
                             version,
                             kind,
                             rows,
@@ -526,6 +553,9 @@ impl Okx {
         request: Request,
         error: &str,
     ) {
+        if !self.account_request_current(&request) {
+            return;
+        }
         match request {
             Request::Balance { generation, .. } | Request::Positions { generation, .. } => {
                 if self
@@ -632,11 +662,20 @@ impl Okx {
     ) {
         if message.event == "login" {
             if message.code == "0" {
+                let reopened = self.account.authenticated_once[channel];
+                self.account.authenticated_once[channel] = true;
                 self.connections[channel].authenticated = true;
                 self.connections[channel].auth_deadline = None;
                 self.subscribe_private(cx, channel);
                 self.subscribe(cx, channel);
                 if self.account.ready {
+                    if reopened {
+                        self.account.join = None;
+                        self.account.generation += 1;
+                        self.account.orders_generation += 1;
+                        self.account.orders_in_flight = false;
+                        self.account.revision += 1;
+                    }
                     self.account_refresh(cx);
                 }
             } else {

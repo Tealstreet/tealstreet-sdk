@@ -277,3 +277,111 @@ fn malformed_known_position_is_a_failed_snapshot() {
     }
     assert!(!e.store().loaded().positions && !e.store().loaded().balance);
 }
+
+fn complete_fresh(e: &mut Engine<Okx>, mut requests: Vec<Action>, position: &str) {
+    while let Some(a) = requests.pop() {
+        let Action::Http(r) = &a else { continue };
+        let body = if r.url.contains("account-position-risk") {
+            envelope(r#"{"balData":[{"ccy":"USDT","eq":"6000"}]}"#)
+        } else if r.url.contains("/positions?") {
+            envelope(position)
+        } else {
+            envelope("")
+        };
+        reply(e, &a, &body, 30_000.0);
+        requests.extend(
+            actions(e)
+                .into_iter()
+                .filter(|a| matches!(a, Action::Http(_))),
+        );
+    }
+}
+
+#[test]
+fn authenticated_reopen_retires_pre_disconnect_reads_and_order_walk() {
+    let (mut e, private, _, stale) = startup();
+    e.handle(
+        100.0,
+        Event::WsClosed {
+            socket: private,
+            code: 1006,
+        },
+    );
+    let out = actions(&mut e);
+    let timer = out
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer { timer, .. } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(2_000.0, Event::TimerFired { timer });
+    let out = actions(&mut e);
+    let socket = out
+        .iter()
+        .find_map(|a| match a {
+            Action::WsConnect { socket, url } if url.ends_with("/private") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(2_001.0, Event::WsOpened { socket });
+    actions(&mut e);
+    ws(&mut e, socket, r#"{"event":"login","code":"0","msg":""}"#);
+    let fresh: Vec<_> = actions(&mut e)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    assert_eq!(fresh.len(), 3);
+    complete_fresh(&mut e, fresh, "");
+    assert!(e.store().loaded().orders && e.store().loaded().positions);
+    assert!(e.store().orders().is_empty() && e.store().positions().is_empty());
+    assert_eq!(e.store().balance().total, 6000.0);
+    // The old page must not restart paging or replace the post-reconnect view.
+    complete(&mut e, stale, ORDER);
+    assert!(e.store().orders().is_empty() && e.store().positions().is_empty());
+    assert_eq!(e.store().balance().total, 6000.0);
+}
+
+#[test]
+fn settings_refresh_retires_position_join_without_discarding_inflight_orders() {
+    use safe_cex_engine::Command;
+    let (mut e, _, _, stale) = startup();
+    e.handle(
+        5.0,
+        Event::Command(Command::SetLeverage {
+            command: 9,
+            symbol: "BTCUSDT".into(),
+            leverage: 20.0,
+        }),
+    );
+    let out = actions(&mut e);
+    let request = out.iter().find(|a| matches!(a, Action::Http(_))).unwrap();
+    reply(
+        &mut e,
+        request,
+        &envelope(r#"{"instId":"BTC-USDT-SWAP","lever":"20","mgnMode":"cross"}"#),
+        6.0,
+    );
+    let fresh: Vec<_> = actions(&mut e)
+        .into_iter()
+        .filter(|a| matches!(a, Action::Http(_)))
+        .collect();
+    assert_eq!(fresh.len(), 2);
+    assert!(
+        !fresh
+            .iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.contains("orders")))
+    );
+    // Retired position reads cannot overwrite the acknowledged leverage.
+    complete(&mut e, stale, ORDER);
+    assert_eq!(e.store().orders().len(), 1);
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
+    complete_fresh(
+        &mut e,
+        fresh,
+        &POSITION.replace("\"lever\":\"10\"", "\"lever\":\"20\""),
+    );
+    assert_eq!(e.store().positions()[0].leverage, 20.0);
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.0);
+    assert_eq!(e.store().orders().len(), 1);
+}
