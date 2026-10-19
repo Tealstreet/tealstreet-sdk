@@ -3,17 +3,25 @@ use crate::options_patch::{
     ExchangeOptionsPatch, apply_extra_patch, apply_patch, empty_extra_options, empty_options,
 };
 use indexmap::IndexMap;
-use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_exchange::{
+    eager::start_eager,
+    js_runtime::{
+        promise::{self, Promise},
+        value::{Js, Thrown},
+    },
+    native_store::DefaultStore,
+    runtime::{ExchangeError, ExchangeRuntime},
+};
 use safe_cex_store::{Store, virtual_clock::VirtualClock};
 use safe_cex_transport::{TransportProvider, TransportRegistry};
 use safe_cex_types::{ExchangeName, ExchangeOptions, exchange_metadata::get_exchange_metadata};
 use std::{
     cell::RefCell,
-    future::{Future, poll_fn},
+    future::Future,
     pin::Pin,
     rc::Rc,
     sync::Arc,
-    task::{Context, Poll, Waker},
+    task::{Context, Waker},
 };
 
 pub type ExchangeConstructor<I> =
@@ -22,7 +30,8 @@ pub type ExchangeLoader<I> =
     Rc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<ExchangeConstructor<I>, String>>>>>;
 pub struct ExchangeFactory<I> {
     pub loaders: IndexMap<String, ExchangeLoader<I>>,
-    cache: RefCell<IndexMap<String, ExchangeConstructor<I>>>,
+    cache: Rc<RefCell<IndexMap<String, ExchangeConstructor<I>>>>,
+    runtime: Rc<dyn ExchangeRuntime>,
     pub clock: VirtualClock,
     pub transport: TransportRegistry,
 }
@@ -31,10 +40,12 @@ impl<I> ExchangeFactory<I> {
         loaders: IndexMap<String, ExchangeLoader<I>>,
         clock: VirtualClock,
         transport: TransportRegistry,
+        runtime: Rc<dyn ExchangeRuntime>,
     ) -> Self {
         Self {
             loaders,
-            cache: RefCell::new(IndexMap::new()),
+            cache: Rc::new(RefCell::new(IndexMap::new())),
+            runtime,
             clock,
             transport,
         }
@@ -119,30 +130,52 @@ impl<I> ExchangeFactory<I> {
     pub async fn preload_exchange(&self, name: &str) -> Result<(), String> {
         self.load_exchange(name).await.map(|_| ())
     }
-    pub async fn preload_exchanges(&self, names: &[String]) -> Result<(), String> {
-        let mut pending: Vec<_> = names
+    pub fn preload_exchanges(
+        &self,
+        names: &[String],
+    ) -> impl Future<Output = Result<(), String>> + use<I>
+    where
+        I: 'static,
+    {
+        let pending = names
             .iter()
-            .map(|name| Some(Box::pin(self.load_exchange(name))))
+            .map(|name| {
+                let cached = self.cache.borrow().contains_key(name);
+                let loader = self.loaders.get(name).cloned();
+                let cache = self.cache.clone();
+                let name = name.clone();
+                let runtime = self.runtime.clone();
+                Js::Promise(Promise::spawn(
+                    &self.runtime,
+                    Box::pin(async move {
+                        if cached {
+                            return Ok(Js::Undefined);
+                        }
+                        let loader = loader.ok_or_else(|| {
+                            Thrown::from(ExchangeError::new(format!("Unknown exchange: {name}")))
+                        })?;
+                        let loading = loader();
+                        let constructor = start_eager(&runtime, async move {
+                            loading.await.map_err(ExchangeError::new)
+                        })
+                        .await
+                        .map_err(Thrown::from)?;
+                        cache.borrow_mut().insert(name, constructor);
+                        Ok(Js::Undefined)
+                    }),
+                ))
+            })
             .collect();
-        poll_fn(|cx| {
-            let mut waiting = false;
-            for future in &mut pending {
-                if let Some(task) = future {
-                    match task.as_mut().poll(cx) {
-                        Poll::Ready(Ok(_)) => *future = None,
-                        Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
-                        Poll::Pending => waiting = true,
-                    }
-                }
-            }
-            if waiting {
-                Poll::Pending
-            } else {
-                Poll::Ready(Ok(()))
-            }
-        })
-        .await
+        let aggregate = promise::all(&self.runtime, pending);
+        async move {
+            aggregate
+                .wait()
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_exchange_error().message)
+        }
     }
+
     pub fn is_exchange_loaded(&self, name: &str) -> bool {
         self.cache.borrow().contains_key(name)
     }
