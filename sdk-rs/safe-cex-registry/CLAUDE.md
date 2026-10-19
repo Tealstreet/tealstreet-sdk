@@ -122,11 +122,20 @@ venue cleanup, and disposal closes all registrations. Stream notifications carry
 in `native_account_streams` verify live frames and actual unsubscribe traffic.
 
 Native Store delivery reuses the worker's payload preparer and lodash throttle.
-Start cancels pending delivery and posts a full snapshot; live updates strip
-raw info and omit stable slices according to worker versions/update IDs.
-Close and deactivation cancel trailing delivery. The full emitter `update` event
-stays internal, so hosts receive Store state through one callback pipeline.
-`native_account_store` drives real Binance gateway and HTTP updates through it.
+It subscribes to canonical native state and retains that referent until the
+leading/trailing invocation. Postprocessing and capture occur only then or on an
+explicit snapshot, preserving latest-state delivery without a per-update copy.
+Preparation and capture retain root and every nested model's own-key order,
+including dynamically appended fields. Only the message-handler diagnostic field
+is projected for its typed processor; model rows are never decoded and re-encoded
+on the way out. Start cancels pending delivery and calls the real facade serialize
+method before preparing a full snapshot. Live updates strip raw info and omit
+stable slices according to worker versions/update IDs. Close and deactivation
+cancel trailing delivery. The full emitter `update` event stays internal.
+The actual constructor/Store/delivery witness compares six complete source graphs,
+including alternate orders for every model family. `native_account_store` drives
+real Binance gateway/HTTP updates and checks full-snapshot own keys before JSON
+can omit undefined properties.
 
 Every native HTTP host an account host builds shares one emitter slot;
 `open_native_account` binds the constructed exchange with `bind_http_events`, so
@@ -308,13 +317,10 @@ status/reason metadata without serializing response bodies; signing captures do
 not replace the slot, and successful responses clear it. `native_host_tunnel`
 exercises real WOO/Bybit HOW 404 reports and cyclic/nonfinite metadata profiles.
 
-Native account Store delivery subscribes to the canonical native state and retains
-that referent through the shared throttle. Leading/trailing delivery prepares
-and captures the canonical graph directly, retaining root and every nested model's
-own-key order. Explicit snapshots call the real facade serialize method before
-the same preparer. Only the message-handler diagnostic field is projected for its
-typed processor; model rows are never decoded and re-encoded on the way out.
-Dynamic live-state fields remain in their original appended positions. The actual
-native constructor/Store/delivery witness compares six complete source graphs,
-including alternate orders for every model family, and the account startup test
-checks full-snapshot own keys before JSON can omit undefined properties.
+Native listenOHLCV delivery calls Exchange::listen_ohlcv_retained and captures
+the original Js callback value in OwnedJsValue. It does not deserialize Candle
+before worker delivery. The Phemex recorded-feed child module constructs the
+real venue and uses native_account_call/watch for all 19 callbacks, checking
+string units and numeric bits before serialization and real unlisten cleanup.
+Typed-only venue implementations keep their declared Candle adaptation.
+

@@ -725,7 +725,15 @@ fn family(family: &str) {
                     let e = &e["args"][0];
                     assert_eq!(f.id.as_deref(), e["id"].as_str(), "private orders fill id");
                     assert_eq!(f.order_id.as_deref(), e["orderId"].as_str());
-                    assert_eq!(f.symbol.as_deref(), e["symbol"].as_str());
+                    assert_eq!(
+                        safe_cex_exchange::js_runtime::value::to_json(
+                            &safe_cex_exchange::js_runtime::value::from_retained_input(
+                                f.symbol.clone()
+                            )
+                        )
+                        .unwrap(),
+                        e["symbol"]
+                    );
                     assert_eq!(
                         f.side,
                         serde_json::from_value::<safe_cex_types::OrderSide>(e["side"].clone())
