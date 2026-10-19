@@ -392,3 +392,37 @@ fn worker_structured_clone_matches_node_graphs_and_refusals() {
         graph.delete(&utf16("set")).unwrap();
     }
 }
+
+mod clone_observation {
+    use safe_cex_exchange::js_runtime::globals::install_builtins;
+    use safe_cex_exchange::js_runtime::value::{Js, Prop, Thrown, error_object, utf16};
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/scripts/structured-clone-observers.rs"
+    ));
+}
+
+#[test]
+fn structured_clone_owner_profiles_match_node() {
+    let output = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/structured-clone-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(rows.len(), 8);
+    for row in rows {
+        let actual = clone_observation::observe(
+            &row["input"],
+            safe_cex_exchange::js_runtime::structured_clone::structured_clone,
+        );
+        assert_eq!(actual, row["output"], "STRUCTURED_CLONE {}", row["input"]);
+    }
+}
