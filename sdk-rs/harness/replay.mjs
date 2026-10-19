@@ -229,7 +229,7 @@ class Tape extends SharedTape {
       this.verifySignature(headers, query, body);
     }
     if (isWriteRequest(method, url)) this.outbound.push(requestKey(method, url, body));
-    return this.responses.respond(method, url, body, this.commandIndex, this.time);
+    return super.respond(method, url, body);
   }
 
   assertSubscribed(socket, message, subscriptionKey) {
@@ -309,6 +309,7 @@ class Tape extends SharedTape {
     const recordedLifecycle = records.some((r) => r.type === 'connect');
     if (values.venue !== 'bitunix' && !recordedLifecycle) await ensureReady();
     begin();
+    this.replayClock = clock;
     clock?.start();
     this.peakBytes = Math.max(this.peakBytes ?? 0, this.sampleMemory?.() ?? 0);
     const start = performance.now();

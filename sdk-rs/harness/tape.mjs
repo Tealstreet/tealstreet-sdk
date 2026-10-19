@@ -175,6 +175,22 @@ export class Tape {
       }
       return prepareFrame(frame);
     });
+    // Legacy captures omit connect anchors. Only the open cohort before the
+    // first close may bootstrap readiness; later opens still drive reconnects.
+    this.socketLifecycle = new Map();
+    for (const frame of this.frames) {
+      if (!['open', 'close'].includes(frame.type)) continue;
+      let lifecycle = this.socketLifecycle.get(frame.url);
+      if (!lifecycle) {
+        lifecycle = { hasOpen: false, initial: new Set(), pastInitial: false };
+        this.socketLifecycle.set(frame.url, lifecycle);
+      }
+      if (frame.type === 'close') lifecycle.pastInitial = true;
+      else {
+        lifecycle.hasOpen = true;
+        if (!lifecycle.pastInitial) lifecycle.initial.add(frame.connection ?? lifecycle.initial.size);
+      }
+    }
     this.sockets = [];
     this.open = new Map();
     this.connectionCounts = new Map();
@@ -183,7 +199,12 @@ export class Tape {
   }
   get unserved() { return this._unserved; }
 
+  get responseTime() {
+    return this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time ?? 0;
+  }
+
   respond(method, url, body) {
+    if (typeof this.responses.respond === 'function') return this.responses.respond(method, url, body, this.commandIndex ?? 0, this.responseTime);
     const queue = this.responses.get(`${method} ${canonicalUrl(url)}`);
     const matches = queue?.filter(
       (r) => r.requestBody === undefined || canonicalBody(r.requestBody) === canonicalBody(body),
@@ -210,9 +231,10 @@ export class Tape {
     this.byConnection.set(`${url}:${connection}`, socket);
     // Old synthetic fixtures have no lifecycle records; live tapes drive every
     // open explicitly, including failed startup attempts and reconnects.
-    const hasLifecycle = this.records.some((r) => r.type === 'open' && this.canonicalize(r.url) === url);
+    const lifecycle = this.socketLifecycle.get(url);
+    const hasLifecycle = lifecycle?.hasOpen;
     const explicit = this.explicitOpens || this.records.some((r) => r.type === 'connect' && this.canonicalize(r.url) === url);
-    if (!hasLifecycle || !explicit) setImmediate(() => this.openSocket(socket));
+    if (!hasLifecycle || (!explicit && lifecycle.initial.has(connection))) setImmediate(() => this.openSocket(socket));
     return socket;
   }
 
@@ -272,6 +294,7 @@ export class Tape {
   async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
     await ready();
     begin();
+    this.replayClock = clock;
     clock?.start();
     const start = performance.now();
     let delivered = 0;
@@ -282,6 +305,7 @@ export class Tape {
         const wait = frame.t - (performance.now() - start);
         if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
       }
+      this.time = frame.t;
       await clock?.advance(frame.t);
       if (frame.type === 'command') {
         this.results.push(

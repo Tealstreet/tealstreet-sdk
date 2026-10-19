@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { Responses } from './responses.mjs';
 import { bodyBytes, canonicalBody, canonicalUrl, replayStoreReady, ReplayClock, Tape } from './tape.mjs';
 
 const url = 'https://api.mexc.com/api/v1/private/order/cancel';
@@ -234,4 +235,51 @@ test('explicit remote closes notify once and prevent delivery to the old connect
   await tape.lifecycle(tape.frames[0]);
   assert.deepEqual(seen, [1006]);
   await assert.rejects(tape.lifecycle(tape.frames[0]), /before recorded remote close/);
+});
+
+test('timer HTTP reads and mutations use the timer time while advancing toward a later frame', async () => {
+  const read = { type: 'http', method: 'GET', url: 'https://example.test/state', status: 200 };
+  const write = { type: 'http', method: 'POST', url: 'https://example.test/change', status: 200, body: 'written', effectiveAt: 3000 };
+  const records = [
+    { ...read, body: 'initial', effectiveAt: 0 },
+    { ...read, body: 'early', effectiveAt: 500 },
+    { ...read, body: 'later', effectiveAt: 3000 }, write,
+    { type: 'command', t: 5000, op: 'finish' },
+  ];
+  const responses = new Responses(records, (method, url) => method + url);
+  const tape = new Tape(records, { responses });
+  const clock = new ReplayClock(1700000000000);
+  const seen = [];
+  clock.install();
+  try {
+    await tape.play(undefined, async () => {
+      for (const time of [1000, 4000]) setTimeout(() => {
+        seen.push([tape.respond('GET', read.url).body, tape.respond('POST', write.url).status]);
+      }, time);
+    }, async () => [], clock);
+    assert.deepEqual(seen, [['early', 599], ['later', 200]]);
+    assert.equal(responses.unusedWrites(), 0);
+  } finally { clock.restore(); }
+});
+
+test('legacy shared-URL initial sockets auto-open but recorded reconnects wait for their open', async () => {
+  const url = 'wss://example.test/shared';
+  const tape = new Tape([
+    { type: 'open', t: 0, url, socket: 0 },
+    { type: 'open', t: 1, url, socket: 1 },
+    { type: 'close', t: 2, url, socket: 0, code: 1006 },
+    { type: 'open', t: 50, url, socket: 2 },
+  ]);
+  const seen = [];
+  tape.connect(url, () => seen.push('public'), () => {}, () => {
+    tape.connect(url, () => seen.push('reconnect'), () => {});
+  });
+  tape.connect(url, () => seen.push('private'), () => {});
+  await new Promise(setImmediate);
+  assert.deepEqual(seen, ['public', 'private']);
+  await tape.lifecycle(tape.frames[2]);
+  await new Promise(setImmediate);
+  assert.deepEqual(seen, ['public', 'private']);
+  await tape.lifecycle(tape.frames[3]);
+  assert.deepEqual(seen, ['public', 'private', 'reconnect']);
 });

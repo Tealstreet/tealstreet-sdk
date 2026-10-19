@@ -402,3 +402,15 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
 - Workspace bans/fmt/clippy PASS. Full workspace tests, wasm lint/build and root
   checks continue; final measured artifact and combined replays are recorded on
   PR #1309. Keep the existing 3 MiB budget with landing's browser optimization.
+- Eight-venue artifact: 2,705,853 bytes with landing's `s` build, below existing
+  3 MiB cap. Workspace native/wasm checks, adapter 19/host 26 tests PASS.
+  Actual rebuilt FrameApplier full-to-empty/snapshot probe PASS.
+- New integration review found virtual timers seeing future response stages
+  and legacy reconnects opening before their recorded event. Fix both using
+  active clock elapsed eligibility and per-URL initial open cohorts. Both
+  regressions fail before/pass after; helper suite 51 PASS; independent original
+  probes and 27 focused tests PASS with no further findings.
+- Root typecheck/lint PASS. First full tests hit HyroTrader five-second import
+  timeouts under load; isolated 10 tests PASS and full retry is running. Bitunix
+  and Binance private clock smoke PASS. Final eight-venue gates and CI are
+  tracked on PR #1309 before the authorized merge/follow-up branch.
