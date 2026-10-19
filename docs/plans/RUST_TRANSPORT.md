@@ -138,4 +138,24 @@ nested workspace.
 - Fresh eight-venue wasm: **2,579,548 bytes**, below the unchanged
   **2,621,440-byte** budget. **22 real SDK/wasm**, **23 host**, and **45 harness**
   tests pass. The 59 routing and 46 HOW regressions remain green.
-- Running the full **eight public / eleven private** replay gates before PR.
+- Full **eight public / eleven private** replay gates: **19/19 PASS**. Private
+  coverage includes all eight venues and four OKX region/demo variants.
+
+Eight-venue public replay measurements (CPU in ms, retained memory in MB):
+
+| Venue | TS CPU | Rust CPU | TS retained | Rust retained | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Binance | 270.6 | 146.4 | 4.2 | 2.2 | PASS |
+| BingX | 147.2 | 104.5 | 3.6 | 2.0 | PASS |
+| Bybit | 517.5 | 404.0 | 6.3 | 2.4 | PASS |
+| OKX | 632.3 | 528.6 | 5.1 | 3.4 | PASS |
+| WEEX | 138.8 | 94.1 | 5.0 | 2.1 | PASS |
+| MEXC | 501.7 | 248.9 | 10.0 | 3.4 | PASS |
+| BloFin | 249.3 | 213.2 | 3.3 | 1.9 | PASS |
+| Crypto.com | 142.0 | 103.6 | 2.0 | 1.4 | PASS |
+
+BloFin's first run rejected a negative TS retained-memory baseline; repeated
+that gate unchanged and obtained valid passing measurements above. The final
+OKX EU demo private run also required a retry after its TS backing-buffer
+baseline failed to settle before replay. No gate
+thresholds, normalizations or size budgets changed for this transport work.
