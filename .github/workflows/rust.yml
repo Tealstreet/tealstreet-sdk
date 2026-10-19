@@ -137,7 +137,7 @@ jobs:
         run: yarn workspace @tealstreet/safe-cex-wasm test
       - name: Check the wasm size budget
         run: |
-          size=$(stat -c%s sdk-rs/safe-cex-wasm/pkg/node/safe_cex_wasm_bg.wasm)
+          size=$(stat -c%s sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm)
           echo "wasm: $size bytes (budget $WASM_BUDGET_BYTES)"
           test "$size" -le "$WASM_BUDGET_BYTES"
       - name: Binance public data (correctness, CPU and memory)
