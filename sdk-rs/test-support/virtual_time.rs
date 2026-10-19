@@ -19,6 +19,18 @@ impl SleepWakers {
         self.0.borrow_mut().push((deadline, Rc::downgrade(&slot)));
         slot
     }
+    #[allow(
+        dead_code,
+        reason = "only deadline-stepping harnesses query the next timer"
+    )]
+    pub fn next_deadline(&self, now: f64) -> Option<f64> {
+        self.0
+            .borrow()
+            .iter()
+            .filter(|(deadline, slot)| *deadline > now && slot.strong_count() > 0)
+            .map(|(deadline, _)| *deadline)
+            .min_by(f64::total_cmp)
+    }
     pub fn wake_due(&self, now: f64) {
         let mut ready = Vec::new();
         self.0.borrow_mut().retain(|(deadline, slot)| {

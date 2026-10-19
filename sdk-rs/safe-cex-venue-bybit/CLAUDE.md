@@ -979,7 +979,7 @@ projections or a second callback registry.
 The SDK invoke/invoke_unit and get_account wrappers call their installed member
 before returning a waiter and await the same canonical Promise. Preserve this
 boundary when changing the typed facade; do not add a second Promise driver.
-DIVERGENCE_FIX_AUDIT.md records 29 reconciled rows and eight remaining delegated rows.
+DIVERGENCE_FIX_AUDIT.md records 33 reconciled rows and four remaining delegated rows.
 
 Delegated history audit rows 6/16: keep the order-history mapper synchronous and
 raw/source-equal. At the final live historical-fills result, shared strict-output
@@ -1032,9 +1032,22 @@ Its five/sixth-request witness matches the real axios-rate-limit dependency with
 the maintained constructor's options, including frozen wall time. Preserve the
 unlimited/secondary routing checks and all 36 existing constructor profiles.
 
+Public scheduling audit rows 1/2/12/13 are ACCEPT through the live dedicated
+Spot/Inverse sockets. The first subscription precedes ping; socket-owned tails
+continue without caller polling at exact 10ms subscription and 5ms market boundaries.
+Run public_topic_binding with Node enabled and public-scheduling-controls.py;
+the latter rejects deferred prefixes, zero delay and abandoned owned tails.
+Keep the accepted owner-disposal teardown and original topic admission guards.
+
 The private onOpen specific-claims review records bounded disposal/recovery
 differences separately from the shared original-cause diagnostic correction.
 See `../safe-cex-exchange/PRIVATE_OPEN_REVIEW.md`; no Wasm-only row is closed.
+
+The binding harness preserves pending-job registration order ahead of new jobs.
+The demo reconciliation witness compares the maintained source's interleaved
+five-RPS timeline, including two complete twenty-page reads and exact warning
+arguments. Retry sleeps stay pending until explicit virtual-clock advancement.
+See RATE_WINDOW_FIXTURE_REVIEW.md and scripts/reconciliation-timeline-source.cjs.
 
 The unknown-send guard in primary/demo submitCreateOrders and the shared global
 uses the live rejection with the single lower decision algorithm. No whole-error
