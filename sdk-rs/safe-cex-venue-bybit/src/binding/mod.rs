@@ -17,3 +17,7 @@ pub(crate) use safe_cex_exchange::js_runtime::{promise, value};
 #[cfg(test)]
 #[cfg(not(target_arch = "wasm32"))]
 mod delegated_socket_tests;
+
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+mod delegated_controls_tests;

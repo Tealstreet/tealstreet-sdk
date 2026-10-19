@@ -548,11 +548,27 @@ fn constructor_clients_and_sockets_follow_actual_source() {
     reason = "browser-local fixture adapters"
 )]
 fn concrete_private_protocol_composes_source_open_sequence_and_real_auth() {
+    composed_private_open(safe_cex_types::ExchangeName::Bybit);
+}
+
+#[test]
+#[ignore = "requires frozen workspace Node dependencies; mandatory venue-oracle:bybit CI step"]
+fn delegated_inverse_and_spot_reconnect_start_eagerly_through_real_protocol() {
+    composed_private_open(safe_cex_types::ExchangeName::Bybitinverse);
+    composed_private_open(safe_cex_types::ExchangeName::Bybitspot);
+}
+
+#[allow(
+    clippy::arc_with_non_send_sync,
+    reason = "browser-local fixture adapters"
+)]
+fn composed_private_open(family: safe_cex_types::ExchangeName) {
     let output = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/scripts/private-open-fixtures.mjs"
         ))
+        .arg(serde_json::to_value(&family).unwrap().as_str().unwrap())
         .output()
         .unwrap();
     assert!(
@@ -574,7 +590,7 @@ fn concrete_private_protocol_composes_source_open_sequence_and_real_auth() {
                 wrong_variant: false,
             });
             let mut base = BaseExchange::new(
-                safe_cex_types::ExchangeName::Bybit,
+                family.clone(),
                 serde_json::from_value(json!({"key":"fixture-key","secret":"secret"})).unwrap(),
                 Rc::new(DefaultStore::new()),
                 runtime.clone(),

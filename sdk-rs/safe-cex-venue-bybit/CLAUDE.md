@@ -979,7 +979,10 @@ projections or a second callback registry.
 The SDK invoke/invoke_unit and get_account wrappers call their installed member
 before returning a waiter and await the same canonical Promise. Preserve this
 boundary when changing the typed facade; do not add a second Promise driver.
-DIVERGENCE_FIX_AUDIT.md records 33 reconciled rows and four remaining delegated rows.
+DIVERGENCE_FIX_AUDIT.md records all 37 reconciled rows. The final delegated
+3/7/8/23 use actual inverse/Spot reconnect and primary/demo control bindings;
+keep eager prefixes, original Promise continuations and the reviewed private-open
+disposal divergence. `delegated-audit-controls.py` pins probe sensitivity.
 
 Delegated history audit rows 6/16: keep the order-history mapper synchronous and
 raw/source-equal. At the final live historical-fills result, shared strict-output
