@@ -316,3 +316,16 @@ before collection. Deterministic delayed-cleanup tests protect the bounds.
 Eight-family current and isolated baseline release builds run with two Cargo
 jobs; baseline exact130-file source audit matches a4d9e2ec84, opt-levels unchanged.
 Final public comparisons and gross CPU profiles await these artifacts.
+
+Eight-family controlled public comparisons all pass strict output/egress and
+CPU/memory thresholds, but retained ratios regress slightly on Bybit, BingX,
+BloFin and WEEX; these are diagnostic, not completion numbers. Page traces show
+Bybit retains the drained streamed-market page allocation through startup, and
+combined Store/book frames can grow the whole output after string metadata is
+live. Reviewed fixes adopt the first Bybit page and drop later drained buffers
+before startup, and reserve the combined Store+valid-book bound before writing.
+Engine52 and Bybit43 tests, fmt and strict clippy pass. Composition regression
+proves unchanged bytes with no buffer growth; missing-market/book and market-only
+state semantics are covered. Independent plan/implementation review passes.
+BloFin isolated budget is783360 bytes (measured759953), replacing its missing
+manifest entry. Next integrate Backpack landing before one release rebuild.

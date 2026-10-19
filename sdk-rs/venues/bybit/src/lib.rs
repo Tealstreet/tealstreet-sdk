@@ -573,7 +573,15 @@ impl BybitLinear {
         } else {
             &mut self.startup.trading_pages
         };
-        pages.append(&mut markets);
+        if pages.is_empty() {
+            // Adopt the first streamed page instead of copying its row buffer.
+            std::mem::swap(pages, &mut markets);
+        } else {
+            pages.append(&mut markets);
+        }
+        // Later pages keep their allocation after append; release it before
+        // startup builds market indexes, ticker rows and subscriptions.
+        drop(markets);
         if let Some(cursor) = cursor {
             self.request_markets(cx, prelaunch, Some(&cursor));
             return;

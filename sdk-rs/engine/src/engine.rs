@@ -711,6 +711,13 @@ impl<V: Venue> Engine<V> {
         let buffer = std::mem::take(&mut self.io.snapshot);
         let mut w = FrameWriter::new(buffer, now);
         let everything = self.store.everything();
+        let book_bytes: usize = self
+            .venue
+            .books()
+            .filter(|(symbol, _)| self.store.market_index(symbol).is_some())
+            .map(|(_, book)| book.frame_size_hint())
+            .sum();
+        w.reserve(self.store.frame_size_hint(&everything) + book_bytes);
         self.store.write(&everything, &mut w);
         for (symbol, book) in self.venue.books() {
             if let Some(market) = self.store.market_index(symbol) {
@@ -738,10 +745,27 @@ impl<V: Venue> Engine<V> {
         let buffer = std::mem::take(&mut self.io.frame);
         let mut w = FrameWriter::new(buffer, now);
         let pending = store.then(|| self.store.take_pending());
+        let books = std::mem::take(&mut self.io.changed_books);
+        let book_bytes: usize = books
+            .iter()
+            .filter_map(|symbol| {
+                let (Some(book), Some(_)) =
+                    (self.venue.book(symbol), self.store.market_index(symbol))
+                else {
+                    return None;
+                };
+                Some(book.frame_size_hint())
+            })
+            .sum();
+        w.reserve(
+            pending
+                .as_ref()
+                .map_or(0, |p| self.store.frame_size_hint(p))
+                + book_bytes,
+        );
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
         }
-        let books = std::mem::take(&mut self.io.changed_books);
         for symbol in &books {
             if let (Some(book), Some(market)) =
                 (self.venue.book(symbol), self.store.market_index(symbol))
@@ -794,6 +818,7 @@ mod streaming_tests {
         rows: Vec<String>,
         body: Option<String>,
         failure: Option<String>,
+        books: Vec<(String, Book)>,
     }
 
     impl Venue for StreamVenue {
@@ -837,11 +862,18 @@ mod streaming_tests {
         }
         fn on_timer(&mut self, _cx: &mut Cx<'_, Self::Pending>, _timer: TimerId) {}
         fn on_command(&mut self, _cx: &mut Cx<'_, Self::Pending>, _command: Command) {}
-        fn book(&self, _symbol: &str) -> Option<&Book> {
-            None
+        fn book(&self, symbol: &str) -> Option<&Book> {
+            self.books
+                .iter()
+                .find(|(s, _)| s == symbol)
+                .map(|(_, book)| book)
         }
         fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-            Box::new(std::iter::empty())
+            Box::new(
+                self.books
+                    .iter()
+                    .map(|(symbol, book)| (symbol.as_str(), book)),
+            )
         }
     }
 
@@ -851,6 +883,7 @@ mod streaming_tests {
             rows: Vec::new(),
             body: None,
             failure: None,
+            books: Vec::new(),
         });
         engine.start(0.0);
         let request = engine
@@ -873,6 +906,93 @@ mod streaming_tests {
         }
         engine.handle(1.0, Event::HttpEnd { request });
         engine.venue
+    }
+
+    #[test]
+    fn frame_reservations_filter_missing_books_and_preserve_market_only_pending_state() {
+        use crate::book::BookSide;
+        use crate::model::{Limits, Market, MinMax, Precision};
+        use crate::wire::{book_top, sections};
+
+        for market_only in [false, true] {
+            let mut book = Book::default();
+            book.load_sorted(BookSide::Bids, [(99.0, 2.0)]);
+            book.load_sorted(BookSide::Asks, [(101.0, 3.0)]);
+            let mut engine = Engine::new(StreamVenue {
+                at: ArrayAt::Root,
+                rows: Vec::new(),
+                body: None,
+                failure: None,
+                books: vec![("A".into(), book.clone()), ("missing-market".into(), book)],
+            });
+            let market = Market {
+                id: "A-SWAP".into(),
+                symbol: "A".into(),
+                pretty_symbol: None,
+                base: "A".into(),
+                quote: "USD".into(),
+                active: true,
+                precision: Precision {
+                    amount: 1.0,
+                    price: 1.0,
+                },
+                limits: Limits {
+                    amount: MinMax {
+                        min: 1.0,
+                        max: 10.0,
+                    },
+                    leverage: MinMax {
+                        min: 1.0,
+                        max: 10.0,
+                    },
+                    price: None,
+                },
+                contract_size: None,
+                is_expiring: None,
+                is_inverse: None,
+                is_spot: None,
+                is_perpetual: None,
+                is_read_only: None,
+                taker_fee: None,
+                maker_fee: None,
+            };
+            let mut no_book = market.clone();
+            no_book.id = "no-book".into();
+            no_book.symbol = "no-book".into();
+            engine.store.set_markets(vec![market, no_book]);
+            engine.io.changed_books = vec!["no-book".into(), "missing-market".into(), "A".into()];
+
+            let mut sequential = FrameWriter::new(Vec::new(), 5.0);
+            engine
+                .store
+                .write(&engine.store.everything(), &mut sequential);
+            engine.venue.book("A").unwrap().write(0, &mut sequential);
+            let expected = sequential.finish();
+            assert_eq!(engine.snapshot_frame(5.0), expected);
+            let frame = if market_only {
+                engine.take_market_frame(5.0)
+            } else {
+                engine.take_frame(5.0)
+            }
+            .unwrap()
+            .to_vec();
+            let books: Vec<_> = sections(&frame)
+                .filter(|(kind, _)| *kind == section::BOOK)
+                .collect();
+            assert_eq!(books.len(), 1);
+            assert_eq!(book_top(books[0].1), Some((0, 99.0, 101.0)));
+            if market_only {
+                assert_eq!(sections(&frame).count(), 1);
+                let deferred = engine.take_frame(5.0).unwrap();
+                assert_eq!(
+                    sections(deferred).map(|(kind, _)| kind).collect::<Vec<_>>(),
+                    [section::MARKETS, section::STATUS, section::STRINGS]
+                );
+            } else {
+                assert!(sections(&frame).any(|(kind, _)| kind == section::MARKETS));
+            }
+            assert!(engine.take_frame(5.0).is_none());
+        }
     }
 
     #[test]

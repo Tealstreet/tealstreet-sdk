@@ -106,7 +106,11 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
-    #[cfg(any(feature = "venue-blofin", feature = "venue-okx", feature = "venue-weex"))]
+    #[cfg(any(
+        feature = "venue-blofin",
+        feature = "venue-okx",
+        feature = "venue-weex"
+    ))]
     #[serde(default)]
     passphrase: Option<String>,
     #[cfg(feature = "venue-weex")]
@@ -543,7 +547,7 @@ impl WasmEngine {
     #[cfg(any(
         feature = "venue-binance",
         feature = "venue-bingx",
-    feature = "venue-blofin",
+        feature = "venue-blofin",
         feature = "venue-bybit",
         feature = "venue-cryptocom",
         feature = "venue-mexc",

@@ -68,7 +68,7 @@ impl Book {
 
     /// Write the full book as a `BOOK` section: rows of `[price, amount, total]`.
     pub fn write(&self, market: u32, w: &mut FrameWriter<'_>) {
-        w.reserve(24 + 24 * (self.bids.len() + self.asks.len()));
+        w.reserve(self.frame_size_hint());
         w.begin(section::BOOK);
         w.u32s([market, self.bids.len() as u32, self.asks.len() as u32, 0]);
         for levels in [&self.bids, &self.asks] {
@@ -79,6 +79,10 @@ impl Book {
             }
         }
         w.end();
+    }
+
+    pub(crate) fn frame_size_hint(&self) -> usize {
+        24 + 24 * (self.bids.len() + self.asks.len())
     }
 
     fn side_mut(&mut self, side: BookSide) -> &mut Vec<(f64, f64)> {

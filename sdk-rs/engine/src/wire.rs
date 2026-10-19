@@ -372,6 +372,33 @@ mod tests {
             ..Ticker::default()
         }]);
         let pending = store.take_pending();
+        let mut book = crate::book::Book::default();
+        book.load_sorted(
+            crate::book::BookSide::Bids,
+            (1..=1000).rev().map(|price| (price as f64, 1.0)),
+        );
+        book.load_sorted(
+            crate::book::BookSide::Asks,
+            (1001..=2000).map(|price| (price as f64, 2.0)),
+        );
+        let mut combined = FrameWriter::new(Vec::new(), 1234.0);
+        combined.reserve(store.frame_size_hint(&pending) + book.frame_size_hint());
+        let allocation = combined.buf.as_ptr();
+        let capacity = combined.buf.capacity();
+        store.write(&pending, &mut combined);
+        assert_eq!(combined.buf.as_ptr(), allocation);
+        assert_eq!(combined.buf.capacity(), capacity);
+        book.write(0, &mut combined);
+        assert_eq!(combined.buf.as_ptr(), allocation);
+        assert_eq!(combined.buf.capacity(), capacity);
+        let combined = combined.finish();
+        assert_eq!(combined.as_ptr(), allocation);
+        assert_eq!(combined.capacity(), capacity);
+        let mut sequential = FrameWriter::new(Vec::new(), 1234.0);
+        store.write(&pending, &mut sequential);
+        book.write(0, &mut sequential);
+        assert_eq!(combined, sequential.finish(), "composition preserves wire");
+
         let mut w = FrameWriter::new(Vec::new(), 1234.0);
         store.write(&pending, &mut w);
         let candle = Candle {

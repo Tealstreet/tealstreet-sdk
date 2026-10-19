@@ -520,7 +520,7 @@ impl Store {
         }
     }
 
-    fn frame_size_hint(&self, pending: &Pending) -> usize {
+    pub(crate) fn frame_size_hint(&self, pending: &Pending) -> usize {
         let changes = &pending.changes;
         let mut size = 0;
         let mut strings = 0;
