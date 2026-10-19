@@ -160,3 +160,184 @@ fn native_snapshot_guards_precede_tries_coercion() {
         assert_eq!(serde_json::json!(rows), expected["guarded"]);
     });
 }
+
+#[test]
+fn native_base_input_secondary_keeps_capabilities_and_original_failures() {
+    use safe_cex_exchange::js_runtime::value::arg;
+    use std::cell::RefCell;
+    let expected = oracle();
+    let mut observations = vec![];
+    for mode in ["single", "split", "throw"] {
+        let (this, _shared, _owner) = facade(false);
+        let cause = Js::object(vec![("units", Js::utf16(&[0xd800]))]);
+        let original = cause.clone();
+        let payload = Js::object(vec![("opaque", Js::Undefined)]);
+        let alias = payload.clone();
+        let calls = Rc::new(Cell::new(0));
+        let invoked = calls.clone();
+        let seen = Rc::new(RefCell::new(vec![]));
+        let options_seen = seen.clone();
+        let create = Js::function("createApi", move |_, args| {
+            invoked.set(invoked.get() + 1);
+            if mode == "throw" {
+                return Err(Thrown::new(original.clone()));
+            }
+            let options = arg(&args, 0);
+            options_seen.borrow_mut().push(options.clone());
+            let tag = options.get("key")?;
+            Ok(Js::object(vec![
+                ("tag", tag),
+                (
+                    "get",
+                    Js::function("get", |_, args| Ok(arg(&args, 0))),
+                ),
+                (
+                    "post",
+                    Js::function("post", |this, args| {
+                        Ok(Js::array(vec![this.get("tag")?, arg(&args, 0)]))
+                    }),
+                ),
+            ]))
+        });
+        let signer = Js::function("host capability", |_, _| Ok(Js::Undefined));
+        let options = Js::object(vec![
+            ("key", Js::str("primary")),
+            ("secret", Js::str("secret")),
+            (
+                "secondary_key",
+                Js::str(if mode == "single" { "" } else { "secondary" }),
+            ),
+            ("remoteSigner", signer.clone()),
+            ("payloadSigner", signer.clone()),
+            ("unread", Js::utf16(&[0xd800])),
+        ]);
+        let result = this.call_method(
+            "createXhrWithSecondaryKey",
+            vec![options.clone(), create, Js::Undefined],
+        );
+        let observation = match result {
+            Err(error) => serde_json::json!({"mode":mode,"calls":calls.get(),"causeIdentity":error.value.same_reference(&cause)}),
+            Ok(xhr) => {
+                assert!(seen.borrow()[0].same_reference(&options));
+                for opts in seen.borrow().iter() {
+                    assert!(opts.get("remoteSigner").unwrap().same_reference(&signer));
+                    assert!(opts.get("payloadSigner").unwrap().same_reference(&signer));
+                    assert_eq!(opts.get("unread").unwrap().to_js_string().unwrap().as_ref(), &[0xd800]);
+                }
+                let get = xhr.call_method("get", vec![payload]).unwrap();
+                let post = xhr.call_method("post", vec![alias.clone()]).unwrap();
+                serde_json::json!({"mode":mode,"calls":calls.get(),
+                    "shared":xhr.same_reference(&this.get("_primaryXhr").unwrap()) && xhr.same_reference(&this.get("_secondaryXhr").unwrap()),
+                    "getIdentity":get.same_reference(&alias),"postIdentity":post.get("1").unwrap().same_reference(&alias),
+                    "postTag":post.get("0").unwrap().to_display(),"units":options.get("unread").unwrap().to_js_string().unwrap().as_ref()})
+            }
+        };
+        observations.push(observation);
+    }
+    assert_eq!(serde_json::json!(observations), expected["secondaryOwners"]);
+}
+
+#[test]
+fn native_base_input_overlay_runs_the_installed_callable() {
+    let expected = oracle();
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&executor, async {
+        let mut rows = vec![];
+        for mode in ["null", "undefined", "identity"] {
+            let (this, shared, owner) = facade(false);
+            let calls = Rc::new(Cell::new(0));
+            let invoked = calls.clone();
+            let overlay = match mode {
+                "null" => Js::Null,
+                "undefined" => Js::Undefined,
+                _ => Js::function("overlay", move |_, args| {
+                    invoked.set(invoked.get() + 1);
+                    Ok(args[0].clone())
+                }),
+            };
+            let result = this
+                .call_method(
+                    "loadAccountMarketOverlay",
+                    vec![Js::function("load", move |_, _| Ok(overlay.clone()))],
+                )
+                .unwrap();
+            let result = await_js(
+                &(shared.runtime.clone() as Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>),
+                result,
+            )
+            .await
+            .unwrap();
+            let markets = owner.base().adapt_external_markets(vec![]);
+            rows.push(serde_json::json!({"mode":mode,"undefinedResult":result.is_undefined(),"calls":calls.get(),"length":markets.len()}));
+        }
+        assert_eq!(serde_json::json!(rows), expected["overlayOwners"]);
+    });
+}
+
+#[test]
+fn native_base_input_worker_rpc_keeps_the_reached_wire_fields() {
+    use safe_cex_exchange::js_runtime::value::to_json;
+    use std::cell::RefCell;
+    let expected = oracle();
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&executor, async {
+        let mut rows = vec![];
+        for success in [true, false] {
+            let (this, shared, owner) = facade(false);
+            let request = Rc::new(RefCell::new(Js::Undefined));
+            let captured = request.clone();
+            owner.base().on("callMethod", Rc::new(move |_, value| {
+                *captured.borrow_mut() = value.clone();
+                Ok(())
+            }));
+            let result = this.call_method("callMethodInWorker", vec![Js::str("removeOrders"), Js::array(vec![Js::object(vec![("id", Js::str("wire"))])])]).unwrap();
+            let captured = request.borrow().clone();
+            assert_eq!(to_json(&captured.get("args").unwrap()).unwrap(), serde_json::json!([[{"id":"wire"}]]));
+            assert_eq!(captured.get("method").unwrap().to_display(), "removeOrders");
+            let response = if success { Js::object(vec![("removed", Js::str("wire"))]) } else { Js::object(vec![("name", Js::str("WorkerFailure")),("message", Js::str("rejected")),("code", Js::Number(409.)),("stack",Js::str("worker stack"))]) };
+            owner.base().emit("callMethod:done",Js::object(vec![("requestId",captured.get("requestId").unwrap()),("success",Js::Bool(success)),("result",response)])).unwrap();
+            let result=await_js(&(shared.runtime.clone() as Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>),result).await;
+            rows.push(match result {
+                Ok(value)=>serde_json::json!({"success":true,"removed":value.get("removed").unwrap().to_display()}),
+                Err(error)=>serde_json::json!({"success":false,"name":error.value.get("name").unwrap().to_display(),"message":error.message(),"code":error.value.get("code").unwrap().to_number().unwrap(),"stack":error.value.get("stack").unwrap().to_display()})
+            });
+            // The installed converter must retain the exact original coercion failure.
+            let cause = Js::object(vec![("opaque",Js::utf16(&[0xd800]))]);
+            let thrown=cause.clone();
+            let argument=Js::object(vec![("toString",Js::function("throw",move |_,_|Err(Thrown::new(thrown.clone()))))]);
+            let rejected=this.call_method("getOrFetchPositionsForSymbol",vec![argument]).unwrap();
+            let error=await_js(&(shared.runtime.clone() as Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>),rejected).await.unwrap_err();
+            assert!(error.value.same_reference(&cause));
+        }
+        assert_eq!(serde_json::json!(rows),expected["workerOwners"]);
+    });
+}
+
+#[test]
+fn native_base_overlay_propagates_original_throw_instead_of_markets() {
+    let expected = oracle();
+    assert_eq!(expected["overlayThrow"]["propagates"], true);
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&executor, async {
+        let (this, shared, owner) = facade(false);
+        let cause = Thrown::error("RangeError", "overlay source failure").value;
+        cause.set("message", Js::utf16(&[0x62, 0xd800])).unwrap();
+        let original = cause.clone();
+        let overlay = Js::function("throwing overlay", move |_, _| {
+            Err(Thrown::new(original.clone()))
+        });
+        let loading = this.call_method("loadAccountMarketOverlay", vec![Js::function("load", move |_, _| Ok(overlay.clone()))]).unwrap();
+        await_js(&(shared.runtime.clone() as Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>), loading).await.unwrap();
+        let outcome = owner.base().adapt_external_markets(vec![]);
+        assert!(format!("{outcome:?}").starts_with("Err("), "OVERLAY_ORIGINAL_THROW: source rejects instead of returning unadapted markets");
+    });
+}
