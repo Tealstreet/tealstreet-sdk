@@ -198,3 +198,10 @@ have zero unmatched requests, unused writes or protocol errors. Harness/merge
 reviews are clean. Five-venue combined build, thirteen replays and final-head CI
 remain the landing checks; all earlier performance numbers are historical and
 will be superseded by the final measurement model on PR#1301.
+
+The final five-venue artifact is2,150,200 bytes:53,048 bytes above the former
+four-venue2MiB cap. Raise only the static combined binary budget to2.25MiB
+(2,359,296 bytes,9.7% headroom). CPU/memory gates remain Rust<TS; measurements
+retain all heap/backing-buffer/WASM components. Workspace checks, SDK wasm17,
+host7 and harness14 tests pass on this combined build. The artifact addition
+is measured rather than inferred from isolated venue builds.

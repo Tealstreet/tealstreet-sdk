@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Combined Binance, Bybit, Crypto.com, OKX and WEEX; remeasure after additions.
-      WASM_BUDGET_BYTES: 2097152
+      # Five venues: measured 2,150,200 bytes locally; allow 2.25 MiB.
+      WASM_BUDGET_BYTES: 2359296
     defaults:
       run:
         working-directory: .
