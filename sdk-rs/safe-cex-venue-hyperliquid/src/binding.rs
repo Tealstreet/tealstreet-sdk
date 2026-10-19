@@ -9,6 +9,11 @@ mod cloid_audit;
 #[path = "../tests/support/order_error_audit.rs"]
 mod order_error_audit;
 
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "../tests/support/signing_audit.rs"]
+mod signing_audit;
+
 use crate::{
     cloid::hyperliquid_client_order_id_rule,
     core_exchange_class,

@@ -408,51 +408,59 @@ impl JournalFolder for ReceiverFolder {
         from: f64,
         to: f64,
         symbol_scoped: bool,
-        resolve_settle_currency: Box<dyn Fn(&str) -> Result<String, ExchangeError> + 'a>,
+        resolve_settle_currency: Box<dyn Fn(&str) -> Result<String, ExchangeError>>,
     ) -> ExchangeFuture<'a, Vec<Value>> {
+        let runtime = self.runtime.clone();
+        let this = self.this.clone();
+        let account = account.to_owned();
         Box::pin(async move {
-            let this = self.this.clone();
             let fills_this = this.clone();
-            let mut fetch_fills = |opts: ExecutionsOptions| -> ExchangeFuture<'_, Vec<Execution>> {
-                let this = fills_this.clone();
-                Box::pin(async move {
-                    let call =
-                        this.call_method("fetchHistoricalFills", vec![from_typed(&opts)?])?;
-                    Ok(to_typed::<Vec<Execution>>(
-                        &await_js(&self.runtime, call).await?,
-                    )?)
-                })
-            };
+            let fills_runtime = runtime.clone();
+            let fetch_fills =
+                move |opts: ExecutionsOptions| -> ExchangeFuture<'static, Vec<Execution>> {
+                    let runtime = fills_runtime.clone();
+                    let this = fills_this.clone();
+                    Box::pin(async move {
+                        let call =
+                            this.call_method("fetchHistoricalFills", vec![from_typed(&opts)?])?;
+                        Ok(to_typed::<Vec<Execution>>(
+                            &await_js(&runtime, call).await?,
+                        )?)
+                    })
+                };
             let income_this = this.clone();
-            let mut fetch_income = |from: f64, to: f64| -> ExchangeFuture<'_, Vec<IncomeRecord>> {
-                let this = income_this.clone();
-                Box::pin(async move {
-                    let call = this.call_method(
-                        "fetchIncomeHistoryRange",
-                        vec![Js::Number(from), Js::Number(to)],
-                    )?;
-                    Ok(to_typed::<Vec<IncomeRecord>>(
-                        &await_js(&self.runtime, call).await?,
-                    )?)
-                })
-            };
+            let income_runtime = runtime.clone();
+            let fetch_income =
+                move |from: f64, to: f64| -> ExchangeFuture<'static, Vec<IncomeRecord>> {
+                    let runtime = income_runtime.clone();
+                    let this = income_this.clone();
+                    Box::pin(async move {
+                        let call = this.call_method(
+                            "fetchIncomeHistoryRange",
+                            vec![Js::Number(from), Js::Number(to)],
+                        )?;
+                        Ok(to_typed::<Vec<IncomeRecord>>(
+                            &await_js(&runtime, call).await?,
+                        )?)
+                    })
+                };
             let has_income = this.get("fetchIncomeHistoryRange")?.truthy();
-            let mut settle = |symbol: &str| resolve_settle_currency(symbol);
             let result = build_folded_position_records(
-                &mut FoldableExchange {
-                    fetch_historical_fills: &mut fetch_fills,
+                FoldableExchange {
+                    runtime,
+                    fetch_historical_fills: Rc::new(fetch_fills),
                     fetch_income_history_range: if has_income {
-                        Some(&mut fetch_income)
+                        Some(Rc::new(fetch_income))
                     } else {
                         None
                     },
                 },
-                &mut BuildRecordsOptions {
+                BuildRecordsOptions {
                     account,
                     from,
                     to,
                     symbol_scoped,
-                    resolve_settle_currency: &mut settle,
+                    resolve_settle_currency: Rc::from(resolve_settle_currency),
                 },
             )
             .await

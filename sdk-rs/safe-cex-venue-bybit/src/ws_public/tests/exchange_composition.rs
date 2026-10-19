@@ -13,7 +13,29 @@ use safe_cex_transport::{
 struct Clock {
     now: Cell<u64>,
     sleeps: RefCell<Vec<u64>>,
-    reset: RefCell<Option<Box<dyn FnOnce(Result<(), TransportError>)>>>,
+    waiters: RefCell<Vec<Waker>>,
+    reset: RefCell<Option<ScheduledReset>>,
+}
+impl Clock {
+    fn advance_to(&self, milliseconds: u64) {
+        assert!(milliseconds >= self.now.get());
+        self.now.set(milliseconds);
+        let waiters = std::mem::take(&mut *self.waiters.borrow_mut());
+        for waiter in waiters {
+            waiter.wake();
+        }
+        let reset = {
+            let mut reset = self.reset.borrow_mut();
+            if reset.as_ref().is_some_and(|timer| timer.deadline <= milliseconds) {
+                reset.take()
+            } else {
+                None
+            }
+        };
+        if let Some(reset) = reset {
+            (reset.callback)(Ok(()));
+        }
+    }
 }
 impl RateLimitClock for Clock {
     fn now_ms(&self) -> u64 {
@@ -21,9 +43,23 @@ impl RateLimitClock for Clock {
     }
     fn sleep_ms(&self, milliseconds: u64) -> TransportFuture<'_, ()> {
         self.sleeps.borrow_mut().push(milliseconds);
-        self.now.set(self.now.get() + milliseconds);
-        Box::pin(async { Ok(()) })
+        let deadline = self.now.get() + milliseconds;
+        Box::pin(std::future::poll_fn(move |cx| {
+            if self.now.get() >= deadline {
+                Poll::Ready(Ok(()))
+            } else {
+                let mut waiters = self.waiters.borrow_mut();
+                if !waiters.iter().any(|waiter| waiter.will_wake(cx.waker())) {
+                    waiters.push(cx.waker().clone());
+                }
+                Poll::Pending
+            }
+        }))
     }
+}
+struct ScheduledReset {
+    deadline: u64,
+    callback: Box<dyn FnOnce(Result<(), TransportError>)>,
 }
 struct Reset(std::rc::Rc<std::cell::Cell<bool>>);
 impl safe_cex_transport::rate_limit::RateLimitTimer for Reset {
@@ -40,22 +76,17 @@ impl safe_cex_transport::rate_limit::RateLimitScheduler for Clock {
         self.sleeps.borrow_mut().push(delay);
         let canceled = std::rc::Rc::new(std::cell::Cell::new(false));
         let active = canceled.clone();
-        *self.reset.borrow_mut() = Some(Box::new(move |result| {
-            if !active.get() {
-                callback(result);
-            }
-        }));
+        *self.reset.borrow_mut() = Some(ScheduledReset {
+            deadline: self.now.get() + delay,
+            callback: Box::new(move |result| {
+                if !active.get() {
+                    callback(result);
+                }
+            }),
+        });
         Ok(Box::new(Reset(canceled)))
     }
 }
-impl Clock {
-    fn expire(&self) {
-        self.now.set(self.now.get() + 1000);
-        let callback = self.reset.borrow_mut().take().unwrap();
-        callback(Ok(()));
-    }
-}
-
 struct Adapter {
     key: String,
     calls: Rc<RefCell<Vec<String>>>,
@@ -360,19 +391,57 @@ fn constructor_clients_and_sockets_follow_actual_source() {
         for _ in 0..5 {
             ready(venue.xhr().request(RestRequest::default())).unwrap();
         }
-        let mut sixth = venue.xhr().request(RestRequest::default());
+        assert_eq!(
+            calls.borrow().len(),
+            5,
+            "five requests dispatch in the first window"
+        );
+        assert_eq!(
+            clock.now.get(),
+            0,
+            "registering a sleep must not advance time"
+        );
+        assert_eq!(
+            *clock.sleeps.borrow(),
+            [1000],
+            "first dispatch arms one window timer"
+        );
+        let client = venue.xhr();
+        let mut sixth = Box::pin(client.request(RestRequest::default()));
         assert!(
             sixth
                 .as_mut()
                 .poll(&mut Context::from_waker(Waker::noop()))
                 .is_pending()
         );
-        clock.expire();
+        assert_eq!(
+            calls.borrow().len(),
+            5,
+            "sixth primary request must wait at five RPS"
+        );
+        clock.advance_to(999);
+        assert!(
+            sixth
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        assert_eq!(
+            calls.borrow().len(),
+            5,
+            "sixth request cannot dispatch before 1000ms"
+        );
+        clock.advance_to(1000);
         ready(sixth).unwrap();
+        assert_eq!(
+            calls.borrow().len(),
+            6,
+            "sixth dispatches when the window completes"
+        );
         assert_eq!(
             *clock.sleeps.borrow(),
             [1000, 1000],
-            "sixth primary request must wait at five RPS"
+            "sixth primary request starts the next five-RPS window"
         );
         for _ in 0..6 {
             ready(venue.unlimited_xhr().execute(RestRequest::default())).unwrap();
