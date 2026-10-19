@@ -210,3 +210,24 @@ Merged native suites (engine/Binance/Bybit/Crypto.com), venue clippy, wasm clipp
 bans and 5 harness regressions PASS. Combined three-venue wasm is 1,618,621 bytes;
 size budget advances from 1.4 MiB (two venues) to 1.6 MiB (three venues), following
 the landing branch's per-venue budget increment. Combined replays follow.
+
+### Combined landing gates PASS
+
+All six replays pass after the landing merge:
+
+| Tape | Frames | Main CPU TS / Rust ms | Steady CPU TS / Rust ms | Retained TS / Rust MB |
+| --- | ---: | ---: | ---: | ---: |
+| Crypto.com public (3 runs) | 2177 | 188.9 / 141.1 | 123.5 / 74.0 | 1.9 / 1.5 |
+| Crypto.com private | 21 | 41.1 / 49.1 | 15.2 / 20.6 | 0.7 / 0.8 |
+| Binance public (3 runs) | 871 | 252.6 / 104.1 | 148.2 / 42.9 | 4.3 / 2.1 |
+| Binance private | 14 | 60.1 / 35.9 | 22.4 / 17.6 | 0.9 / 0.8 |
+| Bybit public (3 runs) | 8742 | 479.5 / 315.1 | 336.9 / 189.7 | 6.0 / 2.2 |
+| Bybit private | 18 | 103.7 / 41.9 | 48.0 / 21.0 | 3.4 / 0.7 |
+
+Private tapes gate correctness only. Package typecheck/lint and all six real
+wasm integration tests PASS after merge. Native combined suites total 118 tests
+(engine 11, Binance 29, Bybit 43, Crypto.com 35), all PASS. Full workspace
+clippy/tests also running as CI preflight. Ready to push and open PR into
+feat/rust-rewrite, followed by required adversarial reviews/comments and green CI.
+Rust remains opt-in, with TS retained as the replay reference like the existing
+Binance/Bybit lanes; global production TS removal is rewrite phase 9.
