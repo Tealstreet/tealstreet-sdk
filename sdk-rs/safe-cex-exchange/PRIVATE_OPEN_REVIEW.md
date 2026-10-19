@@ -26,6 +26,10 @@ core regression also checks original thrown-object identity, name and message;
 success/disposal controls retain their existing outcomes. These are diagnostic
 FIXes, separate from the bounded ACCEPTs above.
 
+The helper also recovers an error returned by the original open prefix (for
+example, a log or ping failure). This existing callback outcome difference is
+included in the recovery ACCEPT; the correction reports that cause too.
+
 A production caller census finds only Orderly, Paradex and BloFin using this core
 helper. BloFin therefore inherits the cause report too; its existing login and
 private-frame regressions must pass. Bybit owns its separate reconnect operation
