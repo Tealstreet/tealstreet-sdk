@@ -127,6 +127,24 @@ test('native transport queues remote close behind gzip and stamps the raw callba
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(calls.length, 3, 'disposal cannot deliver a pending decode or close into the engine');
 });
+for (const [format, compress, field] of [['gzip', gzipSync, 'id'], ['deflate', deflateSync, 'symbol']]) {
+  test(`${format} rejects malformed UTF-8 in JSON ${field} instead of delivering a changed value`, { timeout: 1000 }, async () => {
+    const received = [];
+    let failures = 0;
+    let failed;
+    const rejected = new Promise((resolve) => { failed = resolve; });
+    const receive = socketMessages((text) => received.push(text), (error) => {
+      failures++;
+      failed(error);
+    });
+    const malformed = Buffer.concat([Buffer.from(`{"${field}":"`), Buffer.from([0xff]), Buffer.from('"}')]);
+    receive(compress(malformed));
+    const error = await rejected;
+    assert.ok(error instanceof TypeError);
+    assert.equal(failures, 1);
+    assert.deepEqual(received, []);
+  });
+}
 
 test('whole and streamed HTTP buffers cross in bounded chunks', async () => {
   for (const streamed of [false, true]) {

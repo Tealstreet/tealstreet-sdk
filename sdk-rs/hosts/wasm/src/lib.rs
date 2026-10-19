@@ -4,6 +4,7 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none.
 #[cfg(not(any(
+    feature = "venue-backpack",
     feature = "venue-binance",
     feature = "venue-bingx",
     feature = "venue-blofin",
@@ -19,6 +20,8 @@ use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
+#[cfg(feature = "venue-backpack")]
+use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 #[cfg(feature = "venue-binance")]
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 #[cfg(feature = "venue-bingx")]
@@ -79,6 +82,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
 }
 
 #[cfg(any(
+    feature = "venue-backpack",
     feature = "venue-binance",
     feature = "venue-bingx",
     feature = "venue-blofin",
@@ -106,6 +110,9 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
+    #[cfg(feature = "venue-backpack")]
+    #[serde(default)]
+    recv_window: Option<f64>,
     #[cfg(any(
         feature = "venue-blofin",
         feature = "venue-okx",
@@ -545,6 +552,7 @@ pub struct WasmEngine {
 impl WasmEngine {
     #[wasm_bindgen(constructor)]
     #[cfg(any(
+        feature = "venue-backpack",
         feature = "venue-binance",
         feature = "venue-bingx",
         feature = "venue-blofin",
@@ -577,6 +585,13 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
+            }))),
+            #[cfg(feature = "venue-backpack")]
+            "backpack" => Box::new(Engine::new(Backpack::new(BackpackOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                recv_window: options.recv_window,
             }))),
             #[cfg(feature = "venue-blofin")]
             "blofin" => Box::new(Engine::new(Blofin::new(BlofinOptions {

@@ -6,5 +6,5 @@ export const venueRequestKey = (method, url, body, callerIds, venue) => {
   if (venue.rust !== 'mexc') return requestKey(method, url, body, callerIds, venue);
   // MEXC rejects caller clientOrderId and generates externalOid internally.
   // Its active trigger lists also use a rolling, fixed-width time window.
-  return `${method} ${canonicalUrl(url)}${venue.matchRequestBody && method !== 'GET' ? ` ${canonicalBody(body)}` : ''}`;
+  return `${method} ${canonicalUrl(url, callerIds, venue)}${venue.matchRequestBody && method !== 'GET' ? ` ${canonicalBody(body, callerIds, venue)}` : ''}`;
 };

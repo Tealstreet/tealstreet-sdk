@@ -329,3 +329,17 @@ proves unchanged bytes with no buffer growth; missing-market/book and market-onl
 state semantics are covered. Independent plan/implementation review passes.
 BloFin isolated budget is783360 bytes (measured759953), replacing its missing
 manifest entry. Next integrate Backpack landing before one release rebuild.
+
+Backpack landed at `eff4dcbb0f7bb5d5f19c28d6d9cf263eaf6cf0f5`; integration
+adds the ninth optional family, cfg-scoped recvWindow and venue-selected loaders.
+The landing extraction of replay Tape is retained while restoring the strict
+typed response oracle on existing families, indexed subscription coverage,
+recorded-timestamp batching, MEXC-only virtual-clock scope and Crypto live-open
+readiness. Backpack signature/write-order/caller-ID checks remain intact.
+Host merge review and56 targeted JS tests pass;44 repository typecheck and28
+lint tasks pass. Full repository tests run while final release artifacts build.
+Baseline9 is exact142-file source-audited aggregate at that landing, built in
+its isolated target with original unbatched runtime and original opt=s/host=z:
+2863225 bytes, SHA256
+`58cb11561450d4544b1f1ad3f1d709048bd578981e9c6a361b070112afda2c4e`.
+Final runtime helper copy waits until merge verification completes.

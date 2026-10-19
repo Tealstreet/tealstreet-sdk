@@ -5,6 +5,7 @@ import { venueFamily } from './venues.mjs';
 
 const require = createRequire(import.meta.url);
 const aliases = {
+  backpack: ['backpack'],
   binance: ['binance', 'binancepm'],
   bingx: ['bingx'],
   blofin: ['blofin'],

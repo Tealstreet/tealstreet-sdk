@@ -380,7 +380,7 @@ export const socketMessages = (onMessage, onError, onClose = () => {}) => {
       : bytes[0] === 0x78 ? 'deflate' : undefined;
     if (!format) return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format));
-    return new Response(stream).text();
+    return new TextDecoder('utf-8', { fatal: true }).decode(await new Response(stream).arrayBuffer());
   };
   const receive = (data, receivedAt = Date.now()) => {
     if (!accepting || cancelled) return;
