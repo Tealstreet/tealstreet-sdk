@@ -59,13 +59,6 @@ pub fn get_address(value: &str) -> Result<String, String> {
     Err("invalid address".into())
 }
 
-/// ethers.isAddress: invalid shapes or checksums are false, without throwing.
-pub fn is_address(value: &serde_json::Value) -> bool {
-    value
-        .as_str()
-        .is_some_and(|value| get_address(value).is_ok())
-}
-
 /// ABI encode four parameters; nonce is an unsigned 256-bit big-endian word.
 pub fn encode_string_address_address_uint256(
     payload: &str,
@@ -288,11 +281,6 @@ mod tests {
             case["address"].as_str().unwrap(),
             "ethers oversized ICAP spelling"
         );
-        assert_eq!(
-            is_address(&case["input"]),
-            case["isAddress"].as_bool().unwrap(),
-            "ethers oversized ICAP predicate"
-        );
     }
 
     #[test]
@@ -338,18 +326,6 @@ mod tests {
                     case["name"]
                 );
             }
-            assert_eq!(
-                is_address(&case["input"]),
-                case.get("address").is_some(),
-                "isAddress {}",
-                case["name"]
-            );
-        }
-        for raw in ["null", "123", "true", "{}", "[]"] {
-            assert!(
-                !is_address(&serde_json::from_str(raw).unwrap()),
-                "non-string isAddress refusal {raw}"
-            );
         }
     }
 }

@@ -57,3 +57,12 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
 - In-progress private/trading/query modules are separate work, not yet wired.
 - Overseer requested integration of the nested workspace immediately; relocating
   the crate before resuming account/trading/query verification.
+
+### Nested workspace
+
+- Merged `origin/feat/rust-rewrite` restructure into this lane (`8aa90f0406`).
+  BingX now lives at `sdk-rs/venues/bingx`; workspace membership is automatic.
+- Independent crypto audit found `wallet_utils` has no callers beyond its own
+  definitions/export; `ethereum::is_address` only has predicate-specific tests.
+  Removed those first-port facades; kept address validation and signing
+  primitives with live callers. Updated licence notice paths after nesting.
