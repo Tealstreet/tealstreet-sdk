@@ -650,37 +650,44 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::regexp::match_all_or_first",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "Direct native RegExp match_all_or_first observations retain UTF-16 units, binary64 bits, coercion effects and thrown identity; public native RegExp entrypoints are compared with the independent Node corpus. No ledger permission replaces the exact decoder contract."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::regexp::replace",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "Direct native RegExp replace observations retain UTF-16 units, binary64 bits, coercion effects and thrown identity; public native RegExp entrypoints are compared with the independent Node corpus. No ledger permission replaces the exact decoder contract."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::regexp::search",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "Direct native RegExp search observations retain UTF-16 units, binary64 bits, coercion effects and thrown identity; public native RegExp entrypoints are compared with the independent Node corpus. No ledger permission replaces the exact decoder contract."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::regexp::split",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "Direct native RegExp split observations retain UTF-16 units, binary64 bits, coercion effects and thrown identity; public native RegExp entrypoints are compared with the independent Node corpus. No ledger permission replaces the exact decoder contract."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::regexp::split_limit",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "Direct native RegExp split_limit observations retain UTF-16 units, binary64 bits, coercion effects and thrown identity; public native RegExp entrypoints are compared with the independent Node corpus. No ledger permission replaces the exact decoder contract."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::regexp::to_length",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "Direct native RegExp to_length observations retain UTF-16 units, binary64 bits, coercion effects and thrown identity; public native RegExp entrypoints are compared with the independent Node corpus. No ledger permission replaces the exact decoder contract."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::regexp::to_string",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: constructed public RegExp exec chose valueOf before toString, consuming 7 instead of the original UTF-16 units. The canonical string-hint conversion passes the original compiled RED and all 28 Node/native cases. Direct native owner observations retain units, coercion effects and original thrown identity; the ordinary decoder contract supplies execution, not this ledger."
     },
     {
       "package": "safe-cex-exchange",

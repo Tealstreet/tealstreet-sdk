@@ -1,14 +1,11 @@
 //! The host RegExp: a backtracking matcher over UTF-16 for the non-unicode
 //! syntax subset the ported bodies use, plus exec/test/toString/@@replace.
 //! Unsupported syntax or flags throw a SyntaxError rather than misbehaving.
-use super::{
-    ops::to_primitive,
-    value::{Js, Str, Thrown, arg},
-};
+use super::value::{Js, Str, Thrown, arg};
 use std::rc::Rc;
 
 fn to_string(value: &Js) -> Result<Str, Thrown> {
-    to_primitive(value)?.to_js_string()
+    value.to_js_string()
 }
 
 /// ToLength, clamped to the addressable index range.

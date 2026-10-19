@@ -35755,5 +35755,2138 @@
     },
     "reason": "Terminal Error presentation selector over existing native data descriptors. It returns only stored strings, stops on accessor or non-string shadows, walks prototype references with cycle detection, and renders UTF-16 lossily only for the terminal sink. It does not parse input or admit a domain model; no getter or coercion hook is executed.",
     "evidence": "tests/native_console_default.rs::native_error_diagnostics_read_data_without_executing_user_hooks executes the production NativeRuntime console sink in a subprocess: inherited hidden data and malformed UTF-16 render, own getter/non-string shadows suppress inherited messages without executing user code, empty names preserve message-only output, and a cyclic chain terminates with the Error fallback."
+  },
+  "safe_cex_exchange::js_runtime::regexp::match_all_or_first": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "match_all_or_first",
+      "signature": {
+        "inputs": [
+          [
+            "program",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::regexp::Program",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "this",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "input",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Direct native RegExp match_all_or_first inputs retain UTF-16 units, number bits, coercion effects and original thrown identity; the same corpus runs through Node RegExp symbol methods and the installed native public facade.",
+    "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let pattern: Vec<u16> = $value[\"pattern\"].as_str().unwrap().encode_utf16().collect(); let flags: Vec<u16> = $value[\"flags\"].as_str().unwrap().encode_utf16().collect(); let program = super::Program::compile(&pattern, &flags).unwrap(); let regexp = super::regexp(&pattern, &flags).unwrap(); let result = $type(&program, &regexp, input.as_str().unwrap()); audit.finish(result, Some(&regexp), None, false) }",
+    "cases": [
+      {
+        "input": {
+          "pattern": "(a)?b",
+          "flags": "",
+          "input": {
+            "kind": "units",
+            "units": [
+              98
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "string",
+                "units": [
+                  98
+                ]
+              },
+              {
+                "kind": "undefined"
+              }
+            ]
+          },
+          "calls": 0,
+          "lastIndex": {
+            "kind": "number",
+            "bits": "0000000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "pattern": "",
+          "flags": "g",
+          "input": {
+            "kind": "units",
+            "units": [
+              55296,
+              97
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "string",
+                "units": []
+              },
+              {
+                "kind": "string",
+                "units": []
+              },
+              {
+                "kind": "string",
+                "units": []
+              }
+            ]
+          },
+          "calls": 0,
+          "lastIndex": {
+            "kind": "number",
+            "bits": "0000000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "pattern": "z",
+          "flags": "g",
+          "input": {
+            "kind": "units",
+            "units": [
+              97
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "null"
+          },
+          "calls": 0,
+          "lastIndex": {
+            "kind": "number",
+            "bits": "0000000000000000"
+          }
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let pattern: Vec<u16> = $value[\"pattern\"].as_str().unwrap().encode_utf16().collect(); let flags: Vec<u16> = $value[\"flags\"].as_str().unwrap().encode_utf16().collect(); let program = super::Program::compile(&pattern, &flags).unwrap(); let regexp = super::regexp(&pattern, &flags).unwrap(); let result = $type(&program, &regexp, input.as_str().unwrap()); audit.finish(result, Some(&regexp), None, false) }",
+      "nativeFields": [
+        "value",
+        "lastIndex"
+      ],
+      "cases": [
+        {
+          "input": {
+            "pattern": "(a)?b",
+            "flags": "",
+            "input": {
+              "kind": "units",
+              "units": [
+                98
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "array",
+              "items": [
+                {
+                  "kind": "string",
+                  "units": [
+                    98
+                  ]
+                },
+                {
+                  "kind": "undefined"
+                }
+              ]
+            },
+            "calls": 0,
+            "lastIndex": {
+              "kind": "number",
+              "bits": "0000000000000000"
+            }
+          }
+        },
+        {
+          "input": {
+            "pattern": "",
+            "flags": "g",
+            "input": {
+              "kind": "units",
+              "units": [
+                55296,
+                97
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "array",
+              "items": [
+                {
+                  "kind": "string",
+                  "units": []
+                },
+                {
+                  "kind": "string",
+                  "units": []
+                },
+                {
+                  "kind": "string",
+                  "units": []
+                }
+              ]
+            },
+            "calls": 0,
+            "lastIndex": {
+              "kind": "number",
+              "bits": "0000000000000000"
+            }
+          }
+        },
+        {
+          "input": {
+            "pattern": "z",
+            "flags": "g",
+            "input": {
+              "kind": "units",
+              "units": [
+                97
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "null"
+            },
+            "calls": 0,
+            "lastIndex": {
+              "kind": "number",
+              "bits": "0000000000000000"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::regexp::replace": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "replace",
+      "signature": {
+        "inputs": [
+          [
+            "program",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::regexp::Program",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "this",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "input",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "replacement",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Direct native RegExp replace inputs retain UTF-16 units, number bits, coercion effects and original thrown identity; the same corpus runs through Node RegExp symbol methods and the installed native public facade.",
+    "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let pattern: Vec<u16> = $value[\"pattern\"].as_str().unwrap().encode_utf16().collect(); let flags: Vec<u16> = $value[\"flags\"].as_str().unwrap().encode_utf16().collect(); let program = super::Program::compile(&pattern, &flags).unwrap(); let regexp = super::regexp(&pattern, &flags).unwrap(); let replacement = audit.input(&$value[\"replacement\"]); let result = $type(&program, &regexp, input.as_str().unwrap(), &replacement); audit.finish(result, Some(&regexp), None, true) }",
+    "cases": [
+      {
+        "input": {
+          "pattern": "(a)",
+          "flags": "g",
+          "input": {
+            "kind": "units",
+            "units": [
+              97,
+              98,
+              97
+            ]
+          },
+          "replacement": {
+            "kind": "units",
+            "units": [
+              36,
+              38,
+              58,
+              36,
+              49,
+              58,
+              36,
+              36
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "string",
+            "units": [
+              97,
+              58,
+              97,
+              58,
+              36,
+              98,
+              97,
+              58,
+              97,
+              58,
+              36
+            ]
+          },
+          "calls": 0,
+          "lastIndex": {
+            "kind": "number",
+            "bits": "0000000000000000"
+          },
+          "callbackArgs": []
+        }
+      },
+      {
+        "input": {
+          "pattern": "(a)",
+          "flags": "g",
+          "input": {
+            "kind": "units",
+            "units": [
+              97,
+              98,
+              97
+            ]
+          },
+          "replacement": {
+            "kind": "callback",
+            "units": [
+              55296
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "string",
+            "units": [
+              55296,
+              98,
+              55296
+            ]
+          },
+          "calls": 2,
+          "lastIndex": {
+            "kind": "number",
+            "bits": "0000000000000000"
+          },
+          "callbackArgs": [
+            [
+              {
+                "kind": "string",
+                "units": [
+                  97
+                ]
+              },
+              {
+                "kind": "string",
+                "units": [
+                  97
+                ]
+              },
+              {
+                "kind": "number",
+                "bits": "0000000000000000"
+              },
+              {
+                "kind": "string",
+                "units": [
+                  97,
+                  98,
+                  97
+                ]
+              }
+            ],
+            [
+              {
+                "kind": "string",
+                "units": [
+                  97
+                ]
+              },
+              {
+                "kind": "string",
+                "units": [
+                  97
+                ]
+              },
+              {
+                "kind": "number",
+                "bits": "4000000000000000"
+              },
+              {
+                "kind": "string",
+                "units": [
+                  97,
+                  98,
+                  97
+                ]
+              }
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "pattern": "a",
+          "flags": "",
+          "input": {
+            "kind": "units",
+            "units": [
+              97
+            ]
+          },
+          "replacement": {
+            "kind": "throw"
+          }
+        },
+        "output": {
+          "ok": false,
+          "sameError": true,
+          "calls": 1
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let pattern: Vec<u16> = $value[\"pattern\"].as_str().unwrap().encode_utf16().collect(); let flags: Vec<u16> = $value[\"flags\"].as_str().unwrap().encode_utf16().collect(); let program = super::Program::compile(&pattern, &flags).unwrap(); let regexp = super::regexp(&pattern, &flags).unwrap(); let replacement = audit.input(&$value[\"replacement\"]); let result = $type(&program, &regexp, input.as_str().unwrap(), &replacement); audit.finish(result, Some(&regexp), None, true) }",
+      "nativeFields": [
+        "value",
+        "calls",
+        "callbackArgs",
+        "lastIndex"
+      ],
+      "cases": [
+        {
+          "input": {
+            "pattern": "(a)",
+            "flags": "g",
+            "input": {
+              "kind": "units",
+              "units": [
+                97,
+                98,
+                97
+              ]
+            },
+            "replacement": {
+              "kind": "units",
+              "units": [
+                36,
+                38,
+                58,
+                36,
+                49,
+                58,
+                36,
+                36
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "string",
+              "units": [
+                97,
+                58,
+                97,
+                58,
+                36,
+                98,
+                97,
+                58,
+                97,
+                58,
+                36
+              ]
+            },
+            "calls": 0,
+            "lastIndex": {
+              "kind": "number",
+              "bits": "0000000000000000"
+            },
+            "callbackArgs": []
+          }
+        },
+        {
+          "input": {
+            "pattern": "(a)",
+            "flags": "g",
+            "input": {
+              "kind": "units",
+              "units": [
+                97,
+                98,
+                97
+              ]
+            },
+            "replacement": {
+              "kind": "callback",
+              "units": [
+                55296
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "string",
+              "units": [
+                55296,
+                98,
+                55296
+              ]
+            },
+            "calls": 2,
+            "lastIndex": {
+              "kind": "number",
+              "bits": "0000000000000000"
+            },
+            "callbackArgs": [
+              [
+                {
+                  "kind": "string",
+                  "units": [
+                    97
+                  ]
+                },
+                {
+                  "kind": "string",
+                  "units": [
+                    97
+                  ]
+                },
+                {
+                  "kind": "number",
+                  "bits": "0000000000000000"
+                },
+                {
+                  "kind": "string",
+                  "units": [
+                    97,
+                    98,
+                    97
+                  ]
+                }
+              ],
+              [
+                {
+                  "kind": "string",
+                  "units": [
+                    97
+                  ]
+                },
+                {
+                  "kind": "string",
+                  "units": [
+                    97
+                  ]
+                },
+                {
+                  "kind": "number",
+                  "bits": "4000000000000000"
+                },
+                {
+                  "kind": "string",
+                  "units": [
+                    97,
+                    98,
+                    97
+                  ]
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "input": {
+            "pattern": "a",
+            "flags": "",
+            "input": {
+              "kind": "units",
+              "units": [
+                97
+              ]
+            },
+            "replacement": {
+              "kind": "throw"
+            }
+          },
+          "output": {
+            "ok": false,
+            "sameError": true,
+            "calls": 1
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::regexp::search": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "search",
+      "signature": {
+        "inputs": [
+          [
+            "program",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::regexp::Program",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "this",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "input",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Direct native RegExp search inputs retain UTF-16 units, number bits, coercion effects and original thrown identity; the same corpus runs through Node RegExp symbol methods and the installed native public facade.",
+    "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let pattern: Vec<u16> = $value[\"pattern\"].as_str().unwrap().encode_utf16().collect(); let flags: Vec<u16> = $value[\"flags\"].as_str().unwrap().encode_utf16().collect(); let program = super::Program::compile(&pattern, &flags).unwrap(); let regexp = super::regexp(&pattern, &flags).unwrap(); let previous = crate::js_runtime::value::Js::object(vec![(\"marker\", crate::js_runtime::value::Js::Number($value[\"previous\"].as_f64().unwrap()))]); regexp.set(\"lastIndex\", previous.clone()).unwrap(); let result = $type(&program, &regexp, input.as_str().unwrap()); audit.finish(result, Some(&regexp), Some(&previous), false) }",
+    "cases": [
+      {
+        "input": {
+          "pattern": "a",
+          "flags": "g",
+          "input": {
+            "kind": "units",
+            "units": [
+              98,
+              97
+            ]
+          },
+          "previous": 7
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "number",
+            "bits": "3ff0000000000000"
+          },
+          "calls": 0,
+          "lastIndex": {
+            "same": true
+          }
+        }
+      },
+      {
+        "input": {
+          "pattern": "z",
+          "flags": "",
+          "input": {
+            "kind": "units",
+            "units": [
+              97
+            ]
+          },
+          "previous": 0
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "number",
+            "bits": "bff0000000000000"
+          },
+          "calls": 0,
+          "lastIndex": {
+            "same": true
+          }
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let pattern: Vec<u16> = $value[\"pattern\"].as_str().unwrap().encode_utf16().collect(); let flags: Vec<u16> = $value[\"flags\"].as_str().unwrap().encode_utf16().collect(); let program = super::Program::compile(&pattern, &flags).unwrap(); let regexp = super::regexp(&pattern, &flags).unwrap(); let previous = crate::js_runtime::value::Js::object(vec![(\"marker\", crate::js_runtime::value::Js::Number($value[\"previous\"].as_f64().unwrap()))]); regexp.set(\"lastIndex\", previous.clone()).unwrap(); let result = $type(&program, &regexp, input.as_str().unwrap()); audit.finish(result, Some(&regexp), Some(&previous), false) }",
+      "nativeFields": [
+        "value",
+        "lastIndex"
+      ],
+      "cases": [
+        {
+          "input": {
+            "pattern": "a",
+            "flags": "g",
+            "input": {
+              "kind": "units",
+              "units": [
+                98,
+                97
+              ]
+            },
+            "previous": 7
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "number",
+              "bits": "3ff0000000000000"
+            },
+            "calls": 0,
+            "lastIndex": {
+              "same": true
+            }
+          }
+        },
+        {
+          "input": {
+            "pattern": "z",
+            "flags": "",
+            "input": {
+              "kind": "units",
+              "units": [
+                97
+              ]
+            },
+            "previous": 0
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "number",
+              "bits": "bff0000000000000"
+            },
+            "calls": 0,
+            "lastIndex": {
+              "same": true
+            }
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::regexp::split": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "split",
+      "signature": {
+        "inputs": [
+          [
+            "program",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::regexp::Program",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "input",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "primitive": "u16"
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "limit",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Direct native RegExp split inputs retain UTF-16 units, number bits, coercion effects and original thrown identity; the same corpus runs through Node RegExp symbol methods and the installed native public facade.",
+    "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let pattern: Vec<u16> = $value[\"pattern\"].as_str().unwrap().encode_utf16().collect(); let flags: Vec<u16> = $value[\"flags\"].as_str().unwrap().encode_utf16().collect(); let program = super::Program::compile(&pattern, &flags).unwrap(); let regexp = super::regexp(&pattern, &flags).unwrap(); let limit = audit.input(&$value[\"limit\"]); let result = $type(&program, input.as_str().unwrap(), &limit); audit.finish(result, Some(&regexp), None, false) }",
+    "cases": [
+      {
+        "input": {
+          "pattern": "(,)",
+          "flags": "",
+          "input": {
+            "kind": "units",
+            "units": [
+              97,
+              44,
+              98
+            ]
+          },
+          "limit": {
+            "kind": "undefined"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "string",
+                "units": [
+                  97
+                ]
+              },
+              {
+                "kind": "string",
+                "units": [
+                  44
+                ]
+              },
+              {
+                "kind": "string",
+                "units": [
+                  98
+                ]
+              }
+            ]
+          },
+          "calls": 0,
+          "lastIndex": {
+            "kind": "number",
+            "bits": "0000000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "pattern": "(,)",
+          "flags": "",
+          "input": {
+            "kind": "units",
+            "units": [
+              97,
+              44,
+              98
+            ]
+          },
+          "limit": {
+            "kind": "number",
+            "number": "2"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "string",
+                "units": [
+                  97
+                ]
+              },
+              {
+                "kind": "string",
+                "units": [
+                  44
+                ]
+              }
+            ]
+          },
+          "calls": 0,
+          "lastIndex": {
+            "kind": "number",
+            "bits": "0000000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "pattern": "(x)?b",
+          "flags": "",
+          "input": {
+            "kind": "units",
+            "units": [
+              97,
+              98,
+              99
+            ]
+          },
+          "limit": {
+            "kind": "undefined"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "string",
+                "units": [
+                  97
+                ]
+              },
+              {
+                "kind": "undefined"
+              },
+              {
+                "kind": "string",
+                "units": [
+                  99
+                ]
+              }
+            ]
+          },
+          "calls": 0,
+          "lastIndex": {
+            "kind": "number",
+            "bits": "0000000000000000"
+          }
+        }
+      },
+      {
+        "input": {
+          "pattern": ",",
+          "flags": "",
+          "input": {
+            "kind": "units",
+            "units": [
+              55296,
+              44,
+              56320
+            ]
+          },
+          "limit": {
+            "kind": "undefined"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "array",
+            "items": [
+              {
+                "kind": "string",
+                "units": [
+                  55296
+                ]
+              },
+              {
+                "kind": "string",
+                "units": [
+                  56320
+                ]
+              }
+            ]
+          },
+          "calls": 0,
+          "lastIndex": {
+            "kind": "number",
+            "bits": "0000000000000000"
+          }
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let pattern: Vec<u16> = $value[\"pattern\"].as_str().unwrap().encode_utf16().collect(); let flags: Vec<u16> = $value[\"flags\"].as_str().unwrap().encode_utf16().collect(); let program = super::Program::compile(&pattern, &flags).unwrap(); let regexp = super::regexp(&pattern, &flags).unwrap(); let limit = audit.input(&$value[\"limit\"]); let result = $type(&program, input.as_str().unwrap(), &limit); audit.finish(result, Some(&regexp), None, false) }",
+      "nativeFields": [
+        "value",
+        "lastIndex"
+      ],
+      "cases": [
+        {
+          "input": {
+            "pattern": "(,)",
+            "flags": "",
+            "input": {
+              "kind": "units",
+              "units": [
+                97,
+                44,
+                98
+              ]
+            },
+            "limit": {
+              "kind": "undefined"
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "array",
+              "items": [
+                {
+                  "kind": "string",
+                  "units": [
+                    97
+                  ]
+                },
+                {
+                  "kind": "string",
+                  "units": [
+                    44
+                  ]
+                },
+                {
+                  "kind": "string",
+                  "units": [
+                    98
+                  ]
+                }
+              ]
+            },
+            "calls": 0,
+            "lastIndex": {
+              "kind": "number",
+              "bits": "0000000000000000"
+            }
+          }
+        },
+        {
+          "input": {
+            "pattern": "(,)",
+            "flags": "",
+            "input": {
+              "kind": "units",
+              "units": [
+                97,
+                44,
+                98
+              ]
+            },
+            "limit": {
+              "kind": "number",
+              "number": "2"
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "array",
+              "items": [
+                {
+                  "kind": "string",
+                  "units": [
+                    97
+                  ]
+                },
+                {
+                  "kind": "string",
+                  "units": [
+                    44
+                  ]
+                }
+              ]
+            },
+            "calls": 0,
+            "lastIndex": {
+              "kind": "number",
+              "bits": "0000000000000000"
+            }
+          }
+        },
+        {
+          "input": {
+            "pattern": "(x)?b",
+            "flags": "",
+            "input": {
+              "kind": "units",
+              "units": [
+                97,
+                98,
+                99
+              ]
+            },
+            "limit": {
+              "kind": "undefined"
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "array",
+              "items": [
+                {
+                  "kind": "string",
+                  "units": [
+                    97
+                  ]
+                },
+                {
+                  "kind": "undefined"
+                },
+                {
+                  "kind": "string",
+                  "units": [
+                    99
+                  ]
+                }
+              ]
+            },
+            "calls": 0,
+            "lastIndex": {
+              "kind": "number",
+              "bits": "0000000000000000"
+            }
+          }
+        },
+        {
+          "input": {
+            "pattern": ",",
+            "flags": "",
+            "input": {
+              "kind": "units",
+              "units": [
+                55296,
+                44,
+                56320
+              ]
+            },
+            "limit": {
+              "kind": "undefined"
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "array",
+              "items": [
+                {
+                  "kind": "string",
+                  "units": [
+                    55296
+                  ]
+                },
+                {
+                  "kind": "string",
+                  "units": [
+                    56320
+                  ]
+                }
+              ]
+            },
+            "calls": 0,
+            "lastIndex": {
+              "kind": "number",
+              "bits": "0000000000000000"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::regexp::split_limit": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "split_limit",
+      "signature": {
+        "inputs": [
+          [
+            "limit",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "usize"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Direct native RegExp split_limit inputs retain UTF-16 units, number bits, coercion effects and original thrown identity; the same corpus runs through Node RegExp symbol methods and the installed native public facade.",
+    "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let result = $type(&input).map(|value| crate::js_runtime::value::Js::Number(value as f64)); audit.finish(result, None, None, false) }",
+    "cases": [
+      {
+        "input": {
+          "input": {
+            "kind": "number",
+            "number": "4294967297"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "number",
+            "bits": "3ff0000000000000"
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "input": {
+            "kind": "undefined"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "number",
+            "bits": "41efffffffe00000"
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "input": {
+            "kind": "number",
+            "number": "NaN"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "number",
+            "bits": "0000000000000000"
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "input": {
+            "kind": "number",
+            "number": "-1"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "number",
+            "bits": "41efffffffe00000"
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "input": {
+            "kind": "objectNumber",
+            "number": "2.75"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "number",
+            "bits": "4000000000000000"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "input": {
+            "kind": "throw"
+          }
+        },
+        "output": {
+          "ok": false,
+          "sameError": true,
+          "calls": 1
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let result = $type(&input).map(|value| crate::js_runtime::value::Js::Number(value as f64)); audit.finish(result, None, None, false) }",
+      "nativeFields": [
+        "value",
+        "calls"
+      ],
+      "cases": [
+        {
+          "input": {
+            "input": {
+              "kind": "number",
+              "number": "4294967297"
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "number",
+              "bits": "3ff0000000000000"
+            },
+            "calls": 0
+          }
+        },
+        {
+          "input": {
+            "input": {
+              "kind": "undefined"
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "number",
+              "bits": "41efffffffe00000"
+            },
+            "calls": 0
+          }
+        },
+        {
+          "input": {
+            "input": {
+              "kind": "number",
+              "number": "NaN"
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "number",
+              "bits": "0000000000000000"
+            },
+            "calls": 0
+          }
+        },
+        {
+          "input": {
+            "input": {
+              "kind": "number",
+              "number": "-1"
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "number",
+              "bits": "41efffffffe00000"
+            },
+            "calls": 0
+          }
+        },
+        {
+          "input": {
+            "input": {
+              "kind": "objectNumber",
+              "number": "2.75"
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "number",
+              "bits": "4000000000000000"
+            },
+            "calls": 1
+          }
+        },
+        {
+          "input": {
+            "input": {
+              "kind": "throw"
+            }
+          },
+          "output": {
+            "ok": false,
+            "sameError": true,
+            "calls": 1
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::regexp::to_length": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "to_length",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "usize"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Direct native RegExp to_length inputs retain UTF-16 units, number bits, coercion effects and original thrown identity; the same corpus runs through Node RegExp symbol methods and the installed native public facade.",
+    "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let result = $type(&input).map(|value| crate::js_runtime::value::Js::Number(value as f64)); audit.finish(result, None, None, false) }",
+    "cases": [
+      {
+        "input": {
+          "input": {
+            "kind": "number",
+            "number": "2.75"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "number",
+            "bits": "4000000000000000"
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "input": {
+            "kind": "number",
+            "number": "-1"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "number",
+            "bits": "0000000000000000"
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "input": {
+            "kind": "number",
+            "number": "NaN"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "number",
+            "bits": "0000000000000000"
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "input": {
+            "kind": "objectNumber",
+            "number": "3.9"
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "number",
+            "bits": "4008000000000000"
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "input": {
+            "kind": "throw"
+          }
+        },
+        "output": {
+          "ok": false,
+          "sameError": true,
+          "calls": 1
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let result = $type(&input).map(|value| crate::js_runtime::value::Js::Number(value as f64)); audit.finish(result, None, None, false) }",
+      "nativeFields": [
+        "value",
+        "calls"
+      ],
+      "cases": [
+        {
+          "input": {
+            "input": {
+              "kind": "number",
+              "number": "2.75"
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "number",
+              "bits": "4000000000000000"
+            },
+            "calls": 0
+          }
+        },
+        {
+          "input": {
+            "input": {
+              "kind": "number",
+              "number": "-1"
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "number",
+              "bits": "0000000000000000"
+            },
+            "calls": 0
+          }
+        },
+        {
+          "input": {
+            "input": {
+              "kind": "number",
+              "number": "NaN"
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "number",
+              "bits": "0000000000000000"
+            },
+            "calls": 0
+          }
+        },
+        {
+          "input": {
+            "input": {
+              "kind": "objectNumber",
+              "number": "3.9"
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "number",
+              "bits": "4008000000000000"
+            },
+            "calls": 1
+          }
+        },
+        {
+          "input": {
+            "input": {
+              "kind": "throw"
+            }
+          },
+          "output": {
+            "ok": false,
+            "sameError": true,
+            "calls": 1
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_exchange::js_runtime::regexp::to_string": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "to_string",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Str",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Direct native RegExp to_string inputs retain UTF-16 units, number bits, coercion effects and original thrown identity; the same corpus runs through Node RegExp symbol methods and the installed native public facade.",
+    "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let result = $type(&input).map(crate::js_runtime::value::Js::String); audit.finish(result, None, None, false) }",
+    "cases": [
+      {
+        "input": {
+          "input": {
+            "kind": "stringBeforeNumber",
+            "units": [
+              55296,
+              97
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "string",
+            "units": [
+              55296,
+              97
+            ]
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "input": {
+            "kind": "stringBeforeThrow",
+            "units": [
+              56320,
+              98
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "string",
+            "units": [
+              56320,
+              98
+            ]
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "input": {
+            "kind": "units",
+            "units": [
+              55296,
+              97
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "string",
+            "units": [
+              55296,
+              97
+            ]
+          },
+          "calls": 0
+        }
+      },
+      {
+        "input": {
+          "input": {
+            "kind": "objectString",
+            "units": [
+              56320,
+              98
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "kind": "string",
+            "units": [
+              56320,
+              98
+            ]
+          },
+          "calls": 1
+        }
+      },
+      {
+        "input": {
+          "input": {
+            "kind": "throw"
+          }
+        },
+        "output": {
+          "ok": false,
+          "sameError": true,
+          "calls": 1
+        }
+      }
+    ],
+    "nativeObservation": {
+      "call": "{ mod observation { use crate::js_runtime::value::{Js, Thrown}; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/scripts/regexp-native-observers.rs\")); } let audit = observation::Audit::new(); let input = audit.input(&$value[\"input\"]); let result = $type(&input).map(crate::js_runtime::value::Js::String); audit.finish(result, None, None, false) }",
+      "nativeFields": [
+        "value",
+        "calls"
+      ],
+      "cases": [
+        {
+          "input": {
+            "input": {
+              "kind": "stringBeforeNumber",
+              "units": [
+                55296,
+                97
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "string",
+              "units": [
+                55296,
+                97
+              ]
+            },
+            "calls": 1
+          }
+        },
+        {
+          "input": {
+            "input": {
+              "kind": "stringBeforeThrow",
+              "units": [
+                56320,
+                98
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "string",
+              "units": [
+                56320,
+                98
+              ]
+            },
+            "calls": 1
+          }
+        },
+        {
+          "input": {
+            "input": {
+              "kind": "units",
+              "units": [
+                55296,
+                97
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "string",
+              "units": [
+                55296,
+                97
+              ]
+            },
+            "calls": 0
+          }
+        },
+        {
+          "input": {
+            "input": {
+              "kind": "objectString",
+              "units": [
+                56320,
+                98
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "value": {
+              "kind": "string",
+              "units": [
+                56320,
+                98
+              ]
+            },
+            "calls": 1
+          }
+        },
+        {
+          "input": {
+            "input": {
+              "kind": "throw"
+            }
+          },
+          "output": {
+            "ok": false,
+            "sameError": true,
+            "calls": 1
+          }
+        }
+      ]
+    }
   }
 }

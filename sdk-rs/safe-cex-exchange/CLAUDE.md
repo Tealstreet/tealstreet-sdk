@@ -1706,6 +1706,11 @@ native `js_split_limit` target compares 1,440 Node cases across five strings,
 limits and throwing coercions. Regex literals use the actual production parser;
 this host does not install a global RegExp constructor.
 
+RegExp input and replacement conversion uses the canonical string hint, so a
+custom toString runs before valueOf. The public native facade and seven direct
+input-owner observations compare 28 Node cases before JSON projection, including
+UTF-16 captures, callback arguments, lastIndex identity and original thrown values.
+
 String.localeCompare uses the existing pinned JsRootCollator for the imported
 runtime's default English/root collation, including case, accents, canonical
 combining forms and lexicographic digits. Argument conversion uses the ordinary
