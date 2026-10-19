@@ -114,3 +114,35 @@ replacement until fresh reconciliation, serialized settings mutations and explic
 income INCOMPLETE notices for advertised cursors. Focused tests pass: 26 trading,
 17 history, 18 account; WEEX clippy passes. Final shared integration now merges
 the newly landed Bybit nested-array metadata support, followed by all gates.
+
+
+## Final gate evidence
+
+Final code after adversarial fixes and landing merge: `e10b87b95d`.
+All six replay gates PASS in [GitHub run39290020868](https://github.com/Tealstreet/tealstreet-sdk/actions/runs/39290020868).
+
+| Public tape | Frames / books | TS worker CPU | Rust worker CPU | TS retained | Rust retained |
+| --- | --- | --- | --- | --- | --- |
+| WEEX | 2028 / 2 | 146.2ms | 132.6ms | 2.5MB | 2.2MB |
+| Binance | 871 / 3 | 240.0ms | 111.1ms | 2.2MB | 1.8MB |
+| Bybit | 8742 / 2 | 268.9ms | 197.8ms | 3.2MB | 2.1MB |
+
+WEEX steady worker CPU: 76.2ms TS / 52.0ms Rust. Whole-process CPU including
+background compilation: 200.0ms TS / 304.7ms Rust; worker-thread CPU is the
+established gate. Private correctness: WEEX19, Binance14, Bybit18 frames.
+
+Final local workspace tests PASS: WEEX76, Bybit43, Binance29, engine15,
+crypto27 unit +1 integration +3 doctests, native host1. SDK wasm7, host7 and
+oracle5 tests pass. Bans, workspace fmt/clippy, wasm clippy, root typecheck44
+and lint28 tasks pass. Broad TS suite previously passed6489/6489; general CI
+is the final landing check. All local adversarial findings and merge reviews
+are posted on PR#1301 and re-reviewed clean.
+
+Combined artifact: 1,887,079 bytes locally / 1,886,574 bytes in CI. Set a2MiB
+combined-venue cap (11% local headroom); the first1.8MiB estimate left357bytes
+on macOS. This adjusts the static binary budget for three venues and platform
+variance. CPU/memory thresholds stay Rust<TS for every public tape.
+
+PR merge waits for green final-head CI, then the lane cuts a fresh follow-up
+branch from the updated `feat/rust-rewrite`. TS retirement/client adoption and
+live private-account validation remain outside this opt-in phase8 lane.
