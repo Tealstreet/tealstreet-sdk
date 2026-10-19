@@ -33,7 +33,31 @@ pub(crate) struct Host {
     module: Option<&'static str>,
 }
 
+pub(super) struct WeakHost {
+    shared: Weak<ScopeShared<Modules>>,
+    lexical: Option<Weak<FunctionData>>,
+    module: Option<&'static str>,
+}
+
+impl WeakHost {
+    fn upgrade(&self) -> Option<Host> {
+        Some(Host {
+            shared: self.shared.upgrade()?,
+            lexical: self.lexical.clone(),
+            module: self.module,
+        })
+    }
+}
+
 impl Host {
+    fn downgrade(&self) -> WeakHost {
+        WeakHost {
+            shared: Rc::downgrade(&self.shared),
+            lexical: self.lexical.clone(),
+            module: self.module,
+        }
+    }
+
     pub(crate) fn new(
         runtime: Rc<dyn WsRuntime>,
         http: Arc<dyn RestAdapter>,

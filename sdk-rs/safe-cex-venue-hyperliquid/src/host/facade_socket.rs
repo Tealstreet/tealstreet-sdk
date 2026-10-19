@@ -6,7 +6,7 @@
 //! this bridge forwards to those listeners and to the instance's own
 //! `connectAndSubscribe`/`ping`. CHOSEN: `close` listeners are not invoked —
 //! the Rust core runs the close/reconnect path the base `onClose` would.
-use super::Host;
+use super::{Host, WeakHost};
 use safe_cex_exchange::js_runtime::value::ObjectData;
 use safe_cex_exchange::js_runtime::value::{Js, Thrown};
 use safe_cex_exchange::{
@@ -39,7 +39,7 @@ struct Listeners {
 }
 
 struct Bridge {
-    realm: Host,
+    realm: WeakHost,
     instance: RefCell<Weak<ObjectData>>,
     listeners: RefCell<Rc<RefCell<Listeners>>>,
 }
@@ -62,7 +62,9 @@ impl Bridge {
         r.exchange_error(thrown)
     }
     fn call_member(&self, name: &str, args: &[Js]) -> Result<Js, ExchangeError> {
-        let mut r = self.realm.clone();
+        let Some(mut r) = self.realm.upgrade() else {
+            return Err(ExchangeError::new("Hyperliquid host disposed"));
+        };
         let Some(instance) = self.instance() else {
             return Ok(Js::Undefined);
         };
@@ -92,11 +94,11 @@ impl WsProtocol for Bridge {
             .map(|_| ())
     }
     fn on_open(&self, _: Rc<BaseWebSocket>) -> ExchangeFuture<'static, ()> {
-        let realm = self.realm.clone();
+        let realm = self.realm.upgrade();
         let listeners: Vec<Js> = self.listeners.borrow().borrow().open.clone();
         let instance = self.instance();
         Box::pin(async move {
-            let mut r = realm;
+            let mut r = realm.ok_or_else(|| ExchangeError::new("Hyperliquid host disposed"))?;
             let event = r.object_from(vec![("type", Js::str("open"))]);
             for listener in listeners {
                 let this = instance.clone().unwrap_or(Js::Undefined);
@@ -115,7 +117,9 @@ impl WsProtocol for Bridge {
             SocketFrame::Binary(bytes) => Js::str(&String::from_utf8_lossy(bytes)),
             _ => return Ok(()),
         };
-        let mut r = self.realm.clone();
+        let Some(mut r) = self.realm.upgrade() else {
+            return Err(ExchangeError::new("Hyperliquid host disposed"));
+        };
         let listeners: Vec<Js> = self.listeners.borrow().borrow().message.clone();
         let event = r.object_from(vec![("data", data)]);
         let this = self.instance().unwrap_or(Js::Undefined);
@@ -157,7 +161,7 @@ pub(crate) fn base_websocket_class(realm: &mut Host, deps: SocketDependencies) -
     let next_id = Rc::new(Cell::new(1u64));
     let class = realm.constructor("BaseWebSocket", 1, move |r, args, new_target| {
         let bridge = Rc::new(Bridge {
-            realm: r.clone(),
+            realm: r.downgrade(),
             instance: RefCell::new(Weak::new()),
             listeners: RefCell::default(),
         });

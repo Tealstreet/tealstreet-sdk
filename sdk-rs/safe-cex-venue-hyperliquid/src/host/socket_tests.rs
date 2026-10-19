@@ -14,6 +14,44 @@ use std::{rc::Rc, sync::Arc};
 
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
+fn constructed_socket_bridges_do_not_retain_the_host_owner_after_dispose() {
+    use safe_cex_exchange::exchange::Exchange;
+
+    for spot in [false, true] {
+        let runtime = Rc::new(host::Host::default());
+        let dependencies = HyperliquidDependencies {
+            runtime: runtime.clone(),
+            http: host::Routes::new(vec![]),
+            limiter: Rc::new(RateLimiter::new(
+                Arc::new(RuntimeClock::new(runtime.clone())),
+                1200.0,
+                60_000.0,
+            )),
+            signers: ExchangeSigners::default(),
+            external_public_data: None,
+        };
+        let options = serde_json::from_value(json!({"key":"", "secret":""})).unwrap();
+        let store = Rc::new(DefaultStore::new());
+        let (exchange, owner): (Rc<dyn Exchange>, _) = if spot {
+            let exchange =
+                crate::spot_binding::HyperliquidSpotExchange::new(options, store, dependencies)
+                    .unwrap();
+            let owner = Rc::downgrade(&exchange.binding.borrow().as_ref().unwrap().realm.shared);
+            (exchange, owner)
+        } else {
+            let exchange = HyperliquidExchange::new(options, store, dependencies).unwrap();
+            let owner = Rc::downgrade(&exchange.binding.borrow().as_ref().unwrap().realm.shared);
+            (exchange, owner)
+        };
+        assert!(owner.upgrade().is_some(), "held host must remain live");
+        exchange.dispose().unwrap();
+        drop(exchange);
+        assert!(owner.upgrade().is_none(), "HL_HOST_OWNER_RELEASE: spot={spot}");
+    }
+}
+
+#[test]
+#[allow(clippy::arc_with_non_send_sync)]
 fn both_constructed_families_keep_original_js_arguments_and_start_async_calls_eagerly() {
     use safe_cex_exchange::{exchange::Exchange, js_runtime::promise::Promise};
     use std::cell::{Cell, RefCell};
