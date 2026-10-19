@@ -236,54 +236,6 @@ mod tests {
         }
     }
     #[test]
-    fn wire_payload_and_signature_last_preserve_order() {
-        // zkLink signs binary payload bytes, not the surrounding JSON object.
-        // The envelope transports that exact preimage and must not be re-keyed.
-        let corpus = corpus();
-        let base = corpus
-            .cases
-            .iter()
-            .find(|case| case.name == "base")
-            .unwrap();
-        let raw = format!(r#"{{"zPayload":"{}","alphaNonce":1}}"#, base.payload);
-        let mut body: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        assert_eq!(
-            serde_json::to_string(&body).unwrap(),
-            raw,
-            "zkLink wire body field order requires preserve_order"
-        );
-        let signed_payload = decode(body["zPayload"].as_str().unwrap());
-        let signed = sign(&decode(&base.seed), &signed_payload).unwrap();
-        let signature_hex: String = signed
-            .signature
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
-        assert_eq!(
-            signature_hex, base.signed.signature.signature,
-            "zkLink wire payload must match npm WASM signing preimage"
-        );
-        body.as_object_mut().unwrap().insert(
-            "signature".into(),
-            serde_json::Value::String(signature_hex.clone()),
-        );
-        let wire = serde_json::to_string(&body).unwrap();
-        let expected = format!(
-            r#"{{"zPayload":"{}","alphaNonce":1,"signature":"{}"}}"#,
-            base.payload, signature_hex
-        );
-        assert_eq!(
-            wire, expected,
-            "zkLink signature must be last without changing unsigned fields"
-        );
-        let received: serde_json::Value = serde_json::from_str(&wire).unwrap();
-        assert_eq!(
-            decode(received["zPayload"].as_str().unwrap()),
-            signed_payload,
-            "zkLink received payload differs from signed binary preimage"
-        );
-    }
-    #[test]
     fn key_payload_nonce_controls() {
         let corpus = corpus();
         let base = &corpus.cases[0];

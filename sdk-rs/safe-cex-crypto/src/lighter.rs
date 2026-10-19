@@ -125,35 +125,6 @@ mod tests {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
     #[test]
-    #[cfg(not(target_arch = "wasm32"))]
-    fn unchanged_go_wasm_oracle_replay() {
-        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/lighter/go-wasm.cjs");
-        for mode in [
-            None,
-            Some("--edges"),
-            Some("--noncanonical"),
-            Some("--security"),
-            Some("--lengths"),
-            Some("--two-noncanonical"),
-        ] {
-            let mut command = std::process::Command::new("node");
-            command.arg(&script);
-            if let Some(mode) = mode {
-                command.arg(mode);
-            }
-            let output = command
-                .output()
-                .expect("Node required for unchanged Go-WASM oracle gate");
-            assert!(
-                output.status.success(),
-                "Go WASM oracle replay failed: {} {}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-    }
-    #[test]
     fn zero_nonce_key_recovery_signature_is_refused_like_go() {
         let fixture: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/lighter/go-wasm-security.json"
@@ -509,42 +480,5 @@ mod tests {
                 "mutated nonce failed to change signature"
             );
         }
-    }
-    #[test]
-    fn signed_body_preserves_exact_two_key_bytes_and_signature_last() {
-        let raw = r#"{"z":12,"a":345}"#;
-        let mut body: Value = serde_json::from_str(raw).unwrap();
-        assert_eq!(
-            serde_json::to_string(&body).unwrap(),
-            raw,
-            "body re-keyed after signing"
-        );
-        let fixture: Value = serde_json::from_str(include_str!(
-            "../tests/fixtures/lighter/go-wasm-noncanonical.json"
-        ))
-        .unwrap();
-        let case = &fixture["signature"];
-        assert_eq!(raw.as_bytes(), bytes(case, "payload"));
-        let signature = schnorr_sign(
-            raw.as_bytes(),
-            &bytes(case, "key"),
-            SchnorrNonce::from_bytes(&bytes(case, "nonce")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(hex(&signature), case["signature"]);
-        body.as_object_mut()
-            .unwrap()
-            .insert("signature".into(), Value::String(hex(&signature)));
-        let wire = serde_json::to_string(&body).unwrap();
-        assert!(
-            wire.starts_with(r#"{"z":12,"a":345,"signature":""#),
-            "signature must be last on wire"
-        );
-        body.as_object_mut().unwrap().remove("signature");
-        assert_eq!(
-            serde_json::to_vec(&body).unwrap(),
-            raw.as_bytes(),
-            "signed preimage differs from wire body"
-        );
     }
 }

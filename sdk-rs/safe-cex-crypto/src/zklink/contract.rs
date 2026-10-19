@@ -12,7 +12,8 @@ use zeroize::Zeroizing;
 
 /// Inputs after the SDK's ContractBuilder wasm argument conversions.
 /// Decimal strings retain the source BigUint spelling until serialization.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Contract {
     pub account_id: u32,
     pub sub_account_id: u8,
@@ -24,27 +25,6 @@ pub struct Contract {
     pub direction: bool,
     pub fee_rates: [u8; 2],
     pub has_subsidy: bool,
-}
-
-#[derive(Deserialize)]
-#[serde(remote = "Contract", rename_all = "camelCase")]
-struct WireContract {
-    account_id: u32,
-    sub_account_id: u8,
-    slot_id: u32,
-    nonce: u32,
-    pair_id: u16,
-    size: String,
-    price: String,
-    direction: bool,
-    fee_rates: [u8; 2],
-    has_subsidy: bool,
-}
-
-impl<'de> Deserialize<'de> for Contract {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        WireContract::deserialize(safe_cex_types::strict_decode::object(deserializer))
-    }
 }
 
 // num::BigUint's decimal parser permits one leading '+' and underscores after

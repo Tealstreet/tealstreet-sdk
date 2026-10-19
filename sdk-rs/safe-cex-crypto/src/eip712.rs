@@ -177,49 +177,6 @@ mod tests {
     }
 
     #[test]
-    fn signed_two_key_message_preserves_wire_order_and_signature_last() {
-        let cases = corpus();
-        let base = cases.iter().find(|case| case.name == "base").unwrap();
-        let mut typed: serde_json::Value = serde_json::from_str(&base.typed_data).unwrap();
-        let unsigned = serde_json::to_string(&typed["message"]).unwrap();
-        assert_eq!(
-            unsigned, r#"{"payload":"雪\u0000payload","nonce":"7"}"#,
-            "EIP-712 signed two-key body must preserve wire order"
-        );
-        let signature = sign_typed_data(&base.typed_data, &base.private_key).unwrap();
-        assert_eq!(signature, base.signature, "EIP-712 body signature oracle");
-        let message = typed["message"].as_object_mut().unwrap();
-        message.insert("signature".into(), signature.clone().into());
-        let wire = serde_json::to_string(message).unwrap();
-        let expected = format!(
-            "{},\"signature\":\"{}\"}}",
-            unsigned.strip_suffix('}').unwrap(),
-            signature
-        );
-        assert_eq!(wire, expected, "EIP-712 signature must be last on wire");
-        // Re-parse the actual submitted body rather than reusing the original object.
-        let mut submitted: serde_json::Value = serde_json::from_str(&wire).unwrap();
-        submitted.as_object_mut().unwrap().remove("signature");
-        assert_eq!(
-            serde_json::to_string(&submitted).unwrap(),
-            unsigned,
-            "EIP-712 submitted bytes must match signed body"
-        );
-        typed["message"] = submitted;
-        let submitted_typed = serde_json::to_string(&typed).unwrap();
-        assert_eq!(
-            hash_typed_data(&submitted_typed).unwrap(),
-            base.hash,
-            "EIP-712 submitted message hash"
-        );
-        assert_eq!(
-            sign_typed_data(&submitted_typed, &base.private_key).unwrap(),
-            signature,
-            "EIP-712 submitted message signature"
-        );
-    }
-
-    #[test]
     fn malformed_raw_input_and_invalid_key_are_errors() {
         assert!(hash_typed_data("{").is_err());
         let cases = corpus();

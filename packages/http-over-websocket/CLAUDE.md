@@ -140,18 +140,3 @@ yarn test           # Vitest
   while legacy servers may return both fields. Browser `ArrayBuffer`/`Blob` and
   Node/Bun buffer views are supported, and every older text response remains a
   valid fallback.
-
-## Rust transport correspondence
-
-The Rust host contract and declared representation differences are documented in
-[sdk-rs transport](../../sdk-rs/safe-cex-transport/README.md), with independent
-mutation controls in its [gate evidence](../../sdk-rs/safe-cex-transport/GATE_EVIDENCE.md).
-Fresh relay upgrade authentication remains a provider until the inner tunnel dial;
-required-auth headers must be checked before construction and before a lazy dial.
-
-The Rust raw-body parser also reproduces the deterministic big-integer regex
-corruption inside quoted strings, including outbound null data; its live-source
-oracle forces a revisit when the TypeScript parser is corrected.
-
-Rust uses the same exact staging flag for HOW and relay paths (native environment
-at first endpoint use, wasm build environment).

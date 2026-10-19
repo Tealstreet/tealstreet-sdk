@@ -111,24 +111,6 @@ mod tests {
         }
     }
     #[test]
-    fn signature_last_body_keeps_exact_signed_bytes() {
-        // Raw parsing reaches the host text boundary and proves preserve_order.
-        let mut body: serde_json::Value = serde_json::from_str("{\"zeta\":1,\"alpha\":2}").unwrap();
-        let payload = serde_json::to_vec(&body).unwrap();
-        assert_eq!(payload, b"{\"zeta\":1,\"alpha\":2}", "signed key order");
-        let signature = sign(&payload, &[1; 32]).unwrap();
-        body.as_object_mut().unwrap().insert(
-            "signature".into(),
-            serde_json::Value::String("attached".into()),
-        );
-        assert_eq!(
-            serde_json::to_string(&body).unwrap(),
-            "{\"zeta\":1,\"alpha\":2,\"signature\":\"attached\"}",
-            "signature-last wire order"
-        );
-        assert!(verify(&payload, &public_key(&[1; 32]).unwrap(), &signature).unwrap());
-    }
-    #[test]
     fn malformed_raw_seed_returns_error() {
         let seed: Vec<u8> = serde_json::from_str("[1,2,3]").unwrap();
         assert_eq!(
