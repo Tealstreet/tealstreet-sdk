@@ -134,3 +134,78 @@ test('modify-by-client-id preserves an existing generated identity', () => {
   assert.equal(tape.respond('POST', place, { clientOid: 'actual-old' }).status, 200);
   assert.equal(tape.respond('POST', url, { clientOid: 'actual-old', newClientOid: 'actual-new' }).status, 200);
 });
+
+test('Crypto.com POST reads reuse staged snapshots and retain exact integer parameters', () => {
+  const read = 'https://api.crypto.com/exchange/v1/private/get-trades';
+  const body = (id, end = '1610000000000000001') =>
+    `{"id":${id},"method":"private/get-trades","params":{"end_time":${end}},"sig":"volatile"}`;
+  const rpcVenue = {
+    rust: 'cryptocom',
+    matchRequestBody: true,
+    isWrite: (_method, requestUrl) => requestUrl.includes('/create-'),
+  };
+  const tape = createTape(
+    [
+      response(body(1), { url: read, body: 'old', headers: 'stage: 0' }),
+      response(body(2), { url: read, body: 'new', headers: 'stage: 2', afterCommand: 2 }),
+    ],
+    rpcVenue,
+    true,
+  );
+  assert.deepEqual(tape.respond('POST', read, body(100)), { status: 200, headers: 'stage: 0', body: 'old' });
+  assert.equal(tape.respond('POST', read, body(101)).body, 'old');
+  assert.equal(tape.respond('POST', read, body(102, '1610000000000000002')).status, 599);
+  tape.commandIndex = 2;
+  assert.deepEqual(tape.respond('POST', read, body(103)), { status: 200, headers: 'stage: 2', body: 'new' });
+  assert.equal(tape.unserved, 1);
+  assert.equal(tape.unusedWrites, 0);
+  tape.assertWritesConsumed();
+});
+
+test('venue request checks reject a matching write without consuming its response', () => {
+  const write = 'https://api.crypto.com/exchange/v1/private/create-order';
+  const body = (sig) => JSON.stringify({ method: 'private/create-order', params: { quantity: '1' }, sig });
+  const rpcVenue = {
+    rust: 'cryptocom',
+    matchRequestBody: true,
+    checkRequest: (_method, _url, requestBody) => JSON.parse(requestBody).sig === 'valid',
+    isWrite: () => true,
+  };
+  const tape = createTape([response(body('recorded'), { url: write })], rpcVenue, true);
+  assert.equal(tape.respond('POST', write, body('invalid')).status, 599);
+  assert.equal(tape.unusedWrites, 1);
+  assert.equal(tape.respond('POST', write, body('valid')).status, 200);
+  assert.equal(tape.unusedWrites, 0);
+  assert.equal(tape.respond('POST', write, body('valid')).status, 599);
+});
+
+test('factory supplies socket audit context and audits frames before venue delivery', async () => {
+  const seen = [];
+  const books = ['BTCUSD-PERP'];
+  const auditVenue = {
+    rust: 'cryptocom',
+    publicTickers: () => ['BTCUSD-PERP', 'ETHUSD-PERP'],
+    createSocketAudit: (impl, context) => {
+      assert.equal(impl, 'rust');
+      assert.deepEqual(context, { isPrivate: true, books, tickers: ['BTCUSD-PERP', 'ETHUSD-PERP'] });
+      return {
+        sent: (_url, text) => seen.push(['sent', text]),
+        received: (_url, text) => seen.push(['received', text]),
+      };
+    },
+  };
+  const tape = createTape([], auditVenue, true, { impl: 'rust', books });
+  const socketUrl = 'wss://stream.crypto.com/exchange/v1/user';
+  const socket = tape.connect(
+    socketUrl,
+    () => {},
+    (text) => seen.push(['delivered', text]),
+  );
+  tape.sent(socket, '{"method":"public/auth"}');
+  await tape.deliver({ url: socketUrl, text: '{"method":"public/auth","code":0}' });
+  assert.deepEqual(seen, [
+    ['sent', '{"method":"public/auth"}'],
+    ['received', '{"method":"public/auth","code":0}'],
+    ['delivered', '{"method":"public/auth","code":0}'],
+  ]);
+});

@@ -1,4 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { parseRequestJson } from './request-json.mjs';
+import { Responses } from './responses.mjs';
 export class ReplayTimeout extends Error {}
 export const within = async (promise, ms, label) => {
   let timer;
@@ -14,7 +16,7 @@ export const within = async (promise, ms, label) => {
   }
 };
 
-export const createTape = (records, venue, isPrivate) => {
+export const createTape = (records, venue, isPrivate, { impl, books = [] } = {}) => {
   const KEY = 'replay-key',
     SECRET = 'replay-secret',
     PASSPHRASE = 'replay-passphrase';
@@ -52,12 +54,13 @@ export const createTape = (records, venue, isPrivate) => {
     if (body === undefined || body === null || body === '') return '';
     let parsed = body;
     try {
-      if (typeof body === 'string') parsed = JSON.parse(body);
+      if (typeof body === 'string') parsed = parseRequestJson(body);
       else if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer)
-        parsed = JSON.parse(new TextDecoder().decode(body));
+        parsed = parseRequestJson(new TextDecoder().decode(body));
     } catch {
       return String(body);
     }
+    if (venue.rust === 'cryptocom' && parsed?.method && parsed?.params) parsed = parsed.params;
     const sorted = (value) => {
       if (Array.isArray(value)) return value.map(sorted);
       if (value === null || typeof value !== 'object') return value;
@@ -79,7 +82,9 @@ export const createTape = (records, venue, isPrivate) => {
         ]),
       );
     };
-    return JSON.stringify(sorted(parsed));
+    return JSON.stringify(sorted(parsed), (_key, value) =>
+      typeof value === 'bigint' ? { integer: String(value) } : value,
+    );
   };
   const topicKey = (arg) => `${arg.instType ?? ''}|${arg.channel ?? arg.topic}|${arg.instId ?? arg.symbol ?? ''}`;
   const requestKey = (method, url, body) =>
@@ -88,83 +93,69 @@ export const createTape = (records, venue, isPrivate) => {
   /** Serves recorded HTTP responses and websocket frames in tape order. */
   class Tape {
     constructor() {
-      this.responses = new Map();
-      for (const record of records.filter((r) => r.type === 'http')) {
-        const key = requestKey(record.method, record.url, record.requestBody);
-        if (!this.responses.has(key)) this.responses.set(key, []);
-        this.responses.get(key).push(record);
-      }
+      this.audit = venue.createSocketAudit?.(impl, {
+        isPrivate,
+        books,
+        tickers: venue.publicTickers?.(records),
+      });
+      this.responses = new Responses(
+        records,
+        requestKey,
+        venue.checkRequest,
+        venue.isWrite ?? ((method) => method !== 'GET'),
+      );
       this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
       this.open = new Map();
       this.waiters = [];
-      this.unserved = 0;
       this.commandIndex = 0;
       this.generated = new Set();
     }
 
     respond(method, url, body) {
-      const key = requestKey(method, url, body);
-      const queue = this.responses.get(key);
-      if (!queue?.length) {
-        this.unserved++;
-        if (venue.matchRequestBody) console.error(`Unserved request: ${key}`);
-        return { status: 599, body: '' };
-      }
-      // Staged snapshots become available only once their command starts.
-      const eligible = queue.filter((r) => (r.afterCommand ?? 0) <= this.commandIndex);
-      if (!eligible.length) {
-        this.unserved++;
-        console.error(`Request preceded its taped stage: ${key}`);
-        return { status: 599, body: '' };
-      }
-      const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
-      const current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
-      const record = current[0];
-      // Reads may reconcile repeatedly; every write needs its own row.
-      if (current.length > 1 || method !== 'GET') queue.splice(queue.indexOf(record), 1);
-      if (method !== 'GET' && venue.rust.startsWith('bitget') && /(?:place|modify)-/.test(new URL(url).pathname)) {
-        const ids = [];
-        const visit = (value) => {
-          if (!value || typeof value !== 'object') return;
-          for (const [key, item] of Object.entries(value)) {
-            if (mintedField(key, url) && (key === 'newClientOid' || !callerIds.has(item))) {
+      return this.responses.respond(method, url, body, this.commandIndex, (record) => {
+        if (method !== 'GET' && venue.rust.startsWith('bitget') && /(?:place|modify)-/.test(new URL(url).pathname)) {
+          const ids = [];
+          const visit = (value) => {
+            if (!value || typeof value !== 'object') return;
+            for (const [key, item] of Object.entries(value)) {
+              if (mintedField(key, url) && (key === 'newClientOid' || !callerIds.has(item))) {
+                if (
+                  typeof item !== 'string' ||
+                  !/^[.A-Za-z0-9:/_-]{1,32}$/.test(item) ||
+                  (key === 'newClientOid' && callerIds.has(item))
+                )
+                  throw new Error(`invalid generated ${key}`);
+                ids.push(item);
+              } else visit(item);
+            }
+          };
+          visit(typeof body === 'string' ? parseRequestJson(body) : body);
+          const reply = JSON.parse(record.body);
+          // A rejected signature may be re-signed once with the same identity.
+          if (String(reply.code) !== '40009')
+            for (const id of ids) {
+              if (this.generated.has(id)) throw new Error(`generated client ID reused: ${id}`);
+              this.generated.add(id);
+            }
+        }
+        if (bitget && method !== 'GET') {
+          const decode = (value) => (typeof value === 'string' ? parseRequestJson(value) : value);
+          const bind = (expected, actual) => {
+            if (!expected || !actual || typeof expected !== 'object' || typeof actual !== 'object') return;
+            for (const key of Object.keys(expected)) {
               if (
-                typeof item !== 'string' ||
-                !/^[.A-Za-z0-9:/_-]{1,32}$/.test(item) ||
-                (key === 'newClientOid' && callerIds.has(item))
+                mintedField(key, url) &&
+                typeof expected[key] === 'string' &&
+                typeof actual[key] === 'string' &&
+                !callerIds.has(actual[key])
               )
-                throw new Error(`invalid generated ${key}`);
-              ids.push(item);
-            } else visit(item);
-          }
-        };
-        visit(typeof body === 'string' ? JSON.parse(body) : body);
-        const reply = JSON.parse(record.body);
-        // A rejected signature may be re-signed once with the same identity.
-        if (String(reply.code) !== '40009')
-          for (const id of ids) {
-            if (this.generated.has(id)) throw new Error(`generated client ID reused: ${id}`);
-            this.generated.add(id);
-          }
-      }
-      if (bitget && method !== 'GET') {
-        const decode = (value) => (typeof value === 'string' ? JSON.parse(value) : value);
-        const bind = (expected, actual) => {
-          if (!expected || !actual || typeof expected !== 'object' || typeof actual !== 'object') return;
-          for (const key of Object.keys(expected)) {
-            if (
-              mintedField(key, url) &&
-              typeof expected[key] === 'string' &&
-              typeof actual[key] === 'string' &&
-              !callerIds.has(actual[key])
-            )
-              generatedAliases.set(actual[key], expected[key]);
-            else bind(expected[key], actual[key]);
-          }
-        };
-        bind(decode(record.requestBody), decode(body));
-      }
-      return { status: record.status, headers: record.headers ?? '', body: record.body };
+                generatedAliases.set(actual[key], expected[key]);
+              else bind(expected[key], actual[key]);
+            }
+          };
+          bind(decode(record.requestBody), decode(body));
+        }
+      });
     }
 
     connect(url, onOpen, onMessage) {
@@ -181,6 +172,7 @@ export const createTape = (records, venue, isPrivate) => {
     }
 
     send(socket, text) {
+      this.audit?.sent(socket.url, text);
       if (venue.respondToPing && text === 'ping') {
         setImmediate(() => {
           if (!socket.closed) socket.onMessage('pong');
@@ -258,8 +250,8 @@ export const createTape = (records, venue, isPrivate) => {
     }
 
     assertWritesConsumed() {
-      const missing = [...this.responses].flatMap(([key, rows]) => (key.startsWith('GET ') ? [] : rows.map(() => key)));
-      if (missing.length) throw new Error(`${missing.length} taped write(s) were not sent:\n${missing.join('\n')}`);
+      const missing = this.responses.unusedWrites();
+      if (missing) throw new Error(`${missing} taped write(s) were not sent`);
     }
 
     sockets(url) {
@@ -293,6 +285,7 @@ export const createTape = (records, venue, isPrivate) => {
         ? sockets.filter((socket) => [...socket.topics.values()].some((topic) => topicKey(topic) === key))
         : sockets;
       if (key && !matching.length) throw new Error(`frame has no subscribed socket: ${frame.url} ${key}`);
+      this.audit?.received(frame.url, frame.text);
       for (const socket of matching) {
         if ((venue.validateLogin || venue.validateSubscriptions) && frame.text.trimStart().startsWith('{')) {
           const message = JSON.parse(frame.text);
@@ -350,7 +343,11 @@ export const createTape = (records, venue, isPrivate) => {
     }
 
     get unusedWrites() {
-      return [...this.responses.values()].reduce((n, queue) => n + queue.filter((r) => r.method !== 'GET').length, 0);
+      return this.responses.unusedWrites();
+    }
+
+    get unserved() {
+      return this.responses.unserved;
     }
 
     results = [];

@@ -10,6 +10,7 @@ use safe_cex_engine::{
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
+use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -449,6 +450,12 @@ impl WasmEngine {
                     },
                 })))
             }
+            "cryptocom" => Box::new(Engine::new(Cryptocom::new(CryptocomOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
             "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
                 if !options.public_data_only
                     && options.key.as_ref().is_some_and(|s| !s.is_empty())

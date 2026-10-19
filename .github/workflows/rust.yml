@@ -102,7 +102,7 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Binance + Bybit + Bitget + OKX: measured 1,918,946 bytes; allow 2 MiB.
+      # Five-venue merge: retain 2 MiB pending bundle remeasurement.
       WASM_BUDGET_BYTES: 2097152
     defaults:
       run:
@@ -160,6 +160,12 @@ jobs:
         run: |
           yarn rust:private-tape-bitget
           yarn rust:gate --venue bitget --tape sdk-rs/harness/tapes/bitget-private.jsonl --runs 1 --books ''
+      - name: Crypto.com public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue cryptocom --tape sdk-rs/harness/fixtures/cryptocom-public.jsonl.gz --books BTCUSD-PERP,ETHUSD-PERP
+      - name: Crypto.com account and trading (correctness)
+        run: |
+          yarn rust:private-tape-cryptocom
+          yarn rust:gate --venue cryptocom --tape sdk-rs/harness/tapes/cryptocom-private.jsonl --runs 1 --books ''
       - name: OKX public data (correctness, CPU and memory)
         run: yarn rust:gate --venue okx --tape sdk-rs/harness/fixtures/okx-public.jsonl.gz --books BTCUSDT,ETHUSDT
       - name: OKX account and trading variants (correctness)

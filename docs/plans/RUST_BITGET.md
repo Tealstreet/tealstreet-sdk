@@ -290,3 +290,17 @@ all focused tests pass. Final rebuild, replay and repeat audit in progress.
 - Rebuilt WASM adapter 20 tests, harness 7, private replay and repository
   typecheck/lint PASS. Pre-fix PR CI is entirely green; the corrected commit
   requires its own green CI. Final public rerun remains in progress.
+
+## Crypto.com landing integration
+
+- Merged landing e6e410146e after PR became conflicting. Retained incoming
+  Crypto.com crate/registration, crypto cleanup, request-signature/socket audits,
+  exact large request IDs, POST-read versus mutation semantics, stable retained
+  memory accounting and the real TS worker packer/receiver path.
+- Strict Bitget factory now delegates to shared Responses with a matched-record
+  hook; minted-ID aliases/freshness and multi-socket subscriptions remain intact.
+  All 19 harness tests pass, including independent factory integration cases.
+- Shared splitter retains both incoming malformed-item/envelope validation and
+  Bitget alternative paths; engine 20 tests PASS. All private fixes remain.
+- Previous public rerun was invalidated by the merge while child replay imports
+  were in progress; rerun on the frozen integration before final reporting.
