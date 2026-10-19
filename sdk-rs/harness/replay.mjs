@@ -19,9 +19,15 @@ const { values } = parseArgs({
     out: { type: 'string' },
     // Skip modelling the worker posting books to main (same work for both).
     'no-egress': { type: 'boolean', default: false },
+    delivery: { type: 'string', default: 'batch' },
+    cadence: { type: 'string', default: 'recorded' },
+    // Opt-in diagnostics; never enabled by correctness/performance gates.
+    profile: { type: 'boolean', default: false },
   },
 });
 const venue = venueOf(values.venue);
+if (!['single', 'batch'].includes(values.delivery)) throw new Error('delivery must be single or batch');
+if (!['frame', 'recorded'].includes(values.cadence)) throw new Error('cadence must be frame or recorded');
 const tapeBytes = readFileSync(values.tape);
 const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
   .toString('utf8')
@@ -212,7 +218,8 @@ class Tape {
   }
 
   /**
-   * Deliver every frame in order, yielding to the event loop between frames.
+   * Deliver every frame in order. Equal recorded timestamps model one socket
+   * burst; both implementations yield at the same boundaries.
    * Commands are awaited where they fall. A private tape is paced: each record
    * waits until its time after the account is ready.
    */
@@ -225,7 +232,7 @@ class Tape {
     const start = performance.now();
     let delivered = 0;
     const warm = Math.floor(this.frames.length / 4);
-    for (const frame of this.frames) {
+    for (const [index, frame] of this.frames.entries()) {
       if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
       if (isPrivate) {
         const wait = frame.t - (performance.now() - start);
@@ -250,7 +257,9 @@ class Tape {
       }
       delivered++;
       onTick?.(frame.t);
-      await new Promise(setImmediate);
+      if (isPrivate || values.cadence === 'frame' || this.frames[index + 1]?.t !== frame.t) {
+        await new Promise(setImmediate);
+      }
     }
     return delivered;
   }
@@ -278,16 +287,18 @@ const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
     wallMs: performance.now() - wallStart,
     rssBytes: memory.rss,
     heapUsedBytes: memory.heapUsed,
+    arrayBufferBytes: memory.arrayBuffers - heapBefore.arrayBuffers,
     wasmBytes,
     // What the implementation keeps alive beyond the harness and loaded code.
-    retainedBytes: memory.heapUsed - heapBefore + wasmBytes,
+    retainedBytes: memory.heapUsed - heapBefore.heapUsed + memory.arrayBuffers - heapBefore.arrayBuffers + wasmBytes,
   };
 };
 
 /** Heap retained before the implementation loads, so both start from zero. */
 const baseline = () => {
   globalThis.gc?.();
-  return process.memoryUsage().heapUsed;
+  const { heapUsed, arrayBuffers } = process.memoryUsage();
+  return { heapUsed, arrayBuffers };
 };
 
 const sortBook = (book) => ({
@@ -311,7 +322,7 @@ async function runRust() {
   const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
-  const { WasmEngine, wasmMemoryBytes } = await loadEngine();
+  const { WasmEngine, wasmMemoryBytes } = await loadEngine(venue.rust);
   const tape = new Tape();
   const encoder = new TextEncoder();
   // What the main thread keeps: the latest market table, ticker columns, books.
@@ -346,7 +357,9 @@ async function runRust() {
     clearTimeout: (handle) => clearTimeout(handle),
   };
   const options = { ...venue.options, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }) };
-  const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
+  const engine = new WasmEngine(venue.rust, JSON.stringify(options));
+  const profile = values.profile ? (await import('./profile-engine.mjs')).profileEngine(engine) : undefined;
+  const host = new EngineHost(profile?.engine ?? engine, transport, {
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
       const received = values['no-egress'] ? buffer : structuredClone(buffer, { transfer: [buffer] });
@@ -364,7 +377,7 @@ async function runRust() {
         fills.push({ market: executed.market[i], side: executed.side[i], amount: executed.rows[i * 2 + 1], price: executed.rows[i * 2], id: executed.orderId(i) });
       }
     },
-  });
+  }, { batchMessages: values.delivery === 'batch' });
   const heapBefore = baseline();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
   const wallStart = performance.now();
@@ -393,6 +406,7 @@ async function runRust() {
   clearInterval(flushTimer);
   host.flush();
   const metrics = measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
+  if (profile) metrics.profile = profile.methods;
   host.dispose();
 
   // Rebuild comparable records outside the measured window.

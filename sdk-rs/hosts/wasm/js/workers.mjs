@@ -64,8 +64,8 @@ async function* chunks(stream) {
 const KEEPALIVE_MS = 30_000;
 
 /**
- * A Durable Object class running one engine. `loadEngine` resolves the
- * wasm-bindgen module (`{ WasmEngine }`) the deployment bundles; `flush`
+ * A Durable Object class running one engine. `loadEngine(venue)` resolves the
+ * venue-specific wasm-bindgen module (`{ WasmEngine }`) the deployment bundles; `flush`
  * gives the store and book cadences in ms.
  */
 export const createEngineObject = ({ loadEngine, flush = { store: 250, books: 60 } }) =>
@@ -74,6 +74,8 @@ export const createEngineObject = ({ loadEngine, flush = { store: 250, books: 60
       this.state = state;
       this.clients = new Set();
       this.host = undefined;
+      this.venue = undefined;
+      this.starting = undefined;
       this.timers = [];
     }
 
@@ -84,7 +86,13 @@ export const createEngineObject = ({ loadEngine, flush = { store: 250, books: 60
       const [client, server] = Object.values(new WebSocketPair());
       server.accept();
       this.clients.add(server);
-      server.addEventListener('message', (event) => this.receive(server, event.data));
+      server.addEventListener('message', (event) => {
+        this.receive(server, event.data).catch((error) => {
+          if (this.clients.has(server)) {
+            server.send(JSON.stringify({ op: 'log', level: 'error', message: String(error?.message ?? error) }));
+          }
+        });
+      });
       server.addEventListener('close', () => this.leave(server));
       if (this.host) server.send(this.host.snapshot());
       await this.state.storage.setAlarm(Date.now() + KEEPALIVE_MS);
@@ -94,26 +102,60 @@ export const createEngineObject = ({ loadEngine, flush = { store: 250, books: 60
     async receive(client, data) {
       if (typeof data !== 'string') return;
       const message = JSON.parse(data);
-      if (message.op === 'start' && !this.host) {
-        const { WasmEngine } = await loadEngine();
-        this.host = new EngineHost(
-          new WasmEngine(message.venue, JSON.stringify(message.options ?? {})),
-          workersTransport(),
-          {
-            onFrame: (frame) => this.broadcast(frame),
-            onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),
-          },
-        );
-        this.host.start();
-        this.timers.push(setInterval(() => this.host?.flush(), flush.store));
-        if (flush.books < flush.store) this.timers.push(setInterval(() => this.host?.flush(true), flush.books));
+      if (message.op === 'start') {
+        if (this.host || this.starting) {
+          if (message.venue !== (this.venue ?? this.starting.venue)) {
+            throw new Error('this account already selected a different venue');
+          }
+          return this.starting?.promise;
+        }
+        const starting = { venue: message.venue };
+        this.starting = starting;
+        starting.promise = (async () => {
+          const { WasmEngine } = await loadEngine(message.venue);
+          // Leaving invalidates this attempt even if another client reconnects
+          // before its module finishes loading.
+          if (this.starting !== starting || this.clients.size === 0) return;
+          const host = new EngineHost(
+            new WasmEngine(message.venue, JSON.stringify(message.options ?? {})),
+            workersTransport(),
+            {
+              onFrame: (frame) => this.broadcast(frame),
+              onLog: (level, text) => this.broadcast(JSON.stringify({ op: 'log', level, message: text })),
+            },
+          );
+          this.host = host;
+          this.venue = message.venue;
+          try {
+            host.start();
+          } catch (error) {
+            host.dispose();
+            this.host = undefined;
+            this.venue = undefined;
+            throw error;
+          }
+          this.timers.push(setInterval(() => this.host?.flush(), flush.store));
+          if (flush.books < flush.store) this.timers.push(setInterval(() => this.host?.flush(true), flush.books));
+        })();
+        try {
+          await starting.promise;
+        } finally {
+          if (this.starting === starting) this.starting = undefined;
+        }
         return;
       }
-      if (message.op === 'command' && this.host) {
-        this.host.command(message.command).then(
-          (result) => client.send(JSON.stringify({ op: 'done', id: message.id, result })),
-          (error) => client.send(JSON.stringify({ op: 'done', id: message.id, error: String(error?.message ?? error) })),
-        );
+      if (message.op === 'command') {
+        try {
+          if (!this.host && this.starting) await this.starting.promise;
+          if (!this.clients.has(client)) return;
+          if (!this.host) throw new Error('the engine has not started');
+          const result = await this.host.command(message.command);
+          if (this.clients.has(client)) client.send(JSON.stringify({ op: 'done', id: message.id, result }));
+        } catch (error) {
+          if (this.clients.has(client)) {
+            client.send(JSON.stringify({ op: 'done', id: message.id, error: String(error?.message ?? error) }));
+          }
+        }
       }
     }
 
@@ -129,6 +171,8 @@ export const createEngineObject = ({ loadEngine, flush = { store: 250, books: 60
       this.timers = [];
       this.host?.dispose();
       this.host = undefined;
+      this.venue = undefined;
+      this.starting = undefined;
     }
 
     async alarm() {

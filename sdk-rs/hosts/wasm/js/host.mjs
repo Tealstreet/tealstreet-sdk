@@ -13,9 +13,13 @@
 // }
 
 const CHUNK_BYTES = 64 * 1024;
+const BATCH_BYTES = 1024 * 1024;
+const BATCH_MESSAGES = 256;
+const RETAINED_SCRATCH_BYTES = 64 * 1024;
+const encoder = new TextEncoder();
 
 export class EngineHost {
-  constructor(engine, transport, handlers = {}) {
+  constructor(engine, transport, handlers = {}, { batchMessages = true } = {}) {
     this.engine = engine;
     this.transport = transport;
     this.handlers = handlers;
@@ -23,6 +27,12 @@ export class EngineHost {
     this.timers = new Map();
     this.commands = new Map();
     this.nextCommand = 1;
+    this.batchMessages = batchMessages;
+    this.messages = [];
+    this.messageBytes = 0;
+    this.batchBuffer = new Uint8Array(0);
+    this.batchTimer = undefined;
+    this.disposed = false;
   }
 
   start() {
@@ -31,6 +41,7 @@ export class EngineHost {
 
   /** Send a command; resolves with its result for commands that report one. */
   command(command) {
+    this.drainMessages();
     const reply = command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
@@ -49,6 +60,7 @@ export class EngineHost {
    * fills go out, for flushing those at the venue's faster book cadence.
    */
   flush(marketOnly = false) {
+    this.drainMessages();
     const frame = this.engine.takeFrame(this.transport.now(), marketOnly);
     if (frame) this.handlers.onFrame?.(frame.buffer);
   }
@@ -56,10 +68,17 @@ export class EngineHost {
   /** The whole current state as one frame (an ArrayBuffer), for a consumer
    * that starts late or skipped frames; later flushes apply on top of it. */
   snapshot() {
+    this.drainMessages();
     return this.engine.snapshotFrame(this.transport.now()).buffer;
   }
 
   dispose() {
+    this.disposed = true;
+    this.transport.clearTimeout(this.batchTimer);
+    this.batchTimer = undefined;
+    this.messages.length = 0;
+    this.messageBytes = 0;
+    this.batchBuffer = new Uint8Array(0);
     for (const socket of this.sockets.values()) socket.close();
     for (const handle of this.timers.values()) this.transport.clearTimeout(handle);
     this.sockets.clear();
@@ -68,21 +87,80 @@ export class EngineHost {
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
   async receive(id, { status, headers = '', body }) {
+    if (this.disposed) return;
     const { engine, transport } = this;
+    this.drainMessages();
     this.run(engine.httpStart(id, status, headers, transport.now()));
     try {
       if (body instanceof Uint8Array) {
         for (let at = 0; at < body.length; at += CHUNK_BYTES) {
+          this.drainMessages();
           this.run(engine.httpChunk(id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
         }
       } else {
-        for await (const chunk of body) this.run(engine.httpChunk(id, chunk, transport.now()));
+        for await (const chunk of body) {
+          if (this.disposed) return;
+          this.drainMessages();
+          this.run(engine.httpChunk(id, chunk, transport.now()));
+        }
       }
     } catch (error) {
+      if (this.disposed) return;
+      this.drainMessages();
       this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));
       return;
     }
+    if (this.disposed) return;
+    this.drainMessages();
     this.run(engine.httpEnd(id, transport.now()));
+  }
+
+  message(socket, text) {
+    if (this.disposed) return;
+    const now = this.transport.now();
+    if (!this.batchMessages) {
+      this.run(this.engine.wsMessage(socket, text, now));
+      return;
+    }
+    // UTF-8 needs at most three bytes per JS code unit. Bound pending memory
+    // even when a busy socket prevents the scheduled task from running.
+    const bytes = 16 + text.length * 3;
+    this.messages.push(socket, now, text);
+    this.messageBytes += bytes;
+    if (this.messages.length >= BATCH_MESSAGES * 3 || this.messageBytes >= BATCH_BYTES) {
+      this.drainMessages();
+    } else if (this.batchTimer === undefined) {
+      this.batchTimer = this.transport.setTimeout(() => {
+        this.batchTimer = undefined;
+        this.drainMessages();
+      }, 0);
+    }
+  }
+
+  /** Deliver queued arrivals before any later event can overtake them. */
+  drainMessages() {
+    if (!this.messages.length) return;
+    this.transport.clearTimeout(this.batchTimer);
+    this.batchTimer = undefined;
+    const messages = this.messages;
+    this.messages = [];
+    const capacity = this.messageBytes;
+    this.messageBytes = 0;
+    if (this.batchBuffer.length < capacity) this.batchBuffer = new Uint8Array(capacity);
+    const buffer = this.batchBuffer;
+    const view = new DataView(buffer.buffer);
+    let at = 0;
+    for (let i = 0; i < messages.length; i += 3) {
+      const { written } = encoder.encodeInto(messages[i + 2], buffer.subarray(at + 16));
+      view.setUint32(at, messages[i], true);
+      view.setUint32(at + 4, written, true);
+      view.setFloat64(at + 8, messages[i + 1], true);
+      at += 16 + written;
+    }
+    const actions = this.engine.wsMessages(buffer.subarray(0, at));
+    // Bursts and large individual messages must not grow retained scratch.
+    if (buffer.length > RETAINED_SCRATCH_BYTES) this.batchBuffer = new Uint8Array(0);
+    this.run(actions);
   }
 
   run(actionsJson) {
@@ -96,9 +174,15 @@ export class EngineHost {
       case 'wsConnect': {
         const id = action.socket;
         const socket = transport.connect(action.url, {
-          onOpen: () => this.run(engine.wsOpen(id, transport.now())),
-          onMessage: (text) => this.run(engine.wsMessage(id, text, transport.now())),
+          onOpen: () => {
+            if (this.disposed) return;
+            this.drainMessages();
+            this.run(engine.wsOpen(id, transport.now()));
+          },
+          onMessage: (text) => this.message(id, text),
           onClose: (code) => {
+            if (this.disposed) return;
+            this.drainMessages();
             this.sockets.delete(id);
             this.run(engine.wsClose(id, code ?? 1006, transport.now()));
           },
@@ -124,13 +208,20 @@ export class EngineHost {
           })
           .then(
             (response) => this.receive(id, response),
-            (error) => this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now())),
+            (error) => {
+              if (this.disposed) return;
+              this.drainMessages();
+              this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));
+            },
           );
         break;
       }
       case 'setTimer': {
         const id = action.timer;
+        transport.clearTimeout(this.timers.get(id));
         const handle = transport.setTimeout(() => {
+          if (this.disposed) return;
+          this.drainMessages();
           this.timers.delete(id);
           this.run(engine.timer(id, transport.now()));
         }, Math.max(0, action.at - transport.now()));

@@ -3,15 +3,31 @@
 //! JavaScript owns sockets, fetch and timers; it forwards each event here and
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none.
+#[cfg(not(any(
+    feature = "venue-binance",
+    feature = "venue-bybit",
+    feature = "venue-okx"
+)))]
+compile_error!("safe-cex-wasm requires at least one venue-* feature");
+
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
+#[cfg(feature = "venue-binance")]
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+#[cfg(feature = "venue-bybit")]
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
+#[cfg(feature = "venue-okx")]
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+
+mod batch;
+use batch::MessageBatch;
+
+#[cfg(feature = "profiling")]
+mod profile;
 
 trait AnyEngine {
     fn start(&mut self, now: f64);
@@ -47,6 +63,11 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
 }
 
+#[cfg(any(
+    feature = "venue-binance",
+    feature = "venue-bybit",
+    feature = "venue-okx"
+))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
@@ -58,6 +79,7 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
+    #[cfg(feature = "venue-okx")]
     #[serde(default)]
     passphrase: Option<String>,
 }
@@ -102,6 +124,47 @@ enum ActionOut<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<&'a str>,
     },
+}
+
+// Large subscription bursts must not grow a JSON buffer through several
+// generations: wasm keeps every page added during those transient reallocations.
+fn json_string_length(text: &str) -> usize {
+    2 + text
+        .bytes()
+        .map(|byte| match byte {
+            b'"' | b'\\' | b'\n' | b'\r' | b'\t' | 8 | 12 => 2,
+            0..=31 => 6,
+            _ => 1,
+        })
+        .sum::<usize>()
+}
+
+impl ActionOut<'_> {
+    fn capacity_hint(&self) -> usize {
+        // Fixed field names, punctuation and numeric identifiers fit in this
+        // allowance. Variable strings include JSON escaping and their quotes.
+        128 + match self {
+            Self::WsConnect { url, .. } => json_string_length(url),
+            Self::WsSend { text, .. } => json_string_length(text),
+            Self::Http {
+                url, headers, body, ..
+            } => {
+                json_string_length(url)
+                    + headers
+                        .iter()
+                        .map(|(name, value)| {
+                            json_string_length(name) + json_string_length(value) + 4
+                        })
+                        .sum::<usize>()
+                    + body.map_or(0, json_string_length)
+            }
+            Self::Log { message, .. } => json_string_length(message),
+            Self::Done { result, error, .. } => {
+                result.map_or(0, json_string_length) + error.map_or(0, json_string_length)
+            }
+            _ => 0,
+        }
+    }
 }
 
 fn encode(actions: &[Action]) -> String {
@@ -151,7 +214,12 @@ fn encode(actions: &[Action]) -> String {
             },
         })
         .collect();
-    serde_json::to_string(&out).unwrap_or_default()
+    let capacity = 2 + out.iter().map(ActionOut::capacity_hint).sum::<usize>();
+    let mut bytes = Vec::with_capacity(capacity);
+    if serde_json::to_writer(&mut bytes, &out).is_err() {
+        return String::new();
+    }
+    String::from_utf8(bytes).expect("JSON serialization produces UTF-8")
 }
 
 /// Commands as JavaScript sends them.
@@ -411,9 +479,15 @@ pub struct WasmEngine {
 #[wasm_bindgen]
 impl WasmEngine {
     #[wasm_bindgen(constructor)]
+    #[cfg(any(
+        feature = "venue-binance",
+        feature = "venue-bybit",
+        feature = "venue-okx"
+    ))]
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: EngineOptions = serde_json::from_str(options_json)?;
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "venue-binance")]
             "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
@@ -421,12 +495,14 @@ impl WasmEngine {
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
             }))),
+            #[cfg(feature = "venue-bybit")]
             "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
                 testnet: options.testnet,
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
             }))),
+            #[cfg(feature = "venue-okx")]
             "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
                 if !options.public_data_only
                     && options.key.as_ref().is_some_and(|s| !s.is_empty())
@@ -470,6 +546,21 @@ impl WasmEngine {
         let socket = SocketId(socket);
         self.inner.handle(now, Event::WsMessage { socket, text });
         self.flush()
+    }
+
+    /// Records are socket u32, UTF-8 byte length u32, arrival time f64, text.
+    /// The payloads borrow this single crossing's buffer without per-message copies.
+    #[wasm_bindgen(js_name = wsMessages)]
+    pub fn ws_messages(&mut self, data: &[u8]) -> Result<String, JsError> {
+        // Validate first: a corrupt batch must never commit a valid prefix.
+        for record in MessageBatch::new(data) {
+            record.map_err(JsError::new)?;
+        }
+        for record in MessageBatch::new(data) {
+            let (socket, now, text) = record.map_err(JsError::new)?;
+            self.inner.handle(now, Event::WsMessage { socket, text });
+        }
+        Ok(self.flush())
     }
 
     #[wasm_bindgen(js_name = wsClose)]
@@ -546,5 +637,32 @@ impl WasmEngine {
         self.inner
             .frame(now, market_only)
             .map(js_sys::Uint8Array::from)
+    }
+}
+
+#[cfg(test)]
+mod action_tests {
+    use super::*;
+
+    #[test]
+    fn subscription_json_preserves_escaped_and_unicode_messages() {
+        #[derive(Deserialize)]
+        struct Send {
+            op: String,
+            socket: u32,
+            text: String,
+        }
+        let text = "\"\\\n\r\t\u{0008}\u{000c}\u{0000}\u{001f}é東京🦀".repeat(500);
+        let actions = vec![Action::WsSend {
+            socket: SocketId(7),
+            text: text.clone(),
+        }];
+        let encoded = encode(&actions);
+        let decoded: Vec<Send> = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.len(), 1);
+        assert_eq!(decoded[0].op, "wsSend");
+        assert_eq!(decoded[0].socket, 7);
+        assert_eq!(decoded[0].text, text);
+        assert!(encoded.capacity() <= encoded.len() + 128);
     }
 }

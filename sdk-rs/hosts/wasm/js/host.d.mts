@@ -41,6 +41,7 @@ export interface WasmEngineLike {
   snapshotFrame(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
   wsMessage(socket: number, text: string, now: number): string;
+  wsMessages(batch: Uint8Array): string;
   wsClose(socket: number, code: number, now: number): string;
   httpStart(request: number, status: number, headers: string, now: number): string;
   httpChunk(request: number, data: Uint8Array, now: number): string;
@@ -50,13 +51,14 @@ export interface WasmEngineLike {
 }
 
 export class EngineHost {
-  constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers);
+  constructor(engine: WasmEngineLike, transport: Transport, handlers?: EngineHandlers, options?: { batchMessages?: boolean });
   start(): void;
   /** Resolves with the command's result for commands that report one. */
   command(command: { op: string; [field: string]: unknown }): Promise<unknown>;
   /** With `marketOnly`, only books, candles and fills. */
   flush(marketOnly?: boolean): void;
   snapshot(): ArrayBuffer;
+  drainMessages(): void;
   dispose(): void;
 }
 

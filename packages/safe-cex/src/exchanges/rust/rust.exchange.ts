@@ -63,8 +63,8 @@ export type WasmEngineModule = {
  * Workers, the Node build on servers and in tests. Registered once by the
  * host, like the transport.
  */
-let loadWasmEngine: (() => Promise<WasmEngineModule>) | undefined;
-export const setWasmEngineLoader = (loader: () => Promise<WasmEngineModule>) => {
+let loadWasmEngine: ((venue: string) => Promise<WasmEngineModule>) | undefined;
+export const setWasmEngineLoader = (loader: (venue: string) => Promise<WasmEngineModule>) => {
   loadWasmEngine = loader;
 };
 
@@ -108,7 +108,7 @@ export class RustEngineExchange extends BaseExchange {
       throw new Error('Rust engine private accounts require a local API key and secret; remote signing is unsupported');
     }
     if (!loadWasmEngine) throw new Error('No wasm engine loader registered (setWasmEngineLoader)');
-    const { WasmEngine } = await loadWasmEngine();
+    const { WasmEngine } = await loadWasmEngine(RUST_VENUES[this.name]!);
     if (this.isDisposed) return;
     const { key, secret, passphrase, testnet } = this.options;
     const publicDataOnly = this.isPublicDataOnly;

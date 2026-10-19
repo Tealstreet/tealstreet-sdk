@@ -14,18 +14,39 @@
       "default": "./js/wire.mjs"
     },
     "./workers": "./js/workers.mjs",
-    "./web": {
-      "types": "./js/engine.d.mts",
-      "default": "./pkg/web/safe_cex_wasm.js"
+    "./venues": {
+      "types": "./js/venues.d.mts",
+      "default": "./js/venues.mjs"
     },
-    "./node": {
+    "./web/binance": {
       "types": "./js/engine.d.mts",
-      "default": "./pkg/node/safe_cex_wasm.js"
+      "default": "./pkg/web/binance/safe_cex_wasm.js"
+    },
+    "./web/bybit": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/bybit/safe_cex_wasm.js"
+    },
+    "./web/okx": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/web/okx/safe_cex_wasm.js"
+    },
+    "./node/binance": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/binance/safe_cex_wasm.js"
+    },
+    "./node/bybit": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/bybit/safe_cex_wasm.js"
+    },
+    "./node/okx": {
+      "types": "./js/engine.d.mts",
+      "default": "./pkg/node/okx/safe_cex_wasm.js"
     }
   },
   "scripts": {
     "build-wasm": "bash ../../harness/build.sh",
-    "test": "node --test js/*.test.mjs"
+    "test": "node --test js/*.test.mjs",
+    "check-sizes": "node ../../harness/check-wasm-sizes.mjs"
   },
   "license": "MIT"
 }

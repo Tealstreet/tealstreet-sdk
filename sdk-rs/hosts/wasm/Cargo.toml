@@ -7,11 +7,18 @@ publish.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+profiling = []
+default = ["venue-binance", "venue-bybit", "venue-okx"]
+venue-binance = ["dep:safe-cex-venue-binance"]
+venue-bybit = ["dep:safe-cex-venue-bybit"]
+venue-okx = ["dep:safe-cex-venue-okx"]
+
 [dependencies]
 safe-cex-engine.workspace = true
-safe-cex-venue-binance.workspace = true
-safe-cex-venue-bybit.workspace = true
-safe-cex-venue-okx.workspace = true
+safe-cex-venue-binance = { workspace = true, optional = true }
+safe-cex-venue-bybit = { workspace = true, optional = true }
+safe-cex-venue-okx = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 wasm-bindgen.workspace = true

@@ -919,3 +919,13 @@ runner depends on that bit for `retry`, blocking steps, and capture
 writeback. For fire-and-forget worker commands with no `reqId`,
 handled failures should still emit `exec-log` so the terminal displays
 the error.
+
+## Rust engine loading
+
+The registered WASM loader receives the Rust venue name. `loadWebEngine` and
+`loadNodeEngine` select a family package (`binance`, `bybit`, `okx`); aliases
+share a module, while different families instantiate separate binaries. Browser
+imports use literal family subpaths so a browser downloads only its venue. Add
+a family to the WASM Cargo features, package exports, shared `venueFamily`
+registry and both loader switches when registering another Rust venue. CI checks
+each family against `sdk-rs/harness/wasm-budgets.json`.

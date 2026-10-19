@@ -1,0 +1,51 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const init = vi.hoisted(() => ({
+  binance: vi.fn(async () => undefined),
+  bybit: vi.fn(async () => undefined),
+  okx: vi.fn(async () => undefined),
+}));
+
+vi.mock('@tealstreet/safe-cex-wasm/web/binance', () => ({ default: init.binance, WasmEngine: class {} }));
+vi.mock('@tealstreet/safe-cex-wasm/web/bybit', () => ({ default: init.bybit, WasmEngine: class {} }));
+vi.mock('@tealstreet/safe-cex-wasm/web/okx', () => ({ default: init.okx, WasmEngine: class {} }));
+
+beforeEach(() => {
+  vi.resetModules();
+  vi.clearAllMocks();
+});
+
+describe.runIf(process.env.SAFE_CEX_WASM_TESTS)('browser Rust engine selection', () => {
+  it('shares one initialization across concurrent aliases and loads no other family', async () => {
+    const { loadWebEngine } = await import('../exchanges/rust/loadWebEngine');
+    const engines = await Promise.all(['okx', 'okxeu', 'okxdemo', 'okxeudemo'].map(loadWebEngine));
+    expect(engines.every((engine) => engine === engines[0])).toBe(true);
+    expect(init.okx).toHaveBeenCalledTimes(1);
+    expect(init.bybit).not.toHaveBeenCalled();
+    expect(init.binance).not.toHaveBeenCalled();
+  });
+
+  it('initializes each requested family separately', async () => {
+    const { loadWebEngine } = await import('../exchanges/rust/loadWebEngine');
+    const [binance, pm, bybit, okx] = await Promise.all(['binance', 'binancepm', 'bybit', 'okx'].map(loadWebEngine));
+    expect(binance).toBe(pm);
+    expect(new Set([binance, bybit, okx]).size).toBe(3);
+    for (const initialize of Object.values(init)) expect(initialize).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows retry after a failed download or initialization', async () => {
+    const { loadWebEngine } = await import('../exchanges/rust/loadWebEngine');
+    init.okx.mockRejectedValueOnce(new Error('download interrupted'));
+    await expect(loadWebEngine('okx')).rejects.toThrow('download interrupted');
+    await loadWebEngine('okxeu');
+    expect(init.okx).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects unknown and inherited names before loading', async () => {
+    const { loadWebEngine } = await import('../exchanges/rust/loadWebEngine');
+    for (const name of ['unknown', '__proto__', 'constructor']) {
+      expect(() => loadWebEngine(name)).toThrow('unsupported Rust venue');
+    }
+    for (const initialize of Object.values(init)) expect(initialize).not.toHaveBeenCalled();
+  });
+});

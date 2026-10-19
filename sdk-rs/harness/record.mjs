@@ -66,7 +66,7 @@ const recording = {
   },
 };
 
-const { WasmEngine } = await loadEngine();
+const { WasmEngine } = await loadEngine(values.venue);
 let frames = 0;
 let updates = 0;
 const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: false })), recording, {

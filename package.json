@@ -16,6 +16,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore",
     "check:licenses": "node scripts/check-licenses.mjs",
     "rust:build-wasm": "bash sdk-rs/harness/build.sh",
+    "rust:build-profile": "bash sdk-rs/harness/build-profile.sh",
+    "rust:profile": "node --expose-gc sdk-rs/harness/profile.mjs",
     "rust:record": "node sdk-rs/harness/record.mjs",
     "rust:private-tape": "node sdk-rs/harness/private-tape.mjs",
     "rust:private-tape-bybit": "node sdk-rs/harness/private-tape-bybit.mjs",

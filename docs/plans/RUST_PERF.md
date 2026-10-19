@@ -58,3 +58,26 @@ identified external ArrayBuffer storage omitted by the old memory gate. The
 new measurement counts ArrayBuffer delta alongside heap and WASM memory;
 original baseline will be remeasured with the same accounting. Scratch is lazy.
 The initial batching run improved CPU but regressed memory; gates remain open.
+
+### WASM batching and family-build implementation checkpoint
+
+- Batch wire: little-endian socket u32, UTF-8 byte length u32, arrival f64,
+  followed by borrowed UTF-8 text. Whole batch validates before any state change.
+- JS queues up to 256 messages / roughly 1 MiB, preserving arrival order across
+  sockets; barriers drain first. Large scratch is released after delivery;
+  retained scratch is capped at 64 KiB. Disposal ignores late transport events.
+- Family modules are selected by venue across browser, Node, harness and Workers;
+  aliases share modules, browser initialization is cached per family with retry.
+  Isolated clippy, 20 SDK WASM tests, 3 Rust WASM tests, 16 host tests pass.
+- Independent reviews passed profiling, native batching and family registration.
+  Workers review exposed duplicate/orphan async initialization and commands lost
+  during a pending download; guards and deferred-loader regression tests added.
+- Exact escaped-string output reservation lowers OKX startup WASM highwater from
+  1,441,792 to 1,114,112 bytes (five pages). Same subscription JSON and replay
+  output. A first strict-memory recorded-burst gate passes (1.16x CPU, 1.01x
+  retained memory) before scratch-retention improvement; broader gates remain.
+- Public replay now yields between distinct recorded timestamps, preserving
+  equal-timestamp network bursts for both implementations. `--cadence frame`
+  keeps the earlier pacing; `--delivery single` isolates batching changes.
+  Re-running the original isolated binary with identical cadence and strengthened
+  ArrayBuffer accounting for the controlled before/after table.

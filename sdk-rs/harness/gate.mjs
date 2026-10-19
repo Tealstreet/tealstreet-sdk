@@ -14,6 +14,8 @@ const { values } = parseArgs({
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
     runs: { type: 'string', default: '3' },
     'no-egress': { type: 'boolean', default: false },
+    delivery: { type: 'string', default: 'batch' },
+    cadence: { type: 'string', default: 'recorded' },
   },
 });
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
@@ -23,6 +25,8 @@ const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
   args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
+  args.push('--delivery', values.delivery);
+  args.push('--cadence', values.cadence);
   if (values['no-egress']) args.push('--no-egress');
   const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125_000 });
   if (result.status !== 0) throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
