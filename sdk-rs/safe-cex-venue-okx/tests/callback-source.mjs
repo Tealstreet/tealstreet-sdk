@@ -85,6 +85,24 @@ if (process.argv.includes('--handler-registry')) {
     table.selected=[parser];
     receiver.dispatchMessageHandler('selected', {});
     assert.equal(calls,2);
+    delete table.selected;
+    Object.setPrototypeOf(table, {selected:[parser]});
+    receiver.dispatchMessageHandler('selected', {});
+    assert.equal(calls,3);
+    const trace=[];
+    const callbacks=[()=>{
+      trace.push('first');
+      callbacks.push(()=>trace.push('later'));
+      delete receiver.messageHandlers.selected;
+    }];
+    receiver.messageHandlers={selected:callbacks};
+    receiver.dispatchMessageHandler('selected', {});
+    receiver.dispatchMessageHandler('selected', {});
+    assert.deepEqual(trace,['first','later']);
+    Object.defineProperty(receiver.messageHandlers,'selected',{configurable:true,get(){throw original;}});
+    assert.throws(()=>receiver.dispatchMessageHandler('selected', {}), error=>error===original);
+    Object.defineProperty(receiver.messageHandlers,'selected',{configurable:true,value:[()=>{throw original;} ]});
+    assert.throws(()=>receiver.dispatchMessageHandler('selected', {}), error=>error===original);
   }
   process.stdout.write('handler-registry');
   process.exit(0);

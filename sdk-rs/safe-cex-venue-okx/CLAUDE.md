@@ -1,5 +1,10 @@
 # OKX venue port
 
+Public and business socket dispatch read the live JS `messageHandlers` key;
+the shared statistics reader uses that same registry for record/pong/cleanup.
+Never rebuild a typed mirror. See HANDLER_REGISTRY_REVIEW.md for the owner census
+and recorded candle/unsubscribe controls.
+
 The five-row follow-on FIX-audit is recorded in DIVERGENCE_FIX_AUDIT.md and
 tests/divergence-rulings.json. Placement-result IDs now use shared JS String
 under shared-type decision 4 so an already-live order's numeric ID survives.

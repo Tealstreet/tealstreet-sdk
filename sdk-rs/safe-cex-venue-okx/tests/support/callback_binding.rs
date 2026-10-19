@@ -257,6 +257,98 @@ fn actual_socket_dispatch_reads_only_the_live_selected_handler() {
         dispatch().unwrap();
         assert_eq!(callbacks.get(), 2, "{field} sees alias assignment");
         assert_eq!(reads.get(), 0);
+        table
+            .delete(&"selected".encode_utf16().collect::<Vec<_>>())
+            .unwrap();
+        let Js::Object(object) = &table else {
+            unreachable!()
+        };
+        *object.proto.borrow_mut() = Some(Js::object(vec![(
+            "selected",
+            Js::array(vec![Js::function("inherited", {
+                let calls = callbacks.clone();
+                move |_, _| {
+                    calls.set(calls.get() + 1);
+                    Ok(Js::Undefined)
+                }
+            })]),
+        )]));
+        dispatch().unwrap();
+        assert_eq!(callbacks.get(), 3, "{field} reads the current prototype");
+        h.venue().dispose().unwrap();
+    }
+}
+
+#[test]
+fn actual_dispatch_keeps_captured_live_arrays_and_original_failures() {
+    for field in ["publicWebsocket", "businessWebsocket"] {
+        let h = fixture();
+        let socket = h.exchange.scope.this.get(field).unwrap();
+        let trace = Rc::new(RefCell::new(Vec::new()));
+        let callbacks = Js::array(vec![]);
+        let Js::Array(array) = &callbacks else {
+            unreachable!()
+        };
+        let array = Rc::downgrade(array);
+        let table = Js::object(vec![("selected", callbacks.clone())]);
+        let Js::Object(object) = &table else {
+            unreachable!()
+        };
+        let object = Rc::downgrade(object);
+        let calls = trace.clone();
+        callbacks
+            .push(Js::function("first", move |_, _| {
+                calls.borrow_mut().push("first");
+                let later = calls.clone();
+                Js::Array(array.upgrade().unwrap()).push(Js::function("later", move |_, _| {
+                    later.borrow_mut().push("later");
+                    Ok(Js::Undefined)
+                }))?;
+                Js::Object(object.upgrade().unwrap())
+                    .delete(&"selected".encode_utf16().collect::<Vec<_>>())?;
+                Ok(Js::Undefined)
+            }))
+            .unwrap();
+        socket.set("messageHandlers", table.clone()).unwrap();
+        let dispatch = || {
+            socket.call_method(
+                "dispatchMessageHandler",
+                vec![Js::str("selected"), Js::object(vec![])],
+            )
+        };
+        dispatch().unwrap();
+        dispatch().unwrap();
+        assert_eq!(
+            &*trace.borrow(),
+            &["first", "later"],
+            "{field} captures the array and iterates its live length"
+        );
+        let original = Js::object(vec![("marker", Js::str("selected getter failure"))]);
+        let captured = original.clone();
+        table
+            .define_accessor(
+                "selected",
+                Some(Rc::new(move |_| Err(Thrown::new(captured.clone())))),
+                None,
+            )
+            .unwrap();
+        assert!(
+            dispatch().unwrap_err().value.same_reference(&original),
+            "{field} selected getter throw identity"
+        );
+        let captured = original.clone();
+        table
+            .define(
+                "selected",
+                Js::array(vec![Js::function("thrower", move |_, _| {
+                    Err(Thrown::new(captured.clone()))
+                })]),
+            )
+            .unwrap();
+        assert!(
+            dispatch().unwrap_err().value.same_reference(&original),
+            "{field} callback throw identity"
+        );
         h.venue().dispose().unwrap();
     }
 }
