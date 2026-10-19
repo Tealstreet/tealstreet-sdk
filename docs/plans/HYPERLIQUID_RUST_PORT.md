@@ -284,3 +284,13 @@ tickers), matching the TS readiness barrier. Private auth readiness and strict
 post-run topic/write comparisons are unchanged. Fifty-five harness tests pass,
 including a regression that refuses early ticker-only/wrong-depth/private topics.
 CI venue jobs no longer cancel other venues on one failure, preserving diagnostics.
+
+Follow-up Bybit rerun exposed the symmetric TS pacing race: its handler readiness
+also precedes send completion. Both public realms now require all seed-derived
+912 ticker topics plus requested books before playback; 57 harness tests pass.
+BingX has landed at 022ab79de5 with the same seed-derived startup barrier and a
+100ms elapsed backing-buffer quiescence fix. Integrate its central pending-topic
+counter using our canonical keys, strict comparisons and Hyperliquid config.
+Six-venue checks so far: combined 17 bridge/seven host tests pass; Crypto.com,
+Hyperliquid, Binance and WEEX public/private gates pass. Native364, targeted296,
+root typecheck/lint/all27tests pass. Remaining Bybit/OKX replays and CI stay gated.

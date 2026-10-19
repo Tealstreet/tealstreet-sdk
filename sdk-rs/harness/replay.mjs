@@ -63,7 +63,8 @@ const keyFor = (method, url, body) => requestKey(method, url, body, callerIds, v
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
   constructor(impl) {
-    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: venue.publicTickers?.(records) });
+    this.publicTickers = venue.publicTickers?.(records) ?? [];
+    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: this.publicTickers });
     this.responses = new Responses(records, keyFor, venue.checkRequest, (method, url) => venue.isWrite?.(method, url) ?? isWriteRequest(method, url));
     this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
     this.open = new Map();
@@ -370,7 +371,7 @@ async function runRust() {
     async () => {
       while ((isPrivate && (status?.loaded ?? 0) !== allLoaded)
         || (tape.audit && !tape.audit.ready())
-        || (!isPrivate && venue.rustBooksSubscribed && !venue.rustBooksSubscribed(tape.subscriptions, bookSymbols))) {
+        || (!isPrivate && venue.publicSubscriptionsReady && !venue.publicSubscriptionsReady(tape.subscriptions, bookSymbols, tape.publicTickers))) {
         await new Promise((r) => setTimeout(r, 5));
       }
     },
@@ -559,7 +560,10 @@ async function runTs() {
     },
     async () => {
       venue.prepareTsReady?.(exchange, { isPrivate });
-      while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
+      while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)
+        || (!isPrivate && venue.publicSubscriptionsReady && !venue.publicSubscriptionsReady(tape.subscriptions, bookSymbols, tape.publicTickers))) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
       const loaded = () => Object.values(store.loaded).every(Boolean);
       while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
     },

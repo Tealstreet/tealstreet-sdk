@@ -142,19 +142,54 @@ test('Bybit public readiness waits for every requested book after paced ticker c
     for (const key of subscriptionKeys(url, { op: 'subscribe', args: topics, req_id: 'generated' })) subscriptions.add(key);
   };
   const url = 'wss://stream.bybit.com/v5/public/linear?requestId=generated&max_active_time=1m';
-  assert.equal(bybit.rustBooksSubscribed(subscriptions, []), true);
-  assert.equal(bybit.rustBooksSubscribed(subscriptions, books), false);
+  assert.equal(bybit.publicSubscriptionsReady(subscriptions, []), true);
+  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books), false);
   for (let chunk = 0; chunk < 3; chunk++) {
     send(url, Array.from({ length: 10 }, (_, i) => `tickers.COIN${chunk * 10 + i}USDT`));
-    assert.equal(bybit.rustBooksSubscribed(subscriptions, books), false);
+    assert.equal(bybit.publicSubscriptionsReady(subscriptions, books), false);
   }
   // Private feeds, the wrong depth, and unsubscribe records cannot release playback.
   send('wss://stream.bybit.com/v5/private', books.map((symbol) => `orderbook.1000.${symbol}`));
   send(url, books.map((symbol) => `orderbook.50.${symbol}`));
   for (const key of subscriptionKeys(url, { op: 'unsubscribe', args: ['orderbook.1000.ETHUSDT'] })) subscriptions.add(key);
-  assert.equal(bybit.rustBooksSubscribed(subscriptions, books), false);
+  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books), false);
   send(url, ['orderbook.1000.BTCUSDT']);
-  assert.equal(bybit.rustBooksSubscribed(subscriptions, books), false);
+  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books), false);
   send(url.replace('requestId=generated', 'requestId=another'), ['orderbook.1000.ETHUSDT']);
-  assert.equal(bybit.rustBooksSubscribed(subscriptions, books), true);
+  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books), true);
+});
+
+
+test('Bybit expected tickers include every linear stablecoin instrument page once', () => {
+  const bybit = venueOf('bybit');
+  const instruments = (query, rows) => ({ type: 'http', method: 'GET', status: 200,
+    url: `https://api.bybit.com/v5/market/instruments-info?${query}`,
+    body: JSON.stringify({ result: { list: rows } }) });
+  const rows = [
+    instruments('category=linear&status=PreLaunch', [{ symbol: 'NEWUSDT', quoteCoin: 'USDT' }]),
+    instruments('category=linear&limit=1000', [{ symbol: 'BTCUSDT', quoteCoin: 'USDT' }, { symbol: 'ETHUSDC', quoteCoin: 'USDC' }]),
+    instruments('category=linear&cursor=next', [{ symbol: 'BTCUSDT', quoteCoin: 'USDT' }, { symbol: 'OTHERUSD', quoteCoin: 'USD' }]),
+    instruments('category=inverse', [{ symbol: 'BTCUSD', quoteCoin: 'USD' }]),
+    instruments('category=spot', [{ symbol: 'SOLUSDT', quoteCoin: 'USDT' }]),
+  ];
+  assert.deepEqual(bybit.publicTickers(rows), ['NEWUSDT', 'BTCUSDT', 'ETHUSDC']);
+});
+
+test('Bybit public readiness requires all tickers and books regardless of send order', () => {
+  const bybit = venueOf('bybit'), books = ['BTCUSDT', 'ETHUSDT'], tickers = ['BTCUSDT', 'ETHUSDT', 'NEWUSDC'];
+  const subscriptions = new Set();
+  const url = 'wss://stream.bybit.com/v5/public/linear?max_active_time=1m&requestId=first';
+  const send = (topics) => {
+    for (const key of subscriptionKeys(url.replace('requestId=first', 'requestId=changed'), { op: 'subscribe', args: topics })) subscriptions.add(key);
+  };
+  send(books.map((symbol) => `orderbook.1000.${symbol}`));
+  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books, tickers), false);
+  send(['tickers.BTCUSDT', 'tickers.ETHUSDT']);
+  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books, tickers), false);
+  assert.equal(bybit.publicSubscriptionsReady(subscriptions, [], tickers), false);
+  send(['tickers.NEWUSDC']);
+  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books, tickers), true);
+  assert.equal(bybit.publicSubscriptionsReady(subscriptions, [], tickers), true);
+  const missingBook = new Set([...subscriptions].filter((key) => !key.includes('orderbook.1000.ETHUSDT')));
+  assert.equal(bybit.publicSubscriptionsReady(missingBook, books, tickers), false);
 });

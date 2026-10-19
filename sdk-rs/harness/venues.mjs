@@ -217,14 +217,23 @@ export const VENUES = {
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >= count,
     privateSocket: '/v5/private',
-    // Books follow every ticker chunk in Bybit's paced public outbox.
-    rustBooksSubscribed: (subscriptions, books) => {
-      if (!books.length) return true;
+    publicTickers: (records) => [...new Set(records.flatMap((record) => {
+      if (record.type !== 'http' || record.method !== 'GET' || record.status < 200 || record.status >= 300) return [];
+      const url = new URL(record.url);
+      if (url.pathname !== '/v5/market/instruments-info' || url.searchParams.get('category') !== 'linear') return [];
+      const rows = JSON.parse(record.body).result?.list ?? [];
+      return rows.filter((row) => ['USDT', 'USDC'].includes(row.quoteCoin) && typeof row.symbol === 'string')
+        .map((row) => row.symbol);
+    }))],
+    // Both outboxes pace their sends; registered book handlers may precede tickers.
+    publicSubscriptionsReady: (subscriptions, books, tickers = []) => {
+      const topics = [...tickers.map((symbol) => `tickers.${symbol}`), ...books.map((symbol) => `orderbook.1000.${symbol}`)];
+      if (!topics.length) return true;
       const urls = new Set([...subscriptions].filter((key) => key.startsWith('WS '))
         .map((key) => key.slice(3, key.indexOf(' ', 3)))
         .filter((url) => new URL(url).pathname === '/v5/public/linear'));
       return [...urls].some((url) => subscriptionKeys(url,
-        { op: 'subscribe', args: books.map((symbol) => `orderbook.1000.${symbol}`) })
+        { op: 'subscribe', args: topics })
         .every((key) => subscriptions.has(key)));
     },
     isWrite: (method) => method === 'POST',
