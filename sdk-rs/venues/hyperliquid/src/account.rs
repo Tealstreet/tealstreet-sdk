@@ -13,6 +13,7 @@ pub enum Request {
     State {
         dex: String,
         revision: u64,
+        settings_revision: u64,
     },
     Orders {
         dex: String,
@@ -22,6 +23,10 @@ pub enum Request {
         valid: bool,
     },
     Spot {
+        revision: u64,
+    },
+    Asset {
+        symbol: String,
         revision: u64,
     },
     Builder,
@@ -44,6 +49,11 @@ struct QueuedRead {
     request: ReadContinuation,
     streamed: bool,
     weight: u32,
+}
+struct SettingBarrier {
+    at: f64,
+    revision: u64,
+    confirmed: bool,
 }
 
 #[derive(Default)]
@@ -69,6 +79,10 @@ pub struct Account {
     spot: Option<(f64, f64)>,
     authoritative: Option<(f64, f64, f64)>,
     state_revision: HashMap<String, u64>,
+    settings_revision: u64,
+    settings_barriers: HashMap<String, SettingBarrier>,
+    asset_retry: HashSet<String>,
+    asset_retry_timer: Option<TimerId>,
     state_time: HashMap<String, f64>,
     position_time: HashMap<String, f64>,
     snapshot_time: HashMap<String, f64>,
@@ -348,6 +362,7 @@ impl Hyperliquid {
             Request::State {
                 dex: dex.into(),
                 revision,
+                settings_revision: self.account.settings_revision,
             },
             false,
         );
@@ -565,7 +580,11 @@ impl Hyperliquid {
                     });
                 }
             }
-            Request::State { dex, revision } => {
+            Request::State {
+                dex,
+                revision,
+                settings_revision,
+            } => {
                 self.account.inflight.remove(&format!("state:{dex}"));
                 if let Ok(state) = serde_json::from_str::<Clearinghouse>(raw) {
                     let changed =
@@ -574,7 +593,7 @@ impl Hyperliquid {
                         || (state.server_time.or(state.time).is_some()
                             && self.account.state_time.contains_key(&dex))
                     {
-                        self.apply_state(cx, &dex, &state, true);
+                        self.apply_state(cx, &dex, &state, true, Some(settings_revision));
                     }
                 } else {
                     cx.log(
@@ -591,9 +610,11 @@ impl Hyperliquid {
                 valid,
             } => {
                 self.account.inflight.remove(&format!("orders:{dex}"));
-                if !valid
-                    || self.account.orders_revision.get(&dex).copied().unwrap_or(0) != revision
-                {
+                if !valid {
+                    return;
+                }
+                if self.account.orders_revision.get(&dex).copied().unwrap_or(0) != revision {
+                    self.schedule_orders(cx);
                     return;
                 }
                 let mut merged = cx
@@ -607,6 +628,15 @@ impl Hyperliquid {
                     .cloned()
                     .collect::<Vec<_>>();
                 for order in orders {
+                    // A cancel can complete after this streamed row was parsed.
+                    if self
+                        .account
+                        .suppressed
+                        .get(&order.id)
+                        .is_some_and(|at| cx.now - *at < 30_000.0)
+                    {
+                        continue;
+                    }
                     self.account.suppressed.remove(&order.id);
                     if let Some(old) = merged.iter_mut().find(|o| o.id == order.id) {
                         *old = order;
@@ -627,6 +657,28 @@ impl Hyperliquid {
                 }
                 if let Ok(state) = serde_json::from_str::<SpotState>(raw) {
                     self.apply_spot(cx, &state, false);
+                }
+            }
+            Request::Asset { symbol, revision } => {
+                if !self.settings_uncertain(&symbol)
+                    || !self
+                        .account
+                        .settings_barriers
+                        .get(&symbol)
+                        .is_some_and(|b| b.revision == revision)
+                {
+                    return;
+                }
+                if let Ok(row) = serde_json::from_str::<ActiveAsset>(raw)
+                    && self.symbol(&row.coin) == Some(symbol.as_str())
+                {
+                    self.apply_asset_setting(cx, &symbol, &row);
+                } else {
+                    self.account_failed(
+                        cx,
+                        Request::Asset { symbol, revision },
+                        "Malformed Hyperliquid active asset settings",
+                    );
                 }
             }
         }
@@ -690,12 +742,28 @@ impl Hyperliquid {
                 self.account.inflight.remove(&format!("orders:{dex}"));
             }
             Request::Spot { .. } => self.account.spot_inflight = false,
+            Request::Asset { symbol, .. } => {
+                if self.settings_uncertain(&symbol) {
+                    self.account.asset_retry.insert(symbol);
+                    if self.account.asset_retry_timer.is_none() {
+                        self.account.asset_retry_timer = Some(cx.set_timer(5000.0));
+                    }
+                }
+            }
             Request::Builder => self.account.builder_approved = None,
             Request::Fees => {}
         }
         cx.log(LogLevel::Warning, error);
     }
     pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account.asset_retry_timer == Some(timer) {
+            self.account.asset_retry_timer = None;
+            for symbol in std::mem::take(&mut self.account.asset_retry) {
+                if self.settings_uncertain(&symbol) {
+                    self.refresh_asset_setting(cx, &symbol);
+                }
+            }
+        }
         if self.account.state_refresh_timer == Some(timer) {
             self.account.state_refresh_timer = None;
             let dirty = std::mem::take(&mut self.account.state_dirty);
@@ -743,15 +811,94 @@ impl Hyperliquid {
             .and_then(|m| m.id.split_once(':'))
             .map_or("", |(d, _)| d)
     }
+    pub(crate) fn acknowledge_cancel(&mut self, cx: &Cx<'_, Pending>, symbol: &str) {
+        let dex = self.dex_of(cx, symbol).to_owned();
+        *self.account.orders_revision.entry(dex).or_default() += 1;
+    }
+    pub(crate) fn acknowledge_settings(&mut self, cx: &Cx<'_, Pending>, symbol: &str) {
+        self.account.settings_revision += 1;
+        self.account.settings_barriers.insert(
+            symbol.into(),
+            SettingBarrier {
+                at: cx.now,
+                revision: self.account.settings_revision,
+                confirmed: false,
+            },
+        );
+    }
+    pub(crate) fn refresh_uncertain_settings(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        self.acknowledge_settings(cx, symbol);
+        let dex = self.dex_of(cx, symbol).to_owned();
+        self.account.state_dirty.insert(dex);
+        if self.account.state_refresh_timer.is_none() {
+            self.account.state_refresh_timer = Some(cx.set_timer(350.0));
+        }
+        self.refresh_asset_setting(cx, symbol);
+    }
+    fn refresh_asset_setting(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str) {
+        #[derive(Serialize)]
+        struct Read<'a> {
+            r#type: &'static str,
+            user: &'a str,
+            coin: &'a str,
+        }
+        if let Some(coin) = self.coin(cx, symbol) {
+            let body = serde_json::to_string(&Read {
+                r#type: "activeAssetData",
+                user: self.user().unwrap_or_default(),
+                coin,
+            })
+            .unwrap();
+            self.read_body(
+                cx,
+                body,
+                Request::Asset {
+                    symbol: symbol.into(),
+                    revision: self
+                        .account
+                        .settings_barriers
+                        .get(symbol)
+                        .map_or(0, |b| b.revision),
+                },
+            );
+        }
+    }
+    fn apply_asset_setting(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        symbol: &str,
+        row: &ActiveAsset<'_>,
+    ) {
+        let margin = if row.leverage.kind == "cross" {
+            MarginType::Cross
+        } else {
+            MarginType::Isolated
+        };
+        cx.store.update_setting(symbol, |s| {
+            s.leverage = row.leverage.value;
+            s.margin_type = Some(margin);
+        });
+        cx.store.update_positions(|p| {
+            if p.symbol == symbol {
+                p.leverage = row.leverage.value;
+                p.margin_type = Some(margin);
+            }
+        });
+        if let Some(barrier) = self.account.settings_barriers.get_mut(symbol) {
+            barrier.confirmed = true;
+        }
+        self.settings_reconciled(symbol);
+    }
     fn apply_state(
         &mut self,
         cx: &mut Cx<'_, Pending>,
         dex: &str,
         state: &Clearinghouse<'_>,
         authoritative: bool,
+        settings_revision: Option<u64>,
     ) {
         let source_time = state.server_time.or(state.time);
-        if authoritative
+        if (authoritative || !dex.is_empty())
             && let Some(time) = source_time
             && self
                 .account
@@ -812,15 +959,37 @@ impl Hyperliquid {
                 self.account.position_time.insert(symbol.clone(), time);
                 self.account.snapshot_time.insert(symbol.clone(), time);
             }
-            let margin = if p.leverage.kind == "cross" {
+            let mut margin = if p.leverage.kind == "cross" {
                 MarginType::Cross
             } else {
                 MarginType::Isolated
             };
-            cx.store.update_setting(&symbol, |s| {
-                s.leverage = p.leverage.value;
-                s.margin_type = Some(margin);
-            });
+            // Position size can be fresh while its settings predate a local write.
+            let settings_fresh =
+                self.account
+                    .settings_barriers
+                    .get(&symbol)
+                    .is_none_or(|barrier| {
+                        settings_revision.is_none_or(|read| read >= barrier.revision)
+                            && source_time.map_or_else(
+                                || settings_revision.is_some(),
+                                |time| time >= barrier.at,
+                            )
+                    });
+            let mut leverage = p.leverage.value;
+            if settings_fresh {
+                cx.store.update_setting(&symbol, |s| {
+                    s.leverage = leverage;
+                    s.margin_type = Some(margin);
+                });
+                if let Some(barrier) = self.account.settings_barriers.get_mut(&symbol) {
+                    barrier.confirmed = true;
+                }
+                self.settings_reconciled(&symbol);
+            } else if let Some(setting) = cx.store.setting(&symbol) {
+                leverage = setting.leverage;
+                margin = setting.margin_type.unwrap_or(margin);
+            }
             positions.retain(|old| old.symbol != symbol);
             if p.szi == 0.0 {
                 continue;
@@ -836,7 +1005,7 @@ impl Hyperliquid {
                 side,
                 entry_price: p.entry_px.unwrap_or(0.0),
                 notional: p.position_value,
-                leverage: p.leverage.value,
+                leverage,
                 margin_type: Some(margin),
                 position_mode: Some(PositionMode::Oneway),
                 unrealized_pnl: p.unrealized_pnl,
@@ -988,9 +1157,9 @@ impl Hyperliquid {
                     && let Some(mut state) = env.clearinghouse_state
                 {
                     state.time = env.server_time.or(env.time).or(state.time);
-                    self.apply_state(cx, &env.dex, &state, false);
+                    self.apply_state(cx, &env.dex, &state, false, None);
                 } else if let Ok(state) = serde_json::from_str::<Clearinghouse>(raw) {
-                    self.apply_state(cx, "", &state, false);
+                    self.apply_state(cx, "", &state, false, None);
                 }
             }
             "spotState" | "spotClearinghouseState" => {
@@ -1003,16 +1172,27 @@ impl Hyperliquid {
             "activeAssetData" => {
                 if let Ok(row) = serde_json::from_str::<ActiveAsset>(raw)
                     && let Some(symbol) = self.symbol(&row.coin).map(str::to_owned)
-                    && !cx.store.positions().iter().any(|p| p.symbol == symbol)
                 {
-                    cx.store.update_setting(&symbol, |s| {
-                        s.leverage = row.leverage.value;
-                        s.margin_type = Some(if row.leverage.kind == "cross" {
-                            MarginType::Cross
-                        } else {
-                            MarginType::Isolated
-                        });
-                    });
+                    let margin = if row.leverage.kind == "cross" {
+                        MarginType::Cross
+                    } else {
+                        MarginType::Isolated
+                    };
+                    // Until confirmed, untimed asset frames may only echo an acknowledged write.
+                    if self.settings_uncertain(&symbol)
+                        || cx.store.positions().iter().any(|p| p.symbol == symbol)
+                        || (self
+                            .account
+                            .settings_barriers
+                            .get(&symbol)
+                            .is_some_and(|b| !b.confirmed)
+                            && cx.store.setting(&symbol).is_none_or(|s| {
+                                s.leverage != row.leverage.value || s.margin_type != Some(margin)
+                            }))
+                    {
+                        return;
+                    }
+                    self.apply_asset_setting(cx, &symbol, &row);
                 }
             }
             "orderUpdates" => {
@@ -1255,7 +1435,11 @@ impl Hyperliquid {
     fn optimistic_fill(&mut self, cx: &mut Cx<'_, Pending>, symbol: &str, fill: &FillRow<'_>) {
         if fill.coin.contains(':') {
             let dex = fill.coin.split_once(':').unwrap().0;
-            self.account.position_time.insert(symbol.into(), fill.time);
+            self.account
+                .position_time
+                .entry(symbol.into())
+                .and_modify(|time| *time = time.max(fill.time))
+                .or_insert(fill.time);
             *self.account.state_revision.entry(dex.into()).or_default() += 1;
             self.account.state_dirty.insert(dex.into());
             if self.account.state_refresh_timer.is_none() {

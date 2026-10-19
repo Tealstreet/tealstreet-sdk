@@ -346,3 +346,191 @@ fn same_millisecond_partial_executions_both_update_position() {
     assert_eq!(e.store().positions()[0].contracts, 3.0);
     assert_eq!(fill_count(e.take_frame(2000.0).unwrap()), 2);
 }
+
+#[test]
+fn delayed_hip3_state_preserves_position_after_newer_fill() {
+    let (mut e, s) = ready_with_dex("disabled", true);
+    let state = r#"{"channel":"clearinghouseState","data":{"dex":"xyz","clearinghouseState":{"assetPositions":[{"position":{"coin":"xyz:FOO","szi":"2","entryPx":"50","positionValue":"100","unrealizedPnl":"0","leverage":{"type":"cross","value":10}}}],"time":1500}}}"#;
+    message(&mut e, s, 1500.0, state);
+    assert!(
+        e.store()
+            .positions()
+            .iter()
+            .any(|p| p.symbol == "XYZ|FOO-PERP")
+    );
+    message(
+        &mut e,
+        s,
+        5000.0,
+        r#"{"channel":"userFills","data":{"fills":[{"coin":"xyz:FOO","side":"B","px":"50","sz":"1","time":5000,"tid":11,"oid":91,"dir":"Open Long","startPosition":"2"}]}}"#,
+    );
+    message(
+        &mut e,
+        s,
+        5100.0,
+        r#"{"channel":"userFills","data":{"fills":[{"coin":"xyz:FOO","side":"B","px":"50","sz":"1","time":3000,"tid":12,"oid":92,"dir":"Open Long","startPosition":"1"}]}}"#,
+    );
+    message(
+        &mut e,
+        s,
+        5200.0,
+        &state
+            .replace("1500", "4000")
+            .replace("\"szi\":\"2\"", "\"szi\":\"1\""),
+    );
+    assert_eq!(
+        e.store()
+            .positions()
+            .iter()
+            .find(|p| p.symbol == "XYZ|FOO-PERP")
+            .unwrap()
+            .contracts,
+        2.0
+    );
+}
+
+#[test]
+fn reconnect_retries_order_snapshot_after_unrelated_stream_event() {
+    let (mut e, s) = ready("disabled");
+    e.handle(2000.0, Event::WsOpened { socket: s });
+    let requests = e
+        .drain_actions()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    message(
+        &mut e,
+        s,
+        2100.0,
+        r#"{"channel":"orderUpdates","data":[{"order":{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},"status":"open"}]}"#,
+    );
+    let snapshot = r#"[{"coin":"BTC","oid":8,"side":"B","limitPx":"80","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"},{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}]"#;
+    for r in requests {
+        let body = if kind(&r) == "frontendOpenOrders" {
+            snapshot
+        } else {
+            STATE
+        };
+        e.handle(
+            2200.0,
+            Event::HttpResponse {
+                request: r.id,
+                response: safe_cex_engine::Response {
+                    status: 200,
+                    headers: "",
+                    body,
+                },
+            },
+        );
+    }
+    assert!(e.store().order("9").is_some());
+    let timer = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, at_ms } = a {
+                (at_ms == 2700.0).then_some(timer)
+            } else {
+                None
+            }
+        })
+        .expect("invalidated reconnect snapshot must retry");
+    e.handle(2700.0, Event::TimerFired { timer });
+    let r = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                (kind(&r) == "frontendOpenOrders").then_some(r)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(
+        2800.0,
+        Event::HttpResponse {
+            request: r.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: snapshot,
+            },
+        },
+    );
+    assert!(e.store().order("8").is_some());
+    assert!(e.store().order("9").is_some());
+}
+
+#[test]
+fn streamed_snapshot_does_not_resurrect_acknowledged_cancel() {
+    for finished_at in [2400.0, 40_000.0] {
+        let (mut e, s) = ready("disabled");
+        let row = r#"{"coin":"BTC","oid":9,"side":"B","limitPx":"90","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}"#;
+        message(
+            &mut e,
+            s,
+            2000.0,
+            &format!(r#"{{"channel":"orderUpdates","data":[{{"order":{row},"status":"open"}}]}}"#),
+        );
+        e.handle(2100.0, Event::WsOpened { socket: s });
+        let r = e
+            .drain_actions()
+            .find_map(|a| {
+                if let Action::Http(r) = a {
+                    (kind(&r) == "frontendOpenOrders").then_some(r)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        e.handle(
+            2200.0,
+            Event::HttpStart {
+                request: r.id,
+                status: 200,
+                headers: "",
+            },
+        );
+        e.handle(
+            2200.0,
+            Event::HttpChunk {
+                request: r.id,
+                data: format!("[{row},").as_bytes(),
+            },
+        );
+        e.handle(
+            2300.0,
+            Event::Command(safe_cex_engine::Command::CancelOrders {
+                command: 1,
+                ids: vec!["9".into()],
+            }),
+        );
+        let cancel = e
+            .drain_actions()
+            .find_map(|a| {
+                if let Action::Http(r) = a {
+                    r.url.ends_with("/exchange").then_some(r)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        e.handle(2301.0, Event::HttpResponse {
+        request: cancel.id,
+        response: safe_cex_engine::Response {status: 200, headers: "", body: r#"{"status":"ok","response":{"type":"cancel","data":{"statuses":["success"]}}}"#},
+    });
+        assert!(e.store().order("9").is_none());
+        e.handle(finished_at, Event::HttpChunk {request: r.id, data: br#"{"coin":"BTC","oid":10,"side":"B","limitPx":"80","origSz":"1","sz":"1","orderType":"Limit","tif":"Gtc"}]"#});
+        e.handle(finished_at, Event::HttpEnd { request: r.id });
+        assert!(e.store().order("9").is_none());
+        assert!(
+            e.drain_actions().any(
+                |a| matches!(a, Action::SetTimer { at_ms, .. } if at_ms == finished_at + 500.0)
+            )
+        );
+    }
+}

@@ -185,3 +185,11 @@ resolution. Explicit public-only mode still wins; local signing remains in the
 native trading path. Five regressions added; 278 targeted wrapper/client-ID/OKX
 oracle checks pass. First full test run overlapped the wrapper edit and observed
 its pre-fix module; rerunning the settled source along with typecheck/lint.
+
+Private-data review fixes: retry invalidated order snapshots, fence staged rows
+against successful cancels, reject stale HIP-3 scope replacement, and keep fill
+watermarks monotonic. Settings use their own revision/time barriers so position
+updates cannot reverse acknowledged writes. Ambiguous settings writes recover
+through fresh, budgeted per-symbol activeAssetData reads, including flat/HIP-3
+markets; failed reads retain state and retry. Sixteen account tests pass.
+Independent review accepted the final revision/time fences and wrapper startup.
