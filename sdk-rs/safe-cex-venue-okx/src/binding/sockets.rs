@@ -747,9 +747,9 @@ fn sync_handlers(this: &Js, socket: &BaseWebSocket) -> Result<(), Thrown> {
         let callbacks: Vec<MessageHandler> = callbacks
             .into_iter()
             .map(|callback| {
-                Rc::new(move |value: &Value| {
+                Rc::new(move |value: &Js| {
                     callback
-                        .call(Js::Undefined, vec![from_json(value)])
+                        .call(Js::Undefined, vec![value.clone()])
                         .map(|_| ())
                         .map_err(|e| e.to_exchange_error())
                 }) as MessageHandler
@@ -981,7 +981,7 @@ fn new_public(s: &OkxScope) -> Result<(), Thrown> {
     });
     sync_member(s, "dispatchMessageHandler", |s, a| {
         let handler = text(&arg(&a, 0))?;
-        let json = to_json(&arg(&a, 1))?;
+        let json = arg(&a, 1);
         with_book(s, |socket, st| {
             let recover = |h: &str| recover(socket, st, h);
             public_socket::dispatch_message_handler(
@@ -997,7 +997,7 @@ fn new_public(s: &OkxScope) -> Result<(), Thrown> {
     });
     sync_member(s, "acceptOrderBookSequence", |s, a| {
         let handler = text(&arg(&a, 0))?;
-        let json = to_json(&arg(&a, 1))?;
+        let json = arg(&a, 1);
         let accepted = with_book(s, |socket, st| {
             let recover = |h: &str| recover(socket, st, h);
             public_socket::accept_order_book_sequence(

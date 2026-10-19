@@ -16,13 +16,13 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 | 8 | UpdatePositionsHandler.handle | FIX | Same operation invoked during dispatch, without an extra spawn. |
 | 17 | StoreWorkerPayload | OPEN | Whole worker carrier and report boundary. |
 | 18 | WorkerConfig | ACCEPT | Unreachable strict codec removed; actual config/listener preserves the original native values. |
-| 19 | splitWorkerLogExtra | OPEN | Retained carrier across callers; no isolated JSON shim. |
+| 19 | splitWorkerLogExtra | FIX | Native Get/Object.entries plus retained worker/FFI logging delivery; source getter/graph/cooldown profiles below. |
 | 20 | start | FIX | Native Js ingress/config/dispatch, module-owned listeners and deterministic context teardown below. |
 | 21 | ChaserOrderState | OPEN | Native state and output boundary. |
 | 22 | defaultChaserState | FIX | Shared shallow-frozen native template; actual constructor snapshots and compiled old-constructor refusal below. |
 | 23 | ChaserOrderManager | ACCEPT | Explicit required host composition; actual singleton/engine/Store binding below. |
 | 24 | ChaserTerminate | OPEN | Live termination admission. |
-| 25 | ChaserCompleteEvent | OPEN | Native event payload. |
+| 25 | ChaserCompleteEvent | FIX | Dead inbound codec removed; canonical native output retains own undefined clientId. |
 | 26 | CallMethodHandler.handleCallMethod | OPEN | Continuation timing repaired below; typed arguments/primitive rejection admission remains. |
 | 30 | readStringProperty | ACCEPT | Merged #1158: native Get, getter cause and approved typed String replacement. |
 | 71 | ExchangeWorker.start | FIX | Canonical eager startup, source await checkpoints and dropped-waiter continuation below. |
@@ -369,3 +369,72 @@ model/dispatcher consumers, so sharing task_types.rs does not make their raw
 admission, output or depth questions evidence for acceptance. They remain OPEN.
 With merged perf rows 72-74 in #1238, the transferred cohort now has 12 FIX,
 4 ACCEPT and 11 OPEN rows.
+
+## Completion event output and codec retirement: row 25
+
+The maintained manager constructs its event at ChaserOrderManager.ts:937 with
+`clientId: instance.options.clientId`, creating an own property even when that
+option is absent. The native derived serializer omitted that property. The
+output now uses canonical MODEL_RECORD and ModelField::into_property, retaining
+own undefined in native Js while ordinary JSON continues to omit it. All eight
+fields keep the source insertion order; no JSON adapter or alternate event path
+is introduced.
+
+The old ChaserCompleteEvent inbound Deserialize/Wire codec has no production
+caller: the actual engine constructs the record, then passes it to the required
+ChaserHost::emit_completion output capability. Tracked registry, FFI, worker and
+venue searches find no decoder consumer. Its orphan-only codec assertions are
+removed with it; compiler checks cover the remaining callers. Row 25 closes by
+that retirement plus the observable output repair, not by accepting a depth
+limit. The other task/options/state decoder findings stay OPEN.
+
+The actual engine/emitter listener compares 15 maintained-TS completion profiles:
+absent, empty and present clientId across negative zero, infinities, NaN and a
+finite size. It observes exactly one argument/event, eight ordered own keys,
+undefined presence, all fields and native binary64 bits. The compiled original
+serializer at master 49c825adc6 fails the named completion listener regression
+with seven own keys when clientId is absent; exact repaired bytes restore it.
+The original ten identity cases/eight leaves remain as output observations.
+The retired decoder's two numeric fields no longer claim ingress coverage:
+the five remaining records keep 45 requiredness and 13 optional-null checks;
+scalar ingress checks retain 18 fields/378 comparisons, and the separate
+terminate/state numeric matrix retains its three fields/270 comparisons with
+unchanged inputs/routes. Source inventories keep the retired event declarations
+as output evidence. The cohort now has 13 FIX, 4 ACCEPT and 10 OPEN rows.
+
+## Native logging and report delivery: row 19
+
+The maintained ExchangeWorker helpers read inherited/hidden controls with ordinary
+Get, evaluate reserved fields again for each source read, and capture the original
+sentry tags/extra objects. Error materialization can mutate those objects before
+the report spreads them. Object.entries reads every enumerable value before its
+reserved-key filter. JSON input and cloned control fields lost these effects.
+
+The shared native Js carrier now runs from both helpers through forward_log and
+forward_error to WorkerDataPayload and the actual worker/FFI startup posts. The
+FFI caller no longer builds a JSON scaffold and patches text/error fields later.
+Cooldowns use the canonical native Map: a changing report-key getter may return
+an object after validation, and must never be coerced to a String key.
+The source try covers tag/extra spreading as well as the post; earlier control
+and materialization errors still propagate before that catch. Existing typed
+worker constructor identity and caught-error host capabilities stay explicit.
+
+Compiled master403459ad2d fails the existing source live-tag assertion: reporting
+uses before while maintained TypeScript reports after following coercion. The
+actual ExchangeWorker/DefaultStore/runtime binding independently checks the real
+post's aliases, cycles, own undefined, native UTF-16 key/value units, Infinity and
+negative-zero bits, unread depth150 referent, and raw overflow operation values.
+Its graph profile is compared to the maintained logError method. A separately
+compiled own-undefined omission control must fail that real worker assertion,
+then exact production bytes are restored before positive replay. No depth limit
+is accepted.
+
+The original 72 source reporting sequences/360 calls, six clock bit profiles,
+810 log profiles and helper corpus remain; getter-throw cases now compare the
+real source outcomes instead of a plain-object substitute. Three original text
+profiles include native D800, and hidden/inherited controls plus repeated getter
+counts/order are compared directly. Materialization/post/fallback error identity,
+clock reentry and cooldown mutation order remain separate assertions.
+Row 17 stays OPEN for the other StoreWorkerPayload consumers.
+
+After rows 25 and 19, the cohort has 14 FIX, 4 ACCEPT and 9 OPEN rows.

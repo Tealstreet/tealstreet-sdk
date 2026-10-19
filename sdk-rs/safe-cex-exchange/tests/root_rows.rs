@@ -165,12 +165,28 @@ fn root_handler_aliases_native_presence_bits_and_callback_identity() {
         vec!["other", "42"],
         "ROOT handlers native insertion order"
     );
+    let message = safe_cex_exchange::js_runtime::value::from_json(&json!({"price":17}));
     for cb in map["other"].borrow().iter() {
-        cb(&json!({"price":17})).unwrap();
+        cb(&message).unwrap();
+    }
+    assert!(
+        seen.borrow()
+            .iter()
+            .all(|value| value.strict_equals(&message)),
+        "ROOT handlers share original native input"
+    );
+    for value in seen.borrow().iter() {
+        assert!(
+            matches!(value.get("price").unwrap(), safe_cex_exchange::js_runtime::value::Js::Number(number) if number.to_bits() == 17.0f64.to_bits()),
+            "ROOT handler native Number bits before JSON observation"
+        );
     }
     assert_eq!(
-        *seen.borrow(),
-        vec![json!({"price":17}), json!({"price":17})]
+        seen.borrow()
+            .iter()
+            .map(|value| safe_cex_exchange::js_runtime::value::to_json(value).unwrap())
+            .collect::<Vec<_>>(),
+        vec![json!({"price":17.0}), json!({"price":17.0})]
     );
     let source = oracle("types");
     assert_eq!(source["statFields"], 3);

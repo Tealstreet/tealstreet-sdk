@@ -12,10 +12,7 @@ use crate::{
 use safe_cex_exchange::{
     error_reporting::ExchangeErrorInput, exchange::BaseExchange, runtime::ExchangeError,
 };
-use safe_cex_transport::{
-    RestAdapter, RestResponseBody,
-    rate_limit::{RateLimitClock, RateLimitedAdapter},
-};
+use safe_cex_transport::{RestAdapter, RestResponseBody, rate_limit::RateLimitedAdapter};
 use safe_cex_types::ExchangeOptions;
 use std::{rc::Rc, sync::Arc};
 
@@ -25,7 +22,6 @@ use std::{rc::Rc, sync::Arc};
 pub(crate) struct RestDependencies {
     pub http: Arc<dyn RestAdapter>,
     pub limiter: Rc<RateLimiter>,
-    pub clock: Arc<dyn RateLimitClock>,
 }
 
 #[derive(Clone, Copy)]
@@ -61,7 +57,7 @@ fn build(
     let adapter: Arc<dyn RestAdapter> = match max_rps {
         Some(n) => Arc::new(RateLimitedAdapter::new(
             deps.http.clone(),
-            deps.clock.clone(),
+            safe_cex_exchange::runtime::rate_limit_scheduler(base),
             n.max(1),
             1000,
         )),

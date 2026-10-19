@@ -10,7 +10,7 @@ import { loadContracts } from '../../safe-cex-parity/scripts/accepted-contract-f
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const names = [
   'public_ticker_events::Failure', 'public_ticker_events::TickerFields',
-  'public_dispatch::CallbackList', 'public_dispatch::CoreInvoke',
+  'public_dispatch::CallbackList',
   'orderbook::BinanceDepthUpdate',
 ].map(name => `safe_cex_venue_binance::${name}`).sort();
 const args = process.argv.slice(2);
@@ -43,10 +43,10 @@ assert.deepEqual(results.map(result => result.name).sort(), names);
 if (args.includes('--expect-unclassified')) {
   assert.ok(results.every(result => result.failures.some(failure =>
     failure.includes('public alias needs an accepted-set contract'))));
-  console.log('All five public stream aliases fail missing classification by name.');
+  console.log('All four public stream aliases fail missing classification by name.');
 } else {
   for (const result of results) assert.deepEqual(result.failures, [], result.name);
-  console.log('All five public stream aliases pass their native compiler contracts.');
+  console.log('All four public stream aliases pass their native compiler contracts.');
 }
 if (args.includes('--controls')) {
   const name = 'safe_cex_venue_binance::orderbook::BinanceDepthUpdate';

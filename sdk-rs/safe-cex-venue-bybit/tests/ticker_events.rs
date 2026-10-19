@@ -54,9 +54,12 @@ fn ticker_notification_retains_subscriber_identity_after_committed_patch() {
     for (is_spot, last) in [(false, 21.), (true, 22.)] {
         let error = handle_tickers_event(
             &store,
-            &serde_json::json!({"data":{"symbol":"BTCUSDT","lastPrice":last}}),
+            &safe_cex_exchange::js_runtime::value::from_json(
+                &serde_json::json!({"data":{"symbol":"BTCUSDT","lastPrice":last}}),
+            ),
             is_spot,
             false,
+            !is_spot,
         )
         .unwrap_err();
         let TickerEventError::Store(StoreMutationError::Notification(notification)) = error else {
@@ -146,9 +149,10 @@ fn ticker_events_match_live_source_with_native_nonfinite_patches() {
         );
         let result = handle_tickers_event(
             &store,
-            &case["frame"],
+            &safe_cex_exchange::js_runtime::value::from_json(&case["frame"]),
             case["variant"] == "bybitspot",
             case["variant"] == "bybit" && case["category"] == "inverse",
+            case["variant"] == "bybit",
         );
         let symbol = case["frame"]["data"]["symbol"].as_str();
         if matches!(symbol, Some("constructor" | "__proto__" | "toString")) {

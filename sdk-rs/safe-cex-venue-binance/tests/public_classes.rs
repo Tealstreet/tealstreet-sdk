@@ -471,13 +471,40 @@ fn public_classes_share_native_payload_callbacks_reentrancy_and_failure() {
     owner.replace_handlers("kline.BTC".into(), vec![exact]);
     owner.on_message(r#"{"e":"kline","s":"BTC"}"#).unwrap();
     assert_eq!(calls.get(), 1, "independent exact callback count");
-    let primary = Rc::new(ExchangeError::new("class callback fixture"));
+    let retained = safe_cex_types::retained_json::RetainedJsonInput::Object(vec![
+        (
+            "data".encode_utf16().collect(),
+            safe_cex_types::retained_json::RetainedJsonInput::Text(vec![0xd800]),
+        ),
+        (
+            "zero".encode_utf16().collect(),
+            safe_cex_types::retained_json::RetainedJsonInput::Float(-0.),
+        ),
+    ]);
+    let primary = Rc::new(
+        ExchangeError::new("class callback fixture").with_retained_response(retained.clone()),
+    );
     let e = primary.clone();
     owner.replace_handlers("error".into(), vec![Rc::new(move |_| Err(e.clone()))]);
     let actual = owner.on_message(r#"{"e":"error"}"#).unwrap_err();
     assert!(
         Rc::ptr_eq(&actual, &primary),
         "native bridged original failure identity"
+    );
+    let core = owner.base().message_handlers.borrow()["error"].borrow()[0].clone();
+    let bridged = core(&EventValue::Null).unwrap_err();
+    assert_eq!(
+        bridged.retained_response_input(),
+        Some(retained),
+        "direct core callback preserves retained failure fields"
+    );
+    let safe_cex_types::retained_json::RetainedJsonInput::Object(fields) =
+        bridged.retained_response_input().unwrap()
+    else {
+        panic!("retained response object");
+    };
+    assert!(
+        matches!(fields[1].1, safe_cex_types::retained_json::RetainedJsonInput::Float(value) if value.to_bits() == 0x8000_0000_0000_0000)
     );
     owner.replace_handlers("good".into(), vec![Rc::new(|_| Ok(()))]);
     owner.on_message(r#"{"e":"good"}"#).unwrap();
@@ -638,9 +665,12 @@ fn public_classes_preserve_foreign_core_callback_on_listener_registration() {
     let calls = Rc::new(Cell::new(0));
     let count = calls.clone();
     let original: MessageHandler = Rc::new(move |events| {
-        assert_eq!(
-            events[0]["k"]["s"].as_str(),
-            Some("BTC"),
+        assert!(
+            events
+                .get("0")?
+                .get("k")?
+                .get("s")?
+                .strict_equals(&EventValue::str("BTC")),
             "native foreign callback receives parsed envelope"
         );
         count.set(count.get() + 1);
@@ -681,16 +711,13 @@ fn public_classes_preserve_foreign_core_callback_on_listener_registration() {
         1,
         "native unsubscribe preserves foreign callback"
     );
-    let unsupported = owner
+    owner
         .on_message(r#"{"e":"kline","s":"BTC","k":{"s":"BTC","i":"1m"},"native":1e400}"#)
-        .unwrap_err();
+        .unwrap();
     assert_eq!(
-        unsupported.name, "TypeError",
-        "native explicit immutable core carrier limit"
-    );
-    assert_eq!(
-        unsupported.message,
-        "core JSON callback cannot represent nonfinite native number"
+        calls.get(),
+        2,
+        "nonfinite unrelated data retains the foreign callback frame"
     );
 }
 
@@ -813,7 +840,7 @@ fn saved_core_bridge_decodes_numeric_lexeme_without_frame() {
     );
     let callback = owner.base().message_handlers.borrow()["saved"].borrow()[0].clone();
     let data: Value = serde_json::from_str(r#"[{"native":1e400}]"#).unwrap();
-    callback(&data).unwrap();
+    callback(&safe_cex_exchange::js_runtime::value::from_json(&data)).unwrap();
 }
 
 #[test]
@@ -961,7 +988,7 @@ fn public_same_generation_symbol_alias_receives_second_tick() {
 }
 
 #[test]
-fn public_escaped_surrogate_callback_loss_is_inventoried() {
+fn public_surrogate_frames_retain_raw_units_and_reach_callbacks() {
     for kind in [
         PublicKind::FuturesMarket,
         PublicKind::FuturesPublic,
@@ -972,9 +999,15 @@ fn public_escaped_surrogate_callback_loss_is_inventoried() {
         let (owner, _, _) = fixture(kind);
         let count = Rc::new(Cell::new(0));
         let seen = count.clone();
+        let raw = Rc::new(RefCell::new(Vec::<Vec<u16>>::new()));
+        let observed = raw.clone();
         owner.replace_handlers(
             "kline".into(),
-            vec![Rc::new(move |_| {
+            vec![Rc::new(move |events| {
+                let EventValue::String(units) = events.get("0")?.get("x")? else {
+                    panic!("native source string");
+                };
+                observed.borrow_mut().push(units.to_vec());
                 seen.set(seen.get() + 1);
                 Ok(())
             })],
@@ -992,8 +1025,13 @@ fn public_escaped_surrogate_callback_loss_is_inventoried() {
             .unwrap();
         assert_eq!(
             count.get(),
-            0,
-            "FORCED native escaped surrogate frame loses public callback"
+            1,
+            "native escaped surrogate frame reaches public callback"
+        );
+        assert_eq!(
+            *raw.borrow(),
+            [vec![111, 107], vec![0xd800]],
+            "native callbacks retain exact ordinary and surrogate units"
         );
     }
     let source = std::process::Command::new("node")
@@ -1075,4 +1113,58 @@ fn public_symbol_collision_uses_latest_store_alias_owner() {
         );
         stop();
     }
+}
+
+#[test]
+fn retained_handler_frames_cross_the_production_core_registry() {
+    let (owner, _, _) = fixture(PublicKind::FuturesMarket);
+    let calls = Rc::new(Cell::new(0));
+    let seen = calls.clone();
+    let callback: MessageHandler = Rc::new(move |_| {
+        seen.set(seen.get() + 1);
+        Ok(())
+    });
+    owner.base().message_handlers.borrow_mut().insert(
+        "retainedProbe".into(),
+        Rc::new(RefCell::new(vec![callback])),
+    );
+    for marker in [r"\ud800", r"\udfff", r"\ud83e\udd80"] {
+        let frame = format!(
+            r#"{{"e":"retainedProbe","unused":{{"{marker}":["{marker}"]}},"overflow":1e400,"zero":-0}}"#
+        );
+        owner
+            .on_message(&frame)
+            .expect("source-valid native graph reaches core callbacks");
+    }
+    owner
+        .on_message(r#"{"e":"retainedProbe","neighbor":true}"#)
+        .unwrap();
+    assert_eq!(
+        calls.get(),
+        4,
+        "every source-valid frame reaches the real class/core registry"
+    );
+}
+
+#[cfg(test)]
+mod retained_handler_support {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../safe-cex-exchange/tests/support/retained_handlers.rs"
+    ));
+}
+#[test]
+fn shared_core_handlers_retain_the_source_graph_and_native_fields() {
+    let (owner, _, _) = fixture(PublicKind::FuturesMarket);
+    let cases = retained_handler_support::source_frames("binance", "publicWebsocket");
+    let (handlers, calls) = retained_handler_support::pair(&cases, true);
+    owner
+        .base()
+        .message_handlers
+        .borrow_mut()
+        .insert("retainedProbe".into(), handlers);
+    for case in cases {
+        owner.on_message(case["frame"].as_str().unwrap()).unwrap();
+    }
+    assert_eq!(calls.get(), 8);
 }

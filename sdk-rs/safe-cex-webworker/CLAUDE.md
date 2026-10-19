@@ -755,6 +755,13 @@ Object.freeze builtin protects its outer fields while its nested ID array stays
 mutable. Constructors snapshot through the shared typed state decoder; remaining
 raw state admission and instance-array alias findings stay separate.
 
+Completion events are output records; their unreachable inbound codec is retired.
+Serialize through canonical MODEL_RECORD/ModelField property semantics so the
+actual chaser:complete listener owns clientId even when its value is undefined.
+The engine/source listener witness pins eight ordered keys, all values and native
+number bits; the original ten identity cases remain output checks. Other live
+task decoders retain their numeric/presence floors and independent audit rows.
+
 ## Module Drop override review
 
 `WorkerModule::drop` is a production teardown boundary under the approved native
@@ -767,3 +774,10 @@ cleanup and shuts down each context. Required error reporting lets later owned
 resources finish cleanup after a handler failure. The existing module-drop and
 perf-disposal binding tests pin retained-handle cleanup; the inventory guard must
 continue to detect any change in this body's hook receiver or multiplicity.
+
+Worker log helpers read native Js, including repeated control getters and the
+Object.entries-before-filter sequence. Keep controls/extras live through error
+materialization and use the shared native Map for cooldown key identity. Both
+worker and FFI startup deliver WorkerDataPayload directly; do not rebuild a JSON
+scaffold or patch retained fields after serialization. Typed constructor identities
+and the remaining payload consumers keep their separate audit boundaries.

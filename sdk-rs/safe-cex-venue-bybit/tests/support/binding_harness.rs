@@ -554,7 +554,6 @@ fn configured_harness(
             remote_signer,
             wire: wire.clone(),
             http_host: Rc::new(Host),
-            rate_limit_clock: Arc::new(Clock(runtime.now.clone())),
             retry_clock: Rc::new(Clock(runtime.now.clone())),
             clock,
             external_public_data,

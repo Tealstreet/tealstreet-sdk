@@ -970,6 +970,12 @@ embedding the class name in its message. The 242-case maintained-source test
 checks both the constructed native receiver and the typed helper; primitive
 diagnostics are compared directly rather than normalized to a custom string.
 
+Shared WebSocket message handlers now borrow the canonical `Js` frame graph.
+Restore retained ingress once per frame, preserve it across all callbacks, and
+project only reached typed output fields; see exchange/WS_CONTRACT.md and the
+actual-source/native retained-handler witnesses. Do not reintroduce Value frame
+projections or a second callback registry.
+
 The SDK invoke/invoke_unit and get_account wrappers call their installed member
 before returning a waiter and await the same canonical Promise. Preserve this
 boundary when changing the typed facade; do not add a second Promise driver.
@@ -1032,3 +1038,7 @@ continue without caller polling at exact 10ms subscription and 5ms market bounda
 Run public_topic_binding with Node enabled and public-scheduling-controls.py;
 the latter rejects deferred prefixes, zero delay and abandoned owned tails.
 Keep the accepted owner-disposal teardown and original topic admission guards.
+
+The private onOpen specific-claims review records bounded disposal/recovery
+differences separately from the shared original-cause diagnostic correction.
+See `../safe-cex-exchange/PRIVATE_OPEN_REVIEW.md`; no Wasm-only row is closed.

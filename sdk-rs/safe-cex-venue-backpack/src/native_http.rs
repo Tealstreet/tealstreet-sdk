@@ -442,31 +442,12 @@ impl safe_cex_transport::RestAdapter for HttpExecution {
         Box::pin(self.inner.execute_with_receipt(request))
     }
 }
-struct RateClock {
-    runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
-}
-impl safe_cex_transport::rate_limit::RateLimitClock for RateClock {
-    fn now_ms(&self) -> u64 {
-        self.runtime.monotonic_now_ms() as u64
-    }
-    fn sleep_ms(&self, ms: u64) -> safe_cex_transport::TransportFuture<'_, ()> {
-        let f = self.runtime.sleep(ms);
-        Box::pin(async move {
-            f.await
-                .map_err(|e| safe_cex_transport::TransportError::Host(e.message))
-        })
-    }
-}
+
 impl Client {
-    #[expect(clippy::arc_with_non_send_sync)]
-    pub fn limit_requests(
-        &self,
-        runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>,
-        max_rps: usize,
-    ) {
+    pub fn limit_requests(&self, max_rps: usize) {
         self.rate_limits.borrow_mut().push(Rc::new(
             safe_cex_transport::rate_limit::RateLimiter::new(
-                std::sync::Arc::new(RateClock { runtime }),
+                safe_cex_exchange::runtime::rate_limit_scheduler(&self.base),
                 max_rps,
                 1000,
             ),

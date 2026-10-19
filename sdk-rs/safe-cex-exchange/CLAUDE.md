@@ -15,6 +15,11 @@ Native proxy authorization carries its marker in config extensions, never header
 read-only diagnostic slots cannot reject the request. Remote signing publishes
 its timing stamps after the signed-header merge and preserves them in returned
 success/failure configs. Skipped or refused signing does not fabricate stamps.
+Both factories publish actual HTTP outcomes to the lower crate's single REST
+diagnostic cache, retaining numeric config values and bound header accessors.
+Direct failures are recorded before enhancement; routed failures are recorded
+afterwards. Config materialization follows installed Axios before terminal send,
+so accessor failures remain request-setup failures rather than phantom wire calls.
 Socket diagnostics reuse the shared auth-operation predicate after JSON parsing.
 The Bitget owned-transport regression pins retry eligibility after that boundary.
 Native network rejections retain the actual RestRequest as an opaque request
@@ -2043,6 +2048,11 @@ See ARRAY_STORAGE_REVIEW.md for the length/descriptor/iterator algorithms, atomi
 consumer boundaries and independent native/Node/compiled controls. The browser
 DATA bridge caches identity before walking enumerable indexed and named fields.
 
+Array.prototype.constructor is its own nonenumerable writable/configurable data
+property and retains the installed Array facade. ARRAY_STORAGE_REVIEW.md records
+the Node identity/mutation proof and the approved single-pair-per-realm Rc cycle
+limit; repeated operations and installations do not grow that retained graph.
+
 Internal update listeners subscribe to the canonical Store's native state referent.
 They do not project StoreData or visit unrelated getters before emitter fanout.
 Typed subscribers remain explicit projection boundaries at their reached slots;
@@ -2086,6 +2096,12 @@ all loop host effects; remaining_utils compares invocation, continuation and
 callback scheduling with the maintained TypeScript function in Node.
 
 
+Shared WebSocket message handlers now borrow the canonical `Js` frame graph.
+Restore retained ingress once per frame, preserve it across all callbacks, and
+project only reached typed output fields; see exchange/WS_CONTRACT.md and the
+actual-source/native retained-handler witnesses. Do not reintroduce Value frame
+projections or a second callback registry.
+
 
 BaseExchange socket-health publication constructs own undefined timestamp/close-code properties and passes them to the canonical Store partial merge. It never removes keys through a JSON read/replacement. Typed Store notifications and prepared payloads retain the same health field.
 
@@ -2122,6 +2138,11 @@ engine-dependent. Array sort compacts defined values before TimSort, then writes
 undefined values and deletes remaining holes; four native/Node profiles pin the
 comparator schedule as well as sparse output.
 
+Direct calls of the canonical Object.prototype.toString referent use the same
+intrinsic object-tag implementation as ordinary coercion. The actual Aster
+private fill witness compares an object ID against its maintained TS constructor;
+an own noncallable toString shadow still refuses and emits no fill.
+
 ## Worker structured clone
 
 js_runtime::structured_clone implements the recorder's platform clone operation
@@ -2132,3 +2153,7 @@ NaN payloads canonicalize as Node structuredClone does.
 Uncloneable values and unmodeled object kinds produce visible DataCloneError.
 The worker recorder intentionally drops clone failures as perfFixture.ts does;
 other callers receive the error. Node's real structuredClone supplies the oracle.
+
+Private authentication recovery reports the supplied ExchangeError through the
+runtime exception sink before warning/reconnect, preserving its retained cause.
+See `PRIVATE_OPEN_REVIEW.md` for the bounded disposal/recovery differences.

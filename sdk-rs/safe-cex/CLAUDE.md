@@ -35,3 +35,7 @@ that category and the account enabled it. Presence-aware patches run afterward,
 including false overrides and explicit clears. The root option-toggle supplement
 runs all 48 metadata entries through actual source and facade construction. See
 `../parity/OPTION_FIELDS_AUDIT.md` for the cross-crate construction/retention audit.
+
+Preloading uses the required factory ExchangeRuntime and canonical start_eager.
+All loaders start before return, cache writes follow their await boundary, and
+a rejected or discarded aggregate waiter does not cancel sibling loads.
