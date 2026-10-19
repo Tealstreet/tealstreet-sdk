@@ -30,6 +30,7 @@ import { BaseExchange } from '../base';
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   binancepm: 'binancepm',
+  bybit: 'bybit',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
