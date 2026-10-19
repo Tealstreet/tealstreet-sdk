@@ -322,6 +322,23 @@ fn production_emitter_preserves_empty_array_and_multiple_arguments() {
 #[test]
 fn production_import_registry_uses_real_helpers_and_rejects_unknown_names() {
     let (mut r, _) = production_realm();
+    assert_eq!(
+        r.global_binding("Infinity")
+            .unwrap()
+            .to_number()
+            .unwrap()
+            .to_bits(),
+        f64::INFINITY.to_bits()
+    );
+    assert!(r.shared.globals.set("Infinity", Js::Number(0.0)).is_err());
+    assert_eq!(
+        r.global_binding("Infinity")
+            .unwrap()
+            .to_number()
+            .unwrap()
+            .to_bits(),
+        f64::INFINITY.to_bits()
+    );
     for name in [
         "hasSeenFill",
         "markFillSeen",
