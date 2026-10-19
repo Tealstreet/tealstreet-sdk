@@ -252,3 +252,16 @@ tasks. Capping Vitest to one worker and serializing package jobs avoids the Hyro
 import timeout without changing assertions or timeout thresholds. The new
 Crypto.com common-rule regressions pass alongside Hyperliquid/OKX checks;
 31 harness regressions pass. Final five-venue replay/host builds are running.
+
+Five-venue replay checkpoint: Hyperliquid and Binance public/private pass. Updated
+public medians with CPU isolated from memory collection: Hyperliquid 432.5/56.1 ms
+TS/Rust CPU and 5.1/1.9 MB retained (7.72x/2.75x); Binance 243.8/103.2 ms and
+4.3/2.7 MB (2.36x/1.60x). Bundles 956,050 and 766,451 bytes. Crypto.com public
+outputs/performance pass, but exact subscription parity exposes an incoming
+startup bug: two early books consume automatic ticker capacity, dropping two
+seed ticker channels. Fix its automatic/lazy budget distinction with regression.
+
+WEEX has landed at origin/feat/rust-rewrite (6cd219ce4c), including host lifecycle
+and OKX allocation fixes. Integrate that landing tree while the bounded Crypto.com
+fix runs, then verify the settled tree. No gate threshold or parity exclusion is
+being relaxed.
