@@ -48,3 +48,12 @@ green final-head CI. No stash, rebase, force push or master changes.
 - Fetched landing branch, read current brief/spec and Bitget guidance; clean fresh
   branch created. Inverse audit and documented ledger/trailing implementation
   research are running in separate bounded scopes.
+
+## Public checkpoint
+
+- Inverse registered through wasm, Rust SDK and harness, with coin/scoin product,
+  USD filtering, inverse flag, native lot precision and TS maxTradeNum precedence.
+- Independent public audit found zero leverage fallback mismatch; corrected to
+  TS defaults 1/20. Documented-schema regression covers both product environments,
+  two markets, wrong quote filtering, precision and unchanged book quantities.
+- Public native tests: 16/16 PASS. Private/trading/query work continues separately.
