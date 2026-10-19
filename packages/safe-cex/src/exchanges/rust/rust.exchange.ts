@@ -5,6 +5,7 @@ import type {
   ExchangeName,
   ExchangeOptions,
   Execution,
+  ExecutionsOptions,
   HistoricalOrder,
   IncomeHistoryOptions,
   IncomeRecord,
@@ -15,9 +16,9 @@ import type {
   PlaceOrderOpts,
   PublicTrade,
   UpdateOrderOpts,
-  ExecutionsOptions,
   ValidateAccountResult,
 } from '../../types';
+import type { ClientOrderIdRule } from '../clientOrderId';
 
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
@@ -25,6 +26,7 @@ import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
 import { LogSeverity } from '../../types';
 import { BaseExchange } from '../base';
+import { patternClientOrderIdRule } from '../clientOrderId';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
@@ -32,6 +34,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binancepm: 'binancepm',
   bitget: 'bitget',
   bitgetusdc: 'bitgetusdc',
+  bybit: 'bybit',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
@@ -66,6 +69,7 @@ const STORE_FLUSH_MS = 250;
  * reads the same store it always has. Trading methods are engine commands.
  */
 export class RustEngineExchange extends BaseExchange {
+  protected readonly clientOrderIdRule: ClientOrderIdRule | undefined;
   private host?: EngineHostType;
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
@@ -81,6 +85,8 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
+    this.clientOrderIdRule =
+      exchangeName === 'bybit' ? patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/) : undefined;
     this.applier = new FrameApplier(store);
   }
 
@@ -178,7 +184,10 @@ export class RustEngineExchange extends BaseExchange {
     return this.host.command(command) as Promise<T>;
   };
 
-  placeOrders = (orders: PlaceOrderOpts[]) => this.command<string[]>({ op: 'placeOrders', orders });
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (this.name === 'bybit') this.assertCallerClientOrderIds(orders);
+    return this.command<string[]>({ op: 'placeOrders', orders });
+  };
 
   placeOrder = (opts: PlaceOrderOpts) => this.placeOrders([opts]);
 
@@ -225,8 +234,7 @@ export class RustEngineExchange extends BaseExchange {
       to: opts.to,
     });
 
-  fetchHistoricalFills = (opts: ExecutionsOptions) =>
-    this.command<Execution[]>({ op: 'fetchFills', ...opts });
+  fetchHistoricalFills = (opts: ExecutionsOptions) => this.command<Execution[]>({ op: 'fetchFills', ...opts });
 
   fetchHistoricalOrders = (opts?: OrderHistoryOptions) =>
     this.command<HistoricalOrder[]>({

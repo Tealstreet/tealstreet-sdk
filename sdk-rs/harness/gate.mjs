@@ -86,6 +86,21 @@ const KNOWN_TS_FIXES = {
       }
     },
   },
+  bybit: {
+    // TS drops post-only rejection metadata, rounds split totals, resends failed
+    // batches, can race the REST ticker seed, and can duplicate Partial stops.
+    normalize(account, rustAccount) {
+      for (const position of account.positions) {
+        const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
+        if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+      }
+      for (const order of account.orders) {
+        const fixed = rustAccount.orders.find((o) => o.id === order.id);
+        if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled')
+          order.rejectReason = 'PostOnly';
+      }
+    },
+  },
   bitget: {
     // Each correction is covered by documented-payload Rust tests. Normal
     // tapes still compare unchanged; these notes do not rewrite mismatches.

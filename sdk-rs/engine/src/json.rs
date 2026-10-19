@@ -104,6 +104,8 @@ pub enum ArrayAt {
     Root,
     /// The array is this field of the top-level object.
     Field(&'static str),
+    /// The array sits under these nested object fields.
+    Path(&'static [&'static str]),
     /// Stream the first matching array and retain its envelope with `[]` in
     /// place of the list, including pagination and business-error metadata.
     Envelope(&'static [&'static [&'static str]]),
@@ -165,20 +167,21 @@ impl ArraySplitter {
     pub fn finished(&self) -> bool {
         self.phase == Phase::Done
             && !self.invalid
-            && (!matches!(self.at, ArrayAt::Envelope(_))
-                || (!self.envelope_overflow
-                    && serde_json::from_slice::<IgnoredAny>(&self.envelope).is_ok()))
+            && !self.envelope_overflow
+            && serde_json::from_slice::<IgnoredAny>(&self.envelope).is_ok()
     }
 
     pub fn envelope(&self) -> Option<&str> {
-        matches!(self.at, ArrayAt::Envelope(_))
-            .then(|| std::str::from_utf8(&self.envelope).ok())
-            .flatten()
+        std::str::from_utf8(&self.envelope).ok()
+    }
+    /// The body with the streamed array emptied, bounded to 128 KiB.
+    pub fn outside(&self) -> &[u8] {
+        &self.envelope
     }
 
     pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
         for &byte in data {
-            if matches!(self.at, ArrayAt::Envelope(_)) && self.phase != Phase::InArray {
+            if self.phase != Phase::InArray {
                 if self.envelope.len() < 131_072 {
                     self.envelope.push(byte);
                 } else {
@@ -224,6 +227,13 @@ impl ArraySplitter {
                 b':' if self.phase == Phase::Seeking => {
                     self.armed = match self.at {
                         ArrayAt::Field(name) => self.depth == 1 && name.as_bytes() == self.key,
+                        ArrayAt::Path(path) => {
+                            path.len() == self.depth as usize
+                                && path
+                                    .iter()
+                                    .zip(&self.keys)
+                                    .all(|(name, key)| name.as_bytes() == key)
+                        }
                         ArrayAt::Envelope(paths) => paths.iter().any(|path| {
                             path.len() == self.depth as usize
                                 && path
@@ -243,6 +253,9 @@ impl ArraySplitter {
                             && match self.at {
                                 ArrayAt::Root => self.depth == 1,
                                 ArrayAt::Field(_) => self.armed && self.depth == 2,
+                                ArrayAt::Path(path) => {
+                                    self.armed || (path.is_empty() && self.depth == 1)
+                                }
                                 ArrayAt::Envelope(paths) => {
                                     self.armed
                                         || (self.depth == 1 && paths.iter().any(|p| p.is_empty()))
@@ -262,9 +275,7 @@ impl ArraySplitter {
                             self.invalid = true;
                         }
                         self.emit(&mut on_item);
-                        if matches!(self.at, ArrayAt::Envelope(_)) {
-                            self.envelope.push(b']');
-                        }
+                        self.envelope.push(b']');
                         self.phase = Phase::Done;
                         continue;
                     }
@@ -339,6 +350,24 @@ mod tests {
     struct Row<'a> {
         s: &'a str,
         v: u32,
+    }
+
+    #[test]
+    fn nested_path_retains_envelope_and_ignores_unrelated_siblings() {
+        let body = r#"{"other":{"list":[{"id":"wrong"}]},"result":{"list":[{"id":"right"}],"nextPageCursor":"page2"},"retCode":0}"#;
+        for chunk in [1, 3, 17, 1024] {
+            let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
+            let mut rows = Vec::new();
+            for part in body.as_bytes().chunks(chunk) {
+                splitter.feed(part, |row| rows.push(row.to_owned()));
+            }
+            assert!(splitter.finished());
+            assert_eq!(rows, [r#"{"id":"right"}"#]);
+            assert_eq!(
+                std::str::from_utf8(splitter.outside()).unwrap(),
+                r#"{"other":{"list":[{"id":"wrong"}]},"result":{"list":[],"nextPageCursor":"page2"},"retCode":0}"#
+            );
+        }
     }
 
     #[test]

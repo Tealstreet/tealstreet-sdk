@@ -1,7 +1,7 @@
 // Shared deterministic replay transport, independent of either engine.
 export const createTape = (records, venue, isPrivate) => {
   /** Per-request values: clocks, signatures and generated client ids. */
-  const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId']);
+  const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
   const canonicalUrl = (url) => {
     const parsed = new URL(url);
     const query = [...parsed.searchParams]
@@ -27,6 +27,7 @@ export const createTape = (records, venue, isPrivate) => {
       if (value && typeof value === 'object')
         return Object.fromEntries(
           Object.keys(value)
+            .filter((key) => !VOLATILE.has(key) && value[key] !== undefined)
             .sort()
             .map((key) => {
               const item = value[key];
@@ -108,8 +109,8 @@ export const createTape = (records, venue, isPrivate) => {
       const socket = { url, onMessage, closed: false, topics: new Set() };
       setImmediate(() => {
         if (socket.closed) return;
-        if (!this.open.has(url)) this.open.set(url, new Set());
-        this.open.get(url).add(socket);
+        if (!this.open.has(canonicalUrl(url))) this.open.set(canonicalUrl(url), new Set());
+        this.open.get(canonicalUrl(url)).add(socket);
         onOpen();
         this.waiters = this.waiters.filter((waiter) => !waiter());
       });
@@ -117,7 +118,7 @@ export const createTape = (records, venue, isPrivate) => {
     }
 
     sockets(url) {
-      return [...(this.open.get(url) ?? [])].filter((s) => !s.closed);
+      return [...(this.open.get(canonicalUrl(url)) ?? [])].filter((s) => !s.closed);
     }
 
     sent(socket, text) {

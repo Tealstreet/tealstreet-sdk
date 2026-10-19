@@ -170,3 +170,15 @@ range boundaries, malformed pages and retry failure; sub-agent review afterward.
   strict transport changes. Re-run all gates on the final integrated branch.
 - Native 66 tests and fmt/clippy PASS. Repository checks running. Latest landing
   Process adds green CI before PR merge; enforce it. No push/PR until every gate.
+
+## Landing integration checkpoint
+
+- Public gate now PASS: 36,631 frames / 846 markets / 846 tickers / two books,
+  TS/Rust CPU 562.6/486.1 ms, steady CPU 382.2/329.7 ms, retained 2.7/2.1 MB.
+  Outputs identical. These are pre-integration measurements; final reruns follow.
+- Merged landing 20dd66dddb, preserving nested workspace and Bybit registration,
+  scripts, public/private fixtures, requestId canonicalization, and known TS
+  fixes. Shared splitter combines Path + alternative Envelope paths, bounded
+  metadata retention, whole-envelope validation and malformed-list rejection.
+- Combined engine / Bitget / Binance / Bybit native tests PASS; harness 5 PASS.
+  Integration sub-agent audit and full final gates still running. No PR yet.
