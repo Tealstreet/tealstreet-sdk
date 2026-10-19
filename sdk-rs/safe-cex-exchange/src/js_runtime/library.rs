@@ -13,28 +13,33 @@ use std::{
     rc::{Rc, Weak},
 };
 
-impl safe_cex_store::remaining_utils::UnknownOutcomeValue for Js {
+struct NativeOutcome(Js);
+
+pub fn is_unknown_outcome(error: &Js) -> Result<bool, Thrown> {
+    safe_cex_store::remaining_utils::is_unknown_outcome_value(&NativeOutcome(error.clone()))
+}
+
+impl safe_cex_store::remaining_utils::UnknownOutcomeValue for NativeOutcome {
     type Error = Thrown;
     fn outcome_object(&self) -> bool {
-        // Source typeof functions is "function", even though they carry properties.
-        !self.is_callable() && (self.is_object() || self.is_array())
+        self.0.type_of() == "object" && !self.0.is_nullish()
     }
     fn outcome_get(&self, key: &str) -> Result<Self, Thrown> {
-        self.get(key)
+        self.0.get(key).map(Self)
     }
     fn outcome_nullish(&self) -> bool {
-        self.is_nullish()
+        self.0.is_nullish()
     }
     fn outcome_truthy(&self) -> bool {
-        self.truthy()
+        self.0.truthy()
     }
     fn outcome_number(&self) -> Result<f64, Thrown> {
-        self.to_number()
+        self.0.to_number()
     }
     fn outcome_network_code(&self) -> bool {
         ["ECONNRESET", "ECONNABORTED", "ETIMEDOUT", "ERR_NETWORK"]
             .iter()
-            .any(|code| self.strict_equals(&Js::str(code)))
+            .any(|code| self.0.strict_equals(&Js::str(code)))
     }
     fn outcome_test(&self, pattern: &str, ignore_case: bool) -> Result<bool, Thrown> {
         let regex = super::regexp::regexp(
@@ -48,10 +53,10 @@ impl safe_cex_store::remaining_utils::UnknownOutcomeValue for Js {
         regex
             .call_method(
                 "test",
-                vec![if self.is_nullish() {
+                vec![if self.0.is_nullish() {
                     Js::str("")
                 } else {
-                    self.clone()
+                    self.0.clone()
                 }],
             )
             .map(|result| result.truthy())

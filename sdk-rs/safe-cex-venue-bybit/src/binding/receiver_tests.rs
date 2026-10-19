@@ -2093,6 +2093,7 @@ fn audit_unknown_outcome_preserves_native_submission_rejection() {
                 let sends = Rc::new(Cell::new(0));
                 let count = sends.clone();
                 let rejected = reason.clone();
+                let runtime = exchange.base.runtime.clone();
                 rt.this
                     .get("xhr")
                     .unwrap()
@@ -2100,7 +2101,12 @@ fn audit_unknown_outcome_preserves_native_submission_rejection() {
                         "post",
                         Js::function("post", move |_, _| {
                             count.set(count.get() + 1);
-                            Err(Thrown::new(rejected.clone()))
+                            Ok(Js::Promise(
+                                safe_cex_exchange::js_runtime::promise::Promise::settled(
+                                    &runtime,
+                                    Err(Thrown::new(rejected.clone())),
+                                ),
+                            ))
                         }),
                     )
                     .unwrap();

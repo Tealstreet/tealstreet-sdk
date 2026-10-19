@@ -233,7 +233,7 @@ references/partial writes; do not insert typed patch admission into that path.
 
 Lost-send classification has one `is_unknown_outcome_value` decision body.
 `UnknownOutcomeValue` supplies property/coercion capabilities; the JSON adapter
-and canonical Js implementation delegate to it. Destructuring reads code/message/
+and native handle implementation delegate to it. Destructuring reads code/message/
 name/response before the signing veto. Native venue recovery must never serialize
 an entire rejection before this safety decision. The constructed Bybit receiver
 probe checks original rejection identity and one send against maintained TS.
