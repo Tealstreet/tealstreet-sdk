@@ -389,3 +389,13 @@ all focused tests pass. Final rebuild, replay and repeat audit in progress.
   growth during settling from being missed.
 - Seven-venue release rebuild, replay verification and bundle remeasurement are
   running before the next push. Earlier interrupted import runs are not passes.
+
+- Seven-venue WASM is 3,049,383 bytes, under a fixed 3.25 MiB aggregate
+  budget (3,407,872 bytes). Native workspace tests/clippy and WASM clippy pass.
+- Fresh three-run Bitget public gate PASS: 36,631 frames, 846 markets and
+  tickers, two books; TS/Rust CPU 816.7/788.2 ms, steady 569.4/548.7 ms,
+  retained 5.9/2.5 MB; Rust linear memory 1.2 MB.
+- Independent integration review clear: timed responses, single-use writes,
+  exact routing/subscriptions, reconnect callbacks, audit delivery and settled
+  memory boundaries checked. Final cross-venue regressions and current-head
+  CI remain required before landing.
