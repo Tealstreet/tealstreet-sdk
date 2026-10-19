@@ -161,7 +161,10 @@ command(18500, 'cancelSymbolOrders', { symbol: 'BTCUSDT' });
 pendingRegular = []; pendingAlgo = []; pendingSnapshot();
 http('DELETE', '/v3/merge/orders/pending/PERP_BTC_USDT', null, { success: true, status: 'CANCEL_ALL_SENT' });
 regularWs(18900, regular(800, 0.01, 59000, 0, 'CANCELLED'));
-for (const id of [802, 803]) algoWs(18900, { algoOrderId: id, algoStatus: 'CANCELLED' });
+// Full terminal leaves remain self-contained after the server's empty read.
+for (const child of pair(801, 802, 803, 58000).childOrders)
+  algoWs(18900, { ...child, positionSide: 'LONG', algoStatus: 'CANCELLED' });
+for (const t of [10000, 16000, 22000]) ws(t, PUBLIC, { event: 'ping' });
 for (const t of [10000, 12000, 14000, 16000, 18000, 20000, 22000]) ws(t, PRIVATE, { event: 'pong' });
 records.sort((a, b) => a.t - b.t);
 mkdirSync(dirname(values.out), { recursive: true });
