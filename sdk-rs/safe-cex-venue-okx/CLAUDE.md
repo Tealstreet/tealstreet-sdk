@@ -157,9 +157,11 @@ socket dispatch, Store and event emitter. Terminal orders commit Closed/Canceled
 before the final fill, emit the exact source fill object once per execution, and
 retain terminal memory against stale REST snapshots. The JS Store bridge delegates
 to the existing native operation rather than implementing another terminal map.
-`tests/terminal_store_controls.py` faults the bridge registration, terminal-memory
-delegation, empty-Store handling, subscriber-error propagation and typed ID
-admission, requiring named compiled failures and exact restoration.
+The shared Store-correctness runner's five `terminal-*` controls fault the live
+graph registration, memory delegation, empty-Store handling, subscriber-error
+propagation and UTF16 ID preservation. Each requires its specific compiled
+assertion failure and exact-byte restored success; see the core
+`STORE_CORRECTNESS_REVIEW.md` for the command and coverage.
 
 The concrete parallel-map host starts every callback with the shared eager promise
 runtime and joins already-started promises. Market/leverage and order-read bodies

@@ -866,12 +866,14 @@ orders/final fills (all filled, canceled and mmp-canceled states), positions and
 account balance. They pin terminal commit before fill, the exact bare fill object
 and converted amount/price, duplicate suppression, no canceled/account/position
 fill, and stale REST snapshot refusal. Three direct native Store/facade tests
-pass for absent-ID memory, subscriber error metadata and typed UTF-16 refusal.
+pass for absent-ID memory, subscriber error metadata and raw UTF16 ID preservation.
 The shared emitter behavior is inherited from #425, not reimplemented here.
 
-`python3 tests/terminal_store_controls.py` completed five compiled, named REDs
-(exit 101) followed by exact-byte restored PASS runs: missing bridge, ordinary
-status update without terminal memory, empty-Store shortcut, discarded subscriber
-error and lossy terminal-ID replacement. Receipts are written to
-`sdk-rs/target/okx-terminal-store-controls/`. The source is restored after each
-fault. These controls exercise the production facade, not test-only collaborators.
+The core Store-correctness runner now owns five `terminal-*` compiled controls:
+missing facade registration, suppressed terminal-memory writes,
+an empty-Store shortcut, discarded subscriber errors and lossy UTF16 ID replacement.
+They target the live canonical graph and existing `js_store_terminal` witnesses.
+The raw-ID control follows maintained DefaultStore: surrogate IDs remain distinct
+from U+FFFD. The original typed-ID refusal expectation is superseded by #1180.
+See `../safe-cex-exchange/STORE_CORRECTNESS_REVIEW.md` for exact commands and
+the per-control assertion requirements.
