@@ -224,6 +224,15 @@ fn start_connects_the_public_socket_and_its_frames_update_the_store() {
         &public,
         json!({"topic": "markprices", "data": [{"symbol": "PERP_BTC_USDT", "price": 105.45}]}),
     );
+    push(&h, &public, json!({"event": "pong"}));
+    let native = h.venue().base().get_socket(
+        safe_cex_exchange::socket_lifecycle::SocketSlot::Public,
+    ).unwrap();
+    for topic in ["tickers", "bbos", "markprices", "pong"] {
+        let stats = native.message_handlers_stats.borrow();
+        let stat = stats.get(topic).unwrap_or_else(|| panic!("missing {topic} stats"));
+        assert_eq!(stat.had_handlers, Some(true), "live WOO {topic} table");
+    }
     let t = ticker(&h);
     assert_eq!(
         (
