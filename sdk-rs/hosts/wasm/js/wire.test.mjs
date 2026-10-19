@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { Frame, NONE, SECTION } from './wire.mjs';
+import { Frame, NONE, SECTION, TICKER_FIELDS, TickerState } from './wire.mjs';
 
 const stringFrame = (strings) => {
   const encoder = new TextEncoder();
@@ -93,4 +93,105 @@ test('legacy settings fall back to scalar without reading the following section'
     assert.deepEqual([...settings.sellLeverage], values);
     assert.equal(frame.status().loaded, 31);
   }
+});
+
+function numericFrame(sections) {
+  const buffer = new ArrayBuffer(16 + sections.reduce((size, section) => size + 8 + section.length, 0));
+  const view = new DataView(buffer);
+  view.setUint32(0, 0x46584353, true);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, sections.length, true);
+  let offset = 16;
+  for (const section of sections) {
+    view.setUint16(offset, section.kind, true);
+    view.setUint32(offset + 4, section.length, true);
+    section.write(view, offset + 8);
+    offset += 8 + section.length;
+  }
+  return new Frame(structuredClone(buffer, { transfer: [buffer] }));
+}
+
+const tickerTable = (start) => ({
+  kind: SECTION.TICKERS,
+  length: 16 + TICKER_FIELDS.length * 16,
+  write(view, offset) {
+    view.setUint32(offset, 2, true);
+    view.setUint32(offset + 4, 7, true);
+    view.setUint32(offset + 8, 9, true);
+    for (let i = 0; i < TICKER_FIELDS.length * 2; i++) view.setFloat64(offset + 16 + i * 8, start + i, true);
+  },
+});
+
+const tickerDeltas = (values) => ({
+  kind: SECTION.TICKER_DELTAS,
+  length: values.length * 8,
+  write(view, offset) {
+    values.forEach((value, i) => view.setFloat64(offset + i * 8, value, true));
+  },
+});
+
+test('ticker replacements adopt new columns before applying sparse multirow deltas', () => {
+  const state = new TickerState();
+  state.apply(numericFrame([tickerTable(100)]));
+  const previousBid = state.columns.bid;
+  state.apply(numericFrame([
+    tickerTable(200),
+    tickerDeltas([1, 1025, 301, 0, 0, 2, 302, 1, 0]),
+  ]));
+  assert.equal(state.count, 2);
+  assert.deepEqual([...state.market], [7, 9]);
+  assert.notEqual(state.columns.bid, previousBid);
+  assert.deepEqual([...previousBid], [100, 101]);
+  assert.deepEqual([...state.columns.bid], [200, 301]);
+  assert.deepEqual([...state.columns.ask], [302, 203]);
+  assert.deepEqual([...state.columns.quoteVolume], [220, 0]);
+  for (const field of TICKER_FIELDS.slice(2, -1)) {
+    const index = TICKER_FIELDS.indexOf(field);
+    assert.deepEqual([...state.columns[field]], [200 + index * 2, 201 + index * 2]);
+  }
+});
+
+test('ticker deltas respect replaced consumer columns and leave masked fields untouched', () => {
+  const state = new TickerState();
+  state.apply(numericFrame([tickerTable(100)]));
+  const previousLast = state.columns.last;
+  const last = new Float64Array([500, 501]);
+  state.columns.last = last;
+  state.apply(numericFrame([tickerDeltas([1, 4, 0, 0, 0])]));
+  assert.equal(state.columns.last, last);
+  assert.deepEqual([...last], [500, 0]);
+  assert.deepEqual([...previousLast], [104, 105]);
+  assert.deepEqual([...state.columns.bid], [100, 101]);
+});
+
+test('books preserve section order, empty sides and shared transferred row views', () => {
+  const book = (market, bids, asks) => ({
+    kind: SECTION.BOOK,
+    length: 16 + (bids.length + asks.length) * 8,
+    write(view, offset) {
+      view.setUint32(offset, market, true);
+      view.setUint32(offset + 4, bids.length / 3, true);
+      view.setUint32(offset + 8, asks.length / 3, true);
+      [...bids, ...asks].forEach((value, i) => view.setFloat64(offset + 16 + i * 8, value, true));
+    },
+  });
+  const frame = numericFrame([
+    book(7, [99, 2, 2, 98, 3, 5], [100, 4, 4]),
+    { kind: SECTION.STATUS, length: 16, write(view, offset) { view.setUint32(offset, 31, true); } },
+    book(9, [], [200, 1, 1]),
+    book(10, [], []),
+  ]);
+  const books = [...frame.books()];
+  assert.deepEqual(books.map(({ market, bids, asks }) => [market, [...bids], [...asks]]), [
+    [7, [99, 2, 2, 98, 3, 5], [100, 4, 4]],
+    [9, [], [200, 1, 1]],
+    [10, [], []],
+  ]);
+  assert.equal(frame.status().loaded, 31);
+  for (const { bids, asks } of books) {
+    assert.equal(bids.buffer, frame.buffer);
+    assert.equal(asks.buffer, frame.buffer);
+  }
+  books[0].bids[1] = 6;
+  assert.equal(frame.books().next().value.bids[1], 6);
 });

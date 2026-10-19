@@ -79,7 +79,10 @@ lto = "fat"
 codegen-units = 1
 opt-level = 3
 
-# Keep dispatch/serialization glue compact. The shared engine stays at O3.
+# Keep dispatch and cold venue code compact; optimize the engine and Bybit feeds.
+[profile.release.package.safe-cex-engine]
+opt-level = 3
+
 [profile.release.package.safe-cex-wasm]
 opt-level = "z"
 
@@ -87,7 +90,7 @@ opt-level = "z"
 opt-level = "z"
 
 [profile.release.package.safe-cex-venue-bybit]
-opt-level = "z"
+opt-level = 3
 
 [profile.release.package.safe-cex-venue-bingx]
 opt-level = "z"

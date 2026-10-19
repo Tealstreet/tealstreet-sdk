@@ -374,3 +374,15 @@ engine 46, Backpack 50), 39 wasm boundary cases, 25 host/socket/Workers cases an
 eight frame/copier cases. Workspace bans, fmt, strict all-target Clippy,
 wasm Clippy, typecheck (44 tasks), lint (28 tasks), licenses (31 workspaces)
 and the lane commit secret scan pass. Final replay results and CI remain pending.
+
+The global `z` build then failed Hyro CPU: total TS/Rust 24.6/26.7 ms and
+steady 6.4/8.6 ms. An explicit engine O3 override improved total to 18.7/18.0 ms
+but still failed steady at 5.4/6.1 ms. Both failed runs are retained. The next
+source candidate compiles the engine and Bybit feeds at O3, reuses engine
+book/fill vector capacities after encoding, removes per-delta ticker arrays,
+and decodes book headers without a nested iterator or temporary typed view.
+Review and native/host regressions pass; the new wasm is 2,998,620 bytes under
+the inherited 3 MiB budget. Hyro's first full gate on that candidate passes:
+total 30.6/25.1 ms, steady 10.4/10.3 ms (a narrow margin), memory 15.5/1.0 MB.
+No fixture, CPU window, threshold or median-selection rule changed. The full
+matrix and final-head CI are still required on this candidate.

@@ -743,7 +743,7 @@ impl<V: Venue> Engine<V> {
         if let Some(pending) = &pending {
             self.store.write(pending, &mut w);
         }
-        let books = std::mem::take(&mut self.io.changed_books);
+        let mut books = std::mem::take(&mut self.io.changed_books);
         for symbol in &books {
             if let (Some(book), Some(market)) =
                 (self.venue.book(symbol), self.store.market_index(symbol))
@@ -760,7 +760,7 @@ impl<V: Venue> Engine<V> {
             })
             .collect();
         w.candles(&candles);
-        let fills = std::mem::take(&mut self.io.fills);
+        let mut fills = std::mem::take(&mut self.io.fills);
         if !fills.is_empty() {
             w.begin(section::FILLS);
             w.u32(fills.len() as u32);
@@ -780,6 +780,10 @@ impl<V: Venue> Engine<V> {
         }
         let empty = w.is_empty();
         let frame = w.finish();
+        books.clear();
+        self.io.changed_books = books;
+        fills.clear();
+        self.io.fills = fills;
         drop(candles);
         self.io.candles.clear();
         self.io.frame = frame;

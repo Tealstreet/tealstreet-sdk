@@ -110,6 +110,7 @@ export class Frame {
     if (header.getUint32(0, true) !== 0x46584353) throw new Error('not a safe-cex frame');
     if (header.getUint16(4, true) !== 1) throw new Error(`unsupported frame format ${header.getUint16(4, true)}`);
     this.buffer = buffer;
+    this.view = header;
     this.time = header.getFloat64(8, true);
     this.sections = [];
     let offset = 16;
@@ -174,8 +175,11 @@ export class Frame {
 
   /** Full books: `bids`/`asks` are rows of `[price, amount, total]`. */
   *books() {
-    for (const section of this.of(SECTION.BOOK)) {
-      const [market, bids, asks] = new Uint32Array(this.buffer, section.offset, 3);
+    for (const section of this.sections) {
+      if (section.kind !== SECTION.BOOK) continue;
+      const market = this.view.getUint32(section.offset, true);
+      const bids = this.view.getUint32(section.offset + 4, true);
+      const asks = this.view.getUint32(section.offset + 8, true);
       const rows = section.offset + 16;
       yield {
         market,
@@ -295,13 +299,12 @@ export class TickerState {
     }
     const deltas = frame.tickerDeltas();
     if (!deltas) return;
-    const fields = TICKER_FIELDS.map((field) => this.columns[field]);
     for (let i = 0; i < deltas.length; ) {
       const row = deltas[i];
       const mask = deltas[i + 1];
       i += 2;
-      for (let field = 0; field < fields.length; field++) {
-        if (mask & (1 << field)) fields[field][row] = deltas[i++];
+      for (let field = 0; field < TICKER_FIELDS.length; field++) {
+        if (mask & (1 << field)) this.columns[TICKER_FIELDS[field]][row] = deltas[i++];
       }
     }
   }
