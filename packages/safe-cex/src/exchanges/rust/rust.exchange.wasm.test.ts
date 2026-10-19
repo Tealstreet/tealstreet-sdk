@@ -46,7 +46,7 @@ const RESPONSES: Record<string, string> = {
 };
 
 /** Serves canned Binance responses; sockets open at once and can be fed frames. */
-const recordedTransport = () => {
+const recordedTransport = (overrides: Record<string, { status: number; body: string }> = {}) => {
   const sockets = new Map<string, (text: string) => void>();
   const requests: string[] = [];
   const transport: Transport = {
@@ -59,6 +59,10 @@ const recordedTransport = () => {
     request: async ({ method, url }) => {
       requests.push(`${method} ${url}`);
       const name = new URL(url).pathname.split('/').pop()!;
+      if (overrides[name]) {
+        const { status, body } = overrides[name];
+        return { status, headers: '', body: new TextEncoder().encode(body) };
+      }
       const body = RESPONSES[name];
       return { status: body ? 200 : 404, headers: '', body: new TextEncoder().encode(body ?? '{}') };
     },
@@ -164,5 +168,19 @@ describe('RustEngineExchange', () => {
     ]);
     expect(workerBooks).toEqual([]);
     main.dispose();
+  });
+
+  it('validates an account by its balance, or reports the venue error', async () => {
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => recordedTransport().transport);
+    exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
+    expect(await exchange.validateAccount()).toMatchObject({ error: '', balance: { total: 1000 } });
+    exchange.dispose();
+
+    const rejected = { status: 401, body: '{"code":-2015,"msg":"Invalid API-key, IP, or permissions for action."}' };
+    setRustEngineTransport(() => recordedTransport({ account: rejected, leverageBracket: rejected }).transport);
+    exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
+    const result = await exchange.validateAccount();
+    expect(result.error).toContain('Invalid API-key');
   });
 });

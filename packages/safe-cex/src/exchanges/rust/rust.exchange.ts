@@ -16,6 +16,7 @@ import type {
   PublicTrade,
   UpdateOrderOpts,
   ExecutionsOptions,
+  ValidateAccountResult,
 } from '../../types';
 
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
@@ -144,6 +145,30 @@ export class RustEngineExchange extends BaseExchange {
           resolve();
         }
       });
+    });
+
+  /** Valid once the account's balance loads; the engine's first error says why not. */
+  validateAccount = (): Promise<ValidateAccountResult> =>
+    new Promise((resolve) => {
+      let settled = false;
+      const finish = (result: ValidateAccountResult) => {
+        if (settled) return;
+        settled = true;
+        this.emitter.off('error', onError);
+        unsubscribe();
+        clearTimeout(timeout);
+        resolve(result);
+      };
+      const onError = (message: unknown) =>
+        finish({ error: typeof message === 'string' && message ? message : 'Invalid API key or secret' });
+      const loaded = () => {
+        if (this.store.loaded.balance) finish({ error: '', balance: this.store.balance });
+      };
+      this.emitter.on('error', onError);
+      const unsubscribe = this.store.subscribe(loaded);
+      const timeout = setTimeout(() => finish({ error: 'Timed out validating the account' }), 15_000);
+      loaded();
+      if (!this.host) this.start().catch((error) => onError(String(error?.message ?? error)));
     });
 
   private command = <T>(command: { op: string; [field: string]: unknown }): Promise<T> => {
