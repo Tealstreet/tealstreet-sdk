@@ -760,3 +760,16 @@ Notable cross-references for leverage handling:
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `clientOrderId`, rule `^[A-Za-z0-9]{1,32}$`, on `placeOrder` and on each regular order of `placeOrders`. Replaces the generated `BROKER_ID…` ID; no prefix is composed.
+
+## Rust engine account safety
+
+The Rust venue lives at `sdk-rs/venues/blofin`. It retains each large REST
+response's status envelope while streaming its data rows, so a non-zero API
+code or a failed page cannot commit as an empty authoritative snapshot.
+Snapshot revisions prevent older REST data from overwriting newer socket events.
+
+Two defensive corrections to the TS behavior are recorded in the replay gate:
+malformed successful mode reads do not silently initialize cross/one-way mode,
+and an empty position push clears used margin and unrealized PnL. Per-market
+settings retain leverage and margin when positions close. Cumulative fills keep
+quantity and traded-value watermarks for 500 orders, including terminal rows.

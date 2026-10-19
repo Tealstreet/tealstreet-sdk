@@ -3610,6 +3610,7 @@ dependencies = [
 name = "safe-cex-venue-blofin"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "safe-cex-crypto",
  "safe-cex-engine",
  "serde",

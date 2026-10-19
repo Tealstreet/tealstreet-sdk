@@ -71,3 +71,47 @@ merge that PR, and create a fresh follow-up branch. No rebase or force push.
   differences quantity and traded value to recover execution price.
 - Verify signatures, login, fills/replays/regressions, setting preservation,
   stale snapshots, later-page failures, and private socket watchdog/reconnect.
+
+
+### Workspace update
+
+- Merged landing structure in `e7e0be289f`; crate is now
+  `sdk-rs/venues/blofin`, shared core `sdk-rs/engine`, hosts `sdk-rs/hosts/*`.
+- Removed unused `crypto::wallet_utils` (repository search found no caller);
+  kept signing primitives and the shared nonce helper used by Binance.
+- Full safe-cex run reached 6,488 passes; failures were a concurrent edit/run
+  race in the now-passing BloFin regression and the pre-existing production-tree
+  `rust.exchange.wasm.test.ts` violating the runtime-boundary test. Rerun final
+  checks on stable sources, and relocate that integration test in phase 5.
+
+### Phase 2 review and verification
+
+- Typed private snapshots, hex/base64 signing, authenticated socket and liveness,
+  cursor pagination and snapshot revisions implemented. Cumulative fills emit
+  execution quantity/price once across duplicate, regressive and terminal frames.
+- Review fixes: remainder-sized inline protection, valid positive leverage
+  fallback, login startup dependency, separate collateral rounding, and rejection
+  of malformed global modes. Global margin is projected to flat-market settings.
+- Intentional TS corrections: malformed modes cannot initialize trading; empty
+  position pushes clear used/upnl. Listed in gate comments/normalization.
+- Final private checks: 1 signing + 9 account + 8 public tests, clippy and bans
+  pass. Review recheck reports no remaining phase blockers.
+
+### Phase 3 implementation plan
+
+- A preflighted `Job` holds sequenced typed write steps; successful responses
+  apply effects, errors stop the job, uncertain writes are never retried.
+- Native contract sizing/rounding, caller IDs honored once or rejected across
+  the entire batch before writes; normal batches at most 20, TP/SL single objects,
+  conditional single objects. Generated IDs carry broker attribution.
+- Cancel steps preserve exact native identity and correlate every row, including
+  already-gone responses; pending TP/SL sibling protection is reconstructed
+  before cancellation and re-placed afterwards. Pace TPSL/trigger writes.
+- Amend is bounded cancel-replace with a fully preflighted replacement; keep
+  raw conditional margin/position side, trigger reference, execution price and
+  attached protection. Replacement client IDs are always new.
+- Account setting commands commit only after confirmed success. Isolated hedge
+  leverage updates both legs; changes update positions and persistent settings.
+- Verify all-or-nothing IDs, placement sizing/brackets, response-loss no-retry,
+  conditional provenance, cancel correlation and sibling preservation, mode and
+  leverage rejections, optimistic states and cleanup.

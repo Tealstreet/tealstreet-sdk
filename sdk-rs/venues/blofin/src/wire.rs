@@ -197,3 +197,129 @@ impl CandleWire {
         }
     }
 }
+
+#[derive(Clone, Copy, Default, Deserialize)]
+#[serde(from = "BooleanWire<'_>")]
+pub struct Boolean(pub bool);
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum BooleanWire<'a> {
+    Bare(bool),
+    Text(#[serde(borrow)] Str<'a>),
+}
+impl From<BooleanWire<'_>> for Boolean {
+    fn from(v: BooleanWire<'_>) -> Self {
+        Self(match v {
+            BooleanWire::Bare(v) => v,
+            BooleanWire::Text(v) => v == "true",
+        })
+    }
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderRow<'a> {
+    #[serde(borrow)]
+    pub inst_id: Str<'a>,
+    #[serde(borrow, default)]
+    pub inst_type: Str<'a>,
+    #[serde(borrow, default)]
+    pub order_id: Str<'a>,
+    #[serde(borrow, default)]
+    pub ord_id: Str<'a>,
+    #[serde(borrow, default)]
+    pub tpsl_id: Str<'a>,
+    #[serde(borrow, default)]
+    pub algo_id: Str<'a>,
+    #[serde(borrow, default)]
+    pub order_category: Str<'a>,
+    #[serde(borrow, default)]
+    pub order_type: Str<'a>,
+    #[serde(borrow, default)]
+    pub state: Str<'a>,
+    #[serde(borrow, default)]
+    pub side: Str<'a>,
+    #[serde(borrow, default)]
+    pub position_side: Str<'a>,
+    #[serde(borrow, default)]
+    pub margin_mode: Str<'a>,
+    #[serde(borrow, default)]
+    pub client_order_id: Str<'a>,
+    #[serde(borrow, default)]
+    pub trigger_price_type: Str<'a>,
+    #[serde(borrow, default)]
+    pub tp_trigger_price_type: Str<'a>,
+    #[serde(borrow, default)]
+    pub sl_trigger_price_type: Str<'a>,
+    #[serde(default)]
+    pub price: Number,
+    #[serde(default)]
+    pub size: Number,
+    #[serde(default)]
+    pub filled_size: Number,
+    #[serde(default)]
+    pub average_price: Number,
+    #[serde(default)]
+    pub trigger_price: Number,
+    #[serde(default)]
+    pub order_price: Number,
+    #[serde(default)]
+    pub tp_trigger_price: Number,
+    #[serde(default)]
+    pub sl_trigger_price: Number,
+    #[serde(default)]
+    pub tp_order_price: Number,
+    #[serde(default)]
+    pub sl_order_price: Number,
+    #[serde(default)]
+    pub reduce_only: Boolean,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PositionRow<'a> {
+    #[serde(borrow)]
+    pub inst_id: Str<'a>,
+    #[serde(borrow, default)]
+    pub inst_type: Str<'a>,
+    #[serde(borrow, default)]
+    pub position_side: Str<'a>,
+    #[serde(borrow, default)]
+    pub margin_mode: Str<'a>,
+    #[serde(borrow, default)]
+    pub liquidation_price: Str<'a>,
+    #[serde(default)]
+    pub positions: Number,
+    #[serde(default)]
+    pub average_price: Number,
+    #[serde(default)]
+    pub mark_price: Number,
+    #[serde(default)]
+    pub unrealized_pnl: Number,
+    #[serde(default)]
+    pub leverage: Number,
+    #[serde(default)]
+    pub maintenance_margin: Number,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetRow {
+    pub available: Number,
+    pub frozen: Number,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ModeRow<'a> {
+    #[serde(borrow, default)]
+    pub position_mode: Str<'a>,
+    #[serde(borrow, default)]
+    pub margin_mode: Str<'a>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountRow {
+    pub total_equity: Number,
+}

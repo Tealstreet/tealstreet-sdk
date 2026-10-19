@@ -1,4 +1,6 @@
 //! BloFin linear perpetuals on the sans-I/O engine.
+mod account;
+mod sign;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
@@ -19,6 +21,7 @@ pub struct Options {
     pub passphrase: Option<String>,
 }
 pub enum Pending {
+    Account(account::Request),
     Markets {
         rows: Vec<Market>,
         failed: bool,
@@ -56,6 +59,7 @@ struct CandleState {
 }
 pub struct Blofin {
     options: Options,
+    account: account::Account,
     public: Connection,
     books: HashMap<String, DepthState>,
     candles: HashMap<(String, String), CandleState>,
@@ -112,6 +116,7 @@ impl Blofin {
     pub fn new(options: Options) -> Self {
         Self {
             options,
+            account: account::Account::default(),
             public: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -375,6 +380,10 @@ impl Venue for Blofin {
         );
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        if self.account.connection.socket == Some(socket) {
+            self.private_open(cx, socket);
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -385,6 +394,10 @@ impl Venue for Blofin {
         cx.send(socket, "ping");
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        if self.account.connection.socket == Some(socket) {
+            self.private_message(cx, socket, text);
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -443,6 +456,10 @@ impl Venue for Blofin {
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
+        if self.account.connection.socket == Some(socket) {
+            self.private_close(cx, socket);
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -464,6 +481,7 @@ impl Venue for Blofin {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets { rows, failed } => match serde_json::from_str::<Instrument<'_>>(item)
             {
                 Ok(m)
@@ -541,6 +559,13 @@ impl Venue for Blofin {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        let pending = match pending {
+            Pending::Account(request) => {
+                self.account_response(cx, request, response);
+                return;
+            }
+            other => other,
+        };
         if let Err(error) = check(&response) {
             self.on_request_failed(cx, pending, &error);
             return;
@@ -564,7 +589,10 @@ impl Venue for Blofin {
             Pending::Tickers {
                 rows,
                 failed: false,
-            } => cx.store.set_tickers(rows),
+            } => {
+                cx.store.set_tickers(rows);
+                self.private_start(cx);
+            }
             Pending::Candles {
                 command,
                 mut rows,
@@ -577,6 +605,10 @@ impl Venue for Blofin {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        if let Pending::Account(request) = pending {
+            self.account_failed(cx, request, error);
+            return;
+        }
         if let Pending::Candles { command, .. } = pending {
             cx.done(command, Err(error.to_string()));
         } else {
@@ -584,6 +616,9 @@ impl Venue for Blofin {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account_timer(cx, timer) {
+            return;
+        }
         if self.public.reconnect == Some(timer) {
             self.public.reconnect = None;
             self.connect(cx);

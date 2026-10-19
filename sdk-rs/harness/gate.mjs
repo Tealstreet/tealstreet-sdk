@@ -63,10 +63,17 @@ const isPrivate = Boolean(ts.account);
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
+// BloFin also rejects malformed successful margin/position-mode responses
+// instead of silently choosing cross/one-way, and clears used/upnl after an
+// empty position push. Valid payloads need no mode normalization.
 // BloFin books5 formerly overwrote N array slots, corrupting ordering when the
 // top moved. Both TS and Rust now merge by price boundary; full books are still
 // compared without normalization or exclusions for this corrected TS defect.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
+  if (values.venue === 'blofin' && account.positions.length === 0) {
+    account.balance.used = 0;
+    account.balance.upnl = 0;
+  }
   for (const position of account.positions) {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
     if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
