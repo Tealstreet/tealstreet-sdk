@@ -118,3 +118,25 @@ green final-head CI. No stash, rebase, force push or master changes.
 - Native trailing21 + existing trading25 PASS, inverse amend direct/resolved paths
   PASS, strict clippy PASS. Flat ETH metadata test clears positions first and
   verifies ETH collateral in metadata, leverage, margin and cancellation.
+
+## Harness checkpoint
+
+- Independent inverse overlap tape compares two coin balances, native/display
+  quantities, exact per-coin writes, fresh amend identity and native fills with
+  TS: PASS, 30 records / 13 WS frames, 2 markets/tickers. No normalization.
+- New native-contract integration tests pin UTA USDT/USDC ledger pagination and
+  raw signed fees, trailing REST/WS reads, placement, callback preservation,
+  known-rejection rollback, cancellation and duplicate execution handling. A
+  Classic tape separately pins native modify/cancel and percentage preservation.
+  Four independent cases PASS, including a tampered distance rejected before
+  write consumption. Exact signatures/protocol/write-consumption checks retained.
+- Fresh USDT public recording: 20 seconds / 150,439 WS frames / two books; trimmed
+  first six seconds replaces the existing public fixture (39,457 replay frames).
+  Preliminary public gate PASS, TS/Rust CPU598.0/547.5ms, steady396.3/376.2ms,
+  retained6.0/2.5MB. Final source/artifact reruns remain required below.
+- Live inverse recording attempt returned an empty contracts list and rejected
+  BTCUSD/ETHUSD book subscriptions. Do not count it as a public gate or commit an
+  empty fixture. Inverse verification uses explicitly documented-schema native
+  tests and the private overlap tape; USDT public gates cover shared hot paths.
+- Root typecheck44, lint28 and test27 tasks PASS. Harness113 and Worker/wire26
+  tests PASS; native workspace and final WASM/CI checks are running.

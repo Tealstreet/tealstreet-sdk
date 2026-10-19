@@ -122,6 +122,7 @@ export const VENUES = {
     options: { passphrase: 'replay-passphrase' },
   },
   bitgetinverse: {
+    inverseNativeAmounts: true,
     rust: 'bitgetinverse',
     ts: { module: `${root}/bitget/bitgetinverse.exchange.ts`, className: 'BitgetInverseExchange', name: 'bitgetinverse' },
     tsBooksSubscribed: (exchange, count) =>

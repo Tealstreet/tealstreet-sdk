@@ -165,6 +165,12 @@ jobs:
         run: |
           yarn rust:private-tape-bitget
           yarn rust:gate --venue bitget --tape sdk-rs/harness/tapes/bitget-private.jsonl --runs 1 --books ''
+      - name: Bitget inverse account and native contract sizing
+        run: |
+          yarn rust:private-tape-bitgetinverse
+          yarn rust:gate --venue bitgetinverse --tape sdk-rs/harness/tapes/bitgetinverse-private.jsonl --runs 1 --books ''
+      - name: Bitget UTA ledger and Classic/UTA trailing native contracts
+        run: yarn rust:test-bitget-parity
       - name: Backpack public data (correctness, CPU and memory)
         run: corepack yarn -s rust:gate --venue backpack --tape sdk-rs/harness/fixtures/backpack-public.jsonl.gz --books SOL_USDC_PERP,BTC_USDC_PERP
       - name: Backpack private account and trading
