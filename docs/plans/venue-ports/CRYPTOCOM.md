@@ -318,3 +318,23 @@ Added staged-snapshot/headers regression. Nine harness tests and all four venue
 native suites plus engine PASS (engine16,Crypto.com42); wasm clippy PASS.
 Combined four-venue wasm1,687,019bytes; aggregate budget1.8MiB. Revalidating public
 and private gates, including all four OKX account variants, before updated CI.
+
+### Four-venue integration final gates
+
+All eleven local replays PASS after merging2b37754970. These public medians
+(three runs, TS/Rust) supersede the earlier three-venue results:
+
+| Venue | Frames | Main CPU ms | Steady CPU ms | Retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| Crypto.com | 2177 | 80.1 / 60.7 | 37.4 / 20.8 | 1.8 / 1.4 |
+| Binance | 871 | 169.8 / 66.2 | 94.1 / 20.2 | 4.3 / 2.5 |
+| Bybit | 8742 | 265.9 / 149.2 | 182.5 / 76.3 | 6.0 / 2.6 |
+| OKX | 8902 | 657.8 / 552.1 | 515.2 / 419.0 | 4.1 / 2.6 |
+
+Private correctness gates PASS:Crypto.com21frames,Binance14,Bybit18,
+OKX/OKXEU/OKXdemo/OKXEUdemo29each. Zero unmatched or unused writes; both protocol
+audits pass. Four-venue native suites plus engine16PASS, nine harness testsPASS,
+package typecheck/lint and all16wasm integration testsPASS; wasm clippy/bansPASS.
+Integration sub-agent review at2a47b4e8bc passes with no concrete findings.
+Wasm1,687,019bytes (<1.8MiB). All local implementation/review work is complete;
+CI on the final pushed PR head is the remaining landing condition.
