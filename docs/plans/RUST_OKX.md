@@ -189,3 +189,22 @@ Never touch master, rebase, or force-push.
   broker-prefixed alphanumeric range. Trading cross-review is finishing.
 - Rebuilt release binary: 1,074,930 bytes; full replay gates are running again.
   No change to release optimization, binary budget or secret-scanning policy.
+
+### Landing integration with Bybit
+
+- Landing advanced to20dd66dddb while PR review ran, so merged it under the
+  standing conflict-resolution authorization. Preserved the nested workspace,
+  Bybit venue/fixtures/CI, both host registrations, and all SDK helper tests.
+- Three disjoint resolutions: host/manifests/CI, engine streaming, and harness.
+  Root combined both SDK client-ID rules and the two WASM test sets. Package
+  typecheck/lint pass. Independent cross-reviews and rebuilt three-venue gates
+  are in progress before the merge commit is considered ready.
+- Engine keeps Bybit nested Path/error previews plus OKX strict grammar/UTF-8/
+  overflow handling; only opt-in Path/EnvelopeField modes return metadata.
+  Harness retains each venue's scoped corrections and exact write matching.
+- Added an assertion that acknowledged leverage survives a malformed account
+  refresh. The empty-risk mutation now retains all funds/positions; TS alone
+  rolls acknowledged leverage12 back to10 after its failed refresh. Listed this
+  intentional Rust correction without normalizing the mismatched setting.
+- Landing budget is now1,468,006 bytes for the aggregate browser engine. This
+  lane preserves that budget and still removes debug name/producers metadata.

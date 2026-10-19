@@ -54,8 +54,8 @@ const SECRET = 'replay-secret';
 const PASSPHRASE = 'replay-passphrase';
 const callerIds = new Set(records.flatMap((r) => r.type === 'command' ? (r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean) : []));
 
-/** Per-request values: clocks, signatures and generated client ids. */
-const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId']);
+/** Per-request values: clocks, signatures, request ids and generated client ids. */
+const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams]
@@ -66,11 +66,17 @@ const canonicalUrl = (url) => {
 };
 
 const canonicalBody = (body) => {
-  const parsed = typeof body === 'string' && body.length ? JSON.parse(body) : body ?? null;
+  if (body === undefined || body === null || body === '') return '';
+  let parsed = body;
+  try {
+    if (typeof body === 'string') parsed = JSON.parse(body);
+    else if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) parsed = JSON.parse(new TextDecoder().decode(body));
+  } catch { return String(body); }
   const sorted = (value) => {
     if (Array.isArray(value)) return value.map(sorted);
     if (value === null || typeof value !== 'object') return value;
-    return Object.fromEntries(Object.keys(value).sort().map((key) => [
+    const keys = Object.keys(value).filter((key) => value[key] !== undefined && !(venue.volatileBodyFields && VOLATILE.has(key))).sort();
+    return Object.fromEntries(keys.map((key) => [
       key,
       !callerIds.has(value[key]) && venue.generatedBodyId?.(key, value[key]) ? '<generated>' : sorted(value[key]),
     ]));
@@ -123,7 +129,8 @@ class Tape {
     const socket = { url, onMessage, closed: false, loginVerified: false, topics: new Map() };
     setImmediate(() => {
       if (socket.closed) return;
-      this.open.set(url, socket);
+      // Bybit adds a generated requestId to each connection URL.
+      this.open.set(canonicalUrl(url), socket);
       onOpen();
       this.waiters = this.waiters.filter((waiter) => !waiter());
     });
@@ -196,7 +203,8 @@ class Tape {
     if (missing.length) throw new Error(`${missing.length} taped write(s) were not sent:\n${missing.join('\n')}`);
   }
 
-  async socketFor(url) {
+  async socketFor(rawUrl) {
+    const url = canonicalUrl(rawUrl);
     while (!this.open.get(url) || this.open.get(url).closed) {
       await new Promise((resolve) => this.waiters.push(() => (this.open.get(url) ? (resolve(), true) : false)));
     }

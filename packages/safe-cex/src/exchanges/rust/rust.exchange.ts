@@ -34,6 +34,7 @@ import { BROKER_ID } from '../okx/okx.types';
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   binancepm: 'binancepm',
+  bybit: 'bybit',
   okx: 'okx',
   okxeu: 'okxeu',
   okxdemo: 'okxdemo',
@@ -46,6 +47,7 @@ const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}
   mint: () => `${BROKER_ID}${uuid()}`.slice(0, 32),
 });
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
+  bybit: patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/),
   okx: okxClientOrderIdRule,
   okxeu: okxClientOrderIdRule,
   okxdemo: okxClientOrderIdRule,
@@ -199,7 +201,10 @@ export class RustEngineExchange extends BaseExchange {
     return this.host.command(command) as Promise<T>;
   };
 
-  placeOrders = (orders: PlaceOrderOpts[]) => this.command<string[]>({ op: 'placeOrders', orders });
+  placeOrders = async (orders: PlaceOrderOpts[]) => {
+    if (this.name === 'bybit') this.assertCallerClientOrderIds(orders);
+    return this.command<string[]>({ op: 'placeOrders', orders });
+  };
 
   placeOrder = (opts: PlaceOrderOpts) => this.placeOrders([opts]);
 

@@ -45,7 +45,11 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const recorded = (body) => write({ type: 'http', method: request.method, url: request.url, status: response.status, body });
+    const recorded = (body) => write({
+      type: 'http', method: request.method, url: request.url,
+      ...(request.body === undefined ? {} : { requestBody: request.body }),
+      status: response.status, headers: response.headers ?? '', body,
+    });
     if (response.body instanceof Uint8Array) {
       recorded(new TextDecoder().decode(response.body));
       return response;

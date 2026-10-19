@@ -63,6 +63,17 @@ const isPrivate = Boolean(ts.account);
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
+//  - Bybit: TS drops the reject reason of a post-only order cancelled for taking
+//    liquidity (`EC_PostOnlyWillTakeLiquidity`); Rust reports it as PostOnly.
+//  - Bybit: TS can round split quantities away from the requested total;
+//    Rust uses maximum-size lots and the exact remainder.
+//  - Bybit: TS falls back from failed batch writes to single creates, even
+//    after ambiguous HTTP/transport failures; Rust never resends those writes.
+//  - Bybit: TS may drop the initial ticker snapshot before a slow REST seed;
+//    Rust installs the seed before connecting. These cases have native regression
+//    coverage; the committed replay tapes require no normalization for them.
+//  - Bybit: with no mark price, TS can add a second Partial stop on amend;
+//    Rust amends the existing native order ID.
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
 const KNOWN_TS_FIXES = {
@@ -81,11 +92,19 @@ const KNOWN_TS_FIXES = {
     'standalone protective limit amendment fails before cancel if execution price cannot be retained',
     'standalone cancellation continues remaining batches after per-row failures',
     'new account equity survives delayed snapshots and local balance ticks',
+    'acknowledged leverage survives failed post-write snapshots',
   ],
   account: (account, rustAccount) => {
     for (const position of account.positions) {
       const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
       if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+    }
+  },
+  bybit: (account, rustAccount) => {
+    KNOWN_TS_FIXES.account(account, rustAccount);
+    for (const order of account.orders) {
+      const fixed = rustAccount.orders.find((o) => o.id === order.id);
+      if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled') order.rejectReason = 'PostOnly';
     }
   },
 };
@@ -106,6 +125,7 @@ for (let run = 0; run < runs; run++) {
   const isPrivate = Boolean(ts.account);
   if (isPrivate) {
     if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
+    if (values.venue === 'bybit') KNOWN_TS_FIXES.bybit(ts.account, rust.account);
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
       const left = JSON.stringify(ts.account[field]);
       const right = JSON.stringify(rust.account[field]);

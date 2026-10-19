@@ -499,6 +499,7 @@ fn malformed_risk_outer_rows_preserve_existing_atomic_snapshot() {
         }
         assert_eq!(e.store().balance(), &balance);
         assert_eq!(e.store().positions(), positions);
+        assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 12.0);
     }
 }
 
