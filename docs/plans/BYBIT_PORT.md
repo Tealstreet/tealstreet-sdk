@@ -83,3 +83,8 @@ limit; the private fixture's `No VIP` setting uses ten in both implementations.
 This metadata omission is intentional and is not classified as a TS bug. Every
 trading request, other read, authentication identity and subscription remains
 checked; unmatched tape requests still fail.
+The shared outgoing-subscription gate also records the existing private
+protocol improvement: Rust requires `execution` and `wallet` on every connection.
+TS infers fills from cumulative order updates and waits for REST wallet reads.
+The declared exception adds those two required topics to the TS oracle; it does
+not copy Rust subscriptions or hide missing native topics.

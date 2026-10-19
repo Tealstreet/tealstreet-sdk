@@ -10,6 +10,7 @@ import { subscriptionKeys } from './requests.mjs';
 import { gunzipSync } from 'node:zlib';
 import { fixWeexConditionals } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
+import { venueOf } from './venues.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -24,6 +25,7 @@ const tapeBytes = readFileSync(values.tape);
 const tapeRecords = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes).toString('utf8').trim().split('\n').map(JSON.parse);
 const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
+const records = tapeRecords;
 
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
@@ -61,9 +63,21 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
-const isPrivate = Boolean(ts.account);
+const venue = venueOf(values.venue);
+const isPrivate = tapeRecords.find((record) => record.type === 'config')?.private ?? tapeRecords.some((record) =>
+  venue.isPrivateRecord ? venue.isPrivateRecord(record) : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
+);
 
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
+// BingX additionally fixes write/read defects covered by native contract tests:
+// - closePosition=true STOP_MARKET/TAKE_PROFIT_MARKET requires quantity.
+// - A rejected/ambiguous entry must stop its remaining bracket placement jobs.
+// - fillHistory uses startTs/endTs/pageSize/pageIndex, not TS's ignored params.
+// - Contradictory placement IDs or rejected ACK status must not advance jobs.
+// - Delayed placement/replacement ACKs must not reopen newer private state.
+// - Trigger replacement checks its selected source; TS always checks mark.
+// - Attached SL/TP keeps per-leg workingType; TS spreads the untyped entry.
+
 //  - A position first seen on the user stream keeps the margin size of TS's
 //    zero-size placeholder (0); Rust takes the isolated wallet, or notional
 //    over leverage for cross.
@@ -134,6 +148,38 @@ const KNOWN_TS_FIXES = {
     // Price-only replacement preserves remaining quantity and refuses uncertain
     // fill/bracket state; positive income cursors always report INCOMPLETE.
   },
+  bingx: (account, rustAccount) => {
+  if (values.venue === 'bingx') {
+    // BingX TS emits a terminal cumulative fill, ignores partial executions,
+    // and drops its terminal watermark so TRADE_UPDATE can repeat that fill.
+    // Use the taped per-execution oracle; Rust is still compared against it.
+    const watermark = new Map();
+    const fills = [];
+    for (const record of records) {
+      if (record.type !== 'ws' || !record.url?.includes('?listenKey=')) continue;
+      let event;
+      try { event = JSON.parse(record.text, (_key, value, context) => typeof value === 'number' && !Number.isSafeInteger(value) && context?.source && /^-?\d+$/.test(context.source) ? context.source : value); } catch { continue; }
+      if (!['ORDER_TRADE_UPDATE', 'TRADE_UPDATE'].includes(event.e)) continue;
+      const o = event.o;
+      if (!['PARTIALLY_FILLED', 'FILLED'].includes(o.X)) continue;
+      const id = String(o.i);
+      const cumulative = Number(o.z);
+      const previous = watermark.get(id) ?? 0;
+      const amount = Math.max(0, cumulative - previous);
+      watermark.set(id, Math.max(previous, cumulative));
+      if (amount > 0) fills.push({ id, symbol: o.s.replaceAll('-', ''), side: o.S === 'BUY' ? 'buy' : 'sell', amount: Number(o.l) > 0 ? Math.min(amount, Number(o.l)) : amount });
+    }
+    account.fills = fills;
+    // TS's private mapper reads closePosition but misses the native cp alias.
+    for (const record of records) {
+      if (record.type !== 'ws') continue;
+      let event; try { event = JSON.parse(record.text, (_key, value, context) => typeof value === 'number' && !Number.isSafeInteger(value) && context?.source && /^-?\d+$/.test(context.source) ? context.source : value); } catch { continue; }
+      const row = account.orders.find((o) => o.id === String(event.o?.i));
+      if (row && event.o.cp !== undefined) row.close = event.o.cp === true || event.o.cp === 'true';
+    }
+    return;
+  }
+  },
   bybit(account, rustAccount, tsResult) {
     // TS's optional API-key/VIP UI metadata probe has no engine-frame output.
     // Rust uses the conservative non-VIP batch limit; this is an intentional
@@ -165,6 +211,45 @@ const KNOWN_TS_FIXES = {
     // REST ticker seeds install before the initial socket snapshot;
     // Partial-stop amend keeps its native ID when no mark price is available.
   },
+};
+const normalizeBingxPublic = (ts) => {
+// KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
+// integer step 1. Correct that precision and its synthetic ticker touch only.
+if (values.venue === 'bingx') {
+  const contracts = new Map();
+  for (const record of records) {
+    if (record.type !== 'http' || new URL(record.url).pathname !== '/openApi/swap/v2/quote/contracts') continue;
+    const response = JSON.parse(record.body);
+    if (response.code !== 0 || !Array.isArray(response.data)) continue;
+    for (const contract of response.data) contracts.set(contract.symbol, contract);
+  }
+  const zeroPrecision = (value) => (typeof value === 'number' || typeof value === 'string' && value.trim() !== '') && Number(value) === 0;
+  const prices = new Set();
+  for (const market of ts.markets) {
+    const source = contracts.get(market.id);
+    for (const [field, nativeField] of [['amount', 'quantityPrecision'], ['price', 'pricePrecision']]) {
+      if (market.precision[field] === 0.1 && zeroPrecision(source?.[nativeField])) {
+        market.precision[field] = 1;
+        if (field === 'price') prices.add(market.symbol);
+      }
+    }
+  }
+  // TS parses non-trading '-' placeholders into NaN; Rust stores finite zeros.
+  for (const ticker of ts.tickers) {
+    for (const field of ['percentage', 'volume', 'quoteVolume']) if (ticker[field] === null) ticker[field] = 0;
+    if (!prices.has(ticker.symbol)) continue;
+    ticker.bid = Math.max(ticker.last - 1, 0);
+    ticker.ask = ticker.last + 1;
+  }
+}
+// KNOWN_TS_FIXES: BingX's internal feed sends asks descending; TS forwards
+// that order. Consumers require best ask first, so Rust sorts full snapshots.
+if (values.venue === 'bingx') {
+  for (const book of Object.values(ts.books)) {
+    book.bids.sort((a,b) => b[0]-a[0]);
+    book.asks.sort((a,b) => a[0]-b[0]);
+  }
+}
 };
 function fixCryptocomAccount(account) {
     // TS never sets the hedged store flag despite mapping positions as hedged.
@@ -202,10 +287,10 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) {
     const output = impl === 'ts' ? ts : rust;
     const unserved = output.unserved;
-    for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
-      if (!Number.isFinite(output.metrics[field]) || output.metrics[field] < 0) {
-        differences.push(`${impl}: invalid ${field} (${output.metrics[field]}); baseline is invalid`);
-      }
+    if (Boolean(output.account) !== isPrivate) differences.push(impl + ': account presence differs from tape classification');
+    // Paced private tapes gate correctness; their unscored heap can shed loaded code.
+    if (!isPrivate) for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
+      if (!Number.isFinite(output.metrics[field]) || output.metrics[field] < 0) differences.push(`${impl}: invalid ${field} (${output.metrics[field]}); baseline is invalid`);
     }
     if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
     for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
@@ -215,8 +300,7 @@ for (let run = 0; run < runs; run++) {
     if (!output.markets.length || !output.tickers.length) differences.push(`${impl}: empty public seed`);
     if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
   }
-  const isPrivate = Boolean(ts.account);
-  if (isPrivate) {
+  if (isPrivate && ts.account && rust.account) {
     if (values.venue === 'cryptocom') {
       fixCryptocomAccount(ts.account);
       // Rust consumes authoritative user.trade; TS omits that feed entirely.
@@ -233,6 +317,7 @@ for (let run = 0; run < runs; run++) {
     if (values.venue === 'binance') KNOWN_TS_FIXES.binance(ts.account, rust.account);
     if (values.venue === 'bybit') KNOWN_TS_FIXES.bybit(ts.account, rust.account, ts);
     if (values.venue === 'weex') KNOWN_TS_FIXES.weex(ts.account);
+    if (values.venue === 'bingx') KNOWN_TS_FIXES.bingx(ts.account, rust.account);
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
       const left = JSON.stringify(ts.account[field]);
       const right = JSON.stringify(rust.account[field]);
@@ -242,6 +327,7 @@ for (let run = 0; run < runs; run++) {
   const left = JSON.stringify(stable(ts.commands));
   const right = JSON.stringify(stable(rust.commands));
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
+  normalizeBingxPublic(ts);
   for (const field of ['requests', 'subscriptions']) {
     const missing = ts[field].filter((key) => !rust[field].includes(key));
     const extra = rust[field].filter((key) => !ts[field].includes(key));
@@ -282,7 +368,7 @@ row('steady cpu', t.steadyCpuMs, r.steadyCpuMs);
 row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
-if (ts.account) console.log('(private tape: paced in real time, so it gates correctness only)');
+if (isPrivate) console.log('(private tape: correctness only; CPU and memory are informational)');
 if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
 
 const failures = [...differences];

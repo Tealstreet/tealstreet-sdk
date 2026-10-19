@@ -59,6 +59,17 @@ export const VENUES = {
     publicOptions: { key: '' },
     recordOptions: { publicDataOnly: true, key: '' },
   },
+  bingx: {
+    rust: 'bingx',
+    ts: { module: `${root}/bingx/bingx.exchange.ts`, className: 'BingxExchange', name: 'bingx' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('market.depth.')).length >= count,
+    privateSocket: '?listenKey=',
+    matchRequestBody: true,
+    bingxProtocol: true,
+    // BingX owns one listener per URL; resubscriptions must recur on reconnect.
+    subscriptionGenerations: true,
+  },
   weex: {
     rust: 'weex',
     ts: { module: `${root}/weex/weex.exchange.ts`, className: 'WeexExchange', name: 'weex' },
@@ -216,26 +227,24 @@ export const VENUES = {
     /** Book topics get a message handler once each subscription reaches the socket. */
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >= count,
-    privateSocket: '/v5/private',
-    publicTickers: (records) => [...new Set(records.flatMap((record) => {
-      if (record.type !== 'http' || record.method !== 'GET' || record.status < 200 || record.status >= 300) return [];
-      const url = new URL(record.url);
-      if (url.pathname !== '/v5/market/instruments-info' || url.searchParams.get('category') !== 'linear') return [];
-      const rows = JSON.parse(record.body).result?.list ?? [];
-      return rows.filter((row) => ['USDT', 'USDC'].includes(row.quoteCoin) && typeof row.symbol === 'string')
-        .map((row) => row.symbol);
-    }))],
-    // Both outboxes pace their sends; registered book handlers may precede tickers.
-    publicSubscriptionsReady: (subscriptions, books, tickers = []) => {
-      const topics = [...tickers.map((symbol) => `tickers.${symbol}`), ...books.map((symbol) => `orderbook.1000.${symbol}`)];
-      if (!topics.length) return true;
-      const urls = new Set([...subscriptions].filter((key) => key.startsWith('WS '))
-        .map((key) => key.slice(3, key.indexOf(' ', 3)))
-        .filter((url) => new URL(url).pathname === '/v5/public/linear'));
-      return [...urls].some((url) => subscriptionKeys(url,
-        { op: 'subscribe', args: topics })
-        .every((key) => subscriptions.has(key)));
+    startupSubscriptions: (records, books) => {
+      const symbols = new Set();
+      for (const record of records) {
+        if (record.type !== 'http' || record.method !== 'GET' || !(record.status >= 200 && record.status < 300)) continue;
+        const url = new URL(record.url);
+        if (url.pathname !== '/v5/market/instruments-info' || (url.searchParams.has('category') && url.searchParams.get('category') !== 'linear')) continue;
+        const body = JSON.parse(record.body);
+        if (Number(body.retCode) !== 0) continue;
+        for (const row of body.result?.list ?? []) {
+          if (['USDT', 'USDC'].includes(row.quoteCoin) && typeof row.symbol === 'string' && row.symbol) symbols.add(row.symbol);
+        }
+      }
+      const socket = records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/v5/public/linear')?.url
+        ?? 'wss://stream.bybit.com/v5/public/linear';
+      return subscriptionKeys(socket, { op: 'subscribe', args: [...symbols].map((symbol) => `tickers.${symbol}`)
+        .concat(books.map((symbol) => `orderbook.1000.${symbol}`)) });
     },
+    privateSocket: '/v5/private',
     isWrite: (method) => method === 'POST',
     matchRequestBody: true,
     volatileBodyFields: true,

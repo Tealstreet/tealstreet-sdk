@@ -294,3 +294,14 @@ counter using our canonical keys, strict comparisons and Hyperliquid config.
 Six-venue checks so far: combined 17 bridge/seven host tests pass; Crypto.com,
 Hyperliquid, Binance and WEEX public/private gates pass. Native364, targeted296,
 root typecheck/lint/all27tests pass. Remaining Bybit/OKX replays and CI stay gated.
+
+BingX integration checkpoint: retain all seven default constructors/features,
+existing single-venue budget and incoming workspace structure. The new query
+variant is explicitly unsupported in BingX; its existing client-ID shape policy
+is retained in the wrapper. Native workspace tests, native/wasm Clippy, bans,
+formatting, root typecheck/lint and 296 targeted TS tests pass. The full root
+suite again hit one existing Hyro dynamic-import timeout (6,528 other safe-cex
+tests passed); repeat in isolation after builds. Harness union passes 61 tests,
+including strict identity/timing checks and symmetric Bybit startup readiness.
+The host/CI/query union passed independent review; final harness audit and
+settled-tree Wasm replay gates remain pending.

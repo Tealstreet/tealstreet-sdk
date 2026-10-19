@@ -134,62 +134,40 @@ test('WEEX timestamp freshness accepts both edges of the replay clock window', (
 });
 
 
-test('Bybit public readiness waits for every requested book after paced ticker chunks', () => {
-  const bybit = venueOf('bybit');
-  const books = ['BTCUSDT', 'ETHUSDT'];
-  const subscriptions = new Set();
-  const send = (url, topics) => {
-    for (const key of subscriptionKeys(url, { op: 'subscribe', args: topics, req_id: 'generated' })) subscriptions.add(key);
-  };
-  const url = 'wss://stream.bybit.com/v5/public/linear?requestId=generated&max_active_time=1m';
-  assert.equal(bybit.publicSubscriptionsReady(subscriptions, []), true);
-  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books), false);
-  for (let chunk = 0; chunk < 3; chunk++) {
-    send(url, Array.from({ length: 10 }, (_, i) => `tickers.COIN${chunk * 10 + i}USDT`));
-    assert.equal(bybit.publicSubscriptionsReady(subscriptions, books), false);
-  }
-  // Private feeds, the wrong depth, and unsubscribe records cannot release playback.
-  send('wss://stream.bybit.com/v5/private', books.map((symbol) => `orderbook.1000.${symbol}`));
-  send(url, books.map((symbol) => `orderbook.50.${symbol}`));
-  for (const key of subscriptionKeys(url, { op: 'unsubscribe', args: ['orderbook.1000.ETHUSDT'] })) subscriptions.add(key);
-  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books), false);
-  send(url, ['orderbook.1000.BTCUSDT']);
-  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books), false);
-  send(url.replace('requestId=generated', 'requestId=another'), ['orderbook.1000.ETHUSDT']);
-  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books), true);
-});
 
 
-test('Bybit expected tickers include every linear stablecoin instrument page once', () => {
+test('Bybit startup topics include all successful stablecoin pages and requested books', () => {
   const bybit = venueOf('bybit');
-  const instruments = (query, rows) => ({ type: 'http', method: 'GET', status: 200,
-    url: `https://api.bybit.com/v5/market/instruments-info?${query}`,
-    body: JSON.stringify({ result: { list: rows } }) });
+  const seed = (list, extra = {}) => ({ type: 'http', method: 'GET', status: 200,
+    url: 'https://api.bybit.com/v5/market/instruments-info?category=linear',
+    body: JSON.stringify({ retCode: 0, result: { list } }), ...extra });
   const rows = [
-    instruments('category=linear&status=PreLaunch', [{ symbol: 'NEWUSDT', quoteCoin: 'USDT' }]),
-    instruments('category=linear&limit=1000', [{ symbol: 'BTCUSDT', quoteCoin: 'USDT' }, { symbol: 'ETHUSDC', quoteCoin: 'USDC' }]),
-    instruments('category=linear&cursor=next', [{ symbol: 'BTCUSDT', quoteCoin: 'USDT' }, { symbol: 'OTHERUSD', quoteCoin: 'USD' }]),
-    instruments('category=inverse', [{ symbol: 'BTCUSD', quoteCoin: 'USD' }]),
-    instruments('category=spot', [{ symbol: 'SOLUSDT', quoteCoin: 'USDT' }]),
+    seed([{ symbol: 'BTCUSDT', quoteCoin: 'USDT' }, { symbol: 'BTCUSD', quoteCoin: 'USD' }]),
+    seed([{ symbol: 'ETHUSDC', quoteCoin: 'USDC' }], { url: 'https://api.bybit.com/v5/market/instruments-info?cursor=next' }),
+    seed([{ symbol: 'NEWUSDT', quoteCoin: 'USDT' }, { symbol: 'BTCUSDT', quoteCoin: 'USDT' }], { url: 'https://api.bybit.com/v5/market/instruments-info?category=linear&status=PreLaunch' }),
+    seed([{ symbol: 'FAILEDUSDT', quoteCoin: 'USDT' }], { status: 503 }),
+    seed([], { body: '{"retCode":10001,"result":{"list":[{"symbol":"FAILEDUSDT","quoteCoin":"USDT"}]}}' }),
+    seed([{ symbol: 'SPOTUSDT', quoteCoin: 'USDT' }], { url: 'https://api.bybit.com/v5/market/instruments-info?category=spot' }),
   ];
-  assert.deepEqual(bybit.publicTickers(rows), ['NEWUSDT', 'BTCUSDT', 'ETHUSDC']);
-});
-
-test('Bybit public readiness requires all tickers and books regardless of send order', () => {
-  const bybit = venueOf('bybit'), books = ['BTCUSDT', 'ETHUSDT'], tickers = ['BTCUSDT', 'ETHUSDT', 'NEWUSDC'];
-  const subscriptions = new Set();
-  const url = 'wss://stream.bybit.com/v5/public/linear?max_active_time=1m&requestId=first';
-  const send = (topics) => {
-    for (const key of subscriptionKeys(url.replace('requestId=first', 'requestId=changed'), { op: 'subscribe', args: topics })) subscriptions.add(key);
+  const url = 'wss://stream.bybit.com/v5/public/linear?requestId=taped&max_active_time=1m';
+  rows.push({ type: 'ws', url });
+  const expected = bybit.startupSubscriptions(rows, ['BTCUSDT', 'ETHUSDC']);
+  assert.deepEqual(expected, subscriptionKeys(url, { op: 'subscribe', args: [
+    'tickers.BTCUSDT', 'tickers.ETHUSDC', 'tickers.NEWUSDT', 'orderbook.1000.BTCUSDT', 'orderbook.1000.ETHUSDC',
+  ] }));
+  const pending = new Map(expected.map((key) => [key, false]));
+  const sent = (socket, topics) => {
+    for (const key of subscriptionKeys(socket, { op: 'subscribe', args: topics })) if (pending.has(key)) pending.set(key, true);
   };
-  send(books.map((symbol) => `orderbook.1000.${symbol}`));
-  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books, tickers), false);
-  send(['tickers.BTCUSDT', 'tickers.ETHUSDT']);
-  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books, tickers), false);
-  assert.equal(bybit.publicSubscriptionsReady(subscriptions, [], tickers), false);
-  send(['tickers.NEWUSDC']);
-  assert.equal(bybit.publicSubscriptionsReady(subscriptions, books, tickers), true);
-  assert.equal(bybit.publicSubscriptionsReady(subscriptions, [], tickers), true);
-  const missingBook = new Set([...subscriptions].filter((key) => !key.includes('orderbook.1000.ETHUSDT')));
-  assert.equal(bybit.publicSubscriptionsReady(missingBook, books, tickers), false);
+  const ready = () => [...pending.values()].every(Boolean);
+  sent(url.replace('requestId=taped', 'requestId=generated'), ['orderbook.1000.BTCUSDT', 'orderbook.1000.ETHUSDC']);
+  assert.equal(ready(), false, 'books alone do not drain paced ticker sends');
+  sent('wss://stream.bybit.com/v5/private', ['tickers.BTCUSDT', 'tickers.ETHUSDC', 'tickers.NEWUSDT']);
+  assert.equal(ready(), false);
+  sent(url, ['tickers.BTCUSDT', 'tickers.ETHUSDC']);
+  assert.equal(ready(), false);
+  sent(url, ['tickers.NEWUSDT']);
+  assert.equal(ready(), true);
+  assert.equal(pending.size, 5, 'retain startup backing storage across memory samples');
+  assert.equal(bybit.startupSubscriptions(rows, []).length, 3, 'no books still requires every ticker');
 });

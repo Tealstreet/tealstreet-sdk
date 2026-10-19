@@ -7,12 +7,13 @@
     feature = "binance",
     feature = "bybit",
     feature = "cryptocom",
+    feature = "bingx",
     feature = "weex",
     feature = "hyperliquid",
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, hyperliquid, okx or weex"
+    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, bingx, hyperliquid, okx or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -21,6 +22,8 @@ use safe_cex_engine::{
 };
 #[cfg(feature = "binance")]
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+#[cfg(feature = "bingx")]
+use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 #[cfg(feature = "bybit")]
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 #[cfg(feature = "cryptocom")]
@@ -72,6 +75,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "binance",
     feature = "bybit",
     feature = "cryptocom",
+    feature = "bingx",
     feature = "weex",
     feature = "hyperliquid",
     feature = "okx"
@@ -506,6 +510,7 @@ impl WasmEngine {
         feature = "binance",
         feature = "bybit",
         feature = "cryptocom",
+        feature = "bingx",
         feature = "weex",
         feature = "hyperliquid",
         feature = "okx"
@@ -528,6 +533,12 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
+            }))),
+            #[cfg(feature = "bingx")]
+            "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
             }))),
             #[cfg(feature = "weex")]
             "weex" => Box::new(Engine::new(WeexFutures::new(WeexOptions {

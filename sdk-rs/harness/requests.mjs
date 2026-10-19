@@ -1,6 +1,6 @@
 // Stable request identity. Caller IDs remain exact; generated IDs and transport
 // signatures/clocks are nondeterministic. Economic action fields stay intact.
-const CLOCKS = new Set(['timestamp', 'recvWindow', 'signature']);
+const CLOCKS = new Set(['timestamp', 'recvWindow', 'signature', 'requestId']);
 const URL_VOLATILE = new Set([...CLOCKS, 'requestId']);
 const CLIENT_IDS = new Set(['newClientOrderId', 'clientAlgoId', 'clientOrderId', 'c']);
 
@@ -10,6 +10,7 @@ export const isWriteRequest = (method, url) => {
   method = method.toUpperCase();
   if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return false;
   const parsed = new URL(url);
+  if (['POST', 'PUT', 'DELETE'].includes(method) && /\/(listenKey|userDataStream)$/.test(parsed.pathname)) return false;
   // Hyperliquid's /info POSTs are reads, including account/history polling.
   return !(method === 'POST' && parsed.pathname === '/info'
     && /(^|\.)hyperliquid(?:-testnet)?\.xyz$/.test(parsed.hostname));
@@ -17,7 +18,7 @@ export const isWriteRequest = (method, url) => {
 
 export const selectResponse = (queue, elapsed, { write = false, commandIndex = 0 } = {}) => {
   if (!queue?.length) return undefined;
-  const at = (record) => record.availableAt ?? record.effectiveAt ?? 0;
+  const at = (record) => record.availableAt ?? record.effectiveAt ?? record.availableAfter ?? 0;
   const available = (record) => (record.afterCommand ?? 0) <= commandIndex
     && at(record) <= elapsed;
   if (write) {
@@ -29,7 +30,7 @@ export const selectResponse = (queue, elapsed, { write = false, commandIndex = 0
   if (!eligible.length) return undefined;
   const stage = Math.max(...eligible.map((record) => record.afterCommand ?? 0));
   const current = eligible.filter((record) => (record.afterCommand ?? 0) === stage);
-  if (!current.some((record) => record.availableAt !== undefined || record.effectiveAt !== undefined)) {
+  if (!current.some((record) => record.availableAt !== undefined || record.effectiveAt !== undefined || record.availableAfter !== undefined)) {
     const record = current[0];
     if (current.length > 1) queue.splice(queue.indexOf(record), 1);
     return record;
@@ -99,9 +100,11 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
 
 export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) => {
   let message;
+  if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
   try { message = typeof text === 'string' ? JSON.parse(text) : text; }
   catch { return `WS ${canonicalUrl(url, callerIds)} ${text}`; }
-  const method = String(message?.method ?? message?.op ?? '').toLowerCase();
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? '').toLowerCase();
+  if (options.bingxProtocol && (message?.ping !== undefined || message?.pong !== undefined)) return undefined;
   if (options.cryptoProtocol && method === 'public/respond-heartbeat') return undefined;
   if (['ping', 'pong', 'heartbeat'].includes(method)) return undefined;
   if (message && typeof message === 'object') {
@@ -136,8 +139,11 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
 export const subscriptionKeys = (url, text, callerIds = new Set(), options = {}) => {
   let message;
   try { message = typeof text === 'string' ? parseJson(text) : text; }
-  catch { return [subscriptionKey(url, text, callerIds, options)]; }
-  const method = String(message?.method ?? message?.op ?? '').toLowerCase();
+  catch {
+    const key = subscriptionKey(url, text, callerIds, options);
+    return key === undefined ? [] : [key];
+  }
+  const method = String(message?.method ?? message?.reqType ?? message?.op ?? '').toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
     if (options.cryptoProtocol && Array.isArray(message.params?.channels)) {
       return message.params.channels.map((channel) => subscriptionKey(url,

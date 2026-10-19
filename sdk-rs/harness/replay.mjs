@@ -66,10 +66,16 @@ class Tape {
     this.publicTickers = venue.publicTickers?.(records) ?? [];
     this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: this.publicTickers });
     this.responses = new Responses(records, keyFor, venue.checkRequest, (method, url) => venue.isWrite?.(method, url) ?? isWriteRequest(method, url));
-    this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
+    this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command' || r.type === 'close');
     this.open = new Map();
     this.waiters = [];
     this.commandIndex = 0;
+    this.subscriptions = new Set();
+    // Retain expected keys/backing storage across both memory samples: deleting
+    // startup-only harness state would subtract it from workload retained memory.
+    this.startupSubscriptions = new Map(Array.from((!isPrivate && venue.startupSubscriptions?.(records, bookSymbols)) || [], (key) => [key, false]));
+    this.pendingStartupSubscriptions = this.startupSubscriptions.size;
+    this.generations = new Map();
   }
 
   get unserved() { return this.responses.unserved; }
@@ -82,9 +88,11 @@ class Tape {
     return this.responses.respond(method, url, body, this.commandIndex, this.playbackTime ?? 0);
   }
 
-  connect(url, onOpen, onMessage) {
+  connect(url, onOpen, onMessage, onClose) {
     const key = canonicalUrl(url, callerIds);
-    const socket = { url, onMessage, closed: false, loginVerified: false, topics: new Map() };
+    const generation = (this.generations.get(key) ?? 0) + 1;
+    this.generations.set(key, generation);
+    const socket = { url, generation, onMessage, onClose, closed: false, loginVerified: false, topics: new Map() };
     setImmediate(() => {
       if (socket.closed) return;
       // Bybit adds a generated requestId to each connection URL.
@@ -98,7 +106,13 @@ class Tape {
 
   send(socket, text) {
     this.audit?.sent(socket.url, text);
-    for (const key of subscriptionKeys(socket.url, text, callerIds, venue)) this.subscriptions.add(key);
+    for (const key of subscriptionKeys(socket.url, text, callerIds, venue)) {
+      this.subscriptions.add(venue.subscriptionGenerations ? `${socket.generation} ${key}` : key);
+      if (this.startupSubscriptions.get(key) === false) {
+        this.startupSubscriptions.set(key, true);
+        this.pendingStartupSubscriptions--;
+      }
+    }
     if (venue.respondToPing && text === 'ping') {
       setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
       return;
@@ -170,7 +184,12 @@ class Tape {
     }
     // Keep auth and subscription validation per actual socket while broadcasting
     // shared-URL frames to every open listener (Hyperliquid public/private).
-    return { onMessage: (text) => {
+    return { onClose: (code) => {
+      for (const socket of active()) {
+        socket.closed = true;
+        socket.onClose?.(code);
+      }
+    }, onMessage: (text) => {
       for (const socket of active()) {
         if ((venue.validateLogin || venue.validateSubscriptions) && text.trimStart().startsWith('{')) {
           const message = JSON.parse(text);
@@ -192,8 +211,11 @@ class Tape {
   async play(onTick, ready = async () => {}, runCommand = async () => {}) {
     const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
     await within((async () => {
-      for (const url of urls) await this.socketFor(url);
+      if (urls.length) await this.socketFor(urls[0]);
       await ready();
+      // Native and TS outboxes batch sends independently of handler registration.
+      // Begin the tape only after every seed-derived startup topic reached send.
+      while (this.pendingStartupSubscriptions) await new Promise((resolve) => setTimeout(resolve, 1));
     })(), 15_000, 'Replay startup');
     const start = performance.now();
     let delivered = 0;
@@ -213,7 +235,8 @@ class Tape {
         }));
       } else {
         const socket = await this.socketFor(frame.url);
-        socket.onMessage(frame.text);
+        if (frame.type === 'close') socket.onClose(frame.code ?? 1006);
+        else socket.onMessage(frame.text);
       }
       delivered++;
       onTick?.(frame.t);
@@ -264,14 +287,19 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
 
 /** Loaded code is excluded; collect before I/O and after replay state settles. */
 const baseline = async () => {
+  const deadline = performance.now() + 1000;
   let previous;
-  let stable = 0;
-  for (let i = 0; i < 8; i++) {
+  let stableSince;
+  while (performance.now() < deadline) {
     globalThis.gc?.();
-    await new Promise(setImmediate);
+    // Loader/native cleanup can outlive several immediate turns. Require real
+    // elapsed quiescence so imported transient buffers cannot inflate baseline.
+    await new Promise((resolve) => setTimeout(resolve, 10));
     const memory = process.memoryUsage();
-    stable = memory.arrayBuffers === previous ? stable + 1 : 0;
-    if (stable >= 2) return memory;
+    const now = performance.now();
+    if (now >= deadline) break;
+    if (memory.arrayBuffers !== previous) stableSince = now;
+    if (now - stableSince >= 100) return memory;
     previous = memory.arrayBuffers;
   }
   throw new Error('Backing-buffer memory did not settle');
@@ -314,9 +342,9 @@ async function runRust() {
   const transport = {
     now: () => Date.now(),
     webSocketHeaders: true,
-    connect: (url, { headers, onOpen, onMessage }) => {
+    connect: (url, { headers, onOpen, onMessage, onClose }) => {
       venue.validateSocket?.(url, headers);
-      const socket = tape.connect(url, onOpen, (text) => { tape.audit?.received(url, text); onMessage(text); });
+      const socket = tape.connect(url, onOpen, (text) => { tape.audit?.received(url, text); onMessage(text); }, onClose);
       return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
     request: async ({ method, url, body: requestBody, headers }) => {
@@ -334,7 +362,20 @@ async function runRust() {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
-  const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
+  const engine = new WasmEngine(venue.rust, JSON.stringify(options));
+  if (process.env.RUST_MEMORY_TRACE) {
+    let last = wasmMemoryBytes();
+    for (const method of ['start', 'httpStart', 'httpChunk', 'httpEnd', 'wsMessage', 'takeFrame']) {
+      const original = engine[method].bind(engine);
+      engine[method] = (...args) => {
+        const result = original(...args);
+        const bytes = wasmMemoryBytes();
+        if (bytes !== last) console.error(`memory ${method} ${args[0]}: ${last} -> ${bytes}`);
+        last = bytes; return result;
+      };
+    }
+  }
+  const host = new EngineHost(engine, transport, {
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
       const received = values['no-egress'] ? buffer : structuredClone(buffer, { transfer: [buffer] });
@@ -370,8 +411,7 @@ async function runRust() {
     },
     async () => {
       while ((isPrivate && (status?.loaded ?? 0) !== allLoaded)
-        || (tape.audit && !tape.audit.ready())
-        || (!isPrivate && venue.publicSubscriptionsReady && !venue.publicSubscriptionsReady(tape.subscriptions, bookSymbols, tape.publicTickers))) {
+        || (tape.audit && !tape.audit.ready())) {
         await new Promise((r) => setTimeout(r, 5));
       }
     },
@@ -477,6 +517,11 @@ async function runTs() {
           this.onmessage?.({ data });
           venue.afterTsFrame?.(exchange);
         },
+        (code) => {
+          this.readyState = 3;
+          for (const fn of this.listeners.close) fn({ code });
+          this.onclose?.({ code });
+        },
       );
     }
     addEventListener(type, fn) {
@@ -530,7 +575,7 @@ async function runTs() {
   const postStore = () => {
     if (!values['no-egress'] && state) mainStore.update(structuredClone(worker._prepareStorePayload(state)), true);
   };
-  const exchange = new Exchange(venue.ts.name, options, store);
+  const exchange = new Exchange(venue.ts.name, { ...options, tealstreetTunnel: false }, store);
   venue.configureTs?.(exchange);
   venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
@@ -560,8 +605,7 @@ async function runTs() {
     },
     async () => {
       venue.prepareTsReady?.(exchange, { isPrivate });
-      while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)
-        || (!isPrivate && venue.publicSubscriptionsReady && !venue.publicSubscriptionsReady(tape.subscriptions, bookSymbols, tape.publicTickers))) {
+      while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) {
         await new Promise((r) => setTimeout(r, 5));
       }
       const loaded = () => Object.values(store.loaded).every(Boolean);
