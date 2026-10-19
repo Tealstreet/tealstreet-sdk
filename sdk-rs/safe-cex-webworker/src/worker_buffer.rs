@@ -1,14 +1,13 @@
-use crate::payload::StoreWorkerPayload;
 use serde_json::{Value, json};
 use std::cell::RefCell;
 
 // ts: ExchangeWorker._flushBufferedMessages
-pub fn flush_buffered_messages<E>(
-    buffer: &RefCell<Vec<StoreWorkerPayload>>,
+pub fn flush_buffered_messages<E, P>(
+    buffer: &RefCell<Vec<P>>,
     mut log_info: impl FnMut(&str, &Value) -> Result<(), E>,
-    mut handle_payload: impl FnMut(&mut StoreWorkerPayload) -> Result<(), E>,
+    mut handle_payload: impl FnMut(&mut P) -> Result<(), E>,
     mut stringify_error: impl FnMut(&E) -> Result<String, E>,
-    mut log_error: impl FnMut(&str, E, &Value) -> Result<(), E>,
+    mut log_error: impl FnMut(&str, E, &P, usize, usize) -> Result<(), E>,
 ) -> Result<(), E> {
     let buffer_count = buffer.borrow().len();
     if buffer_count == 0 {
@@ -31,11 +30,7 @@ pub fn flush_buffered_messages<E>(
                 "Failed to process buffered message {position}/{count} {}",
                 stringify_error(&error)?
             );
-            log_error(
-                &message,
-                error,
-                &json!({"payloadOp":payload.op,"messageIndex":index,"totalBuffered":buffer_count}),
-            )?;
+            log_error(&message, error, &payload, index, buffer_count)?;
         }
     }
     Ok(())

@@ -5,6 +5,14 @@ NativeReplayRuntime, canonical Store, API signing/interceptors, clock and privat
 repair owners. Only the terminal HTTP host supplies responses and held requests.
 The source oracle instantiates the maintained exchange/private socket classes.
 
+The lifecycle oracle observes adapter entry and the real Store subscription,
+rather than counting event-loop turns. The signed request's rate limiter queues
+a zero-delay timer; 100 setImmediate turns do not guarantee its admission. A
+controlled platform timer keeps the actual repair busy before dispatch, then
+releases the real signed request. Its held response must keep the repair busy
+through disposal until finally settles. Late source open-interest writes remain
+observed separately from the accepted native teardown policy.
+
 | Assigned row | Result and evidence |
 | --- | --- |
 | syncClientServerTime | FIX: disposal previously stranded sync/start/force-sync waiters and left syncInFlight set. The compiled native test fails at ASTER-CLOCK-SETTLEMENT before the change. One common completion boundary now uses shared start_eager; held work settles, clears the slot and cannot write a stopped generation or install a late interval. |

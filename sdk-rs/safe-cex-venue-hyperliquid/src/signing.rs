@@ -480,7 +480,19 @@ pub fn signing_preimage(
 ) -> Result<Vec<u8>, OwnedCallbackError> {
     let mut data = safe_cex_crypto::msgpack::encode_js_value(&action.encoding_view())
         .map_err(signing_error)?;
-    data.extend_from_slice(&nonce_u64(nonce).map_err(signing_error)?.to_be_bytes());
+    // BigInt(number) rejects fractional numeric nonces with RangeError. Preserve
+    // that class before the owned cause crosses the API/Promise boundaries.
+    let nonce = nonce_u64(nonce).map_err(|message| {
+        if nonce.is_number() {
+            OwnedCallbackError::new(OwnedJsValue::object([
+                ("name", OwnedJsValue::string("RangeError")),
+                ("message", OwnedJsValue::string(&message)),
+            ]))
+        } else {
+            signing_error(message)
+        }
+    })?;
+    data.extend_from_slice(&nonce.to_be_bytes());
     data.push(u8::from(vault.is_some()));
     // ts-bug: actionHash accepts short hex vaults and pads trailing zeros instead of enforcing 20 bytes.
     if let Some(vault) = vault {

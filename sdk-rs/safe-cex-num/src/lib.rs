@@ -736,3 +736,5 @@ pub use prototype_realm::{
     BuiltinIdentity, BuiltinReference, FunctionMethod, PrototypeRealm, PrototypeRealmBinding,
     PrototypeRealmFuture, PrototypeScalar, PrototypeValue,
 };
+
+pub mod sorting;
