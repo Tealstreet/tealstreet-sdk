@@ -45,12 +45,16 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const buffers = [];
-    if (response.body instanceof Uint8Array) buffers.push(response.body);
-    else for await (const chunk of response.body) buffers.push(chunk);
-    const bytes = Buffer.concat(buffers);
+    // A streamed body is gathered so the tape holds it whole.
+    let bytes = response.body;
+    if (!(bytes instanceof Uint8Array)) {
+      const chunks = [];
+      for await (const chunk of bytes) chunks.push(chunk);
+      bytes = Buffer.concat(chunks);
+    }
     const body = new TextDecoder().decode(bytes);
-    write({ type: 'http', method: request.method, url: request.url, requestBody: request.body, status: response.status, headers: response.headers, body });
+    const requestBody = request.body ? { requestBody: request.body } : {};
+    write({ type: 'http', method: request.method, url: request.url, ...requestBody, status: response.status, headers: response.headers, body });
     return { ...response, body: bytes };
   },
 };

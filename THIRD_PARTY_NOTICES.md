@@ -62,12 +62,12 @@ which keep their upstream licences. `scripts/check-licenses.mjs` fails CI when a
 
 ## zkLink native cryptography and contract serialization
 
-- Files: `sdk-rs/safe-cex-crypto/src/zklink.rs` and
-  `sdk-rs/safe-cex-crypto/src/zklink/contract.rs`.
+- Files: `sdk-rs/crypto/src/zklink.rs` and
+  `sdk-rs/crypto/src/zklink/contract.rs`.
 - Upstream: https://github.com/zkLinkProtocol/zklink_sdk at
   `3152525e2615ecbbdb56fd6728ce265ad2dde485`.
 - Licence: Apache-2.0; upstream notice retained in
-  `sdk-rs/safe-cex-crypto/LICENSE-zklink`. Copyright 2023-present, zk.link.
+  `sdk-rs/crypto/LICENSE-zklink`. Copyright 2023-present, zk.link.
 - Modified by Tealstreet Ltd: extracted deterministic signing and contract
   serialization primitives, with explicit errors for unsafe packing/price
   inputs and a seed-only native signer capability.

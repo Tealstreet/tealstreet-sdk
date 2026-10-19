@@ -34,9 +34,9 @@ const isPrivate = records.some((r) => r.url?.includes(venue.privateSocket));
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 
-/** Per-request values: clocks, signatures and generated client ids. */
+/** Per-request values: clocks, signatures, request ids and generated client ids. */
 const callerIds = new Set(records.flatMap((r) => r.type === 'command' ? (r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean) : []));
-const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId']);
+const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams]
@@ -46,12 +46,29 @@ const canonicalUrl = (url) => {
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
 
+/**
+ * A JSON request body with its keys sorted and generated fields dropped, so
+ * venues that sign headers and send parameters in the body (Bybit) key their
+ * writes by what they ask for. Caller-supplied IDs remain part of the match.
+ * Empty for a body-less request.
+ */
 const canonicalBody = (body) => {
-  if (!body) return '';
-  const value = typeof body === 'string' ? JSON.parse(body) : body;
-  const normalize = (v) => Array.isArray(v) ? v.map(normalize) : v && typeof v === 'object'
-    ? Object.fromEntries(Object.keys(v).sort().filter((k) => !VOLATILE.has(k) || callerIds.has(String(v[k]))).map((k) => [k, normalize(v[k])])) : v;
-  return JSON.stringify(normalize(value));
+  if (body === undefined || body === null || body === '') return '';
+  let parsed;
+  try {
+    parsed = typeof body === 'string' ? JSON.parse(body)
+      : body instanceof Uint8Array || body instanceof ArrayBuffer ? JSON.parse(new TextDecoder().decode(body))
+      : body;
+  } catch {
+    return String(body);
+  }
+  const strip = (value) => {
+    if (Array.isArray(value)) return value.map(strip);
+    if (!value || typeof value !== 'object') return value;
+    const keys = Object.keys(value).filter((key) => (!VOLATILE.has(key) || callerIds.has(String(value[key]))) && value[key] !== undefined).sort();
+    return Object.fromEntries(keys.map((key) => [key, strip(value[key])]));
+  };
+  return JSON.stringify(strip(parsed));
 };
 const requestKey = (method, url, body) => `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
 
@@ -89,14 +106,16 @@ class Tape {
     const socket = { url, onMessage, closed: false };
     setImmediate(() => {
       if (socket.closed) return;
-      this.open.set(url, socket);
+      // Keyed without volatile query params (Bybit's per-connection requestId).
+      this.open.set(canonicalUrl(url), socket);
       onOpen();
       this.waiters = this.waiters.filter((waiter) => !waiter());
     });
     return socket;
   }
 
-  async socketFor(url) {
+  async socketFor(rawUrl) {
+    const url = canonicalUrl(rawUrl);
     while (!this.open.get(url) || this.open.get(url).closed) {
       let timer;
       try {
@@ -434,6 +453,11 @@ async function runTs() {
       if (record.op === 'cancelOrders') {
         await exchange.cancelOrders(store.orders.filter((order) => record.ids.includes(order.id)));
         return [];
+      }
+      if (record.op === 'amendOrder') {
+        const order = store.orders.find((o) => o.id === record.id);
+        const update = { ...(record.price !== undefined && { price: record.price }), ...(record.amount !== undefined && { amount: record.amount }) };
+        return exchange.updateOrder({ order, update });
       }
       if (record.op === 'cancelSymbolOrders') {
         await exchange.cancelSymbolOrders(record.symbol);

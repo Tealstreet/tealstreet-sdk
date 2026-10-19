@@ -8,6 +8,7 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -450,6 +451,12 @@ impl WasmEngine {
                 secret: options.secret,
                 passphrase: options.passphrase,
                 private_ws_headers: options.private_ws_headers,
+            }))),
+            "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
             }))),
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };
