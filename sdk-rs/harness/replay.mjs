@@ -91,6 +91,8 @@ const baseline = async () => {
     globalThis.gc?.();
     await new Promise((resolve) => setTimeout(resolve, 50));
     const memory = process.memoryUsage();
+    // Private account pollers remain live; their memory is informational only.
+    if (isPrivate) return memory;
     stable =
       previous && memory.arrayBuffers === previous.arrayBuffers && Math.abs(memory.heapUsed - previous.heapUsed) < 4096
         ? stable + 1

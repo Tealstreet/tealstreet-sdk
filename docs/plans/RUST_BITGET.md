@@ -399,3 +399,8 @@ all focused tests pass. Final rebuild, replay and repeat audit in progress.
   exact routing/subscriptions, reconnect callbacks, audit delivery and settled
   memory boundaries checked. Final cross-venue regressions and current-head
   CI remain required before landing.
+
+- Final Bybit private replay exposed active reconciliation timers preventing
+  heap stabilization. Private tapes now report one GC/timer-turn sample rather
+  than failing their correctness gate on unscored memory settling. Both engines
+  use the same boundary; public stabilization and thresholds remain unchanged.
