@@ -1,6 +1,7 @@
 # Non-UTF-8 Store audit rulings
 
-The frozen census names the retired lower-crate DefaultStore implementation.
+The seven mutation claims in the frozen census name the retired lower-crate
+DefaultStore implementation.
 The production constructor and JS facade now share the canonical graph in
 `safe-cex-exchange/src/js_runtime/native_store`. These verdicts reconcile the
 original claims against that shipped binding, rather than treating the historical
@@ -35,5 +36,30 @@ drop own-undefined extension fields, copy a nested extension object, or read eve
 patch getter before writing. Each must fail the named Store audit assertion, then
 pass after byte-exact restoration of `native_store/graph.rs`.
 
-This batch reconciles 7 of the 27 Store rows. The other 20 Store rows and the
+## Request-outcome accounting
+
+| Census row | Verdict | Production observation and reason |
+| --- | --- | --- |
+| 133 `recordRequestOutcome` | ACCEPT | Both actual native Axios factory paths increment the canonical Store counter for ordinary success, rate-limit, auth, server and network outcomes. Missing counters and a frozen counter object do not change request settlement or rejection identity. The old claim of no equivalent fallible Store/catch path does not describe the shipped binding: counter writes can fail and the factory suppresses those telemetry failures, as TS does. Arbitrary replacement of the typed Store protocol is not a missing production capability. |
+| 446 `isSigningCaptureRequest` | ACCEPT | The actual factory reads the native config marker with JS truthiness before accounting. Capture-only requests execute their adapter without creating phantom venue outcomes; the marker stays outside headers. The typed HTTP host predicate is composition of that explicit capability, not a different policy. No capture-marker or counter loss is observed through either native factory. |
+
+`safe-cex-exchange/tests/js_runtime.rs` contains
+`audit_http_outcomes_keep_capture_guard_and_counter_failure_isolation`.
+Its 98 profiles execute the canonical factory and Store on NativeRuntime, against
+both maintained TS factories with installed Axios, the actual signing-capture
+helper and maintained DefaultStore. Only the terminal adapter and external hosts
+are injected. Both routed/direct factories cover ten HTTP statuses and network
+failure with absent/false/true markers, eight further marker truthiness cases,
+and four ordinary/capture/error cases for each disabled/frozen counter mode.
+
+Counter values are observed as native binary64 bits before JSON, along with
+original counter-reference and rejection identity, one terminal dispatch, no
+Store notification, and no capture-marker header. TS independently asserts its
+counter values and observations before emitting the comparison receipt.
+The baseline already passes; these are ACCEPT verdicts, not production repairs.
+Three separately compiled corruptions must fail the named native comparison:
+count capture-only requests, skip counter writes, or notify Store subscribers
+while recording. Byte-exact restoration must pass after each control.
+
+Nine of the 27 Store rows are reconciled here. The other 18 Store rows and the
 separate num row remain assigned for later batches.

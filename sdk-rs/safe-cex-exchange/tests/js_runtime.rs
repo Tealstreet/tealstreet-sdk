@@ -4423,3 +4423,127 @@ fn native_accessor_integrity_failure_propagates_from_base_assembly() {
     .expect("frozen supplied receiver must refuse assembly");
     assert_eq!(error.value.get("name").unwrap().to_display(), "TypeError");
 }
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn audit_http_outcomes_keep_capture_guard_and_counter_failure_isolation() {
+    use safe_cex_exchange::js_runtime::{
+        client::factory, globals, store::facade, value::from_json,
+    };
+    use safe_cex_exchange::native::native_runtime;
+    use std::cell::Cell;
+
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_http_factory_source.cjs"
+        ))
+        .arg("outcomes")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let profiles: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(profiles.len(), 98, "OUTCOME_AUDIT complete source profiles");
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(tokio::task::LocalSet::new().run_until(async {
+            let runtime: Rc<dyn ExchangeRuntime> = native_runtime();
+            let builtins = Js::object(vec![]);
+            globals::install_builtins::<()>(&builtins, std::rc::Weak::new());
+            for profile in profiles {
+                let owner = factory_owner(runtime.clone());
+                let store = facade(owner.store.clone()).unwrap();
+                let mode = profile["mode"].as_str().unwrap();
+                let stats = if mode == "disabled" {
+                    Js::Undefined
+                } else {
+                    from_json(&json!({"ok":2,"rateLimit":3,"auth":5,"network":7,"other":11}))
+                };
+                store.call_method("update", vec![Js::object(vec![("requestStats", stats.clone())])]).unwrap();
+                if mode == "frozen" {
+                    builtins.get("Object").unwrap().call_method("freeze", vec![stats.clone()]).unwrap();
+                }
+                let notices = Rc::new(Cell::new(0));
+                let notice_counter = notices.clone();
+                store.call_method("subscribe", vec![Js::function("auditNotice", move |_, _| {
+                    notice_counter.set(notice_counter.get() + 1);
+                    Ok(Js::Undefined)
+                })]).unwrap();
+                let sends = Rc::new(Cell::new(0));
+                let capture = Rc::new(Cell::new(false));
+                let header_marker = Rc::new(Cell::new(false));
+                let rejection = safe_cex_exchange::js_runtime::value::error_object("Error", "fixture rejection");
+                let original = rejection.clone();
+                let status = profile["status"].as_f64();
+                let terminal_sends = sends.clone();
+                let terminal_capture = capture.clone();
+                let terminal_header_marker = header_marker.clone();
+                let adapter = Js::function("auditTerminal", move |_, args| {
+                    let config = arg(&args, 0);
+                    terminal_sends.set(terminal_sends.get() + 1);
+                    terminal_capture.set(config.get("__tealstreetSigningCapture")?.truthy());
+                    terminal_header_marker.set(config.get("headers")?.has_own("__tealstreetSigningCapture"));
+                    let response = Js::object(vec![
+                        ("status", status.map_or(Js::Undefined, Js::Number)),
+                        ("data", Js::object(vec![])),
+                        ("headers", Js::object(vec![])),
+                        ("config", config.clone()),
+                    ]);
+                    if status.is_none_or(|value| value >= 400.0) {
+                        rejection.define("config", config)?;
+                        if status.is_some() { rejection.define("response", response)?; }
+                        return Err(Thrown::new(rejection.clone()));
+                    }
+                    Ok(response)
+                });
+                let host = client::rest_http_host(runtime.clone(), std::sync::Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
+                let config = Js::object(vec![("baseURL", Js::str("https://venue")), ("adapter", adapter)]);
+                let options = Js::object(vec![("key", Js::str("")), ("secret", Js::str(""))]);
+                let xhr = if profile["factory"] == "direct" {
+                    factory::create_no_proxy(host, config, &owner).unwrap()
+                } else {
+                    factory::create(host, &safe_cex_transport::DirectTransport, config, &options, &owner).unwrap()
+                };
+                let marker = match profile["marker"].as_str().unwrap() {
+                    "missing" => None,
+                    "false" => Some(Js::Bool(false)),
+                    "true" => Some(Js::Bool(true)),
+                    "one" => Some(Js::Number(1.0)),
+                    "text" => Some(Js::str("yes")),
+                    "array" => Some(Js::array(vec![])),
+                    "object" => Some(Js::object(vec![])),
+                    "null" => Some(Js::Null),
+                    "zero" => Some(Js::Number(0.0)),
+                    "empty" => Some(Js::str("")),
+                    "nan" => Some(Js::Number(f64::NAN)),
+                    other => panic!("unreviewed capture profile {other}"),
+                };
+                let request = Js::object(vec![]);
+                if let Some(marker) = marker { request.define("__tealstreetSigningCapture", marker).unwrap(); }
+                let result = await_js(&runtime, xhr.call_method("get", vec![Js::str("/audit"), request]).unwrap()).await;
+                let error_identity = result.as_ref().err().is_none_or(|error| error.value.same_reference(&original));
+                let current_stats = store.get("requestStats").unwrap();
+                let observation = json!({
+                    "factory":profile["factory"], "mode":profile["mode"],
+                    "marker":profile["marker"], "status":profile["status"],
+                    "statsBits":if current_stats.is_undefined() {Value::Null} else {
+                        let mut bits = serde_json::Map::new();
+                        for key in ["ok", "rateLimit", "auth", "network", "other"] {
+                            bits.insert(key.into(), json!(format!("{:016x}", current_stats.get(key).unwrap().as_f64().unwrap().to_bits())));
+                        }
+                        Value::Object(bits)
+                    },
+                    "success":result.is_ok(), "errorIdentity":error_identity,
+                    "sameStats":current_stats.strict_equals(&stats), "notices":notices.get(),
+                    "sends":sends.get(), "capture":capture.get(), "headerMarker":header_marker.get(),
+                });
+                assert_eq!(observation, profile, "OUTCOME_AUDIT real factory and Store match maintained source");
+            }
+        }));
+}
