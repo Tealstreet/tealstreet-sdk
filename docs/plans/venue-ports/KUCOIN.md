@@ -49,3 +49,34 @@ private validation uses independently documented synthetic payloads.
 
 - Planning: read current remote brief/spec and TS contracts; interfaces agreed
   between public/private/trading modules. Parent owns queries/harness/landing.
+
+### Core phases implemented and reviewed
+
+Public: dynamic bullet endpoints, sharded snapshot pool (380 topics/socket,
+100 symbols/frame), native ping deadlines/fresh-token reconnects, pre-seed
+subscription reference counts, full-depth sequence recovery and REST/WS candles.
+Private: streamed positions and paginated normal/stop books, balance, modes and
+settings, per-execution fills, read retries, revision/timestamp/closure guards.
+Trading: sequenced jobs, native lot placement, st-orders brackets, standalone
+full/partial stops, cancel+replace with fresh IDs, both cancel families, cross
+leverage/margin/mode commands, headless metadata reads and per-side leverage.
+Queries: fills/orders numbered pages with census, exact ledger offset paging in
+one-day windows, seven-day order/fill windows, recent public trades, typed JSON.
+
+Independent phase reviews: trading agent reviewed public and queries; public
+agent reviewed private; private agent reviewed trading. Findings fixed and
+regressed: generation collisions, partial position risk resets, stale closures
+and reopened positions, stale metadata after writes, zero-rounded replacement
+prices, isolated per-side leverage, query parameter injection and one-ms ledger
+windows. Native tests/clippy pass at the core checkpoint (ongoing harness adds
+integration coverage). Optional broker signed headers and signed passphrase have
+independent HMAC oracles. Crypto audit found no newly unused first-port facades.
+
+Known TS corrections (also listed in gate.mjs): complete paginated order reads;
+failed/delayed account reads retain newer state; correct side-dependent stop
+classification and trigger/close flags; execution deduplication; reject silently
+dropped conditional fields and incompatible bracket references; cancel-symbol
+covers stops too. Missing TS futures history surfaces use independently declared
+documented-payload oracles. Live replay found a TS buffered-book suffix loss on
+cached snapshot gaps; a production reference fix and deterministic regression
+are being verified. Private validation uses synthetic documented payloads.
