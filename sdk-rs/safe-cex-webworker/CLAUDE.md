@@ -761,3 +761,16 @@ actual chaser:complete listener owns clientId even when its value is undefined.
 The engine/source listener witness pins eight ordered keys, all values and native
 number bits; the original ten identity cases remain output checks. Other live
 task decoders retain their numeric/presence floors and independent audit rows.
+
+## Module Drop override review
+
+`WorkerModule::drop` is a production teardown boundary under the approved native
+module drop-equals-dispose policy. Its direct `self.perf.dispose()` call closes
+the module-owned recorder and cancels every pending metronome timer. The hook
+inventory records that one dynamic dispose edge; it is not a test-only call.
+Drop then unregisters listeners, removes port mappings, drains both worker maps,
+uses the shared fallible worker disposal pipeline, performs native final-drop
+cleanup and shuts down each context. Required error reporting lets later owned
+resources finish cleanup after a handler failure. The existing module-drop and
+perf-disposal binding tests pin retained-handle cleanup; the inventory guard must
+continue to detect any change in this body's hook receiver or multiplicity.
