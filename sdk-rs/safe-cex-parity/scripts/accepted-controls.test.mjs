@@ -331,29 +331,8 @@ test('external reexports retain canonical production decoder and feature coverag
       const result = run(selected);
       assert.equal(result.status, 0, result.output);
       assert.match(result.output, /accepted-set-control: [1-9]\d* production runtime results/, 'ROOT-REEXPORT canonical owner runtime executes');
-      return result;
     };
     baseline();
-    const ownerManifest = path.join(fixture, 'Cargo.toml');
-    const consumerManifest = path.join(fixture, 'reexport/Cargo.toml');
-    const originalOwnerManifest = fs.readFileSync(ownerManifest, 'utf8');
-    const originalConsumerManifest = fs.readFileSync(consumerManifest, 'utf8');
-    try {
-      assert.equal(originalOwnerManifest.split('[features]\n').length, 2);
-      assert.equal(originalConsumerManifest.split('path = ".."').length, 2);
-      fs.writeFileSync(ownerManifest, originalOwnerManifest.replace('[features]\n', '[features]\ndefault = []\n'));
-      fs.writeFileSync(consumerManifest, originalConsumerManifest.replace('path = ".."', 'path = "..", default-features = false'));
-      const disabled = baseline();
-      const inventories = result => JSON.parse(fs.readFileSync(result.output.match(/accepted-set: \d+ Deserialize owners; inventory (.+)/)[1], 'utf8'))
-        .filter(owner => owner.package === 'accepted-set-control');
-      assert.deepEqual(inventories(disabled).map(owner => owner.features), [[]]);
-      const workspace = run(['--inventory']);
-      assert.equal(workspace.status, 0, workspace.output);
-      assert.deepEqual(inventories(workspace).map(owner => owner.features).sort(), [[], ['default']]);
-    } finally {
-      fs.writeFileSync(ownerManifest, originalOwnerManifest);
-      fs.writeFileSync(consumerManifest, originalConsumerManifest);
-    }
     const wasm = run([...selected, '--target=wasm32-unknown-unknown']);
     assert.equal(wasm.status, 0, wasm.output);
     assert.match(wasm.output, /accepted-set-control: [1-9]\d* production runtime results/, 'ROOT-REEXPORT wasm canonical owner runtime executes');
@@ -384,6 +363,42 @@ test('external reexports retain canonical production decoder and feature coverag
   } finally { fs.writeFileSync(consumer, originalConsumer); }
   const restored = run(['--package=accepted-set-reexport-control']);
   assert.equal(restored.status, 0, restored.output);
+});
+
+test('reexport bindings retain the compiler-selected default features', { timeout: 1200000 }, () => {
+  const ownerManifest = path.join(fixture, 'Cargo.toml');
+  const consumerManifest = path.join(fixture, 'reexport/Cargo.toml');
+  const consumer = path.join(fixture, 'reexport/src/lib.rs');
+  const originals = new Map([ownerManifest, consumerManifest, consumer, sourcePath].map(file => [file, fs.readFileSync(file, 'utf8')]));
+  const selected = ['--package=accepted-set-reexport-control'];
+  try {
+    assert.equal(originals.get(ownerManifest).split('[features]\n').length, 2);
+    assert.equal(originals.get(consumerManifest).split('path = ".."').length, 2);
+    assert.equal(source.split('"buy" => Ok(Self::Buy)').length, 2);
+    fs.writeFileSync(ownerManifest, originals.get(ownerManifest).replace('[features]\n', '[features]\ndefault = []\n'));
+    fs.writeFileSync(consumerManifest, originals.get(consumerManifest).replace('path = ".."', 'path = "..", default-features = false'));
+    fs.writeFileSync(consumer, 'pub use accepted_set_control::*;\n');
+    fs.writeFileSync(sourcePath, source.replace('"buy" => Ok(Self::Buy)', '"buy" if !cfg!(feature = "default") => Ok(Self::Buy)'));
+    const inventories = result => JSON.parse(fs.readFileSync(result.output.match(/accepted-set: \d+ Deserialize owners; inventory (.+)/)[1], 'utf8'))
+      .filter(owner => owner.package === 'accepted-set-control');
+    const native = run(selected);
+    assert.equal(native.status, 0, native.output);
+    assert.match(native.output, /accepted-set-control: [1-9]\d* production runtime results/);
+    assert.deepEqual(inventories(native).map(owner => owner.features), [[]]);
+    const workspace = run(['--inventory']);
+    assert.equal(workspace.status, 0, workspace.output);
+    assert.deepEqual(inventories(workspace).map(owner => owner.features).sort(), [[], ['default']]);
+    const wasm = run([...selected, '--target=wasm32-unknown-unknown']);
+    assert.equal(wasm.status, 0, wasm.output);
+    assert.match(wasm.output, /accepted-set-control: [1-9]\d* production runtime results/);
+    fs.writeFileSync(consumerManifest, originals.get(consumerManifest));
+    const enabled = run(selected);
+    assert.equal(enabled.status, 1, enabled.output);
+    assert.match(enabled.output, /accepted_set_control::Side:.*advertised spelling rejected: buy/);
+    console.log('canonical default feature changes decoder admission: named assertion; process exit 1');
+  } finally {
+    for (const [file, text] of originals) fs.writeFileSync(file, text);
+  }
 });
 
 test('public aliases classify targets by compiler package identity', { timeout: 180000 }, () => {
