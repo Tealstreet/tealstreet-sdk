@@ -1,4 +1,6 @@
 //! Hyperliquid perpetuals: typed, deterministic state machines without I/O.
+mod account;
+pub mod sign;
 mod wire;
 
 use base64::Engine as _;
@@ -29,6 +31,7 @@ pub struct Builder {
 }
 
 pub enum Pending {
+    Account(account::Request),
     Meta {
         dex: String,
         offset: u32,
@@ -68,6 +71,7 @@ struct Ladder {
 }
 pub struct Hyperliquid {
     options: Options,
+    account: account::Account,
     connection: Connection,
     books: HashMap<String, Ladder>,
     candles: HashMap<(String, String), usize>,
@@ -81,6 +85,7 @@ impl Hyperliquid {
     pub fn new(options: Options) -> Self {
         Self {
             options,
+            account: account::Account::default(),
             connection: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -149,6 +154,7 @@ impl Hyperliquid {
         if let Some((dex, offset)) = self.dex_queue.pop_front() {
             self.meta(cx, dex, offset);
         } else if self.connection.socket.is_none() {
+            self.account_start(cx);
             self.connection.socket = Some(cx.connect(self.ws()));
         }
     }
@@ -473,6 +479,10 @@ impl Venue for Hyperliquid {
         self.connection.attempts = 0;
         self.connection.last_received = cx.now;
         self.connection.ping = Some(cx.set_timer(15_000.0));
+        self.private_subscribe(cx);
+        if self.account.started && self.user().is_some() && !self.options.public_data_only {
+            self.refresh_account(cx);
+        }
         self.subscription(cx, "subscribe", "allMids", None, None, None);
         self.subscription(cx, "subscribe", "fastAssetCtxs", None, None, None);
         for dex in &self.dex_names {
@@ -502,6 +512,8 @@ impl Venue for Hyperliquid {
         }
         self.connection.last_received = cx.now;
         self.public_frame(cx, text);
+        self.account_frame(cx, text);
+        self.live_balance(cx);
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
         if self.connection.socket != Some(socket) {
@@ -531,6 +543,7 @@ impl Venue for Hyperliquid {
             return;
         }
         match pending {
+            Pending::Account(request) => self.account_response(cx, request, response),
             Pending::Meta {
                 dex,
                 offset,
@@ -613,6 +626,7 @@ impl Venue for Hyperliquid {
     }
     fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Account(request) => self.account_item(_cx, request, item),
             Pending::Meta {
                 dex,
                 instruments,
@@ -653,6 +667,7 @@ impl Venue for Hyperliquid {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Account(request) => self.account_failed(cx, request, error),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Dexs { .. } => self.next_dex(cx),
             Pending::Meta {
@@ -673,6 +688,7 @@ impl Venue for Hyperliquid {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.account_timer(cx, timer);
         if let Some((dex, offset, attempt)) = self.meta_retries.remove(&timer) {
             self.meta_attempt(cx, dex, offset, attempt);
         }

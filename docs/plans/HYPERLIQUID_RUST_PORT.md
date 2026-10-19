@@ -2,7 +2,8 @@
 
 Lane: `feat/rust-hyperliquid`; target: `feat/rust-rewrite`.
 Spec: `RUST_REWRITE.md`; process: the Process section of the upstream
-`VENUE_PORT_BRIEF.md` fetched 2026-10-19. Full automatic execution, with a
+`VENUE_PORT_BRIEF.md` fetched 2026-10-19. Workspace migration
+merged at `fefe9db44c`; crate now lives in `sdk-rs/venues/hyperliquid/`. Full automatic execution, with a
 sub-agent implementation review and fixes before every phase commit.
 
 ## Phases
@@ -53,10 +54,21 @@ sub-agent implementation review and fixes before every phase commit.
   limit/from semantics, Unicode interval panic. Six documented-payload tests
   pass; bans, formatting and clippy pass. Registration in wasm/harness remains
   in phase 5, so phase 1 does not enable an incomplete venue in user flows.
-- Phase 2: pending.
+- Phase 2: implementation checkpoint. Twelve account tests, one official SDK
+  signing-vector test (mainnet/testnet/vault), and six public tests pass.
+  `review_private` found and drove fixes for position IDs, core trigger fallback,
+  suppression recovery, user event shapes, TIF retention, newer REST source
+  times, per-symbol fill clocks and HIP-3 in-flight refresh collapse. Final
+  review of these fixes pending. Weighted read queue bounds background reads;
+  orders reconcile at 1s for HIP-3, positions at 120s, with debounced fill heals.
+  Deleted unused `crypto/wallet_utils.rs`; private-key address derivation now
+  uses a transport-free Ethereum primitive for non-fatal startup warnings.
 - Phase 3: pending.
 - Phase 4: pending.
 - Phase 5: pending.
+
+Standing overseer authorization (2026-10-20): resolve future landing-branch
+merge conflicts while keeping its layout; never stash, use WIP commits.
 
 After all gates: merge origin/feat/rust-rewrite into lane, push, open PR into
 feat/rust-rewrite, adversarial local sub-agent review with findings posted to

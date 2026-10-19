@@ -66,6 +66,14 @@ pub fn is_address(value: &serde_json::Value) -> bool {
         .is_some_and(|value| get_address(value).is_ok())
 }
 
+/// Address of a private signing key, for non-fatal account diagnostics.
+pub fn private_key_address(private_key: &str) -> Result<String, String> {
+    let signer: PrivateKeySigner = private_key
+        .parse()
+        .map_err(|error: alloy_signer_local::LocalSignerError| error.to_string())?;
+    Ok(signer.address().to_checksum(None))
+}
+
 /// ABI encode four parameters; nonce is an unsigned 256-bit big-endian word.
 pub fn encode_string_address_address_uint256(
     payload: &str,
