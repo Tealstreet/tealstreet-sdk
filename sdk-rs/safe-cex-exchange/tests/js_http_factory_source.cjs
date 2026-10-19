@@ -120,7 +120,39 @@ async function diagnosticBindingAudit(kind) {
  const rows=[];
  const originalNow=Date.now;Date.now=()=>1000;
  try {
-  if(kind==='proxy'){
+  if(kind==='consumer'){
+   const diagnostics=load(path.join(root,'packages/safe-cex/src/utils/venueRestDiagnostics.ts'));
+   Object.assign(imported['./utils/venueRestDiagnostics'],diagnostics);
+   Object.assign(imported['./utils/axiosErrorEnhancer'],load(path.join(root,'packages/safe-cex/src/utils/axiosErrorEnhancer.ts')));
+   provider={rest:({config})=>({baseURL:config.baseURL,proxied:false})};
+   for(const factory of ['routed','direct'])for(const outcome of ['success','failure'])
+    for(const sign of ['number','zero','nan','text','throw','undefined','null','boolean','infinity','negative-infinity','hidden-number','inherited-number','terminal-number','mutable-number','sealed-number'])for(const authorization of ['bearer','malformed','absent','unmarked']){
+     diagnostics.resetVenueRestDiagnostics();const events=[];let success=true,sends=0;
+     const owner={name:'polymarket',grafanaEndpointsEvery:[],grafanaEndpointsPeriodic:[],emitter:{emit:()=>{}}};
+     const xhr=moduleValue.exports[factory==='direct'?'safeCexAxiosCreateNoProxy':'safeCexAxiosCreate']({baseURL:'https://venue',adapter:async config=>{
+      sends++;const response={status:outcome==='success'?200:503,statusText:'',data:{opaque:[NaN,Infinity,-0,undefined],retCode:0},headers:{server:'audit-edge','x-bapi-limit-status':'12','retry-after':'3'},config};
+      if(outcome==='failure')throw new axios.AxiosError('Request failed with status code 503',undefined,config,undefined,response);
+      return response;
+     }},{key:'',secret:''},owner);
+     xhr.interceptors.request.use(config=>{
+      let target=config;
+      if(sign==='inherited-number'||sign==='terminal-number'){target=Object.create(sign==='terminal-number'?null:Object.prototype);Object.setPrototypeOf(config,target);}
+      if(sign==='mutable-number')config.safeCexRestDiagSignMs=7;
+      else Object.defineProperty(target,'safeCexRestDiagSignMs',{enumerable:sign!=='hidden-number',configurable:true,get(){events.push('sign');if(sign==='throw')throw Error('audit getter');return sign.endsWith('-number')?7:({number:7,zero:-0,nan:NaN,text:'7',undefined:undefined,null:null,boolean:true,infinity:Infinity,'negative-infinity':-Infinity})[sign];}});
+      if(authorization!=='unmarked')config.safeCexRestDiagProxyHeader='present';
+      if(authorization==='bearer')config.headers.set('Authorization','Bearer audit-token');
+      if(authorization==='malformed')config.headers.set('Authorization','Basic audit-token');
+      if(sign==='sealed-number')Object.preventExtensions(config);
+      return config;
+     });
+     try{await xhr.get('/diagnostic-consumer');}catch{success=false;}
+     const stats=diagnostics.getVenueRestStats().polymarket;
+     const samples=diagnostics.drainVenueRestFailureSamples();
+     assert.equal(sends,sign==='throw'?0:1);assert.equal(success,outcome==='success'&&sign!=='throw');assert.equal(stats.requests,1);assert.equal(stats[outcome==='success'&&sign!=='throw'?'ok':'failures'],1);
+     rows.push({factory,outcome,sign,authorization,success,sends,events,stats:{requests:bits(stats.requests),ok:bits(stats.ok),failures:bits(stats.failures),total:typeof stats.totalP50Ms==='number'?bits(stats.totalP50Ms):null,sign:typeof stats.signP50Ms==='number'?bits(stats.signP50Ms):null},samples:samples.map(x=>({proxy:x.restProxyHeaderSent??null,sign:typeof x.signMs==='number'?bits(x.signMs):null,name:x.errorName??null,message:x.errorMessage??null,path:x.path??null,endpoint:x.endpoint??null,bodyKind:x.bodyKind,headers:x.headers,status:typeof x.status==='number'?bits(x.status):null}))});
+   }
+   assert.equal(rows.length,240);
+  }else if(kind==='proxy'){
    const {tealstreetTransport}=load(path.join(root,'packages/safe-cex/src/transport/tealstreet/tealstreetTransport.ts'));
    for(const exchange of ['okx','grvt','mexc'])for(token of ['', 'audit-token'])for(const replacement of [false,true])for(const mode of ['fresh','readonly','readonly-undefined']){
     provider=tealstreetTransport;
@@ -161,6 +193,7 @@ async function diagnosticBindingAudit(kind) {
  return rows;
 }
 (async()=>{
+ if(process.argv[2]==='consumer-diagnostics'){process.stdout.write(JSON.stringify(await diagnosticBindingAudit('consumer')));return;}
  if(process.argv[2]==='proxy-diagnostics'||process.argv[2]==='sign-diagnostics'){process.stdout.write(JSON.stringify(await diagnosticBindingAudit(process.argv[2]==='proxy-diagnostics'?'proxy':'sign')));return;}
  if(process.argv[2]==='request-start'){process.stdout.write(JSON.stringify(await requestStartAudit()));return;}
  if(process.argv[2]==='outcomes'){process.stdout.write(JSON.stringify(await outcomeAudit()));return;}

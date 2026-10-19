@@ -15,6 +15,11 @@ Native proxy authorization carries its marker in config extensions, never header
 read-only diagnostic slots cannot reject the request. Remote signing publishes
 its timing stamps after the signed-header merge and preserves them in returned
 success/failure configs. Skipped or refused signing does not fabricate stamps.
+Both factories publish actual HTTP outcomes to the lower crate's single REST
+diagnostic cache, retaining numeric config values and bound header accessors.
+Direct failures are recorded before enhancement; routed failures are recorded
+afterwards. Config materialization follows installed Axios before terminal send,
+so accessor failures remain request-setup failures rather than phantom wire calls.
 Socket diagnostics reuse the shared auth-operation predicate after JSON parsing.
 The Bitget owned-transport regression pins retry eligibility after that boundary.
 Native network rejections retain the actual RestRequest as an opaque request
@@ -2149,3 +2154,7 @@ whose runtime shape differs from the explicit typed Candle API. Typed-only venue
 adapt their existing declared listener; Phemex overrides it with the original Js
 payload. Native account delivery captures that retained value without coercion.
 The 906-frame Phemex binding probe compares all 19 maintained-source callbacks.
+
+Private authentication recovery reports the supplied ExchangeError through the
+runtime exception sink before warning/reconnect, preserving its retained cause.
+See `PRIVATE_OPEN_REVIEW.md` for the bounded disposal/recovery differences.
