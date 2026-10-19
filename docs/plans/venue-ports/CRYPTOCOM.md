@@ -105,3 +105,13 @@ realized_pnl field (official institutional get-transactions example).
 Sub-agent found the income total cap, dead cursor-precision guard, trigger vs
 limit history price and settlement-PnL mapping. Fixed all; regressions added.
 Bans/clippy PASS; 33 venue tests PASS. Next: registration, tapes, cleanup, gates.
+
+### First-port crypto cleanup
+
+Reference audit proved wallet_utils, zklink::contract, lenient base64 decoding,
+Ethereum Value/address/ICAP facades and fixed Aster ABI construction have no
+venue callers. Removed them and their facade-only fixtures/tests. EIP-712 now
+uses Alloy TypedData directly: hashing/signing primitives remain, while ethers
+input-normalization/rejection emulation is deliberately removed. Retained
+primitive vectors, nonce scrubbing and independent Lighter corpus all pass:
+23 crypto unit tests, 1 corpus integration test and 3 doctests; clippy PASS.
