@@ -16,6 +16,47 @@ const LEVERAGE: &str = "/v1/client/futures_leverage";
 const MODE: &str = "/v1/client/position_mode";
 const POSITIONS: &str = "/v3/positions";
 
+#[path = "../../parity/test-support/ticker_ingress.rs"]
+#[cfg(not(target_arch = "wasm32"))]
+mod ticker_ingress;
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn ticker_ingress_startup_keeps_maintained_construction_order() {
+    let source = ticker_ingress::source("woo", "rest");
+    let opts =
+        serde_json::from_value(json!({"key": "", "secret": "", "publicDataOnly": true})).unwrap();
+    let h = harness(ExchangeName::Woo, opts, |http| {
+        http.route(
+            "GET",
+            MARKETS,
+            200.0,
+            json!({"success": true, "rows": [{"symbol": "PERP_BTC_USDT",
+            "base_imr": 0.02, "base_tick": 0.0001, "quote_tick": 0.1,
+            "base_min": 0.0001, "base_max": 100}]}),
+        );
+        http.route(
+            "GET",
+            TICKERS,
+            200.0,
+            json!({"success": true, "rows": [{"symbol": "PERP_BTC_USDT",
+            "24h_open": 100, "24h_close": 101.2345, "index_price": 101.1,
+            "mark_price": 101.2, "last_funding_rate": 0.0001,
+            "next_funding_time": 1700000000000_f64, "24h_volume": 12,
+            "24h_amount": 1200, "open_interest": 7}]}),
+        );
+    });
+    h.drive(h.venue().start()).unwrap();
+    assert_eq!(h.http.calls(MARKETS).len(), 1);
+    assert_eq!(h.http.calls(TICKERS).len(), 1);
+    assert_eq!(
+        ticker_ingress::observe(h.store.clone()),
+        source,
+        "WOO_POST1248_TICKER_ORDER"
+    );
+    h.venue().dispose().unwrap();
+}
+
 fn account(mode: &str) -> Value {
     json!({
         "applicationId": "app-1",
