@@ -211,3 +211,21 @@ an error. Completed jobs return their known result; fills before dispatch still
 abort. Independent final reviewer accepts this correction and reports no remaining
 P1/P2 findings in scope, with diminishing returns. All 57 Hyperliquid tests
 (20 trading), Clippy, formatting and diff checks pass.
+
+Post-review four-venue checkpoint (before Crypto.com integration): all public and
+private replay gates pass, including all four OKX aliases. Hyperliquid public
+three-run medians: TS/Rust main-thread CPU 273.1/70.4 ms, steady 31.7/27.9 ms,
+retained 4.4/1.8 MB; bundle 954,721 bytes. Binance 174.0/80.7 ms, retained
+2.3/2.3 MB (1.03x less), bundle 763,031 bytes. Bybit 482.5/421.0 ms,
+retained 3.6/2.8 MB, bundle 742,675 bytes. OKX 1049.0/865.8 ms,
+retained 3.9/3.8 MB (1.03x less), bundle 707,514 bytes. All fit 1,258,291.
+All 241 workspace tests, native/wasm Clippy, bans, fmt, 17 harness tests,
+278 targeted TS checks, 16 combined real-wasm checks and two Workers checks pass.
+Repository typecheck/lint pass. All 6,511 safe-cex CI tests pass with capped workers;
+full test-unit retries still encounter existing Hyro import timeouts under load.
+No timeout or unrelated production-code change has been made.
+
+Origin now includes Crypto.com at e6e410146e. Merge its venue, harness memory and
+protocol improvements, and provably unused crypto deletions while retaining the
+Hyperliquid helpers used by production signing. Re-run affected gates before
+pushing the final PR head; adversarial findings/resolutions are posted on #1306.
