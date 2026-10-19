@@ -448,3 +448,22 @@ all focused tests pass. Final rebuild, replay and repeat audit in progress.
 - All private variants PASS, including the final matching REST/WS live-order
   checkpoint for Bitget. Harness62, WASM adapter23 and Worker13 tests PASS.
   Final sub-agent reviews clear. Current pushed head must pass CI before merge.
+
+## Final eight-venue local gate checkpoint
+
+- All eight public gates PASS on the targeted artifact, with exact output and
+  lower Rust main/steady CPU and retained memory. All private variants PASS.
+- Final independent audit of 5300f4960f is clear; no threshold, output-oracle,
+  identity or negative-memory relaxation. Fixed bundle budget stays unchanged.
+- GitHub CI is required on the final pushed head before merge.
+
+```text
+bitget: main-thread cpu  ts    617.9 ms   rust    576.5 ms   1.07x; steady cpu       ts    411.0 ms   rust    395.8 ms   1.04x; retained memory  ts      5.9 MB   rust      2.4 MB   2.48x
+binance: main-thread cpu  ts    180.2 ms   rust     84.0 ms   2.14x; steady cpu       ts     94.2 ms   rust     34.3 ms   2.75x; retained memory  ts      4.4 MB   rust      2.2 MB   2.03x
+mexc: main-thread cpu  ts    490.6 ms   rust    200.8 ms   2.44x; steady cpu       ts    277.1 ms   rust    107.0 ms   2.59x; retained memory  ts     10.3 MB   rust      3.4 MB   3.06x
+bybit: main-thread cpu  ts    214.3 ms   rust    191.2 ms   1.12x; steady cpu       ts    116.6 ms   rust    100.3 ms   1.16x; retained memory  ts      6.5 MB   rust      2.3 MB   2.80x
+bingx: main-thread cpu  ts    113.0 ms   rust     85.8 ms   1.32x; steady cpu       ts     44.8 ms   rust     40.9 ms   1.10x; retained memory  ts      3.8 MB   rust      2.0 MB   1.90x
+cryptocom: main-thread cpu  ts    108.6 ms   rust     72.4 ms   1.50x; steady cpu       ts     47.6 ms   rust     31.0 ms   1.54x; retained memory  ts      2.2 MB   rust      1.3 MB   1.62x
+okx: main-thread cpu  ts    572.1 ms   rust    495.8 ms   1.15x; steady cpu       ts    421.1 ms   rust    358.1 ms   1.18x; retained memory  ts      5.4 MB   rust      3.4 MB   1.58x
+weex: main-thread cpu  ts    120.1 ms   rust     79.9 ms   1.50x; steady cpu       ts     56.1 ms   rust     33.3 ms   1.68x; retained memory  ts      5.3 MB   rust      2.1 MB   2.53x
+```
