@@ -56,7 +56,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = [ "safe-cex-store/src/venue_rest_diagnostics.rs::read_config_number", "safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticConfig" ]
 status = "divergent"
-note = "CHOSEN: typed numeric config rationale and property costs: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Native f64 ingress is retained. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::read_config_number` mirrors readConfigNumber. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticConfig` mirrors readConfigNumber. Split targets retain the adapter and its concrete behavior."
+note = "FIX non-UTF-8 audit row 452: actual native Axios outcomes now populate the one shared diagnostic state through read_config_number. Both real factory/Rust terminal paths match maintained TS with installed Axios across 240 numeric, accessor, authorization and settlement profiles. See safe-cex-store/per-row-rulings.md. Remaining typed/output boundary: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Native f64 ingress is retained. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::read_config_number` mirrors readConfigNumber. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::RestDiagnosticConfig` mirrors readConfigNumber. Split targets retain the adapter and its concrete behavior."
 
 [[symbol]]
 ts = "pathOf"
@@ -144,7 +144,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-store/src/venue_rest_diagnostics.rs::proxy_header_of"
 status = "divergent"
-note = "CHOSEN: config/header capability rationale and observable costs: sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. The supplied bound callback is retained; production proxy assembly is not established. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::proxy_header_of` mirrors proxyHeaderOf."
+note = "FIX non-UTF-8 audit row 454: actual native HTTP outcomes now publish samples through the shared classifier with final marker/header capabilities, distinguishing bearer, malformed, absent and unmarked requests. The real binding/source matrix covers both factories and success/failure; see safe-cex-store/per-row-rulings.md. Typed output boundaries remain in sdk-rs/parity/MANIFEST-SPEC.md#diagnostic-adapter-choice. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::proxy_header_of` mirrors proxyHeaderOf."
 
 [[symbol]]
 ts = "markRestRequestStart"
