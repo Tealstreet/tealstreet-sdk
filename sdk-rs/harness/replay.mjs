@@ -10,7 +10,7 @@ import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
 import { parseRequestJson } from './request-json.mjs';
-import { retainedMemory } from './memory.mjs';
+import { retainedMemory, settledMemory } from './memory.mjs';
 import { Responses } from './responses.mjs';
 
 const { values } = parseArgs({
@@ -359,19 +359,7 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
 };
 
 /** Loaded code is excluded; collect before I/O and after replay state settles. */
-const baseline = async () => {
-  let previous;
-  let stable = 0;
-  for (let i = 0; i < 8; i++) {
-    globalThis.gc?.();
-    await new Promise(setImmediate);
-    const memory = process.memoryUsage();
-    stable = memory.arrayBuffers === previous ? stable + 1 : 0;
-    if (stable >= 2) return memory;
-    previous = memory.arrayBuffers;
-  }
-  throw new Error('Backing-buffer memory did not settle');
-};
+const baseline = () => settledMemory();
 
 const sortBook = (book) => ({
   bids: book.bids.map(({ price, amount }) => [price, amount]),

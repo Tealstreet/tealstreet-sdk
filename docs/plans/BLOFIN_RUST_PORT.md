@@ -364,3 +364,14 @@ and three-run public medians:
   Final five-venue correctness/performance/size checks are running. Shared-engine
   merge review passes21 tests and clippy; host/SDK integration review has no
   concrete blockers. No master, rebase, force push, stash or gate relaxation.
+
+- Corrected a shared baseline race: three equal immediate-only samples could
+  precede delayed56-byte loader-buffer cleanup. Require100ms exact stability
+  across10ms timer turns/GC, bounded1s. Signed deltas and negative checks stay.
+  Independent review and11 harness tests pass. BloFin public189.063/150.870ms,
+  steady120.928/91.103ms, retained2.828152/1.661880MB passes; private29 passes.
+- Five-venue build1,817,179bytes fits. Binance/Bybit/Crypto.com public+private
+  pass. OKX exact correctness/memory pass but size profile fails CPU1151.3/
+  1235.1ms and steady891.0/911.5ms. Restore OKX O3; evaluate Crypto.com size
+  profile under the same unchanged aggregate budget. All final gates rerun on
+  that artifact before landing. Native266/SDK17/host4/TC44/lint28/clippy pass.
