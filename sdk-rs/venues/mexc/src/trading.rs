@@ -968,8 +968,18 @@ impl MexcFutures {
             let order = self
                 .map_order(cx, &raw, Scope::Regular)
                 .ok_or_else(|| "Invalid MEXC amend order read".to_owned())?;
-            if order.id != intent.id {
+            if order.id != intent.id || order.symbol != opts.symbol {
                 return Err("MEXC amend read returned a different order".into());
+            }
+            if raw.vol <= 0.0 || raw.deal_vol < 0.0 || raw.deal_vol > raw.vol {
+                return Err("Invalid MEXC amend volume; replacement withheld".into());
+            }
+            if cx
+                .store
+                .order(&intent.id)
+                .is_some_and(|o| o.filled > order.filled)
+            {
+                return Err("Stale MEXC amend fill quantity; replacement withheld".into());
             }
             if order.status == OrderStatus::Open {
                 if attempt >= 5 {

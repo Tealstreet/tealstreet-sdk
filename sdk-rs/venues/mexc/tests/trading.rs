@@ -447,6 +447,50 @@ fn amend_recomputes_remaining_quantity_after_fills_during_cancel() {
 }
 
 #[test]
+fn stale_terminal_amend_read_cannot_erase_a_newer_partial_fill_or_replace_it() {
+    let (mut e, socket, reads, _) = private_started();
+    for r in reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    e.drain_actions().for_each(drop);
+    let original = r#"{"channel":"push.personal.order","data":{"orderId":"one","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":10,"price":59000,"state":2}}"#;
+    ws(&mut e, socket, original);
+    e.drain_actions().for_each(drop);
+    e.handle(
+        300.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "one".into(),
+            price: Some(58000.0),
+            amount: None,
+        }),
+    );
+    let cancel = requests(&mut e).remove(0);
+    reply(
+        &mut e,
+        &cancel,
+        400.0,
+        r#"{"success":true,"code":0,"data":[{"orderId":"one","errorCode":0}]}"#,
+    );
+    let read = requests(&mut e).remove(0);
+    ws(
+        &mut e,
+        socket,
+        &original.replace("\"dealVol\":10", "\"dealVol\":40"),
+    );
+    reply(
+        &mut e,
+        &read,
+        450.0,
+        r#"{"success":true,"code":0,"data":{"orderId":"one","symbol":"BTC_USDT","side":1,"orderType":1,"vol":60,"dealVol":30,"price":59000,"state":4}}"#,
+    );
+    assert!((e.store().order("one").unwrap().filled - 0.004).abs() < 1e-12);
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a|matches!(a,Action::Notice(Notice::CommandDone {result:Err(e),..}) if e.contains("Stale"))));
+}
+
+#[test]
 fn filled_order_is_neither_replaced_nor_changed_to_canceled_by_cancel_ack() {
     let (mut e, socket, reads, _) = private_started();
     for r in reads {

@@ -513,13 +513,19 @@ export class MexcExchange extends BaseExchange {
             page_size: 100,
           },
         });
-        orders.push(
-          ...extractRows<Record<string, any>>(data, ['orders', 'items'])
-            .map((row) => normalizeOrder(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]))
-            .filter((order): order is Order => !!order),
-        );
+        this.assertCommonSuccess(data, 'MEXC open orders read');
+        const payload = extractData(data);
+        if (!Array.isArray(payload) && !['orders', 'items'].some((key) => Array.isArray(payload?.[key]) || Array.isArray(payload?.data?.[key]))) {
+          throw new Error('Invalid MEXC open orders read');
+        }
+        for (const row of extractRows<Record<string, any>>(data, ['orders', 'items'])) {
+          const order = normalizeOrder(row, this.store.marketsBySymbol[fromMexcSymbol(row.symbol)]);
+          if (!order) throw new Error('Invalid MEXC open order row');
+          orders.push(order);
+        }
       } catch (err: any) {
         this.log(`Failed to fetch MEXC open orders: ${err?.response?.data?.message || err?.message}`, LogSeverity.Warning);
+        throw err;
       }
     }
 
@@ -625,8 +631,8 @@ export class MexcExchange extends BaseExchange {
 
   placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
     this.resolveCallerClientOrderId(opts);
-    if (opts.type === OrderType.TrailingStopLoss) {
-      const message = 'MEXC trailing-stop order placement is not implemented yet';
+    if (opts.type === OrderType.TrailingStopLoss || opts.type === OrderType.Conditional) {
+      const message = 'MEXC opening conditional and trailing-stop placement is not implemented';
       this.emitAndLogError(message);
       throw new Error(message);
     }
@@ -680,6 +686,10 @@ export class MexcExchange extends BaseExchange {
       leverage: Math.min(Math.max(leverage, market.limits.leverage.min), market.limits.leverage.max),
       externalOid: `ts_${uuid()}`,
       reduceOnly: opts.reduceOnly || undefined,
+      stopLossPrice: opts.stopLoss === undefined ? undefined : `${adjust(opts.stopLoss, market.precision.price)}`,
+      takeProfitPrice: opts.takeProfit === undefined ? undefined : `${adjust(opts.takeProfit, market.precision.price)}`,
+      lossTrend: opts.stopLoss === undefined ? undefined : this.stopOrderTrend({ ...opts, type: OrderType.StopLoss }),
+      profitTrend: opts.takeProfit === undefined ? undefined : this.stopOrderTrend({ ...opts, type: OrderType.TakeProfit }),
     });
   };
 
@@ -767,7 +777,7 @@ export class MexcExchange extends BaseExchange {
       throw new Error(message);
     }
 
-    const leverage = Math.min(Math.max(this.getLeverageForOrder(opts), market.limits.leverage.min), market.limits.leverage.max);
+    const leverage = Math.min(Math.max(this.getLeverageForOrder({ ...opts, reduceOnly: true }), market.limits.leverage.min), market.limits.leverage.max);
     const config = this.symbolSettings.get(opts.symbol) || this.deriveSymbolConfig(opts.symbol);
     const payload = omitUndefined({
       symbol: market.id,
@@ -1029,6 +1039,9 @@ export class MexcExchange extends BaseExchange {
 
   placeOrders = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
     this.assertCallerClientOrderIds(orders);
+    if (orders.some((order) => order.type === OrderType.Conditional || order.type === OrderType.TrailingStopLoss)) {
+      throw new Error('MEXC opening conditional and trailing-stop placement is not implemented');
+    }
     if (!orders.length) return [];
     if (orders.every(this.isRegularPlaceOrder)) {
       if (this.nativeBatchOrdersAvailable !== false) {
@@ -1072,7 +1085,7 @@ export class MexcExchange extends BaseExchange {
   };
 
   private isRegularPlaceOrder = (order: PlaceOrderOpts): boolean =>
-    order.type !== OrderType.StopLoss && order.type !== OrderType.TakeProfit && order.type !== OrderType.TrailingStopLoss;
+    order.type === OrderType.Limit || order.type === OrderType.Market;
 
   private placeRegularOrdersBatch = async (orders: PlaceOrderOpts[]): Promise<string[]> => {
     const payload = orders.map((order) => ({
@@ -1153,7 +1166,53 @@ export class MexcExchange extends BaseExchange {
     };
 
     await this.cancelOrders([order]);
+    if (this.store.orders.some((current) => current.id === order.id && current.status === OrderStatus.Closed)) {
+      throw new Error('MEXC original order filled during amend');
+    }
+    if (!this.isStopLikeOrder(order)) {
+      const terminal = await this.readCanceledOrder(order);
+      if (!('amount' in update)) nextOrder.amount = toNumber(terminal.extra?.remainingNative, Number.NaN);
+      if (!Number.isFinite(nextOrder.amount) || nextOrder.amount <= 0) {
+        throw new Error('MEXC replacement requires positive remaining native volume');
+      }
+    }
     return await this.placeOrder(nextOrder);
+  };
+
+  private readCanceledOrder = async (original: Order): Promise<Order> => {
+    for (let attempt = 0; attempt <= 5; attempt += 1) {
+      const { data } = await this.xhr.get(`/api/v1/private/order/get/${original.id.split('__')[0]}`);
+      this.assertCommonSuccess(data, 'MEXC amend reconciliation');
+      const raw = extractData<Record<string, any>>(data);
+      const order = normalizeOrder(raw, this.store.marketsBySymbol[original.symbol]);
+      const volume = toNumber(raw?.vol, Number.NaN);
+      const filled = toNumber(raw?.dealVol, Number.NaN);
+      if (!order || order.id !== original.id || order.symbol !== original.symbol ||
+          !Number.isFinite(volume) || volume <= 0 || !Number.isFinite(filled) || filled < 0 || filled > volume) {
+        throw new Error('Invalid MEXC amend order read; replacement withheld');
+      }
+      const current = this.store.orders.find((row) => row.id === original.id);
+      if (order.filled < Math.max(original.filled, current?.filled ?? 0)) {
+        throw new Error('MEXC amend read regressed cumulative fills; replacement withheld');
+      }
+      if (order.status === OrderStatus.Closed) {
+        if (current?.status !== OrderStatus.Closed || current.filled < order.filled) this.store.addOrUpdateOrder(order);
+        this.store.markOrdersTerminal([{ id: order.id }], OrderStatus.Closed);
+        throw new Error('MEXC original order filled during amend');
+      }
+      if (current?.status === OrderStatus.Closed) throw new Error('MEXC original order filled during amend');
+      const state = toNumber(raw.state, Number.NaN);
+      if (state === 4) {
+        this.store.addOrUpdateOrder(order);
+        this.store.markOrdersTerminal([{ id: order.id }], OrderStatus.Canceled);
+        return order;
+      }
+      if ((state !== 1 && state !== 2) || attempt === 5) {
+        throw new Error('MEXC cancellation is not authoritative; replacement withheld');
+      }
+      await sleep(200);
+    }
+    throw new Error('MEXC cancellation is not authoritative; replacement withheld');
   };
 
   private getReplacementOrderAmount = (order: Order): number => {
@@ -1202,8 +1261,8 @@ export class MexcExchange extends BaseExchange {
     }
 
     this.noteRecentlyCanceledStopLikeOrders(acceptedStopLikeCancels);
-    this.store.updateOrdersStatus(
-      orders.map((order) => ({ id: order.id })),
+    this.store.markOrdersTerminal(
+      orders.filter((order) => !this.store.orders.some((current) => current.id === order.id && current.status === OrderStatus.Closed)).map((order) => ({ id: order.id })),
       OrderStatus.Canceled,
     );
   };
@@ -1298,7 +1357,7 @@ export class MexcExchange extends BaseExchange {
     this.recentlyRejectedRegularOrderIds.set(cleanId, virtualClock.getCurrentTimeMs());
 
     const existing = this.store.orders.find((order) => order.id === cleanId);
-    if (existing && existing.status !== OrderStatus.Canceled) {
+    if (existing && existing.status !== OrderStatus.Canceled && existing.status !== OrderStatus.Closed) {
       this.store.updateOrderStatus({ id: cleanId }, OrderStatus.Canceled);
     }
 
@@ -1339,11 +1398,17 @@ export class MexcExchange extends BaseExchange {
 
   cancelSymbolOrders = async (symbol: string): Promise<void> => {
     const market = this.store.marketsBySymbol[symbol];
-    await this.xhr.post(ENDPOINTS.ORDER_CANCEL_ALL, omitUndefined({ symbol: market?.id || toMexcSymbol(symbol) }));
-    this.store.updateOrdersStatus(
-      this.store.orders.filter((order) => order.symbol === symbol).map((order) => ({ id: order.id })),
-      OrderStatus.Canceled,
-    );
+    for (const [endpoint, accepts] of [
+      [ENDPOINTS.ORDER_CANCEL_ALL, (order: Order) => !this.isStopLikeOrder(order)],
+      ['/api/v1/private/planorder/cancel_all', (order: Order) => this.isPlanOrder(order)],
+      ['/api/v1/private/stoporder/cancel_all', (order: Order) => this.isStopOrder(order)],
+    ] as const) {
+      const { data } = await this.xhr.post(endpoint, { symbol: market?.id || toMexcSymbol(symbol) });
+      this.assertCommonSuccess(data, 'MEXC cancel-all');
+      const orders = this.store.orders.filter((order) => order.symbol === symbol && accepts(order) && order.status !== OrderStatus.Closed);
+      this.noteRecentlyCanceledStopLikeOrders(orders.filter((order) => this.isStopLikeOrder(order)));
+      this.store.markOrdersTerminal(orders.map((order) => ({ id: order.id })), OrderStatus.Canceled);
+    }
   };
 
   cancelAllOrders = async (): Promise<void> => {

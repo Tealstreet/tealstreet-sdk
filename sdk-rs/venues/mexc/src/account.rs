@@ -395,12 +395,38 @@ impl MexcFutures {
     pub fn apply_order(
         &mut self,
         cx: &mut Cx<'_, Pending>,
-        order: Order,
+        mut order: Order,
         scope: Scope,
         revision: u64,
     ) {
+        if scope == Scope::Regular
+            && let Some(current) = cx.store.order(&order.id)
+        {
+            if order.filled < current.filled {
+                let status = order.status;
+                order = current.clone();
+                if current.status != OrderStatus::Closed
+                    && matches!(status, OrderStatus::Canceled | OrderStatus::Closed)
+                {
+                    order.status = status;
+                }
+            }
+            if current.status == OrderStatus::Closed {
+                order.status = OrderStatus::Closed;
+            }
+        }
         if order.status == OrderStatus::Open && self.account.terminal.contains_key(&order.id) {
-            return;
+            // A fill can precede cancellation but arrive after its HTTP ack.
+            // Retain its cumulative quantity without reopening the order.
+            if scope == Scope::Regular
+                && let Some(current) = cx.store.order(&order.id)
+                && order.filled > current.filled
+                && matches!(current.status, OrderStatus::Canceled | OrderStatus::Closed)
+            {
+                order.status = current.status;
+            } else {
+                return;
+            }
         }
         self.account
             .order_updates

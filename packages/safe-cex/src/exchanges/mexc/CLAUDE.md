@@ -128,6 +128,13 @@ fills and stops replacement. This avoids replacing fills whose WS frames
 arrive after the cancellation response. Newer WS settings win over delayed
 mutation acknowledgements, with revisions tracked separately per hedge rail.
 
+Regular cumulative fills never regress across WS frames, independently of
+status. Terminal rows accept a delayed Open frame's larger cumulative fill
+while retaining their terminal status; Closed takes precedence. Older terminal
+frames and amend reads cannot regress quantity; a stale final read withholds replacement even when the
+caller supplied an explicit new amount. Stop replacements also abort if the
+original executes before cancellation is acknowledged.
+
 The Rust gate's `KNOWN_TS_FIXES.mexc` lists intentional corrections to the TS
 reference, including full-depth sequencing, closing leverage for sized stops,
 native attached brackets, and cancel-all across all three order surfaces.
@@ -139,3 +146,7 @@ Only explicit `FUNDING_FEE` income is supported; an all-kind income request
 fails because the funding endpoint cannot supply a complete general ledger.
 The public deals feed exposes no execution ID, so its result keys include the
 response ordinal and preserve otherwise identical prints.
+
+Private execution IDs are deduplicated for five minutes. Cumulative regular
+fill volume is monotonic across WS updates, including updates arriving after
+a cancel acknowledgement; terminal status is retained without dropping fills.

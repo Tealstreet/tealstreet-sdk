@@ -112,3 +112,22 @@ and cut a follow-up branch. Never touch master or force-push.
   chunk-boundary nested streaming tests. Crate clippy and bans pass.
 - Merged latest landing branch through f036684d26; retained its relocated wasm
   test path and corrected relative imports in e2d8e7c43b.
+- Phase 5 reference repairs are implemented and independently reviewed:
+  full incremental depth and snapshot lifecycle; native brackets; unsupported
+  conditional/trailing preflight; closing stop leverage; all cancel-all scopes;
+  definitive amend reads; failed regular snapshots; monotonic cumulative fills,
+  Closed precedence, and once-per-execution fill delivery. These are documented
+  in KNOWN_TS_FIXES.mexc and corresponding TS regression tests.
+- Adversarial phase review caught stale partial amend reads and completed-stop
+  replacement. Both implementations now withhold unsafe replacements. Delayed
+  Open fill frames after cancel acceptance retain higher cumulative fills while
+  preserving the terminal status; lower cumulative rows cannot erase fills.
+- Verification: 44 MEXC Rust tests, 12 engine tests, 91 focused TS MEXC tests,
+  14 public depth regressions, package typecheck/lint, wasm clippy and bindings
+  build pass. Root checks passed (44 typecheck, 28 lint, 27 test tasks; safe-cex
+  6523 tests); final targeted tests cover the subsequent race fixes.
+- Public recording succeeded: 20s BTCUSDT/ETHUSDT, 14706 WS frames. Harness
+  review fixed same-URL socket ordinals, mutation response reuse and reconnect
+  lifecycle ordering. Public virtual timers now follow recorded timestamps.
+  Gates remain pending: the trimmer dropped resync responses after the third
+  identical URL; preserve complete recorded input before the final comparison.

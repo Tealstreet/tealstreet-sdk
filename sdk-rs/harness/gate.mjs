@@ -81,6 +81,9 @@ const KNOWN_TS_FIXES = {
     // Cancel-all reaches regular, plan and position-stop endpoints.
     // Cancel/replace recomputes remaining size after racing fills; Closed wins
     // over a late cancellation acknowledgement. Failed reads preserve state.
+    // Regular cumulative fills stay monotonic; terminal rows never reopen.
+    // Stale amend reads cannot regress those fills or place a replacement.
+    // Repeated private execution IDs emit one fill within the replay window.
   },
 };
 if (isPrivate) {
