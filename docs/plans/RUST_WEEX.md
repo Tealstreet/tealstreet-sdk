@@ -55,16 +55,28 @@ by a sub-agent at each phase boundary. Never touch master or rebase.
   matching, response headers, paced snapshots and socket readiness preserve
   Binance parity. Independent harness and host reviews are clean after fixing
   Node socket error handling, disposal and Workers upgrade capabilities.
-- Preliminary replay gates all PASS: WEEX public worker CPU 141.8ms TS versus
-  126.1ms Rust, steady CPU 82.8ms versus 58.8ms, retained memory 2.6MB versus
-  2.2MB; private replay 15 frames. Binance public CPU 226.5ms versus 99.9ms,
-  retained memory 2.3MB versus 2.0MB; private replay 14 frames. Final rerun follows
-  the last public ban/active-symbol changes and landing-branch merge.
-- Final checks in progress: Rust native/wasm, SDK/host tests, root typecheck,
-  lint and tests. Broad root tests passed all but unrelated timed-out suites;
-  package suite rerun uses two workers and a 30-second test timeout.
-- Crypto audit found no helper made unused by this port; signing/UUID remain
-  live and the shared signing primitive API stays intact. No credentials used.
+- Final replay gates after landing merge `22ccd27bd4` all PASS. WEEX public:
+  2028 frames, 1040 markets/tickers, two books; worker CPU 150.8ms TS versus
+  109.5ms Rust (1.38x), steady CPU 83.9ms versus 49.2ms (1.70x), retained
+  memory 2.6MB versus 2.2MB (1.19x), wasm linear memory 1.7MB. Whole-process
+  CPU including background compilation was 204.8ms versus 230.0ms; the existing
+  gate measures worker-thread CPU. WEEX private: 15 frames, exact account,
+  command and signed-request parity. Binance public: 871 frames, CPU 228.2ms
+  versus 100.5ms (2.27x), steady 126.6ms versus 42.1ms (3.01x), memory 2.3MB
+  versus 2.0MB (1.15x). Binance private: 14 frames, exact parity.
+- Native tests: 60 WEEX, 10 engine and 29 Binance passed. Root typecheck44
+  tasks and lint28 tasks passed. SDK wasm tests5 and host tests7 passed.
+  Bans/fmt and native/wasm clippy passed. Final crypto cleanup recheck/build
+  and broad TS suite (two workers, 30-second test timeout) are in progress;
+  earlier root runs passed all but unrelated timed-out suites.
+- Crypto cleanup removes unused wallet wrappers, address predicate, fixed
+  venue-specific ABI tuple builder and lenient base64 decoder. Shared signing
+  primitives remain; 27 unit, one integration and three compile-fail doctests
+  pass. No credentials used.
+- This is phase8 opt-in integration (`engine: 'rust'`), matching Binance.
+  Existing TS remains actively reachable through its registry and used by
+  the replay oracle. Phase9 shipping retirement and client adoption are not
+  claimed complete by this lane.
 
 ## Delivery
 
