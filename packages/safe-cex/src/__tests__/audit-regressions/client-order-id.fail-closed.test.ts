@@ -82,6 +82,7 @@ const HONORING: Array<[string, ExchangeCtor]> = [
   ['paradex', ParadexExchange],
   ['phemex', PhemexExchange],
   ['weex', WeexExchange],
+  ['weex', RustEngineExchange],
   ['woo', WOOXExchange],
 ];
 

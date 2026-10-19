@@ -42,6 +42,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   okxeu: 'okxeu',
   okxdemo: 'okxdemo',
   okxeudemo: 'okxeudemo',
+  weex: 'weex',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
@@ -53,6 +54,7 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   hyperliquid: hyperliquidClientOrderIdRule,
   bybit: patternClientOrderIdRule('Bybit', /^[A-Za-z0-9_-]{1,36}$/),
   cryptocom: patternClientOrderIdRule('Crypto.com', /^.{1,36}$/),
+  weex: patternClientOrderIdRule('WEEX', /^[.A-Z:/a-z0-9_-]{1,36}$/, { mint: () => `ts${uuid()}`.slice(0, 36) }),
   okx: okxClientOrderIdRule,
   okxeu: okxClientOrderIdRule,
   okxdemo: okxClientOrderIdRule,
@@ -110,6 +112,7 @@ export class RustEngineExchange extends BaseExchange {
         this.command<ClientOrderLookup>({ op: 'findOrderByClientOrderId', symbol, clientOrderId });
     }
     this.applier = new FrameApplier(store);
+    this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
   }
 
   get isPublicDataOnly(): boolean {
@@ -119,6 +122,9 @@ export class RustEngineExchange extends BaseExchange {
       !Boolean(this.options.vault || this.options.applicationId || this.options.key)
     );
   }
+  private updateTickerSymbols = () => {
+    if (this.host) void this.host.command({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
+  };
 
   start = async () => {
     if (this.name === 'hyperliquid' && this.options.enableSpotMarkets) {
@@ -133,6 +139,7 @@ export class RustEngineExchange extends BaseExchange {
     const { key, secret, passphrase, testnet, applicationId, vault, hyperliquidBuilder, enableSpotMarkets } =
       this.options;
     const publicDataOnly = this.isPublicDataOnly;
+    const transport = engineTransport();
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
       JSON.stringify({
@@ -145,13 +152,15 @@ export class RustEngineExchange extends BaseExchange {
         vault,
         hyperliquidBuilder,
         enableSpotMarkets: Boolean(enableSpotMarkets),
+        ...(this.name === 'weex' ? { privateWsHeaders: Boolean(transport.webSocketHeaders) } : {}),
       }),
     );
-    this.host = new EngineHost(engine, engineTransport(), {
+    this.host = new EngineHost(engine, transport, {
       onFrame: this.receiveFrame,
       onLog: this.receiveLog,
     });
     this.host.start();
+    this.updateTickerSymbols();
     // Books, candles and fills go out at the venue's book cadence, the rest
     // at the store's, matching what the TS worker posts today.
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;

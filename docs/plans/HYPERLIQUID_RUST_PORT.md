@@ -265,3 +265,13 @@ WEEX has landed at origin/feat/rust-rewrite (6cd219ce4c), including host lifecyc
 and OKX allocation fixes. Integrate that landing tree while the bounded Crypto.com
 fix runs, then verify the settled tree. No gate threshold or parity exclusion is
 being relaxed.
+
+WEEX integration review: six constructors/features, WS upgrade headers, active
+symbol notifications and host lifecycle changes are retained. WEEX-only testnet
+field is cfg-gated; native WEEX-only/Hyperliquid-only builds pass. Added the
+incoming missing WEEX client-ID rule with common regressions. Hyperliquid wallet
+semantics, all OKX aliases and the per-venue 1,258,291-byte budget remain intact.
+Independent reviewers accepted the union and Crypto.com automatic budget fix.
+The harness review found missing WEEX auth timestamp validation; both REST and
+upgrade now require safe millisecond timestamps within 30 seconds. Fourteen
+malicious signed cases reproduced the gap before the fix; 54 harness tests pass.

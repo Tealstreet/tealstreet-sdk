@@ -8,6 +8,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { subscriptionKeys } from './requests.mjs';
 import { gunzipSync } from 'node:zlib';
+import { fixWeexConditionals } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 
 const { values } = parseArgs({
@@ -94,6 +95,7 @@ const KNOWN_TS_FIXES = {
     // - Income honors the requested kind; fills support all-symbol queries.
     // The tape compares converged state: no account values are rewritten here.
   },
+  cryptocom: fixCryptocomAccount,
   // Applied to the TS oracle itself (okx.ws-public.ts / okx.exchange.ts).
   okx: [
     'full books retain levels past a stale last trade',
@@ -111,11 +113,26 @@ const KNOWN_TS_FIXES = {
     'new account equity survives delayed snapshots and local balance ticks',
     'acknowledged leverage survives failed post-write snapshots',
   ],
-  account: (account, rustAccount) => {
+  binance(account, rustAccount) {
     for (const position of account.positions) {
       const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
       if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
     }
+  },
+  weex(account) {
+    // TS reads opening STOP/TP stream rows as protective orders and displays
+    // the execution price as their trigger, corrupting conditional size amends.
+    const bytes = readFileSync(values.tape);
+    const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
+      .toString('utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    fixWeexConditionals(account, records);
+    // Additional deliberate fixes, covered by native regressions: failed
+    // normal/algo reads retain the complete last snapshot; stale depth/private
+    // frames cannot undo newer state; repeated fill IDs emit once; missing
+    // placement IDs fail rather than fabricating an ID; rejected cancellations
+    // retain their order; per-symbol margin changes preserve that symbol's mode.
+    // Price-only replacement preserves remaining quantity and refuses uncertain
+    // fill/bracket state; positive income cursors always report INCOMPLETE.
   },
   bybit(account, rustAccount, tsResult) {
     // TS's optional API-key/VIP UI metadata probe has no engine-frame output.
@@ -149,7 +166,7 @@ const KNOWN_TS_FIXES = {
     // Partial-stop amend keeps its native ID when no mark price is available.
   },
 };
-const fixCryptocomAccount = (account) => {
+function fixCryptocomAccount(account) {
     // TS never sets the hedged store flag despite mapping positions as hedged.
     account.hedged = true;
     // TS omits user.trade entirely. Derive the execution oracle from documented
@@ -175,8 +192,8 @@ const fixCryptocomAccount = (account) => {
     // ignored brackets/opening triggers reject before writes; caller ids use a
     // conservative 36-byte ceiling without JS string emulation.
     // Public throttle and public-only subscription corrections are the
-    // afterTsFrame and prepareTs hooks in venues.mjs.
-};
+    // afterTsFrame and prepareTsReady hooks in venues.mjs.
+}
 for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
@@ -185,7 +202,11 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) {
     const output = impl === 'ts' ? ts : rust;
     const unserved = output.unserved;
-    if (output.metrics.retainedBytes < 0 || output.metrics.bufferRetainedBytes < 0) differences.push(impl + ': negative retained memory component; baseline is invalid');
+    for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
+      if (!Number.isFinite(output.metrics[field]) || output.metrics[field] < 0) {
+        differences.push(`${impl}: invalid ${field} (${output.metrics[field]}); baseline is invalid`);
+      }
+    }
     if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
     for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
     for (const symbol of values.books.split(',').filter(Boolean)) {
@@ -209,8 +230,9 @@ for (let run = 0; run < runs; run++) {
       }
       ts.subscriptions = [...feeds].sort();
     }
-    if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
+    if (values.venue === 'binance') KNOWN_TS_FIXES.binance(ts.account, rust.account);
     if (values.venue === 'bybit') KNOWN_TS_FIXES.bybit(ts.account, rust.account, ts);
+    if (values.venue === 'weex') KNOWN_TS_FIXES.weex(ts.account);
     for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
       const left = JSON.stringify(ts.account[field]);
       const right = JSON.stringify(rust.account[field]);

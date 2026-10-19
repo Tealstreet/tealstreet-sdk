@@ -59,3 +59,29 @@ test('writes cannot skip a premature earlier acknowledgement or consume on faile
   assert.equal(responses.respond(write.method, write.url, 'valid', 2).status, 599);
   assert.equal(responses.unusedWrites(), 0);
 });
+
+
+test('WEEX effective snapshots follow delivered time without consuming their transitions', () => {
+  const read = { type: 'http', method: 'GET', url: 'https://api-contract.weex.com/capi/v3/openOrders', status: 200 };
+  const responses = new Responses([
+    { ...read, effectiveAt: 0, body: 'initial' },
+    { ...read, effectiveAt: 2800, body: 'placed' },
+    { ...read, effectiveAt: 4000, body: 'cancelled' },
+  ], (method, url) => method + url);
+  for (let i = 0; i < 3; i++) assert.equal(responses.respond(read.method, read.url, undefined, 0, 2799).body, 'initial');
+  assert.equal(responses.respond(read.method, read.url, undefined, 0, 2800).body, 'placed');
+  assert.equal(responses.respond(read.method, read.url, undefined, 0, 3999).body, 'placed');
+  assert.equal(responses.respond(read.method, read.url, undefined, 0, 4000).body, 'cancelled');
+  const future = new Responses([{ ...read, effectiveAt: 1, body: 'future' }], (method, url) => method + url);
+  assert.equal(future.respond(read.method, read.url, undefined, 0, 0).status, 599);
+});
+
+test('WEEX acknowledgements echo the actual generated ID and still consume exactly once', () => {
+  const write = { type: 'http', method: 'POST', url: 'https://api-contract.weex.com/capi/v3/algoOrder', status: 200,
+    body: '{"orderId":"702345678901234565","clientOrderId":"$clientAlgoId"}' };
+  const responses = new Responses([write], (method, url) => method + url);
+  const result = responses.respond(write.method, write.url, '{"clientAlgoId":"generated-on-wire"}');
+  assert.equal(JSON.parse(result.body).clientOrderId, 'generated-on-wire');
+  assert.equal(JSON.parse(result.body).orderId, '702345678901234565');
+  assert.equal(responses.respond(write.method, write.url, '{"clientAlgoId":"another"}').status, 599);
+});

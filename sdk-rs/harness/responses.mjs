@@ -1,4 +1,5 @@
 import { isWriteRequest, selectResponse } from './requests.mjs';
+import { parseRequestJson } from './request-json.mjs';
 
 // Reads may reuse their last snapshot; a mutation response is consumed once.
 export class Responses {
@@ -25,7 +26,15 @@ export class Responses {
       this.unserved++;
       return { status: 599, body: '' };
     }
-    return { status: record.status, headers: record.headers ?? '', body: record.body };
+    // WEEX acknowledges generated IDs from the actual request, never a fixed ID.
+    let responseBody = record.body;
+    if (/"\$(clientAlgoId|newClientOrderId)"/.test(responseBody)) {
+      const sent = typeof body === 'string' ? parseRequestJson(body) : body;
+      responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId)"/g,
+        (_, field) => JSON.stringify(sent?.[field] ?? null,
+          (_key, value) => typeof value === 'bigint' ? JSON.rawJSON(String(value)) : value));
+    }
+    return { status: record.status, headers: record.headers ?? '', body: responseBody };
   }
   unusedWrites() {
     return [...this.queues.values()].flat().filter((r) => this.isWrite(r.method, r.url)).length;

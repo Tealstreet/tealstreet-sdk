@@ -17,8 +17,9 @@ export const isWriteRequest = (method, url) => {
 
 export const selectResponse = (queue, elapsed, { write = false, commandIndex = 0 } = {}) => {
   if (!queue?.length) return undefined;
+  const at = (record) => record.availableAt ?? record.effectiveAt ?? 0;
   const available = (record) => (record.afterCommand ?? 0) <= commandIndex
-    && (record.availableAt ?? 0) <= elapsed;
+    && at(record) <= elapsed;
   if (write) {
     // An acknowledgement proves one attempt. Never replay it for another write,
     // or skip an earlier outstanding write to consume a later staged one.
@@ -28,7 +29,7 @@ export const selectResponse = (queue, elapsed, { write = false, commandIndex = 0
   if (!eligible.length) return undefined;
   const stage = Math.max(...eligible.map((record) => record.afterCommand ?? 0));
   const current = eligible.filter((record) => (record.afterCommand ?? 0) === stage);
-  if (!current.some((record) => record.availableAt !== undefined)) {
+  if (!current.some((record) => record.availableAt !== undefined || record.effectiveAt !== undefined)) {
     const record = current[0];
     if (current.length > 1) queue.splice(queue.indexOf(record), 1);
     return record;
@@ -36,7 +37,7 @@ export const selectResponse = (queue, elapsed, { write = false, commandIndex = 0
   let selected;
   let latest = -Infinity;
   for (const record of current) {
-    const available = record.availableAt ?? 0;
+    const available = at(record);
     if (available <= elapsed && available >= latest) {
       selected = record;
       latest = available;

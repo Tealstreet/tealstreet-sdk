@@ -75,17 +75,39 @@ pub struct Fill {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
-    WsConnect { socket: SocketId, url: String },
-    WsSend { socket: SocketId, text: String },
-    WsClose { socket: SocketId },
+    WsConnect {
+        socket: SocketId,
+        url: String,
+    },
+    /// Upgrade authentication; hosts must fail closed if headers are unsupported.
+    WsConnectWithHeaders {
+        socket: SocketId,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+    },
+    WsSend {
+        socket: SocketId,
+        text: String,
+    },
+    WsClose {
+        socket: SocketId,
+    },
     Http(HttpRequest),
-    SetTimer { timer: TimerId, at_ms: f64 },
-    ClearTimer { timer: TimerId },
+    SetTimer {
+        timer: TimerId,
+        at_ms: f64,
+    },
+    ClearTimer {
+        timer: TimerId,
+    },
     Notice(Notice),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    SetTickerSymbols {
+        symbols: Vec<String>,
+    },
     SubscribeOrderBook {
         symbol: String,
     },
@@ -315,6 +337,20 @@ impl<P> Cx<'_, P> {
         socket
     }
 
+    pub fn connect_with_headers(
+        &mut self,
+        url: impl Into<String>,
+        headers: Vec<(&'static str, String)>,
+    ) -> SocketId {
+        let socket = SocketId(self.io.next());
+        self.io.actions.push(Action::WsConnectWithHeaders {
+            socket,
+            url: url.into(),
+            headers,
+        });
+        socket
+    }
+
     pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
         self.io.actions.push(Action::WsSend {
             socket,
@@ -349,8 +385,7 @@ impl<P> Cx<'_, P> {
 
     /// Issue a request whose successful body holds a large array: each element
     /// goes to [`Venue::on_item`] as it arrives, then [`Venue::on_response`]
-    /// runs with the envelope for `EnvelopeField` or `Path` (array emptied),
-    /// or an empty body for legacy `Root`/`Field`. Error bodies arrive whole.
+    /// receives the envelope with its array emptied. Error bodies arrive whole.
     pub fn request_streamed(
         &mut self,
         method: Method,
@@ -627,10 +662,7 @@ impl<V: Venue> Engine<V> {
             let response = Response {
                 status: incoming.status,
                 headers: &incoming.headers,
-                body: splitter
-                    .envelope()
-                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
-                    .unwrap_or(""),
+                body: std::str::from_utf8(outside).unwrap_or_default(),
             };
             self.venue.on_response(&mut cx, pending, response);
             return;

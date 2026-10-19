@@ -7,11 +7,12 @@
     feature = "binance",
     feature = "bybit",
     feature = "cryptocom",
+    feature = "weex",
     feature = "hyperliquid",
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, hyperliquid or okx"
+    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, hyperliquid, okx or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -28,6 +29,8 @@ use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
 #[cfg(feature = "okx")]
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
+#[cfg(feature = "weex")]
+use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -69,12 +72,20 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "binance",
     feature = "bybit",
     feature = "cryptocom",
+    feature = "weex",
     feature = "hyperliquid",
     feature = "okx"
 ))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[cfg(any(
+        feature = "binance",
+        feature = "bybit",
+        feature = "cryptocom",
+        feature = "hyperliquid",
+        feature = "okx"
+    ))]
     #[serde(default)]
     testnet: bool,
     #[serde(default)]
@@ -83,7 +94,7 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
-    #[cfg(feature = "okx")]
+    #[cfg(any(feature = "okx", feature = "weex"))]
     #[serde(default)]
     passphrase: Option<String>,
     #[cfg(feature = "hyperliquid")]
@@ -98,6 +109,9 @@ struct EngineOptions {
     #[cfg(feature = "hyperliquid")]
     #[serde(default)]
     enable_spot_markets: bool,
+    #[cfg(feature = "weex")]
+    #[serde(default)]
+    private_ws_headers: bool,
 }
 #[cfg(feature = "hyperliquid")]
 #[derive(Deserialize)]
@@ -113,6 +127,8 @@ enum ActionOut<'a> {
     WsConnect {
         socket: u32,
         url: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        headers: Option<Vec<(&'static str, &'a str)>>,
     },
     WsSend {
         socket: u32,
@@ -159,6 +175,16 @@ fn encode(actions: &[Action]) -> String {
             Action::WsConnect { socket, url } => ActionOut::WsConnect {
                 socket: socket.0,
                 url,
+                headers: None,
+            },
+            Action::WsConnectWithHeaders {
+                socket,
+                url,
+                headers,
+            } => ActionOut::WsConnect {
+                socket: socket.0,
+                url,
+                headers: Some(headers.iter().map(|(k, v)| (*k, v.as_str())).collect()),
             },
             Action::WsSend { socket, text } => ActionOut::WsSend {
                 socket: socket.0,
@@ -203,6 +229,9 @@ fn encode(actions: &[Action]) -> String {
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase")]
 enum CommandIn {
+    SetTickerSymbols {
+        symbols: Vec<String>,
+    },
     SubscribeOrderBook {
         symbol: String,
     },
@@ -331,6 +360,7 @@ impl From<CommandIn> for Command {
                     client_order_id,
                 },
             },
+            CommandIn::SetTickerSymbols { symbols } => Self::SetTickerSymbols { symbols },
             CommandIn::SubscribeOrderBook { symbol } => Self::SubscribeOrderBook { symbol },
             CommandIn::UnsubscribeOrderBook { symbol } => Self::UnsubscribeOrderBook { symbol },
             CommandIn::SubscribeCandles { symbol, interval } => {
@@ -476,12 +506,20 @@ impl WasmEngine {
         feature = "binance",
         feature = "bybit",
         feature = "cryptocom",
+        feature = "weex",
         feature = "hyperliquid",
         feature = "okx"
     ))]
     #[wasm_bindgen(constructor)]
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: EngineOptions = serde_json::from_str(options_json)?;
+        #[cfg(feature = "weex")]
+        if venue == "weex"
+            && !options.public_data_only
+            && options.passphrase.as_deref().is_none_or(str::is_empty)
+        {
+            return Err(JsError::new("WEEX requires a passphrase"));
+        }
         let inner: Box<dyn AnyEngine> = match venue {
             #[cfg(feature = "binance")]
             "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
@@ -490,6 +528,14 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
+            }))),
+            #[cfg(feature = "weex")]
+            "weex" => Box::new(Engine::new(WeexFutures::new(WeexOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
+                private_ws_headers: options.private_ws_headers,
             }))),
             #[cfg(feature = "bybit")]
             "bybit" => Box::new(Engine::new(BybitLinear::new(BybitOptions {

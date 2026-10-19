@@ -68,3 +68,66 @@ test('unrecorded economic websocket methods fail the Crypto.com protocol audit',
   audit.sent(privateUrl, JSON.stringify({ id: 1, method: 'private/create-order', params: { quantity: '1' } }));
   assert(audit.errors().some((error) => error.includes('unexpected outbound WS method private/create-order')));
 });
+
+
+test('WEEX signed REST and private upgrade headers bind path, body and account', () => {
+  const weex = venueOf('weex');
+  const time = String(Date.now());
+  const method = 'POST';
+  const url = 'https://api-contract.weex.com/capi/v3/account/income';
+  const body = '{"symbol":"BTCUSDT"}';
+  const headers = {
+    'ACCESS-TIMESTAMP': time, 'ACCESS-KEY': 'replay-key', 'ACCESS-PASSPHRASE': 'replay-passphrase',
+    'ACCESS-SIGN': createHmac('sha256', 'replay-secret').update(`${time}${method}/capi/v3/account/income${body}`).digest('base64'),
+  };
+  assert.doesNotThrow(() => weex.validateRequest({ method, url, body, headers }));
+  assert.throws(() => weex.validateRequest({ method, url, body: '{}', headers }));
+  assert.throws(() => weex.validateRequest({ method, url, body, headers: { ...headers, 'ACCESS-KEY': 'another' } }));
+  const privateUrl = 'wss://ws-contract.weex.com/v3/ws/private';
+  const upgrade = { ...headers, 'ACCESS-SIGN': createHmac('sha256', 'replay-secret').update(`${time}/v3/ws/private`).digest('base64') };
+  assert.doesNotThrow(() => weex.validateSocket(privateUrl, upgrade));
+  assert.throws(() => weex.validateSocket(privateUrl, { ...upgrade, 'ACCESS-SIGN': 'invalid' }));
+  assert.equal(weex.isWrite(method, url), false);
+  assert.equal(weex.isWrite('POST', 'https://api-contract.weex.com/capi/v3/algoOrder'), true);
+});
+
+
+for (const [label, timestamp] of [
+  ['missing', undefined],
+  ['empty', ''],
+  ['nonnumeric', 'undefined'],
+  ['fractional', '1800000000000.5'],
+  ['unsafe integer', '9007199254740992'],
+  ['stale', '1799999969999'],
+  ['future', '1800000030001'],
+]) {
+  for (const transport of ['REST', 'upgrade']) {
+    test(`WEEX ${transport} rejects ${label} timestamps even with a matching signature`, () => {
+      const weex = venueOf('weex');
+      const now = 1800000000000;
+      const headers = { 'ACCESS-KEY': 'replay-key', 'ACCESS-PASSPHRASE': 'replay-passphrase',
+        ...(timestamp === undefined ? {} : { 'ACCESS-TIMESTAMP': timestamp }) };
+      const method = 'POST', path = '/capi/v3/account/income', body = '{}';
+      const payload = transport === 'REST' ? `${timestamp}${method}${path}${body}` : `${timestamp}/v3/ws/private`;
+      headers['ACCESS-SIGN'] = createHmac('sha256', 'replay-secret').update(payload).digest('base64');
+      if (transport === 'REST') {
+        assert.throws(() => weex.validateRequest({ method, url: 'https://api-contract.weex.com' + path, body, headers, now }));
+      } else {
+        assert.throws(() => weex.validateSocket('wss://ws-contract.weex.com/v3/ws/private', headers, now));
+      }
+    });
+  }
+}
+
+test('WEEX timestamp freshness accepts both edges of the replay clock window', () => {
+  const weex = venueOf('weex'), now = 1800000000000;
+  for (const offset of [-30000, 0, 30000]) {
+    const timestamp = String(now + offset);
+    const headers = { 'ACCESS-TIMESTAMP': timestamp, 'ACCESS-KEY': 'replay-key', 'ACCESS-PASSPHRASE': 'replay-passphrase' };
+    const method = 'POST', path = '/capi/v3/account/income', body = '{}';
+    headers['ACCESS-SIGN'] = createHmac('sha256', 'replay-secret').update(`${timestamp}${method}${path}${body}`).digest('base64');
+    assert.doesNotThrow(() => weex.validateRequest({ method, url: 'https://api-contract.weex.com' + path, body, headers, now }));
+    headers['ACCESS-SIGN'] = createHmac('sha256', 'replay-secret').update(`${timestamp}/v3/ws/private`).digest('base64');
+    assert.doesNotThrow(() => weex.validateSocket('wss://ws-contract.weex.com/v3/ws/private', headers, now));
+  }
+});
