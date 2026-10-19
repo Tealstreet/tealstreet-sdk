@@ -21,10 +21,10 @@ The existing `LocalDial` test wrapper now forwards `spawn_classified` and
 `task_work_started` to its NativeRuntime. This preserves the production receipt
 rather than turning all classified core operations into wrapper-local raw tasks.
 
-The independent live-diff owner has pinned ee045514f4 for the preserved WOO
-260-frame and Backpack 38,289-frame tape reruns. Those tape results are separate
-from the constructed regressions; this review does not claim their parity or CPU
-ratio before their terminal receipts exist.
+The independent live-diff owner replayed the preserved WOO 260-frame and Backpack
+38,289-frame tapes on ee045514f4. Both complete tape reruns confirm timer liveness;
+their remaining semantic and performance findings below remain open. These are
+separate from the constructed regressions, not full-parity acceptance.
 
 Backpack disposal fixtures track real owned timeout handles. They retain the
 existing assertions for depth cancellation before socket close and the source
