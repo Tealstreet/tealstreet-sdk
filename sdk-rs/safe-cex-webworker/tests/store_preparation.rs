@@ -2,8 +2,8 @@
 mod model_identity;
 #[path = "support/typed_payload_observation.rs"]
 mod typed_payload_observation;
-use safe_cex_types::StoreData;
 use safe_cex_exchange::js_runtime::value::{Js, from_typed, to_json};
+use safe_cex_types::StoreData;
 use serde_json::{Value, json};
 use typed_payload_observation::*;
 fn normalized(v: Value) -> Value {
@@ -114,44 +114,29 @@ fn store_payload_preparation_matches_live_full_snapshots_and_incremental_transit
     native
         .get("updateIds")
         .unwrap()
-        .set(
-            "orders",
-            Js::Number(99.0),
-        )
+        .set("orders", Js::Number(99.0))
         .unwrap();
     native
         .get("loaded")
         .unwrap()
-        .set(
-            "orders",
-            Js::Bool(true),
-        )
+        .set("orders", Js::Bool(true))
         .unwrap();
     native
         .get("socketHealth")
         .unwrap()
-        .set(
-            "publicHealthy",
-            Js::Bool(true),
-        )
+        .set("publicHealthy", Js::Bool(true))
         .unwrap();
     native
         .get("balance")
         .unwrap()
-        .set(
-            "total",
-            Js::Number(99.0),
-        )
+        .set("total", Js::Number(99.0))
         .unwrap();
     native
         .get("orders")
         .unwrap()
         .get("1")
         .unwrap()
-        .set(
-            "amount",
-            Js::Number(99.0),
-        )
+        .set("amount", Js::Number(99.0))
         .unwrap();
     let observed = Js::object(vec![
         (
