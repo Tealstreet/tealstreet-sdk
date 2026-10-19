@@ -359,3 +359,24 @@ newer WS/terminal rows, failed subsets, timer serialization and WS-before-HTTP.
 All55 MEXC native tests, strict Clippy, fmt and independent re-review pass.
 Wasm private replay and a fresh Node22 Hyperliquid sample are running; new CI
 must pass before merge. Both general PR CI jobs on0192036dd5 are now green.
+
+Real MEXC replay found its conservative, native-tested denied-batch fallback
+paces the first regular write by1500ms. The later plan ACK lands near2210ms,
+putting its scoped refresh at3710ms, after the old3300ms fixture end. Extend the
+final observation to4300ms; reviewer accepted the trace and unchanged pacing.
+Exact requests then pass. The newly observed4s poll exposed stale returned regular
+rows being filtered out when their current store row was already terminal.
+Reconcile only returned regular terminal rows through monotonic fills/status,
+retaining absent-row/tombstone and stop/plan protections. Review caught an
+Open/equal-fill row reviving Canceled; explicit terminal status preservation now
+covers lower/equal/higher-fill cases across regular/full snapshots. All57 MEXC
+native tests and strict Clippy pass; final review accepted, real replay pending.
+
+Final repository checks pass: typecheck44tasks, lint28tasks, all27root test tasks,
+including6597safe-cex tests in each CI/unit task. Run the worker cap through a clean
+minimal environment: Turbo strict mode filters VITEST_MAX_WORKERS; do not widen
+timeout thresholds. Final workspace528 native tests, native/wasm Clippy, fmt and
+bans passed before the last two MEXC regressions. The Node22 Hyperliquid rerun
+reproduced an invalid cold buffer baseline (-88) while warm runs retained+32;
+five seconds of idle stability still yielded-24 on a fresh tsx disk cache.
+Investigate loader allocation lifetime; longer quiescence alone is disproven.

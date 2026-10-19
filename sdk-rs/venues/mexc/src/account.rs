@@ -431,6 +431,39 @@ impl MexcFutures {
         }
         order
     }
+    fn reconcile_snapshot_orders(
+        &self,
+        cx: &Cx<'_, Pending>,
+        rows: &mut Vec<Order>,
+        revision: u64,
+    ) {
+        rows.retain_mut(|order| {
+            // An open-order endpoint may lag a terminal stream update. Keep a
+            // returned regular row terminal while preserving cumulative fills;
+            // a tombstone without a current row must never resurrect an order.
+            if matches!(order.kind, OrderType::Limit | OrderType::Market)
+                && cx.store.order(&order.id).is_some_and(|current| {
+                    matches!(current.status, OrderStatus::Canceled | OrderStatus::Closed)
+                })
+            {
+                let current = cx.store.order(&order.id).unwrap();
+                let status = if order.status == OrderStatus::Closed {
+                    OrderStatus::Closed
+                } else {
+                    current.status
+                };
+                *order = Self::monotonic_order(cx, order.clone());
+                order.status = status;
+                return true;
+            }
+            !self.account.terminal.contains_key(&order.id)
+                && self
+                    .account
+                    .order_updates
+                    .get(&order.id)
+                    .is_none_or(|&updated| updated <= revision)
+        });
+    }
     fn commit_order_snapshot(cx: &mut Cx<'_, Pending>, rows: Vec<Order>) {
         let rows = rows
             .into_iter()
@@ -1046,14 +1079,7 @@ impl MexcFutures {
                         cx.store.set_positions(rows);
                     }
                     scope => {
-                        s.orders.retain(|o| {
-                            !self.account.terminal.contains_key(&o.id)
-                                && self
-                                    .account
-                                    .order_updates
-                                    .get(&o.id)
-                                    .is_none_or(|&v| v <= s.revision)
-                        });
+                        self.reconcile_snapshot_orders(cx, &mut s.orders, s.revision);
                         for o in &s.orders {
                             if scope == Scope::Stop {
                                 self.account.stop_ids.insert(o.id.clone());
@@ -1080,14 +1106,7 @@ impl MexcFutures {
                             if s.symbol.is_none() {
                                 self.account.needs_full = false;
                             }
-                            rows.retain(|o| {
-                                !self.account.terminal.contains_key(&o.id)
-                                    && self
-                                        .account
-                                        .order_updates
-                                        .get(&o.id)
-                                        .is_none_or(|&v| v <= s.revision)
-                            });
+                            self.reconcile_snapshot_orders(cx, &mut rows, s.revision);
                             for o in cx.store.orders() {
                                 // A symbol snapshot cannot retire another market's rows.
                                 if s.symbol.as_ref().is_some_and(|symbol| *symbol != o.symbol) {

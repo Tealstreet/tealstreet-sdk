@@ -548,3 +548,78 @@ fn stream_order_before_placement_ack_still_schedules_scoped_reconciliation() {
     assert_eq!(reads.len(), 3);
     assert!(reads.iter().all(|r| r.url.contains("BTC_USDT")));
 }
+
+#[test]
+fn returned_regular_rows_keep_terminal_stream_state_through_regular_and_full_snapshots() {
+    use safe_cex_engine::model::OrderStatus;
+    for full in [false, true] {
+        for (state, status) in [(4, OrderStatus::Canceled), (3, OrderStatus::Closed)] {
+            for returned in [0, 10, 20] {
+                let (mut e, socket, reads, timer) = private_started();
+                for r in reads {
+                    response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+                }
+                e.drain_actions().for_each(drop);
+                // Start the read before the authoritative terminal stream update.
+                if full {
+                    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+                } else {
+                    e.handle(2100.0, Event::TimerFired { timer });
+                }
+                let reads = requests(&mut e);
+                let text = format!(
+                    r#"{{"channel":"push.personal.order","data":{}}}"#,
+                    ORDER.replace("\"state\":2", &format!("\"state\":{state}"))
+                );
+                ws(&mut e, socket, &text);
+                for r in reads {
+                    let body = if r.url.contains("open_orders") {
+                        format!(
+                            r#"{{"success":true,"code":0,"data":[{}]}}"#,
+                            ORDER.replace("\"dealVol\":10", &format!("\"dealVol\":{returned}"))
+                        )
+                    } else {
+                        r#"{"success":true,"code":0,"data":[]}"#.into()
+                    };
+                    response(&mut e, &r, &body);
+                }
+                let order = e.store().order("739113577038255617").unwrap();
+                assert_eq!(order.status, status);
+                assert_eq!(order.filled, f64::from(returned.max(10)) * 0.0001);
+                assert_eq!(
+                    order.extra.as_ref().unwrap().filled_in_placement_units,
+                    Some(f64::from(returned.max(10)))
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn absent_terminal_regular_rows_are_removed_and_tombstones_cannot_be_restored_by_lagging_rest() {
+    let (mut e, socket, reads, timer) = private_started();
+    for r in reads {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    let text = format!(
+        r#"{{"channel":"push.personal.order","data":{}}}"#,
+        ORDER.replace("\"state\":2", "\"state\":4")
+    );
+    ws(&mut e, socket, &text);
+    e.drain_actions().for_each(drop);
+    e.handle(2100.0, Event::TimerFired { timer });
+    for r in requests(&mut e) {
+        response(&mut e, &r, r#"{"success":true,"code":0,"data":[]}"#);
+    }
+    assert!(e.store().order("739113577038255617").is_none());
+    ws(&mut e, socket, r#"{"channel":"rs.login","data":"success"}"#);
+    for r in requests(&mut e) {
+        let body = if r.url.contains("open_orders") {
+            format!(r#"{{"success":true,"code":0,"data":[{ORDER}]}}"#)
+        } else {
+            r#"{"success":true,"code":0,"data":[]}"#.into()
+        };
+        response(&mut e, &r, &body);
+    }
+    assert!(e.store().order("739113577038255617").is_none());
+}

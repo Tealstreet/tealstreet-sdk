@@ -273,7 +273,10 @@ http('POST', '/api/v1/private/order/cancel_all', null, envelope(null), { symbol:
 http('POST', '/api/v1/private/planorder/cancel_all', null, envelope(null), { symbol: 'BTC_USDT' });
 http('POST', '/api/v1/private/stoporder/cancel_all', null, envelope(null), { symbol: 'BTC_USDT' });
 ws(3100, 1, 'push.personal.order', { ...resting, state: 4 });
-ws(3300, 1, 'push.personal.stop.order', { ...stop, state: 2 });
+// The denied-batch fallback waits 1500ms before its first regular submit,
+// delaying the later plan acknowledgement and scoped refresh beyond 3300ms.
+// Observe that reconciliation before ending the tape.
+ws(4300, 1, 'push.personal.stop.order', { ...stop, state: 2 });
 
 records.sort((a, b) => a.t - b.t);
 mkdirSync(dirname(values.out), { recursive: true });
