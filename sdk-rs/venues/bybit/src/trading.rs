@@ -574,12 +574,7 @@ impl BybitLinear {
             {
                 cx.store.set_hedged(hedged);
                 self.trading.mode_version += 1;
-                self.account.position_modes.retain(|symbol, _| {
-                    cx.store
-                        .market(symbol)
-                        .is_some_and(|market| market.quote != "USDT")
-                });
-                self.fetch_positions(cx);
+                self.refresh_after_mode_change(cx);
             }
             (_, Err(error)) => errors.push(describe(error)),
             (_, Ok(_)) => {}

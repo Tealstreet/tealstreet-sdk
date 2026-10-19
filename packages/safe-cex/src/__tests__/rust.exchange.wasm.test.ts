@@ -130,9 +130,13 @@ const bybitTransport = () => {
           break;
         case '/v5/account/fee-rate':
         case '/v5/order/realtime':
-        case '/v5/position/list':
           result = list([]);
           break;
+        case '/v5/position/list': {
+          const symbol = new URL(url).searchParams.get('symbol');
+          result = list(symbol ? [{ symbol, positionIdx: 0, size: '0' }] : []);
+          break;
+        }
         default:
           throw new Error(`Unexpected Bybit request: ${method} ${path}`);
       }

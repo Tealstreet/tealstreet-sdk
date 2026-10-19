@@ -1070,3 +1070,36 @@ fn a_missing_or_failed_mode_read_cannot_guess_and_place() {
         assert!(matches!(h.result(54), Some(Err(_))));
     }
 }
+
+#[test]
+fn a_mode_switch_fences_old_position_snapshots_and_queues_a_refresh() {
+    let mut h = ready();
+    h.advance(5_000.0);
+    let usdt = h.take("/v5/position/list?category=linear&settleCoin=USDT");
+    let usdc = h.take("/v5/position/list?category=linear&settleCoin=USDC");
+    h.command(Command::SetPositionMode {
+        command: 55,
+        hedged: true,
+    });
+    h.respond("/v5/position/switch-mode", 200, OK_EMPTY);
+    h.reply(usdt.id, 200, POSITIONS);
+    h.reply(usdc.id, 200, EMPTY_LIST);
+    assert!(
+        h.has_request("/v5/position/list?category=linear&settleCoin=USDT"),
+        "fresh snapshot follows the old response"
+    );
+    assert!(h.has_request("/v5/position/list?category=linear&settleCoin=USDC"));
+    place(
+        &mut h,
+        56,
+        vec![limit("BTCUSDT", OrderSide::Buy, 0.01, 90000.0)],
+    );
+    assert!(
+        !h.has_request("/v5/order/create-batch"),
+        "old snapshot cannot restore a known one-way mode"
+    );
+    let mode = h.take("/v5/position/list?category=linear&symbol=BTCUSDT");
+    h.reply(mode.id, 200, r#"{"retCode":0,"result":{"list":[{"symbol":"BTCUSDT","positionIdx":1,"size":"0"},{"symbol":"BTCUSDT","positionIdx":2,"size":"0"}]}}"#);
+    let batch = h.take("/v5/order/create-batch");
+    assert!(body(&batch).contains(r#""positionIdx":1}"#));
+}

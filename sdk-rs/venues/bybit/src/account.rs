@@ -1042,6 +1042,18 @@ impl BybitLinear {
         cx.store.set_orders(merged);
     }
 
+    pub(crate) fn refresh_after_mode_change(&mut self, cx: &mut Cx<'_, Pending>) {
+        // A response issued before the switch cannot restore the old mode.
+        self.account.position_version += 1;
+        self.account.positions_follow_up |= self.account.positions.is_some();
+        self.account.position_modes.retain(|symbol, _| {
+            cx.store
+                .market(symbol)
+                .is_some_and(|market| market.quote != "USDT")
+        });
+        self.fetch_positions(cx);
+    }
+
     /// Commit the positions snapshot once every settle coin is in.
     fn finish_positions(&mut self, cx: &mut Cx<'_, Pending>) {
         let Some(join) = &self.account.positions else {
