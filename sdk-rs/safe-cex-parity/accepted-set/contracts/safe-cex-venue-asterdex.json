@@ -89259,7 +89259,7 @@
                     "is_mutable": false,
                     "type": {
                       "resolved_path": {
-                        "path": "serde_json::value::Value",
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
                         "args": null
                       }
                     }
@@ -89316,7 +89316,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsParent as _;#[allow(unused_imports)] use crate::public_stream::PublicStreamParent as _;#[allow(unused_imports)] use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let values=f::events(venue.base(),\"ticker\");let ticker=f::drive(&runtime,venue.fetch_tickers()).unwrap().remove(0);parent.emit_ticker(\"ticker\",$value,&ticker).unwrap();serde_json::json!(values.borrow()[0][0])}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsParent as _;#[allow(unused_imports)] use crate::public_stream::PublicStreamParent as _;#[allow(unused_imports)] use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let values=f::events(venue.base(),\"ticker\");let ticker=f::drive(&runtime,venue.fetch_tickers()).unwrap().remove(0);parent.emit_ticker(\"ticker\",&from_json($value),&ticker).unwrap();serde_json::json!(values.borrow()[0][0])}",
         "cases": [
           {
             "input": "BTCUSDT",
@@ -89566,7 +89566,7 @@
                     "is_mutable": false,
                     "type": {
                       "resolved_path": {
-                        "path": "serde_json::value::Value",
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
                         "args": null
                       }
                     }
@@ -89608,7 +89608,7 @@
         },
         "input": "observed",
         "reason": "Real production method executed against the constructed Aster binding with primitive transport/runtime fixtures; direct native return, callback or state observations distinguish the inputs.",
-        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsParent as _;#[allow(unused_imports)] use crate::public_stream::PublicStreamParent as _;#[allow(unused_imports)] use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let values=f::events(venue.base(),\"account\");parent.emit_account($value).unwrap();serde_json::json!(*values.borrow())}",
+        "call": "{#[allow(dead_code)]mod f{include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/scripts/accepted-alternate-fixture.rs\"));} #[allow(unused_imports)] use safe_cex_exchange::exchange::Exchange as _; #[allow(unused_imports)] use safe_cex_exchange::js_runtime::value::{Js,from_json}; let(venue,rt,runtime,store,wire)=f::fixture();let _=(&venue,&rt,&runtime,&store,&wire);#[allow(unused_imports)] use safe_cex_exchange::websocket::WsParent as _;#[allow(unused_imports)] use crate::public_stream::PublicStreamParent as _;#[allow(unused_imports)] use crate::private_stream::PrivateStreamParent as _;let erased:std::rc::Rc<dyn safe_cex_exchange::exchange::Exchange>=venue.clone();let parent=$type{weak:std::rc::Rc::downgrade(&rt.shared),inner:safe_cex_exchange::ws_parent::WsExchangeParent::new(&erased)};let values=f::events(venue.base(),\"account\");parent.emit_account(&from_json($value)).unwrap();serde_json::json!(*values.borrow())}",
         "cases": [
           {
             "input": {
