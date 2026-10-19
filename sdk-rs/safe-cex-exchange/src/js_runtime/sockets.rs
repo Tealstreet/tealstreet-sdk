@@ -4,7 +4,7 @@
 use super::{
     promise::Promise,
     value::arg,
-    value::{Getter, Js, Thrown},
+    value::{Getter, Js, ObjectData, Thrown},
 };
 use crate::{
     exchange::Exchange,
@@ -120,12 +120,11 @@ fn core_error(e: Thrown) -> ExchangeError {
 // `handlers` is captured once, but its length is read at both source record
 // expressions. Reconciliation asks only for the second expression (missing=0).
 fn read_handler_stats(
-    core: &SocketCore,
+    this: &Js,
     topic: &str,
     missing: usize,
 ) -> Result<(bool, safe_cex_num::PrototypeScalar), Thrown> {
     use safe_cex_num::PrototypeScalar as Scalar;
-    let this = core.this.borrow().clone();
     let handlers = this.get("messageHandlers")?.get(topic)?;
     let has = missing == 1 && handlers.truthy() && handlers.get("length")?.truthy();
     let count = if handlers.truthy() {
@@ -148,6 +147,18 @@ fn read_handler_stats(
         }
     };
     Ok((has, count))
+}
+
+/// Read statistics from the socket's live JS table without retaining its owner.
+pub fn install_js_handler_stats(socket: &Rc<BaseWebSocket>, receiver: Weak<ObjectData>) {
+    socket.set_handler_stats_reader(Rc::new(move |topic, missing| {
+        let this = Js::Object(
+            receiver
+                .upgrade()
+                .ok_or_else(|| ExchangeError::new("socket facade was dropped"))?,
+        );
+        read_handler_stats(&this, topic, missing).map_err(core_error)
+    }));
 }
 
 fn connection_options(value: &Js) -> Result<WebSocketConnectionOptions, Thrown> {
@@ -564,13 +575,10 @@ impl SocketCore {
             Rc::new(JsProtocol(Rc::downgrade(self))),
         );
         base.set_last_received(self.last_received.get());
-        let weak = Rc::downgrade(self);
-        base.set_handler_stats_reader(Rc::new(move |topic, missing| {
-            let core = weak
-                .upgrade()
-                .ok_or_else(|| ExchangeError::new("socket facade was dropped"))?;
-            read_handler_stats(&core, topic, missing).map_err(core_error)
-        }));
+        let Js::Object(receiver) = self.this.borrow().clone() else {
+            return Err(Thrown::type_error("socket receiver must be an object"));
+        };
+        install_js_handler_stats(&base, Rc::downgrade(&receiver));
         let _ = self.base.set(base.clone());
         self.apply_pong_policy(&base)?;
         Ok(base)

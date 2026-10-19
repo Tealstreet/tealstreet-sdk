@@ -497,9 +497,21 @@ The signing interceptor supplies a fallible request-emission hook through
 `prepare_request`/`execute`; the native factory returns its execution-local
 original listener error before transport. See `FIX_AUDIT_API_SIGNING.md`.
 
+
+The custom socket bridge installs the shared weak-receiver JS handler statistics
+reader after binding its canonical instance. Perpetual and Spot tables therefore
+feed the same core record/pong/cleanup/reconcile algorithm. Constructed witnesses
+cover original recorded BBO/candle bytes, unsubscribe counts, live table replacement,
+selected-key reads, getter cause identity and host release after disposal.
+
 The startup construction-order regression compares the actual maintained
 `fetchMarketsHelper` and DefaultStore with the constructed native exchange.
 It reads canonical facade own keys directly: Store diagnostics precede loaded
 state, and each ticker retains `openInterest` after `quoteVolume`. The shared
 Host facade preserves mapper construction order without a typed re-encoding;
 do not replace that ingress with a Ticker struct roundtrip or an order table.
+
+The Base socket constructor initializes its own `messageHandlers` table before
+subclass construction, as the maintained class does. Both private families retain
+that empty table; compiled private-feed tests prevent statistics from blocking
+fills, orders, positions or balances before their dispatch.

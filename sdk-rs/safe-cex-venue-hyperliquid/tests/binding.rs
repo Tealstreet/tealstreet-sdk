@@ -1781,6 +1781,58 @@ fn startup_finishes_all_hip3_requests_under_fixed_and_advancing_native_clocks() 
     });
 }
 
+#[test]
+fn recorded_public_frames_observe_the_canonical_handler_table() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_num::PrototypeScalar;
+    let f = seam_started();
+    let wire = seam_socket(&f, "fastAssetCtxs");
+    let candles = Rc::new(Cell::new(0));
+    let seen = candles.clone();
+    let cleanup_candle = f
+        .exchange
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTC-PERP","interval":"1m"})).unwrap(),
+            Rc::new(move |_| seen.set(seen.get() + 1)),
+        )
+        .unwrap();
+    let cleanup_book = f
+        .exchange
+        .listen_order_book("BTC-PERP".into(), Rc::new(|_| {}))
+        .unwrap();
+    // Original e754af4d496-frame tape, messages7 and13, with wire bytes unchanged.
+    for frame in [
+        r#"{"channel":"bbo","data":{"coin":"BTC","time":1792335295589,"bbo":[{"px":"81063.0","sz":"6.33133","n":33},{"px":"81064.0","sz":"2.19885","n":4}]}}"#,
+        r#"{"channel":"candle","data":{"t":1792335240000,"T":1792335299999,"s":"BTC","i":"1m","o":"81051.0","c":"81064.0","h":"81064.0","l":"81051.0","v":"4.1146","n":80}}"#,
+    ] {
+        wire.push(safe_cex_exchange::websocket::WsEvent::Message(
+            safe_cex_transport::socket::SocketFrame::Text(frame.into()),
+        ));
+        f.host.settle();
+    }
+    assert_eq!(candles.get(), 1, "recorded candle reaches actual listener");
+    let native = f.exchange.base().get_socket(SocketSlot::Public).unwrap();
+    for key in ["bbo.BTC", "candle.BTC.1m"] {
+        let stats = native.message_handlers_stats.borrow();
+        let stat = stats.get(key).unwrap();
+        assert_eq!(stat.had_handlers, Some(true), "recorded HL {key} table");
+        assert_eq!(stat.last_callbacks_count, PrototypeScalar::Number(1.0));
+    }
+    cleanup_candle().unwrap();
+    cleanup_book().unwrap();
+    for key in ["bbo.BTC", "candle.BTC.1m"] {
+        native.record_message_handler_stats(key).unwrap();
+        let stats = native.message_handlers_stats.borrow();
+        let stat = stats.get(key).unwrap();
+        assert_eq!(
+            stat.last_callbacks_count,
+            PrototypeScalar::Number(0.0),
+            "unsubscribed {key}"
+        );
+    }
+    f.exchange.dispose().unwrap();
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn startup_store_and_ticker_key_order_match_maintained_mapper() {

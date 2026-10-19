@@ -177,7 +177,7 @@ pub(crate) fn base_websocket_class(realm: &mut Host, deps: SocketDependencies) -
         };
         deps.base.set_socket(slot, Some(socket.clone()));
         let handle = Rc::new(Handle {
-            socket,
+            socket: socket.clone(),
             bridge: bridge.clone(),
         });
         let instance = Js::host_object(handle);
@@ -186,10 +186,16 @@ pub(crate) fn base_websocket_class(realm: &mut Host, deps: SocketDependencies) -
         };
         *data.proto.borrow_mut() = new_target.allocate_instance()?.prototype();
         *bridge.instance.borrow_mut() = Rc::downgrade(data);
+        safe_cex_exchange::js_runtime::sockets::install_js_handler_stats(
+            &socket,
+            Rc::downgrade(data),
+        );
         r.define_str(&instance, "parent", arg(args, 0))?;
         r.define_str(&instance, "pingAt", Js::Number(0.0))?;
         let books = r.new_object();
         r.define_str(&instance, "orderBookInnerState", books)?;
+        let handlers = r.new_object();
+        r.define_str(&instance, "messageHandlers", handlers)?;
         Ok(instance)
     });
     class

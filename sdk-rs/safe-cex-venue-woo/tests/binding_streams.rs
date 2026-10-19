@@ -224,6 +224,31 @@ fn start_connects_the_public_socket_and_its_frames_update_the_store() {
         &public,
         json!({"topic": "markprices", "data": [{"symbol": "PERP_BTC_USDT", "price": 105.45}]}),
     );
+    // Original WOO260 tape d683a239, frame0: preserve the captured pong bytes.
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            r#"{"event":"pong","ts":1792394404031}"#.into(),
+        )));
+    h.runtime.pump();
+    let native = h
+        .venue()
+        .base()
+        .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public)
+        .unwrap();
+    for topic in ["tickers", "bbos", "markprices", "pong"] {
+        let stats = native.message_handlers_stats.borrow();
+        let stat = stats
+            .get(topic)
+            .unwrap_or_else(|| panic!("missing {topic} stats"));
+        assert_eq!(stat.had_handlers, Some(true), "live WOO {topic} table");
+        assert_eq!(
+            stat.last_callbacks_count,
+            safe_cex_num::PrototypeScalar::Number(1.0),
+            "live WOO {topic} count"
+        );
+    }
     let t = ticker(&h);
     assert_eq!(
         (
