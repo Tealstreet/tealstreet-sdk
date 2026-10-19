@@ -564,24 +564,36 @@ impl safe_cex_transport::rate_limit::RateLimitScheduler for RateScheduler {
             })?;
         let sleeping = self.runtime.sleep(milliseconds);
         let reporter = self.runtime.clone();
+        let completion = Rc::new(std::cell::RefCell::new(Some(callback)));
+        let canceled = completion.clone();
         let operation = owner.start_classified(
             self.runtime.as_ref(),
             RuntimeTaskKind::Timer,
             move |_| {
                 Box::pin(async move {
-                    match sleeping.await {
-                        Ok(()) => callback(Ok(())),
-                        Err(error) => {
-                            reporter.report_exception(
-                                &error,
-                                &serde_json::json!({"operation":"rate window reset"}).into(),
-                            );
-                            callback(Err(safe_cex_transport::TransportError::Host(error.message)));
-                        }
+                    let result = sleeping.await.map_err(|error| {
+                        reporter.report_exception(
+                            &error,
+                            &serde_json::json!({"operation":"rate window reset"}).into(),
+                        );
+                        safe_cex_transport::TransportError::Host(error.message)
+                    });
+                    let callback = completion.borrow_mut().take();
+                    if let Some(callback) = callback {
+                        callback(result);
                     }
                 })
             },
-            |_| {},
+            move |was_canceled| {
+                if was_canceled {
+                    let callback = canceled.borrow_mut().take();
+                    if let Some(callback) = callback {
+                        callback(Err(safe_cex_transport::TransportError::Host(
+                            "rate limiter reset canceled".into(),
+                        )));
+                    }
+                }
+            },
         );
         Ok(Box::new(RateReset(operation)))
     }

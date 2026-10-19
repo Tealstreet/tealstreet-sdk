@@ -339,6 +339,23 @@ fn dropping_native_rate_limiter_cancels_its_independent_reset() {
             0,
             "BYBIT_RATE_DROP cancels the reset on limiter drop"
         );
+        let limiter = safe_cex_transport::rate_limit::RateLimiter::new(
+            rate_limit_scheduler(&base),
+            1,
+            60_000,
+        );
+        limiter.acquire().await.unwrap();
+        let mut queued = Box::pin(limiter.acquire());
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(queued.as_mut().poll(&mut cx).is_pending());
+        base.dispose().unwrap();
+        assert!(
+            matches!(
+                queued.as_mut().poll(&mut cx),
+                std::task::Poll::Ready(Err(safe_cex_transport::TransportError::Host(ref text))) if text == "rate limiter reset canceled"
+            ),
+            "BYBIT_DISPOSED_ADMISSION rejects queued work visibly"
+        );
         safe_cex_store::virtual_clock::set_thread_host_time(None);
     });
 }
