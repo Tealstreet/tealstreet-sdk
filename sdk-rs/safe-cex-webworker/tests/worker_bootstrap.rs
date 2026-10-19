@@ -885,6 +885,24 @@ fn payload_routing_live_handler_arrays_and_buffer_floor() {
             .map(f64::to_bits),
         Some((2f64).to_bits())
     );
+    let stats = safe_cex_exchange::js_runtime::store::facade(w.store())
+        .unwrap()
+        .get("messageHandlerStats")
+        .unwrap();
+    let bits = |key: &str| {
+        let Js::Number(value) = stats.get(key).unwrap() else {
+            panic!("native message-handler stat {key} must be a number");
+        };
+        format!("{:016x}", value.to_bits())
+    };
+    let profile = json!({
+        "privateBits": bits("private"),
+        "publicBits": bits("public"),
+        "keys": stats.own_keys().iter().map(|key| String::from_utf16(key).unwrap()).collect::<Vec<_>>(),
+        "wire": String::from_utf16(&safe_cex_exchange::js_runtime::globals::stringify_json(&stats).unwrap().unwrap()).unwrap(),
+    });
+    let expected = source();
+    assert_eq!(profile, expected["routingStats"]);
     w.handle_payload(native_payload(StoreWorkerOp::Deactivate, None))
         .unwrap();
     assert!(w.exchange().is_none());
@@ -892,7 +910,7 @@ fn payload_routing_live_handler_arrays_and_buffer_floor() {
         h.state.posts.borrow().last().unwrap().op,
         StoreWorkerOp::DeactivateStatus
     );
-    assert_eq!(source()["routingEvents"], json!(routing));
+    assert_eq!(expected["routingEvents"], json!(routing));
 }
 #[test]
 fn hosted_factory_selection_and_exact_event_bridge_registration() {

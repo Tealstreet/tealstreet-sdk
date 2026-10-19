@@ -153,7 +153,7 @@ impl JournalFolder for Folder {
         _: f64,
         _: f64,
         symbol_scoped: bool,
-        _: Box<dyn Fn(&str) -> Result<String, safe_cex_exchange::runtime::ExchangeError> + 'a>,
+        _: Box<dyn Fn(&str) -> Result<String, safe_cex_exchange::runtime::ExchangeError>>,
     ) -> ExchangeFuture<'a, Vec<Value>> {
         self.0.borrow_mut().push((account.into(), symbol_scoped));
         Box::pin(async { Ok(vec![json!({"folded": true})]) })

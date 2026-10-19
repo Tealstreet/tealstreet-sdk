@@ -4423,3 +4423,217 @@ fn native_accessor_integrity_failure_propagates_from_base_assembly() {
     .expect("frozen supplied receiver must refuse assembly");
     assert_eq!(error.value.get("name").unwrap().to_display(), "TypeError");
 }
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn audit_http_outcomes_keep_capture_guard_and_counter_failure_isolation() {
+    use safe_cex_exchange::js_runtime::{
+        client::factory, globals, store::facade, value::from_json,
+    };
+    use safe_cex_exchange::native::native_runtime;
+    use std::cell::Cell;
+
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_http_factory_source.cjs"
+        ))
+        .arg("outcomes")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let profiles: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(profiles.len(), 98, "OUTCOME_AUDIT complete source profiles");
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(tokio::task::LocalSet::new().run_until(async {
+            let runtime: Rc<dyn ExchangeRuntime> = native_runtime();
+            let builtins = Js::object(vec![]);
+            globals::install_builtins::<()>(&builtins, std::rc::Weak::new());
+            for profile in profiles {
+                let owner = factory_owner(runtime.clone());
+                let store = facade(owner.store.clone()).unwrap();
+                let mode = profile["mode"].as_str().unwrap();
+                let stats = if mode == "disabled" {
+                    Js::Undefined
+                } else {
+                    from_json(&json!({"ok":2,"rateLimit":3,"auth":5,"network":7,"other":11}))
+                };
+                store.call_method("update", vec![Js::object(vec![("requestStats", stats.clone())])]).unwrap();
+                if mode == "frozen" {
+                    builtins.get("Object").unwrap().call_method("freeze", vec![stats.clone()]).unwrap();
+                }
+                let notices = Rc::new(Cell::new(0));
+                let notice_counter = notices.clone();
+                store.call_method("subscribe", vec![Js::function("auditNotice", move |_, _| {
+                    notice_counter.set(notice_counter.get() + 1);
+                    Ok(Js::Undefined)
+                })]).unwrap();
+                let sends = Rc::new(Cell::new(0));
+                let capture = Rc::new(Cell::new(false));
+                let header_marker = Rc::new(Cell::new(false));
+                let rejection = safe_cex_exchange::js_runtime::value::error_object("Error", "fixture rejection");
+                let original = rejection.clone();
+                let status = profile["status"].as_f64();
+                let terminal_sends = sends.clone();
+                let terminal_capture = capture.clone();
+                let terminal_header_marker = header_marker.clone();
+                let adapter = Js::function("auditTerminal", move |_, args| {
+                    let config = arg(&args, 0);
+                    terminal_sends.set(terminal_sends.get() + 1);
+                    terminal_capture.set(config.get("__tealstreetSigningCapture")?.truthy());
+                    terminal_header_marker.set(config.get("headers")?.has_own("__tealstreetSigningCapture"));
+                    let response = Js::object(vec![
+                        ("status", status.map_or(Js::Undefined, Js::Number)),
+                        ("data", Js::object(vec![])),
+                        ("headers", Js::object(vec![])),
+                        ("config", config.clone()),
+                    ]);
+                    if status.is_none_or(|value| value >= 400.0) {
+                        rejection.define("config", config)?;
+                        if status.is_some() { rejection.define("response", response)?; }
+                        return Err(Thrown::new(rejection.clone()));
+                    }
+                    Ok(response)
+                });
+                let host = client::rest_http_host(runtime.clone(), std::sync::Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
+                let config = Js::object(vec![("baseURL", Js::str("https://venue")), ("adapter", adapter)]);
+                let options = Js::object(vec![("key", Js::str("")), ("secret", Js::str(""))]);
+                let xhr = if profile["factory"] == "direct" {
+                    factory::create_no_proxy(host, config, &owner).unwrap()
+                } else {
+                    factory::create(host, &safe_cex_transport::DirectTransport, config, &options, &owner).unwrap()
+                };
+                let marker = match profile["marker"].as_str().unwrap() {
+                    "missing" => None,
+                    "false" => Some(Js::Bool(false)),
+                    "true" => Some(Js::Bool(true)),
+                    "one" => Some(Js::Number(1.0)),
+                    "text" => Some(Js::str("yes")),
+                    "array" => Some(Js::array(vec![])),
+                    "object" => Some(Js::object(vec![])),
+                    "null" => Some(Js::Null),
+                    "zero" => Some(Js::Number(0.0)),
+                    "empty" => Some(Js::str("")),
+                    "nan" => Some(Js::Number(f64::NAN)),
+                    other => panic!("unreviewed capture profile {other}"),
+                };
+                let request = Js::object(vec![]);
+                if let Some(marker) = marker { request.define("__tealstreetSigningCapture", marker).unwrap(); }
+                let result = await_js(&runtime, xhr.call_method("get", vec![Js::str("/audit"), request]).unwrap()).await;
+                let error_identity = result.as_ref().err().is_none_or(|error| error.value.same_reference(&original));
+                let current_stats = store.get("requestStats").unwrap();
+                let observation = json!({
+                    "factory":profile["factory"], "mode":profile["mode"],
+                    "marker":profile["marker"], "status":profile["status"],
+                    "statsBits":if current_stats.is_undefined() {Value::Null} else {
+                        let mut bits = serde_json::Map::new();
+                        for key in ["ok", "rateLimit", "auth", "network", "other"] {
+                            bits.insert(key.into(), json!(format!("{:016x}", current_stats.get(key).unwrap().as_f64().unwrap().to_bits())));
+                        }
+                        Value::Object(bits)
+                    },
+                    "success":result.is_ok(), "errorIdentity":error_identity,
+                    "sameStats":current_stats.strict_equals(&stats), "notices":notices.get(),
+                    "sends":sends.get(), "capture":capture.get(), "headerMarker":header_marker.get(),
+                });
+                assert_eq!(observation, profile, "OUTCOME_AUDIT real factory and Store match maintained source");
+            }
+        }));
+}
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn audit_request_start_stamp_reaches_adapter_and_preserves_best_effort_writes() {
+    use safe_cex_exchange::js_runtime::client::factory;
+    use safe_cex_exchange::native::native_replay_runtime;
+    use std::cell::Cell;
+    const KEY: &str = "safeCexRestDiagStartedAt";
+    fn view(value: Js) -> Value {
+        match value {
+            Js::Number(number) => {
+                json!({"kind":"number","bits":format!("{:016x}", number.to_bits())})
+            }
+            Js::Undefined => json!({"kind":"undefined"}),
+            other => panic!("unexpected native timestamp {other:?}"),
+        }
+    }
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_http_factory_source.cjs"
+        ))
+        .arg("request-start")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let profiles: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        profiles.len(),
+        32,
+        "DIAGNOSTIC_START complete source profiles"
+    );
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
+        .block_on(tokio::task::LocalSet::new().run_until(async {
+            for profile in profiles {
+                let runtime: Rc<dyn ExchangeRuntime> = native_replay_runtime(profile["epoch"].as_f64().unwrap());
+                let owner = factory_owner(runtime.clone());
+                let events = Rc::new(RefCell::new(Vec::<String>::new()));
+                let terminal_events = events.clone();
+                let seen = Rc::new(RefCell::new(Value::Null));
+                let terminal_seen = seen.clone();
+                let sends = Rc::new(Cell::new(0));
+                let terminal_sends = sends.clone();
+                let adapter = Js::function("diagnosticTerminal", move |_, args| {
+                    let config = arg(&args, 0);
+                    terminal_sends.set(terminal_sends.get()+1);
+                    terminal_events.borrow_mut().push("send".into());
+                    *terminal_seen.borrow_mut() = json!({"own":config.has_own(KEY),"value":view(config.get(KEY)?)});
+                    Ok(Js::object(vec![("status", Js::Number(200.0)),("data",Js::object(vec![])),("headers",Js::object(vec![])),("config",config)]))
+                });
+                let host = client::rest_http_host(runtime.clone(), std::sync::Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
+                let config = Js::object(vec![("baseURL",Js::str("https://venue")),("adapter",adapter)]);
+                let xhr = if profile["factory"] == "direct" {
+                    factory::create_no_proxy(host, config, &owner).unwrap()
+                } else {
+                    factory::create(host, &safe_cex_transport::DirectTransport, config, &Js::object(vec![("key",Js::str("")),("secret",Js::str(""))]), &owner).unwrap()
+                };
+                let prepared = Rc::new(RefCell::new(Js::Undefined));
+                let original = prepared.clone();
+                let builtins = Js::object(vec![]);
+                safe_cex_exchange::js_runtime::globals::install_builtins::<()>(&builtins, std::rc::Weak::new());
+                let object = builtins.get("Object").unwrap();
+                let mode = profile["mode"].as_str().unwrap().to_owned();
+                let prepare_events = events.clone();
+                xhr.get("interceptors").unwrap().get("request").unwrap().call_method("use", vec![Js::function("prepareDiagnostic", move |_, args| {
+                    let config = arg(&args,0);
+                    prepare_events.borrow_mut().push("prepare".into());
+                    *original.borrow_mut()=config.clone();
+                    if mode!="fresh" {
+                        object.call_method("defineProperty", vec![config.clone(), Js::str(KEY), Js::object(vec![
+                            ("value",if mode=="readonly-undefined" {Js::Undefined} else {Js::Number(-0.0)}),
+                            ("writable",Js::Bool(!mode.starts_with("readonly"))),
+                            ("enumerable",Js::Bool(true)),("configurable",Js::Bool(true)),
+                        ])])?;
+                    }
+                    Ok(config)
+                })]).unwrap();
+                await_js(&runtime, xhr.call_method("get",vec![Js::str("/diagnostic-start")]).unwrap()).await.expect("DIAGNOSTIC_START telemetry writes must not fail the request");
+                let observed=json!({"factory":profile["factory"],"epoch":profile["epoch"],"mode":profile["mode"],
+                    "own":seen.borrow()["own"],"value":seen.borrow()["value"],
+                    "prepared":view(prepared.borrow().get(KEY).unwrap()),"sends":sends.get(),"events":*events.borrow()});
+                assert_eq!(observed,profile,"DIAGNOSTIC_START real native factory stamps before dispatch");
+            }
+            safe_cex_store::virtual_clock::set_thread_host_time(None);
+        }));
+}

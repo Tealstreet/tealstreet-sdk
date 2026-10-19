@@ -16,7 +16,8 @@ function load(file,imports={},globals={}) {
 const axios=actualRequire('axios'),retry=actualRequire('axios-retry'),createHmac=actualRequire('create-hmac');
 const diagnostics={markRestSigned(){},markRestRequestStart(){},noteRestFailure(){},noteRestSuccess(){}};
 const remote=load('remoteSigningAdapter.ts',{axios,nanoid:{nanoid:()=> 'orderly-source-id'},'./utils/tryParseJson':load('utils/tryParseJson.ts'),'./utils/venueRestDiagnostics':diagnostics});
-const factory=load('safeCexAxiosCreate.ts',{axios,'./remoteSigningAdapter':remote,'./transport/registry':{getTransport:()=>({restAdapter:()=>undefined,rest:({config})=>({baseURL:config.baseURL,proxied:false})})},'./utils/axiosErrorEnhancer':{enhanceAxiosError:e=>e},'./utils/isDevelopment':{isDevelopment:false},'./utils/signingCapture':{isSigningCaptureRequest:()=>false},'./utils/venueRestDiagnostics':diagnostics,'./utils/runtime':{isNodeOrBunRuntime:()=>true}});
+const enhancer=load('utils/axiosErrorEnhancer.ts',{},{Error});
+const factory=load('safeCexAxiosCreate.ts',{axios,'./remoteSigningAdapter':remote,'./transport/registry':{getTransport:()=>({restAdapter:()=>undefined,rest:({config})=>({baseURL:config.baseURL,proxied:false})})},'./utils/axiosErrorEnhancer':enhancer,'./utils/isDevelopment':{isDevelopment:false},'./utils/signingCapture':{isSigningCaptureRequest:()=>false},'./utils/venueRestDiagnostics':diagnostics,'./utils/runtime':{isNodeOrBunRuntime:()=>true}});
 const types=load('types.ts',{'@tealstreet/logging/src/LogSeverity':load('../../logging/src/LogSeverity.ts')});
 const constants=load('exchanges/orderly/orderly.types.ts',{'../../types':types});
 const ed=actualRequire('@noble/ed25519');
@@ -47,7 +48,7 @@ vm.runInNewContext(ts.transpileModule(`class Slice {${members[0].getText(tree)}}
   factory.setInnerAdapterForRemoteSigning(exchange.xhr,async config=>{wire.push({url:config.url,method:config.method,header:config.headers.get('X-Hosted-Orderly'),headers:config.headers.toJSON()});return {status:200,data:config.url===constants.ENDPOINTS.ACCOUNT?{success:true,data:{account_id:'orderly-hosted'}}:{success:true,data:{rows:[]}},headers:{},config};});
   let account,error;
   try {account=await exchange.getAccount();}catch(e){error={name:e.name,message:e.message};}
-  if(local){assert.equal(error,undefined,JSON.stringify(error));assert.equal(account.userId,'orderly-hosted');assert.equal(account.affiliateId,'orderly-hosted');}else assert.deepEqual(error,{name:'TypeError',message:'Expected String'});
+  if(local){assert.equal(error,undefined,JSON.stringify(error));assert.equal(account.userId,'orderly-hosted');assert.equal(account.affiliateId,'orderly-hosted');}else assert.deepEqual(error,{name:'TypeError',message:`[${name}] Request setup error: Expected String`});
   await exchange.xhr.get(constants.ENDPOINTS.MARKETS);
   assert.equal(calls.length,local?2:1,'private requires local signing before hosted adapter; public still hosted');
   assert.equal(wire.length,local?2:1);assert.ok(wire.every(r=>r.header===name));

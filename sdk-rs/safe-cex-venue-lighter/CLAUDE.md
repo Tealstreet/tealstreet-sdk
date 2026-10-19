@@ -388,10 +388,11 @@ escape without closing. Registered private-class regressions cover live Set,
 Map-values and array traces plus these four abrupt-completion boundaries.
 This slice is scoped to binding/ws_private/slots.rs, rather than every venue host.
 The supplementary close-spread regression substitutes an iterator-valued helper
-result and restores the real DefaultStore mutator. On the master slot body the
-position remains open; the repaired spread delivers the close pair, clears margin
-through own undefined, and increments the position revision once. It exercises
-latent iterable admission; maintained wire payloads still provide arrays.
+result and keeps the real DefaultStore mutator from fixture construction. A second
+facade lookup returns the same object and cannot undo a recorder override. The
+maintained handler and actual TS Store confirm native row identity, zero bits,
+own-undefined margin and one position revision increment after the close pair.
+It exercises latent iterable admission; maintained wire payloads still provide arrays.
 
 Partner-attribution order rejection helpers are installed in the production
 module globals. Their source String/nullish coercion runs before the existing
@@ -480,3 +481,9 @@ The fourteen TransactionClient get/submit methods have a real-constructor timing
 proof in `TRANSACTION_TIMING_AUDIT.md`. Keep live JS inputs until the nonce await
 settles, retain the batch iterator, and preserve receiver dispatch for submits.
 The typed FIFO promise family is already eager; do not wrap it in a second driver.
+
+The SDK API error binding delegates Error initialization to the installed runtime
+constructor and inherits its prototype. Optional captureStackTrace executes after
+all source fields are assigned; its mutations and original throws remain visible.
+`ERROR_CONSTRUCTOR_REVIEW.md` records native regressions and the shared engine
+stack-generation residual.
