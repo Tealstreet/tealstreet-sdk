@@ -436,3 +436,27 @@ bundle951036bytes. Binance public passes259.1/117.4ms,steady145.7/47.2ms,
 retained4.2/2.2MB. Final remaining local private/integration replays and CI on the
 pushed nine-venue head remain required before merge. Findings/resolutions are
 posted on PR1306; no performance threshold or byte budget was raised.
+
+Backpack landed at b265a0bab0 while the nine-venue checkpoint finished. Integrate
+its crate, PATCH transport, owned sorted-book load, disposal/UTF-8 host guards,
+and shared actual Tape tests under the standing merge authorization. Retain all
+ten default constructors and single-venue feature builds with the unchanged
+1258291-byte limit. Bounded independent wrapper/host/CI review accepts the union:
+Backpack receive window, corrected clock and bound prototype transport methods
+are scoped to Backpack; Hyperliquid watch-only, cloids and history units remain
+intact. Backpack-only and default host checks and workspace formatting pass.
+The shared Tape extraction must preserve strict financial identity, ordered
+single-use writes, all authentication/topic checks and signed net-memory math.
+Native/TypeScript/full host verification and end-of-phase harness review are
+running before the integration commit; real replays and final CI remain gated.
+
+Ten-venue harness audit found a persistent-error gap in incoming Backpack
+verification: a host-caught invalid periodic signature could leave loaded state
+and no reported audit failure. Shared signature verification now persists both
+false results and thrown verifier errors exactly once; both actual replay realms
+reject them before returning metrics/results. Caught REST/WS and parser-throw
+regressions pass. Localized independent re-review accepts the fix and finds no
+remaining bounded integration issues. All137 harness tests pass, including the
+existing104 plus shared transport/Backpack tests;29module/build syntax checks
+pass. All655 native workspace tests and the combined Wasm bridge pass. Final
+Clippy/root tests and real ten-venue replays/CI are still required before merge.

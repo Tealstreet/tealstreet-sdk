@@ -449,7 +449,7 @@ Snapshot-then-delta approach (`listenOrderBook` in `backpack.ws-public.ts`):
 5. Apply the first remaining buffered update when its aggregate `U`/`u` range spans `lastUpdateId + 1` (`U <= expected <= u`); after that initial bridge, require each delta's `U` to equal the prior `u + 1`. `lastUpdateId` advances to each applied `u`.
 6. Mark snapshot as loaded, clear buffer
 7. Apply subsequent delta updates in real-time via `updateOrderBook()` utility
-8. On a non-bridging sequence range, stop applying deltas and perform an authoritative REST resnapshot. Recovery is capped at three resnapshots per active connection and never reconnects the WebSocket; reconnect resets that budget and refetches all snapshots. Terminal failure emits exactly one exchange error, then clears every listener's local book.
+8. On a non-bridging sequence range, stop applying deltas and perform an authoritative REST resnapshot. Recovery is capped at three consecutive non-bridging resnapshots and never reconnects the WebSocket; a successful bridge resets the streak. Reconnect resets each book and refetches snapshots. Terminal failure emits exactly one exchange error for the affected symbol, then clears that symbol's listeners' local books.
 9. On WebSocket reconnect, reset all states and refetch all snapshots
 
 ### Balance

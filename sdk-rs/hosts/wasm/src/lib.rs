@@ -10,18 +10,21 @@
     feature = "cryptocom",
     feature = "bingx",
     feature = "mexc",
+    feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, bingx, blofin, mexc, hyperliquid, okx or weex"
+    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, bingx, blofin, mexc, backpack, hyperliquid, okx or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
+#[cfg(feature = "backpack")]
+use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 #[cfg(feature = "binance")]
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 #[cfg(feature = "bingx")]
@@ -84,6 +87,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "cryptocom",
     feature = "bingx",
     feature = "mexc",
+    feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
     feature = "okx"
@@ -107,6 +111,9 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
+    #[cfg(feature = "backpack")]
+    #[serde(default)]
+    recv_window: Option<f64>,
     #[cfg(any(feature = "okx", feature = "weex", feature = "blofin"))]
     #[serde(default)]
     passphrase: Option<String>,
@@ -527,6 +534,7 @@ impl WasmEngine {
         feature = "cryptocom",
         feature = "bingx",
         feature = "mexc",
+        feature = "backpack",
         feature = "weex",
         feature = "hyperliquid",
         feature = "okx"
@@ -542,6 +550,13 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "backpack")]
+            "backpack" => Box::new(Engine::new(Backpack::new(BackpackOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                recv_window: options.recv_window,
+            }))),
             #[cfg(feature = "blofin")]
             "blofin" => Box::new(Engine::new(Blofin::new(BlofinOptions {
                 testnet: options.testnet,

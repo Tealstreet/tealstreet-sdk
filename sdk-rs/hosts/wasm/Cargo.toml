@@ -8,11 +8,12 @@ publish.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [features]
+backpack = ["dep:safe-cex-venue-backpack"]
 blofin = ["dep:safe-cex-venue-blofin"]
 mexc = ["dep:safe-cex-venue-mexc"]
 bingx = ["dep:safe-cex-venue-bingx"]
 weex = ["dep:safe-cex-venue-weex"]
-default = ["binance", "bybit", "hyperliquid", "okx", "cryptocom", "weex", "bingx", "mexc", "blofin"]
+default = ["binance", "bybit", "hyperliquid", "okx", "cryptocom", "weex", "bingx", "mexc", "blofin", "backpack"]
 cryptocom = ["dep:safe-cex-venue-cryptocom"]
 binance = ["dep:safe-cex-venue-binance"]
 bybit = ["dep:safe-cex-venue-bybit"]
@@ -20,6 +21,7 @@ hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
 okx = ["dep:safe-cex-venue-okx"]
 
 [dependencies]
+safe-cex-venue-backpack = { path = "../../venues/backpack", optional = true }
 safe-cex-venue-blofin = { workspace = true, optional = true }
 safe-cex-venue-mexc = { workspace = true, optional = true }
 safe-cex-venue-bingx = { workspace = true, optional = true }

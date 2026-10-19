@@ -4,17 +4,13 @@
 //   node --expose-gc --import tsx sdk-rs/harness/replay.mjs --impl ts --tape <file>
 //   node --expose-gc sdk-rs/harness/replay.mjs --impl rust --tape <file>
 import { readFileSync } from 'node:fs';
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
-import { deliverSocketFrame, replayStoreReady, ReplayClock } from './tape.mjs';
+import { Tape, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
-import { callerIdsOf, canonicalUrl, isWriteRequest, requestKey, subscriptionKeys } from './requests.mjs';
-import { parseRequestJson } from './request-json.mjs';
 import { retainedMemory, settledMemory } from './memory.mjs';
-import { Responses } from './responses.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -71,244 +67,11 @@ const isPrivate = config.private ?? metadata?.private ?? records.some((record) =
   venue.isPrivateRecord ? venue.isPrivateRecord(record) : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
 );
 const options = { ...venue.options, ...(isPrivate
-  ? { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase' }
+  ? { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase', ...venue.replayCredentials }
   : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }), ...config.options };
-const callerIds = callerIdsOf(records);
-const keyFor = (method, url, body) => requestKey(method, url, body, callerIds, venue);
 
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
-class Tape {
-  constructor(impl) {
-    this.publicTickers = venue.publicTickers?.(records) ?? [];
-    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books: bookSymbols, tickers: this.publicTickers });
-    this.responses = new Responses(records, keyFor, venue.checkRequest, (method, url) => venue.isWrite?.(method, url) ?? isWriteRequest(method, url));
-    this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command' || r.type === 'close' || r.type === 'open');
-    this.open = new Map();
-    this.waiters = [];
-    this.commandIndex = 0;
-    this.subscriptions = new Set();
-    // Retain expected keys/backing storage across both memory samples: deleting
-    // startup-only harness state would subtract it from workload retained memory.
-    this.startupSubscriptions = new Map(Array.from((!isPrivate && venue.startupSubscriptions?.(records, bookSymbols)) || [], (key) => [key, false]));
-    this.pendingStartupSubscriptions = this.startupSubscriptions.size;
-    this.generations = new Map();
-  }
-
-  get unserved() { return this.responses.unserved; }
-
-  respond(method, url, body, headers) {
-    venue.validateRequest?.({ method, url, body, headers });
-    const key = keyFor(method, url, body);
-    this.requests.add(key);
-    if (this.responses.isWrite(method, url)) this.writes.push(key);
-    return this.responses.respond(method, url, body, this.commandIndex, this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.playbackTime ?? 0);
-  }
-
-  connect(url, onOpen, onMessage, onClose) {
-    const key = canonicalUrl(url, callerIds);
-    const generation = (this.generations.get(key) ?? 0) + 1;
-    this.generations.set(key, generation);
-    const socket = { url, ordinal: generation - 1, generation, onMessage, onClose, closed: false, loginVerified: false, topics: new Map() };
-    setImmediate(() => {
-      if (socket.closed) return;
-      // Bybit adds a generated requestId to each connection URL.
-      if (!this.open.has(key)) this.open.set(key, new Set());
-      this.open.get(key).add(socket);
-      onOpen();
-      this.waiters = this.waiters.filter((waiter) => !waiter());
-    });
-    return socket;
-  }
-
-  send(socket, text) {
-    venue.validateSocketMessage?.(socket, text);
-    this.sent(socket.url, text);
-    this.audit?.sent(socket.url, text);
-    for (const key of subscriptionKeys(socket.url, text, callerIds, venue)) {
-      this.subscriptions.add(venue.subscriptionGenerations ? `${socket.generation} ${key}` : key);
-      if (this.startupSubscriptions.get(key) === false) {
-        this.startupSubscriptions.set(key, true);
-        this.pendingStartupSubscriptions--;
-      }
-    }
-    if (venue.respondToPing && text === 'ping') {
-      setImmediate(() => {
-        if (!socket.closed) socket.onMessage('pong');
-      });
-      return;
-    }
-    // OKX's opt-in auth validation also uses its v5 subscription argument model.
-    const validateTopics = venue.validateSubscriptions ?? venue.validateLogin;
-    if (!venue.validateLogin && !validateTopics) return;
-    const message = JSON.parse(text);
-    if (validateTopics && ['subscribe', 'unsubscribe'].includes(message.op)) {
-      if (!Array.isArray(message.args)) throw new Error(`Invalid subscription on ${socket.url}`);
-      for (const topic of message.args) {
-        if (!topic || typeof topic.channel !== 'string' || !topic.channel)
-          throw new Error(`Invalid subscription topic on ${socket.url}`);
-        const key = JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
-        if (message.op === 'subscribe') socket.topics.set(key, topic);
-        else socket.topics.delete(key);
-      }
-      return;
-    }
-    if (!venue.validateLogin || !/\/(private|business)$/.test(new URL(socket.url).pathname)) return;
-    if (message.op !== 'login') return;
-    const arg = message.args?.length === 1 ? message.args[0] : undefined;
-    const timestamp = String(arg?.timestamp ?? '');
-    if (arg?.apiKey !== options.key || arg?.passphrase !== options.passphrase || !/^\d+$/.test(timestamp)
-      || !Number.isSafeInteger(Number(timestamp)) || Math.abs(Number(timestamp) - Date.now() / 1000) > 30) {
-      throw new Error(`Invalid OKX login credentials/timestamp on ${socket.url}`);
-    }
-    const expected = createHmac('sha256', options.secret).update(`${timestamp}GET/users/self/verify`).digest('base64');
-    const supplied = Buffer.from(String(arg.sign ?? ''));
-    const expectedBytes = Buffer.from(expected);
-    if (supplied.length !== expectedBytes.length || !timingSafeEqual(supplied, expectedBytes)) {
-      throw new Error(`Invalid OKX login signature on ${socket.url}`);
-    }
-    socket.loginVerified = true;
-  }
-
-  assertSubscribed(socket, message) {
-    if (!(venue.validateSubscriptions ?? venue.validateLogin) || !message.arg?.channel || !Array.isArray(message.data))
-      return;
-    const topics = [...socket.topics.values()].filter((topic) => topic.channel === message.arg.channel);
-    // Some documented messages put instId only on each data row, not arg.
-    const rows = message.data.length ? message.data : [null];
-    for (const row of rows) {
-      const object = row && !Array.isArray(row) && typeof row === 'object' ? row : {};
-      const covered = topics.some((topic) =>
-        Object.entries(topic).every(([key, value]) => {
-          if (key === 'channel') return true;
-          if (key === 'instType' && value === 'ANY') return true;
-          const values = [message.arg[key], object[key]].filter((v) => v !== undefined && v !== '');
-          if (!values.length && key === 'instType') {
-            const id = object.instId ?? message.arg.instId;
-            if (id?.endsWith('-SWAP')) values.push('SWAP');
-          }
-          return values.length > 0 && values.every((v) => v === value);
-        }),
-      );
-      if (!covered) {
-        throw new Error(
-          `Unsubscribed ${message.arg.channel} frame on ${socket.url}: ${JSON.stringify(message.arg)}${object.instId ? ` instId=${object.instId}` : ''}`,
-        );
-      }
-    }
-  }
-
-  assertWritesConsumed() {
-    const missing = this.responses.unusedWrites();
-    if (missing) throw new Error(`${missing} taped write(s) were not sent`);
-  }
-
-  close(socket, code = 1000) {
-    if (socket.closed) return;
-    socket.closed = true;
-    socket.onClose?.(code);
-  }
-
-  async socketFor(url, ordinal) {
-    const key = canonicalUrl(url, callerIds);
-    const active = () => [...(this.open.get(key) ?? [])].filter((socket) => !socket.closed && (ordinal === undefined || socket.ordinal === ordinal));
-    while (!active().length) {
-      await within(new Promise((resolve) => this.waiters.push(() => (active().length ? (resolve(), true) : false))), 30_000, `Socket ${url}`);
-    }
-    // Keep auth and subscription validation per actual socket while broadcasting
-    // shared-URL frames to every open listener (Hyperliquid public/private).
-    return { onClose: (code) => {
-      for (const socket of active()) {
-        socket.closed = true;
-        socket.onClose?.(code);
-      }
-    }, onMessage: (text) => {
-      for (const socket of active()) {
-        if ((venue.validateLogin || venue.validateSubscriptions) && text.trimStart().startsWith('{')) {
-          const message = JSON.parse(text);
-          if (venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified) {
-            throw new Error(`Taped login success preceded a valid login on ${url}`);
-          }
-          this.assertSubscribed(socket, message);
-        }
-        deliverSocketFrame(socket, text, this.audit, venue.validateSocketFrame);
-      }
-    } };
-  }
-
-  /**
-   * Deliver every frame in order, yielding to the event loop between frames.
-   * Commands are awaited where they fall. A private tape is paced: each record
-   * waits until its time after the account is ready.
-   */
-  async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
-    const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
-    await within((async () => {
-      if (urls.length) await this.socketFor(urls[0]);
-      await ready();
-      // Native and TS outboxes batch sends independently of handler registration.
-      // Begin the tape only after every seed-derived startup topic reached send.
-      while (this.pendingStartupSubscriptions) await new Promise((resolve) => setTimeout(resolve, 1));
-    })(), 15_000, 'Replay startup');
-    begin();
-    clock?.start();
-    this.replayClock = clock;
-    const start = performance.now();
-    let delivered = 0;
-    const warm = Math.floor(this.frames.length / 4);
-    for (const frame of this.frames) {
-      if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
-      if (isPrivate) {
-        const wait = frame.t - (performance.now() - start);
-        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-      }
-      this.playbackTime = frame.t;
-      await clock?.advance(frame.t);
-      if (frame.type === 'command') {
-        this.commandIndex++;
-        this.results.push(await within(runCommand(frame), 15_000, `Command ${frame.op}`).then((ids) => ({ ok: ids }), (error) => {
-          if (error instanceof ReplayTimeout) throw error;
-          return { error: String(error?.message ?? error) };
-        }));
-      } else {
-        const socket = await this.socketFor(frame.url, frame.socket);
-        if (frame.type === 'close') socket.onClose(frame.code ?? 1006);
-        else if (frame.type === 'ws') socket.onMessage(frame.text);
-      }
-      delivered++;
-      onTick?.(frame.t);
-      await new Promise(setImmediate);
-    }
-    return delivered;
-  }
-
-  unusedWrites() {
-    return this.responses.unusedWrites();
-  }
-
-  results = [];
-  requests = new Set();
-  subscriptions = new Set();
-  writes = [];
-  sentRequests = new Set();
-  sent(url, text) {
-    if (!venue.requestBodies || text === 'ping' || text === 'pong') return;
-    let message;
-    try {
-      message = JSON.parse(text);
-    } catch {
-      return;
-    }
-    const capture = (value) => JSON.stringify(value, (_key, entry) => entry && !Array.isArray(entry) && typeof entry === 'object'
-      ? Object.fromEntries(Object.entries(entry).sort(([a], [b]) => a.localeCompare(b))) : entry);
-    if (message.op === 'subscribe' || message.op === 'unsubscribe') {
-      for (const topic of message.args ?? []) this.sentRequests.add(capture({ url, op: message.op, topic }));
-    } else if (message.op === 'login') {
-      const args = message.args.map(({ timestamp, nonce, sign, ...credentials }) => credentials);
-      this.sentRequests.add(capture({ url, op: 'login', args }));
-    }
-  }
-}
 
 const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
@@ -385,7 +148,7 @@ async function runRust() {
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine();
-  const tape = new Tape('rust');
+  const tape = new Tape(records, venue, isPrivate, 30000, 'rust', bookSymbols, options);
   const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());
   clock?.install();
   const encoder = new TextEncoder();
@@ -593,7 +356,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   const symbol = (i) => markets.symbol(i);
   const orderRows = [];
   for (let i = 0; i < (orders?.count ?? 0); i++) {
-    const row = { id: orders.id(i), symbol: symbol(orders.market[i]), ...orderEnums(orders.enums[i]) };
+    const row = { id: orders.id(i), ...(venue.compareClientIds ? { clientOrderId: orders.clientOrderId(i) ?? null } : {}), symbol: symbol(orders.market[i]), ...orderEnums(orders.enums[i]) };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
     orderRows.push(row);
   }
@@ -632,7 +395,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 }
 
 async function runTs() {
-  const tape = new Tape('ts');
+  const tape = new Tape(records, venue, isPrivate, 30000, 'ts', bookSymbols, options);
   const clock = isPrivate ? undefined : new ReplayClock(metadata?.epoch ?? Date.now());
   clock?.install();
   class TapeWebSocket {
@@ -844,6 +607,7 @@ async function runTs() {
 function normalizeAccount(account) {
   const order = (o) => ({
     id: String(o.id),
+    ...(venue.compareClientIds ? { clientOrderId: o.clientOrderId ?? null } : {}),
     symbol: o.symbol,
     status: o.status,
     type: o.type,
@@ -851,6 +615,7 @@ function normalizeAccount(account) {
     price: o.price,
     amount: o.amount,
     filled: o.filled,
+    ...(venue.compareClientIds && o.type === 'limit' ? { timeInForce: o.timeInForce ?? null } : {}),
     remaining: o.remaining,
     reduceOnly: Boolean(o.reduceOnly),
     close: Boolean(o.close),
@@ -905,8 +670,8 @@ writeFileSync(
     protocolErrors: result.protocolErrors,
     wsRequests: result.wsRequests,
     metrics: result.metrics,
-    markets: result.store.markets.map(marketFields),
-    tickers: result.store.tickers.map((t) =>
+    markets: result.store.markets.filter(venue.marketFilter ?? (() => true)).map(marketFields),
+    tickers: result.store.tickers.filter(venue.marketFilter ?? (() => true)).map((t) =>
       Object.fromEntries([
         ['symbol', t.symbol],
         ...tickerFields.map((f) => [f, f === 'openInterest' ? (t[f] ?? 0) : t[f]]),

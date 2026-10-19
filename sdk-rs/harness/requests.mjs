@@ -68,6 +68,7 @@ const normalize = (value, callerIds, root = true, options = {}) => {
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()
     .filter((key) => !(root && (CLOCKS.has(key) || (key === 'nonce' && value.action))))
     .filter((key) => options.defaultBodyValues?.[key] !== value[key])
+    .filter((key) => !options.ignoreGeneratedBodyId?.(key, value[key], callerIds))
     .filter((key) => !CLIENT_IDS.has(key) || callerIds.has(value[key])
       || (options.generatedId && !options.generatedId(key, String(value[key]))))
     .map((key) => [key, !callerIds.has(value[key]) && options.generatedBodyId?.(key, value[key])

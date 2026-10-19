@@ -118,6 +118,106 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
+  backpack: (ts) => {
+    const bytes = readFileSync(values.tape);
+    const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
+      .toString()
+      .split('\n')
+      .filter(Boolean)
+      .map(JSON.parse);
+    const orders = new Map();
+    const positions = new Map();
+    const fills = [];
+    const executions = new Set();
+    const tickers = new Map(ts.tickers.map((t) => [t.symbol, t]));
+    for (const ticker of tickers.values()) Object.assign(ticker, { bid: 0, ask: 0 });
+    for (const record of records) {
+      if (
+        record.type === 'http' &&
+        record.method === 'GET' &&
+        new URL(record.url).pathname === '/api/v1/orders' &&
+        record.status === 200
+      ) {
+        for (const order of parseRequestJson(record.body))
+          orders.set(String(order.id), { c: order.clientId, y: order.postOnly });
+      }
+      if (record.type !== 'ws') continue;
+      const { stream, data: d } = parseRequestJson(record.text);
+      if (!d) continue;
+      // TS globally throttles tickers. That
+      // drops other markets' last updates. Rust coalesces at the flush boundary.
+      // TS also reads P/q instead of the documented o/V ticker fields.
+      const ticker = tickers.get(d.s);
+      if (ticker) {
+        if (stream?.startsWith('ticker.')) {
+          const change =
+            d.P !== undefined
+              ? Number(d.P) * 100
+              : Number(d.o) > 0
+                ? ((Number(d.c) - Number(d.o)) / Number(d.o)) * 100
+                : undefined;
+          Object.assign(ticker, {
+            last: Number(d.c),
+            ...(change === undefined ? {} : { percentage: change }),
+            volume: Number(d.v),
+            quoteVolume: Number(d.q ?? d.V),
+          });
+        }
+        if (stream?.startsWith('trade.')) ticker.last = Number(d.p);
+        if (stream?.startsWith('bookTicker.')) Object.assign(ticker, { bid: Number(d.b), ask: Number(d.a) });
+        // TS mistakes the first changed depth level for the best quote.
+        // bookTicker is the venue's authoritative best bid/ask stream; null
+        // sides mean empty (zero), which TS incorrectly leaves stale.
+      }
+      if (stream?.startsWith('account.orderUpdate')) {
+        const previous = orders.get(String(d.i));
+        if (!previous || (d.E ?? 0) >= (previous.E ?? 0)) orders.set(String(d.i), d);
+        // TS emits duplicates on reconnect; one execution must cross once.
+        if (d.e === 'orderFill' && Number(d.l) > 0) {
+          const key = d.t == null ? `${d.i}:${d.E}:${d.z}` : `${d.i}:${d.t}`;
+          if (!executions.has(key)) {
+            executions.add(key);
+            fills.push({
+              id: String(d.i),
+              symbol: d.s,
+              side: d.S === 'Bid' ? 'buy' : 'sell',
+              amount: Number(d.l),
+              price: Number(d.L ?? d.P ?? d.p ?? 0),
+            });
+          }
+        }
+      }
+      if (stream?.startsWith('account.positionUpdate') && (!positions.has(d.s) || d.E >= positions.get(d.s).E))
+        positions.set(d.s, d);
+    }
+    if (!ts.account) return;
+    // TS returns Hedged but never publishes its fixed mode in Store options.
+    ts.account.hedged = true;
+    for (const order of ts.account.orders) {
+      const d = orders.get(order.id);
+      if (!d) continue;
+      // TS drops native client IDs on both REST and stream mapping.
+      order.clientOrderId = d.c == null ? null : String(d.c);
+      // REST postOnly / WS y are separate from GTC. TS loses maker protection.
+      if (d.y) order.timeInForce = 'PostOnly';
+      // Y is trigger quantity; Q is reverse-market quote quantity. A failed
+      // protection order is terminal, not open.
+      if (d.P !== undefined && d.Y !== undefined) {
+        order.amount = Number(d.Y);
+        order.remaining = order.amount - order.filled;
+      }
+      if (d.X === 'TriggerFailed') order.status = 'canceled';
+      // TS drops the trigger price source, so amend falls back to MarkPrice.
+      if (d.P !== undefined && d.B)
+        order.trigger = { MarkPrice: 'mark_price', LastPrice: 'last_price', IndexPrice: 'index_price' }[d.B] ?? null;
+    }
+    for (const position of ts.account.positions) {
+      const d = positions.get(position.symbol);
+      // B is entry; b is breakeven. Do not overwrite entry with breakeven.
+      if (d?.B !== undefined && Number(d.q) !== 0) position.entryPrice = Number(d.B);
+    }
+    ts.account.fills = fills;
+  },
   blofin: fixBlofinAccount,
   hyperliquid() {
     // Native command regressions pin these deliberate TS fixes:
@@ -320,6 +420,7 @@ function fixCryptocomAccount(account) {
 for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
   const rust = results.rust[run];
+  if (values.venue === 'backpack') KNOWN_TS_FIXES.backpack(ts);
   if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
   // Every request must match a taped one: an unserved request sent different parameters.
   for (const impl of ['ts', 'rust']) {
