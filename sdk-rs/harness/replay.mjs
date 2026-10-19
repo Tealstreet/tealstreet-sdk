@@ -68,6 +68,7 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
   const steady = warmMark ? process.threadCpuUsage(warmMark.thread) : { user: 0, system: 0 };
   const wallMs = performance.now() - wallStart;
   const memory = await baseline();
+  const linearBytes = typeof wasmBytes === 'function' ? wasmBytes() : wasmBytes;
   return {
     // The worker's own thread: what competes with its message handling.
     cpuMs: (thread.user + thread.system) / 1000,
@@ -82,9 +83,9 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
     bufferRetainedBytes: memory.arrayBuffers - heapBefore.arrayBuffers,
     buffersBefore: heapBefore.arrayBuffers,
     buffersAfter: memory.arrayBuffers,
-    wasmBytes,
+    wasmBytes: linearBytes,
     // What the implementation keeps alive beyond the harness and loaded code.
-    retainedBytes: retainedMemory(heapBefore, memory, wasmBytes),
+    retainedBytes: retainedMemory(heapBefore, memory, linearBytes),
   };
 };
 
@@ -248,7 +249,7 @@ async function runRust() {
   tape.assertWritesConsumed();
   clearInterval(flushTimer);
   host.flush();
-  const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
+  const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark);
   if (profile) metrics.profile = profile.methods;
   host.dispose();
   clock?.restore();

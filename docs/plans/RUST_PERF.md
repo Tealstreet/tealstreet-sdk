@@ -464,7 +464,7 @@ acknowledge remaining shared-host noise. Optimize code if this fixed experiment
 still shows regression; do not search for a favorable repetition.
 
 Final fetch brought Bitget and shared host-dispatch optimization at
-`3a7b46407dc7120dfd96846c9df26b6ca33d9c51`; expand to ten families and fourteen
+`3a7b46407dc7120dfd96846c9df26b6ca33d9c51`; expand to ten families and thirteen
 private variants before PR. Preserve inherited host3/engine3/venue-specific
 release profiles. Merge review found and fixed two real issues: incoming Tape
 parsed every legacy WS message for Bitget metadata (now Bitget-only), and capped
@@ -476,3 +476,13 @@ and both Bitget aliases remain isolated. Existing size-budget breaches under
 the newly inherited host3 setting are being measured before any cap changes.
 Baseline10 exact158-file source audit/build passes: original aggregate3497553
 bytes, SHA2569ac0db7d5cf880624fd26f65356145b073ad8972f2984f5b25ef597e87944fe7.
+
+Ten-family checks now pass686 Rust tests across71 groups, workspace fmt/bans/
+native+wasm clippy,127 harness regressions,44 repository typecheck and28 lint
+tasks, plus110 targeted Bitget SDK tests. Restored the landing's lazy WASM-memory
+read after final collection, retaining CPU cutoff before collection and the
+strong quiescence check. This avoids undercounting any late WASM growth while
+matching heap/backing-buffer sample time; both baseline10 and current helpers
+will be refreshed identically before comparisons. This changes accounting only,
+with no threshold relaxation. Final ten-family artifacts and13 private gates
+remain in progress.
