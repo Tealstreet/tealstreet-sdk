@@ -19,5 +19,20 @@ Protocol sources for the scripted tests:
 - The checked-in Bitget `CLAUDE.md` documents SDK mapping, candle quote volume,
   product variants, and client-order-ID contracts.
 
-Private data, trading and queries follow in the committed phase plan at
+Private data supports Classic v2 and livenet linear UTA v3. Startup probes
+account settings; a later Classic `40085` response promotes the account, closes
+the old socket and invalidates older HTTP generations. REST snapshots preserve
+newer WebSocket state, terminal orders and recently opened orders. Failed reads
+never commit empty account state.
+
+UTA fills use the dedicated execution channel. UTA account topics cover multiple
+products, so orders are filtered by category and positions by margin coin and
+known market. Combined standalone TP/SL strategies use separate leg identities
+which resolve to their shared native strategy ID.
+
+- [UTA fill channel](https://www.bitget.com/legacy-docs/uta/websocket/private/Fill-Channel)
+- [UTA order channel](https://www.bitget.com/legacy-docs/uta/websocket/private/Order-Channel)
+- [UTA strategy orders](https://www.bitget.com/legacy-docs/uta/websocket/private/Strategy-Order-Channel)
+
+Trading and queries follow in the committed phase plan at
 `docs/plans/RUST_BITGET.md`.

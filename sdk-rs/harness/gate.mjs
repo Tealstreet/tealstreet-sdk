@@ -57,20 +57,38 @@ for (const impl of ['ts', 'rust']) {
   if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
 }
 const isPrivate = Boolean(ts.account);
-// TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
+// Explicit TS defects Rust fixes; only documented comparator differences normalize.
 //  - A position first seen on the user stream keeps the margin size of TS's
 //    zero-size placeholder (0); Rust takes the isolated wallet, or notional
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
-const KNOWN_TS_FIXES = (account, rustAccount) => {
-  for (const position of account.positions) {
-    const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
-    if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
-  }
+const KNOWN_TS_FIXES = {
+  binance: {
+    normalize(account, rustAccount) {
+      for (const position of account.positions) {
+        const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
+        if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+      }
+    },
+  },
+  bitget: {
+    // Each correction is covered by documented-payload Rust tests. Normal
+    // tapes still compare unchanged; these notes do not rewrite mismatches.
+    notes: [
+      'Reject book sequence gaps and legacy checksum failures.',
+      'Preserve account state on failed business-error reads.',
+      'Filter all-product UTA streams to this futures product.',
+      'Use UTA execution IDs, quantities and prices from the fill topic.',
+      'Keep both TP/SL legs of status-less UTA strategy rows.',
+      'Include UTA totalFundingFee in realized PnL.',
+      'Use cumulative executed size for orders and deduplicate executions.',
+      'Do not emit an execution for an algo trigger acknowledgement.',
+    ],
+  },
 };
 if (isPrivate) {
-  KNOWN_TS_FIXES(ts.account, rust.account);
+  KNOWN_TS_FIXES[values.venue.startsWith('bitget') ? 'bitget' : values.venue]?.normalize?.(ts.account, rust.account);
   for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
     const left = JSON.stringify(ts.account[field]);
     const right = JSON.stringify(rust.account[field]);

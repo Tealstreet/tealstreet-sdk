@@ -1,0 +1,1560 @@
+use crate::wire::*;
+use crate::{BitgetFutures, Pending, paths, sign};
+use safe_cex_engine::json::ArrayAt;
+use safe_cex_engine::model::*;
+use safe_cex_engine::{Cx, Fill, LogLevel, Method, Response, TimerId};
+use serde::{Deserialize, Serialize, de::IgnoredAny};
+use std::collections::{HashMap, HashSet};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum OrderSource {
+    Normal,
+    Protection,
+    Trailing,
+}
+
+pub enum Request {
+    Probe,
+    Positions {
+        rows: Vec<Position>,
+        started: f64,
+        invalid: bool,
+    },
+    Balance {
+        row: Option<Amounts>,
+        version: u64,
+        invalid: bool,
+    },
+    UtaBalance {
+        version: u64,
+    },
+    Orders(OrderSnapshot),
+}
+
+pub struct OrderSnapshot {
+    source: OrderSource,
+    cursor: Option<String>,
+    pages: u32,
+    page_count: usize,
+    rows: Vec<Order>,
+    plans: Vec<(String, String)>,
+    started: f64,
+    invalid: bool,
+    virtual_only: bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct Amounts {
+    equity: f64,
+    free: f64,
+    upnl: f64,
+}
+
+struct WsPosition {
+    at: f64,
+    update: Option<f64>,
+}
+
+#[derive(Default)]
+pub struct Account {
+    pub generation: u64,
+    pub uta: bool,
+    pub detected: bool,
+    pub authenticated: bool,
+    poll: Option<TimerId>,
+    tick: u32,
+    positions_in_flight: bool,
+    balance_in_flight: bool,
+    orders_in_flight: bool,
+    positions_timer: Option<TimerId>,
+    balance_timer: Option<TimerId>,
+    orders_timer: Option<TimerId>,
+    balance_version: u64,
+    full_positions_at: Option<f64>,
+    full_position_ids: HashSet<String>,
+    ws_positions: HashMap<String, WsPosition>,
+    terminal: HashMap<String, f64>,
+    opened: HashMap<String, f64>,
+    pub plans: HashMap<String, String>,
+    executed: HashSet<String>,
+    executed_order: std::collections::VecDeque<String>,
+    filled: HashMap<String, (f64, f64)>,
+    rest_paused_until: f64,
+    last_payload: f64,
+}
+
+impl BitgetFutures {
+    pub(crate) fn private_enabled(&self) -> bool {
+        !self.options.public_data_only
+            && self.options.key.as_ref().is_some_and(|k| !k.is_empty())
+            && self.options.secret.as_ref().is_some_and(|s| !s.is_empty())
+    }
+
+    pub(crate) fn signed_headers(
+        &self,
+        now: f64,
+        method: Method,
+        path: &str,
+        body: &str,
+    ) -> Result<Vec<(&'static str, String)>, String> {
+        let key = self
+            .options
+            .key
+            .as_deref()
+            .filter(|k| !k.is_empty())
+            .ok_or("Bitget API key is required")?;
+        let secret = self
+            .options
+            .secret
+            .as_deref()
+            .filter(|k| !k.is_empty())
+            .ok_or("Bitget secret is required")?;
+        let passphrase = self
+            .options
+            .passphrase
+            .as_deref()
+            .filter(|k| !k.is_empty())
+            .ok_or("Bitget passphrase is required")?;
+        Ok(sign::headers(
+            key,
+            secret,
+            passphrase,
+            now,
+            method.as_str(),
+            path,
+            body,
+        ))
+    }
+
+    fn account_request(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        path: String,
+        at: Option<ArrayAt>,
+        request: Request,
+    ) {
+        match self.signed_headers(cx.now, Method::Get, &path, "") {
+            Ok(headers) => {
+                let url = format!("{}{path}", paths::REST);
+                if let Some(at) = at {
+                    cx.request_streamed(
+                        Method::Get,
+                        url,
+                        headers,
+                        at,
+                        Pending::Account {
+                            generation: self.account.generation,
+                            request,
+                        },
+                    );
+                } else {
+                    cx.request(
+                        Method::Get,
+                        url,
+                        headers,
+                        None,
+                        Pending::Account {
+                            generation: self.account.generation,
+                            request,
+                        },
+                    );
+                }
+            }
+            Err(error) => cx.log(LogLevel::Error, error),
+        }
+    }
+
+    pub(crate) fn start_private(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.private_enabled() {
+            cx.store.set_balance(Balance::default());
+            cx.store.set_positions(vec![]);
+            cx.store.set_orders(vec![]);
+            return;
+        }
+        self.account_request(cx, paths::SETTINGS.to_owned(), None, Request::Probe);
+    }
+
+    fn private_detected(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account.detected = true;
+        self.connect(cx, 3);
+        self.refresh_positions(cx);
+        self.refresh_balance(cx);
+        self.refresh_orders(cx, false);
+        if self.account.poll.is_none() {
+            self.account.poll = Some(cx.set_timer(2_000.0));
+        }
+    }
+
+    pub(crate) fn private_open(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        socket: safe_cex_engine::SocketId,
+    ) {
+        self.account.authenticated = false;
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Login<'a> {
+            api_key: &'a str,
+            passphrase: &'a str,
+            timestamp: String,
+            sign: String,
+        }
+        #[derive(Serialize)]
+        struct Auth<'a> {
+            op: &'static str,
+            args: [Login<'a>; 1],
+        }
+        let timestamp = safe_cex_engine::num::format((cx.now / 1000.0).floor());
+        let secret = self.options.secret.as_deref().unwrap_or_default();
+        let signature = sign::signature(secret, &timestamp, "GET", "/user/verify", "");
+        cx.send(
+            socket,
+            serde_json::to_string(&Auth {
+                op: "login",
+                args: [Login {
+                    api_key: self.options.key.as_deref().unwrap_or_default(),
+                    passphrase: self.options.passphrase.as_deref().unwrap_or_default(),
+                    timestamp,
+                    sign: signature,
+                }],
+            })
+            .expect("login"),
+        );
+        self.refresh_positions(cx);
+        self.refresh_balance(cx);
+        self.refresh_orders(cx, false);
+    }
+
+    fn private_subscribe(&self, cx: &mut Cx<'_, Pending>) {
+        let Some(socket) = self.sockets[3].socket else {
+            return;
+        };
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Topic<'a> {
+            inst_type: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            channel: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            topic: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            inst_id: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            coin: Option<&'a str>,
+        }
+        #[derive(Serialize)]
+        struct Subscribe<'a> {
+            op: &'static str,
+            args: Vec<Topic<'a>>,
+        }
+        let product = self.product().to_uppercase();
+        let args = if self.account.uta {
+            ["account", "position", "order", "fill", "strategy-order"]
+                .into_iter()
+                .map(|topic| Topic {
+                    inst_type: "UTA",
+                    channel: None,
+                    topic: Some(topic),
+                    inst_id: None,
+                    coin: None,
+                })
+                .collect()
+        } else {
+            ["account", "positions", "orders", "orders-algo"]
+                .into_iter()
+                .map(|channel| Topic {
+                    inst_type: &product,
+                    channel: Some(channel),
+                    topic: None,
+                    inst_id: (channel != "account").then_some("default"),
+                    coin: (channel == "account").then_some("default"),
+                })
+                .collect()
+        };
+        cx.send(
+            socket,
+            serde_json::to_string(&Subscribe {
+                op: "subscribe",
+                args,
+            })
+            .expect("private subscription"),
+        );
+    }
+
+    pub(crate) fn refresh_positions(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.detected
+            || self.account.positions_in_flight
+            || cx.now < self.account.rest_paused_until
+        {
+            return;
+        }
+        self.account.positions_in_flight = true;
+        let path = if self.account.uta {
+            format!(
+                "{}?category={}",
+                paths::UTA_POSITIONS,
+                self.product().to_uppercase()
+            )
+        } else {
+            format!(
+                "{}?productType={}&marginCoin={}",
+                paths::POSITIONS,
+                self.product(),
+                self.coin()
+            )
+        };
+        let at = if self.account.uta {
+            ArrayAt::Envelope(&[&["data", "list"]])
+        } else {
+            ArrayAt::Envelope(&[&["data"]])
+        };
+        self.account_request(
+            cx,
+            path,
+            Some(at),
+            Request::Positions {
+                rows: vec![],
+                started: cx.now,
+                invalid: false,
+            },
+        );
+    }
+
+    pub(crate) fn refresh_balance(&mut self, cx: &mut Cx<'_, Pending>) {
+        if !self.account.detected
+            || self.account.balance_in_flight
+            || cx.now < self.account.rest_paused_until
+        {
+            return;
+        }
+        self.account.balance_in_flight = true;
+        let version = self.account.balance_version;
+        if self.account.uta {
+            self.account_request(
+                cx,
+                paths::UTA_ASSETS.to_owned(),
+                None,
+                Request::UtaBalance { version },
+            );
+        } else {
+            self.account_request(
+                cx,
+                format!("{}?productType={}", paths::BALANCE, self.product()),
+                Some(ArrayAt::Envelope(&[&["data"]])),
+                Request::Balance {
+                    row: None,
+                    version,
+                    invalid: false,
+                },
+            );
+        }
+    }
+
+    pub(crate) fn refresh_orders(&mut self, cx: &mut Cx<'_, Pending>, virtual_only: bool) {
+        if !self.account.detected
+            || self.account.orders_in_flight
+            || cx.now < self.account.rest_paused_until
+        {
+            return;
+        }
+        self.account.orders_in_flight = true;
+        self.order_page(
+            cx,
+            OrderSnapshot {
+                source: OrderSource::Normal,
+                cursor: None,
+                pages: 0,
+                page_count: 0,
+                rows: vec![],
+                plans: vec![],
+                started: cx.now,
+                invalid: false,
+                virtual_only,
+            },
+        );
+    }
+
+    fn order_page(&self, cx: &mut Cx<'_, Pending>, mut snapshot: OrderSnapshot) {
+        snapshot.page_count = 0;
+        let source = snapshot.source;
+        let mut path = if self.account.uta {
+            if source == OrderSource::Normal {
+                format!(
+                    "{}?category={}&limit=100",
+                    paths::UTA_ORDERS,
+                    self.product().to_uppercase()
+                )
+            } else {
+                format!(
+                    "{}?category={}&type=tpsl",
+                    paths::UTA_STRATEGIES,
+                    self.product().to_uppercase()
+                )
+            }
+        } else if source == OrderSource::Normal {
+            format!("{}?productType={}&limit=200", paths::ORDERS, self.product())
+        } else {
+            format!(
+                "{}?productType={}&planType={}&limit=200",
+                paths::PLANS,
+                self.product(),
+                if source == OrderSource::Protection {
+                    "profit_loss"
+                } else {
+                    "track_plan"
+                }
+            )
+        };
+        if let Some(cursor) = &snapshot.cursor {
+            path.push_str(&format!(
+                "&{}={}",
+                if self.account.uta {
+                    "cursor"
+                } else {
+                    "idLessThan"
+                },
+                sign::encode(cursor)
+            ));
+        }
+        let at = ArrayAt::Envelope(&[&["data", "entrustedList"], &["data", "list"], &["data"]]);
+        self.account_request(cx, path, Some(at), Request::Orders(snapshot));
+    }
+
+    pub(crate) fn account_item(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: &mut Request,
+        item: &str,
+    ) {
+        match request {
+            Request::Positions { rows, invalid, .. } => {
+                match serde_json::from_str::<PositionRow>(item)
+                    .map_err(|e| e.to_string())
+                    .and_then(|row| self.map_position(cx, &row))
+                {
+                    Ok(p) => rows.push(p),
+                    Err(_) => *invalid = true,
+                }
+            }
+            Request::Balance { row, invalid, .. } => match serde_json::from_str::<AccountRow>(item)
+            {
+                Ok(value) if value.margin_coin == self.coin() || value.coin == self.coin() => {
+                    *row = classic_amounts(&value);
+                    *invalid |= row.is_none();
+                }
+                Ok(_) => {}
+                Err(_) => *invalid = true,
+            },
+            Request::Orders(snapshot) => {
+                snapshot.page_count += 1;
+                match serde_json::from_str::<OrderRow>(item)
+                    .map_err(|e| e.to_string())
+                    .and_then(|mut row| {
+                        if self.account.uta
+                            && snapshot.source == OrderSource::Protection
+                            && raw_status(&row).is_empty()
+                        {
+                            row.status = std::borrow::Cow::Borrowed("live");
+                        }
+                        let orders = self.map_order(cx, &row)?;
+                        if self.account.uta && snapshot.source == OrderSource::Protection {
+                            for order in &orders {
+                                snapshot
+                                    .plans
+                                    .push((order.id.clone(), "uta_tpsl".to_owned()));
+                            }
+                        }
+                        if let Some(plan) = plan_type(&row.plan_type) {
+                            for order in &orders {
+                                snapshot.plans.push((order.id.clone(), plan.to_owned()));
+                            }
+                        }
+                        Ok(orders)
+                    }) {
+                    Ok(orders) => snapshot.rows.extend(orders),
+                    Err(_) => snapshot.invalid = true,
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn account_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        response: Response<'_>,
+    ) {
+        let envelope = serde_json::from_str::<Envelope<IgnoredAny>>(response.body);
+        if matches!(response.status, 429 | 418) {
+            self.account.rest_paused_until = cx.now + 30_000.0;
+        }
+        if let Request::Probe = request {
+            match envelope {
+                Ok(header) if header.code.0 == Some(40084.0) => {
+                    self.account.uta = false;
+                    self.private_detected(cx);
+                }
+                Ok(header) if header.code.0 == Some(0.0) && response.status == 200 => {
+                    if self.options.testnet {
+                        cx.log(LogLevel::Error, "Bitget testnet UTA is unsupported");
+                        return;
+                    }
+                    match serde_json::from_str::<Envelope<UtaSettings>>(response.body)
+                        .map_err(|e| e.to_string())
+                        .and_then(Envelope::checked)
+                    {
+                        Ok(settings) => {
+                            self.account.uta = true;
+                            self.apply_settings(cx, &settings);
+                            self.private_detected(cx);
+                        }
+                        Err(error) => self.account_failed(cx, Request::Probe, &error),
+                    }
+                }
+                Ok(header) => self.account_failed(
+                    cx,
+                    Request::Probe,
+                    &format!("Bitget {}: {}", header.code.get(), header.msg),
+                ),
+                Err(_) if response.status >= 500 => {
+                    self.account.uta = false;
+                    self.private_detected(cx);
+                }
+                Err(error) => self.account_failed(cx, Request::Probe, &error.to_string()),
+            }
+            return;
+        }
+        if let Ok(header) = &envelope
+            && header.code.0 == Some(40085.0)
+            && !self.account.uta
+            && !self.options.testnet
+        {
+            self.account.uta = true;
+            self.account.generation += 1;
+            self.account.detected = false;
+            self.account.positions_in_flight = false;
+            self.account.balance_in_flight = false;
+            self.account.orders_in_flight = false;
+            self.account_request(cx, paths::SETTINGS.to_owned(), None, Request::Probe);
+            return;
+        }
+        let valid = envelope
+            .map_err(|e| e.to_string())
+            .and_then(|header| header.checked().map(|_| ()));
+        if let Err(error) = valid {
+            self.account_failed(cx, request, &error);
+            return;
+        }
+        if response.status != 200 {
+            self.account_failed(cx, request, &format!("Bitget HTTP {}", response.status));
+            return;
+        }
+        match request {
+            Request::Positions {
+                rows,
+                started,
+                invalid: false,
+            } => {
+                self.account.positions_in_flight = false;
+                let rows = self.merge_positions(cx, rows, started);
+                for p in &rows {
+                    self.position_setting(cx, p);
+                }
+                cx.store
+                    .set_positions(rows.into_iter().filter(|p| p.contracts > 0.0).collect());
+            }
+            Request::Balance {
+                row,
+                version,
+                invalid: false,
+            } => {
+                self.account.balance_in_flight = false;
+                if self.account.balance_version == version {
+                    if let Some(row) = row {
+                        self.apply_balance(cx, row);
+                    } else {
+                        cx.store.set_balance(cx.store.balance().clone());
+                    }
+                }
+            }
+            Request::UtaBalance { version } => {
+                self.account.balance_in_flight = false;
+                match serde_json::from_str::<Envelope<UtaBalance>>(response.body)
+                    .map_err(|e| e.to_string())
+                    .and_then(Envelope::checked)
+                {
+                    Ok(row) => {
+                        if self.account.balance_version == version
+                            && let Some(amounts) = uta_amounts(&row, self.coin())
+                        {
+                            self.apply_balance(cx, amounts);
+                        }
+                    }
+                    Err(error) => cx.log(LogLevel::Error, error),
+                }
+            }
+            Request::Orders(mut snapshot) if !snapshot.invalid => {
+                #[derive(Deserialize)]
+                #[serde(untagged)]
+                enum Meta {
+                    Object(PageMeta),
+                    Array(Vec<IgnoredAny>),
+                }
+                let meta = serde_json::from_str::<Envelope<Meta>>(response.body)
+                    .ok()
+                    .and_then(|e| e.data);
+                let cursor = match meta {
+                    Some(Meta::Object(meta)) => meta.end_id.or(meta.cursor),
+                    Some(Meta::Array(rows)) => {
+                        debug_assert!(rows.is_empty());
+                        None
+                    }
+                    None => None,
+                }
+                .filter(|cursor| !cursor.is_empty());
+                if snapshot.page_count > 0 && cursor.is_some() && cursor != snapshot.cursor {
+                    snapshot.pages += 1;
+                    if snapshot.pages >= 20 {
+                        self.account_failed(
+                            cx,
+                            Request::Orders(snapshot),
+                            "Bitget open-order page bound reached",
+                        );
+                        return;
+                    }
+                    snapshot.cursor = cursor;
+                    self.order_page(cx, snapshot);
+                    return;
+                }
+                let next = match snapshot.source {
+                    OrderSource::Normal if !snapshot.virtual_only => Some(OrderSource::Protection),
+                    OrderSource::Protection if !self.account.uta => Some(OrderSource::Trailing),
+                    _ => None,
+                };
+                if let Some(next) = next {
+                    snapshot.source = next;
+                    snapshot.pages = 0;
+                    snapshot.cursor = None;
+                    self.order_page(cx, snapshot);
+                } else {
+                    self.account.orders_in_flight = false;
+                    for (id, plan) in snapshot.plans {
+                        self.account.plans.insert(id, plan);
+                    }
+                    self.commit_orders(cx, snapshot.rows, snapshot.virtual_only, snapshot.started);
+                }
+            }
+            Request::Probe => {}
+            request => self.account_failed(cx, request, "invalid Bitget account record"),
+        }
+    }
+
+    fn clear_in_flight(&mut self, request: &Request) {
+        match request {
+            Request::Positions { .. } => self.account.positions_in_flight = false,
+            Request::Balance { .. } | Request::UtaBalance { .. } => {
+                self.account.balance_in_flight = false
+            }
+            Request::Orders(_) => self.account.orders_in_flight = false,
+            _ => {}
+        }
+    }
+
+    pub(crate) fn account_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+    ) {
+        self.clear_in_flight(&request);
+        cx.log(LogLevel::Error, error);
+    }
+
+    pub(crate) fn account_transport_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: &str,
+    ) {
+        if matches!(request, Request::Probe) {
+            self.account.uta = false;
+            self.private_detected(cx);
+        } else {
+            self.account_failed(cx, request, error);
+        }
+    }
+
+    fn apply_settings(&self, cx: &mut Cx<'_, Pending>, settings: &UtaSettings<'_>) {
+        cx.store.set_hedged(is_hedged(&settings.hold_mode));
+        for row in &settings.symbol_config_list {
+            if !row.category.is_empty() && !row.category.eq_ignore_ascii_case(self.product()) {
+                continue;
+            }
+            let leverage = first(&[
+                row.long_leverage,
+                row.leverage,
+                row.short_leverage,
+                row.crossed_margin_leverage,
+                row.isolated_long_lever,
+                row.isolated_short_lever,
+            ])
+            .unwrap_or(1.0);
+            let margin = margin(&row.margin_mode);
+            if !row.pos_mode.is_empty() {
+                cx.store.set_hedged(is_hedged(&row.pos_mode));
+            }
+            cx.store.update_setting(&row.symbol, |s| {
+                s.leverage = leverage;
+                s.margin_type = Some(margin);
+            });
+        }
+    }
+
+    fn position_setting(&self, cx: &mut Cx<'_, Pending>, p: &Position) {
+        cx.store
+            .set_hedged(p.position_mode == Some(PositionMode::Hedged));
+        cx.store.update_setting(&p.symbol, |s| {
+            s.leverage = p.leverage;
+            s.margin_type = p.margin_type;
+        });
+    }
+
+    fn merge_positions(
+        &self,
+        cx: &Cx<'_, Pending>,
+        rows: Vec<Position>,
+        started: f64,
+    ) -> Vec<Position> {
+        let full_fresh = self
+            .account
+            .full_positions_at
+            .is_some_and(|at| started - at <= 5_000.0);
+        let mut rows: Vec<_> = rows
+            .into_iter()
+            .filter_map(|p| {
+                if full_fresh && !self.account.full_position_ids.contains(&p.id) {
+                    return None;
+                }
+                if let Some(mark) = self.account.ws_positions.get(&p.id)
+                    && started - mark.at <= 5_000.0
+                {
+                    let current = cx.store.position(&p.id);
+                    if mark.at >= started
+                        || p.last_update.is_none()
+                        || mark
+                            .update
+                            .is_some_and(|t| p.last_update.is_some_and(|r| t > r))
+                    {
+                        return current.cloned();
+                    }
+                }
+                Some(p)
+            })
+            .collect();
+        for current in cx.store.positions() {
+            if !rows.iter().any(|p| p.id == current.id)
+                && self
+                    .account
+                    .ws_positions
+                    .get(&current.id)
+                    .is_some_and(|m| started - m.at <= 5_000.0)
+            {
+                rows.push(current.clone());
+            }
+        }
+        rows
+    }
+
+    fn commit_orders(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        mut rows: Vec<Order>,
+        virtual_only: bool,
+        started: f64,
+    ) {
+        self.account.terminal.retain(|_, until| *until > cx.now);
+        self.account.opened.retain(|_, until| *until > cx.now);
+        let mut seen = HashSet::new();
+        rows.retain(|row| seen.insert(row.id.clone()));
+        for row in &mut rows {
+            if self
+                .account
+                .opened
+                .get(&row.id)
+                .is_some_and(|until| *until > started + 5_000.0)
+                && let Some(current) = cx.store.order(&row.id)
+            {
+                *row = current.clone();
+            }
+        }
+        rows.retain(|row| {
+            !self.account.terminal.contains_key(&row.id)
+                && !cx.store.order(&row.id).is_some_and(|current| {
+                    matches!(
+                        current.status,
+                        OrderStatus::Canceling | OrderStatus::Closed | OrderStatus::Canceled
+                    )
+                })
+        });
+        if virtual_only {
+            rows.retain(|o| o.parent_id.is_some());
+            rows.extend(
+                cx.store
+                    .orders()
+                    .iter()
+                    .filter(|o| {
+                        o.parent_id.is_none()
+                            || self
+                                .account
+                                .plans
+                                .get(&o.id)
+                                .is_some_and(|plan| plan == "uta_tpsl")
+                    })
+                    .cloned(),
+            );
+        } else {
+            for current in cx.store.orders() {
+                if current.status == OrderStatus::Open
+                    && !rows.iter().any(|r| r.id == current.id)
+                    && (is_algo(current.kind) || self.account.opened.contains_key(&current.id))
+                {
+                    rows.push(current.clone());
+                }
+            }
+        }
+        cx.store.set_orders(rows);
+    }
+
+    fn apply_balance(&self, cx: &mut Cx<'_, Pending>, amounts: Amounts) {
+        let open = cx.store.positions().iter().any(|p| p.contracts > 0.0);
+        let upnl = if open {
+            cx.store
+                .positions()
+                .iter()
+                .map(|p| {
+                    let direction = if p.side == PositionSide::Long {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+                    cx.store
+                        .ticker(&p.symbol)
+                        .filter(|t| t.last > 0.0)
+                        .map_or(p.unrealized_pnl, |t| {
+                            direction * (t.last - p.entry_price) * p.contracts
+                        })
+                })
+                .sum()
+        } else {
+            amounts.upnl
+        };
+        cx.store.set_balance(Balance {
+            used: clean(amounts.equity - amounts.free),
+            free: amounts.free,
+            total: clean(amounts.equity - upnl),
+            upnl: clean(upnl),
+        });
+    }
+
+    pub(crate) fn private_message(&mut self, cx: &mut Cx<'_, Pending>, text: &str) {
+        let Ok(header) = serde_json::from_str::<Message<'_, IgnoredAny>>(text) else {
+            return;
+        };
+        if header.event == "login" {
+            if header.code.and_then(|n| n.0) == Some(0.0) {
+                self.account.authenticated = true;
+                self.private_subscribe(cx);
+            } else {
+                cx.log(
+                    LogLevel::Error,
+                    format!("Bitget private WS login failed: {}", header.msg),
+                );
+            }
+            return;
+        }
+        if !header.event.is_empty() || !self.account.authenticated {
+            return;
+        }
+        let channel = if !header.arg.topic.is_empty() {
+            header.arg.topic.as_ref()
+        } else {
+            header.arg.channel.as_ref()
+        };
+        match channel {
+            "positions" | "position" => {
+                let parsed = serde_json::from_str::<Message<'_, PositionRow>>(text);
+                let Ok(message) = parsed else {
+                    return;
+                };
+                let Some(rows) = message.data else {
+                    return;
+                };
+                let mapped: Result<Vec<_>, _> =
+                    rows.iter()
+                        .filter(|r| {
+                            !self.account.uta
+                                || ((r.margin_coin.is_empty() || r.margin_coin == self.coin())
+                                    && cx
+                                        .store
+                                        .market(&self.normalized_symbol(first_text(&[
+                                            &r.inst_id, &r.symbol,
+                                        ])))
+                                        .is_some())
+                        })
+                        .map(|r| self.map_position(cx, r))
+                        .collect();
+                let Ok(positions) = mapped else {
+                    cx.log(LogLevel::Warning, "invalid Bitget position stream record");
+                    return;
+                };
+                if message.action == "snapshot" {
+                    self.account.full_positions_at = Some(cx.now);
+                    self.account.full_position_ids = positions
+                        .iter()
+                        .filter(|p| p.contracts > 0.0)
+                        .map(|p| p.id.clone())
+                        .collect();
+                }
+                for p in &positions {
+                    self.account.ws_positions.insert(
+                        p.id.clone(),
+                        WsPosition {
+                            at: cx.now,
+                            update: p.last_update,
+                        },
+                    );
+                    self.position_setting(cx, p);
+                }
+                if message.action == "snapshot" {
+                    cx.store.set_positions(
+                        positions
+                            .into_iter()
+                            .filter(|p| p.contracts > 0.0)
+                            .collect(),
+                    );
+                } else {
+                    for p in positions {
+                        cx.store.upsert_position(p);
+                    }
+                }
+                self.account.last_payload = cx.now;
+                if self.account.positions_timer.is_none() {
+                    self.account.positions_timer = Some(cx.set_timer(500.0));
+                }
+                if self.account.balance_timer.is_none() {
+                    self.account.balance_timer = Some(cx.set_timer(300.0));
+                }
+            }
+            "orders" | "order" | "orders-algo" | "ordersAlgo" | "strategy-order" => {
+                let Ok(message) = serde_json::from_str::<Message<'_, OrderRow>>(text) else {
+                    return;
+                };
+                let Some(rows) = message.data else {
+                    return;
+                };
+                for raw in rows {
+                    if self.account.uta && !raw.category.eq_ignore_ascii_case(self.product()) {
+                        continue;
+                    }
+                    let Ok(orders) = self.map_order(cx, &raw) else {
+                        cx.log(LogLevel::Warning, "invalid Bitget order stream record");
+                        continue;
+                    };
+                    let Some(order) = orders.first() else {
+                        continue;
+                    };
+                    let status = raw_status(&raw);
+                    let explicit_fill = matches!(
+                        status,
+                        "partial_fill"
+                            | "partially_filled"
+                            | "partially_fill"
+                            | "filled"
+                            | "full_fill"
+                    );
+                    if explicit_fill && !self.account.uta && !is_algo(order.kind) {
+                        self.emit_execution(cx, &raw, order);
+                    }
+                    for order in orders {
+                        if self.account.uta && channel == "strategy-order" {
+                            self.account
+                                .plans
+                                .insert(order.id.clone(), "uta_tpsl".to_owned());
+                        }
+                        if !raw.plan_type.is_empty() {
+                            self.account.plans.insert(
+                                order.id.clone(),
+                                plan_type(&raw.plan_type)
+                                    .unwrap_or(&raw.plan_type)
+                                    .to_owned(),
+                            );
+                        }
+                        match order.status {
+                            OrderStatus::Closed | OrderStatus::Canceled => {
+                                self.account
+                                    .terminal
+                                    .insert(order.id.clone(), cx.now + 10_000.0);
+                                self.account.opened.remove(&order.id);
+                                cx.store.set_order_status(&order.id, order.status);
+                            }
+                            _ if !self
+                                .account
+                                .terminal
+                                .get(&order.id)
+                                .is_some_and(|until| *until > cx.now) =>
+                            {
+                                self.account
+                                    .opened
+                                    .insert(order.id.clone(), cx.now + 5_000.0);
+                                cx.store.upsert_order(order);
+                            }
+                            _ => {}
+                        }
+                    }
+                    if explicit_fill {
+                        if self.account.balance_timer.is_none() {
+                            self.account.balance_timer = Some(cx.set_timer(300.0));
+                        }
+                        if self.account.positions_timer.is_none() {
+                            self.account.positions_timer = Some(cx.set_timer(500.0));
+                        }
+                    }
+                }
+                self.account.last_payload = cx.now;
+                if self.account.orders_timer.is_none() {
+                    self.account.orders_timer = Some(cx.set_timer(500.0));
+                }
+            }
+            "fill" if self.account.uta => {
+                if let Ok(message) = serde_json::from_str::<Message<'_, FillRow>>(text)
+                    && let Some(rows) = message.data
+                {
+                    for row in rows {
+                        if !row.category.eq_ignore_ascii_case(self.product())
+                            || cx.store.market(&row.symbol).is_none()
+                        {
+                            continue;
+                        }
+                        let price = row.exec_price.get();
+                        let amount = row.exec_qty.get();
+                        let execution = row.exec_id.text();
+                        let order = row.order_id.text();
+                        if execution.is_empty() || order.is_empty() || price <= 0.0 || amount <= 0.0
+                        {
+                            continue;
+                        }
+                        let Some(side) = order_side(&row.side) else {
+                            continue;
+                        };
+                        if self.remember_execution(format!("{}:{execution}", row.symbol)) {
+                            cx.fill(Fill {
+                                order_id: order.into_owned(),
+                                symbol: row.symbol.into_owned(),
+                                side,
+                                price,
+                                amount,
+                            });
+                        }
+                    }
+                }
+                self.account.last_payload = cx.now;
+                if self.account.balance_timer.is_none() {
+                    self.account.balance_timer = Some(cx.set_timer(300.0));
+                }
+                if self.account.positions_timer.is_none() {
+                    self.account.positions_timer = Some(cx.set_timer(500.0));
+                }
+            }
+            "account" => {
+                if self.account.uta {
+                    if let Ok(message) = serde_json::from_str::<Message<'_, UtaBalance>>(text)
+                        && let Some(rows) = message.data
+                    {
+                        for row in rows {
+                            if let Some(amounts) = uta_amounts(&row, self.coin()) {
+                                self.apply_balance(cx, amounts);
+                                self.account.balance_version += 1;
+                            }
+                        }
+                    }
+                } else if let Ok(message) = serde_json::from_str::<Message<'_, AccountRow>>(text)
+                    && let Some(rows) = message.data
+                {
+                    for row in rows {
+                        if (row.margin_coin == self.coin() || row.coin == self.coin())
+                            && let Some(amounts) = classic_amounts(&row)
+                        {
+                            self.apply_balance(cx, amounts);
+                            self.account.balance_version += 1;
+                        }
+                    }
+                }
+                self.account.last_payload = cx.now;
+            }
+            _ => {}
+        }
+    }
+
+    fn emit_execution(&mut self, cx: &mut Cx<'_, Pending>, raw: &OrderRow<'_>, order: &Order) {
+        let previous = self
+            .account
+            .filled
+            .get(&order.id)
+            .map(|(filled, _)| *filled)
+            .or_else(|| cx.store.order(&order.id).map(|o| o.filled))
+            .unwrap_or(0.0);
+        let cumulative = first(&[
+            raw.acc_base_volume,
+            raw.cum_exec_qty,
+            raw.filled_qty,
+            raw.acc_fill_sz,
+        ]);
+        let amount = if self.account.uta {
+            cumulative
+                .map(|total| (total - previous).max(0.0))
+                .or(raw.base_volume.0)
+        } else {
+            raw.base_volume
+                .0
+                .or_else(|| cumulative.map(|total| (total - previous).max(0.0)))
+        }
+        .unwrap_or(0.0);
+        let execution = first_text(&[&raw.trade_id.text(), &raw.exec_id.text()]).to_owned();
+        let key = if execution.is_empty() {
+            format!(
+                "{}:{}:{}:{}",
+                order.id,
+                cumulative.unwrap_or(order.filled),
+                raw.fill_time.or(raw.u_time.get()),
+                amount
+            )
+        } else {
+            format!("{}:{execution}", order.symbol)
+        };
+        if amount <= 0.0 || !self.remember_execution(key) {
+            return;
+        }
+        self.account.filled.insert(
+            order.id.clone(),
+            (cumulative.unwrap_or(previous + amount), cx.now),
+        );
+        let price = first(&[
+            raw.fill_price,
+            raw.price_avg,
+            raw.avg_price,
+            raw.price,
+            raw.px,
+        ])
+        .unwrap_or(order.price);
+        cx.fill(Fill {
+            order_id: order.id.clone(),
+            symbol: order.symbol.clone(),
+            side: order.side,
+            price,
+            amount,
+        });
+    }
+
+    fn remember_execution(&mut self, key: String) -> bool {
+        if !self.account.executed.insert(key.clone()) {
+            return false;
+        }
+        self.account.executed_order.push_back(key);
+        while self.account.executed_order.len() > 4096 {
+            if let Some(old) = self.account.executed_order.pop_front() {
+                self.account.executed.remove(&old);
+            }
+        }
+        true
+    }
+
+    pub(crate) fn account_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account.poll == Some(timer) {
+            self.account.poll = None;
+            self.refresh_positions(cx);
+            self.account.tick += 1;
+            if self.account.tick.is_multiple_of(2) {
+                self.refresh_balance(cx);
+            }
+            if self.account.tick.is_multiple_of(4) {
+                self.refresh_orders(cx, true);
+            }
+            self.account.poll = Some(cx.set_timer(2_000.0));
+            self.account
+                .filled
+                .retain(|id, (_, at)| cx.now - *at < 600_000.0 || cx.store.order(id).is_some());
+            self.account
+                .plans
+                .retain(|id, _| cx.store.order(id).is_some());
+            self.account
+                .ws_positions
+                .retain(|_, m| cx.now - m.at < 10_000.0);
+            self.account.terminal.retain(|_, until| *until > cx.now);
+            self.account.opened.retain(|_, until| *until > cx.now);
+        }
+        if self.account.positions_timer == Some(timer) {
+            self.account.positions_timer = None;
+            self.refresh_positions(cx);
+        }
+        if self.account.balance_timer == Some(timer) {
+            self.account.balance_timer = None;
+            self.refresh_balance(cx);
+        }
+        if self.account.orders_timer == Some(timer) {
+            self.account.orders_timer = None;
+            self.refresh_orders(cx, false);
+        }
+    }
+
+    fn normalized_symbol(&self, symbol: &str) -> String {
+        symbol.split('_').next().unwrap_or(symbol).to_owned()
+    }
+
+    fn map_position(
+        &self,
+        cx: &Cx<'_, Pending>,
+        raw: &PositionRow<'_>,
+    ) -> Result<Position, String> {
+        let symbol = self.normalized_symbol(first_text(&[&raw.inst_id, &raw.symbol]));
+        let contracts = first(&[
+            raw.total,
+            raw.size,
+            raw.pos,
+            raw.open_total_pos,
+            raw.available,
+        ])
+        .ok_or("Bitget position has no size")?;
+        if cx.store.market(&symbol).is_none() || contracts < 0.0 {
+            return Err("invalid Bitget position symbol/size".into());
+        }
+        let side = if matches!(
+            first_text(&[&raw.hold_side, &raw.pos_side, &raw.side]),
+            "short" | "sell"
+        ) {
+            PositionSide::Short
+        } else {
+            PositionSide::Long
+        };
+        let raw_mode = first_text(&[&raw.pos_mode, &raw.hold_mode]);
+        let mode = if is_hedged(raw_mode) || (raw_mode.is_empty() && cx.store.hedged()) {
+            PositionMode::Hedged
+        } else {
+            PositionMode::Oneway
+        };
+        let id = format!("{symbol}:{side:?}:{mode:?}");
+        let entry = if self.account.uta {
+            first(&[
+                raw.avg_price,
+                raw.open_price_avg,
+                raw.open_avg_price,
+                raw.avg_px,
+                raw.average_open_price,
+            ])
+        } else {
+            first(&[
+                raw.open_price_avg,
+                raw.open_avg_price,
+                raw.avg_price,
+                raw.avg_px,
+                raw.average_open_price,
+            ])
+        }
+        .unwrap_or(0.0);
+        let mark = first(&[raw.mark_price, raw.market_price])
+            .filter(|n| *n > 0.0)
+            .unwrap_or(entry);
+        let realized = if self.account.uta {
+            raw.cur_realised_pnl.get()
+                + raw.total_funding.or(raw.total_funding_fee.get())
+                + raw.open_fee_total.get()
+                + raw.close_fee_total.get()
+                - raw.deducted_fee.get()
+        } else {
+            raw.achieved_profits.get() + raw.total_fee.get() - raw.deducted_fee.get()
+        };
+        Ok(Position {
+            id: id.clone(),
+            symbol,
+            side,
+            entry_price: entry,
+            notional: clean(contracts * mark),
+            leverage: first(&[raw.leverage, raw.lever]).unwrap_or(1.0),
+            margin_type: Some(margin(&raw.margin_mode)),
+            position_mode: Some(mode),
+            unrealized_pnl: first(&[raw.unrealized_pl, raw.unrealised_pnl, raw.upl]).unwrap_or(0.0),
+            realized_pnl: Some(clean(realized)),
+            contracts,
+            liquidation_price: first(&[raw.liquidation_price, raw.liq_price, raw.liq_px])
+                .unwrap_or_else(|| cx.store.position(&id).map_or(0.0, |p| p.liquidation_price)),
+            margin_size: first(&[raw.margin_size, raw.margin, raw.position_balance])
+                .filter(|n| *n > 0.0),
+            last_update: first(&[raw.u_time, raw.updated_time, raw.c_time]),
+        })
+    }
+
+    pub(crate) fn map_order(
+        &self,
+        cx: &Cx<'_, Pending>,
+        raw: &OrderRow<'_>,
+    ) -> Result<Vec<Order>, String> {
+        let id = [&raw.order_id, &raw.client_oid, &raw.ord_id, &raw.id]
+            .into_iter()
+            .map(Identifier::text)
+            .find(|s| !s.is_empty())
+            .ok_or("Bitget order has no id")?
+            .into_owned();
+        let symbol = self.normalized_symbol(first_text(&[&raw.symbol, &raw.inst_id]));
+        if cx.store.market(&symbol).is_none() {
+            return Err("unknown Bitget order market".into());
+        }
+        let status = order_status(raw_status(raw)).ok_or("unknown Bitget order status")?;
+        let kind = order_type(first_text(&[
+            &raw.plan_type,
+            &raw.order_type,
+            &raw.ord_type,
+        ]));
+        let side_wire = first_text(&[&raw.trade_side, &raw.t_s, &raw.side]);
+        let mut side = order_side(side_wire)
+            .or_else(|| order_side(&raw.side))
+            .unwrap_or(if raw.pos_side == "short" {
+                OrderSide::Buy
+            } else {
+                OrderSide::Sell
+            });
+        let protected = first_text(&[&raw.hold_side, &raw.pos_side]);
+        if !raw.plan_type.is_empty() && matches!(protected, "long" | "short" | "buy" | "sell") {
+            side = if matches!(protected, "long" | "buy") {
+                OrderSide::Sell
+            } else {
+                OrderSide::Buy
+            };
+        } else if !self.account.uta
+            && is_hedged(first_text(&[&raw.pos_mode, &raw.hold_mode]))
+            && (raw.reduce_only.0 || raw.trade_side == "close")
+            && matches!(side_wire, "buy" | "sell" | "close")
+        {
+            side = side.opposite();
+        }
+        let amount = first(&[raw.size, raw.sz, raw.qty, raw.amount]).unwrap_or(0.0);
+        let filled = first(&[
+            raw.acc_base_volume,
+            raw.filled_qty,
+            raw.acc_fill_sz,
+            raw.cum_exec_qty,
+            raw.base_volume,
+        ])
+        .unwrap_or(0.0);
+        let tp = first(&[
+            raw.preset_stop_surplus_price,
+            raw.stop_surplus_trigger_price,
+            raw.preset_take_profit_price,
+            raw.take_profit,
+        ])
+        .filter(|v| *v > 0.0);
+        let sl = first(&[
+            raw.preset_stoploss_price,
+            raw.stoploss_trigger_price,
+            raw.stoploss,
+        ])
+        .filter(|v| *v > 0.0);
+        let base = Order {
+            id,
+            parent_id: None,
+            symbol,
+            status,
+            kind: kind.unwrap_or(OrderType::StopLoss),
+            side,
+            price: if !raw.plan_type.is_empty() {
+                first(&[raw.trigger_price, raw.trigger_px]).unwrap_or(0.0)
+            } else {
+                first(&[raw.price, raw.px]).unwrap_or(0.0)
+            },
+            amount,
+            filled,
+            remaining: clean((amount - filled).max(0.0)),
+            reduce_only: raw.reduce_only.0 || !raw.plan_type.is_empty(),
+            close: None,
+            client_order_id: Some(raw.client_oid.text().into_owned()).filter(|s| !s.is_empty()),
+            time_in_force: Some(
+                match first_text(&[&raw.force, &raw.time_in_force, &raw.ti_f]) {
+                    "post_only" => TimeInForce::PostOnly,
+                    "ioc" => TimeInForce::ImmediateOrCancel,
+                    "fok" => TimeInForce::FillOrKill,
+                    _ => TimeInForce::GoodTillCancel,
+                },
+            ),
+            last_update: first(&[raw.u_time, raw.updated_time, raw.c_time, raw.created_time])
+                .unwrap_or(cx.now),
+            trigger_type: (!raw.plan_type.is_empty()).then_some(
+                if raw.trigger_type == "fill_price" {
+                    StopTriggerType::LastPrice
+                } else {
+                    StopTriggerType::MarkPrice
+                },
+            ),
+            take_profit: tp,
+            stop_loss: sl,
+            extra: None,
+        };
+        let mut orders = vec![];
+        if kind.is_none() {
+            for (kind, price, trigger) in [
+                (OrderType::StopLoss, sl, &raw.sl_trigger_by),
+                (OrderType::TakeProfit, tp, &raw.tp_trigger_by),
+            ] {
+                if let Some(price) = price {
+                    let mut order = base.clone();
+                    order.kind = kind;
+                    if tp.is_some() && sl.is_some() {
+                        order.id = format!(
+                            "{}__{}",
+                            base.id,
+                            if kind == OrderType::StopLoss {
+                                "stop_loss"
+                            } else {
+                                "take_profit"
+                            }
+                        );
+                        order.parent_id = Some(base.id.clone());
+                    }
+                    order.price = price;
+                    order.reduce_only = true;
+                    order.trigger_type = Some(if trigger == "market" {
+                        StopTriggerType::LastPrice
+                    } else {
+                        StopTriggerType::MarkPrice
+                    });
+                    orders.push(order);
+                }
+            }
+            if orders.is_empty() {
+                return Err("unknown Bitget order type".into());
+            }
+            return Ok(orders);
+        }
+        orders.push(base.clone());
+        if base.kind == OrderType::Limit {
+            for (kind, price, suffix) in [
+                (OrderType::StopLoss, sl, "stop_loss"),
+                (OrderType::TakeProfit, tp, "take_profit"),
+            ] {
+                if let Some(price) = price {
+                    let mut child = base.clone();
+                    child.id = format!("{}__{suffix}", base.id);
+                    child.parent_id = Some(base.id.clone());
+                    child.side = base.side.opposite();
+                    child.kind = kind;
+                    child.price = price;
+                    orders.push(child);
+                }
+            }
+        }
+        Ok(orders)
+    }
+}
+
+pub(crate) fn clean(v: f64) -> f64 {
+    (v * 1e12).round() / 1e12
+}
+pub(crate) fn first(values: &[Number]) -> Option<f64> {
+    values.iter().find_map(|v| v.0)
+}
+pub(crate) fn first_text<'a>(values: &[&'a str]) -> &'a str {
+    values.iter().copied().find(|s| !s.is_empty()).unwrap_or("")
+}
+pub(crate) fn is_hedged(mode: &str) -> bool {
+    matches!(mode, "hedge_mode" | "double_hold")
+}
+pub(crate) fn margin(mode: &str) -> MarginType {
+    if matches!(mode, "crossed" | "cross") {
+        MarginType::Cross
+    } else {
+        MarginType::Isolated
+    }
+}
+pub(crate) fn is_algo(kind: OrderType) -> bool {
+    matches!(
+        kind,
+        OrderType::StopLoss | OrderType::TakeProfit | OrderType::TrailingStopLoss
+    )
+}
+pub(crate) fn plan_type(value: &str) -> Option<&'static str> {
+    Some(match value {
+        "psl" | "pos_loss" => "pos_loss",
+        "ptp" | "pos_profit" => "pos_profit",
+        "sl" | "loss_plan" => "loss_plan",
+        "tp" | "profit_plan" => "profit_plan",
+        "track" | "track_plan" => "track_plan",
+        _ => return None,
+    })
+}
+pub(crate) fn order_type(value: &str) -> Option<OrderType> {
+    Some(match value {
+        "limit" => OrderType::Limit,
+        "market" => OrderType::Market,
+        "pos_loss" | "loss_plan" | "psl" | "sl" => OrderType::StopLoss,
+        "pos_profit" | "profit_plan" | "ptp" | "tp" => OrderType::TakeProfit,
+        "track_plan" | "track" => OrderType::TrailingStopLoss,
+        _ => return None,
+    })
+}
+pub(crate) fn order_status(value: &str) -> Option<OrderStatus> {
+    Some(match value {
+        "init" | "new" | "not_trigger" | "partial_fill" | "partially_fill" | "partially_filled"
+        | "live" | "pending" | "submitting" => OrderStatus::Open,
+        "triggered" | "full_fill" | "filled" | "success" | "executed" => OrderStatus::Closed,
+        "fail_trigger" | "cancel" | "cancelled" | "canceled" | "failed" | "fail_execute" => {
+            OrderStatus::Canceled
+        }
+        _ => return None,
+    })
+}
+fn raw_status<'a>(raw: &'a OrderRow<'_>) -> &'a str {
+    first_text(&[&raw.status, &raw.state, &raw.plan_status, &raw.order_status])
+}
+pub(crate) fn order_side(value: &str) -> Option<OrderSide> {
+    Some(match value {
+        "buy"
+        | "buy_single"
+        | "open_long"
+        | "close_short"
+        | "reduce_close_short"
+        | "offset_close_short"
+        | "burst_close_short"
+        | "delivery_close_short" => OrderSide::Buy,
+        "sell"
+        | "sell_single"
+        | "open_short"
+        | "close_long"
+        | "reduce_close_long"
+        | "offset_close_long"
+        | "burst_close_long"
+        | "delivery_close_long" => OrderSide::Sell,
+        _ => return None,
+    })
+}
+fn classic_amounts(row: &AccountRow<'_>) -> Option<Amounts> {
+    Some(Amounts {
+        equity: first(&[row.union_total_margin, row.account_equity])?,
+        free: first(&[row.union_available, row.available])?,
+        upnl: row
+            .unrealized_pl
+            .or(row.crossed_unrealized_pl.get() + row.isolated_unrealized_pl.get()),
+    })
+}
+fn uta_amounts(row: &UtaBalance<'_>, coin: &str) -> Option<Amounts> {
+    let asset = row.assets.iter().find(|a| a.coin == coin);
+    Some(Amounts {
+        equity: row
+            .account_equity
+            .0
+            .or(row.usdt_equity.0)
+            .or_else(|| asset.and_then(|a| a.usd_value.0.or(a.equity.0)))?,
+        free: row
+            .eff_equity
+            .0
+            .or_else(|| asset.and_then(|a| a.available.0))?,
+        upnl: first(&[row.unrealised_pnl, row.usdt_unrealised_pnl]).unwrap_or(0.0),
+    })
+}

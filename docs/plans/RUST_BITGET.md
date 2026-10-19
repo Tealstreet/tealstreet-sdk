@@ -70,3 +70,24 @@ merge PR, create fresh follow-up branch. Never touch master or force/rebase.
   standing authorization for landing-branch layout conflict resolution.
 - No further stashes: use branch WIP commits. Private-phase stash is restored
   after the relocation merge. Runtime-tree wasm test failure is overseer-owned.
+
+## Private phase checkpoint
+
+- Exact REST/WS HMAC signing; Classic/UTA detection and late 40085 promotion;
+  separate private socket authentication, subscriptions and watchdog.
+- Streaming nested arrays retain small validated envelopes for cursors and
+  business errors. Binance's original streaming form remains unchanged.
+- Typed snapshots, settings, position mode, liquidation fallback, full-snapshot
+  and per-position freshness guards, terminal-order tombstones, open-order
+  grace, virtual-stop polling, account reconciliation and bounded fill caches.
+- UTA fill/strategy topics, product filtering, dual strategy leg identity and
+  status-less strategy snapshots reflect current documented native payloads.
+- Sub-agent review findings fixed and covered by regressions: late promotion,
+  old HTTP generations, socket replacement, UTA scope, execution semantics,
+  missing strategy status, TP/SL ID collision, hedge-close direction, virtual
+  refresh strategy preservation, funding fee alias, map pruning.
+- Removed unused first-port `crypto/wallet_utils.rs` and its export; no native
+  venue, host or engine caller exists. Retained the signing primitives.
+- Bans/fmt/clippy pass; engine 12 tests, Bitget public 11 + private 15 tests pass.
+- TS fixes are explicit in `harness/gate.mjs`'s KNOWN_TS_FIXES registry; normal
+  Bitget tapes receive no mismatch normalization. Next: trading commands.

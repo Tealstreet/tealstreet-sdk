@@ -104,6 +104,9 @@ pub enum ArrayAt {
     Root,
     /// The array is this field of the top-level object.
     Field(&'static str),
+    /// Stream the first matching array and retain its envelope with `[]` in
+    /// place of the list, including pagination and business-error metadata.
+    Envelope(&'static [&'static [&'static str]]),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -130,6 +133,11 @@ pub struct ArraySplitter {
     /// The wanted key and its colon were just seen.
     armed: bool,
     item: Vec<u8>,
+    keys: Vec<Vec<u8>>,
+    envelope: Vec<u8>,
+    envelope_overflow: bool,
+    invalid: bool,
+    saw_comma: bool,
 }
 
 impl ArraySplitter {
@@ -145,18 +153,40 @@ impl ArraySplitter {
             capturing_key: false,
             armed: false,
             item: Vec::new(),
+            keys: Vec::new(),
+            envelope: Vec::new(),
+            envelope_overflow: false,
+            invalid: false,
+            saw_comma: false,
         }
     }
 
     /// Whether the array was found and closed.
     pub fn finished(&self) -> bool {
         self.phase == Phase::Done
+            && !self.invalid
+            && (!matches!(self.at, ArrayAt::Envelope(_))
+                || (!self.envelope_overflow
+                    && serde_json::from_slice::<IgnoredAny>(&self.envelope).is_ok()))
+    }
+
+    pub fn envelope(&self) -> Option<&str> {
+        matches!(self.at, ArrayAt::Envelope(_))
+            .then(|| std::str::from_utf8(&self.envelope).ok())
+            .flatten()
     }
 
     pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
         for &byte in data {
+            if matches!(self.at, ArrayAt::Envelope(_)) && self.phase != Phase::InArray {
+                if self.envelope.len() < 131_072 {
+                    self.envelope.push(byte);
+                } else {
+                    self.envelope_overflow = true;
+                }
+            }
             if self.phase == Phase::Done {
-                return;
+                continue;
             }
             if self.in_string {
                 if self.phase == Phase::InArray {
@@ -173,6 +203,10 @@ impl ArraySplitter {
                     if self.capturing_key {
                         self.capturing_key = false;
                         self.key.pop();
+                        if let Some(key) = self.keys.get_mut(self.depth.saturating_sub(1) as usize)
+                        {
+                            key.clone_from(&self.key);
+                        }
                     }
                 }
                 continue;
@@ -181,24 +215,38 @@ impl ArraySplitter {
             match byte {
                 b'"' => {
                     self.in_string = true;
-                    if self.phase == Phase::Seeking && self.depth == 1 {
+                    if self.phase == Phase::Seeking && self.depth > 0 {
                         self.key.clear();
                         self.capturing_key = true;
                         self.armed = false;
                     }
                 }
-                b':' if self.phase == Phase::Seeking && self.depth == 1 => {
-                    self.armed =
-                        matches!(self.at, ArrayAt::Field(name) if name.as_bytes() == self.key);
+                b':' if self.phase == Phase::Seeking => {
+                    self.armed = match self.at {
+                        ArrayAt::Field(name) => self.depth == 1 && name.as_bytes() == self.key,
+                        ArrayAt::Envelope(paths) => paths.iter().any(|path| {
+                            path.len() == self.depth as usize
+                                && path
+                                    .iter()
+                                    .zip(&self.keys)
+                                    .all(|(name, key)| name.as_bytes() == key)
+                        }),
+                        ArrayAt::Root => false,
+                    };
                     continue;
                 }
                 b'[' | b'{' => {
                     self.depth += 1;
+                    self.keys.resize_with(self.depth as usize, Vec::new);
                     if self.phase == Phase::Seeking {
                         let found = byte == b'['
                             && match self.at {
                                 ArrayAt::Root => self.depth == 1,
                                 ArrayAt::Field(_) => self.armed && self.depth == 2,
+                                ArrayAt::Envelope(paths) => {
+                                    self.armed
+                                        || (self.depth == 1 && paths.iter().any(|p| p.is_empty()))
+                                }
                             };
                         self.armed = false;
                         if found {
@@ -210,13 +258,23 @@ impl ArraySplitter {
                 }
                 b']' | b'}' => {
                     if at_array_level && byte == b']' {
+                        if self.item.is_empty() && self.saw_comma {
+                            self.invalid = true;
+                        }
                         self.emit(&mut on_item);
+                        if matches!(self.at, ArrayAt::Envelope(_)) {
+                            self.envelope.push(b']');
+                        }
                         self.phase = Phase::Done;
                         continue;
                     }
                     self.depth = self.depth.saturating_sub(1);
                 }
                 b',' if at_array_level => {
+                    if self.item.is_empty() {
+                        self.invalid = true;
+                    }
+                    self.saw_comma = true;
                     self.emit(&mut on_item);
                     continue;
                 }
@@ -235,6 +293,8 @@ impl ArraySplitter {
         if !self.item.is_empty() {
             if let Ok(text) = std::str::from_utf8(&self.item) {
                 on_item(text);
+            } else {
+                self.invalid = true;
             }
             self.item.clear();
         }
@@ -296,5 +356,58 @@ mod tests {
         assert_eq!(seen, [3]);
         assert!(!each_in_field::<Row>(r#"{"other":[]}"#, "symbols", |_| {}).unwrap());
         assert!(each::<Row>("[1]", |_| {}).is_err());
+    }
+}
+
+#[cfg(test)]
+mod envelope_tests {
+    use super::*;
+    #[test]
+    fn nested_list_streams_but_retains_business_code_and_cursor() {
+        let body = r#"{"code":"00000","data":{"entrustedList":[{"id":"a"},{"id":"b"}],"endId":"b"},"msg":"ok"}"#;
+        for size in [1, 2, 9, 1024] {
+            let mut splitter =
+                ArraySplitter::new(ArrayAt::Envelope(&[&["data", "entrustedList"], &["data"]]));
+            let mut items = vec![];
+            for chunk in body.as_bytes().chunks(size) {
+                splitter.feed(chunk, |item| items.push(item.to_owned()));
+            }
+            assert!(splitter.finished());
+            assert_eq!(items, [r#"{"id":"a"}"#, r#"{"id":"b"}"#]);
+            assert_eq!(
+                splitter.envelope().unwrap(),
+                r#"{"code":"00000","data":{"entrustedList":[],"endId":"b"},"msg":"ok"}"#
+            );
+        }
+    }
+    #[test]
+    fn envelope_requires_complete_document_and_exact_path() {
+        let at = ArrayAt::Envelope(&[&["data", "list"]]);
+        for body in [
+            r#"{"data":{"list":[]}"#,
+            r#"{"else":{"list":[]}}"#,
+            r#"{"data":{"list":[]}garbage}"#,
+        ] {
+            let mut splitter = ArraySplitter::new(at);
+            splitter.feed(body.as_bytes(), |_| {});
+            assert!(!splitter.finished());
+        }
+    }
+}
+
+#[cfg(test)]
+mod malformed_stream_tests {
+    use super::*;
+    #[test]
+    fn streamed_arrays_reject_missing_elements_trailing_commas_and_bad_utf8() {
+        for body in [
+            b"{\"data\":[,]}".as_slice(),
+            b"{\"data\":[1,]}",
+            b"{\"data\":[\"\xff\"]}",
+        ] {
+            let mut splitter = ArraySplitter::new(ArrayAt::Envelope(&[&["data"]]));
+            splitter.feed(body, |_| {});
+            assert!(!splitter.finished());
+        }
     }
 }

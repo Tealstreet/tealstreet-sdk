@@ -1,6 +1,8 @@
 //! Bitget perpetual futures: a deterministic, sans-I/O venue engine.
+mod account;
 mod book;
 mod paths;
+mod sign;
 mod wire;
 
 use book::BookState;
@@ -32,6 +34,10 @@ pub struct Options {
 }
 
 pub enum Pending {
+    Account {
+        generation: u64,
+        request: account::Request,
+    },
     Markets {
         rows: Vec<Market>,
         invalid: bool,
@@ -60,7 +66,8 @@ struct Connection {
 
 pub struct BitgetFutures {
     options: Options,
-    sockets: [Connection; 3],
+    account: account::Account,
+    sockets: [Connection; 4],
     books: HashMap<String, BookState>,
     candles: HashMap<(String, String), usize>,
 }
@@ -69,6 +76,7 @@ impl BitgetFutures {
     pub fn new(options: Options) -> Self {
         Self {
             options,
+            account: account::Account::default(),
             sockets: Default::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -98,14 +106,32 @@ impl BitgetFutures {
             Method::Get,
             format!("{}{path}", paths::REST),
             vec![],
-            ArrayAt::Field("data"),
+            ArrayAt::Envelope(&[&["data"]]),
             pending,
         );
     }
 
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, index: usize) {
+        let url = if index == 3 {
+            if self.account.uta {
+                paths::UTA_PRIVATE
+            } else {
+                paths::PRIVATE
+            }
+        } else {
+            paths::PUBLIC
+        };
         let connection = &mut self.sockets[index];
-        connection.socket = Some(cx.connect(paths::PUBLIC));
+        if let Some(socket) = connection.socket.take() {
+            cx.close(socket);
+        }
+        if let Some(timer) = connection.watchdog.take() {
+            cx.clear_timer(timer);
+        }
+        if let Some(timer) = connection.reconnect.take() {
+            cx.clear_timer(timer);
+        }
+        connection.socket = Some(cx.connect(url));
         connection.open = false;
         connection.last_received = cx.now;
         connection.watchdog = Some(cx.set_timer(5_000.0));
@@ -170,6 +196,9 @@ impl BitgetFutures {
             let delay = (1_000.0 * 2f64.powi(connection.attempts.min(5) as i32)).min(30_000.0);
             connection.attempts += 1;
             connection.reconnect = Some(cx.set_timer(delay));
+        }
+        if index == 3 {
+            self.account.authenticated = false;
         }
         if index == 0 {
             for state in self.books.values_mut() {
@@ -379,6 +408,11 @@ impl Venue for BitgetFutures {
             cx.clear_timer(timer);
         }
         connection.watchdog = Some(cx.set_timer(5_000.0));
+        if index == 3 {
+            self.private_open(cx, socket);
+            cx.send(socket, "ping");
+            return;
+        }
         let mut topics: Vec<_> = cx
             .store
             .markets()
@@ -411,7 +445,11 @@ impl Venue for BitgetFutures {
                 .set_latency((cx.now - self.sockets[index].ping_at) / 2.0);
             return;
         }
-        self.public_message(cx, text);
+        if index == 3 {
+            self.private_message(cx, text);
+        } else {
+            self.public_message(cx, text);
+        }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _: u16) {
         if let Some(index) = self.channel(socket) {
@@ -420,6 +458,14 @@ impl Venue for BitgetFutures {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Account {
+                generation,
+                request,
+            } => {
+                if *generation == self.account.generation {
+                    self.account_item(cx, request, item);
+                }
+            }
             Pending::Markets { rows, invalid } => match serde_json::from_str::<Contract>(item) {
                 Ok(row) if row.quote_coin == self.coin() => {
                     if row.symbol.is_empty()
@@ -466,6 +512,23 @@ impl Venue for BitgetFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        if let Pending::Account {
+            generation,
+            request,
+        } = pending
+        {
+            if generation == self.account.generation {
+                self.account_response(cx, request, response);
+            }
+            return;
+        }
+        let valid = serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
+            .map_err(|e| e.to_string())
+            .and_then(Envelope::checked);
+        if let Err(error) = valid {
+            self.on_request_failed(cx, pending, &error);
+            return;
+        }
         if response.status != 200 {
             self.on_request_failed(
                 cx,
@@ -497,9 +560,7 @@ impl Venue for BitgetFutures {
                 cx.store.set_tickers(rows);
                 self.connect(cx, 1);
                 self.connect(cx, 2);
-                cx.store.set_balance(Balance::default());
-                cx.store.set_positions(vec![]);
-                cx.store.set_orders(vec![]);
+                self.start_private(cx);
             }
             Pending::Candles {
                 command,
@@ -509,14 +570,41 @@ impl Venue for BitgetFutures {
             pending => self.on_request_failed(cx, pending, "invalid Bitget REST record"),
         }
     }
-    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
-        if let Pending::Candles { command, .. } = pending {
-            cx.done(command, Err(error.to_owned()));
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        if serde_json::from_str::<Envelope<IgnoredAny>>(response.body)
+            .ok()
+            .is_some_and(|e| e.code.0.is_some_and(|code| code != 0.0))
+        {
+            self.on_response(cx, pending, response);
         } else {
-            cx.log(LogLevel::Error, error);
+            self.on_request_failed(
+                cx,
+                pending,
+                "Bitget successful response has no expected list",
+            );
+        }
+    }
+    fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        match pending {
+            Pending::Candles { command, .. } => cx.done(command, Err(error.to_owned())),
+            Pending::Account {
+                generation,
+                request,
+            } => {
+                if generation == self.account.generation {
+                    self.account_transport_failed(cx, request, error);
+                }
+            }
+            _ => cx.log(LogLevel::Error, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.account_timer(cx, timer);
         for index in 0..self.sockets.len() {
             if self.sockets[index].reconnect == Some(timer) {
                 self.sockets[index].reconnect = None;

@@ -108,3 +108,73 @@ impl Harness {
         });
     }
 }
+
+pub const POSITION: &str = r#"{"code":"00000","data":[{"symbol":"BTCUSDT","holdSide":"long","total":"1","openPriceAvg":"90","markPrice":"100","leverage":"20","unrealizedPL":"10","liquidationPrice":"50","marginSize":"50","marginMode":"crossed","posMode":"one_way_mode","uTime":"100"}]}"#;
+pub const ACCOUNT: &str = r#"{"code":"00000","data":[{"marginCoin":"USDT","unionTotalMargin":"1010","unionAvailable":"900","unrealizedPL":"10"}]}"#;
+pub const OPEN_ORDER: &str = r#"{"code":"00000","data":{"entrustedList":[{"orderId":"1","symbol":"BTCUSDT","size":"2","baseVolume":"0","price":"90","side":"buy","orderType":"limit","status":"live","clientOid":"caller"}],"endId":""}}"#;
+
+impl Harness {
+    pub fn private_started() -> Self {
+        let mut h = Self::started(Options {
+            key: Some("key".into()),
+            secret: Some("secret".into()),
+            passphrase: Some("pass".into()),
+            ..Options::default()
+        });
+        h.load_public();
+        h
+    }
+    pub fn classic() -> Self {
+        let mut h = Self::private_started();
+        h.respond(
+            "/account/settings",
+            200,
+            r#"{"code":"40084","msg":"Classic Account mode","data":null}"#,
+        );
+        h.respond("/all-position", 200, POSITION);
+        h.respond("/account/accounts", 200, ACCOUNT);
+        h.orders(OPEN_ORDER);
+        h.login();
+        h
+    }
+    pub fn orders(&mut self, normal: &str) {
+        self.respond("/orders-pending", 200, normal);
+        self.respond(
+            "planType=profit_loss",
+            200,
+            r#"{"code":"00000","data":{"entrustedList":[]}}"#,
+        );
+        self.respond("planType=track_plan", 200, r#"{"code":"00000","data":[]}"#);
+    }
+    pub fn login(&mut self) {
+        let socket = self
+            .sockets
+            .iter()
+            .find(|(_, u)| u.ends_with("/private"))
+            .unwrap()
+            .0;
+        self.event(Event::WsOpened { socket });
+        self.private_message(r#"{"event":"login","code":0,"msg":"","connId":"extra-field"}"#);
+    }
+    pub fn private_message(&mut self, text: &str) {
+        let socket = self
+            .sockets
+            .iter()
+            .rev()
+            .find(|(_, u)| u.ends_with("/private"))
+            .unwrap()
+            .0;
+        self.event(Event::WsMessage { socket, text });
+    }
+    pub fn timer_after(&mut self, delay: f64) {
+        let (timer, at) = self
+            .timers
+            .iter()
+            .copied()
+            .find(|(_, at)| (*at - self.now - delay).abs() < 0.01)
+            .expect("timer at delay");
+        self.timers.retain(|(t, _)| *t != timer);
+        self.now = at;
+        self.event(Event::TimerFired { timer });
+    }
+}

@@ -439,6 +439,23 @@ pub trait Venue {
         _item: &str,
     ) {
     }
+    /// A complete envelope arrived without its expected streamed list. Venues
+    /// may recognize business errors; successful missing lists still fail.
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        pending: Self::Pending,
+        response: Response<'_>,
+    ) {
+        self.on_request_failed(
+            cx,
+            pending,
+            &format!(
+                "response did not contain the expected list: {}",
+                response.body
+            ),
+        );
+    }
     fn on_request_failed(
         &mut self,
         cx: &mut Cx<'_, Self::Pending>,
@@ -596,6 +613,20 @@ impl<V: Venue> Engine<V> {
         // body) must never read as an authoritative empty list.
         if let Some(splitter) = &incoming.splitter {
             if !splitter.finished() {
+                if let Some(body) = splitter.envelope()
+                    && serde_json::from_str::<serde::de::IgnoredAny>(body).is_ok()
+                {
+                    self.venue.on_stream_error(
+                        &mut cx,
+                        pending,
+                        Response {
+                            status: incoming.status,
+                            headers: &incoming.headers,
+                            body,
+                        },
+                    );
+                    return;
+                }
                 let preview = String::from_utf8_lossy(&incoming.body);
                 let message = format!("response did not contain the expected list: {preview}");
                 self.venue.on_request_failed(&mut cx, pending, &message);
@@ -604,7 +635,7 @@ impl<V: Venue> Engine<V> {
             let response = Response {
                 status: incoming.status,
                 headers: &incoming.headers,
-                body: "",
+                body: splitter.envelope().unwrap_or(""),
             };
             self.venue.on_response(&mut cx, pending, response);
             return;
