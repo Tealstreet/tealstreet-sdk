@@ -115,6 +115,36 @@ fn public_topics_and_control_frames_cannot_dispatch_payloads() {
             .any(|a| matches!(a,Action::WsSend{text,..}if text==r#"{"event":"pong"}"#))
     );
 }
+
+#[test]
+fn ticker_batches_validate_all_rows_before_committing_the_valid_prefix() {
+    let (mut e, s) = started();
+    ws(
+        &mut e,
+        s,
+        40.0,
+        r#"{"topic":"tickers","data":[{"symbol":"PERP_BTC_USDT","close":1},{"symbol":"SPOT_UNKNOWN_USDT","close":"bad"}]}"#,
+    );
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 60000.0);
+    ws(&mut e, s, 50.0, r#"{"topic":"bbos","data":[]}"#);
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().bid, 60000.0);
+}
+
+#[test]
+fn ticker_batch_capacity_is_a_hint_and_never_limits_delivered_rows() {
+    let (mut e, s) = started();
+    let rows = (1..=1000)
+        .map(|price| format!(r#"{{"symbol":"PERP_BTC_USDT","close":{price}}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    ws(
+        &mut e,
+        s,
+        40.0,
+        &format!(r#"{{"topic":"tickers","data":[{rows}]}}"#),
+    );
+    assert_eq!(e.store().ticker("BTCUSDT").unwrap().last, 1000.0);
+}
 #[test]
 fn pre_seed_book_subscription_survives_until_socket_open() {
     let mut e = Engine::new(Woo::new(Options {

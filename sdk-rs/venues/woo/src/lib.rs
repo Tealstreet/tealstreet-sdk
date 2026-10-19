@@ -587,7 +587,7 @@ impl Venue for Woo {
         };
         match msg.topic.as_ref() {
             "tickers" | "bbos" | "markprices" => {
-                let Ok(rows) = serde_json::from_str::<Vec<Tick<'_>>>(data.get()) else {
+                let Ok(rows) = ticks(data.get(), self.ticker_indexes.len()) else {
                     return;
                 };
                 for row in rows {
@@ -673,16 +673,17 @@ impl Venue for Woo {
             Pending::Trade(_) => (),
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets { rows, ranges, bad } => {
-                let Ok(header) = serde_json::from_str::<Symbol<'_>>(item) else {
-                    *bad = true;
-                    return;
-                };
-                if !header.symbol.starts_with("PERP_") {
-                    return;
-                }
-                let Ok(raw) = serde_json::from_str::<Instrument<'_>>(item) else {
-                    *bad = true;
-                    return;
+                let raw = match serde_json::from_str::<Instrument<'_>>(item) {
+                    Ok(raw) => raw,
+                    Err(_) => {
+                        if serde_json::from_str::<Symbol<'_>>(item)
+                            .is_ok_and(|s| !s.symbol.starts_with("PERP_"))
+                        {
+                            return;
+                        }
+                        *bad = true;
+                        return;
+                    }
                 };
                 let Some((base, quote)) = raw
                     .symbol
@@ -742,16 +743,17 @@ impl Venue for Woo {
                 });
             }
             Pending::Tickers { rows, indexes, bad } => {
-                let Ok(header) = serde_json::from_str::<Symbol<'_>>(item) else {
-                    *bad = true;
-                    return;
-                };
-                if cx.store.market(&compact(&header.symbol)).is_none() {
-                    return;
-                }
-                let Ok(raw) = serde_json::from_str::<Statistics<'_>>(item) else {
-                    *bad = true;
-                    return;
+                let raw = match serde_json::from_str::<Statistics<'_>>(item) {
+                    Ok(raw) => raw,
+                    Err(_) => {
+                        if serde_json::from_str::<Symbol<'_>>(item)
+                            .is_ok_and(|s| cx.store.market(&compact(&s.symbol)).is_none())
+                        {
+                            return;
+                        }
+                        *bad = true;
+                        return;
+                    }
                 };
                 let symbol = compact(&raw.symbol);
                 let Some(m) = cx.store.market(&symbol) else {

@@ -171,6 +171,38 @@ pub struct Tick<'a> {
     #[serde(default, deserialize_with = "optional_number")]
     pub price: Option<f64>,
 }
+
+pub fn ticks(text: &str, capacity: usize) -> Result<Vec<Tick<'_>>, serde_json::Error> {
+    use serde::de::{DeserializeSeed, SeqAccess, Visitor};
+    struct Batch(usize);
+    impl<'de> Visitor<'de> for Batch {
+        type Value = Vec<Tick<'de>>;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a WOO ticker batch")
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            let Some(first) = seq.next_element()? else {
+                return Ok(Vec::new());
+            };
+            let mut rows = Vec::with_capacity(self.0.clamp(1, 4096));
+            rows.push(first);
+            while let Some(row) = seq.next_element()? {
+                rows.push(row);
+            }
+            Ok(rows)
+        }
+    }
+    impl<'de> DeserializeSeed<'de> for Batch {
+        type Value = Vec<Tick<'de>>;
+        fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+            d.deserialize_seq(self)
+        }
+    }
+    let mut d = serde_json::Deserializer::from_str(text);
+    let rows = Batch(capacity).deserialize(&mut d)?;
+    d.end()?;
+    Ok(rows)
+}
 #[derive(Deserialize)]
 pub struct Level {
     #[serde(deserialize_with = "number")]
