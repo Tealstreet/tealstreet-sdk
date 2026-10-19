@@ -372,7 +372,7 @@ With merged perf rows 72-74 in #1238, the transferred cohort now has 12 FIX,
 
 ## Completion event output and codec retirement: row 25
 
-The maintained manager constructs its event at ChaserOrderManager.ts:944 with
+The maintained manager constructs its event at ChaserOrderManager.ts:937 with
 `clientId: instance.options.clientId`, creating an own property even when that
 option is absent. The native derived serializer omitted that property. The
 output now uses canonical MODEL_RECORD and ModelField::into_property, retaining
@@ -396,7 +396,8 @@ serializer at master 49c825adc6 fails the named completion listener regression
 with seven own keys when clientId is absent; exact repaired bytes restore it.
 The original ten identity cases/eight leaves remain as output observations.
 The retired decoder's two numeric fields no longer claim ingress coverage:
-remaining scalar ingress checks are 18 fields/378 comparisons, and the separate
+the five remaining records keep 45 requiredness and 13 optional-null checks;
+scalar ingress checks retain 18 fields/378 comparisons, and the separate
 terminate/state numeric matrix retains its three fields/270 comparisons with
 unchanged inputs/routes. Source inventories keep the retired event declarations
 as output evidence. The cohort now has 13 FIX, 4 ACCEPT and 10 OPEN rows.
