@@ -5,12 +5,8 @@ import type { PackedTickerDelta, Store, StoreUpdate } from './store.interface';
 import { LOADED_FLAG, MARKET_FLAG, TICKER_FIELDS, orderEnums, positionEnums } from '@tealstreet/safe-cex-wasm/wire';
 import { MarginType, OrderSide, PositionMode } from '../types';
 
-/** What a frame carries besides store state, for the exchange to emit. */
-export type FrameEvents = {
-  books: Array<{ symbol: string; orderbook: OrderBook }>;
-  candles: Array<{ symbol: string; interval: string; candle: Candle }>;
-  fills: OrderFillEvent[];
-};
+export type FrameBook = { symbol: string; orderbook: OrderBook };
+export type FrameCandle = { symbol: string; interval: string; candle: Candle };
 
 const finite = (value: number) => (Number.isNaN(value) ? undefined : value);
 
@@ -25,7 +21,8 @@ export class FrameApplier {
 
   constructor(private readonly store: Store) {}
 
-  apply(frame: Frame): FrameEvents {
+  /** Apply the frame's store sections. Books, candles and fills are decoded on request. */
+  apply(frame: Frame): void {
     const update: Writable<StoreUpdate> = {};
 
     const markets = frame.markets();
@@ -189,20 +186,14 @@ export class FrameApplier {
       break;
     }
     if (changed) this.store.update(update);
-
-    return {
-      books: this.books(frame),
-      candles: this.candles(frame),
-      fills: this.fills(frame),
-    };
   }
 
   private symbol(market: number): string {
     return this.marketSymbols[market] ?? '';
   }
 
-  private books(frame: Frame): FrameEvents['books'] {
-    const books: FrameEvents['books'] = [];
+  books(frame: Frame): FrameBook[] {
+    const books: FrameBook[] = [];
     for (const book of frame.books()) {
       const side = (rows: Float64Array) => {
         const levels = new Array(rows.length / 3);
@@ -216,9 +207,9 @@ export class FrameApplier {
     return books;
   }
 
-  private candles(frame: Frame): FrameEvents['candles'] {
+  candles(frame: Frame): FrameCandle[] {
     const rows = frame.candles();
-    const candles: FrameEvents['candles'] = [];
+    const candles: FrameCandle[] = [];
     for (let i = 0; i < (rows?.count ?? 0); i++) {
       const at = i * 6;
       candles.push({
@@ -237,7 +228,7 @@ export class FrameApplier {
     return candles;
   }
 
-  private fills(frame: Frame): OrderFillEvent[] {
+  fills(frame: Frame): OrderFillEvent[] {
     const rows = frame.fills();
     const fills: OrderFillEvent[] = [];
     for (let i = 0; i < (rows?.count ?? 0); i++) {

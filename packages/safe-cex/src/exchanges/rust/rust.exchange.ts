@@ -20,6 +20,7 @@ import type {
 
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
+import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
 import { LogSeverity } from '../../types';
 import { BaseExchange } from '../base';
@@ -51,8 +52,8 @@ export const setRustEngineTransport = (factory: () => Transport) => {
   engineTransport = factory;
 };
 
-/** The engine flushes a frame this often, the worker's store cadence. */
-const FLUSH_MS = 250;
+/** Store sections flush at the worker's store cadence. */
+const STORE_FLUSH_MS = 250;
 
 /**
  * An exchange account run by the Rust engine. Venue I/O, parsing and state
@@ -62,12 +63,16 @@ const FLUSH_MS = 250;
  */
 export class RustEngineExchange extends BaseExchange {
   private host?: EngineHostType;
-  private flushTimer?: ReturnType<typeof setInterval>;
+  private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
   private readonly bookListeners = new Map<string, Set<(book: OrderBook) => void>>();
   private readonly candleListeners = new Map<string, Set<(candle: Candle) => void>>();
 
-  /** Receives each frame after this exchange has applied it (the worker forwards it). */
+  /**
+   * Receives each frame after this exchange has applied it. When the worker
+   * forwards frames to a main thread that reads them, book and candle
+   * listeners here stay silent: main decodes those from the frame itself.
+   */
   onFrame?: (frame: ArrayBuffer) => void;
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
@@ -89,7 +94,14 @@ export class RustEngineExchange extends BaseExchange {
       onLog: this.receiveLog,
     });
     this.host.start();
-    this.flushTimer = setInterval(() => this.host?.flush(), FLUSH_MS);
+    // Books, candles and fills go out at the venue's book cadence, the rest
+    // at the store's, matching what the TS worker posts today.
+    const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;
+    const bookMs = (exchangeMetadata[this.name]?.orderbookTickDelay || STORE_FLUSH_MS) * multiplier;
+    this.flushTimers.push(setInterval(() => this.host?.flush(), STORE_FLUSH_MS * multiplier));
+    if (bookMs < STORE_FLUSH_MS * multiplier) {
+      this.flushTimers.push(setInterval(() => this.host?.flush(true), bookMs));
+    }
     await this.untilLoaded();
   };
 
@@ -97,13 +109,16 @@ export class RustEngineExchange extends BaseExchange {
   snapshotFrame = () => this.host?.snapshot();
 
   private receiveFrame = (buffer: ArrayBuffer) => {
-    const events = this.applier.apply(new Frame(buffer));
-    for (const fill of events.fills) this.emitter.emit('fill', fill);
-    for (const { symbol, orderbook } of events.books) {
-      this.bookListeners.get(symbol)?.forEach((listener) => listener(orderbook));
-    }
-    for (const { symbol, interval, candle } of events.candles) {
-      this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => listener(candle));
+    const frame = new Frame(buffer);
+    this.applier.apply(frame);
+    for (const fill of this.applier.fills(frame)) this.emitter.emit('fill', fill);
+    if (!this.onFrame) {
+      for (const { symbol, orderbook } of this.applier.books(frame)) {
+        this.bookListeners.get(symbol)?.forEach((listener) => listener(orderbook));
+      }
+      for (const { symbol, interval, candle } of this.applier.candles(frame)) {
+        this.candleListeners.get(`${symbol}:${interval}`)?.forEach((listener) => listener(candle));
+      }
     }
     this.onFrame?.(buffer);
   };
@@ -246,7 +261,8 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   dispose() {
-    clearInterval(this.flushTimer);
+    this.flushTimers.forEach(clearInterval);
+    this.flushTimers = [];
     this.host?.dispose();
     this.host = undefined;
     super.dispose();

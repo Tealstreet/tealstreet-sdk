@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { BaseExchange } from '../base';
 import { loadNodeEngine } from './loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from './rust.exchange';
 
@@ -128,5 +129,40 @@ describe('RustEngineExchange', () => {
     expect(placed).toContain('quantity=0.012');
     expect(placed).toContain('price=90000');
     expect(placed).toContain('signature=');
+  });
+
+  it('forwards frames that rebuild the same store and book events on the main thread', async () => {
+    const tape = recordedTransport();
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => tape.transport);
+    const workerStore = new DefaultStore();
+    exchange = new RustEngineExchange('binance', { key: '', secret: '', publicDataOnly: true }, workerStore);
+    const main = new BaseExchange('binance', { key: '', secret: '' }, new DefaultStore());
+    const mainBooks: unknown[] = [];
+    main.emitter.on('listenOrderBook', (book: unknown) => mainBooks.push(book));
+    // The worker transfers each frame; main gets its own buffer.
+    exchange.onFrame = (frame) => main.applyWorkerFrame(frame.slice(0));
+    const workerBooks: unknown[] = [];
+
+    await exchange.start();
+    exchange.listenOrderBook('BTCUSDT', (book) => workerBooks.push(book));
+    await until(() => tape.sockets.has('/public/ws'));
+    const publicSocket = tape.sockets.get('/public/ws')!;
+    publicSocket('{"e":"depthUpdate","E":1,"T":1,"s":"BTCUSDT","U":90,"u":105,"pu":89,"b":[["98.5","1"]],"a":[]}');
+    await until(() => tape.requests.some((r) => r.includes('/fapi/v1/depth')));
+    publicSocket('{"e":"bookTicker","s":"BTCUSDT","b":"99.5","a":"99.6"}');
+    await until(() => mainBooks.length > 0 && main.store.tickersBySymbol.BTCUSDT?.bid === 99.5);
+
+    expect(main.store.markets).toEqual(workerStore.markets);
+    expect(main.store.tickers).toEqual(workerStore.tickers);
+    expect(main.store.loaded).toEqual(workerStore.loaded);
+    const { symbol, orderbook } = mainBooks[0] as { symbol: string; orderbook: { bids: unknown[] } };
+    expect(symbol).toBe('BTCUSDT');
+    expect(orderbook.bids).toEqual([
+      { price: 99, amount: 5, total: 5 },
+      { price: 98.5, amount: 1, total: 6 },
+    ]);
+    expect(workerBooks).toEqual([]);
+    main.dispose();
   });
 });

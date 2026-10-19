@@ -5,7 +5,7 @@ export class WasmEngine implements WasmEngineLike {
   constructor(venue: string, optionsJson: string);
   start(now: number): string;
   command(json: string, now: number): string;
-  takeFrame(now: number): Uint8Array | undefined;
+  takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
   wsMessage(socket: number, text: string, now: number): string;

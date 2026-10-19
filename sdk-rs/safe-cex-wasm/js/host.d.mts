@@ -37,7 +37,7 @@ export interface EngineHandlers {
 export interface WasmEngineLike {
   start(now: number): string;
   command(json: string, now: number): string;
-  takeFrame(now: number): Uint8Array | undefined;
+  takeFrame(now: number, marketOnly: boolean): Uint8Array | undefined;
   snapshotFrame(now: number): Uint8Array;
   wsOpen(socket: number, now: number): string;
   wsMessage(socket: number, text: string, now: number): string;
@@ -54,7 +54,8 @@ export class EngineHost {
   start(): void;
   /** Resolves with the command's result for commands that report one. */
   command(command: { op: string; [field: string]: unknown }): Promise<unknown>;
-  flush(): void;
+  /** With `marketOnly`, only books, candles and fills. */
+  flush(marketOnly?: boolean): void;
   snapshot(): ArrayBuffer;
   dispose(): void;
 }

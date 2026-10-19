@@ -56,6 +56,8 @@ export type StoreWorkerOutgoingOp =
   // Store
   | 'store'
   | 'store:delta'
+  // One Rust engine flush frame (an ArrayBuffer), see store/frameApplier
+  | 'frame'
   // Orderbook
   | 'listenOrderBook'
   | 'listenOrderBook:delta'
@@ -132,6 +134,11 @@ export interface WorkerConfig {
    * mirrored through the public SDK surface and should stay narrow.
    */
   wsDiagnosticsEnabled?: boolean;
+  /**
+   * The main thread applies Rust engine frames (`op: 'frame'`) itself, so
+   * accounts on the engine send frames instead of venue data as objects.
+   */
+  acceptsFrames?: boolean;
 }
 
 /** One captured outbound worker message, stamped relative to recording start. */

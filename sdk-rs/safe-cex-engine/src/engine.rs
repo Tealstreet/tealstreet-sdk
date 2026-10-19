@@ -393,11 +393,21 @@ impl<P> Cx<'_, P> {
             .push(Action::Notice(Notice::CommandDone { command, result }));
     }
 
-    /// Queue a live candle for the next frame.
+    /// Queue a live candle for the next frame; a newer update of the same
+    /// candle replaces the queued one.
     pub fn candle(&mut self, symbol: &str, interval: &str, candle: Candle) {
-        self.io
+        let same = self
+            .io
             .candles
-            .push((symbol.to_owned(), interval.to_owned(), candle));
+            .iter_mut()
+            .find(|(s, i, c)| s == symbol && i == interval && c.timestamp == candle.timestamp);
+        match same {
+            Some(queued) => queued.2 = candle,
+            None => self
+                .io
+                .candles
+                .push((symbol.to_owned(), interval.to_owned(), candle)),
+        }
     }
 
     /// Queue an execution for the next frame.
@@ -649,10 +659,23 @@ impl<V: Venue> Engine<V> {
     /// Write everything that changed since the previous call as one flush
     /// frame. Returns `None` when nothing changed.
     pub fn take_frame(&mut self, now: f64) -> Option<&[u8]> {
-        let pending = self.store.take_pending();
+        self.write_frame(now, true)
+    }
+
+    /// Like [`take_frame`](Self::take_frame) but only books, candles and
+    /// fills, which consumers want at the venue's book cadence; store
+    /// sections wait for the next full frame.
+    pub fn take_market_frame(&mut self, now: f64) -> Option<&[u8]> {
+        self.write_frame(now, false)
+    }
+
+    fn write_frame(&mut self, now: f64, store: bool) -> Option<&[u8]> {
         let buffer = std::mem::take(&mut self.io.frame);
         let mut w = FrameWriter::new(buffer, now);
-        self.store.write(&pending, &mut w);
+        let pending = store.then(|| self.store.take_pending());
+        if let Some(pending) = &pending {
+            self.store.write(pending, &mut w);
+        }
         let books = std::mem::take(&mut self.io.changed_books);
         for symbol in &books {
             if let (Some(book), Some(market)) =

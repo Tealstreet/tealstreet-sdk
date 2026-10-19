@@ -12,6 +12,7 @@ import { virtualClock } from '../utils/virtualClock';
 import { AppSettingsWorkerType } from './AppSettingsWorkerType';
 import { chaserOrderManagerInstance } from './chaserOrder/ChaserOrderManager';
 import { ExchangeMetadataWorkerType } from './ExchangeMetadataWorkerType';
+import { mainAcceptsFrames } from './frameForwarding';
 import { BaseHandler } from './handlers/BaseHandler';
 import { CallMethodHandler } from './handlers/CallMethodHandler';
 import { ChaserOrderHandler } from './handlers/ChaserOrderHandler';
@@ -119,6 +120,8 @@ export class ExchangeWorker {
   private _lastSentOrdersUpdateId: number | null = null;
   private _lastSentPositionsUpdateId: number | null = null;
   private _lastPayloadHadActiveChasers = false;
+  /** Venue data reaches main as engine frames, not in store payloads. */
+  private _forwardsFrames = false;
   private _sentryReportCooldowns = new Map<string, { lastReportedAt: number; suppressedCount: number }>();
 
   constructor(
@@ -316,6 +319,11 @@ export class ExchangeWorker {
         return false;
       }
       this._exchange = new Exchange(this._exchangeName, this._options, this._store);
+      if (this._exchange instanceof RustEngineExchange && mainAcceptsFrames()) {
+        // Main reads venue data straight from the frames; store payloads carry the rest.
+        this._forwardsFrames = true;
+        this._exchange.onFrame = (frame) => this._ctx.postMessage({ op: 'frame', data: frame }, [frame]);
+      }
 
       // When privateOnly, disable public websocket connections before start().
       // Public data (tickers, orderbook, OHLCV) is provided by a shared public exchange.
@@ -652,10 +660,37 @@ export class ExchangeWorker {
       this._postprocessors[i].process(processedData);
     }
 
+    if (this._forwardsFrames) {
+      this._ctx.postMessage({ op: 'store', data: this._derivedStorePayload(processedData) });
+      return;
+    }
+
     // Send store data with full baseline fields preserved for initial load /
     // sendSnapshot(). Routine live payloads can omit stable fields here; the
     // main-thread store applies the remaining fields as a partial update.
     this._ctx.postMessage({ op: 'store', data: this._prepareStorePayload(processedData, options) });
+  };
+
+  /**
+   * Frame mode: venue state (markets, tickers, orders, positions, balance,
+   * leverage, loaded flags) reaches main in frames, so a store payload carries
+   * only what the worker derives from it, sanitized as usual.
+   */
+  private _derivedStorePayload = (data: StoreData): StoreWorkerStorePayload => {
+    const {
+      markets: _markets,
+      tickers: _tickers,
+      orders: _orders,
+      positions: _positions,
+      balance: _balance,
+      fetchedLeverage: _fetchedLeverage,
+      loaded: _loaded,
+      latency: _latency,
+      options: _options,
+      updateIds: _updateIds,
+      ...derived
+    } = this._sanitizeForPostMessage(data);
+    return derived;
   };
 
   get store() {
@@ -670,6 +705,10 @@ export class ExchangeWorker {
     this._throttledStoreUpdate.cancel();
     if (this._exchange?.isDisposed) {
       return;
+    }
+    if (this._forwardsFrames && this._exchange instanceof RustEngineExchange) {
+      const frame = this._exchange.snapshotFrame();
+      if (frame) this._ctx.postMessage({ op: 'frame', data: frame }, [frame]);
     }
     this._storeUpdate(this._store.serialize(), { forceFullStore: true });
   }
@@ -786,7 +825,7 @@ export class ExchangeWorker {
     });
 
     this._exchange!.on('fill', (event: OrderFillEvent) => {
-      this._ctx.postMessage({ op: 'fill', data: event });
+      if (!this._forwardsFrames) this._ctx.postMessage({ op: 'fill', data: event });
     });
 
     const logEvents = [

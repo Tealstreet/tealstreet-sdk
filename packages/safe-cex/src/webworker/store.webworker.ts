@@ -2,6 +2,7 @@ import { ExchangeName } from '../types';
 import { setTickIntervalMultipliers } from '../utils/tickIntervalOverride';
 import { virtualClock } from '../utils/virtualClock';
 import { setWsDiagnosticsEnabled } from '../utils/wsDiagnostics';
+import { setMainAcceptsFrames } from './frameForwarding';
 import { ExchangeWorker } from './ExchangeWorker';
 import {
   configurePerfFixture,
@@ -70,7 +71,9 @@ function deliverToPortWithThrottle(port: MessagePort | Worker, msg: unknown): vo
     portStates.set(port, state);
   }
 
-  const shouldThrottle = state.throttleEnabled && !state.visible;
+  // Frames carry deltas, so a hidden tab must still receive every one.
+  const isFrame = (msg as { op?: string } | null)?.op === 'frame';
+  const shouldThrottle = state.throttleEnabled && !state.visible && !isFrame;
 
   // Visible clients: deliver immediately, no throttling
   // ExchangeWorker already throttles at 250ms
@@ -214,9 +217,9 @@ const start = (ctx: Worker, shared = false) => {
     let ctxWrapper = new Proxy(ctx, {
       get(target, prop, receiver) {
         if (prop === 'postMessage') {
-          return function (msg: any) {
+          return function (msg: any, transfer?: Transferable[]) {
             recordOutboundFrame(msg);
-            return (target as any).postMessage(msg);
+            return transfer ? (target as any).postMessage(msg, transfer) : (target as any).postMessage(msg);
           };
         }
         return Reflect.get(target, prop, receiver);
@@ -322,6 +325,7 @@ const start = (ctx: Worker, shared = false) => {
       const cfg = (payload.data ?? {}) as WorkerConfig;
       if ('tickIntervalMultipliers' in cfg) setTickIntervalMultipliers(cfg.tickIntervalMultipliers);
       if ('wsDiagnosticsEnabled' in cfg) setWsDiagnosticsEnabled(cfg.wsDiagnosticsEnabled === true);
+      if ('acceptsFrames' in cfg) setMainAcceptsFrames(cfg.acceptsFrames === true);
       for (const handler of workerConfigHandlers) {
         try {
           handler(cfg as Record<string, unknown>);

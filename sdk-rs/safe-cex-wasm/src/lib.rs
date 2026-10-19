@@ -15,7 +15,7 @@ trait AnyEngine {
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
     fn drain(&mut self) -> Vec<Action>;
-    fn frame(&mut self, now: f64) -> Option<&[u8]>;
+    fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]>;
     fn snapshot(&mut self, now: f64) -> &[u8];
 }
 
@@ -32,8 +32,12 @@ impl<V: Venue> AnyEngine for Engine<V> {
         self.drain_actions().collect()
     }
 
-    fn frame(&mut self, now: f64) -> Option<&[u8]> {
-        self.take_frame(now)
+    fn frame(&mut self, now: f64, market_only: bool) -> Option<&[u8]> {
+        if market_only {
+            self.take_market_frame(now)
+        } else {
+            self.take_frame(now)
+        }
     }
 
     fn snapshot(&mut self, now: f64) -> &[u8] {
@@ -507,8 +511,12 @@ impl WasmEngine {
 
     /// Transfer `frame.buffer` to the consumer: it is copied once, straight
     /// out of the engine's reused frame buffer.
+    /// With `market_only`, just books, candles and fills (for the venue's
+    /// book cadence); store sections wait for the next full frame.
     #[wasm_bindgen(js_name = takeFrame)]
-    pub fn take_frame(&mut self, now: f64) -> Option<js_sys::Uint8Array> {
-        self.inner.frame(now).map(js_sys::Uint8Array::from)
+    pub fn take_frame(&mut self, now: f64, market_only: bool) -> Option<js_sys::Uint8Array> {
+        self.inner
+            .frame(now, market_only)
+            .map(js_sys::Uint8Array::from)
     }
 }

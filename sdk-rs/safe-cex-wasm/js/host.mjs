@@ -45,10 +45,11 @@ export class EngineHost {
   /**
    * Hand everything that changed since the previous flush to `onFrame` as one
    * ArrayBuffer (read it with wire.mjs's Frame; transfer it, don't copy it).
-   * Call once per flush interval.
+   * Call once per flush interval; with `marketOnly`, only books, candles and
+   * fills go out, for flushing those at the venue's faster book cadence.
    */
-  flush() {
-    const frame = this.engine.takeFrame(this.transport.now());
+  flush(marketOnly = false) {
+    const frame = this.engine.takeFrame(this.transport.now(), marketOnly);
     if (frame) this.handlers.onFrame?.(frame.buffer);
   }
 

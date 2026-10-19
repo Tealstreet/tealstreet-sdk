@@ -73,6 +73,8 @@ import {
 import { ExternalPublicDataProvider } from './external-public-data';
 import { reportException } from '../telemetry';
 import { InProcessPublicDataProvider } from './in-process-public-data';
+import { Frame } from '@tealstreet/safe-cex-wasm/wire';
+import { FrameApplier } from '../store/frameApplier';
 
 const normalizeSymbols = (symbols: string[]): string[] => {
   const deduped = new Set<string>();
@@ -1410,6 +1412,22 @@ export class BaseExchange implements Exchange {
       this.emitter.off('listenOHLCV', handler);
       this.emitter.emit('unsubscribeOHLCV', { symbol: o.symbol, interval: o.interval, subId });
     };
+  }
+
+  private workerFrameApplier?: FrameApplier;
+
+  /**
+   * Main thread: apply one Rust engine frame from the worker (`op: 'frame'`)
+   * to this store and emit its books, candles and fills as the worker's
+   * object messages are emitted, so subscribers cannot tell the difference.
+   */
+  applyWorkerFrame(buffer: ArrayBuffer) {
+    this.workerFrameApplier ??= new FrameApplier(this.store);
+    const frame = new Frame(buffer);
+    this.workerFrameApplier.apply(frame);
+    for (const book of this.workerFrameApplier.books(frame)) this.emitter.emit('listenOrderBook', book);
+    for (const candle of this.workerFrameApplier.candles(frame)) this.emitter.emit('listenOHLCV', candle);
+    for (const fill of this.workerFrameApplier.fills(frame)) this.emitter.emit('fill', fill);
   }
 
   listenOrderBookWebworker(s: string, c: (o: OrderBook) => void) {
