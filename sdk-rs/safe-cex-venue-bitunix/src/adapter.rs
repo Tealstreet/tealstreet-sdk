@@ -249,6 +249,10 @@ impl BitunixVenue {
         external: ExternalFactory,
         remote_account_name: Option<String>,
     ) -> Result<Rc<Self>, ExchangeError> {
+        base.bind_http_endpoint_lists(
+            crate::types::GRAFANA_ENDPOINTS_EVERY,
+            crate::types::GRAFANA_ENDPOINTS_PERIODIC,
+        );
         let options = base.options();
         let owner: OwnerSlot = Rc::new(RefCell::new(Weak::new()));
         let mut host = Constructor {

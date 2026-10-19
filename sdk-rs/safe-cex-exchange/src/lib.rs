@@ -12,6 +12,7 @@ pub mod fold_position_adapter;
 #[cfg(feature = "health")]
 pub mod health;
 pub mod http;
+mod http_telemetry;
 pub mod income_paging;
 pub mod journal;
 pub mod js_runtime;

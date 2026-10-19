@@ -268,3 +268,61 @@ fn backpack_constructed_subscription_timer_drains_fires_and_cancels_on_replay_cl
         assert_eq!(replay_raw_tasks(&runtime)["blocking"], 0);
     });
 }
+
+#[test]
+fn backpack_native_factory_publishes_telemetry_and_updates_the_live_store() {
+    support::run_local(async {
+        let h = support::venue_harness(
+            ExchangeName::Backpack,
+            Rc::new(|request| (request.path == "/api/v1/capital/collateral").then(|| json!({"netEquity":"100","netEquityAvailable":"90","netEquityLocked":"10","pnlUnrealized":"0"}))),
+            json!({"key":"synthetic-backpack-key","secret":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}),
+            None,
+            safe_cex_exchange::native::native_runtime(),
+        ).await;
+        let events = Rc::new(RefCell::new(Vec::new()));
+        for event in ["grafana-http-request", "grafana-http-response"] {
+            let events = events.clone();
+            let store = h.store.clone();
+            h.exchange.base().on(
+                event,
+                Rc::new(move |_, message| {
+                    events.borrow_mut().push((
+                        event,
+                        message.clone(),
+                        store.request_stats().unwrap().unwrap().ok,
+                    ));
+                    Ok(())
+                }),
+            );
+        }
+        let erased: Rc<dyn std::any::Any> = h.exchange.clone();
+        let exchange = erased
+            .downcast::<safe_cex_venue_backpack::adapter::BackpackExchange>()
+            .unwrap_or_else(|_| panic!("actual registry Backpack receiver"));
+        for expected in [1.0, 2.0] {
+            assert_eq!(exchange.fetch_balance().await.unwrap().total, 100.0);
+            assert_eq!(
+                h.store.request_stats().unwrap().unwrap().ok,
+                expected,
+                "HTTP_TELEMETRY typed host must account into its actual Store"
+            );
+        }
+        let events = events.borrow();
+        let development = std::env::var("NODE_ENV").as_deref() != Ok("production");
+        assert_eq!(
+            events.len(),
+            if development { 4 } else { 2 },
+            "HTTP_TELEMETRY periodic gate"
+        );
+        assert_eq!(
+            (events[0].0, events[1].0),
+            ("grafana-http-request", "grafana-http-response")
+        );
+        assert_eq!(
+            (events[0].2, events[1].2),
+            (0.0, 1.0),
+            "HTTP_TELEMETRY source accounting order"
+        );
+        h.exchange.dispose().unwrap();
+    });
+}

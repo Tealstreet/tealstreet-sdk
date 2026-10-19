@@ -98,6 +98,10 @@ impl BingxExchange {
         );
         base.signers = hosts.exchange.signers();
         let base = Rc::new(base);
+        base.bind_http_endpoint_lists(
+            &crate::constants::GRAFANA_ENDPOINTS_EVERY,
+            &crate::constants::GRAFANA_ENDPOINTS_PERIODIC,
+        );
         let factory = |opts| create_api(opts, &base, hosts.api.clone());
         let xhr = hosts.exchange.secondary(&options, &factory, 3.0)?;
         let unlimited_xhr = create_api(options, &base, hosts.api)?;

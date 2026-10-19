@@ -106,3 +106,57 @@ fn woo_constructed_funding_timer_drains_fires_and_cancels_on_replay_clock() {
         assert_eq!(replay_raw_tasks(&runtime)["blocking"], 0);
     });
 }
+
+#[test]
+fn woo_native_factory_emits_http_telemetry_after_accounting() {
+    use std::cell::RefCell;
+    run_local(async {
+        let h = venue_harness(
+            safe_cex_types::ExchangeName::Woo,
+            Rc::new(|request| (request.path == "/v3/accountinfo").then(||
+                json!({"success":true,"data":{"applicationId":"telemetry","accountMode":"FUTURES","positionMode":"ONE_WAY"},"timestamp":1}))),
+            json!({"key":"synthetic-woo-key","secret":SECRET}),
+            None,
+            safe_cex_exchange::native::native_runtime(),
+        ).await;
+        let events = Rc::new(RefCell::new(Vec::new()));
+        for event in ["grafana-http-request", "grafana-http-response"] {
+            let events = events.clone();
+            let store = h.store.clone();
+            h.exchange.base().on(
+                event,
+                Rc::new(move |_, message| {
+                    let stats = store.request_stats().unwrap();
+                    events
+                        .borrow_mut()
+                        .push((event.to_owned(), message.clone(), stats));
+                    Ok(())
+                }),
+            );
+        }
+        h.exchange.get_account().await.unwrap();
+        let events = events.borrow();
+        assert_eq!(
+            events.len(),
+            2,
+            "HTTP_TELEMETRY actual WOO factory must emit request then response"
+        );
+        assert_eq!(events[0].0, "grafana-http-request");
+        assert_eq!(events[1].0, "grafana-http-response");
+        assert!(
+            events[0].1.to_js_string().unwrap().starts_with(
+                &"Request GET /v3/accountinfo "
+                    .encode_utf16()
+                    .collect::<Vec<_>>()
+            )
+        );
+        assert!(
+            events[1].1.to_js_string().unwrap().starts_with(
+                &"Response GET /v3/accountinfo 200 "
+                    .encode_utf16()
+                    .collect::<Vec<_>>()
+            )
+        );
+        h.exchange.dispose().unwrap();
+    });
+}

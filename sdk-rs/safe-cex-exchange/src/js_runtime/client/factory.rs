@@ -110,6 +110,24 @@ pub fn create(
             .get("request")?
             .call_method("use", vec![interceptor])?;
     }
+    let weak_owner = Rc::downgrade(owner);
+    let runtime = owner.runtime.clone();
+    let log_request = Js::function("logHttpRequest", move |_, args| {
+        let config = arg(&args, 0);
+        let result = (|| {
+            if let Some(owner) = weak_owner.upgrade() {
+                emit_telemetry(&owner, &config, false)?;
+            }
+            Ok(config)
+        })();
+        Ok(Js::Promise(crate::js_runtime::promise::Promise::settled(
+            &runtime, result,
+        )))
+    });
+    client
+        .get("interceptors")?
+        .get("request")?
+        .call_method("use", vec![log_request])?;
     Ok(client)
 }
 
@@ -230,6 +248,13 @@ fn install_outcome_interceptor(
             };
             // TS suppresses telemetry failures so they cannot reject the request.
             drop(observe());
+            if enhance_before_outcome {
+                let result = emit_telemetry(&owner, &response, true).map(|()| response.clone());
+                return Ok(Js::Promise(crate::js_runtime::promise::Promise::settled(
+                    &owner.runtime,
+                    result,
+                )));
+            }
         }
         Ok(response)
     });
@@ -553,6 +578,44 @@ pub fn install_transport_adapter(
             Ok(spawn(&adapter_host, adapter_host.send(arg(&args, 0))))
         });
         client.get("defaults")?.set("adapter", adapter)?;
+    }
+    Ok(())
+}
+
+fn emit_telemetry(owner: &BaseExchange, value: &Js, response: bool) -> Result<(), Thrown> {
+    if !crate::http_telemetry::should_log(
+        || {
+            let config = if response {
+                value.get("config")?
+            } else {
+                value.clone()
+            };
+            config.get("url")
+        },
+        |name| owner.http_endpoints(name),
+        crate::http_telemetry::is_development(),
+        || owner.runtime.now_ms(),
+        &crate::http::HTTP_LOGS,
+        response,
+    )? {
+        return Ok(());
+    }
+    let event = if response {
+        "grafana-http-response"
+    } else {
+        "grafana-http-request"
+    };
+    let message = if response {
+        crate::http_telemetry::response_message(value)
+    } else {
+        crate::http_telemetry::request_message(value)
+    };
+    if let Err(error) = message.and_then(|message| owner.emit(event, message).map_err(Thrown::from))
+    {
+        owner.runtime.console_values(
+            "error",
+            &[Js::str(&format!("Error emitting {event}")), error.value],
+        );
     }
     Ok(())
 }

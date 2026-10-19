@@ -82,6 +82,7 @@ impl BreakoutpropExchange {
         store: Rc<dyn Store>,
     ) -> Result<Rc<Self>, ExchangeError> {
         let base = host.construct_base(name, options, store)?;
+        base.bind_http_endpoint_lists(GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC);
         let exchange = Rc::new(Self {
             base: Rc::new(base),
             host: host.clone(),

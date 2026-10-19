@@ -121,6 +121,15 @@ impl CoinbaseConstructionHost for Host {
         rate_limit: ClassRateLimit,
     ) -> Result<Frame, PortfolioFailure> {
         *self.shared.extra.class.borrow_mut() = Rc::downgrade(&class);
+        self.shared
+            .base
+            .get()
+            .expect("constructed Coinbase base")
+            .bind_http_endpoint_lists(
+                class.grafana_endpoints_every,
+                class.grafana_endpoints_periodic,
+            );
+
         let identity = class.identity.clone();
         let host = self.clone();
         let factory = Js::function("createAPI", move |_, args| {

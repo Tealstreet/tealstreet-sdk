@@ -317,6 +317,10 @@ impl ExchangeState {
             resync: Default::default(),
             root: OnceCell::new(),
         });
+        owner.base.bind_http_endpoint_lists(
+            owner.grafana_endpoints_every(),
+            owner.grafana_endpoints_periodic(),
+        );
         owner.imports.bind_owner(Rc::downgrade(&owner));
         let bindings = Rc::new(Constructor(owner.clone(), OnceCell::new(), OnceCell::new()));
         let name = decoded(&owner.base.name)?;

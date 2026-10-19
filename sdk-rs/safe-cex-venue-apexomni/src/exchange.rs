@@ -98,6 +98,10 @@ impl ApexOmniExchange {
                 Default::default(),
             ),
         );
+        base.bind_http_endpoint_lists(
+            &protocol::GRAFANA_ENDPOINTS_EVERY,
+            &protocol::GRAFANA_ENDPOINTS_PERIODIC,
+        );
         let venue = Rc::new(Self {
             base: Rc::new(base),
             host,

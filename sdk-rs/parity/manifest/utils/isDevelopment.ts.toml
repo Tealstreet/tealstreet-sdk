@@ -1,11 +1,11 @@
 [file]
 ts = "packages/safe-cex/src/utils/isDevelopment.ts"
-rust_files = [ "safe-cex-store/src/remaining_utils.rs" ]
+rust_files = [ "safe-cex-store/src/remaining_utils.rs", "safe-cex-exchange/src/http_telemetry.rs" ]
 
 [[symbol]]
 ts = "isDevelopment"
 kind = "const"
 layer = "adapted"
-rs = "safe-cex-store/src/remaining_utils.rs::is_development"
-status = "divergent"
-note = "CHOSEN: This helper evaluates supplied NODE_ENV; startup capture remains an embedding obligation. The local rationale and selected costs are declared once at sdk-rs/parity/MANIFEST-SPEC.md#utility-capability-choice. Renamed to safe-cex-store/src/remaining_utils.rs::is_development. Evidence: sdk-rs/parity/UTILITY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+rs = [ "safe-cex-store/src/remaining_utils.rs::is_development", "safe-cex-exchange/src/http_telemetry.rs::is_development" ]
+status = "ported"
+note = "FIX non-UTF-8 audit row 444: the native shared HTTP module captures actual process NODE_ENV through the existing canonical is_development helper. Production endpoint gating and development bypass are exercised through actual native factory requests against the maintained TypeScript module; the lower pure helper remains usable with an explicit embedding value. The exact targets safe-cex-store/src/remaining_utils.rs::is_development and safe-cex-exchange/src/http_telemetry.rs::is_development separate the canonical predicate from module capture. No independent development predicate or venue logger is introduced."

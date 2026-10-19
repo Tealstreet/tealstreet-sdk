@@ -1,5 +1,8 @@
 //! HTTP interceptor behavior from packages/safe-cex/src/safeCexAxiosCreate.ts.
-use crate::runtime::{ExchangeError, ExchangeRuntime};
+use crate::{
+    js_runtime::value::{Js, Thrown},
+    runtime::{ExchangeError, ExchangeRuntime},
+};
 use safe_cex_store::Store;
 use safe_cex_transport::query::{
     query_identity_eq, query_json_projection, query_truthy, render_query,
@@ -37,6 +40,18 @@ pub trait HttpHost {
     fn execute(&self, adapter: Arc<dyn RestAdapter>, request: RestRequest) -> HttpFuture<'_>;
     fn enhance_error(&self, error: HttpFailure, exchange: &ExchangeName) -> HttpFailure;
     fn emit(&self, event: &str, message: &str) -> Result<(), String>;
+    fn emit_value(&self, event: &str, message: &Js) -> Result<(), Thrown> {
+        self.emit(
+            event,
+            &String::from_utf16(&message.to_js_string()?)
+                .map_err(|_| Thrown::type_error("lone UTF-16 surrogate at a typed boundary"))?,
+        )
+        .map_err(|error| Thrown::error("Error", &error))
+    }
+    fn telemetry_endpoints(&self, _name: &str) -> Option<Result<Js, Thrown>> {
+        None
+    }
+    fn record_request_outcome(&self, _outcome: RequestOutcome) {}
     fn note_response(&self, _response: &RestResponse, _request: &RestRequest) {}
     fn note_success(&self, exchange: &ExchangeName, response: &RestResponse);
     fn note_failure(&self, exchange: &ExchangeName, error: &HttpFailure);
@@ -92,8 +107,8 @@ pub static HTTP_STATS: LazyLock<Arc<Mutex<HttpRequestStatsTracker>>> =
     LazyLock::new(|| Arc::new(Mutex::new(HttpRequestStatsTracker::default())));
 #[derive(Default)]
 pub struct HttpLogState {
-    request: BTreeMap<String, f64>,
-    response: BTreeMap<String, f64>,
+    pub(crate) request: BTreeMap<Vec<u16>, f64>,
+    pub(crate) response: BTreeMap<Vec<u16>, f64>,
 }
 pub static HTTP_LOGS: LazyLock<Arc<Mutex<HttpLogState>>> =
     LazyLock::new(|| Arc::new(Mutex::new(HttpLogState::default())));
@@ -540,30 +555,10 @@ impl HttpClient {
         &self,
         mut request: RestRequest,
     ) -> Result<RestExecution, HttpFailure> {
-        if !self.no_proxy && self.should_log(&request.url, false) {
-            let body = request.body.as_ref().map(|body| match body {
-                safe_cex_transport::RestBody::Untransformed(value) => value.clone(),
-                safe_cex_transport::RestBody::Transformed(data) => data.value().clone(),
-                safe_cex_transport::RestBody::Encoded(bytes) => {
-                    Input::Text(String::from_utf8_lossy(bytes).encode_utf16().collect())
-                }
-            });
-            let mut summary = Input::from_value(json!({"method":request.method.to_uppercase(),"url":request.url,"params":request.query_params.as_ref().and_then(query_json_projection).or_else(|| request.params.clone())})).map_err(|e| HttpFailure::pre_transmit(e.to_string(),request.clone()))?;
-            let Input::Object(fields) = &mut summary else {
-                unreachable!("request summary")
-            };
-            if let Some(body) = body {
-                fields.push(("body".encode_utf16().collect(), body));
+        if !self.no_proxy {
+            if let Err(error) = self.telemetry(&request, None) {
+                return self.failure(Self::telemetry_failure(error, request));
             }
-            let summary = native_json_text(&summary);
-            let _ = self.host.emit(
-                "grafana-http-request",
-                &format!(
-                    "Request {} {} {summary}",
-                    request.method.to_uppercase(),
-                    request.url
-                ),
-            );
         }
         if self.proxied
             && let Some(authorize) = &self.authorize
@@ -598,24 +593,9 @@ impl HttpClient {
                     self.host.note_response(response, request);
                     self.host.note_success(&self.exchange, response);
                 }
-                if !self.no_proxy && self.should_log(&request.url, true) {
-                    let body = response.body.clone().into_data();
-                    let summary = native_json_text(&Input::Object(vec![
-                        (
-                            "status".encode_utf16().collect(),
-                            Input::Float(response.status as f64),
-                        ),
-                        ("body".encode_utf16().collect(), body),
-                    ]));
-                    let _ = self.host.emit(
-                        "grafana-http-response",
-                        &format!(
-                            "Response {} {} {} {summary}",
-                            request.method.to_uppercase(),
-                            request.url,
-                            response.status
-                        ),
-                    );
+                if !self.no_proxy {
+                    self.telemetry(request, Some(response))
+                        .map_err(|error| Self::telemetry_failure(error, request.clone()))?;
                 }
                 Ok(execution)
             }
@@ -649,6 +629,8 @@ impl HttpClient {
         if let Some(store) = &self.store {
             // safeCexAxiosCreate.ts219-222 catches counter failures explicitly.
             let _ = store.record_request_outcome(outcome);
+        } else {
+            self.host.record_request_outcome(outcome);
         }
     }
     fn failure<T>(&self, error: HttpFailure) -> Result<T, HttpFailure> {
@@ -743,33 +725,77 @@ impl HttpClient {
         }
         Err(error)
     }
-    fn should_log(&self, url: &str, response: bool) -> bool {
-        if self.host.is_development() {
-            return true;
+    fn telemetry_failure(error: Thrown, request: RestRequest) -> HttpFailure {
+        match crate::js_runtime::value::owned::OwnedJsValue::from_js(&error.value) {
+            Ok(value) => HttpFailure::from_transport(
+                TransportError::Rejected(safe_cex_transport::provider::TransportErrorOrigin::new(
+                    crate::js_runtime::value::owned::OwnedCallbackError::new(value),
+                )),
+                request,
+            ),
+            Err(error) => HttpFailure::pre_transmit(error.to_string(), request),
         }
-        let mut should = self.every.iter().any(|endpoint| url.contains(endpoint));
-        let now = self.runtime.now_ms();
-        let mut logs = self
-            .logs
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let logs = if response {
-            &mut logs.response
+    }
+    fn telemetry(
+        &self,
+        request: &RestRequest,
+        response: Option<&RestResponse>,
+    ) -> Result<(), Thrown> {
+        let url = Js::str(&request.url);
+        let should = crate::http_telemetry::should_log(
+            || Ok(url.clone()),
+            |name| {
+                self.host.telemetry_endpoints(name).unwrap_or_else(|| {
+                    let endpoints = if name == "grafanaEndpointsEvery" {
+                        &self.every
+                    } else {
+                        &self.periodic
+                    };
+                    Ok(Js::array(
+                        endpoints.iter().map(|value| Js::str(value)).collect(),
+                    ))
+                })
+            },
+            self.host.is_development(),
+            || self.runtime.now_ms(),
+            &self.logs,
+            response.is_some(),
+        )?;
+        if !should {
+            return Ok(());
+        }
+        let event = if response.is_some() {
+            "grafana-http-response"
         } else {
-            &mut logs.request
+            "grafana-http-request"
         };
-        for endpoint in &self.periodic {
-            if url.contains(endpoint) {
-                if logs.get(endpoint).is_none_or(|&previous| {
-                    previous == 0. || now - previous >= LAST_LOG_PERIODICY as f64
-                }) {
-                    should = true;
-                    logs.insert(endpoint.clone(), now);
-                }
-                break;
+        let render = || {
+            let config =
+                crate::js_runtime::client::effective_config(&Js::object(vec![]), request.clone())?;
+            if let Some(params) = request
+                .query_params
+                .as_ref()
+                .and_then(query_json_projection)
+            {
+                config.set("params", crate::js_runtime::value::from_json(&params))?;
             }
+            let message = if let Some(response) = response {
+                crate::http_telemetry::response_message(&crate::js_runtime::client::js_response(
+                    response.clone(),
+                    config,
+                ))?
+            } else {
+                crate::http_telemetry::request_message(&config)?
+            };
+            self.host.emit_value(event, &message)
+        };
+        if let Err(error) = render() {
+            self.runtime.console_values(
+                "error",
+                &[Js::str(&format!("Error emitting {event}")), error.value],
+            );
         }
-        should
+        Ok(())
     }
 }
 fn native_json_text(value: &Input) -> String {

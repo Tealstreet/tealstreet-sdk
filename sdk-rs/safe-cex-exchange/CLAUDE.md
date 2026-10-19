@@ -1,5 +1,10 @@
 # Exchange core contract
 
+The two native HTTP factories share the maintained endpoint/development gate and
+UTF-16 event renderer. Owner endpoint readers stay live and weak; typed native
+hosts record outcomes through the bound Store when no explicit Store was passed.
+See HTTP_TELEMETRY_REVIEW.md for source order, catch boundaries and binding proofs.
+
 The native Axios factory enhances rejections before venue interceptors, using
 the maintained helper's field order and live message getter. Its originalError
 Error snapshot excludes the self-reference under decision 2; existing owned

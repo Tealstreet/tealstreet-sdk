@@ -442,6 +442,29 @@ impl BybitExchange {
             },
         )
         .map_err(err)?;
+        let (every, periodic) = if name == ExchangeName::Bybitspot {
+            (
+                &*crate::spot_types::GRAFANA_ENDPOINTS_EVERY,
+                &*crate::spot_types::GRAFANA_ENDPOINTS_PERIODIC,
+            )
+        } else {
+            (
+                &*crate::types::GRAFANA_ENDPOINTS_EVERY,
+                &*crate::types::GRAFANA_ENDPOINTS_PERIODIC,
+            )
+        };
+        receiver
+            .define(
+                "grafanaEndpointsEvery",
+                safe_cex_exchange::js_runtime::value::from_json(every),
+            )
+            .map_err(err)?;
+        receiver
+            .define(
+                "grafanaEndpointsPeriodic",
+                safe_cex_exchange::js_runtime::value::from_json(periodic),
+            )
+            .map_err(err)?;
         let _ = shared.base.set(core.clone());
         let wire = deps.wire.clone();
         let http_host = deps.http_host.clone();
@@ -488,7 +511,7 @@ impl BybitExchange {
                             runtime: api_runtime.clone(),
                             store: Some(api_store.clone()),
                             stats: Some(Default::default()),
-                            logs: Some(Default::default()),
+                            logs: None,
                             every: vec![],
                             periodic: vec![],
                             #[allow(

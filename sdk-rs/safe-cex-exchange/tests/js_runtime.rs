@@ -5110,3 +5110,161 @@ fn audit_native_http_consumers_publish_config_numbers_and_proxy_classification()
         .unwrap()
         .block_on(tokio::task::LocalSet::new().run_until(run));
 }
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn http_telemetry_matches_maintained_factory_gates_payloads_and_outcomes() {
+    use safe_cex_exchange::js_runtime::{
+        client::factory, globals, store::facade, value::from_json,
+    };
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_http_factory_source.cjs"
+        ))
+        .arg("telemetry")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let profiles: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(profiles.len(), 16);
+    let development = std::env::var("NODE_ENV").as_deref() != Ok("production");
+    for (index, profile) in profiles
+        .into_iter()
+        .enumerate()
+        .filter(|(_, profile)| profile["development"] == development)
+    {
+        let runtime = Rc::new(Runtime::default());
+        let owner = factory_owner(runtime.clone());
+        let store = facade(owner.store.clone()).unwrap();
+        store
+            .call_method(
+                "update",
+                vec![from_json(
+                    &json!({"requestStats":{"ok":0,"other":0,"rateLimit":0,"auth":0,"network":0}}),
+                )],
+            )
+            .unwrap();
+        let path = format!("/telemetry/profile-{index}");
+        let endpoint = profile["endpoint"].as_str().unwrap();
+        let every = if matches!(endpoint, "every" | "both") {
+            Js::array(vec![Js::str(&path)])
+        } else {
+            Js::array(vec![])
+        };
+        let periodic = if matches!(endpoint, "periodic" | "both") {
+            Js::array(vec![Js::str(&path)])
+        } else {
+            Js::array(vec![])
+        };
+        owner.bind_http_endpoints(Rc::new(move |name| {
+            Ok(if name == "grafanaEndpointsEvery" {
+                every.clone()
+            } else {
+                periodic.clone()
+            })
+        }));
+        let events = Rc::new(RefCell::new(Vec::new()));
+        for event in ["grafana-http-request", "grafana-http-response"] {
+            let events = events.clone();
+            let store = owner.store.clone();
+            owner.on(event, Rc::new(move |_, message| {
+                let stats = store.request_stats().unwrap().unwrap();
+                events.borrow_mut().push(json!([event, String::from_utf16(&message.to_js_string().unwrap()).unwrap(), {"ok":stats.ok,"other":stats.other}]));
+                Ok(())
+            }));
+        }
+        let clock = runtime.clone();
+        let adapter = Js::function("telemetryTerminal", move |_, args| {
+            Ok(Js::object(vec![
+                (
+                    "status",
+                    Js::Number(if clock.now_ms() == 1001.0 {
+                        300.0
+                    } else {
+                        200.0
+                    }),
+                ),
+                (
+                    "data",
+                    Js::object(vec![
+                        ("value", Js::Number(f64::NAN)),
+                        ("text", Js::utf16(&[0xd800])),
+                        ("zero", Js::Number(-0.0)),
+                    ]),
+                ),
+                ("headers", Js::object(vec![])),
+                ("config", arg(&args, 0)),
+            ]))
+        });
+        let host = Rc::new(Http {
+            runtime: runtime.clone(),
+            sent: RefCell::default(),
+        });
+        let config = Js::object(vec![
+            ("baseURL", Js::str("https://venue")),
+            ("adapter", adapter),
+        ]);
+        let xhr = if profile["direct"] == true {
+            factory::create_no_proxy(host, config, &owner).unwrap()
+        } else {
+            factory::create(
+                host,
+                &safe_cex_transport::DirectTransport,
+                config,
+                &Js::object(vec![("key", Js::str("")), ("secret", Js::str(""))]),
+                &owner,
+            )
+            .unwrap()
+        };
+        let builtins = Js::object(vec![]);
+        globals::install_builtins::<()>(&builtins, std::rc::Weak::new());
+        for time in [1000, 1001, 30999, 31000] {
+            runtime.wall_clock.set(f64::from(time));
+            settle(
+                &runtime,
+                xhr.call_method(
+                    "post",
+                    vec![
+                        Js::str(&path),
+                        Js::object(vec![
+                            ("text", Js::utf16(&[0xd800])),
+                            ("n", Js::Number(f64::INFINITY)),
+                        ]),
+                        Js::object(vec![(
+                            "params",
+                            Js::object(vec![("zero", Js::Number(-0.0)), ("skip", Js::Undefined)]),
+                        )]),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        let expected: Vec<Value> = profile["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row[0].as_str().unwrap().starts_with("grafana-http-"))
+            .map(|row| {
+                let mut row = row.clone();
+                row[1] = row[1].as_str().unwrap().replace("/telemetry", &path).into();
+                for name in ["ok", "other"] {
+                    row[2][name] = json!(row[2][name].as_f64().unwrap());
+                }
+                row
+            })
+            .collect();
+        assert_eq!(
+            *events.borrow(),
+            expected,
+            "HTTP_TELEMETRY source profile {profile}"
+        );
+        assert_eq!(owner.store.request_stats().unwrap().unwrap().ok, 3.0);
+        assert_eq!(owner.store.request_stats().unwrap().unwrap().other, 1.0);
+    }
+}

@@ -117,6 +117,30 @@ impl HyperliquidSpotExchange {
             )
             .map_err(|error| realm.exchange_error(&error))?;
         *venue.binding.borrow_mut() = Some(Binding { realm, instance });
+        let owner = Rc::downgrade(&venue);
+        venue.base.bind_http_endpoints(Rc::new(move |name| {
+            let owner = owner.upgrade().ok_or_else(|| {
+                safe_cex_exchange::js_runtime::value::Thrown::error(
+                    "Error",
+                    "HTTP exchange owner released",
+                )
+            })?;
+            let binding = owner.binding.borrow().clone().ok_or_else(|| {
+                safe_cex_exchange::js_runtime::value::Thrown::error(
+                    "Error",
+                    "HTTP exchange binding unavailable",
+                )
+            })?;
+            let mut realm = binding.realm;
+            let value = realm
+                .get(&binding.instance, &crate::realm::PropKey::str(name))
+                .map_err(|error| {
+                    safe_cex_exchange::js_runtime::value::Thrown::from(realm.exchange_error(&error))
+                })?;
+            realm.capture_typed_value(&value, 0).map_err(|error| {
+                safe_cex_exchange::js_runtime::value::Thrown::from(realm.exchange_error(&error))
+            })
+        }));
         Ok(venue)
     }
     fn bound(&self) -> Result<Binding, ExchangeError> {

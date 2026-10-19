@@ -732,16 +732,44 @@ impl HttpHost for NativeHttpHost {
         error
     }
     fn emit(&self, event: &str, message: &str) -> Result<(), String> {
-        let exchange = self
+        self.emit_value(event, &crate::js_runtime::value::Js::str(message))
+            .map_err(|error| error.to_exchange_error().message)
+    }
+    fn emit_value(
+        &self,
+        event: &str,
+        message: &crate::js_runtime::value::Js,
+    ) -> Result<(), crate::js_runtime::value::Thrown> {
+        let owner = self
             .events
             .borrow()
             .as_ref()
             .and_then(Weak::upgrade)
-            .ok_or_else(|| format!("native HTTP host has no exchange to emit {event}"))?;
-        exchange
+            .ok_or_else(|| {
+                crate::js_runtime::value::Thrown::error(
+                    "Error",
+                    "native HTTP exchange owner released",
+                )
+            })?;
+        owner
             .base()
-            .emit(event, crate::js_runtime::value::Js::str(message))
-            .map_err(|error| error.message)
+            .emit(event, message.clone())
+            .map_err(Into::into)
+    }
+    fn telemetry_endpoints(
+        &self,
+        name: &str,
+    ) -> Option<Result<crate::js_runtime::value::Js, crate::js_runtime::value::Thrown>> {
+        self.events
+            .borrow()
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .map(|owner| owner.base().http_endpoints(name))
+    }
+    fn record_request_outcome(&self, outcome: safe_cex_types::RequestOutcome) {
+        if let Some(owner) = self.events.borrow().as_ref().and_then(Weak::upgrade) {
+            drop(owner.base().store.record_request_outcome(outcome));
+        }
     }
     fn note_response(&self, response: &RestResponse, request: &RestRequest) {
         if let Some(exchange) = self.events.borrow().as_ref().and_then(Weak::upgrade) {
@@ -754,11 +782,14 @@ impl HttpHost for NativeHttpHost {
     fn note_success(&self, _exchange: &ExchangeName, _response: &RestResponse) {}
     fn note_failure(&self, _exchange: &ExchangeName, _error: &RestFailure) {}
     fn mark_start(&self, _request: &mut RestRequest) {}
-    fn signing_capture(&self, _request: &RestRequest) -> bool {
-        false
+    fn signing_capture(&self, request: &RestRequest) -> bool {
+        request
+            .config_extensions
+            .get("__tealstreetSigningCapture")
+            .is_some_and(safe_cex_num::js_retained_truthy)
     }
     fn is_development(&self) -> bool {
-        false
+        crate::http_telemetry::is_development()
     }
     fn is_main_window(&self) -> bool {
         false

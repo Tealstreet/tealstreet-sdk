@@ -197,6 +197,17 @@ impl BlofinExchangeHost for NativeHost {
             .take()
             .ok_or_else(|| ExchangeError::new("BloFin BaseExchange already finalized"))?;
         pending.settings.client_order_id_rule = Some(copy_rule(&fields.client_order_id_rule));
+        let every = fields.every;
+        let periodic = fields.periodic;
+        pending.bind_http_endpoints(Rc::new(move |name| {
+            Ok(safe_cex_exchange::js_runtime::value::from_json(
+                if name == "grafanaEndpointsEvery" {
+                    every
+                } else {
+                    periodic
+                },
+            ))
+        }));
         let ready = Rc::new(pending);
         ready.bind_socket_watchdog();
         base.ready

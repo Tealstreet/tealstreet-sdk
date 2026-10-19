@@ -147,7 +147,7 @@
         }
       },
       {
-        "input": " \ufeff ",
+        "input": " ﻿ ",
         "output": {
           "kind": "finite",
           "bits": "0000000000000000"
@@ -4109,7 +4109,7 @@
     "call": "serde_json::json!($type($value.as_str().expect(\"frame\")))",
     "cases": [
       {
-        "input": " PING\u00a0",
+        "input": " PING ",
         "output": true
       },
       {
@@ -16492,7 +16492,7 @@
   },
   "safe_cex_exchange::exchange::BaseExchange": {
     "shape": "observed",
-    "evidence": "All 31 exact fresh compiler-selected APIs execute actual production entrypoints on typed native memory fixtures. Genuine raw order, worker Candle/OrderBook, HTTP shape and worker-error interpretation are directly observed. Native floating values use independent IEEE bit strings. Finite per-entry floors, no live venue/network or every async branch claim. Retained logger review adds native UTF16 console/event observations; the existing typed log cases now assert the source message/severity pair. Every prior case remains.",
+    "evidence": "All 31 exact fresh compiler-selected APIs execute actual production entrypoints on typed native memory fixtures. Genuine raw order, worker Candle/OrderBook, HTTP shape and worker-error interpretation are directly observed. Native floating values use independent IEEE bit strings. Finite per-entry floors, no live venue/network or every async branch claim. Retained logger review adds native UTF16 console/event observations; the existing typed log cases now assert the source message/severity pair. Every prior case remains. The two HTTP endpoint registration APIs execute late-read and typed-list native observations; all prior cases remain unchanged.",
     "entrypoints": [
       {
         "api": {
@@ -16629,6 +16629,207 @@
               "store": true,
               "runtime": true
             }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "bind_http_endpoints",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "read",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::ops::function::Fn",
+                                      "args": {
+                                        "parenthesized": {
+                                          "inputs": [
+                                            {
+                                              "borrowed_ref": {
+                                                "lifetime": null,
+                                                "is_mutable": false,
+                                                "type": {
+                                                  "primitive": "str"
+                                                }
+                                              }
+                                            }
+                                          ],
+                                          "output": {
+                                            "resolved_path": {
+                                              "path": "core::result::Result",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_exchange::js_runtime::value::Js",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    },
+                                                    {
+                                                      "type": {
+                                                        "resolved_path": {
+                                                          "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                                          "args": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": null,
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual source-owner registration and late endpoint read; the retained callback sees subsequent native graph replacement without caching or projecting mutable fields. Immutable typed lists share this reader. These are owner capabilities, not new data decoders.",
+        "call": "{\n    #[allow(dead_code,unused_imports)]\n    mod fixture {\n        use std::{cell::{Cell,RefCell},future::Future,pin::Pin,rc::Rc,task::{Context,Poll,Waker}};\n        use crate::{exchange::{BaseExchange,Exchange,ExchangeSettings,ValidatedOrder,ValidatedBatch},capabilities::{ExchangeCapabilities,PlaceOrderBinding,PlaceOrdersBinding},runtime::{ExchangeRuntime,ExchangeTask,ExchangeFuture,ExchangeError}};\n        use safe_cex_types::*;\n        pub fn ready<F:Future>(future:F)->F::Output {let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut Context::from_waker(Waker::noop())){Poll::Ready(v)=>v,Poll::Pending=>panic!(\"BASE-OWNER expected immediate fixture result\")}}\n        #[derive(Default)] pub struct Runtime{pub ids:Cell<u64>,pub console:RefCell<Vec<(String,String)>>,pub reports:RefCell<Vec<serde_json::Value>>}\n        impl ExchangeRuntime for Runtime {\n            fn monotonic_now_ms(&self)->f64{123000.0}fn now_ms(&self)->f64{123000.0}\n            fn sleep(&self,_:u64)->ExchangeFuture<'static,()>{Box::pin(std::future::pending())}\n            fn spawn_local(&self,_:Pin<Box<dyn Future<Output=()>>>)->Box<dyn ExchangeTask>{panic!(\"BASE-OWNER unexpected asynchronous host work\")}\n            fn console_values(&self,s:&str,m:&[crate::js_runtime::value::Js]){self.console.borrow_mut().push((s.into(),crate::runtime::console_text(m)))}\n            fn unique_id(&self)->String{let n=self.ids.get()+1;self.ids.set(n);format!(\"base-{n}\")}\n            fn is_worker(&self)->bool{false}fn random(&self)->f64{0.25}\n            fn report_exception(&self,e:&ExchangeError,c:&safe_cex_types::retained_json::RetainedJsonInput){self.reports.borrow_mut().push(serde_json::json!([e.name,e.message,c]))}\n            fn report_raw_exception(&self,_:&crate::js_runtime::value::Js,_:&safe_cex_types::retained_json::RetainedJsonInput){panic!(\"BASE-OWNER unexpected raw exception\")}\n            fn execute_worker_request(&self,_:serde_json::Value)->ExchangeFuture<'static,serde_json::Value>{Box::pin(async{Err(ExchangeError::new(\"fixture worker unavailable\"))})}\n        }\n        pub fn order(id:&str,symbol:&str)->Order {serde_json::from_value(serde_json::json!({\"id\":id,\"status\":\"open\",\"symbol\":symbol,\"type\":\"limit\",\"side\":\"buy\",\"price\":17.25,\"amount\":3.5,\"filled\":1.25,\"remaining\":2.25,\"reduceOnly\":false,\"lastUpdate\":91000,\"info\":{\"clientOrderId\":format!(\"client-{id}\")}})).expect(\"authored native order fixture\")}\n        pub fn position(id:&str,symbol:&str)->Position{serde_json::from_value(serde_json::json!({\"id\":id,\"symbol\":symbol,\"side\":\"long\",\"entryPrice\":11.25,\"notional\":23.5,\"leverage\":7,\"unrealizedPnl\":3.75,\"contracts\":5.5,\"liquidationPrice\":2.25})).expect(\"authored native position fixture\")}\n        pub fn project_order(v:&Order)->serde_json::Value{serde_json::json!({\"id\":v.id,\"symbol\":v.symbol,\"price\":v.price.value().expect(\"authored native order price\").to_bits().to_string(),\"amount\":v.amount.to_bits().to_string(),\"filled\":v.filled.to_bits().to_string(),\"remaining\":v.remaining.to_bits().to_string()})}\n        pub fn project_position(v:&Position)->serde_json::Value{serde_json::json!({\"id\":v.id,\"symbol\":v.symbol,\"entryPrice\":v.entry_price.to_bits().to_string(),\"contracts\":v.contracts.to_bits().to_string(),\"unrealizedPnl\":v.unrealized_pnl.to_bits().to_string()})}\n        pub fn project_place(v:&PlaceOrderOpts)->serde_json::Value{serde_json::json!({\"symbol\":v.symbol,\"type\":match v.r#type{OrderType::Limit=>\"limit\",OrderType::Market=>\"market\",_=>\"other\"},\"side\":match v.side{OrderSide::Buy=>\"buy\",OrderSide::Sell=>\"sell\"},\"amount\":v.amount.to_bits().to_string(),\"price\":v.price.map(|n|n.to_bits().to_string()),\"trigger\":v.trigger_price.map(|n|n.to_bits().to_string()),\"reduce\":v.reduce_only,\"clientOrderId\":v.client_order_id})}\n        pub struct Venue{pub base:BaseExchange,pub capabilities:ExchangeCapabilities,pub calls:RefCell<Vec<serde_json::Value>>}\n        impl Exchange for Venue {\n            type PlaceOpts=PlaceOrderOpts;\n            fn base(&self)->&BaseExchange{&self.base}fn capabilities(&self)->&ExchangeCapabilities{&self.capabilities}\n            fn fetch_orders(&self,symbols:Option<Vec<String>>)->ExchangeFuture<'_,Vec<Order>>{self.calls.borrow_mut().push(serde_json::json!([\"fetchOrders\",symbols]));Box::pin(async{Ok(vec![order(\"A\",\"BTC\"),order(\"B\",\"ETH\")])})}\n            fn cancel_orders(&self,orders:Vec<Order>)->ExchangeFuture<'_,()>{self.calls.borrow_mut().push(serde_json::json!([\"cancelOrders\",orders.iter().map(project_order).collect::<Vec<_>>() ]));Box::pin(async{Ok(())})}\n            fn fetch_symbol_max_leverage(&self,symbol:String)->ExchangeFuture<'_,f64>{self.calls.borrow_mut().push(serde_json::json!([\"leverage\",symbol]));Box::pin(async move{Ok(if symbol==\"BTC\"{17.5}else{29.25})})}\n            fn after_method_called_in_worker(&self,result:&serde_json::Value,method:crate::worker::CallableMethodsInWorker,args:&[serde_json::Value])->Result<(),ExchangeError>{assert!(matches!(method,crate::worker::CallableMethodsInWorker::FetchOrders),\"BASE-OWNER exact typed worker method\");self.calls.borrow_mut().push(serde_json::json!([\"afterWorker\",result,args]));Ok(())}\n        }\n        pub fn options()->ExchangeOptions{serde_json::from_value(serde_json::json!({\"key\":\"fixture-key\",\"secret\":\"fixture-secret\",\"testnet\":true})).expect(\"authored typed options\")}\n        pub fn setup()->(Rc<Venue>,Rc<Runtime>,Rc<safe_cex_exchange::js_runtime::native_store::DefaultStore>){\n            let runtime=Rc::new(Runtime::default());let store=Rc::new(safe_cex_exchange::js_runtime::native_store::DefaultStore::new());\n            let settings=ExchangeSettings{client_order_id_rule:Some(crate::client_order_id::ClientOrderIdRule{label:\"Fixture\".into(),requirement:\"start with client-\".into(),is_valid:Rc::new(|id|id.starts_with(\"client-\")),is_honorable_shape:None,mint:None}),..Default::default()};\n            let base=BaseExchange::new(ExchangeName::Bybit,options(),store.clone(),runtime.clone(),settings);\n            let capabilities=ExchangeCapabilities{place_order:PlaceOrderBinding::implemented::<Venue>(|v,order:ValidatedOrder<Venue>|{let p=project_place(order.options());v.calls.borrow_mut().push(serde_json::json!([\"place\",p]));Box::pin(async{Ok(vec![\"placed-one\".into()])})}),place_orders:PlaceOrdersBinding::implemented::<Venue>(|v,orders:ValidatedBatch<Venue>|{let values=orders.orders().iter().map(|o|project_place(o.options())).collect::<Vec<_>>();v.calls.borrow_mut().push(serde_json::json!([\"batch\",values]));Box::pin(async{Ok(vec![\"placed-batch\".into()])})}),..Default::default()};\n            (Rc::new(Venue{base,capabilities,calls:RefCell::new(Vec::new())}),runtime,store)\n        }\n    }\n    #[allow(unused_imports)] use std::{cell::RefCell,rc::Rc};\n    #[allow(unused_imports)] use crate::exchange::Exchange as _;\n    let (venue,runtime,store)=fixture::setup();\n    let base:&$type=venue.base();\n    let _=(&runtime,&store,base);\n    let observed={\n let source=crate::js_runtime::value::Js::object(vec![(\"grafanaEndpointsEvery\",crate::js_runtime::value::Js::array(vec![crate::js_runtime::value::Js::str(\"/every\")])),(\"grafanaEndpointsPeriodic\",crate::js_runtime::value::Js::array(vec![crate::js_runtime::value::Js::str(\"/periodic\")]))]);\n let captured=source.clone();let reads=Rc::new(std::cell::Cell::new(0));let observed_reads=reads.clone();\n base.bind_http_endpoints(Rc::new(move|name|{observed_reads.set(observed_reads.get()+1);captured.get(name)}));\n let name=$value.as_str().unwrap();let first=base.http_endpoints(name).unwrap();\n let replacement=crate::js_runtime::value::Js::array(vec![crate::js_runtime::value::Js::utf16(&[0xd800])]);source.set(name,replacement.clone()).unwrap();\n let second=base.http_endpoints(name).unwrap();serde_json::json!({\"before\":String::from_utf16(&first.get(\"0\").unwrap().to_js_string().unwrap()).unwrap(),\"afterUnits\":second.get(\"0\").unwrap().to_js_string().unwrap().to_vec(),\"same\":second.same_reference(&replacement),\"reads\":reads.get()})\n    }; base.dispose().expect(\"BASE-OWNER fixture cleanup\");observed\n}",
+        "cases": [
+          {
+            "input": "grafanaEndpointsEvery",
+            "output": {
+              "before": "/every",
+              "afterUnits": [
+                55296
+              ],
+              "same": true,
+              "reads": 2
+            }
+          },
+          {
+            "input": "grafanaEndpointsPeriodic",
+            "output": {
+              "before": "/periodic",
+              "afterUnits": [
+                55296
+              ],
+              "same": true,
+              "reads": 2
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "bind_http_endpoint_lists",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "every",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "borrowed_ref": {
+                          "lifetime": "'static",
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "periodic",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "borrowed_ref": {
+                          "lifetime": "'static",
+                          "is_mutable": false,
+                          "type": {
+                            "primitive": "str"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": null,
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual source-owner registration and late endpoint read; the retained callback sees subsequent native graph replacement without caching or projecting mutable fields. Immutable typed lists share this reader. These are owner capabilities, not new data decoders.",
+        "call": "{\n    #[allow(dead_code,unused_imports)]\n    mod fixture {\n        use std::{cell::{Cell,RefCell},future::Future,pin::Pin,rc::Rc,task::{Context,Poll,Waker}};\n        use crate::{exchange::{BaseExchange,Exchange,ExchangeSettings,ValidatedOrder,ValidatedBatch},capabilities::{ExchangeCapabilities,PlaceOrderBinding,PlaceOrdersBinding},runtime::{ExchangeRuntime,ExchangeTask,ExchangeFuture,ExchangeError}};\n        use safe_cex_types::*;\n        pub fn ready<F:Future>(future:F)->F::Output {let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut Context::from_waker(Waker::noop())){Poll::Ready(v)=>v,Poll::Pending=>panic!(\"BASE-OWNER expected immediate fixture result\")}}\n        #[derive(Default)] pub struct Runtime{pub ids:Cell<u64>,pub console:RefCell<Vec<(String,String)>>,pub reports:RefCell<Vec<serde_json::Value>>}\n        impl ExchangeRuntime for Runtime {\n            fn monotonic_now_ms(&self)->f64{123000.0}fn now_ms(&self)->f64{123000.0}\n            fn sleep(&self,_:u64)->ExchangeFuture<'static,()>{Box::pin(std::future::pending())}\n            fn spawn_local(&self,_:Pin<Box<dyn Future<Output=()>>>)->Box<dyn ExchangeTask>{panic!(\"BASE-OWNER unexpected asynchronous host work\")}\n            fn console_values(&self,s:&str,m:&[crate::js_runtime::value::Js]){self.console.borrow_mut().push((s.into(),crate::runtime::console_text(m)))}\n            fn unique_id(&self)->String{let n=self.ids.get()+1;self.ids.set(n);format!(\"base-{n}\")}\n            fn is_worker(&self)->bool{false}fn random(&self)->f64{0.25}\n            fn report_exception(&self,e:&ExchangeError,c:&safe_cex_types::retained_json::RetainedJsonInput){self.reports.borrow_mut().push(serde_json::json!([e.name,e.message,c]))}\n            fn report_raw_exception(&self,_:&crate::js_runtime::value::Js,_:&safe_cex_types::retained_json::RetainedJsonInput){panic!(\"BASE-OWNER unexpected raw exception\")}\n            fn execute_worker_request(&self,_:serde_json::Value)->ExchangeFuture<'static,serde_json::Value>{Box::pin(async{Err(ExchangeError::new(\"fixture worker unavailable\"))})}\n        }\n        pub fn order(id:&str,symbol:&str)->Order {serde_json::from_value(serde_json::json!({\"id\":id,\"status\":\"open\",\"symbol\":symbol,\"type\":\"limit\",\"side\":\"buy\",\"price\":17.25,\"amount\":3.5,\"filled\":1.25,\"remaining\":2.25,\"reduceOnly\":false,\"lastUpdate\":91000,\"info\":{\"clientOrderId\":format!(\"client-{id}\")}})).expect(\"authored native order fixture\")}\n        pub fn position(id:&str,symbol:&str)->Position{serde_json::from_value(serde_json::json!({\"id\":id,\"symbol\":symbol,\"side\":\"long\",\"entryPrice\":11.25,\"notional\":23.5,\"leverage\":7,\"unrealizedPnl\":3.75,\"contracts\":5.5,\"liquidationPrice\":2.25})).expect(\"authored native position fixture\")}\n        pub fn project_order(v:&Order)->serde_json::Value{serde_json::json!({\"id\":v.id,\"symbol\":v.symbol,\"price\":v.price.value().expect(\"authored native order price\").to_bits().to_string(),\"amount\":v.amount.to_bits().to_string(),\"filled\":v.filled.to_bits().to_string(),\"remaining\":v.remaining.to_bits().to_string()})}\n        pub fn project_position(v:&Position)->serde_json::Value{serde_json::json!({\"id\":v.id,\"symbol\":v.symbol,\"entryPrice\":v.entry_price.to_bits().to_string(),\"contracts\":v.contracts.to_bits().to_string(),\"unrealizedPnl\":v.unrealized_pnl.to_bits().to_string()})}\n        pub fn project_place(v:&PlaceOrderOpts)->serde_json::Value{serde_json::json!({\"symbol\":v.symbol,\"type\":match v.r#type{OrderType::Limit=>\"limit\",OrderType::Market=>\"market\",_=>\"other\"},\"side\":match v.side{OrderSide::Buy=>\"buy\",OrderSide::Sell=>\"sell\"},\"amount\":v.amount.to_bits().to_string(),\"price\":v.price.map(|n|n.to_bits().to_string()),\"trigger\":v.trigger_price.map(|n|n.to_bits().to_string()),\"reduce\":v.reduce_only,\"clientOrderId\":v.client_order_id})}\n        pub struct Venue{pub base:BaseExchange,pub capabilities:ExchangeCapabilities,pub calls:RefCell<Vec<serde_json::Value>>}\n        impl Exchange for Venue {\n            type PlaceOpts=PlaceOrderOpts;\n            fn base(&self)->&BaseExchange{&self.base}fn capabilities(&self)->&ExchangeCapabilities{&self.capabilities}\n            fn fetch_orders(&self,symbols:Option<Vec<String>>)->ExchangeFuture<'_,Vec<Order>>{self.calls.borrow_mut().push(serde_json::json!([\"fetchOrders\",symbols]));Box::pin(async{Ok(vec![order(\"A\",\"BTC\"),order(\"B\",\"ETH\")])})}\n            fn cancel_orders(&self,orders:Vec<Order>)->ExchangeFuture<'_,()>{self.calls.borrow_mut().push(serde_json::json!([\"cancelOrders\",orders.iter().map(project_order).collect::<Vec<_>>() ]));Box::pin(async{Ok(())})}\n            fn fetch_symbol_max_leverage(&self,symbol:String)->ExchangeFuture<'_,f64>{self.calls.borrow_mut().push(serde_json::json!([\"leverage\",symbol]));Box::pin(async move{Ok(if symbol==\"BTC\"{17.5}else{29.25})})}\n            fn after_method_called_in_worker(&self,result:&serde_json::Value,method:crate::worker::CallableMethodsInWorker,args:&[serde_json::Value])->Result<(),ExchangeError>{assert!(matches!(method,crate::worker::CallableMethodsInWorker::FetchOrders),\"BASE-OWNER exact typed worker method\");self.calls.borrow_mut().push(serde_json::json!([\"afterWorker\",result,args]));Ok(())}\n        }\n        pub fn options()->ExchangeOptions{serde_json::from_value(serde_json::json!({\"key\":\"fixture-key\",\"secret\":\"fixture-secret\",\"testnet\":true})).expect(\"authored typed options\")}\n        pub fn setup()->(Rc<Venue>,Rc<Runtime>,Rc<safe_cex_exchange::js_runtime::native_store::DefaultStore>){\n            let runtime=Rc::new(Runtime::default());let store=Rc::new(safe_cex_exchange::js_runtime::native_store::DefaultStore::new());\n            let settings=ExchangeSettings{client_order_id_rule:Some(crate::client_order_id::ClientOrderIdRule{label:\"Fixture\".into(),requirement:\"start with client-\".into(),is_valid:Rc::new(|id|id.starts_with(\"client-\")),is_honorable_shape:None,mint:None}),..Default::default()};\n            let base=BaseExchange::new(ExchangeName::Bybit,options(),store.clone(),runtime.clone(),settings);\n            let capabilities=ExchangeCapabilities{place_order:PlaceOrderBinding::implemented::<Venue>(|v,order:ValidatedOrder<Venue>|{let p=project_place(order.options());v.calls.borrow_mut().push(serde_json::json!([\"place\",p]));Box::pin(async{Ok(vec![\"placed-one\".into()])})}),place_orders:PlaceOrdersBinding::implemented::<Venue>(|v,orders:ValidatedBatch<Venue>|{let values=orders.orders().iter().map(|o|project_place(o.options())).collect::<Vec<_>>();v.calls.borrow_mut().push(serde_json::json!([\"batch\",values]));Box::pin(async{Ok(vec![\"placed-batch\".into()])})}),..Default::default()};\n            (Rc::new(Venue{base,capabilities,calls:RefCell::new(Vec::new())}),runtime,store)\n        }\n    }\n    #[allow(unused_imports)] use std::{cell::RefCell,rc::Rc};\n    #[allow(unused_imports)] use crate::exchange::Exchange as _;\n    let (venue,runtime,store)=fixture::setup();\n    let base:&$type=venue.base();\n    let _=(&runtime,&store,base);\n    let observed={\n base.bind_http_endpoint_lists(&[\"/every\"],&[\"/periodic\"]);\n let value=base.http_endpoints($value.as_str().unwrap()).unwrap();\n serde_json::json!(String::from_utf16(&value.get(\"0\").unwrap().to_js_string().unwrap()).unwrap())\n    }; base.dispose().expect(\"BASE-OWNER fixture cleanup\");observed\n}",
+        "cases": [
+          {
+            "input": "grafanaEndpointsEvery",
+            "output": "/every"
+          },
+          {
+            "input": "grafanaEndpointsPeriodic",
+            "output": "/periodic"
           }
         ]
       },
@@ -23369,7 +23570,7 @@
         }
       },
       {
-        "input": "\ufeff2\u00a0",
+        "input": "﻿2 ",
         "output": {
           "bits": "4000000000000000",
           "nan": false
@@ -23623,7 +23824,7 @@
         }
       },
       {
-        "input": "\ud83d\ude80",
+        "input": "🚀",
         "output": {
           "tag": "string",
           "units": [
@@ -24776,7 +24977,7 @@
           {
             "input": {
               "kind": "string",
-              "text": "\u96ea\ud83d\ude00"
+              "text": "雪😀"
             },
             "output": {
               "tag": "string",
@@ -24858,7 +25059,7 @@
             }
           },
           {
-            "input": "\ud83d\ude80",
+            "input": "🚀",
             "output": {
               "units": [
                 55357,
@@ -26177,7 +26378,7 @@
         },
         "input": "observed",
         "reason": "GetIterator calls the actual retained protocol method and verifies its native object result. Array and astral-string fixtures step that returned iterator and observe iterable-self identity, values and exhaustion.",
-        "call": "{ let owner = if $value.as_str() == Some(\"array\") { $type::array(vec![super::Js::str(\"a\"),super::Js::str(\"b\")]) } else { $type::str(\"A\ud83d\ude00\") }; let observed = (|| -> Result<serde_json::Value,super::Thrown> { let iterator = owner.iterator()?; let is_self = iterator.iterator()?.same_reference(&iterator); let mut values = vec![]; for _ in 0..2 { values.push(iterator.call_method(\"next\",vec![])?.get(\"value\")?.to_display()); } Ok(serde_json::json!({\"self\":is_self,\"values\":values,\"done\":iterator.call_method(\"next\",vec![])?.get(\"done\")?.truthy()})) })(); observed.unwrap_or_else(|error|serde_json::json!({\"error\":error.value.get(\"name\").unwrap().to_display()})) }",
+        "call": "{ let owner = if $value.as_str() == Some(\"array\") { $type::array(vec![super::Js::str(\"a\"),super::Js::str(\"b\")]) } else { $type::str(\"A😀\") }; let observed = (|| -> Result<serde_json::Value,super::Thrown> { let iterator = owner.iterator()?; let is_self = iterator.iterator()?.same_reference(&iterator); let mut values = vec![]; for _ in 0..2 { values.push(iterator.call_method(\"next\",vec![])?.get(\"value\")?.to_display()); } Ok(serde_json::json!({\"self\":is_self,\"values\":values,\"done\":iterator.call_method(\"next\",vec![])?.get(\"done\")?.truthy()})) })(); observed.unwrap_or_else(|error|serde_json::json!({\"error\":error.value.get(\"name\").unwrap().to_display()})) }",
         "cases": [
           {
             "input": "array",
@@ -26196,7 +26397,7 @@
               "self": true,
               "values": [
                 "A",
-                "\ud83d\ude00"
+                "😀"
               ],
               "done": true
             }
@@ -32833,7 +33034,7 @@
           {
             "input": [
               7,
-              "\ud83d\ude00",
+              "😀",
               null
             ],
             "output": {
@@ -32856,7 +33057,7 @@
             }
           },
           {
-            "input": "A\ud83d\ude00",
+            "input": "A😀",
             "output": {
               "values": [
                 {
@@ -32948,7 +33149,7 @@
           {
             "input": [
               7,
-              "\ud83d\ude00",
+              "😀",
               null
             ],
             "output": {
@@ -32971,7 +33172,7 @@
             }
           },
           {
-            "input": "A\ud83d\ude00",
+            "input": "A😀",
             "output": {
               "values": [
                 {
@@ -39765,6 +39966,2187 @@
             "number"
           ]
         }
+      }
+    ]
+  },
+  "safe_cex_exchange::http_telemetry::request_message": {
+    "api": {
+      "kind": "function",
+      "name": "request_message",
+      "signature": {
+        "inputs": [
+          [
+            "config",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual maintained safeCexAxiosCreate.ts emits both message pairs in tests/js_http_factory_source.cjs telemetry-messages; native calls retain UTF16 URL/message units, undefined omission, nonfinite JSON null and signed-zero JSON spelling. The full factory and real WOO/Backpack binding witnesses independently execute the registered path.",
+    "call": "{\n use crate::js_runtime::value::Js;\n let units=$value[\"urlUnits\"].as_array().unwrap().iter().map(|value|value.as_u64().unwrap() as u16).collect::<Vec<_>>();\n let config=Js::object(vec![(\"method\",Js::str($value[\"method\"].as_str().unwrap())),(\"url\",Js::utf16(&units)),\n (\"data\",Js::object(vec![(\"text\",Js::utf16(&[0xd800])),(\"value\",Js::Number(f64::INFINITY)),(\"missing\",Js::Undefined)])),\n (\"params\",Js::object(vec![(\"zero\",Js::Number(-0.0)),(\"list\",Js::array(vec![Js::Undefined,Js::Number(f64::INFINITY)]))]))]);\nlet message=$type(&config).expect(\"actual HTTP renderer\"); serde_json::json!(message.to_js_string().unwrap().to_vec()) }",
+    "cases": [
+      {
+        "input": {
+          "method": "post",
+          "urlUnits": [
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            55296
+          ],
+          "status": 200
+        },
+        "output": [
+          82,
+          101,
+          113,
+          117,
+          101,
+          115,
+          116,
+          32,
+          80,
+          79,
+          83,
+          84,
+          32,
+          47,
+          116,
+          101,
+          108,
+          101,
+          109,
+          101,
+          116,
+          114,
+          121,
+          55296,
+          32,
+          123,
+          34,
+          109,
+          101,
+          116,
+          104,
+          111,
+          100,
+          34,
+          58,
+          34,
+          80,
+          79,
+          83,
+          84,
+          34,
+          44,
+          34,
+          117,
+          114,
+          108,
+          34,
+          58,
+          34,
+          47,
+          116,
+          101,
+          108,
+          101,
+          109,
+          101,
+          116,
+          114,
+          121,
+          92,
+          117,
+          100,
+          56,
+          48,
+          48,
+          34,
+          44,
+          34,
+          98,
+          111,
+          100,
+          121,
+          34,
+          58,
+          123,
+          34,
+          116,
+          101,
+          120,
+          116,
+          34,
+          58,
+          34,
+          92,
+          117,
+          100,
+          56,
+          48,
+          48,
+          34,
+          44,
+          34,
+          118,
+          97,
+          108,
+          117,
+          101,
+          34,
+          58,
+          110,
+          117,
+          108,
+          108,
+          125,
+          44,
+          34,
+          112,
+          97,
+          114,
+          97,
+          109,
+          115,
+          34,
+          58,
+          123,
+          34,
+          122,
+          101,
+          114,
+          111,
+          34,
+          58,
+          48,
+          44,
+          34,
+          108,
+          105,
+          115,
+          116,
+          34,
+          58,
+          91,
+          110,
+          117,
+          108,
+          108,
+          44,
+          110,
+          117,
+          108,
+          108,
+          93,
+          125,
+          125
+        ]
+      },
+      {
+        "input": {
+          "method": "put",
+          "urlUnits": [
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            38634
+          ],
+          "status": 201
+        },
+        "output": [
+          82,
+          101,
+          113,
+          117,
+          101,
+          115,
+          116,
+          32,
+          80,
+          85,
+          84,
+          32,
+          47,
+          116,
+          101,
+          108,
+          101,
+          109,
+          101,
+          116,
+          114,
+          121,
+          38634,
+          32,
+          123,
+          34,
+          109,
+          101,
+          116,
+          104,
+          111,
+          100,
+          34,
+          58,
+          34,
+          80,
+          85,
+          84,
+          34,
+          44,
+          34,
+          117,
+          114,
+          108,
+          34,
+          58,
+          34,
+          47,
+          116,
+          101,
+          108,
+          101,
+          109,
+          101,
+          116,
+          114,
+          121,
+          38634,
+          34,
+          44,
+          34,
+          98,
+          111,
+          100,
+          121,
+          34,
+          58,
+          123,
+          34,
+          116,
+          101,
+          120,
+          116,
+          34,
+          58,
+          34,
+          92,
+          117,
+          100,
+          56,
+          48,
+          48,
+          34,
+          44,
+          34,
+          118,
+          97,
+          108,
+          117,
+          101,
+          34,
+          58,
+          110,
+          117,
+          108,
+          108,
+          125,
+          44,
+          34,
+          112,
+          97,
+          114,
+          97,
+          109,
+          115,
+          34,
+          58,
+          123,
+          34,
+          122,
+          101,
+          114,
+          111,
+          34,
+          58,
+          48,
+          44,
+          34,
+          108,
+          105,
+          115,
+          116,
+          34,
+          58,
+          91,
+          110,
+          117,
+          108,
+          108,
+          44,
+          110,
+          117,
+          108,
+          108,
+          93,
+          125,
+          125
+        ]
+      }
+    ]
+  },
+  "safe_cex_exchange::http_telemetry::response_message": {
+    "api": {
+      "kind": "function",
+      "name": "response_message",
+      "signature": {
+        "inputs": [
+          [
+            "response",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual maintained safeCexAxiosCreate.ts emits both message pairs in tests/js_http_factory_source.cjs telemetry-messages; native calls retain UTF16 URL/message units, undefined omission, nonfinite JSON null and signed-zero JSON spelling. The full factory and real WOO/Backpack binding witnesses independently execute the registered path.",
+    "call": "{\n use crate::js_runtime::value::Js;\n let units=$value[\"urlUnits\"].as_array().unwrap().iter().map(|value|value.as_u64().unwrap() as u16).collect::<Vec<_>>();\n let config=Js::object(vec![(\"method\",Js::str($value[\"method\"].as_str().unwrap())),(\"url\",Js::utf16(&units)),\n (\"data\",Js::object(vec![(\"text\",Js::utf16(&[0xd800])),(\"value\",Js::Number(f64::INFINITY)),(\"missing\",Js::Undefined)])),\n (\"params\",Js::object(vec![(\"zero\",Js::Number(-0.0)),(\"list\",Js::array(vec![Js::Undefined,Js::Number(f64::INFINITY)]))]))]);\nlet value=Js::object(vec![(\"config\",config),(\"status\",Js::Number($value[\"status\"].as_f64().unwrap())),(\"data\",Js::object(vec![(\"text\",Js::utf16(&[0xd801])),(\"value\",Js::Number(f64::NAN)),(\"zero\",Js::Number(-0.0))]))]);\nlet message=$type(&value).expect(\"actual HTTP renderer\"); serde_json::json!(message.to_js_string().unwrap().to_vec()) }",
+    "cases": [
+      {
+        "input": {
+          "method": "post",
+          "urlUnits": [
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            55296
+          ],
+          "status": 200
+        },
+        "output": [
+          82,
+          101,
+          115,
+          112,
+          111,
+          110,
+          115,
+          101,
+          32,
+          80,
+          79,
+          83,
+          84,
+          32,
+          47,
+          116,
+          101,
+          108,
+          101,
+          109,
+          101,
+          116,
+          114,
+          121,
+          55296,
+          32,
+          50,
+          48,
+          48,
+          32,
+          123,
+          34,
+          115,
+          116,
+          97,
+          116,
+          117,
+          115,
+          34,
+          58,
+          50,
+          48,
+          48,
+          44,
+          34,
+          98,
+          111,
+          100,
+          121,
+          34,
+          58,
+          123,
+          34,
+          116,
+          101,
+          120,
+          116,
+          34,
+          58,
+          34,
+          92,
+          117,
+          100,
+          56,
+          48,
+          49,
+          34,
+          44,
+          34,
+          118,
+          97,
+          108,
+          117,
+          101,
+          34,
+          58,
+          110,
+          117,
+          108,
+          108,
+          44,
+          34,
+          122,
+          101,
+          114,
+          111,
+          34,
+          58,
+          48,
+          125,
+          125
+        ]
+      },
+      {
+        "input": {
+          "method": "put",
+          "urlUnits": [
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            38634
+          ],
+          "status": 201
+        },
+        "output": [
+          82,
+          101,
+          115,
+          112,
+          111,
+          110,
+          115,
+          101,
+          32,
+          80,
+          85,
+          84,
+          32,
+          47,
+          116,
+          101,
+          108,
+          101,
+          109,
+          101,
+          116,
+          114,
+          121,
+          38634,
+          32,
+          50,
+          48,
+          49,
+          32,
+          123,
+          34,
+          115,
+          116,
+          97,
+          116,
+          117,
+          115,
+          34,
+          58,
+          50,
+          48,
+          49,
+          44,
+          34,
+          98,
+          111,
+          100,
+          121,
+          34,
+          58,
+          123,
+          34,
+          116,
+          101,
+          120,
+          116,
+          34,
+          58,
+          34,
+          92,
+          117,
+          100,
+          56,
+          48,
+          49,
+          34,
+          44,
+          34,
+          118,
+          97,
+          108,
+          117,
+          101,
+          34,
+          58,
+          110,
+          117,
+          108,
+          108,
+          44,
+          34,
+          122,
+          101,
+          114,
+          111,
+          34,
+          58,
+          48,
+          125,
+          125
+        ]
+      }
+    ]
+  },
+  "safe_cex_exchange::http_telemetry::upper_method": {
+    "api": {
+      "kind": "function",
+      "name": "upper_method",
+      "signature": {
+        "inputs": [
+          [
+            "config",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "The method observation is the uppercase method in the actual maintained-factory message pairs. Calls the production helper on native Js config; no wire/request emulator.",
+    "call": "{let config=crate::js_runtime::value::Js::object(vec![(\"method\",crate::js_runtime::value::Js::str($value.as_str().unwrap()))]);serde_json::json!($type(&config).unwrap().to_js_string().unwrap().to_vec())}",
+    "cases": [
+      {
+        "input": "post",
+        "output": [
+          80,
+          79,
+          83,
+          84
+        ]
+      },
+      {
+        "input": "put",
+        "output": [
+          80,
+          85,
+          84
+        ]
+      }
+    ]
+  },
+  "safe_cex_exchange::http_telemetry::should_log": {
+    "api": {
+      "kind": "function",
+      "name": "should_log",
+      "signature": {
+        "inputs": [
+          [
+            "url",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::Fn",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::js_runtime::value::Js",
+                                          "args": null
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "endpoints",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::Fn",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::js_runtime::value::Js",
+                                          "args": null
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "development",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "now",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::Fn",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "primitive": "f64"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "logs",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "std::sync::poison::mutex::Mutex",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_exchange::http::HttpLogState",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "response",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl Fn() -> Result<Js, Thrown>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::Fn",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl Fn(&str) -> Result<Js, Thrown>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::Fn",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl Fn() -> f64",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::Fn",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "primitive": "f64"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "The independent maintained Axios factory telemetry mode supplies 16 dev/every/periodic/direct profiles at times1000/1001/30999/31000. This native gate observer checks the same four request decisions, independent response state, module-key throttling and dev bypass; the public factory test additionally verifies exact emitted text and Store-counter order.",
+    "call": "{\n use crate::js_runtime::value::Js;\n let kind=$value[\"kind\"].as_str().unwrap(); let development=$value[\"development\"].as_bool().unwrap();\n let logs=std::sync::Mutex::new(crate::http::HttpLogState::default());\n let read=|name:&str|Ok(Js::array(if kind==\"both\" || (name==\"grafanaEndpointsEvery\" && kind==\"every\") || (name==\"grafanaEndpointsPeriodic\" && kind==\"periodic\"){vec![Js::str(\"/probe\")]}else{vec![]}));\n let requests=[1000.0,1001.0,30999.0,31000.0].into_iter().map(|time|$type(||Ok(Js::str(\"/probe\")),&read,development,||time,&logs,false).unwrap()).collect::<Vec<_>>();\n let response=$type(||Ok(Js::str(\"/probe\")),read,development,||1001.0,&logs,true).unwrap();\n serde_json::json!({\"requests\":requests,\"firstResponse\":response})\n}",
+    "cases": [
+      {
+        "input": {
+          "kind": "none",
+          "development": false
+        },
+        "output": {
+          "requests": [
+            false,
+            false,
+            false,
+            false
+          ],
+          "firstResponse": false
+        }
+      },
+      {
+        "input": {
+          "kind": "every",
+          "development": false
+        },
+        "output": {
+          "requests": [
+            true,
+            true,
+            true,
+            true
+          ],
+          "firstResponse": true
+        }
+      },
+      {
+        "input": {
+          "kind": "periodic",
+          "development": false
+        },
+        "output": {
+          "requests": [
+            true,
+            false,
+            false,
+            true
+          ],
+          "firstResponse": true
+        }
+      },
+      {
+        "input": {
+          "kind": "both",
+          "development": false
+        },
+        "output": {
+          "requests": [
+            true,
+            true,
+            true,
+            true
+          ],
+          "firstResponse": true
+        }
+      },
+      {
+        "input": {
+          "kind": "none",
+          "development": true
+        },
+        "output": {
+          "requests": [
+            true,
+            true,
+            true,
+            true
+          ],
+          "firstResponse": true
+        }
+      },
+      {
+        "input": {
+          "kind": "every",
+          "development": true
+        },
+        "output": {
+          "requests": [
+            true,
+            true,
+            true,
+            true
+          ],
+          "firstResponse": true
+        }
+      },
+      {
+        "input": {
+          "kind": "periodic",
+          "development": true
+        },
+        "output": {
+          "requests": [
+            true,
+            true,
+            true,
+            true
+          ],
+          "firstResponse": true
+        }
+      },
+      {
+        "input": {
+          "kind": "both",
+          "development": true
+        },
+        "output": {
+          "requests": [
+            true,
+            true,
+            true,
+            true
+          ],
+          "firstResponse": true
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::native::NativeHttpHost": {
+    "shape": "observed",
+    "requiredFeatures": [
+      "native"
+    ],
+    "evidence": "Feature-authenticated actual NativeHttpHost receiver calls with a real BaseExchange/DefaultStore owner, original event values and source endpoint fields. WOO/Backpack registry witnesses additionally execute actual NativeRuntime and local HTTP; this finite direct probe does not emulate HTTP.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::http::HttpHost",
+          "name": "emit",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "event",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "message",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual native HTTP host forwards through the registered exchange Base emitter and actual late endpoint reader; observes UTF16 unchanged before serialization. The registry Backpack binding independently checks HTTP/Store effects and compiled outcome-loss control.",
+        "call": "{\n    #[allow(dead_code,unused_imports)]\n    mod fixture {\n        use std::{cell::{Cell,RefCell},future::Future,pin::Pin,rc::Rc,task::{Context,Poll,Waker}};\n        use crate::{exchange::{BaseExchange,Exchange,ExchangeSettings,ValidatedOrder,ValidatedBatch},capabilities::{ExchangeCapabilities,PlaceOrderBinding,PlaceOrdersBinding},runtime::{ExchangeRuntime,ExchangeTask,ExchangeFuture,ExchangeError}};\n        use safe_cex_types::*;\n        pub fn ready<F:Future>(future:F)->F::Output {let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut Context::from_waker(Waker::noop())){Poll::Ready(v)=>v,Poll::Pending=>panic!(\"BASE-OWNER expected immediate fixture result\")}}\n        #[derive(Default)] pub struct Runtime{pub ids:Cell<u64>,pub console:RefCell<Vec<(String,String)>>,pub reports:RefCell<Vec<serde_json::Value>>}\n        impl ExchangeRuntime for Runtime {\n            fn monotonic_now_ms(&self)->f64{123000.0}fn now_ms(&self)->f64{123000.0}\n            fn sleep(&self,_:u64)->ExchangeFuture<'static,()>{Box::pin(std::future::pending())}\n            fn spawn_local(&self,_:Pin<Box<dyn Future<Output=()>>>)->Box<dyn ExchangeTask>{panic!(\"BASE-OWNER unexpected asynchronous host work\")}\n            fn console_values(&self,s:&str,m:&[crate::js_runtime::value::Js]){self.console.borrow_mut().push((s.into(),crate::runtime::console_text(m)))}\n            fn unique_id(&self)->String{let n=self.ids.get()+1;self.ids.set(n);format!(\"base-{n}\")}\n            fn is_worker(&self)->bool{false}fn random(&self)->f64{0.25}\n            fn report_exception(&self,e:&ExchangeError,c:&safe_cex_types::retained_json::RetainedJsonInput){self.reports.borrow_mut().push(serde_json::json!([e.name,e.message,c]))}\n            fn report_raw_exception(&self,_:&crate::js_runtime::value::Js,_:&safe_cex_types::retained_json::RetainedJsonInput){panic!(\"BASE-OWNER unexpected raw exception\")}\n            fn execute_worker_request(&self,_:serde_json::Value)->ExchangeFuture<'static,serde_json::Value>{Box::pin(async{Err(ExchangeError::new(\"fixture worker unavailable\"))})}\n        }\n        pub fn order(id:&str,symbol:&str)->Order {serde_json::from_value(serde_json::json!({\"id\":id,\"status\":\"open\",\"symbol\":symbol,\"type\":\"limit\",\"side\":\"buy\",\"price\":17.25,\"amount\":3.5,\"filled\":1.25,\"remaining\":2.25,\"reduceOnly\":false,\"lastUpdate\":91000,\"info\":{\"clientOrderId\":format!(\"client-{id}\")}})).expect(\"authored native order fixture\")}\n        pub fn position(id:&str,symbol:&str)->Position{serde_json::from_value(serde_json::json!({\"id\":id,\"symbol\":symbol,\"side\":\"long\",\"entryPrice\":11.25,\"notional\":23.5,\"leverage\":7,\"unrealizedPnl\":3.75,\"contracts\":5.5,\"liquidationPrice\":2.25})).expect(\"authored native position fixture\")}\n        pub fn project_order(v:&Order)->serde_json::Value{serde_json::json!({\"id\":v.id,\"symbol\":v.symbol,\"price\":v.price.value().expect(\"authored native order price\").to_bits().to_string(),\"amount\":v.amount.to_bits().to_string(),\"filled\":v.filled.to_bits().to_string(),\"remaining\":v.remaining.to_bits().to_string()})}\n        pub fn project_position(v:&Position)->serde_json::Value{serde_json::json!({\"id\":v.id,\"symbol\":v.symbol,\"entryPrice\":v.entry_price.to_bits().to_string(),\"contracts\":v.contracts.to_bits().to_string(),\"unrealizedPnl\":v.unrealized_pnl.to_bits().to_string()})}\n        pub fn project_place(v:&PlaceOrderOpts)->serde_json::Value{serde_json::json!({\"symbol\":v.symbol,\"type\":match v.r#type{OrderType::Limit=>\"limit\",OrderType::Market=>\"market\",_=>\"other\"},\"side\":match v.side{OrderSide::Buy=>\"buy\",OrderSide::Sell=>\"sell\"},\"amount\":v.amount.to_bits().to_string(),\"price\":v.price.map(|n|n.to_bits().to_string()),\"trigger\":v.trigger_price.map(|n|n.to_bits().to_string()),\"reduce\":v.reduce_only,\"clientOrderId\":v.client_order_id})}\n        pub struct Venue{pub base:BaseExchange,pub capabilities:ExchangeCapabilities,pub calls:RefCell<Vec<serde_json::Value>>}\n        impl Exchange for Venue {\n            type PlaceOpts=PlaceOrderOpts;\n            fn base(&self)->&BaseExchange{&self.base}fn capabilities(&self)->&ExchangeCapabilities{&self.capabilities}\n            fn fetch_orders(&self,symbols:Option<Vec<String>>)->ExchangeFuture<'_,Vec<Order>>{self.calls.borrow_mut().push(serde_json::json!([\"fetchOrders\",symbols]));Box::pin(async{Ok(vec![order(\"A\",\"BTC\"),order(\"B\",\"ETH\")])})}\n            fn cancel_orders(&self,orders:Vec<Order>)->ExchangeFuture<'_,()>{self.calls.borrow_mut().push(serde_json::json!([\"cancelOrders\",orders.iter().map(project_order).collect::<Vec<_>>() ]));Box::pin(async{Ok(())})}\n            fn fetch_symbol_max_leverage(&self,symbol:String)->ExchangeFuture<'_,f64>{self.calls.borrow_mut().push(serde_json::json!([\"leverage\",symbol]));Box::pin(async move{Ok(if symbol==\"BTC\"{17.5}else{29.25})})}\n            fn after_method_called_in_worker(&self,result:&serde_json::Value,method:crate::worker::CallableMethodsInWorker,args:&[serde_json::Value])->Result<(),ExchangeError>{assert!(matches!(method,crate::worker::CallableMethodsInWorker::FetchOrders),\"BASE-OWNER exact typed worker method\");self.calls.borrow_mut().push(serde_json::json!([\"afterWorker\",result,args]));Ok(())}\n        }\n        pub fn options()->ExchangeOptions{serde_json::from_value(serde_json::json!({\"key\":\"fixture-key\",\"secret\":\"fixture-secret\",\"testnet\":true})).expect(\"authored typed options\")}\n        pub fn setup()->(Rc<Venue>,Rc<Runtime>,Rc<safe_cex_exchange::js_runtime::native_store::DefaultStore>){\n            let runtime=Rc::new(Runtime::default());let store=Rc::new(safe_cex_exchange::js_runtime::native_store::DefaultStore::new());\n            let settings=ExchangeSettings{client_order_id_rule:Some(crate::client_order_id::ClientOrderIdRule{label:\"Fixture\".into(),requirement:\"start with client-\".into(),is_valid:Rc::new(|id|id.starts_with(\"client-\")),is_honorable_shape:None,mint:None}),..Default::default()};\n            let base=BaseExchange::new(ExchangeName::Bybit,options(),store.clone(),runtime.clone(),settings);\n            let capabilities=ExchangeCapabilities{place_order:PlaceOrderBinding::implemented::<Venue>(|v,order:ValidatedOrder<Venue>|{let p=project_place(order.options());v.calls.borrow_mut().push(serde_json::json!([\"place\",p]));Box::pin(async{Ok(vec![\"placed-one\".into()])})}),place_orders:PlaceOrdersBinding::implemented::<Venue>(|v,orders:ValidatedBatch<Venue>|{let values=orders.orders().iter().map(|o|project_place(o.options())).collect::<Vec<_>>();v.calls.borrow_mut().push(serde_json::json!([\"batch\",values]));Box::pin(async{Ok(vec![\"placed-batch\".into()])})}),..Default::default()};\n            (Rc::new(Venue{base,capabilities,calls:RefCell::new(Vec::new())}),runtime,store)\n        }\n    }\n\n use crate::{exchange::Exchange as _,http::HttpHost as _,js_runtime::value::Js};use std::{rc::Rc,cell::RefCell};\n let (venue,_runtime,_store)=fixture::setup();let erased:Rc<dyn crate::exchange::Exchange>=venue.clone();\n let host=$type{events:Rc::new(RefCell::new(Some(Rc::downgrade(&erased))))};\nlet captured=Rc::new(RefCell::new(None));let target=captured.clone();venue.base().on(\"audit-http\",Rc::new(move|_,value|{*target.borrow_mut()=Some(value.clone());Ok(())}));host.emit(\"audit-http\",$value.as_str().unwrap()).unwrap();let observed=serde_json::json!(String::from_utf16(&captured.borrow().as_ref().unwrap().to_js_string().unwrap()).unwrap());venue.base().dispose().unwrap();observed\n}",
+        "cases": [
+          {
+            "input": "Request GET /probe {}",
+            "output": "Request GET /probe {}"
+          },
+          {
+            "input": "Response GET /雪 200 {}",
+            "output": "Response GET /雪 200 {}"
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::http::HttpHost",
+          "name": "emit_value",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "event",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "message",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual native HTTP host forwards through the registered exchange Base emitter and actual late endpoint reader; observes UTF16 unchanged before serialization. The registry Backpack binding independently checks HTTP/Store effects and compiled outcome-loss control.",
+        "call": "{\n    #[allow(dead_code,unused_imports)]\n    mod fixture {\n        use std::{cell::{Cell,RefCell},future::Future,pin::Pin,rc::Rc,task::{Context,Poll,Waker}};\n        use crate::{exchange::{BaseExchange,Exchange,ExchangeSettings,ValidatedOrder,ValidatedBatch},capabilities::{ExchangeCapabilities,PlaceOrderBinding,PlaceOrdersBinding},runtime::{ExchangeRuntime,ExchangeTask,ExchangeFuture,ExchangeError}};\n        use safe_cex_types::*;\n        pub fn ready<F:Future>(future:F)->F::Output {let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut Context::from_waker(Waker::noop())){Poll::Ready(v)=>v,Poll::Pending=>panic!(\"BASE-OWNER expected immediate fixture result\")}}\n        #[derive(Default)] pub struct Runtime{pub ids:Cell<u64>,pub console:RefCell<Vec<(String,String)>>,pub reports:RefCell<Vec<serde_json::Value>>}\n        impl ExchangeRuntime for Runtime {\n            fn monotonic_now_ms(&self)->f64{123000.0}fn now_ms(&self)->f64{123000.0}\n            fn sleep(&self,_:u64)->ExchangeFuture<'static,()>{Box::pin(std::future::pending())}\n            fn spawn_local(&self,_:Pin<Box<dyn Future<Output=()>>>)->Box<dyn ExchangeTask>{panic!(\"BASE-OWNER unexpected asynchronous host work\")}\n            fn console_values(&self,s:&str,m:&[crate::js_runtime::value::Js]){self.console.borrow_mut().push((s.into(),crate::runtime::console_text(m)))}\n            fn unique_id(&self)->String{let n=self.ids.get()+1;self.ids.set(n);format!(\"base-{n}\")}\n            fn is_worker(&self)->bool{false}fn random(&self)->f64{0.25}\n            fn report_exception(&self,e:&ExchangeError,c:&safe_cex_types::retained_json::RetainedJsonInput){self.reports.borrow_mut().push(serde_json::json!([e.name,e.message,c]))}\n            fn report_raw_exception(&self,_:&crate::js_runtime::value::Js,_:&safe_cex_types::retained_json::RetainedJsonInput){panic!(\"BASE-OWNER unexpected raw exception\")}\n            fn execute_worker_request(&self,_:serde_json::Value)->ExchangeFuture<'static,serde_json::Value>{Box::pin(async{Err(ExchangeError::new(\"fixture worker unavailable\"))})}\n        }\n        pub fn order(id:&str,symbol:&str)->Order {serde_json::from_value(serde_json::json!({\"id\":id,\"status\":\"open\",\"symbol\":symbol,\"type\":\"limit\",\"side\":\"buy\",\"price\":17.25,\"amount\":3.5,\"filled\":1.25,\"remaining\":2.25,\"reduceOnly\":false,\"lastUpdate\":91000,\"info\":{\"clientOrderId\":format!(\"client-{id}\")}})).expect(\"authored native order fixture\")}\n        pub fn position(id:&str,symbol:&str)->Position{serde_json::from_value(serde_json::json!({\"id\":id,\"symbol\":symbol,\"side\":\"long\",\"entryPrice\":11.25,\"notional\":23.5,\"leverage\":7,\"unrealizedPnl\":3.75,\"contracts\":5.5,\"liquidationPrice\":2.25})).expect(\"authored native position fixture\")}\n        pub fn project_order(v:&Order)->serde_json::Value{serde_json::json!({\"id\":v.id,\"symbol\":v.symbol,\"price\":v.price.value().expect(\"authored native order price\").to_bits().to_string(),\"amount\":v.amount.to_bits().to_string(),\"filled\":v.filled.to_bits().to_string(),\"remaining\":v.remaining.to_bits().to_string()})}\n        pub fn project_position(v:&Position)->serde_json::Value{serde_json::json!({\"id\":v.id,\"symbol\":v.symbol,\"entryPrice\":v.entry_price.to_bits().to_string(),\"contracts\":v.contracts.to_bits().to_string(),\"unrealizedPnl\":v.unrealized_pnl.to_bits().to_string()})}\n        pub fn project_place(v:&PlaceOrderOpts)->serde_json::Value{serde_json::json!({\"symbol\":v.symbol,\"type\":match v.r#type{OrderType::Limit=>\"limit\",OrderType::Market=>\"market\",_=>\"other\"},\"side\":match v.side{OrderSide::Buy=>\"buy\",OrderSide::Sell=>\"sell\"},\"amount\":v.amount.to_bits().to_string(),\"price\":v.price.map(|n|n.to_bits().to_string()),\"trigger\":v.trigger_price.map(|n|n.to_bits().to_string()),\"reduce\":v.reduce_only,\"clientOrderId\":v.client_order_id})}\n        pub struct Venue{pub base:BaseExchange,pub capabilities:ExchangeCapabilities,pub calls:RefCell<Vec<serde_json::Value>>}\n        impl Exchange for Venue {\n            type PlaceOpts=PlaceOrderOpts;\n            fn base(&self)->&BaseExchange{&self.base}fn capabilities(&self)->&ExchangeCapabilities{&self.capabilities}\n            fn fetch_orders(&self,symbols:Option<Vec<String>>)->ExchangeFuture<'_,Vec<Order>>{self.calls.borrow_mut().push(serde_json::json!([\"fetchOrders\",symbols]));Box::pin(async{Ok(vec![order(\"A\",\"BTC\"),order(\"B\",\"ETH\")])})}\n            fn cancel_orders(&self,orders:Vec<Order>)->ExchangeFuture<'_,()>{self.calls.borrow_mut().push(serde_json::json!([\"cancelOrders\",orders.iter().map(project_order).collect::<Vec<_>>() ]));Box::pin(async{Ok(())})}\n            fn fetch_symbol_max_leverage(&self,symbol:String)->ExchangeFuture<'_,f64>{self.calls.borrow_mut().push(serde_json::json!([\"leverage\",symbol]));Box::pin(async move{Ok(if symbol==\"BTC\"{17.5}else{29.25})})}\n            fn after_method_called_in_worker(&self,result:&serde_json::Value,method:crate::worker::CallableMethodsInWorker,args:&[serde_json::Value])->Result<(),ExchangeError>{assert!(matches!(method,crate::worker::CallableMethodsInWorker::FetchOrders),\"BASE-OWNER exact typed worker method\");self.calls.borrow_mut().push(serde_json::json!([\"afterWorker\",result,args]));Ok(())}\n        }\n        pub fn options()->ExchangeOptions{serde_json::from_value(serde_json::json!({\"key\":\"fixture-key\",\"secret\":\"fixture-secret\",\"testnet\":true})).expect(\"authored typed options\")}\n        pub fn setup()->(Rc<Venue>,Rc<Runtime>,Rc<safe_cex_exchange::js_runtime::native_store::DefaultStore>){\n            let runtime=Rc::new(Runtime::default());let store=Rc::new(safe_cex_exchange::js_runtime::native_store::DefaultStore::new());\n            let settings=ExchangeSettings{client_order_id_rule:Some(crate::client_order_id::ClientOrderIdRule{label:\"Fixture\".into(),requirement:\"start with client-\".into(),is_valid:Rc::new(|id|id.starts_with(\"client-\")),is_honorable_shape:None,mint:None}),..Default::default()};\n            let base=BaseExchange::new(ExchangeName::Bybit,options(),store.clone(),runtime.clone(),settings);\n            let capabilities=ExchangeCapabilities{place_order:PlaceOrderBinding::implemented::<Venue>(|v,order:ValidatedOrder<Venue>|{let p=project_place(order.options());v.calls.borrow_mut().push(serde_json::json!([\"place\",p]));Box::pin(async{Ok(vec![\"placed-one\".into()])})}),place_orders:PlaceOrdersBinding::implemented::<Venue>(|v,orders:ValidatedBatch<Venue>|{let values=orders.orders().iter().map(|o|project_place(o.options())).collect::<Vec<_>>();v.calls.borrow_mut().push(serde_json::json!([\"batch\",values]));Box::pin(async{Ok(vec![\"placed-batch\".into()])})}),..Default::default()};\n            (Rc::new(Venue{base,capabilities,calls:RefCell::new(Vec::new())}),runtime,store)\n        }\n    }\n\n use crate::{exchange::Exchange as _,http::HttpHost as _,js_runtime::value::Js};use std::{rc::Rc,cell::RefCell};\n let (venue,_runtime,_store)=fixture::setup();let erased:Rc<dyn crate::exchange::Exchange>=venue.clone();\n let host=$type{events:Rc::new(RefCell::new(Some(Rc::downgrade(&erased))))};\nlet captured=Rc::new(RefCell::new(None));let target=captured.clone();venue.base().on(\"audit-http\",Rc::new(move|_,value|{*target.borrow_mut()=Some(value.clone());Ok(())}));let units=$value.as_array().unwrap().iter().map(|value|value.as_u64().unwrap() as u16).collect::<Vec<_>>();let original=Js::utf16(&units);host.emit_value(\"audit-http\",&original).unwrap();let observed=serde_json::json!({\"units\":captured.borrow().as_ref().unwrap().to_js_string().unwrap().to_vec(),\"same\":captured.borrow().as_ref().unwrap().strict_equals(&original)});venue.base().dispose().unwrap();observed\n}",
+        "cases": [
+          {
+            "input": [
+              55296,
+              65
+            ],
+            "output": {
+              "units": [
+                55296,
+                65
+              ],
+              "same": true
+            }
+          },
+          {
+            "input": [
+              38634,
+              0,
+              56320
+            ],
+            "output": {
+              "units": [
+                38634,
+                0,
+                56320
+              ],
+              "same": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::http::HttpHost",
+          "name": "telemetry_endpoints",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::result::Result",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                                        "args": null
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual native HTTP host forwards through the registered exchange Base emitter and actual late endpoint reader; observes UTF16 unchanged before serialization. The registry Backpack binding independently checks HTTP/Store effects and compiled outcome-loss control.",
+        "call": "{\n    #[allow(dead_code,unused_imports)]\n    mod fixture {\n        use std::{cell::{Cell,RefCell},future::Future,pin::Pin,rc::Rc,task::{Context,Poll,Waker}};\n        use crate::{exchange::{BaseExchange,Exchange,ExchangeSettings,ValidatedOrder,ValidatedBatch},capabilities::{ExchangeCapabilities,PlaceOrderBinding,PlaceOrdersBinding},runtime::{ExchangeRuntime,ExchangeTask,ExchangeFuture,ExchangeError}};\n        use safe_cex_types::*;\n        pub fn ready<F:Future>(future:F)->F::Output {let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut Context::from_waker(Waker::noop())){Poll::Ready(v)=>v,Poll::Pending=>panic!(\"BASE-OWNER expected immediate fixture result\")}}\n        #[derive(Default)] pub struct Runtime{pub ids:Cell<u64>,pub console:RefCell<Vec<(String,String)>>,pub reports:RefCell<Vec<serde_json::Value>>}\n        impl ExchangeRuntime for Runtime {\n            fn monotonic_now_ms(&self)->f64{123000.0}fn now_ms(&self)->f64{123000.0}\n            fn sleep(&self,_:u64)->ExchangeFuture<'static,()>{Box::pin(std::future::pending())}\n            fn spawn_local(&self,_:Pin<Box<dyn Future<Output=()>>>)->Box<dyn ExchangeTask>{panic!(\"BASE-OWNER unexpected asynchronous host work\")}\n            fn console_values(&self,s:&str,m:&[crate::js_runtime::value::Js]){self.console.borrow_mut().push((s.into(),crate::runtime::console_text(m)))}\n            fn unique_id(&self)->String{let n=self.ids.get()+1;self.ids.set(n);format!(\"base-{n}\")}\n            fn is_worker(&self)->bool{false}fn random(&self)->f64{0.25}\n            fn report_exception(&self,e:&ExchangeError,c:&safe_cex_types::retained_json::RetainedJsonInput){self.reports.borrow_mut().push(serde_json::json!([e.name,e.message,c]))}\n            fn report_raw_exception(&self,_:&crate::js_runtime::value::Js,_:&safe_cex_types::retained_json::RetainedJsonInput){panic!(\"BASE-OWNER unexpected raw exception\")}\n            fn execute_worker_request(&self,_:serde_json::Value)->ExchangeFuture<'static,serde_json::Value>{Box::pin(async{Err(ExchangeError::new(\"fixture worker unavailable\"))})}\n        }\n        pub fn order(id:&str,symbol:&str)->Order {serde_json::from_value(serde_json::json!({\"id\":id,\"status\":\"open\",\"symbol\":symbol,\"type\":\"limit\",\"side\":\"buy\",\"price\":17.25,\"amount\":3.5,\"filled\":1.25,\"remaining\":2.25,\"reduceOnly\":false,\"lastUpdate\":91000,\"info\":{\"clientOrderId\":format!(\"client-{id}\")}})).expect(\"authored native order fixture\")}\n        pub fn position(id:&str,symbol:&str)->Position{serde_json::from_value(serde_json::json!({\"id\":id,\"symbol\":symbol,\"side\":\"long\",\"entryPrice\":11.25,\"notional\":23.5,\"leverage\":7,\"unrealizedPnl\":3.75,\"contracts\":5.5,\"liquidationPrice\":2.25})).expect(\"authored native position fixture\")}\n        pub fn project_order(v:&Order)->serde_json::Value{serde_json::json!({\"id\":v.id,\"symbol\":v.symbol,\"price\":v.price.value().expect(\"authored native order price\").to_bits().to_string(),\"amount\":v.amount.to_bits().to_string(),\"filled\":v.filled.to_bits().to_string(),\"remaining\":v.remaining.to_bits().to_string()})}\n        pub fn project_position(v:&Position)->serde_json::Value{serde_json::json!({\"id\":v.id,\"symbol\":v.symbol,\"entryPrice\":v.entry_price.to_bits().to_string(),\"contracts\":v.contracts.to_bits().to_string(),\"unrealizedPnl\":v.unrealized_pnl.to_bits().to_string()})}\n        pub fn project_place(v:&PlaceOrderOpts)->serde_json::Value{serde_json::json!({\"symbol\":v.symbol,\"type\":match v.r#type{OrderType::Limit=>\"limit\",OrderType::Market=>\"market\",_=>\"other\"},\"side\":match v.side{OrderSide::Buy=>\"buy\",OrderSide::Sell=>\"sell\"},\"amount\":v.amount.to_bits().to_string(),\"price\":v.price.map(|n|n.to_bits().to_string()),\"trigger\":v.trigger_price.map(|n|n.to_bits().to_string()),\"reduce\":v.reduce_only,\"clientOrderId\":v.client_order_id})}\n        pub struct Venue{pub base:BaseExchange,pub capabilities:ExchangeCapabilities,pub calls:RefCell<Vec<serde_json::Value>>}\n        impl Exchange for Venue {\n            type PlaceOpts=PlaceOrderOpts;\n            fn base(&self)->&BaseExchange{&self.base}fn capabilities(&self)->&ExchangeCapabilities{&self.capabilities}\n            fn fetch_orders(&self,symbols:Option<Vec<String>>)->ExchangeFuture<'_,Vec<Order>>{self.calls.borrow_mut().push(serde_json::json!([\"fetchOrders\",symbols]));Box::pin(async{Ok(vec![order(\"A\",\"BTC\"),order(\"B\",\"ETH\")])})}\n            fn cancel_orders(&self,orders:Vec<Order>)->ExchangeFuture<'_,()>{self.calls.borrow_mut().push(serde_json::json!([\"cancelOrders\",orders.iter().map(project_order).collect::<Vec<_>>() ]));Box::pin(async{Ok(())})}\n            fn fetch_symbol_max_leverage(&self,symbol:String)->ExchangeFuture<'_,f64>{self.calls.borrow_mut().push(serde_json::json!([\"leverage\",symbol]));Box::pin(async move{Ok(if symbol==\"BTC\"{17.5}else{29.25})})}\n            fn after_method_called_in_worker(&self,result:&serde_json::Value,method:crate::worker::CallableMethodsInWorker,args:&[serde_json::Value])->Result<(),ExchangeError>{assert!(matches!(method,crate::worker::CallableMethodsInWorker::FetchOrders),\"BASE-OWNER exact typed worker method\");self.calls.borrow_mut().push(serde_json::json!([\"afterWorker\",result,args]));Ok(())}\n        }\n        pub fn options()->ExchangeOptions{serde_json::from_value(serde_json::json!({\"key\":\"fixture-key\",\"secret\":\"fixture-secret\",\"testnet\":true})).expect(\"authored typed options\")}\n        pub fn setup()->(Rc<Venue>,Rc<Runtime>,Rc<safe_cex_exchange::js_runtime::native_store::DefaultStore>){\n            let runtime=Rc::new(Runtime::default());let store=Rc::new(safe_cex_exchange::js_runtime::native_store::DefaultStore::new());\n            let settings=ExchangeSettings{client_order_id_rule:Some(crate::client_order_id::ClientOrderIdRule{label:\"Fixture\".into(),requirement:\"start with client-\".into(),is_valid:Rc::new(|id|id.starts_with(\"client-\")),is_honorable_shape:None,mint:None}),..Default::default()};\n            let base=BaseExchange::new(ExchangeName::Bybit,options(),store.clone(),runtime.clone(),settings);\n            let capabilities=ExchangeCapabilities{place_order:PlaceOrderBinding::implemented::<Venue>(|v,order:ValidatedOrder<Venue>|{let p=project_place(order.options());v.calls.borrow_mut().push(serde_json::json!([\"place\",p]));Box::pin(async{Ok(vec![\"placed-one\".into()])})}),place_orders:PlaceOrdersBinding::implemented::<Venue>(|v,orders:ValidatedBatch<Venue>|{let values=orders.orders().iter().map(|o|project_place(o.options())).collect::<Vec<_>>();v.calls.borrow_mut().push(serde_json::json!([\"batch\",values]));Box::pin(async{Ok(vec![\"placed-batch\".into()])})}),..Default::default()};\n            (Rc::new(Venue{base,capabilities,calls:RefCell::new(Vec::new())}),runtime,store)\n        }\n    }\n\n use crate::{exchange::Exchange as _,http::HttpHost as _,js_runtime::value::Js};use std::{rc::Rc,cell::RefCell};\n let (venue,_runtime,_store)=fixture::setup();let erased:Rc<dyn crate::exchange::Exchange>=venue.clone();\n let host=$type{events:Rc::new(RefCell::new(Some(Rc::downgrade(&erased))))};\nvenue.base().bind_http_endpoint_lists(&[\"/every\"],&[\"/periodic\"]);let array=host.telemetry_endpoints($value.as_str().unwrap()).unwrap().unwrap();let observed=serde_json::json!(String::from_utf16(&array.get(\"0\").unwrap().to_js_string().unwrap()).unwrap());venue.base().dispose().unwrap();observed\n}",
+        "cases": [
+          {
+            "input": "grafanaEndpointsEvery",
+            "output": "/every"
+          },
+          {
+            "input": "grafanaEndpointsPeriodic",
+            "output": "/periodic"
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::client::factory::emit_telemetry": {
+    "api": {
+      "kind": "function",
+      "name": "emit_telemetry",
+      "signature": {
+        "inputs": [
+          [
+            "owner",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::exchange::BaseExchange",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "response",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "The actual maintained safeCexAxiosCreate factory supplies both UTF16 message pairs. This production interceptor helper reads the real Base endpoint capability, renders through the canonical writer and emits through the actual Base listener. The real native registry WOO binding independently proves registered interceptor and accounting order.",
+    "call": "{\n    #[allow(dead_code,unused_imports)]\n    mod fixture {\n        use std::{cell::{Cell,RefCell},future::Future,pin::Pin,rc::Rc,task::{Context,Poll,Waker}};\n        use crate::{exchange::{BaseExchange,Exchange,ExchangeSettings,ValidatedOrder,ValidatedBatch},capabilities::{ExchangeCapabilities,PlaceOrderBinding,PlaceOrdersBinding},runtime::{ExchangeRuntime,ExchangeTask,ExchangeFuture,ExchangeError}};\n        use safe_cex_types::*;\n        pub fn ready<F:Future>(future:F)->F::Output {let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut Context::from_waker(Waker::noop())){Poll::Ready(v)=>v,Poll::Pending=>panic!(\"BASE-OWNER expected immediate fixture result\")}}\n        #[derive(Default)] pub struct Runtime{pub ids:Cell<u64>,pub console:RefCell<Vec<(String,String)>>,pub reports:RefCell<Vec<serde_json::Value>>}\n        impl ExchangeRuntime for Runtime {\n            fn monotonic_now_ms(&self)->f64{123000.0}fn now_ms(&self)->f64{123000.0}\n            fn sleep(&self,_:u64)->ExchangeFuture<'static,()>{Box::pin(std::future::pending())}\n            fn spawn_local(&self,_:Pin<Box<dyn Future<Output=()>>>)->Box<dyn ExchangeTask>{panic!(\"BASE-OWNER unexpected asynchronous host work\")}\n            fn console_values(&self,s:&str,m:&[crate::js_runtime::value::Js]){self.console.borrow_mut().push((s.into(),crate::runtime::console_text(m)))}\n            fn unique_id(&self)->String{let n=self.ids.get()+1;self.ids.set(n);format!(\"base-{n}\")}\n            fn is_worker(&self)->bool{false}fn random(&self)->f64{0.25}\n            fn report_exception(&self,e:&ExchangeError,c:&safe_cex_types::retained_json::RetainedJsonInput){self.reports.borrow_mut().push(serde_json::json!([e.name,e.message,c]))}\n            fn report_raw_exception(&self,_:&crate::js_runtime::value::Js,_:&safe_cex_types::retained_json::RetainedJsonInput){panic!(\"BASE-OWNER unexpected raw exception\")}\n            fn execute_worker_request(&self,_:serde_json::Value)->ExchangeFuture<'static,serde_json::Value>{Box::pin(async{Err(ExchangeError::new(\"fixture worker unavailable\"))})}\n        }\n        pub fn order(id:&str,symbol:&str)->Order {serde_json::from_value(serde_json::json!({\"id\":id,\"status\":\"open\",\"symbol\":symbol,\"type\":\"limit\",\"side\":\"buy\",\"price\":17.25,\"amount\":3.5,\"filled\":1.25,\"remaining\":2.25,\"reduceOnly\":false,\"lastUpdate\":91000,\"info\":{\"clientOrderId\":format!(\"client-{id}\")}})).expect(\"authored native order fixture\")}\n        pub fn position(id:&str,symbol:&str)->Position{serde_json::from_value(serde_json::json!({\"id\":id,\"symbol\":symbol,\"side\":\"long\",\"entryPrice\":11.25,\"notional\":23.5,\"leverage\":7,\"unrealizedPnl\":3.75,\"contracts\":5.5,\"liquidationPrice\":2.25})).expect(\"authored native position fixture\")}\n        pub fn project_order(v:&Order)->serde_json::Value{serde_json::json!({\"id\":v.id,\"symbol\":v.symbol,\"price\":v.price.value().expect(\"authored native order price\").to_bits().to_string(),\"amount\":v.amount.to_bits().to_string(),\"filled\":v.filled.to_bits().to_string(),\"remaining\":v.remaining.to_bits().to_string()})}\n        pub fn project_position(v:&Position)->serde_json::Value{serde_json::json!({\"id\":v.id,\"symbol\":v.symbol,\"entryPrice\":v.entry_price.to_bits().to_string(),\"contracts\":v.contracts.to_bits().to_string(),\"unrealizedPnl\":v.unrealized_pnl.to_bits().to_string()})}\n        pub fn project_place(v:&PlaceOrderOpts)->serde_json::Value{serde_json::json!({\"symbol\":v.symbol,\"type\":match v.r#type{OrderType::Limit=>\"limit\",OrderType::Market=>\"market\",_=>\"other\"},\"side\":match v.side{OrderSide::Buy=>\"buy\",OrderSide::Sell=>\"sell\"},\"amount\":v.amount.to_bits().to_string(),\"price\":v.price.map(|n|n.to_bits().to_string()),\"trigger\":v.trigger_price.map(|n|n.to_bits().to_string()),\"reduce\":v.reduce_only,\"clientOrderId\":v.client_order_id})}\n        pub struct Venue{pub base:BaseExchange,pub capabilities:ExchangeCapabilities,pub calls:RefCell<Vec<serde_json::Value>>}\n        impl Exchange for Venue {\n            type PlaceOpts=PlaceOrderOpts;\n            fn base(&self)->&BaseExchange{&self.base}fn capabilities(&self)->&ExchangeCapabilities{&self.capabilities}\n            fn fetch_orders(&self,symbols:Option<Vec<String>>)->ExchangeFuture<'_,Vec<Order>>{self.calls.borrow_mut().push(serde_json::json!([\"fetchOrders\",symbols]));Box::pin(async{Ok(vec![order(\"A\",\"BTC\"),order(\"B\",\"ETH\")])})}\n            fn cancel_orders(&self,orders:Vec<Order>)->ExchangeFuture<'_,()>{self.calls.borrow_mut().push(serde_json::json!([\"cancelOrders\",orders.iter().map(project_order).collect::<Vec<_>>() ]));Box::pin(async{Ok(())})}\n            fn fetch_symbol_max_leverage(&self,symbol:String)->ExchangeFuture<'_,f64>{self.calls.borrow_mut().push(serde_json::json!([\"leverage\",symbol]));Box::pin(async move{Ok(if symbol==\"BTC\"{17.5}else{29.25})})}\n            fn after_method_called_in_worker(&self,result:&serde_json::Value,method:crate::worker::CallableMethodsInWorker,args:&[serde_json::Value])->Result<(),ExchangeError>{assert!(matches!(method,crate::worker::CallableMethodsInWorker::FetchOrders),\"BASE-OWNER exact typed worker method\");self.calls.borrow_mut().push(serde_json::json!([\"afterWorker\",result,args]));Ok(())}\n        }\n        pub fn options()->ExchangeOptions{serde_json::from_value(serde_json::json!({\"key\":\"fixture-key\",\"secret\":\"fixture-secret\",\"testnet\":true})).expect(\"authored typed options\")}\n        pub fn setup()->(Rc<Venue>,Rc<Runtime>,Rc<safe_cex_exchange::js_runtime::native_store::DefaultStore>){\n            let runtime=Rc::new(Runtime::default());let store=Rc::new(safe_cex_exchange::js_runtime::native_store::DefaultStore::new());\n            let settings=ExchangeSettings{client_order_id_rule:Some(crate::client_order_id::ClientOrderIdRule{label:\"Fixture\".into(),requirement:\"start with client-\".into(),is_valid:Rc::new(|id|id.starts_with(\"client-\")),is_honorable_shape:None,mint:None}),..Default::default()};\n            let base=BaseExchange::new(ExchangeName::Bybit,options(),store.clone(),runtime.clone(),settings);\n            let capabilities=ExchangeCapabilities{place_order:PlaceOrderBinding::implemented::<Venue>(|v,order:ValidatedOrder<Venue>|{let p=project_place(order.options());v.calls.borrow_mut().push(serde_json::json!([\"place\",p]));Box::pin(async{Ok(vec![\"placed-one\".into()])})}),place_orders:PlaceOrdersBinding::implemented::<Venue>(|v,orders:ValidatedBatch<Venue>|{let values=orders.orders().iter().map(|o|project_place(o.options())).collect::<Vec<_>>();v.calls.borrow_mut().push(serde_json::json!([\"batch\",values]));Box::pin(async{Ok(vec![\"placed-batch\".into()])})}),..Default::default()};\n            (Rc::new(Venue{base,capabilities,calls:RefCell::new(Vec::new())}),runtime,store)\n        }\n    }\n\n use crate::exchange::Exchange as _;use std::{rc::Rc,cell::RefCell};\n let (venue,_runtime,_store)=fixture::setup();venue.base().bind_http_endpoint_lists(&[\"\"],&[]);\n let response=$value[\"response\"].as_bool().unwrap();let event=if response{\"grafana-http-response\"}else{\"grafana-http-request\"};\n let captured=Rc::new(RefCell::new(Vec::new()));let target=captured.clone();venue.base().on(event,Rc::new(move|_,value|{target.borrow_mut().push(value.to_js_string().unwrap().to_vec());Ok(())}));\n use crate::js_runtime::value::Js;\n let units=$value[\"urlUnits\"].as_array().unwrap().iter().map(|value|value.as_u64().unwrap() as u16).collect::<Vec<_>>();\n let config=Js::object(vec![(\"method\",Js::str($value[\"method\"].as_str().unwrap())),(\"url\",Js::utf16(&units)),\n (\"data\",Js::object(vec![(\"text\",Js::utf16(&[0xd800])),(\"value\",Js::Number(f64::INFINITY)),(\"missing\",Js::Undefined)])),\n (\"params\",Js::object(vec![(\"zero\",Js::Number(-0.0)),(\"list\",Js::array(vec![Js::Undefined,Js::Number(f64::INFINITY)]))]))]);\n\n let value=if response{Js::object(vec![(\"config\",config),(\"status\",Js::Number($value[\"status\"].as_f64().unwrap())),(\"data\",Js::object(vec![(\"text\",Js::utf16(&[0xd801])),(\"value\",Js::Number(f64::NAN)),(\"zero\",Js::Number(-0.0))]))])}else{config};\n $type(venue.base(),&value,response).expect(\"actual registered telemetry path\");let observed=serde_json::json!(*captured.borrow());venue.base().dispose().unwrap();observed\n}",
+    "cases": [
+      {
+        "input": {
+          "method": "post",
+          "urlUnits": [
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            55296
+          ],
+          "status": 200,
+          "response": false
+        },
+        "output": [
+          [
+            82,
+            101,
+            113,
+            117,
+            101,
+            115,
+            116,
+            32,
+            80,
+            79,
+            83,
+            84,
+            32,
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            55296,
+            32,
+            123,
+            34,
+            109,
+            101,
+            116,
+            104,
+            111,
+            100,
+            34,
+            58,
+            34,
+            80,
+            79,
+            83,
+            84,
+            34,
+            44,
+            34,
+            117,
+            114,
+            108,
+            34,
+            58,
+            34,
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            92,
+            117,
+            100,
+            56,
+            48,
+            48,
+            34,
+            44,
+            34,
+            98,
+            111,
+            100,
+            121,
+            34,
+            58,
+            123,
+            34,
+            116,
+            101,
+            120,
+            116,
+            34,
+            58,
+            34,
+            92,
+            117,
+            100,
+            56,
+            48,
+            48,
+            34,
+            44,
+            34,
+            118,
+            97,
+            108,
+            117,
+            101,
+            34,
+            58,
+            110,
+            117,
+            108,
+            108,
+            125,
+            44,
+            34,
+            112,
+            97,
+            114,
+            97,
+            109,
+            115,
+            34,
+            58,
+            123,
+            34,
+            122,
+            101,
+            114,
+            111,
+            34,
+            58,
+            48,
+            44,
+            34,
+            108,
+            105,
+            115,
+            116,
+            34,
+            58,
+            91,
+            110,
+            117,
+            108,
+            108,
+            44,
+            110,
+            117,
+            108,
+            108,
+            93,
+            125,
+            125
+          ]
+        ]
+      },
+      {
+        "input": {
+          "method": "post",
+          "urlUnits": [
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            55296
+          ],
+          "status": 200,
+          "response": true
+        },
+        "output": [
+          [
+            82,
+            101,
+            115,
+            112,
+            111,
+            110,
+            115,
+            101,
+            32,
+            80,
+            79,
+            83,
+            84,
+            32,
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            55296,
+            32,
+            50,
+            48,
+            48,
+            32,
+            123,
+            34,
+            115,
+            116,
+            97,
+            116,
+            117,
+            115,
+            34,
+            58,
+            50,
+            48,
+            48,
+            44,
+            34,
+            98,
+            111,
+            100,
+            121,
+            34,
+            58,
+            123,
+            34,
+            116,
+            101,
+            120,
+            116,
+            34,
+            58,
+            34,
+            92,
+            117,
+            100,
+            56,
+            48,
+            49,
+            34,
+            44,
+            34,
+            118,
+            97,
+            108,
+            117,
+            101,
+            34,
+            58,
+            110,
+            117,
+            108,
+            108,
+            44,
+            34,
+            122,
+            101,
+            114,
+            111,
+            34,
+            58,
+            48,
+            125,
+            125
+          ]
+        ]
+      },
+      {
+        "input": {
+          "method": "put",
+          "urlUnits": [
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            38634
+          ],
+          "status": 201,
+          "response": false
+        },
+        "output": [
+          [
+            82,
+            101,
+            113,
+            117,
+            101,
+            115,
+            116,
+            32,
+            80,
+            85,
+            84,
+            32,
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            38634,
+            32,
+            123,
+            34,
+            109,
+            101,
+            116,
+            104,
+            111,
+            100,
+            34,
+            58,
+            34,
+            80,
+            85,
+            84,
+            34,
+            44,
+            34,
+            117,
+            114,
+            108,
+            34,
+            58,
+            34,
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            38634,
+            34,
+            44,
+            34,
+            98,
+            111,
+            100,
+            121,
+            34,
+            58,
+            123,
+            34,
+            116,
+            101,
+            120,
+            116,
+            34,
+            58,
+            34,
+            92,
+            117,
+            100,
+            56,
+            48,
+            48,
+            34,
+            44,
+            34,
+            118,
+            97,
+            108,
+            117,
+            101,
+            34,
+            58,
+            110,
+            117,
+            108,
+            108,
+            125,
+            44,
+            34,
+            112,
+            97,
+            114,
+            97,
+            109,
+            115,
+            34,
+            58,
+            123,
+            34,
+            122,
+            101,
+            114,
+            111,
+            34,
+            58,
+            48,
+            44,
+            34,
+            108,
+            105,
+            115,
+            116,
+            34,
+            58,
+            91,
+            110,
+            117,
+            108,
+            108,
+            44,
+            110,
+            117,
+            108,
+            108,
+            93,
+            125,
+            125
+          ]
+        ]
+      },
+      {
+        "input": {
+          "method": "put",
+          "urlUnits": [
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            38634
+          ],
+          "status": 201,
+          "response": true
+        },
+        "output": [
+          [
+            82,
+            101,
+            115,
+            112,
+            111,
+            110,
+            115,
+            101,
+            32,
+            80,
+            85,
+            84,
+            32,
+            47,
+            116,
+            101,
+            108,
+            101,
+            109,
+            101,
+            116,
+            114,
+            121,
+            38634,
+            32,
+            50,
+            48,
+            49,
+            32,
+            123,
+            34,
+            115,
+            116,
+            97,
+            116,
+            117,
+            115,
+            34,
+            58,
+            50,
+            48,
+            49,
+            44,
+            34,
+            98,
+            111,
+            100,
+            121,
+            34,
+            58,
+            123,
+            34,
+            116,
+            101,
+            120,
+            116,
+            34,
+            58,
+            34,
+            92,
+            117,
+            100,
+            56,
+            48,
+            49,
+            34,
+            44,
+            34,
+            118,
+            97,
+            108,
+            117,
+            101,
+            34,
+            58,
+            110,
+            117,
+            108,
+            108,
+            44,
+            34,
+            122,
+            101,
+            114,
+            111,
+            34,
+            58,
+            48,
+            125,
+            125
+          ]
+        ]
       }
     ]
   }

@@ -198,6 +198,8 @@ pub fn create(
             ("_exchangeName", name),
             ("options", options),
             ("store", store),
+            ("grafanaEndpointsEvery", Js::array(vec![])),
+            ("grafanaEndpointsPeriodic", Js::array(vec![])),
             ("isSpot", Js::Bool(false)),
             ("isDemo", Js::Bool(false)),
         ],
@@ -206,6 +208,16 @@ pub fn create(
     core.is_spot = this.get("isSpot")?.truthy();
     core.is_demo = this.get("isDemo")?.truthy();
     let base = Rc::new(core);
+    let Js::Object(receiver) = &this else {
+        unreachable!("base receiver")
+    };
+    let receiver = Rc::downgrade(receiver);
+    base.bind_http_endpoints(Rc::new(move |name| {
+        receiver
+            .upgrade()
+            .map_or(Ok(Js::Undefined), |receiver| Js::Object(receiver).get(name))
+    }));
+
     let def = |k: &str, v: Js| {
         let _ = this.define(k, v);
     };

@@ -1183,7 +1183,7 @@ fn response_data(body: RestResponseBody) -> Js {
     }
 }
 
-fn effective_config(config: &Js, request: RestRequest) -> Result<Js, Thrown> {
+pub(crate) fn effective_config(config: &Js, request: RestRequest) -> Result<Js, Thrown> {
     let result = config.spread_object()?;
     for (name, value) in &request.config_extensions {
         result.set(name, from_retained_input(value.clone()))?;
@@ -1215,7 +1215,7 @@ fn effective_config(config: &Js, request: RestRequest) -> Result<Js, Thrown> {
     Ok(result)
 }
 
-fn js_response(response: RestResponse, config: Js) -> Js {
+pub(crate) fn js_response(response: RestResponse, config: Js) -> Js {
     let headers = Js::object(vec![]);
     for (name, value) in &response.headers {
         let _ = headers.define(name, Js::str(value));

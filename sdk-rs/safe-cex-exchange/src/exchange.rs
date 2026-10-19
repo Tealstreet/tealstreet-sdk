@@ -185,6 +185,8 @@ pub struct BaseExchange {
     pub store: Rc<dyn Store>,
     pub runtime: Rc<dyn ExchangeRuntime>,
     pub settings: ExchangeSettings,
+    pub(crate) http_endpoint_reader:
+        RefCell<Option<Rc<dyn Fn(&str) -> Result<Js, crate::js_runtime::value::Thrown>>>>,
     pub init_time: f64,
     pub is_demo: bool,
     pub is_spot: bool,
@@ -584,6 +586,7 @@ impl BaseExchange {
             settings,
             is_demo: false,
             is_spot: false,
+            http_endpoint_reader: RefCell::new(None),
             signers: Default::default(),
             signing_http_client: None,
             secondary_clients: RefCell::new(None),
@@ -608,6 +611,37 @@ impl BaseExchange {
             listeners,
             unsubscribe: RefCell::new(Some(Box::new(unsubscribe))),
         }
+    }
+    /// Read the source owner's current endpoint fields without copying its state.
+    pub fn bind_http_endpoints(
+        &self,
+        read: Rc<dyn Fn(&str) -> Result<Js, crate::js_runtime::value::Thrown>>,
+    ) {
+        *self.http_endpoint_reader.borrow_mut() = Some(read);
+    }
+    /// Immutable typed venue fields use the same endpoint reader as runtime owners.
+    pub fn bind_http_endpoint_lists(
+        &self,
+        every: &'static [&'static str],
+        periodic: &'static [&'static str],
+    ) {
+        self.bind_http_endpoints(Rc::new(move |name| {
+            let values = if name == "grafanaEndpointsEvery" {
+                every
+            } else {
+                periodic
+            };
+            Ok(Js::array(
+                values.iter().map(|value| Js::str(value)).collect(),
+            ))
+        }));
+    }
+    pub(crate) fn http_endpoints(
+        &self,
+        name: &str,
+    ) -> Result<Js, crate::js_runtime::value::Thrown> {
+        let read = self.http_endpoint_reader.borrow().clone();
+        read.map_or_else(|| Ok(Js::array(vec![])), |read| read(name))
     }
     pub fn on(&self, event: &str, callback: Listener) -> String {
         self.on_args(

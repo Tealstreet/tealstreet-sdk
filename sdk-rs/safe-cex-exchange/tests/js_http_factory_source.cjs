@@ -192,10 +192,52 @@ async function diagnosticBindingAudit(kind) {
  } finally {Date.now=originalNow;}
  return rows;
 }
+async function telemetryMessages() {
+ const rows=[];
+ provider={rest:({config})=>({baseURL:config.baseURL,proxied:false})};
+ for(const [method,url,status] of [['post','/telemetry\ud800',200],['put','/telemetry雪',201]]) {
+  const messages={};
+  const owner={name:'phemex',grafanaEndpointsEvery:[''],grafanaEndpointsPeriodic:[],emitter:{emit(event,message){messages[event]=Array.from({length:message.length},(_,index)=>message.charCodeAt(index));}}};
+  const xhr=moduleValue.exports.safeCexAxiosCreate({baseURL:'https://venue',adapter:async config=>({status,data:{text:'\ud801',value:NaN,zero:-0},headers:{},config})},{key:'',secret:''},owner);
+  await xhr.request({method,url,data:{text:'\ud800',value:Infinity,missing:undefined},params:{zero:-0,list:[undefined,Infinity]}});
+  rows.push({input:{method,urlUnits:Array.from({length:url.length},(_,index)=>url.charCodeAt(index)),status},request:messages['grafana-http-request'],response:messages['grafana-http-response']});
+ }
+ assert.equal(rows.length,2);return rows;
+}
+async function telemetryAudit() {
+ const rows=[], oldNow=Date.now, oldError=console.error;
+ provider={rest:({config})=>({baseURL:config.baseURL,proxied:true,authorize:async config=>{config.headers.set('Proxy-Authorization','token');}})};
+ try {
+  for(const development of [false,true])for(const endpoint of ['none','every','periodic','both'])for(const direct of [false,true]) {
+   imported['./utils/isDevelopment'].isDevelopment=development;
+   const local={exports:{}};
+   new Function('module','exports','require',code)(local,local.exports,name=>imported[name]);
+   let now=1000,ok=0,other=0;const events=[];
+   Date.now=()=>now;console.error=(...args)=>events.push(['console.error',args[0]]);
+   const owner={name:'phemex',
+    grafanaEndpointsEvery:endpoint==='every'||endpoint==='both'?['/telemetry']:[],
+    grafanaEndpointsPeriodic:endpoint==='periodic'||endpoint==='both'?['/telemetry']:[],
+    store:{recordRequestOutcome(outcome){if(outcome==='ok')ok++;else if(outcome==='other')other++;events.push(['outcome',outcome]);}},
+    noteHttpResponse(){events.push(['response-observed']);},
+    emitter:{emit(event,message){events.push([event,message,{ok,other}]);}}
+   };
+   const xhr=local.exports[direct?'safeCexAxiosCreateNoProxy':'safeCexAxiosCreate']({baseURL:'https://venue',adapter:async config=>{
+    events.push(['send',Object.hasOwn(config.headers,'Proxy-Authorization')]);
+    return {status:now===1001?300:200,data:{value:NaN,text:'\ud800',zero:-0},headers:{},config};
+   }},{key:'',secret:''},owner);
+   xhr.interceptors.request.use(config=>{events.push(['venue']);return config;});
+   for(const time of [1000,1001,30999,31000]){now=time;await xhr.post('/telemetry',{text:'\ud800',n:Infinity}, {params:{zero:-0,skip:undefined}});}
+   rows.push({development,endpoint,direct,events});
+  }
+ } finally {Date.now=oldNow;console.error=oldError;imported['./utils/isDevelopment'].isDevelopment=false;}
+ assert.equal(rows.length,16);return rows;
+}
 (async()=>{
  if(process.argv[2]==='consumer-diagnostics'){process.stdout.write(JSON.stringify(await diagnosticBindingAudit('consumer')));return;}
  if(process.argv[2]==='proxy-diagnostics'||process.argv[2]==='sign-diagnostics'){process.stdout.write(JSON.stringify(await diagnosticBindingAudit(process.argv[2]==='proxy-diagnostics'?'proxy':'sign')));return;}
  if(process.argv[2]==='request-start'){process.stdout.write(JSON.stringify(await requestStartAudit()));return;}
+ if(process.argv[2]==='telemetry-messages'){process.stdout.write(JSON.stringify(await telemetryMessages()));return;}
+ if(process.argv[2]==='telemetry'){process.stdout.write(JSON.stringify(await telemetryAudit()));return;}
  if(process.argv[2]==='outcomes'){process.stdout.write(JSON.stringify(await outcomeAudit()));return;}
  const rows=[];
  for(const proxied of [false,true])for(const failAuth of [false,true]){

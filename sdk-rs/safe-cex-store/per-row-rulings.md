@@ -40,6 +40,17 @@ pass after byte-exact restoration of `native_store/graph.rs`.
 
 | Census row | Verdict | Production observation and reason |
 | --- | --- | --- |
+| 444 `isDevelopment` | FIX | The actual native HTTP host always returned false and the JS factory omitted the source telemetry interceptor. Both now use the existing source-equivalent NODE_ENV predicate, captured for the native module, and the same endpoint gate. The actual Backpack binding observes four events for two development requests versus one periodic pair in production; maintained TS factory profiles independently verify both environments. No alternate environment or logging policy is introduced. |
+
+The shared telemetry batch also repairs typed native outcome publication when
+the factory has no explicit Store. The actual bound exchange Store is updated
+once through NativeHttpHost; an explicit Store retains its original path. This
+is distinct from the already-covered JS factory accounting in rows 133/446.
+See `safe-cex-exchange/HTTP_TELEMETRY_REVIEW.md` for the real registry witnesses,
+compiled counter-loss control and recorded-tape qualification.
+
+| Census row | Verdict | Production observation and reason |
+| --- | --- | --- |
 | 133 `recordRequestOutcome` | ACCEPT | Both actual native Axios factory paths increment the canonical Store counter for ordinary success, rate-limit, auth, server and network outcomes. Missing counters and a frozen counter object do not change request settlement or rejection identity. The old claim of no equivalent fallible Store/catch path does not describe the shipped binding: counter writes can fail and the factory suppresses those telemetry failures, as TS does. Arbitrary replacement of the typed Store protocol is not a missing production capability. |
 | 446 `isSigningCaptureRequest` | ACCEPT | The actual factory reads the native config marker with JS truthiness before accounting. Capture-only requests execute their adapter without creating phantom venue outcomes; the marker stays outside headers. The typed HTTP host predicate is composition of that explicit capability, not a different policy. No capture-marker or counter loss is observed through either native factory. |
 

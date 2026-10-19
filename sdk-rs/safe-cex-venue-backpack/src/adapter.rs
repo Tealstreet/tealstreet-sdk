@@ -57,6 +57,10 @@ impl BackpackExchange {
             },
         );
         let base = Rc::new(base);
+        base.bind_http_endpoint_lists(
+            crate::constants::GRAFANA_ENDPOINTS_EVERY,
+            crate::constants::GRAFANA_ENDPOINTS_PERIODIC,
+        );
         let options = base.options();
         let secondary_proxy = options
             .secondary_proxy_url
