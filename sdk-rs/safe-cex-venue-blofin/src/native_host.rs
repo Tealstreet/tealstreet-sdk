@@ -433,19 +433,23 @@ impl BlofinExchangeHost for NativeHost {
         if context.disposed.get() {
             return Ok(());
         }
-        let sleep = self.runtime.sleep(delay.max(0.0) as u64);
         let runtime = self.runtime.clone();
-        let _ = base.start_owned_operation(async move {
-            if sleep.await.is_err() {
-                return;
+        let owner = Rc::downgrade(&base);
+        base.start_timeout((delay.max(0.0) as u64).max(1), move || {
+            if let Some(base) = owner.upgrade() {
+                let pending = callback();
+                let runtime = runtime.clone();
+                base.start_owned_operation(async move {
+                    if let Err(error) = pending.await {
+                        runtime.report_exception(
+                            &service_error(error),
+                            &json!({"operation":"BloFin tick"}).into(),
+                        );
+                    }
+                });
             }
-            if let Err(error) = callback().await {
-                runtime.report_exception(
-                    &service_error(error),
-                    &json!({"operation":"BloFin tick"}).into(),
-                );
-            }
-        });
+            Ok(())
+        })?;
         Ok(())
     }
     fn get_tick_interval(&self, base: &NativeBase) -> Option<f64> {
@@ -980,12 +984,20 @@ impl pc::PrivateStreamHost for PrivateHost {
         callback: Rc<dyn Fn() -> pc::PrivateStreamFuture<()>>,
         delay_ms: f64,
     ) -> Result<Rc<OwnedOperation>, ExchangeError> {
-        let sleep = self.runtime.sleep(delay_ms.max(0.0) as u64);
-        Ok(Rc::new(self.socket.start_message_operation(async move {
-            sleep.await?;
-            callback().await;
-            Ok(())
-        })))
+        let owner = Rc::downgrade(&self.socket);
+        Ok(Rc::new(self.socket.start_timeout(
+            (delay_ms.max(0.0) as u64).max(1),
+            move || {
+                if let Some(socket) = owner.upgrade() {
+                    let pending = callback();
+                    socket.start_message_operation(async move {
+                        pending.await;
+                        Ok(())
+                    });
+                }
+                Ok(())
+            },
+        )?))
     }
     fn send_with_log(&self, frame: &str) -> Result<(), ExchangeError> {
         if frame == "ping" {

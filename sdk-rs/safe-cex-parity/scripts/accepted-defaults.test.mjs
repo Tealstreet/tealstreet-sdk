@@ -44,24 +44,24 @@ test('default inventory supplies every inherited body and never infers exemption
   assert.throws(() => defaultTraitInventory(doc, paths, value => value, options), /default-method set changed/);
 });
 
-test('Exchange default classifications cover only sixteen reviewed candidates and preserve source refusal', async () => {
+test('Exchange default classifications cover only seventeen reviewed candidates and preserve source refusal', async () => {
   const fs = await import('node:fs'); const { spawnSync } = await import('node:child_process');
   const compiler = JSON.parse(fs.readFileSync(new URL('../accepted-set/exchange-defaults-fixture.json', import.meta.url)));
   const records = loadPolicy('default-traits');
   const text = fs.readFileSync(new URL('../../safe-cex-exchange/src/exchange.rs', import.meta.url));
-  assert.equal(compiler.methods.length, 53, 'review snapshot includes all fifty-three defaults');
-  assert.equal(records[compiler.name].reviewedMethods.length, 16, 'independent reviewed candidate floor');
+  assert.equal(compiler.methods.length, 55, 'review snapshot includes all fifty-five defaults');
+  assert.equal(records[compiler.name].reviewedMethods.length, 17, 'independent reviewed candidate floor');
   assert.equal(reviewedDefaultTrait(compiler, records, text), records[compiler.name]);
   assert.equal(records[compiler.name].reviewedMethods.some(method => ['sign_http_request', 'sign_remote_request'].includes(method.name)), false, 'HTTP signing decode path is outside this classification');
   for (const name of ['fetch_option_chain', 'fetch_option_expiries', 'fetch_account_greeks']) {
     assert.ok(compiler.methods.some(method => method.name === name), `${name} remains in the complete compiler API snapshot`);
     assert.equal(records[compiler.name].reviewedMethods.some(method => method.name === name), false, `${name} does not inherit a reviewed non-decoder classification`);
   }
-  const expected = ['after_method_called_in_worker','cancel_symbol_orders','change_margin_type','change_position_mode','fetch_and_set_orders','fetch_historical_positions','fetch_income_history_range','fetch_leverage_for_symbol','fetch_orders','fetch_positions','fetch_public_trades','fetch_symbol_max_leverage','find_order_by_client_order_id','listen_order_book','set_leverage','update_symbol_metadata'];
+  const expected = ['after_method_called_in_worker','cancel_symbol_orders','change_margin_type','change_position_mode','fetch_and_set_orders','fetch_historical_positions','fetch_income_history_range','fetch_leverage_for_symbol','fetch_orders','fetch_positions','fetch_public_trades','fetch_symbol_max_leverage','find_order_by_client_order_id','listen_ohlcv_retained','listen_order_book','set_leverage','update_symbol_metadata'];
   const doc = { index: { 1: { id: 1, crate_id: 0, name: 'Exchange', span: compiler.span, inner: { trait: { items: compiler.methods.map((_,i)=>i+2), generics: { params: [] } } } } } };
   compiler.methods.forEach((method,i)=>doc.index[i+2]={id:i+2,name:method.name,inner:{function:{has_body:true,sig:method.signature,generics:method.generics}}});
   const found = defaultTraitInventory(doc,new Map([['1',compiler.name.split('::')]]),value=>value,{classifications:records,readSource:()=>text});
-  assert.deepEqual([...found.methodIds].map(id=>doc.index[id].name).sort(),expected,'only sixteen independently named defaults may be classified');
+  assert.deepEqual([...found.methodIds].map(id=>doc.index[id].name).sort(),expected,'only seventeen independently named defaults may be classified');
   assert.equal(found.owners[0].kind,'trait-classifications');
   assert.equal(found.owners[0].classificationContract.category,'non-decoder');
 
@@ -75,6 +75,12 @@ test('Exchange default classifications cover only sixteen reviewed candidates an
     console.log(`${label}: named assertion; process exit 1`);
     assert.equal(reviewedDefaultTrait(compiler, records, text), records[compiler.name]);
   }
+  const signatureDrift = structuredClone(compiler);
+  signatureDrift.methods.find(method => method.name === 'listen_ohlcv_retained').signature.output = null;
+  assert.throws(() => reviewedDefaultTrait(signatureDrift, records, text), /reviewed Exchange default API changed/);
+  const missingAdapter = structuredClone(records);
+  missingAdapter[compiler.name].reviewedMethods = missingAdapter[compiler.name].reviewedMethods.filter(method => method.name !== 'listen_ohlcv_retained');
+  assert.throws(() => reviewedDefaultTrait(compiler, missingAdapter, text), /reviewed Exchange candidate set changed/);
   const redirected = { ...compiler, name: 'other::Exchange' };
   assert.throws(() => reviewedDefaultTrait(redirected, { [redirected.name]: records[compiler.name] }, text), /unknown default-trait classification/);
 });

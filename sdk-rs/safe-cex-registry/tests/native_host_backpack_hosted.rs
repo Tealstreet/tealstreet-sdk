@@ -212,3 +212,59 @@ fn backpack_secretless_private_auth_preserves_actual_source_failure_and_log() {
         venue.dispose().unwrap();
     });
 }
+
+#[test]
+fn backpack_constructed_subscription_timer_drains_fires_and_cancels_on_replay_clock() {
+    use safe_cex_exchange::{
+        native::{native_replay_runtime, replay_raw_tasks},
+        replay_clock,
+    };
+    support::run_local(async {
+        let runtime = native_replay_runtime(1_800_000_000_000.0);
+        let h = support::venue_harness(ExchangeName::Backpack, Rc::new(|r| match r.path.as_str() {
+            "/api/v1/markets" => Some(json!([{"symbol":"BTC_USDC","marketType":"SPOT","visible":true,"filters":{"price":{"tickSize":"0.1","minPrice":"0.1","maxPrice":"1000000"},"quantity":{"stepSize":"0.001","minQuantity":"0.001","maxQuantity":"100"}}}])),
+            "/api/v1/tickers" => Some(json!([{"symbol":"BTC_USDC","lastPrice":"100","priceChangePercent":"0","volume":"1","quoteVolume":"100"}])),
+            "/api/v1/markPrices" => Some(json!([])),
+            _ => None,
+        }), json!({"key":"","secret":"","publicDataOnly":true}), None, runtime.clone()).await;
+        h.exchange.start().await.unwrap();
+        support::eventually("Backpack socket", || !h.peers.borrow().is_empty()).await;
+        for _ in 0..32 {
+            tokio::task::yield_now().await;
+        }
+        let receipt = replay_raw_tasks(&runtime);
+        assert_eq!(
+            receipt["unknown"], 0,
+            "Backpack constructed startup timer must use core ownership: {receipt}"
+        );
+        assert_eq!(receipt["blocking"], 0, "Backpack startup drain: {receipt}");
+        replay_clock::activate(runtime.replay_clock.as_ref().unwrap()).unwrap();
+        replay_clock::advance(runtime.replay_clock.as_ref().unwrap(), 2000.0)
+            .await
+            .unwrap();
+        support::eventually("Backpack delayed market subscription", || {
+            h.received
+                .borrow()
+                .iter()
+                .any(|s| s.contains("ticker.BTC_USDC"))
+        })
+        .await;
+        h.exchange.dispose().unwrap();
+        for _ in 0..32 {
+            tokio::task::yield_now().await;
+        }
+        let before = h.received.borrow().len();
+        replay_clock::advance(runtime.replay_clock.as_ref().unwrap(), 12_000.0)
+            .await
+            .unwrap();
+        for _ in 0..32 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            h.received.borrow().len(),
+            before,
+            "disposed subscription timer never runs"
+        );
+        assert_eq!(replay_raw_tasks(&runtime)["blocking"], 0);
+    });
+}

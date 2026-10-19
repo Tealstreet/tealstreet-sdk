@@ -416,10 +416,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let number = Js::function("Number", |_, a| {
         Ok(Js::Number(match a.first() {
             None => 0.0,
-            Some(value) => match super::ops::to_numeric(value)? {
-                Js::BigInt(n) => n.to_string().parse().unwrap_or(f64::NAN),
-                numeric => numeric.to_number()?,
-            },
+            Some(value) => super::ops::number(value)?,
         }))
     });
     for (key, value) in [

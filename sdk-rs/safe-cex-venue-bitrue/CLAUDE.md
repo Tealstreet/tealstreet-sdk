@@ -259,6 +259,10 @@ socket witness and an independent installed-library probe fail on master without
 `utcOffset` and pass with the shared #453 implementation. Callback cleanup is
 observed; typed Candle still has its separately declared retained-object limits.
 
+The native candle return now retains the assembled receiver's `mapKline` result,
+including `info` and cached array/raw-candle aliases. The typed SDK method is a
+separate explicit projection; the constructed history regression checks both.
+
 
 The Store readBlob audit uses the existing `exchange_binding` target's
 `audit_compressed_blob_bytes_reach_real_socket_pongs_without_utf8_decoding`.

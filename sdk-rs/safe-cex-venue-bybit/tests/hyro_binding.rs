@@ -480,6 +480,7 @@ fn hyro_private_session_awaits_both_acks_and_gates_position_delivery() {
     h.drive(h.venue().start())
         .expect("HyroTrader private startup");
     h.advance(50.);
+    establish_private_snapshot(&h);
     let sockets = h.runtime.sockets.borrow();
     let (url, private) = sockets
         .iter()
@@ -538,6 +539,7 @@ fn hyro_private_session_awaits_both_acks_and_gates_position_delivery() {
         json!({"op":"subscribe","req_id":subscribe[0]["req_id"],"success":true}).to_string(),
     ));
     h.runtime.pump();
+    settle_until(&h, || core.is_recovery_complete());
     assert!(
         core.is_recovery_complete(),
         "acknowledged subscription and stable REST reconciliation complete the session"
@@ -553,6 +555,33 @@ fn hyro_private_session_awaits_both_acks_and_gates_position_delivery() {
     assert!(private.closed.get());
 }
 
+fn establish_private_snapshot(h: &support::Harness) {
+    // Open can invalidate startup's snapshot revision while REST is rate-limited.
+    h.drive(h.venue().fetch_and_set_private_snapshot(0))
+        .expect("establish the session witness's initial REST snapshot");
+    assert_eq!(h.store.positions().unwrap()[0].leverage, 10.0);
+}
+
+fn settle_until(h: &support::Harness, ready: impl Fn() -> bool) {
+    h.drive(Box::pin(std::future::poll_fn(|_| {
+        if ready() {
+            std::task::Poll::Ready(Ok(()))
+        } else {
+            std::task::Poll::Pending
+        }
+    })))
+    .expect("source operation settles on the controlled clock");
+}
+
+fn await_private_ready(h: &support::Harness) {
+    let core = h
+        .venue()
+        .base()
+        .get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Private)
+        .expect("private session");
+    settle_until(h, || core.is_recovery_complete());
+}
+
 fn start_private() -> (
     support::Harness,
     std::rc::Rc<support::Socket>,
@@ -566,6 +595,7 @@ fn start_private() -> (
     h.runtime.random_sequence.set(Some(0));
     h.drive(h.venue().start()).expect("Hyro startup");
     h.advance(50.0);
+    establish_private_snapshot(&h);
     let private = h
         .runtime
         .sockets
@@ -696,6 +726,7 @@ fn hyro_reconnect_ignores_old_acks_and_retired_socket_frames() {
     );
     assert_eq!(h.store.positions().unwrap()[0].leverage, 10.0);
     ack_private(&h, &private, "subscribe");
+    settle_until(&h, || core.is_recovery_complete());
     assert!(core.is_recovery_complete());
     h.venue().dispose().unwrap();
     h.advance(20_000.0);
@@ -749,6 +780,7 @@ fn hyro_private_reconciliation_retries_changed_revision_and_publishes_atomically
     let before = h.wire.calls("/v5/position/list").len();
     ack_private(&h, &private, "auth");
     ack_private(&h, &private, "subscribe");
+    settle_until(&h, || h.wire.calls("/v5/position/list").len() == before + 1);
     assert!(!core.is_recovery_complete(), "REST is still pending");
     assert_eq!(h.wire.calls("/v5/position/list").len(), before + 1);
     feed_private(
@@ -759,6 +791,7 @@ fn hyro_private_reconciliation_retries_changed_revision_and_publishes_atomically
     assert_eq!(h.store.positions().unwrap()[0].leverage, 10.0);
     gate.set(true);
     h.runtime.pump();
+    settle_until(&h, || core.is_recovery_complete());
     assert!(core.is_recovery_complete());
     assert_eq!(h.wire.calls("/v5/position/list").len(), before + 2);
     assert_eq!(h.store.positions().unwrap()[0].leverage, 30.0);
@@ -816,6 +849,7 @@ fn hyro_write_guards_precede_network_and_preserve_caller_id_precedence() {
     assert!(h.wire.calls("/v5/order/create").is_empty());
     ack_private(&h, &private, "auth");
     ack_private(&h, &private, "subscribe");
+    await_private_ready(&h);
     let mut slippage = hyro_limit();
     slippage["maxSlippagePct"] = json!(1.0);
     let error = place_hyro(&h, slippage).expect_err("source simulator slippage guard");
@@ -846,6 +880,7 @@ fn hyro_order_submission_mints_source_identity_and_records_acknowledgement() {
     let (h, private, _) = start_private();
     ack_private(&h, &private, "auth");
     ack_private(&h, &private, "subscribe");
+    await_private_ready(&h);
     h.wire
         .ok("POST", "/v5/order/create", json!({"orderId":"hyro-new-1"}));
     let ids = place_hyro(&h, hyro_limit()).expect("source recovery submission");
@@ -870,6 +905,7 @@ fn hyro_submission_disables_rejected_signature_replay() {
     h.wire.reject_http_errors.set(true);
     ack_private(&h, &private, "auth");
     ack_private(&h, &private, "subscribe");
+    await_private_ready(&h);
     h.wire.route(
         "POST",
         "/v5/order/create",
@@ -906,6 +942,7 @@ fn hyro_uncertain_submission_recovers_terminal_identity_without_a_second_post() 
     let (h, private, _) = start_private();
     ack_private(&h, &private, "auth");
     ack_private(&h, &private, "subscribe");
+    await_private_ready(&h);
     h.wire.route(
         "POST",
         "/v5/order/create",
@@ -927,6 +964,7 @@ fn hyro_uncertain_submission_recovers_terminal_identity_without_a_second_post() 
         Poll::Pending
     ));
     h.runtime.pump();
+    settle_until(&h, || !h.wire.calls("/v5/order/create").is_empty());
     let posts = h.wire.calls("/v5/order/create");
     assert_eq!(posts.len(), 1);
     let link = posts[0].body["orderLinkId"].clone();
@@ -1118,6 +1156,7 @@ fn hyro_concurrent_identical_batches_share_one_submission_sequence() {
     let (h, private, _) = start_private();
     ack_private(&h, &private, "auth");
     ack_private(&h, &private, "subscribe");
+    await_private_ready(&h);
     h.wire.ok(
         "POST",
         "/v5/order/create",
@@ -1150,6 +1189,7 @@ fn hyro_concurrent_identical_batches_share_one_submission_sequence() {
     h.runtime.pump();
     assert!(matches!(duplicate.as_mut().poll(&mut cx), Poll::Pending));
     h.runtime.pump();
+    settle_until(&h, || !h.wire.calls("/v5/order/create").is_empty());
     assert_eq!(
         h.wire.calls("/v5/order/create").len(),
         1,
@@ -1177,6 +1217,7 @@ fn hyro_public_candles_use_authoritative_snapshots_without_trade_accumulation() 
     let (h, private, _) = start_private();
     ack_private(&h, &private, "auth");
     ack_private(&h, &private, "subscribe");
+    await_private_ready(&h);
     let socket = h.venue().base().get_socket(SocketSlot::Public).unwrap();
     let wire = h
         .runtime
@@ -1351,6 +1392,7 @@ fn hyro_private_order_frames_publish_fills_and_ignore_wallet_execution_topics() 
     let (h, private, _) = start_private();
     ack_private(&h, &private, "auth");
     ack_private(&h, &private, "subscribe");
+    await_private_ready(&h);
     let fills = Rc::new(RefCell::new(vec![]));
     let observed = fills.clone();
     h.venue().base().on(
@@ -1503,6 +1545,7 @@ fn hyro_private_positions_update_balance_upnl_without_wallet_or_fill_events() {
     let (h, private, _) = start_private();
     ack_private(&h, &private, "auth");
     ack_private(&h, &private, "subscribe");
+    await_private_ready(&h);
     let before = h.store.balance().unwrap().clone();
     assert_eq!(before.upnl, 5.0);
     let fills = Rc::new(Cell::new(0));
