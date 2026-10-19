@@ -1420,7 +1420,71 @@ fn selected_ticker_lookup_matches_the_maintained_class() {
         json!({"observations":[
             {"topic":"tickers","unrelatedReads":0,"selectedIdentity":true,"value":117.5},
             {"topic":"bbos","unrelatedReads":0,"selectedIdentity":true,"value":116.25},
-            {"topic":"markprices","unrelatedReads":0,"selectedIdentity":true,"value":119.125}
+            {"topic":"markprices","unrelatedReads":0,"selectedIdentity":true,"value":119.125},
+            {"topic":"tickers","selectedIdReads":1,"originalCause":true},
+            {"topic":"bbos","selectedIdReads":1,"originalCause":true},
+            {"topic":"markprices","selectedIdReads":1,"originalCause":true}
         ]})
     );
+}
+#[test]
+fn selected_ticker_id_throws_before_deferred_row_refusals() {
+    use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+    use std::cell::Cell;
+    for (topic, fields) in [
+        (
+            "tickers",
+            json!({"close":"refused","amount":9001.5,"volume":21.25}),
+        ),
+        ("bbos", json!({"bid":"refused","ask":118.75})),
+        ("markprices", json!({"price":"refused"})),
+    ] {
+        let h = started(json!({"publicDataOnly": true}), public_routes);
+        let facade = safe_cex_exchange::js_runtime::native_store::facade(h.store.clone()).unwrap();
+        let selected = facade
+            .get("tickersBySymbol")
+            .unwrap()
+            .get("BTCUSDT")
+            .unwrap();
+        let original = Js::object(vec![
+            ("units", Js::utf16(&[0xd800])),
+            ("tag", Js::str("selected id")),
+        ]);
+        let thrown = original.clone();
+        let reads = Rc::new(Cell::new(0));
+        let observed = reads.clone();
+        selected
+            .define_accessor(
+                "id",
+                Some(Rc::new(move |_| {
+                    observed.set(observed.get() + 1);
+                    Err(Thrown::new(thrown.clone()))
+                })),
+                None,
+            )
+            .unwrap();
+        let mut row = fields.as_object().unwrap().clone();
+        row.insert("symbol".into(), json!("PERP_BTC_USDT"));
+        h.runtime.exceptions.borrow_mut().clear();
+        push(
+            &h,
+            &socket(&h, PUBLIC_URL),
+            json!({"topic":topic,"data":[row]}),
+        );
+        let error = {
+            let errors = h.runtime.exceptions.borrow();
+            assert_eq!(
+                errors.len(),
+                1,
+                "{topic}: exactly one original failure must be reported"
+            );
+            Thrown::from(errors[0].clone())
+        };
+        assert!(
+            error.value.strict_equals(&original),
+            "{topic}: original opaque ID cause changed"
+        );
+        assert_eq!(reads.get(), 1, "{topic}: selected ID getter count");
+        h.venue().dispose().unwrap();
+    }
 }

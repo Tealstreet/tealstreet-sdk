@@ -39,6 +39,7 @@ pub struct Runtime {
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
+    pub exceptions: RefCell<Vec<ExchangeError>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -123,6 +124,7 @@ impl ExchangeRuntime for Runtime {
         _: &safe_cex_types::retained_json::RetainedJsonInput,
     ) {
         self.reports.borrow_mut().push(error.message.clone());
+        self.exceptions.borrow_mut().push(error.clone());
     }
     fn report_raw_exception(
         &self,

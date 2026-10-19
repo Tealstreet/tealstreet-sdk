@@ -30,5 +30,25 @@ for (const [topic, field, fields] of scenes) {
     observed.push({ topic, unrelatedReads, selectedIdentity: true, value: selected[field] });
   } finally { exchange.dispose(); }
 }
-assert.equal(observed.length, 3);
+for (const [topic, , fields] of scenes) {
+  const store = new DefaultStore();
+  store.update({ tickers: [{ id: 'BTCUSDT', symbol: 'BTCUSDT', bid: 1, ask: 2, last: 3,
+    mark: 4, index: 5, percentage: 6, openInterest: 7, fundingRate: 8,
+    fundingTime: 9, volume: 10, quoteVolume: 20 }] });
+  const exchange = new WOOXExchange('woo', { publicDataOnly: true, applicationId: 'fixture-app' }, store);
+  const original = { units: '\ud800', tag: 'selected id' };
+  let reads = 0;
+  Object.defineProperty(store.tickersBySymbol.BTCUSDT, 'id', {
+    enumerable: true, configurable: true, get() { reads++; throw original; },
+  });
+  const key = { tickers: 'close', bbos: 'bid', markprices: 'price' }[topic];
+  try {
+    assert.throws(() => exchange.publicWebsocket.onMessage({data: JSON.stringify({
+      topic, data: [{ symbol: 'PERP_BTC_USDT', ...fields, [key]: 'refused' }],
+    })}), error => error === original);
+    assert.equal(reads, 1);
+    observed.push({ topic, selectedIdReads: reads, originalCause: true });
+  } finally { exchange.dispose(); }
+}
+assert.equal(observed.length, 6);
 process.stdout.write(JSON.stringify({ observations: observed }), () => process.exit(0));

@@ -100,6 +100,10 @@ fn update_public_tickers(
         if !ticker.is_truthy() {
             continue;
         }
+        // A typed row refusal must not suppress the selected ID getter's throw.
+        let Some(id) = ticker.update_id()? else {
+            continue;
+        };
         let mut patch = ModelPatch::default();
         for (target, source) in fields {
             // Preserve later source/store errors ahead of typed row reports.
@@ -123,9 +127,6 @@ fn update_public_tickers(
             };
             patch.set_number(*target, number);
         }
-        let Some(id) = ticker.update_id()? else {
-            continue;
-        };
         // Preserve the typed mutation failure until core recovers its cause.
         let updated: Result<(), StoreMutationError> = store.update_ticker(&id, &patch);
         updated.map_err(|error: StoreMutationError| ExchangeError::from(error))?;

@@ -534,5 +534,5 @@ assets use one row-admission pass after slicing; one malformed asset is reported
 and omitted while good rows survive. See HISTORY_OUTPUT_REVIEW.md.
 
 Public ticker, BBO and mark callbacks retain only the selected native ticker lookup.
-They defer its ID read until the row patch is admitted; unrelated map entries are
-never projected. Constructed socket/source probes pin poisoned unselected getters.
+Selected ID getter throws still win over deferred typed row refusals; unrelated
+map entries are never projected. Constructed socket/source probes pin both cases.
