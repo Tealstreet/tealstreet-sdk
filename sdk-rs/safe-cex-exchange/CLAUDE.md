@@ -1935,6 +1935,8 @@ one-argument precision-count helper. The installed native/source tests cover
 123 scalar cases, UTF16 results, original value/throw identity, repeated property
 reads and precision operand coercion. The separate Realm implementation is
 removed only with the atomic Hyperliquid family consolidation.
+The nine native-input owner classifications and their actual installed/direct
+probes are reviewed individually in CCXT_NATIVE_INPUT_REVIEW.md.
 
 Operator numeric/default-hint conversion of ordinary objects and functions uses
 `Js::ordinary_to_primitive`, the same live hook traversal as direct value coercion.

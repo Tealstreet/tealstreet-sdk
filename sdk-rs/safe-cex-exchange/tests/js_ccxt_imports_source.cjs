@@ -4,6 +4,28 @@ const root=path.resolve(__dirname,'../../..');
 function load(name){const file=path.join(root,'packages/ccxt-compat/src/functions',name+'.ts');const m={exports:{}};new Function('exports','require','module',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText)(m.exports,require,m);return m.exports;}
 const api={...load('ccxt_exchange'),...load('number'),...load('type')};
 const special=v=>v&&v.special?({undefined:undefined,nan:NaN,infinity:Infinity,negativeInfinity:-Infinity,negativeZero:-0,bigint:123n,surrogate:'\ud800'})[v.special]:v;
+if(process.argv[2]==='owner-contracts'){
+const cases={
+ integer:[{tag:'string',value:' -0x10junk'},{tag:'string',value:'3.9junk'},{tag:'undefined'},{tag:'utf16',units:[55296]}],
+ number_to_string:[{tag:'number',value:1e-8},{tag:'number',value:1.234e23},{tag:'undefined'},{tag:'utf16',units:[55296]},{tag:'null'}],
+ numeric_string:[{tag:'number',value:120},{tag:'number',value:0.01},{tag:'utf16',units:[55296]},{tag:'null'}],
+ parse_precision:[{tag:'string',value:'3junk'},{tag:'number',value:0},{tag:'undefined'},{tag:'utf16',units:[55296]}],
+ precision_from_string:[{tag:'string',value:'1e-8'},{tag:'string',value:'0.0500'},{tag:'string',value:'120'},{tag:'utf16',units:[55296]}],
+ safe_string:[{tag:'utf16',units:[55296]},{tag:'number',value:42},{tag:'undefined'},{tag:'null'}],
+ decimal_to_precision:[{tag:'string',value:'1.2345'},{tag:'string',value:'-1.235'},{tag:'utf16',units:[55296]},{tag:'string',value:'1e-8'}]
+};
+function v(x){return x.tag==='string'||x.tag==='number'?x.value:x.tag==='utf16'?String.fromCharCode(...x.units):x.tag==='null'?null:undefined;}
+const units=s=>Array.from({length:s.length},(_,i)=>s.charCodeAt(i));
+function out(f){try{let x=f();return {ok:true,type:typeof x,units:typeof x==='string'?units(x):null,bits:typeof x==='number'?(()=>{let b=Buffer.alloc(8);b.writeDoubleBE(x);return b.readBigUInt64BE().toString()})():null}}catch(e){return{ok:false,name:e.name,units:units(e.message)}}}
+const funcs={integer:x=>parseInt(x),number_to_string:api.numberToString,numeric_string:x=>x.toString(),parse_precision:api.parsePrecision,precision_from_string:api.precisionFromString,safe_string:x=>api.safeString({x},'x','default'),decimal_to_precision:x=>api.decimalToPrecision(x,1,2,2,5)};
+const result=Object.fromEntries(Object.entries(cases).map(([k,rows])=>[k,rows.map(input=>({input,output:out(()=>funcs[k](v(input)))}))]));console.log(JSON.stringify(result));process.exit(0);
+}
+if(process.argv[2]==='owner-routes'){
+ const routes=[['numberToString',[1e-8]],['parsePrecision',['3junk']],
+ ['decimalToPrecision',['123.45',1,-1]],['decimalToPrecision',['1.2345',1,.05,4]],
+ ['decimalToPrecision',['1.235','1',2]],['safeString',[{x:42},'x']]];
+ console.log(JSON.stringify(routes.map(([name,args])=>({name,units:Array.from(api[name](...args),c=>c.charCodeAt(0))}))));process.exit(0);
+}
 if(process.argv[2]==='effects'){
  const log=[], token={token:true};let reads=0;
  const value={get toString(){log.push('string:get');return function(){log.push('string:call:'+String(this===value));return '\ud800'};}};
