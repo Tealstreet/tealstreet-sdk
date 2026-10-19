@@ -3,8 +3,15 @@
 //! JavaScript owns sockets, fetch and timers; it forwards each event here and
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none.
-#[cfg(not(any(feature = "binance", feature = "bybit", feature = "hyperliquid")))]
-compile_error!("safe-cex-wasm requires at least one venue feature: binance, bybit or hyperliquid");
+#[cfg(not(any(
+    feature = "binance",
+    feature = "bybit",
+    feature = "hyperliquid",
+    feature = "okx"
+)))]
+compile_error!(
+    "safe-cex-wasm requires at least one venue feature: binance, bybit, hyperliquid or okx"
+);
 
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
@@ -16,6 +23,8 @@ use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 #[cfg(feature = "hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
+#[cfg(feature = "okx")]
+use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -53,7 +62,12 @@ impl<V: Venue> AnyEngine for Engine<V> {
     }
 }
 
-#[cfg(any(feature = "binance", feature = "bybit", feature = "hyperliquid"))]
+#[cfg(any(
+    feature = "binance",
+    feature = "bybit",
+    feature = "hyperliquid",
+    feature = "okx"
+))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
@@ -65,6 +79,9 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
+    #[cfg(feature = "okx")]
+    #[serde(default)]
+    passphrase: Option<String>,
     #[cfg(feature = "hyperliquid")]
     #[serde(default)]
     application_id: Option<String>,
@@ -451,7 +468,12 @@ pub struct WasmEngine {
 
 #[wasm_bindgen]
 impl WasmEngine {
-    #[cfg(any(feature = "binance", feature = "bybit", feature = "hyperliquid"))]
+    #[cfg(any(
+        feature = "binance",
+        feature = "bybit",
+        feature = "hyperliquid",
+        feature = "okx"
+    ))]
     #[wasm_bindgen(constructor)]
     pub fn new(venue: &str, options_json: &str) -> Result<WasmEngine, JsError> {
         let options: EngineOptions = serde_json::from_str(options_json)?;
@@ -489,6 +511,24 @@ impl WasmEngine {
                         b: b.address,
                         f: b.fee_tenths_bps,
                     }),
+                })))
+            }
+            #[cfg(feature = "okx")]
+            "okx" | "okxeu" | "okxdemo" | "okxeudemo" => {
+                if !options.public_data_only
+                    && options.key.as_ref().is_some_and(|s| !s.is_empty())
+                    && options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                    && options.passphrase.as_ref().is_none_or(|s| s.is_empty())
+                {
+                    return Err(JsError::new("OKX requires a passphrase"));
+                }
+                Box::new(Engine::new(Okx::new(OkxOptions {
+                    testnet: options.testnet || venue.ends_with("demo"),
+                    eea: venue.starts_with("okxeu"),
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    passphrase: options.passphrase,
                 })))
             }
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),

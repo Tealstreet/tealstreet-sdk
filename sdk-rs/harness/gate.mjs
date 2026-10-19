@@ -17,7 +17,7 @@ const { values } = parseArgs({
     'no-egress': { type: 'boolean', default: false },
   },
 });
-const outDir = 'sdk-rs/harness/out';
+const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 
 const replay = (impl, run) => {
@@ -25,13 +25,19 @@ const replay = (impl, run) => {
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
   args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
   if (values['no-egress']) args.push('--no-egress');
-  const result = spawnSync(process.execPath, args, { encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(`${impl} replay failed:\n${result.stderr}`);
+  const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125_000 });
+  if (result.status !== 0) throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
 };
 
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 
+// JSON object insertion order is immaterial; array order and values are exact.
+const stable = (value) => {
+  if (Array.isArray(value)) return value.map(stable);
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+};
 const differences = [];
 const compare = (label, a, b) => {
   const keyed = (rows) => new Map(rows.map((row) => [row.symbol, row]));
@@ -50,23 +56,27 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
-
-for (let run = 0; run < runs; run++) {
-const ts = results.ts[run];
-const rust = results.rust[run];
-if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
-// Every request must match a taped one: an unserved request sent different parameters.
-for (const impl of ['ts', 'rust']) {
-  const unserved = results[impl][run].unserved;
-  if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
-}
 const isPrivate = Boolean(ts.account);
+
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 //  - A position first seen on the user stream keeps the margin size of TS's
 //    zero-size placeholder (0); Rust takes the isolated wallet, or notional
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
+//  - Bybit: TS drops the reject reason of a post-only order cancelled for taking
+//    liquidity (`EC_PostOnlyWillTakeLiquidity`); Rust reports it as PostOnly.
+//  - Bybit: TS can round split quantities away from the requested total;
+//    Rust uses maximum-size lots and the exact remainder.
+//  - Bybit: TS falls back from failed batch writes to single creates, even
+//    after ambiguous HTTP/transport failures; Rust never resends those writes.
+//  - Bybit: TS may drop the initial ticker snapshot before a slow REST seed;
+//    Rust installs the seed before connecting. These cases have native regression
+//    coverage; the committed replay tapes require no normalization for them.
+//  - Bybit: with no mark price, TS can add a second Partial stop on amend;
+//    Rust amends the existing native order ID.
+// OKX full-depth correction is also applied to the TS oracle: its old
+// last-trade filter permanently deleted valid levels when the trade lagged.
 const KNOWN_TS_FIXES = {
   hyperliquid() {
     // Native command regressions pin these deliberate TS fixes:
@@ -80,11 +90,28 @@ const KNOWN_TS_FIXES = {
     // - Income honors the requested kind; fills support all-symbol queries.
     // The tape compares converged state: no account values are rewritten here.
   },
-  binance(account, rustAccount) {
-  for (const position of account.positions) {
-    const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
-    if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
-  }
+  // Applied to the TS oracle itself (okx.ws-public.ts / okx.exchange.ts).
+  okx: [
+    'full books retain levels past a stale last trade',
+    'public trades implement the inherited Not implemented method',
+    'candle calendar bounds use UTC independently of host timezone',
+    'fill window filtering retains native milliseconds before output seconds are truncated',
+    'keyless/public-only business socket avoids empty-credential login and private topics',
+    // Rust safety fixes: covered independently by documented-payload tests.
+    'split bracket entries acquire SL/TP before the next entry is placed',
+    'native OCO amend preserves its sibling protective leg',
+    'negative protective sizes and market or terminal amends fail before writes',
+    'positive protective dust cannot round into a close-entire-position order',
+    'standalone protective limit amendment fails before cancel if execution price cannot be retained',
+    'standalone cancellation continues remaining batches after per-row failures',
+    'new account equity survives delayed snapshots and local balance ticks',
+    'acknowledged leverage survives failed post-write snapshots',
+  ],
+  account: (account, rustAccount) => {
+    for (const position of account.positions) {
+      const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
+      if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+    }
   },
   bybit(account, rustAccount, tsResult) {
     // TS's optional API-key/VIP UI metadata probe has no engine-frame output.
@@ -118,30 +145,48 @@ const KNOWN_TS_FIXES = {
     // Partial-stop amend keeps its native ID when no mark price is available.
   },
 };
-if (isPrivate) {
-  KNOWN_TS_FIXES[values.venue]?.(ts.account, rust.account, ts);
-  for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
-    const left = JSON.stringify(ts.account[field]);
-    const right = JSON.stringify(rust.account[field]);
-    if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
+for (let run = 0; run < runs; run++) {
+  const ts = results.ts[run];
+  const rust = results.rust[run];
+  if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
+  // Every request must match a taped one: an unserved request sent different parameters.
+  for (const impl of ['ts', 'rust']) {
+    const output = impl === 'ts' ? ts : rust;
+    const unserved = output.unserved;
+    for (const symbol of values.books.split(',').filter(Boolean)) {
+      if (!output.books[symbol]) differences.push(`${impl}: requested book ${symbol} is missing`);
+    }
+    if (!output.markets.length || !output.tickers.length) differences.push(`${impl}: empty public seed`);
+    if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
   }
-  const left = JSON.stringify(ts.commands);
-  const right = JSON.stringify(rust.commands);
+  const isPrivate = Boolean(ts.account);
+  if (isPrivate) {
+    if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
+    if (values.venue === 'bybit') KNOWN_TS_FIXES.bybit(ts.account, rust.account, ts);
+    for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
+      const left = JSON.stringify(ts.account[field]);
+      const right = JSON.stringify(rust.account[field]);
+      if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
+    }
+  }
+  const left = JSON.stringify(stable(ts.commands));
+  const right = JSON.stringify(stable(rust.commands));
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
-}
-for (const field of ['requests', 'subscriptions']) {
-  const missing = ts[field].filter((key) => !rust[field].includes(key));
-  const extra = rust[field].filter((key) => !ts[field].includes(key));
-  if (missing.length || extra.length) differences.push(`${field} run ${run + 1}: missing in Rust=${JSON.stringify(missing)}, extra in Rust=${JSON.stringify(extra)}`);
-}
-compare('market', ts.markets, rust.markets);
-compare('ticker', ts.tickers, rust.tickers);
-for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
-  if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
-    differences.push(`book ${symbol} differs`);
+  for (const field of ['requests', 'subscriptions']) {
+    const missing = ts[field].filter((key) => !rust[field].includes(key));
+    const extra = rust[field].filter((key) => !ts[field].includes(key));
+    if (missing.length || extra.length) differences.push(`${field} run ${run + 1}: missing in Rust=${JSON.stringify(missing)}, extra in Rust=${JSON.stringify(extra)}`);
   }
-}
-
+  if (ts.writeCount !== rust.writeCount || JSON.stringify(ts.writes) !== JSON.stringify(rust.writes)) {
+    differences.push(`write sequence run ${run + 1}: ts=${JSON.stringify(ts.writes)} rust=${JSON.stringify(rust.writes)}`);
+  }
+  compare('market', ts.markets, rust.markets);
+  compare('ticker', ts.tickers, rust.tickers);
+  for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
+    if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
+      differences.push(`book ${symbol} differs`);
+    }
+  }
 }
 
 const summary = (impl) => ({
@@ -162,10 +207,11 @@ row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (ts.account) console.log('(private tape: paced in real time, so it gates correctness only)');
+if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
 
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.
-if (!ts.account) {
+if (!isPrivate) {
   if (!(r.cpuMs < t.cpuMs)) failures.push('Rust main-thread CPU is not below TS');
   if (!(r.steadyCpuMs < t.steadyCpuMs)) failures.push('Rust steady-state CPU is not below TS');
   if (!(r.retainedMB < t.retainedMB)) failures.push('Rust retained memory is not below TS');

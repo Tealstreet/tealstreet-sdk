@@ -163,3 +163,18 @@ trading requests and every other read/subscription remain checked.
 Next: publish PR into feat/rust-rewrite, adversarial local reviews with findings
 posted on the PR, fixes/review repetition, then wait for green CI before merging
 and creating the follow-up branch.
+
+PR #1306 is open into feat/rust-rewrite. Adversarial pass 1 found stale HIP-3
+scope replacement, reconnect order-read invalidation, cancel/read resurrection,
+settings acknowledgement/uncertainty races, failed-signature cancellation
+rollback, and a replay gate that hid duplicate writes. Findings are posted on
+the PR; fixes and second reviews are in progress. Pass 2 additionally found
+queued amend duplication and a placement-ack/immediate-cancel window.
+
+Merged incoming OKX layout/registration at 693ad4f139, preserving four venue
+features and all OKX aliases, auth/subscription/heartbeat validation, staged
+private requests and TS oracle fixes. Combined builds retain all constructors;
+per-venue builds keep the original 1,258,291-byte browser budget. The replay
+now consumes each economic-write response once and compares write counts.
+Seventeen harness tests and 269 TS bridge/guard checks pass after resolution;
+OKX-only host compilation passes. Re-run all gates after review fixes.

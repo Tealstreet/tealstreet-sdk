@@ -34,6 +34,7 @@ const recording = {
         handlers.onOpen();
       },
       onMessage: (text) => {
+        frames++;
         write({ type: 'ws', url, text });
         handlers.onMessage(text);
       },
@@ -45,28 +46,30 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const record = (body) => write({ type: 'http', method: request.method, url: request.url, requestBody: request.body, status: response.status, body });
+    const recorded = (body) => write({
+      type: 'http', method: request.method, url: request.url,
+      ...(request.body === undefined ? {} : { requestBody: request.body }),
+      status: response.status, headers: response.headers ?? '', body,
+    });
     if (response.body instanceof Uint8Array) {
-      record(new TextDecoder().decode(response.body));
+      recorded(new TextDecoder().decode(response.body));
       return response;
     }
-    // Tap the transport stream without changing the engine's chunk delivery.
-    const body = async function* () {
+    return { ...response, body: (async function* () {
       const decoder = new TextDecoder();
-      let text = '';
+      let body = '';
       for await (const chunk of response.body) {
-        text += decoder.decode(chunk, { stream: true });
+        body += decoder.decode(chunk, { stream: true });
         yield chunk;
       }
-      record(text + decoder.decode());
-    };
-    return { ...response, body: body() };
+      recorded(body + decoder.decode());
+    })() };
   },
 };
 
 const { WasmEngine } = await loadEngine();
 let frames = 0;
-const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: false, ...venueOf(values.venue).recordOptions })), recording, {
+const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: false, ...venueOf(values.venue).options, ...venueOf(values.venue).recordOptions })), recording, {
   onFrame: () => frames++,
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });

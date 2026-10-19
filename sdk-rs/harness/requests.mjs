@@ -6,14 +6,36 @@ const CLIENT_IDS = new Set(['newClientOrderId', 'clientAlgoId', 'clientOrderId',
 
 // Timed replies describe recorded state; polling must not consume its transitions.
 // Unstamped replies in a timed queue represent the state available at startup.
-export const selectResponse = (queue, elapsed) => {
+export const isWriteRequest = (method, url) => {
+  method = method.toUpperCase();
+  if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return false;
+  const parsed = new URL(url);
+  // Hyperliquid's /info POSTs are reads, including account/history polling.
+  return !(method === 'POST' && parsed.pathname === '/info'
+    && /(^|\.)hyperliquid(?:-testnet)?\.xyz$/.test(parsed.hostname));
+};
+
+export const selectResponse = (queue, elapsed, { write = false, commandIndex = 0 } = {}) => {
   if (!queue?.length) return undefined;
-  if (!queue.some((record) => record.availableAt !== undefined)) {
-    return queue.length > 1 ? queue.shift() : queue[0];
+  const available = (record) => (record.afterCommand ?? 0) <= commandIndex
+    && (record.availableAt ?? 0) <= elapsed;
+  if (write) {
+    // An acknowledgement proves one attempt. Never replay it for another write,
+    // or skip an earlier outstanding write to consume a later staged one.
+    return available(queue[0]) ? queue.shift() : undefined;
+  }
+  const eligible = queue.filter(available);
+  if (!eligible.length) return undefined;
+  const stage = Math.max(...eligible.map((record) => record.afterCommand ?? 0));
+  const current = eligible.filter((record) => (record.afterCommand ?? 0) === stage);
+  if (!current.some((record) => record.availableAt !== undefined)) {
+    const record = current[0];
+    if (current.length > 1) queue.splice(queue.indexOf(record), 1);
+    return record;
   }
   let selected;
   let latest = -Infinity;
-  for (const record of queue) {
+  for (const record of current) {
     const available = record.availableAt ?? 0;
     if (available <= elapsed && available >= latest) {
       selected = record;
@@ -32,13 +54,14 @@ export const callerIdsOf = (records) => new Set(records
   .flatMap((record) => (record.orders ?? []).map((order) => order.clientOrderId))
   .filter((id) => typeof id === 'string'));
 
-const normalize = (value, callerIds, root = true) => {
+const normalize = (value, callerIds, root = true, options = {}) => {
   if (JSON.isRawJSON(value)) return value;
-  if (Array.isArray(value)) return value.map((item) => normalize(item, callerIds, false));
+  if (Array.isArray(value)) return value.map((item) => normalize(item, callerIds, false, options));
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()
     .filter((key) => !(root && (CLOCKS.has(key) || (key === 'nonce' && value.action))))
     .filter((key) => !CLIENT_IDS.has(key) || callerIds.has(value[key]))
-    .map((key) => [key, normalize(value[key], callerIds, false)]));
+    .map((key) => [key, !callerIds.has(value[key]) && options.generatedBodyId?.(key, value[key])
+      ? '<generated>' : normalize(value[key], callerIds, false, options)]));
   return value;
 };
 
@@ -58,9 +81,10 @@ export const canonicalUrl = (url, callerIds = new Set()) => {
   return `${parsed.origin}${parsed.pathname}?${canonicalParams(parsed.searchParams, callerIds)}`;
 };
 
-export const requestKey = (method, url, body, callerIds = new Set()) => {
+export const requestKey = (method, url, body, callerIds = new Set(), options = {}) => {
   const prefix = `${method.toUpperCase()} ${canonicalUrl(url, callerIds)}`;
   if (body == null || body === '') return prefix;
+  if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
   if (body instanceof URLSearchParams) return `${prefix} ${canonicalParams(body, callerIds)}`;
   let parsed;
   try { parsed = typeof body === 'string' ? parseJson(body) : body; }
@@ -68,7 +92,7 @@ export const requestKey = (method, url, body, callerIds = new Set()) => {
     return `${prefix} ${typeof body === 'string' && body.includes('=')
       ? canonicalParams(new URLSearchParams(body), callerIds) : body}`;
   }
-  return `${prefix} ${JSON.stringify(normalize(parsed, callerIds))}`;
+  return `${prefix} ${JSON.stringify(normalize(parsed, callerIds, true, options))}`;
 };
 
 export const subscriptionKey = (url, text, callerIds = new Set()) => {
@@ -81,6 +105,11 @@ export const subscriptionKey = (url, text, callerIds = new Set()) => {
     message = { ...message };
     delete message.id;
     delete message.req_id;
+    // OKX login signatures and clocks are checked against credentials by Tape;
+    // the outbound identity retains API key and passphrase for comparison.
+    if (method === 'login' && Array.isArray(message.args)) {
+      message.args = message.args.map((arg) => ({ ...arg, timestamp: '<timestamp>', sign: '<signature>' }));
+    }
     // Bybit signs a fresh expiration per connection. Keep the API identity.
     if (method === 'auth' && Array.isArray(message.args) && message.args.length === 3) {
       message.args = [message.args[0], '<expires>', '<signature>'];

@@ -109,6 +109,9 @@ jobs:
           - venue: bybit
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-bybit
+          - venue: okx
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-okx
           - venue: hyperliquid
             books: BTC-PERP,ETH-PERP
             private_script: rust:private-tape-hyperliquid
@@ -162,6 +165,14 @@ jobs:
       - name: Public data (correctness, CPU and memory)
         run: yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}'
       - name: Account and trading (correctness)
+        if: matrix.venue != 'okx'
         run: |
           yarn ${{ matrix.private_script }}
           yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs 1 --books ''
+      - name: OKX account and trading variants (correctness)
+        if: matrix.venue == 'okx'
+        run: |
+          for venue in okx okxeu okxdemo okxeudemo; do
+            yarn rust:private-tape-okx --venue "$venue"
+            yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
+          done

@@ -1,0 +1,347 @@
+#![allow(dead_code)]
+mod support;
+use safe_cex_engine::{Action, Command, Engine, Event};
+use safe_cex_venue_okx::{Okx, Options};
+use support::*;
+
+#[test]
+fn seeds_contract_markets_and_tickers() {
+    let (engine, _, _) = public(Options::default());
+    let m = &engine.store().markets()[0];
+    assert_eq!(m.symbol, "BTCUSDT");
+    assert_eq!(m.contract_size, Some(0.01));
+    assert_eq!(m.precision.amount, 0.01);
+    assert_eq!(m.limits.amount.min, 0.0001);
+    assert_eq!(engine.store().tickers()[0].mark, 40000.0);
+}
+
+#[test]
+fn accepts_sequence_reset_keepalive_and_recovers_gap_once() {
+    let (mut e, socket, _) = public(Options::default());
+    e.handle(
+        4.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    actions(&mut e);
+    ws(
+        &mut e,
+        socket,
+        r#"{"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"snapshot","data":[{"seqId":100,"prevSeqId":-1,"bids":[["39999","5","0","1"]],"asks":[["40001","7","0","1"]]}]}"#,
+    );
+    assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(39999.0, 0.05)]);
+    ws(
+        &mut e,
+        socket,
+        r#"{"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"update","data":[{"seqId":10,"prevSeqId":100,"bids":[["39999","0","0","0"]],"asks":[]}]}"#,
+    );
+    assert!(e.book("BTCUSDT").unwrap().bids().is_empty());
+    ws(
+        &mut e,
+        socket,
+        r#"{"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"update","data":[{"seqId":10,"prevSeqId":10,"bids":[],"asks":[]}]}"#,
+    );
+    assert!(actions(&mut e).is_empty());
+    let gap = r#"{"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"update","data":[{"seqId":12,"prevSeqId":11,"bids":[],"asks":[]}]}"#;
+    ws(&mut e, socket, gap);
+    assert!(e.book("BTCUSDT").is_none());
+    assert_eq!(
+        actions(&mut e)
+            .iter()
+            .filter(|a| matches!(a, Action::WsSend { .. }))
+            .count(),
+        2
+    );
+    ws(&mut e, socket, gap);
+    assert!(actions(&mut e).is_empty());
+}
+
+#[test]
+fn envelope_failure_never_marks_empty_markets_loaded() {
+    for body in [
+        r#"{"code":"50113","msg":"Invalid Sign","data":[]}"#,
+        r#"{"data":[],"code":"50113","msg":"Invalid Sign"}"#,
+        r#"{"code":"0","data":[]"#,
+        r#"{"code":"0","data":[,]}"#,
+        r#"{"code":"0","data":[{},]}"#,
+    ] {
+        let mut e = Engine::new(Okx::new(Options::default()));
+        e.start(0.0);
+        let request = actions(&mut e).remove(0);
+        reply(&mut e, &request, body, 1.0);
+        assert!(!e.store().loaded().markets, "{body}");
+        assert!(
+            actions(&mut e)
+                .iter()
+                .all(|a| !matches!(a, Action::Http(_)))
+        );
+    }
+}
+
+#[test]
+fn candles_on_business_and_all_sockets_watch_silence() {
+    let (mut e, _, socket) = public(Options::default());
+    e.handle(
+        4.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: "1M".into(),
+        }),
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::WsSend { socket: s, text } if *s == socket && text.contains("candle1Mutc"))));
+    e.handle(
+        4.0,
+        Event::Command(Command::FetchCandles {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            interval: "1m".into(),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(10),
+        }),
+    );
+    let a = actions(&mut e).remove(0);
+    reply(
+        &mut e,
+        &a,
+        &envelope(r#"["1700000000000","1","3","0.5","2","9","10","20","1"]"#),
+        5.0,
+    );
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: Ok(s), .. }) if s.contains("\"volume\":20.0"))));
+}
+
+#[test]
+fn every_open_socket_pings_times_out_and_reconnects() {
+    let mut e = Engine::new(Okx::new(Options::default()));
+    e.start(0.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(MARKET), 1.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(TICKER), 2.0);
+    let initial = actions(&mut e);
+    let sockets: Vec<_> = initial
+        .iter()
+        .filter_map(|a| {
+            if let Action::WsConnect { socket, .. } = a {
+                Some(*socket)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let timers: Vec<_> = initial
+        .iter()
+        .filter_map(|a| {
+            if let Action::SetTimer { timer, .. } = a {
+                Some(*timer)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(sockets.len(), 2);
+    for socket in &sockets {
+        e.handle(3.0, Event::WsOpened { socket: *socket });
+    }
+    actions(&mut e);
+    for timer in timers {
+        e.handle(10_004.0, Event::TimerFired { timer });
+    }
+    let closed = actions(&mut e);
+    assert_eq!(
+        closed
+            .iter()
+            .filter(|a| matches!(a, Action::WsClose { .. }))
+            .count(),
+        2
+    );
+    let timers: Vec<_> = closed
+        .iter()
+        .filter_map(|a| {
+            if let Action::SetTimer { timer, .. } = a {
+                Some(*timer)
+            } else {
+                None
+            }
+        })
+        .collect();
+    for timer in timers {
+        e.handle(12_000.0, Event::TimerFired { timer });
+    }
+    assert_eq!(
+        actions(&mut e)
+            .iter()
+            .filter(|a| matches!(a, Action::WsConnect { .. }))
+            .count(),
+        2
+    );
+    // Late frames from retired sockets cannot refresh the replacement.
+    for socket in sockets {
+        ws(&mut e, socket, "pong");
+    }
+    assert!(actions(&mut e).is_empty());
+}
+
+#[test]
+fn malformed_levels_force_resnapshot_and_valid_depth_ignores_stale_trade() {
+    let (mut e, socket, _) = public(Options::default());
+    e.handle(
+        4.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    actions(&mut e);
+    ws(
+        &mut e,
+        socket,
+        r#"{"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"snapshot","data":[{"seqId":100,"bids":[["40002","5","0","1"]],"asks":[["40003","7","0","1"]]}]}"#,
+    );
+    assert_eq!(e.book("BTCUSDT").unwrap().best_bid(), Some(40002.0));
+    ws(
+        &mut e,
+        socket,
+        r#"{"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"update","data":[{"seqId":101,"prevSeqId":100,"bids":[["40002"]],"asks":[]}]}"#,
+    );
+    assert!(e.book("BTCUSDT").is_none());
+    assert_eq!(
+        actions(&mut e)
+            .iter()
+            .filter(|a| matches!(a, Action::WsSend { .. }))
+            .count(),
+        2
+    );
+    ws(
+        &mut e,
+        socket,
+        r#"{"arg":{"channel":"books","instId":"BTC-USDT-SWAP"},"action":"snapshot","data":[{"seqId":102,"bids":[["40001","8","0","1"]],"asks":[]}]}"#,
+    );
+    assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(40001.0, 0.08)]);
+}
+
+#[test]
+fn malformed_supported_instrument_is_not_committed() {
+    let mut e = Engine::new(Okx::new(Options::default()));
+    e.start(0.0);
+    let request = actions(&mut e).remove(0);
+    reply(
+        &mut e,
+        &request,
+        &envelope(r#"{"ctType":"linear","settleCcy":"USDT"}"#),
+        1.0,
+    );
+    assert!(!e.store().loaded().markets);
+}
+
+#[test]
+fn variants_use_entity_hosts_and_demo_header() {
+    for (eea, testnet, host, ws_host) in [
+        (false, false, "www.okx.com", "ws.okx.com"),
+        (true, false, "eea.okx.com", "wseea.okx.com"),
+        (false, true, "openapi.okx.com", "wspap.okx.com"),
+        (true, true, "eea.okx.com", "wseeapap.okx.com"),
+    ] {
+        let mut e = Engine::new(Okx::new(Options {
+            eea,
+            testnet,
+            ..Options::default()
+        }));
+        e.start(0.0);
+        let request = actions(&mut e).remove(0);
+        let Action::Http(r) = &request else { panic!() };
+        assert!(r.url.starts_with(&format!("https://{host}/")));
+        assert_eq!(
+            r.headers
+                .iter()
+                .any(|(k, v)| *k == "x-simulated-trading" && v == "1"),
+            testnet
+        );
+        reply(&mut e, &request, &envelope(MARKET), 1.0);
+        let request = actions(&mut e).remove(0);
+        reply(&mut e, &request, &envelope(TICKER), 2.0);
+        assert_eq!(actions(&mut e).iter().filter(|a| matches!(a, Action::WsConnect { url, .. } if url.starts_with(&format!("wss://{ws_host}:8443/")))).count(), 2);
+    }
+}
+
+#[test]
+fn incomplete_known_ticker_never_becomes_authoritative_zero() {
+    let mut e = Engine::new(Okx::new(Options::default()));
+    e.start(0.0);
+    let request = actions(&mut e).remove(0);
+    reply(&mut e, &request, &envelope(MARKET), 1.0);
+    let request = actions(&mut e).remove(0);
+    reply(
+        &mut e,
+        &request,
+        &envelope(r#"{"instId":"BTC-USDT-SWAP"}"#),
+        2.0,
+    );
+    assert!(!e.store().loaded().tickers);
+}
+
+#[test]
+fn candle_reads_use_ts_bounds_limit_and_historical_fallback() {
+    let (mut e, _, _) = public(Options::default());
+    e.handle(
+        1_800_000_000_000.0,
+        Event::Command(Command::FetchCandles {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            interval: "1m".into(),
+            limit: None,
+            from_ms: None,
+            to_ms: None,
+        }),
+    );
+    let request = actions(&mut e).remove(0);
+    assert!(
+        matches!(&request, Action::Http(r) if r.url.ends_with("bar=1m&limit=300&before=1799982000000&after=1800000000000"))
+    );
+    reply(&mut e, &request, &envelope(""), 1_800_000_000_001.0);
+    let fallback = actions(&mut e).remove(0);
+    assert!(
+        matches!(&fallback, Action::Http(r) if r.url.contains("/history-candles?") && r.url.contains("&limit=100&"))
+    );
+    reply(&mut e, &fallback, &envelope(""), 1_800_000_000_002.0);
+    assert!(actions(&mut e).iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { result: Ok(s), .. }) if s == "[]")));
+}
+
+#[test]
+fn month_candle_bounds_clamp_day_in_leap_february() {
+    let (mut e, _, _) = public(Options::default());
+    e.handle(
+        1_711_886_400_000.0,
+        Event::Command(Command::FetchCandles {
+            command: 1,
+            symbol: "BTCUSDT".into(),
+            interval: "1M".into(),
+            limit: Some(1),
+            from_ms: None,
+            to_ms: Some(1_711_886_400_000.0),
+        }),
+    );
+    let out = actions(&mut e);
+    assert!(out.iter().any(|a| matches!(a, Action::Http(r) if r.url.ends_with("bar=1Mutc&limit=1&before=1709208000000&after=1711886400000"))));
+}
+
+#[test]
+fn business_candle_stream_emits_a_candle_frame() {
+    let (mut e, _, socket) = public(Options::default());
+    e.take_frame(4.0);
+    e.handle(
+        5.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "BTCUSDT".into(),
+            interval: "1m".into(),
+        }),
+    );
+    ws(
+        &mut e,
+        socket,
+        r#"{"arg":{"channel":"candle1m","instId":"BTC-USDT-SWAP"},"data":[["1700000000000","1","3","0.5","2","9","10","20","1"]]}"#,
+    );
+    let frame = e.take_market_frame(6.0).unwrap();
+    assert_eq!(u16::from_le_bytes(frame[16..18].try_into().unwrap()), 6);
+    assert_eq!(u32::from_le_bytes(frame[24..28].try_into().unwrap()), 1);
+}

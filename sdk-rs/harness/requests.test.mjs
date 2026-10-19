@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { gunzipSync } from 'node:zlib';
 import test from 'node:test';
-import { callerIdsOf, canonicalUrl, requestKey, selectResponse, subscriptionKey, subscriptionKeys } from './requests.mjs';
+import { callerIdsOf, canonicalUrl, isWriteRequest, requestKey, selectResponse, subscriptionKey, subscriptionKeys } from './requests.mjs';
 
 const info = 'https://api.hyperliquid.xyz/info';
 const exchange = 'https://api.hyperliquid.xyz/exchange';
@@ -48,6 +48,68 @@ test('timed HTTP replies never expose future state and treat unstamped startup s
   assert.equal(selectResponse(queue, 999), startup);
   assert.equal(selectResponse(queue, 1000), future);
   assert.equal(queue.length, 3);
+});
+
+test('one write acknowledgement cannot satisfy a duplicate economic action', () => {
+  const acknowledgement = { body: 'accepted' };
+  const queue = [acknowledgement];
+  assert.equal(selectResponse(queue, 0, { write: true }), acknowledgement);
+  assert.equal(selectResponse(queue, 0, { write: true }), undefined);
+  const twoAttempts = [{ body: 'first' }, { body: 'second' }];
+  assert.equal(selectResponse(twoAttempts, 0, { write: true }).body, 'first');
+  assert.equal(selectResponse(twoAttempts, 0, { write: true }).body, 'second');
+  assert.equal(twoAttempts.length, 0);
+});
+
+test('POST info reads repeat while trading writes consume; other POSTs remain writes', () => {
+  for (const url of [info, 'https://api.hyperliquid-testnet.xyz/info']) {
+    assert.equal(isWriteRequest('POST', url), false);
+    const queue = [{ body: 'snapshot' }];
+    for (let i = 0; i < 10; i++) assert.equal(selectResponse(queue, 0, { write: isWriteRequest('POST', url) }).body, 'snapshot');
+    assert.equal(queue.length, 1);
+  }
+  assert.equal(isWriteRequest('POST', exchange), true);
+  assert.equal(isWriteRequest('POST', 'https://www.okx.com/api/v5/trade/order'), true);
+  assert.equal(isWriteRequest('POST', 'https://other.example/info'), true);
+  assert.equal(isWriteRequest('GET', exchange), false);
+});
+
+test('staged reads and writes cannot consume future command acknowledgements', () => {
+  const initial = { body: 'initial' };
+  const changed = { afterCommand: 1, body: 'changed' };
+  const reads = [initial, changed];
+  assert.equal(selectResponse(reads, 0), initial);
+  assert.equal(selectResponse(reads, 0, { commandIndex: 1 }), changed);
+  assert.equal(selectResponse(reads, 0, { commandIndex: 1 }), changed);
+  const writes = [{ afterCommand: 2, availableAt: 100, body: 'accepted' }];
+  assert.equal(selectResponse(writes, 100, { write: true, commandIndex: 1 }), undefined);
+  assert.equal(selectResponse(writes, 99, { write: true, commandIndex: 2 }), undefined);
+  assert.equal(writes.length, 1);
+  assert.equal(selectResponse(writes, 100, { write: true, commandIndex: 2 }).body, 'accepted');
+  assert.equal(writes.length, 0);
+});
+
+test('OKX generated broker IDs normalize while broker-prefixed caller IDs remain exact', () => {
+  const url = 'https://www.okx.com/api/v5/trade/order';
+  const generated = 'e847386590ce4dBC0000000000000000';
+  const caller = 'e847386590ce4dBC0000000000000001';
+  const options = { generatedBodyId: (key, value) => ['clOrdId', 'algoClOrdId'].includes(key) && value.startsWith('e847386590ce4dBC') };
+  const ids = new Set([caller]);
+  const key = (id) => requestKey('POST', url, { instId: 'BTC-USDT-SWAP', clOrdId: id }, ids, options);
+  assert.equal(key(generated), key('e847386590ce4dBC0000000000000002'));
+  assert.notEqual(key(generated), key(caller));
+  assert.notEqual(key(generated), key('other-exact-id'));
+});
+
+test('OKX login identity normalizes validated clocks/signatures and keeps passphrase', () => {
+  const url = 'wss://ws.okx.com:8443/ws/v5/private';
+  const login = (timestamp, sign, passphrase = 'passphrase') => ({ op: 'login', args: [{ apiKey: 'key', passphrase, timestamp, sign }] });
+  assert.equal(subscriptionKey(url, login('1', 'a')), subscriptionKey(url, login('2', 'b')));
+  assert.notEqual(subscriptionKey(url, login('1', 'a')), subscriptionKey(url, login('1', 'a', 'other')));
+  assert.deepEqual(subscriptionKeys(url, { op: 'subscribe', args: [{ channel: 'orders', instType: 'SWAP' }, { channel: 'positions', instType: 'ANY' }] }), [
+    ...subscriptionKeys(url, { op: 'subscribe', args: [{ channel: 'orders', instType: 'SWAP' }] }),
+    ...subscriptionKeys(url, { op: 'subscribe', args: [{ channel: 'positions', instType: 'ANY' }] }),
+  ]);
 });
 
 test('POST info identity includes every query field and ignores JSON key order', () => {

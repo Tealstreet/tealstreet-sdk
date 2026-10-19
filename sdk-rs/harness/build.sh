@@ -5,12 +5,12 @@ set -euo pipefail
 build_args=(--locked --release -p safe-cex-wasm --target wasm32-unknown-unknown)
 if [[ $# -gt 0 ]]; then
   if [[ $# -ne 2 || $1 != --venue ]]; then
-    echo "Usage: $0 [--venue binance|bybit|hyperliquid]" >&2
+    echo "Usage: $0 [--venue binance|bybit|hyperliquid|okx]" >&2
     exit 2
   fi
   case "$2" in
-    binance|bybit|hyperliquid) build_args+=(--no-default-features --features "$2") ;;
-    *) echo "Unsupported venue: $2 (expected binance, bybit or hyperliquid)" >&2; exit 2 ;;
+    binance|bybit|hyperliquid|okx) build_args+=(--no-default-features --features "$2") ;;
+    *) echo "Unsupported venue: $2 (expected binance, bybit, hyperliquid or okx)" >&2; exit 2 ;;
   esac
 fi
 cd "$(dirname "$0")/.."
@@ -20,7 +20,7 @@ if [[ $(uname) == Darwin ]]; then
 fi
 cargo build "${build_args[@]}"
 for target in web nodejs; do
-  wasm-bindgen --target "$target" --out-dir "hosts/wasm/pkg/${target/nodejs/node}" \
+  wasm-bindgen --remove-name-section --remove-producers-section --target "$target" --out-dir "hosts/wasm/pkg/${target/nodejs/node}" \
     target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm
 done
 # The Node bindings are CommonJS inside an ESM package.
