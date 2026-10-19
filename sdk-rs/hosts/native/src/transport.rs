@@ -201,12 +201,12 @@ impl Transport for NetworkTransport {
                             let _ = events.send(HostEvent::WsMessage(socket, text.to_string()));
                         }
                         Some(Ok(Message::Binary(bytes))) => {
-                            if let (Some(state), Some(key)) = (&routing, &key) { state.message(key); }
                             let mut decoded = Vec::new();
                             let result = if bytes.starts_with(&[0x1f, 0x8b]) { flate2::read::GzDecoder::new(bytes.as_ref()).read_to_end(&mut decoded) }
                                 else if bytes.first() == Some(&0x78) { flate2::read::ZlibDecoder::new(bytes.as_ref()).read_to_end(&mut decoded) }
                                 else { decoded.extend_from_slice(&bytes); Ok(decoded.len()) };
                             let Ok(text) = result.and_then(|_| String::from_utf8(decoded).map_err(std::io::Error::other)) else { break 1007 };
+                            if let (Some(state), Some(key)) = (&routing, &key) { state.message(key); }
                             let _ = events.send(HostEvent::WsMessage(socket, text));
                         }
                         Some(Ok(Message::Ping(_))) => { let _ = ws.flush().await; }

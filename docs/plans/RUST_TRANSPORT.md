@@ -159,3 +159,19 @@ that gate unchanged and obtained valid passing measurements above. The final
 OKX EU demo private run also required a retry after its TS backing-buffer
 baseline failed to settle before replay. No gate
 thresholds, normalizations or size budgets changed for this transport work.
+
+### PR and adversarial review
+
+- Opened [PR #1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313) into
+  `feat/rust-rewrite` after all 19 eight-venue gates passed.
+- Landing then added Backpack. Merged through `b265a0bab0` as `ecc6332396`;
+  preserved PATCH, recvWindow, virtual signing time and the host's late-callback
+  disposal guards. The Backpack clock override retains the wrapped transport's
+  dispose hook; all four new socket connects have explicit public/private roles.
+  The aggregate size budget is the landing branch's inherited 3 MiB.
+- Posted round-one adversarial findings on the PR. TS/provider/SDK integration
+  review is clear. Native review found array response headers rendered as JSON
+  instead of JS strings, and malformed binary messages resetting silence before
+  decoding. Fixed both, with **16/16 native wire tests** and native all-target
+  Clippy passing. A separate reviewer cleared the fixes and regressions; the
+  independent JS/runtime review also found no actionable issues.

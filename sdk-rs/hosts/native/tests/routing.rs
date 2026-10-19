@@ -828,3 +828,123 @@ async fn dropping_the_host_cancels_how_authentication_without_sending_a_write() 
         .expect("host disposal must close the pending tunnel")
         .unwrap();
 }
+
+#[tokio::test]
+async fn malformed_binary_connections_advance_to_fallback_without_emitting_messages() {
+    for malformed in [vec![0x1f, 0x8b, 0], vec![0xff, 0xfe]] {
+        let (listener, origin) = listener().await;
+        let origin = origin.replacen("http:", "ws:", 1);
+        let server = tokio::spawn(async move {
+            for attempt in 0..3 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut ws = tokio_tungstenite::accept_hdr_async(
+                    stream,
+                    move |request: &Request, response: Response| {
+                        assert_eq!(
+                            request.uri().path(),
+                            if attempt < 2 { "/direct" } else { "/fallback" }
+                        );
+                        Ok(response)
+                    },
+                )
+                .await
+                .unwrap();
+                if attempt < 2 {
+                    ws.send(Message::binary(malformed.clone())).await.unwrap();
+                    let _ = ws.next().await;
+                } else {
+                    ws.send(Message::text("fallback-ready")).await.unwrap();
+                    ws.close(None).await.unwrap();
+                }
+            }
+        });
+        let mut plan = RoutingPlan::default();
+        plan.ws.private.fallback = Some(format!("{origin}/fallback"));
+        let transport = NetworkTransport::with_routing(plan, tokens());
+        for attempt in 0..3 {
+            let (send, mut events) = mpsc::unbounded_channel();
+            let outgoing = transport.connect_channel(
+                SocketId(attempt),
+                format!("{origin}/direct"),
+                vec![],
+                Some(safe_cex_engine::SocketChannel::Private),
+                send,
+            );
+            assert!(matches!(next(&mut events).await, HostEvent::WsOpened(_)));
+            if attempt < 2 {
+                assert!(matches!(
+                    next(&mut events).await,
+                    HostEvent::WsClosed(_, 1007)
+                ));
+                assert!(
+                    events.try_recv().is_err(),
+                    "invalid bytes must never become a venue message"
+                );
+            } else {
+                assert!(
+                    matches!(next(&mut events).await, HostEvent::WsMessage(_, text) if text == "fallback-ready")
+                );
+                assert!(matches!(next(&mut events).await, HostEvent::WsClosed(_, _)));
+            }
+            drop(outgoing);
+        }
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn how_response_header_values_match_js_string_coercion_on_the_wire() {
+    let (listener, origin) = listener().await;
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+        ws.send(Message::text(r#"{"type":"rpc.auth","status":"success"}"#))
+            .await
+            .unwrap();
+        let request = rpc(&mut ws).await;
+        let nonce = request.nonce.unwrap();
+        let response = format!(
+            r#"{{"type":"rpc.http","nonce":"{nonce}","data":{{"status":200,"headers":{{"set-cookie":["session=a","csrf=b"],"x-nested":["a",null,["b","c"],false,{{}},1e21,1e-7,-0.0],"x-number":7.0,"x-null":null,"x-object":{{"ignored":"member"}},"x-bool":true}},"data_raw":"{{}}"}}}}"#
+        );
+        ws.send(Message::text(response)).await.unwrap();
+        let _ = ws.next().await;
+    });
+    let mut plan = RoutingPlan::default();
+    plan.http.mode = HttpRouteMode::How;
+    plan.http.tunnel_url = Some(origin.replacen("http:", "ws:", 1) + "/tunnel");
+    let (send, mut events) = mpsc::unbounded_channel();
+    NetworkTransport::with_routing(plan, tokens()).request(
+        http_request(91, "https://venue.invalid/headers".into()),
+        send,
+    );
+    let HostEvent::HttpStart {
+        status, headers, ..
+    } = next(&mut events).await
+    else {
+        panic!("expected response headers")
+    };
+    assert_eq!(status, 200);
+    let headers: BTreeMap<_, _> = headers
+        .lines()
+        .map(|line| line.split_once(": ").unwrap())
+        .collect();
+    assert_eq!(
+        headers,
+        BTreeMap::from([
+            ("set-cookie", "session=a,csrf=b"),
+            ("x-nested", "a,,b,c,false,[object Object],1e+21,1e-7,0"),
+            ("x-number", "7"),
+            ("x-null", "null"),
+            ("x-object", "[object Object]"),
+            ("x-bool", "true"),
+        ])
+    );
+    assert!(
+        matches!(next(&mut events).await, HostEvent::HttpChunk(RequestId(91), bytes) if bytes == b"{}")
+    );
+    assert!(matches!(
+        next(&mut events).await,
+        HostEvent::HttpEnd(RequestId(91))
+    ));
+    server.await.unwrap();
+}

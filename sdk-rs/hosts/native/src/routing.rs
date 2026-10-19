@@ -262,7 +262,7 @@ struct TunnelResponse {
     #[serde(default)]
     error: Option<Box<RawValue>>,
     #[serde(default)]
-    headers: BTreeMap<String, Box<RawValue>>,
+    headers: BTreeMap<String, TunnelHeaderValue>,
     #[serde(default)]
     data_raw: Option<String>,
     #[serde(default)]
@@ -271,6 +271,49 @@ struct TunnelResponse {
     data_encoding: Option<String>,
     #[serde(default)]
     data: Option<Box<RawValue>>,
+}
+
+/// Match the JS host's String(value), including Array#toString's null entries.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum TunnelHeaderValue {
+    Text(String),
+    Array(Vec<TunnelHeaderValue>),
+    Boolean(bool),
+    Number(f64),
+    Null(()),
+    Object(BTreeMap<String, serde::de::IgnoredAny>),
+}
+
+impl TunnelHeaderValue {
+    fn js_string(&self) -> String {
+        match self {
+            Self::Text(text) => text.clone(),
+            Self::Array(values) => values
+                .iter()
+                .map(|value| match value {
+                    Self::Null(()) => String::new(),
+                    value => value.js_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(","),
+            Self::Boolean(value) => value.to_string(),
+            Self::Number(value) if *value == 0.0 => "0".into(),
+            Self::Number(value) if value.abs() >= 1e21 || value.abs() < 1e-6 => {
+                let scientific = format!("{value:e}");
+                let (mantissa, exponent) = scientific.split_once('e').unwrap();
+                let sign = if exponent.starts_with('-') { "" } else { "+" };
+                format!("{mantissa}e{sign}{exponent}")
+            }
+            Self::Number(value) => value.to_string(),
+            Self::Null(()) => "null".into(),
+            Self::Object(fields) => {
+                // Deserialize object members without retaining their values.
+                let _ = fields;
+                "[object Object]".into()
+            }
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -533,9 +576,7 @@ pub(crate) async fn request_how(
         let status = response.status.ok_or("tunnel response missing status")?;
         let mut response_headers = Vec::new();
         for (name, value) in response.headers {
-            let value =
-                serde_json::from_str::<String>(value.get()).unwrap_or_else(|_| value.get().into());
-            response_headers.push(format!("{name}: {value}"));
+            response_headers.push(format!("{name}: {}", value.js_string()));
         }
         let body = if let Some(binary) = binary {
             gunzip(&binary)?
