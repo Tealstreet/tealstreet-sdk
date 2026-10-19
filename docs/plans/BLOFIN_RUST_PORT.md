@@ -290,3 +290,11 @@ All required brief gates pass after landing integration on `487fd434f5`:
 - Release wasm1,461,186 bytes below unchanged landing budget1,468,006. Final
   cross-review found no remaining material blockers; both review rounds and fixes
   are posted on PR1300. Waiting for green CI, then merging and cutting follow-up.
+
+- Added BloFin public/private replay steps beside Binance/Bybit in CI, retaining
+  the existing shared size budget. Verifying the same BloFin gates on CI's Node22
+  locally before the final CI run; no runtime changes in this checkpoint.
+
+- CI-runtime compatibility checks PASS on Node22: BloFin public225.888/162.239ms
+  CPU,158.040/95.482ms steady,1.520/1.384MB retained (TS/Rust, three medians).
+  Private29-frame correctness passes too. The earlier public table uses Node24.

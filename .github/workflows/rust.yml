@@ -102,7 +102,7 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Binance + Bybit: measured 1,332,666 bytes; allow 1.4 MiB.
+      # Binance + Bybit + BloFin: measured 1,461,186 bytes; retain 1.4 MiB.
       WASM_BUDGET_BYTES: 1468006
     defaults:
       run:
@@ -152,3 +152,9 @@ jobs:
         run: |
           yarn rust:private-tape-bybit
           yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''
+      - name: BloFin public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue blofin --tape sdk-rs/harness/fixtures/blofin-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: BloFin account and trading (correctness)
+        run: |
+          yarn rust:private-tape:blofin
+          yarn rust:gate --venue blofin --tape sdk-rs/harness/tapes/blofin-private.jsonl --runs 1 --books ''
