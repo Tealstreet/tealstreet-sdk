@@ -160,3 +160,13 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   one worker, 30-second budget); other root packages passed. No product or test
   code changed for these timing failures. PR-range gitleaks is clean; the initial
   branch-push scan flags an inherited Binance test vector before this PR's base.
+- Final reviewed-code verification (283a87b0d2): all four replay gates PASS.
+  Backpack public median of 3: CPU TS 159.4 ms / Rust 88.7 ms (1.80x), steady
+  92.4/47.3 ms (1.95x), retained memory 1.7/1.6 MB (1.09x; wasm 1.1 MB).
+  Binance public: CPU 214.7/86.3 ms (2.49x), steady 126.0/31.4 ms (4.02x),
+  memory 2.3/2.0 MB (1.15x; wasm 1.6 MB). Both private gates PASS.
+- Final checks PASS: 49 native tests, seven harness tests, five real-WASM SDK
+  tests including synchronized-clock/class-transport regression, two host tests,
+  bans/fmt/native and wasm clippy/release build. Root typecheck 44 tasks and
+  lint 28 tasks PASS. Review findings/remediation posted on PR #1299; all three
+  sub-agent re-reviews are clear. CI completion and landing remain pending.
