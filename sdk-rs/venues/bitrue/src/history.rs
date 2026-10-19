@@ -141,6 +141,7 @@ impl Bitrue {
         } = query
         else {
             match query {
+                Query::OrderByClientId { .. } => cx.done(command, Err("Bitrue client-order-ID lookup is unsupported".into())),
                 Query::PublicTrades { symbol, limit } => self.public_trades(cx, command, symbol, limit),
                 Query::OrderHistory { .. } => cx.done(command, Err("Bitrue v2 has only single-order lookup, not complete order history".into())),
                 Query::Income { .. } => cx.done(command, Err("Bitrue v2 transfer and force-order histories are not a complete PnL/funding ledger".into())),

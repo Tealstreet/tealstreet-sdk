@@ -341,3 +341,24 @@ fn a_full_filtered_native_page_reports_incomplete_instead_of_false_absence() {
     response(&mut e, r, &format!(r#"{{"code":"0","data":[{ROW}]}}"#));
     assert!(result(&mut e).unwrap_err().starts_with("INCOMPLETE:"));
 }
+
+#[test]
+fn client_order_id_lookup_fails_explicitly_without_sending_an_http_read() {
+    let mut e = engine();
+    query(
+        &mut e,
+        Query::OrderByClientId {
+            symbol: SYMBOL.into(),
+            client_order_id: "caller-id".into(),
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|action| matches!(action, Action::Http(_)))
+    );
+    assert!(actions.iter().any(|action| matches!(action,
+        Action::Notice(Notice::CommandDone { command: 99, result: Err(error) })
+        if error.contains("client-order-ID lookup is unsupported"))));
+}

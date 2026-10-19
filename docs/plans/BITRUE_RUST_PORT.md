@@ -158,3 +158,23 @@ create a clean follow-up branch. Never stash, rebase, force-push or touch master
   no correctness, CPU or memory threshold changed.
 - Earlier full safe-cex suite6,597 PASS and paired Bitrue56 PASS remain valid;
   integration typecheck/lint and latest-head CI must pass before merge.
+
+### Hyperliquid landing race and feature integration
+
+- All checks on82591dfa92 were GREEN, including all25 replay gates and both
+  repository CI jobs. CI Bitrue public CPU165.3/136.8ms, steady95.8/74.6ms,
+  retained3.9/2.3MB; private20 frames PASS. Merge was rejected because
+  Hyperliquid landed concurrently. No bypass or auto-merge used.
+- Merged landing5c47683969. Its per-venue WASM features and matrix supersede
+  the prior aggregate budget. Bitrue joins selectable/default features,
+  build --venue selection and the CI matrix, retaining the existing fixed
+  1,258,291-byte venue budget without increase.
+- Retained landing's authoritative request/Tape and memory accounting. Restored
+  route-scoped generated IDs, exact native/caller body IDs and persistent
+  validator failures. Bitrue callback-ID normalization is venue-scoped;
+  channel, operation and heartbeat audits remain enforced. Harness153 PASS.
+- New landing Query::OrderByClientId explicitly rejects for Bitrue, matching
+  other non-Hyperliquid venues, with regression proving no HTTP request.
+- Both independent conflict-resolution reviews PASS, plus focused new-query
+  review PASS. Typecheck44/lint28 tasks PASS. Native, combined SDK boundary,
+  standalone artifact and public/private gates rerun before the next push.
