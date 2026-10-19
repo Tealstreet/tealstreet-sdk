@@ -124,12 +124,11 @@ TS wire name through serde. External names must decode through that union;
 separate optional account flag. Compile-fail tests independently pin both the
 exchange and interval guards; canonical live/testnet byte strings remain tested.
 
-Round-3 decision: `clean_candles` retains first-timestamp deduplication, including
-NaN and signed-zero equivalence, then uses a total numeric order with NaN last.
-This deliberately corrects TS `cleanCandles`' non-transitive subtraction
-comparator, whose actual permutation depends on the engine's sorting algorithm.
-The manifest marks the correction divergent; exact and 2000 seeded permutation
-fixtures assert the returned finite subsequence and the retained first NaN.
+`clean_candles` retains first-timestamp deduplication and delegates the source
+subtraction comparator to safe-cex-num's canonical V8 TimSort. The former
+NaN-last correction is removed. Actual maintained source profiles compare exact
+result permutations, including NaN, infinities, signed zero and first duplicates,
+through the public helper and constructed cache fetch path.
 
 The 27-interval fixture pins labels as well as durations: each decoded union
 must emit its authored literal name, and public keys must preserve exact live
@@ -277,3 +276,8 @@ cancelled persistence ownership. Pre-epoch Euclidean persistence is accepted
 because exchanges have no pre-1970 candles; this is not a general source-bug
 correction policy. Extreme key rounding and namespace violations remain explicit
 and do not arise from real candle dates or prefix-respecting storage.
+
+The remaining specific-claims cohort is recorded in
+`../parity/CANDLE_CACHE_SPECIFIC_CLAIMS.md`. Hydration's accepted extra output is
+**diagnostic log only**: report the typed backend cause, preserve caller success,
+network results, measured settlement order and slot release.
