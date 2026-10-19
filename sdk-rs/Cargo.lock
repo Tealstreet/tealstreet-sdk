@@ -3086,6 +3086,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-engine"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "safe-cex-venue-binance"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "safe-cex-wasm"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-engine",
+ "safe-cex-venue-binance",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "schemars"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

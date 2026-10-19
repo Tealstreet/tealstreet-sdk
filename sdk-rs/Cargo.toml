@@ -2,6 +2,9 @@
 resolver = "2"
 members = [
     "safe-cex-crypto",
+    "safe-cex-engine",
+    "safe-cex-venue-binance",
+    "safe-cex-wasm",
 ]
 
 [workspace.package]
@@ -20,6 +23,8 @@ wasm-bindgen = "0.2.129"
 
 # Internal
 safe-cex-crypto = { path = "safe-cex-crypto" }
+safe-cex-engine = { path = "safe-cex-engine" }
+safe-cex-venue-binance = { path = "safe-cex-venue-binance" }
 
 # P5a Goldilocks/Poseidon2 and ECgFp5 primitives, verified against Go WASM.
 poseidon-hash = "=0.1.4"

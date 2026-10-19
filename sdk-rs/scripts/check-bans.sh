@@ -4,11 +4,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 status=0
+# wasm-bindgen's own host types are glue, not emulation.
+allowed='Js(Error|Cast)'
+
 ban() {
   local description=$1 pattern=$2
   shift 2
   local hits
-  hits=$(grep -rnE --include='*.rs' --include='Cargo.toml' "$pattern" "$@" 2>/dev/null || true)
+  hits=$(grep -rnE --include='*.rs' --include='Cargo.toml' "$pattern" "$@" 2>/dev/null \
+    | sed -E "s/$allowed//g" | grep -E "$pattern" || true)
   if [[ -n $hits ]]; then
     echo "BANNED: $description"
     echo "$hits"
