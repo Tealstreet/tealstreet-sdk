@@ -1,4 +1,6 @@
 //! Bitunix USDT futures: sans-I/O public and account state machines.
+mod account;
+mod sign;
 mod wire;
 use safe_cex_engine::{
     Command, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue, json, num,
@@ -13,6 +15,7 @@ use wire::*;
 const REST: &str = "https://fapi.bitunix.com";
 const PUBLIC: &str = "wss://fapi.bitunix.com/public/";
 const FUTURES: &str = "wss://api.bitunix.com/ws-futures/?from=contract&compress=2";
+const PRIVATE: &str = "wss://fapi.bitunix.com/private/";
 const MARKETS: &str = "/api/v1/futures/market/trading_pairs";
 const TICKERS: &str = "/api/v1/futures/market/tickers";
 const KLINE: &str = "/api/v1/futures/market/kline";
@@ -26,12 +29,14 @@ pub struct Options {
 }
 
 pub enum Pending {
+    Private(account::Read),
     Markets { rows: Vec<Market>, invalid: bool },
     Tickers { rows: Vec<Ticker>, invalid: bool },
     Candles { command: u32 },
 }
 #[derive(Clone)]
 enum Feed {
+    Private,
     Futures,
     Public {
         channel: &'static str,
@@ -43,6 +48,7 @@ struct Socket {
     feed: Feed,
     opened: bool,
     received: f64,
+    pong_observed: bool,
     watchdog: Option<TimerId>,
     queue_timer: Option<TimerId>,
     queue: VecDeque<String>,
@@ -50,6 +56,8 @@ struct Socket {
 
 pub struct BitunixFutures {
     options: Options,
+    credentials: Option<sign::Credentials>,
+    account: account::AccountState,
     sockets: Vec<Socket>,
     books: HashMap<String, Book>,
     candles: HashSet<(String, String)>,
@@ -58,6 +66,20 @@ pub struct BitunixFutures {
 impl BitunixFutures {
     pub fn new(options: Options) -> Self {
         Self {
+            credentials: if options.public_data_only {
+                None
+            } else {
+                options
+                    .key
+                    .as_ref()
+                    .zip(options.secret.as_ref())
+                    .filter(|(k, s)| !k.is_empty() && !s.is_empty())
+                    .map(|(k, s)| sign::Credentials {
+                        key: k.clone(),
+                        secret: s.clone(),
+                    })
+            },
+            account: account::AccountState::default(),
             options,
             sockets: Vec::new(),
             books: HashMap::new(),
@@ -87,6 +109,7 @@ impl BitunixFutures {
     fn connect(&mut self, cx: &mut Cx<'_, Pending>, feed: Feed) {
         let url = match feed {
             Feed::Futures => FUTURES,
+            Feed::Private => PRIVATE,
             Feed::Public { .. } => PUBLIC,
         };
         let id = cx.connect(url);
@@ -95,6 +118,7 @@ impl BitunixFutures {
             feed,
             opened: false,
             received: cx.now,
+            pong_observed: false,
             watchdog: Some(cx.set_timer(15_000.0)),
             queue_timer: None,
             queue: VecDeque::new(),
@@ -234,6 +258,7 @@ impl Venue for BitunixFutures {
         s.opened = true;
         s.received = cx.now;
         match &s.feed {
+            Feed::Private => {}
             Feed::Futures => {
                 for book in self.books.values_mut() {
                     book.clear();
@@ -272,7 +297,21 @@ impl Venue for BitunixFutures {
                 }
             }
         }
-        cx.send(socket, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));
+        if matches!(s.feed, Feed::Private) {
+            cx.send(socket, r#"{"op":"ping"}"#);
+            self.login(cx, socket);
+            if cx.store.loaded().positions {
+                for axis in [
+                    account::Axis::Balance,
+                    account::Axis::Positions,
+                    account::Axis::Orders,
+                ] {
+                    self.read_axis(cx, axis);
+                }
+            }
+        } else {
+            cx.send(socket, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));
+        }
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
         let Some(s) = self.sockets.iter_mut().find(|s| s.id == socket) else {
@@ -281,6 +320,13 @@ impl Venue for BitunixFutures {
         s.received = cx.now;
         match serde_json::from_str::<Message<'_>>(text) {
             Ok(m) => {
+                if matches!(s.feed, Feed::Private) {
+                    if m.op == "pong" {
+                        s.pong_observed = true;
+                    }
+                    self.private_message(cx, &m);
+                    return;
+                }
                 if let Err(e) = self.public_message(cx, &m) {
                     cx.log(LogLevel::Warning, e);
                 }
@@ -302,6 +348,7 @@ impl Venue for BitunixFutures {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Private(read) => self.account_item(cx, read, item),
             Pending::Markets { rows, invalid } => match serde_json::from_str::<Pair<'_>>(item) {
                 Ok(m) => {
                     if m.symbol_status == "OPEN"
@@ -371,6 +418,13 @@ impl Venue for BitunixFutures {
         }
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
+        let pending = match pending {
+            Pending::Private(read) => {
+                self.account_response(cx, read, response);
+                return;
+            }
+            other => other,
+        };
         if !(200..300).contains(&response.status) {
             self.on_request_failed(cx, pending, &format!("Bitunix HTTP {}", response.status));
             return;
@@ -404,6 +458,7 @@ impl Venue for BitunixFutures {
                 invalid: false,
             } => {
                 cx.store.set_tickers(rows);
+                self.private_start(cx);
                 let symbols: Vec<_> = cx
                     .store
                     .markets()
@@ -436,6 +491,10 @@ impl Venue for BitunixFutures {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
+            Pending::Private(read) => {
+                cx.log(LogLevel::Warning, error);
+                self.debounce(cx, read.axis);
+            }
             Pending::Candles { command } => cx.done(command, Err(error.into())),
             _ => {
                 cx.log(LogLevel::Error, error);
@@ -444,6 +503,9 @@ impl Venue for BitunixFutures {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account_timer(cx, timer) {
+            return;
+        }
         if self.retry == Some(timer) {
             self.retry = None;
             if cx.store.loaded().markets {
@@ -476,13 +538,19 @@ impl Venue for BitunixFutures {
         }
         if let Some(i) = self.sockets.iter().position(|s| s.watchdog == Some(timer)) {
             let s = &mut self.sockets[i];
-            if cx.now - s.received >= 45_000.0 {
+            if cx.now - s.received >= 45_000.0
+                && (!matches!(s.feed, Feed::Private) || !s.opened || s.pong_observed)
+            {
                 let id = s.id;
                 cx.close(id);
                 self.on_close(cx, id, 1006);
             } else {
                 if s.opened {
-                    cx.send(s.id, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));
+                    if matches!(s.feed, Feed::Private) {
+                        cx.send(s.id, r#"{"op":"ping"}"#);
+                    } else {
+                        cx.send(s.id, format!(r#"{{"ping":{}}}"#, num::format(cx.now)));
+                    }
                 }
                 s.watchdog = Some(cx.set_timer(15_000.0));
             }

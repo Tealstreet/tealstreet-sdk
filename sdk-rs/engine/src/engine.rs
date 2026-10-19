@@ -546,7 +546,10 @@ impl<V: Venue> Engine<V> {
                 status,
                 headers: headers.to_owned(),
                 splitter,
-                envelope: matches!(at, Some(ArrayAt::FieldEnvelope(_))),
+                envelope: matches!(
+                    at,
+                    Some(ArrayAt::FieldEnvelope(_) | ArrayAt::AnyFieldEnvelope(_))
+                ),
                 body: Vec::new(),
             },
         );

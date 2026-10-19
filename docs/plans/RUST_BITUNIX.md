@@ -60,3 +60,37 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   10 engine tests and doc tests PASS. Browser host ordering test added.
 - Environment: corepack is in Volta node 24.21.0 bin; prepend it to PATH.
 - Full venue gates remain pending phases 2–5. No gate numbers claimed yet.
+
+
+### Workspace nesting checkpoint
+
+- Merged `origin/feat/rust-rewrite` at b32847fca6 in b218c4f417; adopted
+  automatic `venues/*`, engine/crypto and hosts paths. Preserved phase-2 WIP
+  using named stash ef104f904eab6a3fb85ccf179e3a8e4ba5e39ce3 and restored it.
+- Phase-1 new host test PASS. Full JS host suite waits for wasm build: existing
+  Workers test cannot load the not-yet-generated bundle.
+- Crypto audit `public_review`: wallet_utils and zklink/contract have no
+  external callers or tests. Removing these first-port facades, keeping
+  signing primitives and their independent vectors.
+- Phase-2 review `private_review` found alias/null handling, snapshot ordering,
+  cached terminal resurrection, parent/virtual-leg corruption, private silent
+  heartbeat, wrapped balance extraction, cumulative fills, settings and WS
+  signing whitespace issues. Fixes and regressions in progress; not ready.
+
+### Phase 2 checkpoint
+
+- Implemented double-SHA256 REST/WS auth, account object/array/wrapper reads,
+  streamed position/order wrappers, settings and position identities, regular
+  and compound TP/SL mapping, startup/tick/debounce reconciliation, stale read
+  serials/generations and terminal guards, cumulative execution deduplication.
+- `realizedPNL` is carried verbatim, net of fees and funding; regression pins
+  -3.5 with independent fee/funding fields. TS missing live fills and failed
+  reconciliation clearing state are intentional corrections to list in the
+  harness allowlist during phase 5, and in the final change report.
+- Review fixes include REST advancement of execution baseline, rejecting
+  identity-free order rows, updating native TP/SL protection metadata and
+  ignoring delayed updates after terminal events.
+- Verification: venue clippy PASS; 1 signing + 7 account + 7 public tests and
+  10 engine tests PASS; crypto suite 28 unit + 1 independent integration PASS.
+  Added another malformed-order snapshot regression before final phase run.
+- Remaining phases: trading, queries, harness/gates and integration.

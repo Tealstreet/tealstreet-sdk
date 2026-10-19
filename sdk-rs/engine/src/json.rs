@@ -106,6 +106,8 @@ pub enum ArrayAt {
     Field(&'static str),
     /// Stream this field, returning the envelope with an empty array on completion.
     FieldEnvelope(&'static str),
+    /// First matching array inside a versioned venue envelope.
+    AnyFieldEnvelope(&'static [&'static str]),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -175,7 +177,11 @@ impl ArraySplitter {
 
     pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
         for &byte in data {
-            if matches!(self.at, ArrayAt::FieldEnvelope(_)) && self.phase != Phase::InArray {
+            if matches!(
+                self.at,
+                ArrayAt::FieldEnvelope(_) | ArrayAt::AnyFieldEnvelope(_)
+            ) && self.phase != Phase::InArray
+            {
                 if self.envelope.len() < 65_536 {
                     self.envelope.push(byte);
                 } else {
@@ -208,14 +214,24 @@ impl ArraySplitter {
             match byte {
                 b'"' => {
                     self.in_string = true;
-                    if self.phase == Phase::Seeking && self.depth == 1 {
+                    if self.phase == Phase::Seeking
+                        && (self.depth == 1 || matches!(self.at, ArrayAt::AnyFieldEnvelope(_)))
+                    {
                         self.key.clear();
                         self.capturing_key = true;
                         self.armed = false;
                     }
                 }
-                b':' if self.phase == Phase::Seeking && self.depth == 1 => {
-                    self.armed = matches!(self.at, ArrayAt::Field(name) | ArrayAt::FieldEnvelope(name) if name.as_bytes() == self.key);
+                b':' if self.phase == Phase::Seeking => {
+                    self.armed = match self.at {
+                        ArrayAt::AnyFieldEnvelope(names) => {
+                            names.iter().any(|name| name.as_bytes() == self.key)
+                        }
+                        ArrayAt::Field(name) | ArrayAt::FieldEnvelope(name) => {
+                            self.depth == 1 && name.as_bytes() == self.key
+                        }
+                        ArrayAt::Root => false,
+                    };
                     continue;
                 }
                 b'[' | b'{' => {
@@ -224,6 +240,7 @@ impl ArraySplitter {
                         let found = byte == b'['
                             && match self.at {
                                 ArrayAt::Root => self.depth == 1,
+                                ArrayAt::AnyFieldEnvelope(_) => self.armed,
                                 ArrayAt::Field(_) | ArrayAt::FieldEnvelope(_) => {
                                     self.armed && self.depth == 2
                                 }
@@ -242,7 +259,10 @@ impl ArraySplitter {
                             self.invalid = true;
                         }
                         self.emit(&mut on_item);
-                        if matches!(self.at, ArrayAt::FieldEnvelope(_)) {
+                        if matches!(
+                            self.at,
+                            ArrayAt::FieldEnvelope(_) | ArrayAt::AnyFieldEnvelope(_)
+                        ) {
                             self.envelope.push(b']');
                         }
                         self.phase = Phase::Done;

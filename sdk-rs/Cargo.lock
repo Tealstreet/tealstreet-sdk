@@ -3611,6 +3611,7 @@ dependencies = [
 name = "safe-cex-venue-bitunix"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "safe-cex-crypto",
  "safe-cex-engine",
  "serde",
