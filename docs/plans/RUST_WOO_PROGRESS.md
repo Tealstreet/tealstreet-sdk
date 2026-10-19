@@ -196,3 +196,13 @@ Independent integration review PASS; 152 strict harness tests PASS.
 - Bans, formatting, workspace native clippy, root typecheck (44 tasks) and lint
   (28 tasks) PASS. Final combined SDK tests, Binance feature-bundle regressions,
   PR adversarial reviews and CI remain before landing.
+
+## Ready for PR
+
+All brief gates pass on `3511c66f44` plus this evidence commit. The combined
+wasm SDK suite passes 27 tests and Workers host passes 25. Binance feature
+bundle public replay passes 873 frames, 917 markets, 783 tickers, three books:
+CPU 244.5 → 126.2 ms, steady 140.1 → 56.5 ms, retained 4.3 → 2.4 MB. Binance
+private passes 14 frames. WOO/combined/Binance builds all succeed. No performance
+normalizer or threshold was changed. Proceed to PR into feat/rust-rewrite,
+adversarial local reviews posted on the PR, fixes/rereviews and green CI.
