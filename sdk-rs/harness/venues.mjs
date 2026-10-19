@@ -1,10 +1,15 @@
-import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
+import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
-import { requestKey } from './requests.mjs';
+import { subscriptionKeys } from './requests.mjs';
 
 const root = '../../packages/safe-cex/src/exchanges';
+
+// Replay transport and signing clocks both default to wall-clock milliseconds.
+const validWeexTimestamp = (time, now) => typeof time === 'string' && /^\d+$/.test(time)
+  && Number.isSafeInteger(Number(time)) && Number(time) > 0
+  && Number.isFinite(now) && Math.abs(Number(time) - now) <= 30_000;
 
 // Public deterministic replay credentials, never a funded account.
 const backpackSeed = Buffer.alloc(32, 7);
@@ -29,12 +34,16 @@ const backpackInstructions = {
   'GET /wapi/v1/history/orders': 'orderHistoryQueryAll',
   'GET /wapi/v1/history/funding': 'fundingHistoryQueryAll',
 };
-const verifyBackpackSubscribe = (message) => {
+const validBackpackTime = (timestamp, window, now) => /^\d+$/.test(String(timestamp ?? ''))
+  && /^\d+$/.test(String(window ?? '')) && Number.isSafeInteger(Number(timestamp)) && Number(timestamp) > 0
+  && Number.isSafeInteger(Number(window)) && Number(window) > 0 && Number(window) <= 60000
+  && Math.abs(Number(timestamp) - now) <= Number(window);
+const verifyBackpackSubscribe = (message, now = Date.now()) => {
   if (!(message.params ?? []).some((p) => p.startsWith('account.')) || message.method !== 'SUBSCRIBE') return true;
   const [key, signature, timestamp, window] = message.signature ?? [];
   return (
     key === backpackKey &&
-    window === '5000' &&
+    window === '5000' && validBackpackTime(timestamp, window, now) &&
     verify(
       null,
       Buffer.from(`instruction=subscribe&timestamp=${timestamp}&window=${window}`),
@@ -43,15 +52,16 @@ const verifyBackpackSubscribe = (message) => {
     )
   );
 };
-const verifyBackpack = ({ method, url, headers, body }) => {
+const verifyBackpack = ({ method, url, headers, body, now = Date.now() }) => {
   const parsed = new URL(url);
   const instruction = backpackInstructions[`${method} ${parsed.pathname}`];
   if (!instruction) return true;
   const h = Object.fromEntries(
     (Array.isArray(headers) ? headers : Object.entries(headers ?? {})).map(([k, v]) => [k.toLowerCase(), String(v)]),
   );
-  if (h['x-api-key'] !== backpackKey || h['x-broker-id'] !== '1200') return false;
-  const params = method === 'GET' ? Object.fromEntries(parsed.searchParams) : JSON.parse(body ?? '{}');
+  if (h['x-api-key'] !== backpackKey || h['x-broker-id'] !== '1200'
+    || !validBackpackTime(h['x-timestamp'], h['x-window'], now)) return false;
+  const params = method === 'GET' ? Object.fromEntries(parsed.searchParams) : parseRequestJson(body ?? '{}');
   const rows = Array.isArray(params) ? params : [params];
   const pieces = rows.map(
     (row) =>
@@ -104,6 +114,34 @@ const okx = (name) => ({
   compareFillPrices: true,
 });
 
+// MEXC accepts snowflake IDs as either JSON numbers or strings. Keep every
+// economic field's JSON type and every caller-provided client ID exact.
+export const mexcRequestBody = (body, { url = '' } = {}) => {
+  const ids = new Set(['id', 'orderId', 'positionId']);
+  const visit = (value, key = '') => {
+    if (ids.has(key) || (key === '<root-id>' && /\/private\/order\/cancel$/.test(new URL(url).pathname))) {
+      if (JSON.isRawJSON(value)) return value.rawJSON;
+      if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+    }
+    if (JSON.isRawJSON(value)) return value;
+    if (Array.isArray(value)) return value.map((item) => visit(item, key === '' ? '<root-id>' : key));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, visit(v, k)]));
+    return value;
+  };
+  return visit(body);
+};
+export const mexcRequestUrl = (url) => {
+  const parsed = new URL(url);
+  const params = parsed.searchParams;
+  if (parsed.hostname === 'api.mexc.com' && /^\/api\/v1\/private\/(planorder|stoporder)\/list\/orders$/.test(parsed.pathname)
+    && (params.get('states') === '1' || params.get('is_finished') === '0')
+    && /^\d+$/.test(params.get('start_time') ?? '') && /^\d+$/.test(params.get('end_time') ?? '')) {
+    params.set('start_time', String(BigInt(params.get('start_time')) - BigInt(params.get('end_time'))));
+    params.set('end_time', 'now');
+  }
+  return parsed.href;
+};
+
 export const VENUES = {
   bitget: {
     rust: 'bitget',
@@ -132,6 +170,9 @@ export const VENUES = {
   },
   backpack: {
     rust: 'backpack',
+    ignoreGeneratedBodyId: (key, value, callerIds, context) => key === 'clientId' && !callerIds.has(String(value))
+      && context?.method === 'POST' && /^\/api\/v1\/orders?$/.test(new URL(context.url).pathname)
+      && typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 0xffff_ffff,
     ts: { module: `${root}/backpack/backpack.exchange.ts`, className: 'BackpackExchange', name: 'backpack' },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depth.')).length >= count,
@@ -153,8 +194,49 @@ export const VENUES = {
     compareFillPrices: true,
     isWrite: (method) => method !== 'GET',
   },
+
+  hyperliquid: {
+    rust: 'hyperliquid',
+    ts: { module: `${root}/hyperliquid/hyperliquid.exchange.ts`, className: 'HyperliquidExchange', name: 'hyperliquid' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('l2Book.')).length >= count,
+    privateSocket: undefined,
+    publicOptions: { key: '' },
+    recordOptions: { publicDataOnly: true, key: '' },
+  },
   blofin: {
     rust: 'blofin',
+    blofinProtocol: true,
+    validateSocketMessage(socket, text, now = Date.now()) {
+      if (text === 'ping' || text === 'pong') return;
+      const frame = JSON.parse(text);
+      if (frame.op === 'subscribe' && new URL(socket.url).pathname === '/ws/private' && !socket.loginAcknowledged)
+        throw new Error('BloFin subscriptions preceded valid login acknowledgement');
+      if (frame.op !== 'login') return;
+      const arg = frame.args?.length === 1 ? frame.args[0] : {};
+      const { apiKey, passphrase, timestamp, nonce, sign } = arg ?? {};
+      if (!validWeexTimestamp(String(timestamp), now) || apiKey !== 'replay-key' || passphrase !== 'replay-passphrase'
+        || typeof nonce !== 'string' || !nonce.length) throw new Error('invalid BloFin socket login');
+      const expected = Buffer.from(createHmac('sha256', 'replay-secret')
+        .update(`/users/self/verifyGET${timestamp}${nonce}`).digest('hex')).toString('base64');
+      if (sign !== expected) throw new Error('invalid BloFin socket signature');
+      socket.loginVerified = true;
+    },
+    validateSocketFrame(socket, text) {
+      if (text === 'pong') return;
+      const frame = JSON.parse(text);
+      if (frame.event === 'login' && String(frame.code) === '0') {
+        if (!socket.loginVerified) throw new Error('BloFin login acknowledgement preceded valid login');
+        socket.loginAcknowledged = true;
+      }
+    },
+    requestUrl(url) {
+      const parsed = new URL(url);
+      if (parsed.pathname === '/api/v1/market/instruments') {
+        for (const [key, value] of parsed.searchParams) if (value === '') parsed.searchParams.delete(key);
+      }
+      return parsed.href;
+    },
     ts: { module: `${root}/blofin/blofin.exchange.ts`, className: 'BlofinExchange', name: 'blofin' },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('books.')).length >= count,
@@ -170,10 +252,25 @@ export const VENUES = {
   },
   mexc: {
     rust: 'mexc',
+    mexcProtocol: true,
+    requestBody: mexcRequestBody,
+    requestUrl: mexcRequestUrl,
+    generatedBodyId: (key) => key === 'externalOid',
+    validateSocketMessage(socket, text, now = Date.now()) {
+      const frame = JSON.parse(text);
+      if (frame.method !== 'login') return;
+      const { apiKey, reqTime, signature } = frame.param ?? {};
+      if (!validWeexTimestamp(reqTime, now) || apiKey !== 'replay-key'
+        || signature !== createHmac('sha256', 'replay-secret').update(`${apiKey}${reqTime}`).digest('hex')) {
+        throw new Error('invalid MEXC socket login');
+      }
+      socket.loginVerified = true;
+    },
+    validateSocketFrame(socket, text) {
+      const frame = JSON.parse(text);
+      if (frame.channel === 'rs.login' && frame.data === 'success' && !socket.loginVerified) throw new Error('MEXC login acknowledgement preceded valid login');
+    },
     matchRequestBody: true,
-    canonicalIntegerStrings: true,
-    ignoredBodyFields: ['externalOid', 'requestId'],
-    rollingListWindows: true,
     ts: { module: `${root}/mexc/mexc.exchange.ts`, className: 'MexcExchange', name: 'mexc' },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depth.')).length >= count,
@@ -199,7 +296,9 @@ export const VENUES = {
       count,
     privateSocket: '?listenKey=',
     matchRequestBody: true,
-    requestKey: (method, url, body, callerIds) => requestKey(method, url, body, callerIds),
+    bingxProtocol: true,
+    // BingX owns one listener per URL; resubscriptions must recur on reconnect.
+    subscriptionGenerations: true,
   },
   weex: {
     rust: 'weex',
@@ -223,25 +322,20 @@ export const VENUES = {
         };
       }
     },
-    validateRequest({ method, url, body = '', headers = {} }) {
+    validateRequest({ method, url, body = '', headers = {}, now = Date.now() }) {
       const parsed = new URL(url);
       if (parsed.pathname.startsWith('/capi/v3/market/')) return;
       const lookup = (name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
       const time = lookup('ACCESS-TIMESTAMP');
-      const signature = createHmac('sha256', 'replay-secret')
-        .update(`${time}${method}${parsed.pathname}${parsed.search}${body || ''}`)
-        .digest('base64');
-      if (
-        lookup('ACCESS-KEY') !== 'replay-key' ||
-        lookup('ACCESS-PASSPHRASE') !== 'replay-passphrase' ||
-        lookup('ACCESS-SIGN') !== signature
-      )
-        throw new Error(`invalid WEEX signed request: ${method} ${parsed.pathname}`);
+      if (!validWeexTimestamp(time, now)) throw new Error('invalid WEEX authentication timestamp');
+      const signature = createHmac('sha256', 'replay-secret').update(`${time}${method}${parsed.pathname}${parsed.search}${body || ''}`).digest('base64');
+      if (lookup('ACCESS-KEY') !== 'replay-key' || lookup('ACCESS-PASSPHRASE') !== 'replay-passphrase' || lookup('ACCESS-SIGN') !== signature) throw new Error(`invalid WEEX signed request: ${method} ${parsed.pathname}`);
     },
-    validateSocket(url, headers = {}) {
+    validateSocket(url, headers = {}, now = Date.now()) {
       if (!url.includes('/v3/ws/private')) return;
       const lookup = (name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
       const time = lookup('ACCESS-TIMESTAMP');
+      if (!validWeexTimestamp(time, now)) throw new Error('invalid WEEX authentication timestamp');
       const signature = createHmac('sha256', 'replay-secret').update(`${time}/v3/ws/private`).digest('base64');
       if (
         lookup('ACCESS-KEY') !== 'replay-key' ||
@@ -258,8 +352,9 @@ export const VENUES = {
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('book.')).length >= count,
     privateSocket: '/exchange/v1/user',
     matchRequestBody: true,
-    requestBodyParams: true,
-    requestBody: (body) => body?.params ?? body,
+    cryptoProtocol: true,
+    // Authentication is validated separately; economic params stay exact.
+    requestBody: (body) => body?.method && body?.params ? body.params : body,
     publicTickers: (records) => {
       const seed = records.find((r) => r.type === 'http' && r.url.endsWith('/public/get-instruments'));
       return seed
@@ -323,6 +418,8 @@ export const VENUES = {
             for (const channel of frame.params.channels) state.channels.delete(channel);
           } else if (frame.method === 'public/respond-heartbeat') {
             if (!state.heartbeats.delete(frame.id)) failures.push('unexpected heartbeat response id');
+          } else {
+            failures.push('unexpected outbound WS method ' + frame.method);
           }
         },
         ready() {
@@ -423,13 +520,9 @@ export const VENUES = {
     startupSubscriptions: (records, books) => {
       const symbols = new Set();
       for (const record of records) {
-        if (
-          record.type !== 'http' ||
-          record.method !== 'GET' ||
-          !(record.status >= 200 && record.status < 300) ||
-          new URL(record.url).pathname !== '/v5/market/instruments-info'
-        )
-          continue;
+        if (record.type !== 'http' || record.method !== 'GET' || !(record.status >= 200 && record.status < 300)) continue;
+        const url = new URL(record.url);
+        if (url.pathname !== '/v5/market/instruments-info' || (url.searchParams.has('category') && url.searchParams.get('category') !== 'linear')) continue;
         const body = JSON.parse(record.body);
         if (Number(body.retCode) !== 0) continue;
         for (const row of body.result?.list ?? []) {
@@ -437,10 +530,10 @@ export const VENUES = {
             symbols.add(row.symbol);
         }
       }
-      const socket = 'wss://stream.bybit.com/v5/public/linear subscribe ';
-      return [...symbols]
-        .map((symbol) => `${socket}tickers.${symbol}`)
-        .concat(books.map((symbol) => `${socket}orderbook.1000.${symbol}`));
+      const socket = records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/v5/public/linear')?.url
+        ?? 'wss://stream.bybit.com/v5/public/linear';
+      return subscriptionKeys(socket, { op: 'subscribe', args: [...symbols].map((symbol) => `tickers.${symbol}`)
+        .concat(books.map((symbol) => `orderbook.1000.${symbol}`)) });
     },
     privateSocket: '/v5/private',
     tsRejectReason: (order) =>

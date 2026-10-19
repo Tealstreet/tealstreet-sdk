@@ -108,12 +108,15 @@ export function buildBitgetInverseTape() {
     ['BTC', 'inverse-btc-created', '300', '49000', 'caller:inverse-btc'],
     ['ETH', 'inverse-eth-created', '400', '2400', 'caller:inverse-eth'],
   ]) {
-    http('POST', '/api/v2/mix/order/batch-place-order', '', {
+    const batch = http('POST', '/api/v2/mix/order/batch-place-order', '', {
       successList: [{ orderId: id, clientOid: caller }], failureList: [],
     }, {
       symbol: `${base}USD`, productType: 'coin-futures', marginCoin: base, marginMode: 'crossed',
       orderList: [{ size, price, side: 'buy', orderType: 'limit', force: 'gtc', reduceOnly: 'NO', clientOid: caller }],
     });
+    // The shared TS formatter sends enum "cross". The documented native wire
+    // value remains "crossed"; only this declared TS request differs.
+    batch.tsRequestBody = { ...batch.requestBody, marginMode: 'cross' };
   }
   const createdBtc = normal('inverse-btc-created', 'BTCUSD', '300', '49000', 'caller:inverse-btc');
   const createdEth = normal('inverse-eth-created', 'ETHUSD', '400', '2400', 'caller:inverse-eth');

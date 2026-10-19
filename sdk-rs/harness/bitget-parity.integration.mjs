@@ -17,9 +17,9 @@ test('UTA tape requires the documented trailing payload before consuming a write
   const wrong = structuredClone(native.requestBody);
   wrong.trailingStopParams[0].trailVariance = '500';
   assert.equal(tape.respond('POST', native.url, wrong).status, 599);
-  assert.equal(tape.unusedWrites, 1);
+  assert.equal(tape.unusedWrites(), 1);
   assert.equal(tape.respond('POST', native.url, native.requestBody).status, 200);
-  assert.equal(tape.unusedWrites, 0);
+  assert.equal(tape.unusedWrites(), 0);
 });
 
 for (const usdc of [false, true]) {

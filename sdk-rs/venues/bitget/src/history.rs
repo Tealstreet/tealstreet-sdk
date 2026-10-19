@@ -244,6 +244,13 @@ impl BitgetFutures {
             return;
         }
         let (from, to) = match &query {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    command,
+                    Err("Bitget client-order-id query is not supported".into()),
+                );
+                return;
+            }
             Query::Fills { from_ms, to_ms, .. }
             | Query::OrderHistory { from_ms, to_ms, .. }
             | Query::Income { from_ms, to_ms, .. } => (*from_ms, *to_ms),
@@ -321,6 +328,13 @@ impl BitgetFutures {
         let public = matches!(r.query, Query::PublicTrades { .. });
         r.uta = self.account.uta;
         let (endpoint, symbol, order, limit) = match &r.query {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    r.command,
+                    Err("Bitget client-order-id query is not supported".into()),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 order_id,
@@ -445,6 +459,10 @@ impl BitgetFutures {
             return;
         }
         let requested = match &r.query {
+            Query::OrderByClientId { .. } => {
+                r.invalid = true;
+                return;
+            }
             Query::Fills { symbol, .. }
             | Query::OrderHistory { symbol, .. }
             | Query::Income { symbol, .. } => symbol.as_deref(),
@@ -454,6 +472,9 @@ impl BitgetFutures {
             return;
         }
         match &r.query {
+            Query::OrderByClientId { .. } => {
+                r.invalid = true;
+            }
             Query::Fills { order_id, .. } => {
                 if order_id
                     .as_ref()

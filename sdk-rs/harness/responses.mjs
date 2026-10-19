@@ -1,57 +1,51 @@
-import { isRead, takeResponse } from './requests.mjs';
+import { isWriteRequest, selectResponse } from './requests.mjs';
 import { parseRequestJson } from './request-json.mjs';
 
 // Reads may reuse their last snapshot; a mutation response is consumed once.
 export class Responses {
-  constructor(records, key, check, isWrite, checkUnusedWrites = true) {
+  constructor(records, key, check, isWrite) {
     this.key = key;
     this.check = check;
-    this.isWrite = isWrite ?? ((method, url) => !isRead(method, url));
-    this.checkUnusedWrites = checkUnusedWrites;
+    this.isWrite = isWrite ?? isWriteRequest;
     this.unserved = 0;
     this.queues = new Map();
-    for (const original of records.filter((r) => r.type === 'http')) {
-      // Both tape spellings guard visibility; callers of the factory need not
-      // normalize records through replay.mjs first.
-      const record = original.effectiveAt !== undefined && original.availableAfter === undefined
-        ? { ...original, availableAfter: original.effectiveAt }
-        : original;
+    for (const record of records.filter((r) => r.type === 'http')) {
       const id = key(record.method, record.url, record.requestBody);
       if (!this.queues.has(id)) this.queues.set(id, []);
       this.queues.get(id).push(record);
     }
   }
   respond(method, url, body, commandIndex = 0, timeOrMatch = 0, matchTime = 0) {
-    // Preserve the incoming time argument and the factory's pre-consumption
-    // validation hook. A rejected generated ID must leave its write available.
     const onMatch = typeof timeOrMatch === 'function' ? timeOrMatch : undefined;
-    const time = onMatch ? matchTime : timeOrMatch;
+    const elapsed = onMatch ? matchTime : timeOrMatch;
     const queue = this.check?.(method, url, body) === false ? undefined : this.queues.get(this.key(method, url, body));
+    if (!queue?.length) {
+      this.unserved++;
+      return { status: 599, body: '' };
+    }
     const candidates = onMatch && queue ? [...queue] : queue;
-    const record = takeResponse(candidates, method, url, time, commandIndex, !this.isWrite(method, url));
+    const record = selectResponse(candidates, elapsed, { commandIndex, write: this.isWrite(method, url) });
     if (!record) {
       this.unserved++;
       return { status: 599, body: '' };
     }
-    onMatch?.(record);
+    if (onMatch) {
+      try { onMatch(record); }
+      catch (error) { this.unserved++; throw error; }
+    }
+    // WEEX acknowledges generated IDs from the actual request, never a fixed ID.
     let responseBody = record.body;
-    if (typeof responseBody === 'string' && /"\$(clientAlgoId|newClientOrderId)"/.test(responseBody)) {
-      const sent = !body
-        ? {}
-        : typeof body === 'string'
-          ? parseRequestJson(body)
-          : ArrayBuffer.isView(body) || body instanceof ArrayBuffer
-            ? parseRequestJson(new TextDecoder().decode(body))
-            : body;
-      responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId)"/g, (_match, field) =>
-        JSON.stringify(sent[field] ?? null),
-      );
+    if (/"\$(clientAlgoId|newClientOrderId)"/.test(responseBody)) {
+      const wireBody = ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : body;
+      const sent = typeof wireBody === 'string' ? parseRequestJson(wireBody) : wireBody;
+      responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId)"/g,
+        (_, field) => JSON.stringify(sent?.[field] ?? null,
+          (_key, value) => typeof value === 'bigint' ? JSON.rawJSON(String(value)) : value));
     }
     if (onMatch && candidates.length !== queue.length) queue.splice(queue.indexOf(record), 1);
     return { status: record.status, headers: record.headers ?? '', body: responseBody };
   }
   unusedWrites() {
-    if (!this.checkUnusedWrites) return 0;
     return [...this.queues.values()].flat().filter((r) => this.isWrite(r.method, r.url)).length;
   }
 }

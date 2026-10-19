@@ -293,7 +293,12 @@ impl History {
         command: u32,
         query: Query,
     ) {
-        if credentials.is_none() && !matches!(query, Query::PublicTrades { .. }) {
+        if credentials.is_none()
+            && !matches!(
+                query,
+                Query::PublicTrades { .. } | Query::OrderByClientId { .. }
+            )
+        {
             cx.done(command, Ok("[]".into()));
             return;
         }
@@ -311,6 +316,13 @@ impl History {
             timer: None,
         };
         match query {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    command,
+                    Err("BingX client order lookup is not supported by the Rust engine".into()),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 order_id,

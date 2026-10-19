@@ -140,3 +140,20 @@ green final-head CI. No stash, rebase, force push or master changes.
   tests and the private overlap tape; USDT public gates cover shared hot paths.
 - Root typecheck44, lint28 and test27 tasks PASS. Harness113 and Worker/wire26
   tests PASS; native workspace and final WASM/CI checks are running.
+
+## Landing integration
+
+- Integrated Hyperliquid landing5c47683969 under standing merge authorization.
+  Kept incoming optional venue features, 11-venue registrations, single-venue
+  build/matrix and unchanged1,258,291-byte per-venue browser budget.
+- Kept incoming shared strict request/write-sequence transport. Inverse batch
+  fixtures explicitly declare TS cross versus native crossed; no global spelling
+  normalization. Retained direct collateral/native-extra comparisons and native
+  integration signature/protocol counters under the new Tape method API.
+- Incoming measurement model samples after runtime/host construction, validates
+  absolute counters and net arithmetic, permits signed component deltas and waits
+  for backing-buffer stability. Retained that landing model; strict CPU/steady
+  CPU/total-memory comparisons remain. Pre-merge numbers above are not final.
+- Independent registration/feature and Bitget engine/query merge audits clear;
+  nativeBitget123, sharedharness147 and nativecontractintegration4 tests PASS.
+  Final rebuilt per-venue measurements and final-head CI remain required.
