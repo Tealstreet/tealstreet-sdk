@@ -217,3 +217,9 @@ source coercion/getter order, strict argument comparison and original row identi
 The native index_lookup_binding tests and maintained AST index-lookup-source.mjs
 cover poisoned unrelated fields, live method replacement, sparse/captured-length
 filtering, custom filter/replace receivers and original thrown identity.
+
+Shared WebSocket message handlers now borrow the canonical `Js` frame graph.
+Restore retained ingress once per frame, preserve it across all callbacks, and
+project only reached typed output fields; see exchange/WS_CONTRACT.md and the
+actual-source/native retained-handler witnesses. Do not reintroduce Value frame
+projections or a second callback registry.

@@ -5,7 +5,7 @@ use super::{
 use safe_cex_exchange::{
     OwnedOperation,
     exchange::BaseExchange,
-    js_runtime::value::{Js, from_json},
+    js_runtime::value::Js,
     runtime::{ExchangeError, ListenerCleanup},
     websocket::{BaseWebSocket, MessageHandler},
 };
@@ -149,7 +149,7 @@ pub(crate) fn listen_ohlcv(
     let trade_topic = secondary.clone();
     let emit = callback.clone();
     let parser: MessageHandler = Rc::new(move |frame| {
-        let data = from_json(frame).get("data")?;
+        let data = frame.get("data")?;
         let raw = super::candles::first_candle(&data)?;
         let Some(candle) = crate::candle_mapping::apply_kline(&mut state.borrow_mut(), &raw)?
         else {
@@ -169,7 +169,7 @@ pub(crate) fn listen_ohlcv(
     let primary_topic = topic.clone();
     let trade_topic = secondary.clone();
     let trades: MessageHandler = Rc::new(move |frame| {
-        let trade = from_json(frame).get("data")?.get("0")?;
+        let trade = frame.get("data")?.get("0")?;
         let time = trade.get("T")?;
         let price = trade.get("p")?;
         let volume = trade.get("v")?;

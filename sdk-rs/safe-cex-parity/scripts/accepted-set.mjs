@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { inventory } from './accepted-inventory.mjs';
+import { requirePendingNativeInputs } from './accepted-pending-native-inputs.mjs';
 import { loadContracts, defaultContractDirectory } from './accepted-contract-files.mjs';
 import { runProbes } from './accepted-probes.mjs';
 import { reviewedLocalHelper, reviewedGenericDecoderHelper, requireNativeDecoderObservations } from './accepted-local-helpers.mjs';
@@ -87,6 +88,11 @@ for (const pkg of members) {
   const defaultTraits = args.some(arg => arg.startsWith('--workspace=')) ? {} : loadPolicy('default-traits');
   const receiverTraits = args.some(arg => arg.startsWith('--workspace=')) ? {} : loadPolicy('receiver-traits');
   const result = inventory(doc, { defaultTraits, receiverTraits, readSource: file => fs.readFileSync(path.resolve(root, file)) });
+  const canonicalWorkspace = fs.realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'));
+  const nativePending = root === canonicalWorkspace
+    ? JSON.parse(fs.readFileSync(new URL('../accepted-set/new-native-input-owners.json', import.meta.url)))
+    : {version: 1, owners: []};
+  requirePendingNativeInputs(pkg.name, result.types, allContracts, nativePending);
   let nativeEntry;
   if (target.kind.includes('bin') && configuration.target === 'native') {
     const mains = doc.index[String(doc.root)].inner.module.items.map(id => doc.index[String(id)]).filter(item => item?.name === 'main' && item.inner.function);
