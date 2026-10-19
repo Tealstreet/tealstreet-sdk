@@ -5,6 +5,9 @@ import os
 from pathlib import Path
 import subprocess
 
+if not __debug__:
+    raise RuntimeError('compiled registry controls require Python assertions')
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--logs', type=Path, required=True)
 args = parser.parse_args()
