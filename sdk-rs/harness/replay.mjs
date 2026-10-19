@@ -12,6 +12,7 @@ import { axiosClients, venueOf } from './venues.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { retainedMemory } from './memory.mjs';
 import { Responses } from './responses.mjs';
+import { SocketSubscriptions } from './subscriptions.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -113,7 +114,7 @@ class Tape {
   }
 
   connect(url, onOpen, onMessage) {
-    const socket = { url, onMessage, closed: false, loginVerified: false, topics: new Map() };
+    const socket = { url, onMessage, closed: false, loginVerified: false, topics: new SocketSubscriptions() };
     setImmediate(() => {
       if (socket.closed) return;
       // Bybit adds a generated requestId to each connection URL.
@@ -162,26 +163,8 @@ class Tape {
   }
 
   assertSubscribed(socket, message) {
-    if (!(venue.validateSubscriptions ?? venue.validateLogin) || !message.arg?.channel || !Array.isArray(message.data)) return;
-    const topics = [...socket.topics.values()].filter((topic) => topic.channel === message.arg.channel);
-    // Some documented messages put instId only on each data row, not arg.
-    const rows = message.data.length ? message.data : [null];
-    for (const row of rows) {
-      const object = row && !Array.isArray(row) && typeof row === 'object' ? row : {};
-      const covered = topics.some((topic) => Object.entries(topic).every(([key, value]) => {
-        if (key === 'channel') return true;
-        if (key === 'instType' && value === 'ANY') return true;
-        const values = [message.arg[key], object[key]].filter((v) => v !== undefined && v !== '');
-        if (!values.length && key === 'instType') {
-          const id = object.instId ?? message.arg.instId;
-          if (id?.endsWith('-SWAP')) values.push('SWAP');
-        }
-        return values.length > 0 && values.every((v) => v === value);
-      }));
-      if (!covered) {
-        throw new Error(`Unsubscribed ${message.arg.channel} frame on ${socket.url}: ${JSON.stringify(message.arg)}${object.instId ? ` instId=${object.instId}` : ''}`);
-      }
-    }
+    if (!(venue.validateSubscriptions ?? venue.validateLogin)) return;
+    socket.topics.assertSubscribed(socket, message);
   }
 
   assertWritesConsumed() {

@@ -145,3 +145,32 @@ is complete. Controlled before/after public runs and seven final private tapes
 are running; the first baseline OKX run passes (1.08x CPU, 1.70x retained memory)
 under stable collection, illustrating why earlier exploratory memory results
 must not be mixed with final measurements.
+
+### Benchmark fidelity corrections
+
+Discard the first four-family "controlled" before table: a shared Cargo target
+reused current engine artifacts, despite an older WASM host source. Rebuilt the
+control in a separate target directory, removed every workspace fingerprint from
+cloned third-party caches, and audited all 84 Rust files against pinned landing
+`e6e410146e3a` (same Rust behavior as `c63c3e5670`). Build logs prove all seven
+workspace crates compiled from baseline paths. Aggregate is exactly 1687019
+bytes, SHA256 b85246870021d46ed8295b3c4b0242f7e7d20a27a510d9c761c3e5ef4b28a60a;
+it has no batching export or new allocation helpers. Main artifacts unchanged.
+
+Profiling also located dominant *shared harness* CPU: old subscription coverage
+scanned 2472 topics for every frame, costing 456.28 ms CPU for the actual OKX
+fixture. Candidate indexing costs 6.79 ms with the identical final predicate,
+wildcard semantics, insertion/error ordering, duplicate replacement and strict
+unsubscribe. Frozen-old-oracle differential checks, 600 deterministic mutations
+and the entire fixture pass; all 12 harness tests pass. Nothing is skipped or
+normalized. Both control and current runs use this same final harness, stable
+GC accounting and recorded cadence; all comparison numbers are being rerun.
+
+Subscription index passed independent review and all 12 harness tests; no checks
+or normalized fields changed. The malformed-result edge now rejects its pending
+command rather than leaving it unresolved; all 25 host tests pass.
+
+First valid isolated-control/final-harness comparison, three-run medians:
+OKX CPU 1.49x -> 1.81x, retained memory 1.60x -> 1.89x (Rust 209.2 -> 167.8 ms;
+WASM 1.4 -> 1.0 MB). Other three family comparisons remain in progress. Full
+repository verification is green: 44 typecheck tasks, 28 lint, 27 test tasks.

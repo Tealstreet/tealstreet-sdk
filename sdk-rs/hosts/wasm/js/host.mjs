@@ -278,7 +278,13 @@ export class EngineHost {
         this.commands.delete(action.command);
         if (!pending) break;
         if (action.error !== undefined) pending.reject(new Error(action.error));
-        else pending.resolve(action.result === undefined ? undefined : JSON.parse(action.result));
+        else {
+          try {
+            pending.resolve(action.result === undefined ? undefined : JSON.parse(action.result));
+          } catch (error) {
+            pending.reject(error);
+          }
+        }
         break;
       }
       default:

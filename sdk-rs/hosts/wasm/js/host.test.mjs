@@ -162,6 +162,20 @@ test('outbound action failures reject and remove their pending command', async (
   f.host.dispose();
 });
 
+test('malformed command results reject their promise and preserve subsequent actions', async () => {
+  const f = fixture();
+  let logged = false;
+  f.host.handlers.onLog = () => { logged = true; };
+  f.engine.command = (json) => JSON.stringify([
+    { op: 'done', command: JSON.parse(json).command, result: '{' },
+    { op: 'log', level: 'info', message: 'after malformed result' },
+  ]);
+  await assert.rejects(f.host.command({ op: 'fetchCandles' }), SyntaxError);
+  assert.equal(f.host.commands.size, 0);
+  assert.equal(logged, true);
+  f.host.dispose();
+});
+
 test('a throwing disposal callback returns the command cancellation without a hidden rejection', async () => {
   const f = fixture();
   f.engine.command = () => JSON.stringify([{ op: 'log', level: 'error', message: 'stop' }]);

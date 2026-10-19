@@ -265,9 +265,12 @@ are ~450 KB/s for two 1,000-level books).
 
 - Bans, fmt, clippy, native tests, wasm32 build and clippy.
 - Replay gate (`rust.yml`, job "replay gate"): release wasm with the pinned
-  wasm-bindgen, a 1.2 MB size budget, the committed public fixture
-  (`harness/fixtures/`) gated on identical output and lower CPU and memory,
-  and the generated private tape gated on identical account state.
+  wasm-bindgen, one module per venue family and fixed size budgets in
+  `harness/wasm-budgets.json`. Every committed public fixture is gated on
+  identical output and lower CPU and retained memory; private tapes gate
+  identical account state, requests and command results. Memory includes JS
+  backing buffers plus WASM, with stable GC outside the CPU window. Equal
+  recorded timestamps preserve network bursts on both implementations.
 
 ### 8. Remaining venues — in progress
 
