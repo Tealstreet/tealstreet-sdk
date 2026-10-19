@@ -61,7 +61,35 @@ Three separately compiled corruptions must fail the named native comparison:
 count capture-only requests, skip counter writes, or notify Store subscribers
 while recording. Byte-exact restoration must pass after each control.
 
-Nine of the 27 Store rows are reconciled here. The other 18 Store rows and the
+## Request-start and socket auth diagnostics
+
+| Census row | Verdict | Production observation and reason |
+| --- | --- | --- |
+| 455 `markRestRequestStart` | FIX | Both native Axios factories omitted the source request-start property before terminal dispatch. They now stamp the original native config after request accounting, using integer Date.now milliseconds. A read-only timestamp keeps its prior value and does not fail the request, matching the source telemetry catch. The typed diagnostic adapter is not used to project the live config. |
+| 451 `isAuthOperationObject` | ACCEPT | The actual socket diagnostic send/receive paths parse a wire string into own JSON data before testing the four operation fields. With the stock object prototype none of those four keys is inherited, and wire JSON cannot encode getters or custom prototypes. All source auth decisions survive; the core redactor now calls the existing shared predicate instead of maintaining a duplicate condition. This does not authorize arbitrary-object projection elsewhere. |
+
+The native `js_runtime::audit_request_start_stamp_reaches_adapter_and_preserves_best_effort_writes`
+witness compares both real factory paths with maintained TS and installed Axios
+across 32 profiles: four epochs and fresh, writable, read-only and own-undefined
+read-only properties. It observes the timestamp before dispatch and on the
+original interceptor config, exact binary64 bits, one send and interceptor order.
+The compiled baseline fails on the absent property before the production repair.
+The source adapter receives Axios's flattened config; the test does not claim
+adapter/config identity or arbitrary accessor traversal equivalence.
+
+`websocket::tests::audit_auth_operation_own_data_reaches_real_socket_diagnostics`
+compares 44 maintained-source profiles through both actual BaseWebSocket emitters.
+All four operation keys cover auth/non-auth strings, absent-string shapes and
+nested argument redaction. The 88 emitted channel/message pairs preserve the
+public sibling and source auth scope. The baseline already passes, supporting
+ACCEPT rather than claiming a repaired predicate decision.
+
+Four separately compiled controls remove the routed timestamp, remove the direct
+timestamp, propagate a read-only telemetry error, or disable the shared auth
+predicate. Each fails its named binding assertion, and byte-exact restoration of
+the production file passes before the next control.
+
+Eleven of the 27 Store rows are reconciled here. The other 16 Store rows and the
 separate num row remain assigned for later batches.
 
 
