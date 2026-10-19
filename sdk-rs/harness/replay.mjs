@@ -5,7 +5,7 @@
 //   node --expose-gc sdk-rs/harness/replay.mjs --impl rust --tape <file>
 import { readFileSync } from 'node:fs';
 import { createTape, within, ReplayClock, replayStoreReady } from './tape.mjs';
-import { setTimeout as realTimeout } from 'node:timers';
+import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
@@ -295,6 +295,7 @@ async function runRust() {
     subscriptions: [...tape.subscriptions].sort(),
     unusedWrites: tape.unusedWrites,
     protocolErrors: tape.audit?.errors() ?? [],
+    wsRequests: [...tape.sentRequests].sort(),
     store: { markets: marketRows, tickers: tickerRows },
     books: bookRows,
     account,
@@ -321,6 +322,8 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   }
   const settingRows = [];
   for (let i = 0; i < (settings?.count ?? 0); i++) {
+    // TS has no margin-only placeholder; frames retain it for actual consumers.
+    if (!venue.independentLeverage && !(settings.leverage[i] > 0)) continue;
     settingRows.push({
       symbol: symbol(settings.market[i]),
       marginType: settings.marginType(i),
@@ -554,6 +557,7 @@ async function runTs() {
     subscriptions: [...tape.subscriptions].sort(),
     unusedWrites: tape.unusedWrites,
     protocolErrors: tape.audit?.errors() ?? [],
+    wsRequests: [...tape.sentRequests].sort(),
     store: snapshot,
     books: bookCopies,
     account,
@@ -574,7 +578,7 @@ async function runTsCommand(exchange, store, record) {
       return [];
     case 'amendOrder': {
       const order = store.orders.find((o) => o.id === args.id);
-      if (!order) throw new Error(`unknown order ${args.id}`);
+      if (!order) throw new Error(values.venue === 'mexc' ? `Order ${args.id} not found` : `unknown order ${args.id}`);
       const update = Object.fromEntries(
         ['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]),
       );
@@ -666,6 +670,7 @@ writeFileSync(
     subscriptions: result.subscriptions,
     unusedWrites: result.unusedWrites,
     protocolErrors: result.protocolErrors,
+    wsRequests: result.wsRequests,
     metrics: result.metrics,
     markets: result.store.markets.map(marketFields),
     tickers: result.store.tickers.map((t) =>
@@ -679,5 +684,5 @@ writeFileSync(
     commands: result.commands,
   }),
 );
-clearTimeout(replayDeadline);
+realClearTimeout(replayDeadline);
 process.exit(0);

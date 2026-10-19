@@ -467,3 +467,23 @@ cryptocom: main-thread cpu  ts    108.6 ms   rust     72.4 ms   1.50x; steady cp
 okx: main-thread cpu  ts    572.1 ms   rust    495.8 ms   1.15x; steady cpu       ts    421.1 ms   rust    358.1 ms   1.18x; retained memory  ts      5.4 MB   rust      3.4 MB   1.58x
 weex: main-thread cpu  ts    120.1 ms   rust     79.9 ms   1.50x; steady cpu       ts     56.1 ms   rust     33.3 ms   1.68x; retained memory  ts      5.3 MB   rust      2.1 MB   2.53x
 ```
+
+## BloFin landing integration
+
+- Eight-venue head278883674f finished its entire GitHub replay job green.
+  Actual landing ref advanced to d9db55921c (BloFin + MEXC parity follow-up)
+  while CI ran. GitHub's PR baseRefOid remained stale; use the actual branch
+  ref when diagnosing a reported conflict. Merged the new landing normally.
+- Preserved incoming BloFin registrations, request defaults/cache-busters and
+  native numeric/string IDs, independent leverage and margin-only frame fields,
+  WebSocket request oracles, MEXC fixture/history/trailing/income regressions,
+  and its size-oriented crate profiles. Bitget/engine stay optimized at level3.
+- Shared strict factory adds recursive caller-ID collection, BloFin typed keys
+  and normalized opt-in WebSocket request logs; exact Bitget alias/path checks
+  and subscription routing remain. All70harness tests PASS.
+- Incoming retainedMemory formula is unchanged; kept our stronger public heap
+  plus buffer stabilization, private informational sampling, post-settle WASM
+  callback and compiler-worker exclusion. No public threshold relaxation.
+- Registration, parent replay/gate/Cargo and factory reviews are all clear.
+  Nine-venue WASM3,083,413bytes < unchanged3,407,872byte budget. Native and
+  replay regressions plus current-head CI remain required before merge.

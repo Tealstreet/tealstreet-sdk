@@ -175,11 +175,13 @@ export const createTape = (records, venue, isPrivate, { impl, books = [], socket
   const KEY = 'replay-key',
     SECRET = 'replay-secret',
     PASSPHRASE = 'replay-passphrase';
-  const callerIds = new Set(
-    records
-      .filter((r) => r.type === 'command')
-      .flatMap((r) => (r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean)),
-  );
+  const callerIds = new Set();
+  const collectCallerIds = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (typeof value.clientOrderId === 'string') callerIds.add(value.clientOrderId);
+    for (const nested of Object.values(value)) collectCallerIds(nested);
+  };
+  for (const record of records) if (record.type === 'command') collectCallerIds(record);
   /** Per-request values: clocks, signatures, request ids and generated client ids. */
   const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
   const urlKeys = new Map();
@@ -259,7 +261,7 @@ export const createTape = (records, venue, isPrivate, { impl, books = [], socket
   };
   const topicKey = (arg) => `${arg.instType ?? ''}|${arg.channel ?? arg.topic}|${arg.instId ?? arg.symbol ?? ''}`;
   const requestKey = (method, url, body) =>
-    venue.rust === 'bingx'
+    ['bingx', 'blofin'].includes(venue.rust)
       ? nativeRequestKey(method, url, body, callerIds, venue)
       : `${method} ${canonicalUrl(url)}${(bitget || venue.matchRequestBody) && method !== 'GET' ? ` ${canonicalBody(body, url)}` : ''}`;
 
@@ -284,6 +286,7 @@ export const createTape = (records, venue, isPrivate, { impl, books = [], socket
       this.commandIndex = 0;
       this.time = 0;
       this.generated = new Set();
+      this.sentRequests = new Set();
       this.subscriptions = new Set();
       this.startupSubscriptions = new Map(
         Array.from(venue.startupSubscriptions?.(records, books) ?? [], (key) => [key, false]),
@@ -364,6 +367,28 @@ export const createTape = (records, venue, isPrivate, { impl, books = [], socket
     }
 
     send(socket, text) {
+      if (venue.requestBodies && text !== 'ping' && text !== 'pong') {
+        let message;
+        try {
+          message = JSON.parse(text);
+        } catch {
+          /* Literal heartbeats carry no request body. */
+        }
+        const sorted = (value) =>
+          Array.isArray(value)
+            ? value.map(sorted)
+            : value && typeof value === 'object'
+              ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
+                  .map(([key, item]) => [key, sorted(item)]))
+              : value;
+        if (message?.op === 'subscribe' || message?.op === 'unsubscribe') {
+          for (const topic of message.args ?? [])
+            this.sentRequests.add(JSON.stringify({ url: socket.url, op: message.op, topic: sorted(topic) }));
+        } else if (message?.op === 'login') {
+          const args = message.args.map(({ timestamp, nonce, sign, ...credentials }) => sorted(credentials));
+          this.sentRequests.add(JSON.stringify({ url: socket.url, op: 'login', args }));
+        }
+      }
       for (const key of subscriptionKeys(socket.url, text)) {
         this.subscriptions.add(`${socket.generation} ${key}`);
         if (this.startupSubscriptions.get(key) === false) {

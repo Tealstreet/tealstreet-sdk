@@ -415,6 +415,65 @@ test('startup waits for seed subscriptions to reach send and retains per-generat
   assert.deepEqual([...tape.subscriptions], [`1 ${topic}`, `2 ${topic}`]);
 });
 
+test('BloFin factory compares bodies and defaults while retaining nested caller IDs and cache-buster scope', async () => {
+  const { venueOf } = await import('./venues.mjs');
+  const blofin = venueOf('blofin');
+  const place = 'https://openapi.blofin.com/api/v1/trade/order';
+  const instruments = 'https://openapi.blofin.com/api/v1/market/instruments';
+  const caller = 'b3cdedc0a20880baCaller123';
+  const tape = createTape([
+    { type: 'command', nested: { legs: [{ clientOrderId: caller }] } },
+    response({ clientOrderId: caller, size: '1' }, { url: place }),
+    response({ clientOrderId: 'b3cdedc0a20880baMinted1', size: '2', triggerPriceType: 'last' }, { url: place }),
+    response(undefined, { method: 'GET', url: `${instruments}?recorded` }),
+  ], blofin, true);
+  assert.equal(tape.respond('POST', place, { clientOrderId: 'b3cdedc0a20880baWrong', size: '1' }).status, 599);
+  assert.equal(tape.respond('POST', place, { clientOrderId: caller, size: 1 }).status, 599);
+  assert.equal(tape.respond('POST', place, { clientOrderId: caller, size: '1' }).status, 200);
+  assert.equal(tape.respond('POST', place, { clientOrderId: 'b3cdedc0a20880baMinted2', size: '2' }).status, 200);
+  assert.equal(tape.respond('POST', place, { clientOrderId: 'b3cdedc0a20880baMinted3', size: '2' }).status, 599);
+  assert.equal(tape.respond('GET', `${instruments}?runtime`).status, 200);
+  assert.equal(tape.respond('GET', `${instruments}?instType=SWAP`).status, 599);
+  assert.equal(tape.unusedWrites, 0);
+});
+
+test('opt-in WebSocket requests compare login credentials and native topics across batching and key order', () => {
+  const ws = 'wss://openapi.blofin.com/ws/private';
+  const make = () => {
+    const tape = createTape([], { rust: 'blofin', requestBodies: true }, true);
+    return [tape, tape.connect(ws, () => {}, () => {})];
+  };
+  const [first, a] = make();
+  const [second, b] = make();
+  first.send(a, '{"op":"login","args":[{"apiKey":"key","passphrase":"pass","timestamp":"1","nonce":"one","sign":"a"}]}');
+  second.sent(b, '{"args":[{"sign":"b","nonce":"two","timestamp":"2","passphrase":"pass","apiKey":"key"}],"op":"login"}');
+  first.send(a, '{"op":"subscribe","args":[{"channel":"orders","instType":"ANY"},{"channel":"positions"}]}');
+  second.send(b, '{"args":[{"instType":"ANY","channel":"orders"}],"op":"subscribe"}');
+  second.send(b, '{"args":[{"channel":"positions"}],"op":"subscribe"}');
+  first.send(a, 'ping');
+  second.send(b, 'pong');
+  assert.deepEqual([...first.sentRequests].sort(), [...second.sentRequests].sort());
+  assert.equal(first.sentRequests.size, 3);
+  second.send(b, '{"op":"unsubscribe","args":[{"channel":"orders","instType":"ANY"}]}');
+  assert.notDeepEqual([...first.sentRequests].sort(), [...second.sentRequests].sort());
+  const [third, c] = make();
+  third.send(c, '{"op":"login","args":[{"apiKey":"different","passphrase":"pass","timestamp":"1","nonce":"one","sign":"a"}]}');
+  assert.notEqual([...first.sentRequests][0], [...third.sentRequests][0]);
+  const ordinary = createTape([], { rust: 'cryptocom' }, false);
+  ordinary.send(ordinary.connect(ws, () => {}, () => {}), '{"op":"subscribe","args":[{"channel":"orders"}]}');
+  assert.equal(ordinary.sentRequests.size, 0);
+});
+
+test('nested Bitget caller IDs retain exact identity through path-scoped minting', () => {
+  const place = 'https://api.bitget.com/api/v3/trade/place-order';
+  const tape = createTape([
+    { type: 'command', payload: { order: { clientOrderId: 'nested-caller' } } },
+    response({ clientOid: 'nested-caller' }, { url: place }),
+  ], venue, true);
+  assert.equal(tape.respond('POST', place, { clientOid: 'fresh-generated' }).status, 599);
+  assert.equal(tape.respond('POST', place, { clientOid: 'nested-caller' }).status, 200);
+});
+
 // Incoming shared transport cases exercise the same venue-aware factory.
 {
 const mexcTape = (records, { isPrivate = false } = {}) => createTape(records, { rust: 'mexc', matchRequestBody: true }, isPrivate);
