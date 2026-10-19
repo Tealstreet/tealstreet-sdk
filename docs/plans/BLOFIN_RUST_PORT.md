@@ -467,3 +467,33 @@ artifact from `3aa26dc83a`, using Node22.23.3 and three public medians:
   exceeds inherited2,621,440. Evaluate size profiles on WEEX/BingX with shared
   engine/BloFin/OKX/serde_json O3 unchanged, then require all public CPU/memory
   gates and private parity on that exact artifact. No budget increase.
+
+### Seven-venue gate checkpoint
+
+All required venue-port brief gates PASS after `10789e0d54`: bans, fmt, native
+venue tests/clippy, wasm clippy/build, BloFin public/private and Binance public/
+private regressions. All seven public fixtures also PASS on the final artifact
+using Node22.23.3 and three-run medians:
+
+| Public fixture | Frames | TS/Rust CPU ms | TS/Rust steady ms | TS/Rust retained MB |
+| --- | ---: | ---: | ---: | ---: |
+| BloFin | 2,764 | 209.004 /197.145 | 134.620 /123.186 | 3.231000 /1.942176 |
+| Binance | 871 | 249.966 /125.936 | 145.719 /56.455 | 4.152240 /2.250544 |
+| Bybit | 8,742 | 502.958 /384.792 | 303.414 /204.795 | 6.238064 /2.465232 |
+| Crypto.com | 2,177 | 182.109 /145.028 | 125.391 /80.878 | 1.885088 /1.441040 |
+| OKX | 8,902 | 1163.972 /1009.309 | 889.206 /739.757 | 5.117976 /3.489096 |
+| WEEX | 2,028 | 233.324 /166.047 | 137.541 /83.753 | 5.052968 /2.189176 |
+| BingX | 188 | 151.829 /112.052 | 71.761 /55.437 | 3.532088 /2.063640 |
+
+- Final release2,580,836bytes below inherited2,621,440. WEEX/BingX compact
+  profiles pass CPU/memory; restore Crypto.com O3 after compact profile failed
+  total CPU98.6/98.8ms (TS/Rust). Engine/BloFin/OKX/Crypto.com/serde_json stay O3;
+  host/Binance/Bybit/WEEX/BingX use measured size profiles. No budget increase.
+- Native engine/venue452, SDK wasm20, JS host12 and harness33 tests pass.
+  Root typecheck44/lint28, native/wasm clippy, fmt and bans pass. BloFin29 and
+  Binance14 private correctness pass; additional shared private variants finish
+  alongside final PR CI. All checks must pass before merge.
+- Three independent final cross-reviews have no concrete blockers: exact caller
+  IDs/default refs/staging/unused writes; per-side leverage/wire fallback and SDK
+  hooks; retained order/fill identities across store/index/interner changes.
+  Plan/proof committed; final CI and remaining private results go on PR1300.
