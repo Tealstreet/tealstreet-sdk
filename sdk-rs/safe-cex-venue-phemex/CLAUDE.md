@@ -274,3 +274,10 @@ unsubscribe cleanup, and 12 recorded pong payloads with controlled elapsed times
 Public pingAt and the base pong comparison both use the canonical performance
 clock; snapshot throttling continues to use the wall clock. HTTP telemetry and
 the shared JS-facade handler-stats reader are separately assigned work.
+
+REST ticker construction follows the maintained literal, including percentage
+before openInterest and fundingTime before volume. Grouping numeric fields and
+appending the remaining fields changes observable own-key and getter order.
+The real startup regression compares native Store/payload keys and numeric bits
+with the maintained parser; a real stream insertion is its independent positive
+control. The typed Ticker serializer is not the ingress order authority.

@@ -537,3 +537,9 @@ and omitted while good rows survive. See HISTORY_OUTPUT_REVIEW.md.
 The constructed public socket stats regression verifies tickers, BBOs, mark prices
 and the original 260-frame tape's pong bytes through the shared live-table reader.
 WOO uses `SocketCore`, so #1218 covers its registration without a venue mirror.
+
+The constructed legacy startup ticker-order probe in binding_reads compares
+actual market/ticker HTTP, canonical Store rows and prepared native payloads with
+the maintained WOOXExchange parser. Index precedes mark and openInterest stays
+last. This post-#1248 positive covers that ingress/output path; typed SDK returns
+and inactive V3 producers remain separate surfaces.
