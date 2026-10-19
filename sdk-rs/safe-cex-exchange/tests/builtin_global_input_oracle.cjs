@@ -27,4 +27,10 @@ const from = tags.filter(tag => tag !== 'undefined').map(tag => ({
 const entries = ['text', 'surrogate', 'number', 'null', 'symbol'].map(tag => ({
   tag, ...error(() => new Map([input(tag)])),
 }));
-process.stdout.write(JSON.stringify({callbacks, from, entries}));
+const executors = tags.filter(tag => !['object', 'poison', 'array'].includes(tag)).map(tag => ({
+  tag, ...error(() => new Promise(input(tag))),
+}));
+const executorObjects = ['object', 'poison', 'array'].map(tag => ({
+  tag, ...error(() => new Promise(input(tag))),
+}));
+process.stdout.write(JSON.stringify({callbacks, from, entries, executors, executorObjects}));

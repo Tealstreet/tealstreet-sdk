@@ -5344,4 +5344,25 @@ mod builtin_global_input_contracts {
             "SOURCE_MAP_ENTRY_DIAGNOSTICS"
         );
     }
+    #[test]
+    fn installed_promise_executor_validation_keeps_primitive_diagnostics() {
+        let expected = oracle();
+        let (_runtime, shared) = scoped_globals();
+        let constructor = shared.globals.get("Promise").unwrap();
+        let mut rows = vec![];
+        for row in expected["executors"].as_array().unwrap() {
+            let reads = Rc::new(std::cell::Cell::new(0));
+            let mut actual = error(
+                constructor.construct(vec![input(row["tag"].as_str().unwrap(), &reads)], None),
+            );
+            actual["tag"] = row["tag"].clone();
+            actual["reads"] = json!(reads.get());
+            rows.push(actual);
+        }
+        assert_eq!(
+            json!(rows),
+            expected["executors"],
+            "SOURCE_PROMISE_EXECUTOR_DIAGNOSTICS"
+        );
+    }
 }
