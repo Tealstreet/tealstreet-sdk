@@ -163,3 +163,26 @@ JSON mappers remain supplemental tests, with no production fallback through them
 
 This batch reconciles all seven rows retained by codex-0w5ohi. The twelve rows
 delegated to codex-0efu4x retain that owner's separate milestones and verdicts.
+
+
+## Delegated private trade filter: row 35 FIX
+
+The production private-frame handler took a dense snapshot before invoking the
+live category selector. A selector replacing a later row therefore delivered the
+old row, unlike the maintained `rowsThisConnectionTrades` member. The native
+binding now calls the original array filter member. The shared array algorithm
+captures the initial length, skips absent indices and reads later rows after
+each preceding callback. Its completed result feeds the existing event consumers.
+
+`binding::delegated_socket_tests::private_filter_reads_live_indices_through_real_frame_binding`
+constructs primary and demo exchanges and enters through their real private
+socket. Fourteen profiles check callback order, selected count and original row
+identity under replacement, deletion, truncation, appends, sparse input and false
+selectors. The seven corresponding maintained-member profiles run directly from
+`scripts/private-filter-fixtures.cjs`. Existing account-category, dedicated
+Spot/Inverse and typed event/output guards stay in place. Independent compiled
+snapshot and ignored-selector faults must fail the named real-frame witness;
+`private-filter-controls.py` restores exact source bytes and requires GREEN.
+
+This milestone reconciles delegated row35. Rows6/16 retain their separate #1198
+history milestone; the other nine delegated rows remain open.

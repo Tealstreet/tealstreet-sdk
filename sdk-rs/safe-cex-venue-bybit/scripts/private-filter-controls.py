@@ -7,7 +7,7 @@ sdk=crate.parent
 source=crate/'src/ws_private/messages.rs'
 original=source.read_bytes()
 text=original.decode()
-env=dict(os.environ,CARGO_INCREMENTAL='0',SAFE_CEX_TYPESCRIPT_PATH=os.environ.get('SAFE_CEX_TYPESCRIPT_PATH','/Users/sam/cs/tealstreet-sdk/node_modules/typescript'))
+env=dict(os.environ,CARGO_INCREMENTAL='0')
 command=['cargo','test','--locked','--jobs','2','-p','safe-cex-venue-bybit','--all-features','--lib','private_filter_reads_live_indices_through_real_frame_binding','--','--nocapture']
 controls=[
  ('snapshot-indices','let accepted = rows.call_method(', 'let snapshot = Js::array(rows.array_values()?.unwrap_or_default());\n        let accepted = snapshot.call_method('),
@@ -17,7 +17,7 @@ records=[]
 def run(label):
     log=Path('/tmp/bybit-private-filter-'+label+'.log')
     with log.open('w') as stream:
-        result=subprocess.run(command,cwd=sdk,env=env,stdout=stream,stderr=subprocess.STDOUT)
+        result=subprocess.run(command,cwd=sdk,env=env,stdout=stream,stderr=subprocess.STDOUT,timeout=600)
     return result.returncode,log,log.read_text()
 try:
     for name,old,new in controls:

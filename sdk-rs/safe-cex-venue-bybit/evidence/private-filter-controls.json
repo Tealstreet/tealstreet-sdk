@@ -1,0 +1,26 @@
+{
+  "source_sha256": "9ed3432b55563d73393da1b40ea596e413c3713d32d0153d28a23ac2d6fd2ab5",
+  "executed": 2,
+  "controls": [
+    {
+      "control": "snapshot-indices",
+      "compiled_runtime_red": true,
+      "red_log": "/tmp/bybit-private-filter-snapshot-indices-red.log",
+      "red_sha256": "5e6cc059a62803ba6f117230022c5f04754ee122b1c355877503de970885ba35",
+      "exact_restore": true,
+      "green": true,
+      "green_log": "/tmp/bybit-private-filter-snapshot-indices-restore-green.log",
+      "green_sha256": "a265e05b094c5f7cf25b7232bc379db1f3cef46dca2418f07f3812961e6d4925"
+    },
+    {
+      "control": "ignore-selector",
+      "compiled_runtime_red": true,
+      "red_log": "/tmp/bybit-private-filter-ignore-selector-red.log",
+      "red_sha256": "d2583b791278699b76f168bcdd25ded2854154c38f3cbc055978bfff4a226c42",
+      "exact_restore": true,
+      "green": true,
+      "green_log": "/tmp/bybit-private-filter-ignore-selector-restore-green.log",
+      "green_sha256": "a093f7d4eb21ed2da6aef0b9fd634cdf54ea79b54bcfb5183010517b36c85b1d"
+    }
+  ]
+}

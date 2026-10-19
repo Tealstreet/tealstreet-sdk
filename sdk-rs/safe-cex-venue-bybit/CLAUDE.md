@@ -996,3 +996,10 @@ metadata plus primary/Spot ticker parsing without a whole-input JSON projection.
 `retained_audit_*` observes held startup, original cache/lookup identity, UTF-16,
 nonfinite bits and visible cache rejection. Placement extension refusal stays
 strictly input-only; malformed market strings remain row-only decision3 refusals.
+
+
+Private trade gating uses the retained array's original `filter` member before
+projecting the completed selection for event delivery. Do not snapshot input rows
+before `tradesCategoryOf`: it is a live callback and can replace, delete or truncate
+later indices. The dedicated socket audit runs seven maintained-source profiles
+and fourteen actual primary/demo frame profiles with original row identity.
