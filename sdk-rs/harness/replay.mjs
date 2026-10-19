@@ -45,20 +45,29 @@ class ReplayTimeout extends Error {}
 const within = async (promise, ms, label) => {
   let timer;
   try {
-    return await Promise.race([promise, new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new ReplayTimeout(`${label} exceeded ${ms} ms`)), ms);
-    })]);
-  } finally { clearTimeout(timer); }
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new ReplayTimeout(`${label} exceeded ${ms} ms`)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 };
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
 const isPrivate = records.some((r) =>
-  venue.isPrivateRecord ? venue.isPrivateRecord(r) : Boolean(venue.privateSocket && r.url?.includes(venue.privateSocket)),
+  venue.isPrivateRecord
+    ? venue.isPrivateRecord(r)
+    : Boolean(venue.privateSocket && r.url?.includes(venue.privateSocket)),
 );
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 const PASSPHRASE = 'replay-passphrase';
-const callerIds = new Set(records.flatMap((r) => r.type === 'command' ? (r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean) : []));
+const callerIds = new Set(
+  records.flatMap((r) => (r.type === 'command' ? (r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean) : [])),
+);
 
 /** Per-request values: clocks, signatures, request ids and generated client ids. */
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
@@ -83,16 +92,23 @@ const canonicalBody = (body) => {
   let parsed = body;
   try {
     if (typeof body === 'string') parsed = JSON.parse(body);
-    else if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) parsed = JSON.parse(new TextDecoder().decode(body));
-  } catch { return String(body); }
+    else if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer)
+      parsed = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    return String(body);
+  }
   const sorted = (value) => {
     if (Array.isArray(value)) return value.map(sorted);
     if (value === null || typeof value !== 'object') return value;
-    const keys = Object.keys(value).filter((key) => value[key] !== undefined && !(venue.volatileBodyFields && VOLATILE.has(key))).sort();
-    return Object.fromEntries(keys.map((key) => [
-      key,
-      !callerIds.has(value[key]) && venue.generatedBodyId?.(key, value[key]) ? '<generated>' : sorted(value[key]),
-    ]));
+    const keys = Object.keys(value)
+      .filter((key) => value[key] !== undefined && !(venue.volatileBodyFields && VOLATILE.has(key)))
+      .sort();
+    return Object.fromEntries(
+      keys.map((key) => [
+        key,
+        !callerIds.has(value[key]) && venue.generatedBodyId?.(key, value[key]) ? '<generated>' : sorted(value[key]),
+      ]),
+    );
   };
   return JSON.stringify(sorted(parsed));
 };
@@ -165,7 +181,9 @@ class Tape {
       return;
     }
     if (venue.respondToPing && text === 'ping') {
-      setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
+      setImmediate(() => {
+        if (!socket.closed) socket.onMessage('pong');
+      });
       return;
     }
     // OKX's opt-in auth validation also uses its v5 subscription argument model.
@@ -175,7 +193,8 @@ class Tape {
     if (validateTopics && ['subscribe', 'unsubscribe'].includes(message.op)) {
       if (!Array.isArray(message.args)) throw new Error(`Invalid subscription on ${socket.url}`);
       for (const topic of message.args) {
-        if (!topic || typeof topic.channel !== 'string' || !topic.channel) throw new Error(`Invalid subscription topic on ${socket.url}`);
+        if (!topic || typeof topic.channel !== 'string' || !topic.channel)
+          throw new Error(`Invalid subscription topic on ${socket.url}`);
         const key = JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
         if (message.op === 'subscribe') socket.topics.set(key, topic);
         else socket.topics.delete(key);
@@ -186,8 +205,13 @@ class Tape {
     if (message.op !== 'login') return;
     const arg = message.args?.length === 1 ? message.args[0] : undefined;
     const timestamp = String(arg?.timestamp ?? '');
-    if (arg?.apiKey !== KEY || arg?.passphrase !== PASSPHRASE || !/^\d+$/.test(timestamp)
-      || !Number.isSafeInteger(Number(timestamp)) || Math.abs(Number(timestamp) - Date.now() / 1000) > 30) {
+    if (
+      arg?.apiKey !== KEY ||
+      arg?.passphrase !== PASSPHRASE ||
+      !/^\d+$/.test(timestamp) ||
+      !Number.isSafeInteger(Number(timestamp)) ||
+      Math.abs(Number(timestamp) - Date.now() / 1000) > 30
+    ) {
       throw new Error(`Invalid OKX login credentials/timestamp on ${socket.url}`);
     }
     const expected = createHmac('sha256', SECRET).update(`${timestamp}GET/users/self/verify`).digest('base64');
@@ -200,32 +224,36 @@ class Tape {
   }
 
   assertSubscribed(socket, message) {
-    if (!(venue.validateSubscriptions ?? venue.validateLogin) || !message.arg?.channel || !Array.isArray(message.data)) return;
+    if (!(venue.validateSubscriptions ?? venue.validateLogin) || !message.arg?.channel || !Array.isArray(message.data))
+      return;
     const topics = [...socket.topics.values()].filter((topic) => topic.channel === message.arg.channel);
     // Some documented messages put instId only on each data row, not arg.
     const rows = message.data.length ? message.data : [null];
     for (const row of rows) {
       const object = row && !Array.isArray(row) && typeof row === 'object' ? row : {};
-      const covered = topics.some((topic) => Object.entries(topic).every(([key, value]) => {
-        if (key === 'channel') return true;
-        if (key === 'instType' && value === 'ANY') return true;
-        const values = [message.arg[key], object[key]].filter((v) => v !== undefined && v !== '');
-        if (!values.length && key === 'instType') {
-          const id = object.instId ?? message.arg.instId;
-          if (id?.endsWith('-SWAP')) values.push('SWAP');
-        }
-        return values.length > 0 && values.every((v) => v === value);
-      }));
+      const covered = topics.some((topic) =>
+        Object.entries(topic).every(([key, value]) => {
+          if (key === 'channel') return true;
+          if (key === 'instType' && value === 'ANY') return true;
+          const values = [message.arg[key], object[key]].filter((v) => v !== undefined && v !== '');
+          if (!values.length && key === 'instType') {
+            const id = object.instId ?? message.arg.instId;
+            if (id?.endsWith('-SWAP')) values.push('SWAP');
+          }
+          return values.length > 0 && values.every((v) => v === value);
+        }),
+      );
       if (!covered) {
-        throw new Error(`Unsubscribed ${message.arg.channel} frame on ${socket.url}: ${JSON.stringify(message.arg)}${object.instId ? ` instId=${object.instId}` : ''}`);
+        throw new Error(
+          `Unsubscribed ${message.arg.channel} frame on ${socket.url}: ${JSON.stringify(message.arg)}${object.instId ? ` instId=${object.instId}` : ''}`,
+        );
       }
     }
   }
 
   assertWritesConsumed() {
     if (!venue.matchRequestBody) return;
-    const missing = [...this.responses].flatMap(([key, rows]) =>
-      key.startsWith('GET ') ? [] : rows.map(() => key));
+    const missing = [...this.responses].flatMap(([key, rows]) => (key.startsWith('GET ') ? [] : rows.map(() => key)));
     if (missing.length) throw new Error(`${missing.length} taped write(s) were not sent:\n${missing.join('\n')}`);
   }
 
@@ -244,10 +272,14 @@ class Tape {
    */
   async play(onTick, ready = async () => {}, runCommand = async () => {}) {
     const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
-    await within((async () => {
-      for (const url of urls) await this.socketFor(url);
-      await ready(false);
-    })(), 15_000, 'Replay startup');
+    await within(
+      (async () => {
+        for (const url of urls) await this.socketFor(url);
+        await ready(!venue.bootstrapPrivateFromTape);
+      })(),
+      15_000,
+      'Replay startup',
+    );
     const start = performance.now();
     let delivered = 0;
     const warm = Math.floor(this.frames.length / 4);
@@ -260,15 +292,25 @@ class Tape {
       if (frame.type === 'command') {
         await within(ready(true), 15_000, 'Account readiness');
         this.commandIndex++;
-        this.results.push(await within(runCommand(frame), 15_000, `Command ${frame.op}`).then((ids) => ({ ok: ids }), (error) => {
-          if (error instanceof ReplayTimeout) throw error;
-          return { error: String(error?.message ?? error) };
-        }));
+        this.results.push(
+          await within(runCommand(frame), 15_000, `Command ${frame.op}`).then(
+            (ids) => ({ ok: ids }),
+            (error) => {
+              if (error instanceof ReplayTimeout) throw error;
+              return { error: String(error?.message ?? error) };
+            },
+          ),
+        );
       } else {
         const socket = await this.socketFor(frame.url);
         if ((venue.validateLogin || venue.validateSubscriptions) && frame.text.trimStart().startsWith('{')) {
           const message = JSON.parse(frame.text);
-          if (venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified) {
+          if (
+            venue.validateLogin &&
+            message.event === 'login' &&
+            String(message.code) === '0' &&
+            !socket.loginVerified
+          ) {
             throw new Error(`Taped login success preceded a valid login on ${frame.url}`);
           }
           this.assertSubscribed(socket, message);
@@ -334,7 +376,19 @@ const sortBook = (book) => ({
   asks: book.asks.map(({ price, amount }) => [price, amount]),
 });
 
-const tickerFields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume', 'openInterest'];
+const tickerFields = [
+  'bid',
+  'ask',
+  'last',
+  'mark',
+  'index',
+  'percentage',
+  'fundingRate',
+  'fundingTime',
+  'volume',
+  'quoteVolume',
+  'openInterest',
+];
 const marketFields = (m) => ({
   id: m.id,
   symbol: m.symbol,
@@ -388,9 +442,15 @@ async function runRust() {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
-  const options = { ...venue.options, ...replayOptions, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }) };
+  const options = {
+    ...venue.options,
+    ...replayOptions,
+    ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }),
+  };
   const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
-    onLog: (level, message) => { if (level === 'error') console.error(message); },
+    onLog: (level, message) => {
+      if (level === 'error') console.error(message);
+    },
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
       const received = values['no-egress'] ? buffer : structuredClone(buffer, { transfer: [buffer] });
@@ -405,7 +465,13 @@ async function runRust() {
       status = frame.status() ?? status;
       const executed = frame.fills();
       for (let i = 0; i < (executed?.count ?? 0); i++) {
-        fills.push({ market: executed.market[i], side: executed.side[i], amount: executed.rows[i * 2 + 1], price: executed.rows[i * 2], id: executed.orderId(i) });
+        fills.push({
+          market: executed.market[i],
+          side: executed.side[i],
+          amount: executed.rows[i * 2 + 1],
+          price: executed.rows[i * 2],
+          id: executed.orderId(i),
+        });
       }
     },
   });
@@ -424,8 +490,9 @@ async function runRust() {
       }
     },
     async (accountReady) => {
-      const ready = () => accountReady ? (status?.loaded ?? 0) === allLoaded : ((status?.loaded ?? 0) & 12) === 12;
-      if (isPrivate) await until(ready, `Rust loaded state ${accountReady ? 'account' : 'public'}; unserved=${tape.unserved}`);
+      const ready = () => (accountReady ? (status?.loaded ?? 0) === allLoaded : ((status?.loaded ?? 0) & 12) === 12);
+      if (isPrivate)
+        await until(ready, `Rust loaded state ${accountReady ? 'account' : 'public'}; unserved=${tape.unserved}`);
     },
     (record) => {
       const { op, ...rest } = record;
@@ -472,11 +539,18 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, unserved: tape.unserved, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return {
+    frames,
+    metrics,
+    unserved: tape.unserved,
+    store: { markets: marketRows, tickers: tickerRows },
+    books: bookRows,
+    account,
+    commands: tape.results,
+  };
 }
 
 const commandArgs = ({ t, type, ...args }) => args;
-
 
 /** Main-thread view of the account, rebuilt from the latest frame tables. */
 function rustAccount({ markets, orders, positions, balance, settings, status, fills }) {
@@ -495,7 +569,11 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   }
   const settingRows = [];
   for (let i = 0; i < (settings?.count ?? 0); i++) {
-    settingRows.push({ symbol: symbol(settings.market[i]), leverage: settings.leverage[i], marginType: settings.marginType(i) });
+    settingRows.push({
+      symbol: symbol(settings.market[i]),
+      leverage: settings.leverage[i],
+      marginType: settings.marginType(i),
+    });
   }
   return {
     hedged: status?.hedged ?? false,
@@ -503,7 +581,13 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
     orders: orderRows,
     positions: positionRows,
     settings: settingRows,
-    fills: fills.map((f) => ({ id: f.id, symbol: symbol(f.market), side: f.side === 0 ? 'buy' : 'sell', amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
+    fills: fills.map((f) => ({
+      id: f.id,
+      symbol: symbol(f.market),
+      side: f.side === 0 ? 'buy' : 'sell',
+      amount: f.amount,
+      ...(venue.compareFillPrices ? { price: f.price } : {}),
+    })),
   };
 }
 
@@ -538,7 +622,9 @@ async function runTs() {
     removeEventListener(type, fn) {
       this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
     }
-    send(text) { tape.send(this.socket, text); }
+    send(text) {
+      tape.send(this.socket, text);
+    }
     close() {
       this.readyState = 3;
       this.socket.closed = true;
@@ -565,7 +651,13 @@ async function runTs() {
     return response;
   };
   const store = new DefaultStore();
-  const options = { ...venue.options, ...replayOptions, ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { key: '', secret: '', publicDataOnly: true }) };
+  const options = {
+    ...venue.options,
+    ...replayOptions,
+    ...(isPrivate
+      ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE }
+      : { key: '', secret: '', publicDataOnly: true }),
+  };
   const exchange = new Exchange(venue.ts.name, options, store);
   venue.configureTs?.(exchange);
   const executions = [];
@@ -593,8 +685,10 @@ async function runTs() {
     },
     async (accountReady) => {
       await until(() => venue.tsBooksSubscribed(exchange, bookSymbols.length), 'TS book subscriptions');
-      const loaded = () => accountReady ? Object.values(store.loaded).every(Boolean) : store.loaded.markets && store.loaded.tickers;
-      if (isPrivate) await until(loaded, `TS loaded state ${accountReady ? 'account' : 'public'}; unserved=${tape.unserved}`);
+      const loaded = () =>
+        accountReady ? Object.values(store.loaded).every(Boolean) : store.loaded.markets && store.loaded.tickers;
+      if (isPrivate)
+        await until(loaded, `TS loaded state ${accountReady ? 'account' : 'public'}; unserved=${tape.unserved}`);
     },
     (record) => runTsCommand(exchange, store, record),
   );
@@ -612,44 +706,85 @@ async function runTs() {
   const account = isPrivate
     ? {
         hedged: Boolean(store.options.isHedged),
-        balance: { used: store.balance.used, free: store.balance.free, total: store.balance.total, upnl: store.balance.upnl },
+        balance: {
+          used: store.balance.used,
+          free: store.balance.free,
+          total: store.balance.total,
+          upnl: store.balance.upnl,
+        },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.
         positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
-        settings: [...new Map(store.positions.filter((p) => p.leverage > 0).map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }])).values()],
-        fills: executions.map((f) => ({ id: f.id, symbol: f.symbol, side: f.side, amount: f.amount, ...(venue.compareFillPrices ? { price: f.price } : {}) })),
+        settings: [
+          ...new Map(
+            store.positions
+              .filter((p) => p.leverage > 0)
+              .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
+          ).values(),
+        ],
+        fills: executions.map((f) => ({
+          id: f.id,
+          symbol: f.symbol,
+          side: f.side,
+          amount: f.amount,
+          ...(venue.compareFillPrices ? { price: f.price } : {}),
+        })),
       }
     : undefined;
   exchange.dispose();
-  return { frames, metrics, unserved: tape.unserved, store: snapshot, books: bookCopies, account, commands: tape.results };
+  return {
+    frames,
+    metrics,
+    unserved: tape.unserved,
+    store: snapshot,
+    books: bookCopies,
+    account,
+    commands: tape.results,
+  };
 }
 
 async function runTsCommand(exchange, store, record) {
   const { op, ...args } = commandArgs(record);
   switch (op) {
-    case 'placeOrders': return exchange.placeOrders(args.orders);
+    case 'placeOrders':
+      return exchange.placeOrders(args.orders);
     case 'cancelOrders':
       await exchange.cancelOrders(store.orders.filter((order) => args.ids.includes(order.id)));
       return [];
-    case 'cancelSymbolOrders': await exchange.cancelSymbolOrders(args.symbol); return [];
+    case 'cancelSymbolOrders':
+      await exchange.cancelSymbolOrders(args.symbol);
+      return [];
     case 'amendOrder': {
       const order = store.orders.find((o) => o.id === args.id);
       if (!order) throw new Error(`unknown order ${args.id}`);
-      const update = Object.fromEntries(['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]));
+      const update = Object.fromEntries(
+        ['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]),
+      );
       return exchange.updateOrder({ order, update });
     }
-    case 'setLeverage': await exchange.setLeverage(args.symbol, args.leverage); return [];
-    case 'setMarginType': await exchange.changeMarginType(args.isolated, args.symbol); return [];
-    case 'setPositionMode': await exchange.changePositionMode(args.hedged); return [];
-    case 'fetchFills': return exchange.fetchHistoricalFills(args);
-    case 'fetchOrderHistory': return exchange.fetchHistoricalOrders(args);
+    case 'setLeverage':
+      await exchange.setLeverage(args.symbol, args.leverage);
+      return [];
+    case 'setMarginType':
+      await exchange.changeMarginType(args.isolated, args.symbol);
+      return [];
+    case 'setPositionMode':
+      await exchange.changePositionMode(args.hedged);
+      return [];
+    case 'fetchFills':
+      return exchange.fetchHistoricalFills(args);
+    case 'fetchOrderHistory':
+      return exchange.fetchHistoricalOrders(args);
     case 'fetchIncome': {
       const { from, to, ...options } = args;
       return exchange.fetchIncomeHistory({ ...options, startTime: from, endTime: to });
     }
-    case 'fetchPublicTrades': return exchange.fetchPublicTrades(args.symbol, args.limit);
-    case 'fetchCandles': return exchange.fetchOHLCV(args);
-    default: throw new Error(`unknown command ${op}`);
+    case 'fetchPublicTrades':
+      return exchange.fetchPublicTrades(args.symbol, args.limit);
+    case 'fetchCandles':
+      return exchange.fetchOHLCV(args);
+    default:
+      throw new Error(`unknown command ${op}`);
   }
 }
 
@@ -704,7 +839,9 @@ writeFileSync(
     unserved: result.unserved,
     metrics: result.metrics,
     markets: result.store.markets.map(marketFields),
-    tickers: result.store.tickers.map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, t[f]])])),
+    tickers: result.store.tickers.map((t) =>
+      Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, t[f]])]),
+    ),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
     commands: result.commands,

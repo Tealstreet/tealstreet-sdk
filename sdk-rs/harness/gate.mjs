@@ -23,10 +23,23 @@ mkdirSync(outDir, { recursive: true });
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
-  args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
+  args.push(
+    'sdk-rs/harness/replay.mjs',
+    '--impl',
+    impl,
+    '--venue',
+    values.venue,
+    '--tape',
+    values.tape,
+    '--books',
+    values.books,
+    '--out',
+    out,
+  );
   if (values['no-egress']) args.push('--no-egress');
   const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125_000 });
-  if (result.status !== 0) throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
+  if (result.status !== 0)
+    throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
   return JSON.parse(readFileSync(out, 'utf8'));
 };
 
@@ -36,7 +49,11 @@ const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 const stable = (value) => {
   if (Array.isArray(value)) return value.map(stable);
   if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]));
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, stable(value[key])]),
+  );
 };
 const differences = [];
 const compare = (label, a, b) => {
@@ -59,8 +76,13 @@ const [ts, rust] = [results.ts[0], results.rust[0]];
 const isPrivate = Boolean(ts.account);
 
 const tapeBytes = readFileSync(values.tape);
-const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes).toString().trim().split('\n').map(JSON.parse);
-const instrumentRows = records.filter((r) => r.type === 'http' && new URL(r.url).pathname === '/v5/market/instruments-info')
+const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes)
+  .toString()
+  .trim()
+  .split('\n')
+  .map(JSON.parse);
+const instrumentRows = records
+  .filter((r) => r.type === 'http' && new URL(r.url).pathname === '/v5/market/instruments-info')
   .flatMap((r) => JSON.parse(r.body).result?.list ?? []);
 const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 
@@ -94,8 +116,8 @@ const instruments = new Map(instrumentRows.map((r) => [r.symbol, r]));
 //  - Bybit spot: Rust sends marketUnit=baseCoin for market buys, uses native
 //    spot conditional/amend/cancel families, and rejects unsupported trailing
 //    orders instead of calling derivative position/trading-stop endpoints.
-//  - Hyro: seed cumulative fills from accepted reconnect snapshots; TS starts
-//    its incremental tracker empty and can re-emit the historical partial fill.
+//  - Hyro: seed unseen partial fills from accepted account snapshots; TS can
+//    report pre-snapshot cumulative executions again when the order stream resumes.
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
 const KNOWN_TS_FIXES = {
@@ -126,7 +148,8 @@ const KNOWN_TS_FIXES = {
     KNOWN_TS_FIXES.account(account, rustAccount);
     for (const order of account.orders) {
       const fixed = rustAccount.orders.find((o) => o.id === order.id);
-      if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled') order.rejectReason = 'PostOnly';
+      if (order.rejectReason === null && fixed?.rejectReason === 'PostOnly' && order.status === 'canceled')
+        order.rejectReason = 'PostOnly';
     }
   },
 };
@@ -149,16 +172,22 @@ for (let run = 0; run < runs; run++) {
       const lot = instruments.get(market.symbol)?.lotSizeFilter;
       if (!lot) continue;
       market.precision.amount = Number(lot.qtyStep ?? lot.basePrecision);
-      const maxima = [lot.maxLimitOrderQty, lot.maxMarketOrderQty, lot.maxOrderQty].map(Number).filter((n) => Number.isFinite(n) && n > 0);
+      const maxima = [lot.maxLimitOrderQty, lot.maxMarketOrderQty, lot.maxOrderQty]
+        .map(Number)
+        .filter((n) => Number.isFinite(n) && n > 0);
       if (maxima.length) market.limits.amount.max = Math.min(...maxima);
     }
   }
   const isPrivate = Boolean(ts.account);
   if (isPrivate) {
     if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
-    if (['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue)) KNOWN_TS_FIXES.bybit(ts.account, rust.account);
+    if (['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue))
+      KNOWN_TS_FIXES.bybit(ts.account, rust.account);
     if (values.venue === 'bybitinverse') {
-      const upnl = ts.account.positions.reduce((sum, p) => sum + (p.contracts > 0 ? p.unrealizedPnl * p.notional / p.contracts : 0), 0);
+      const upnl = ts.account.positions.reduce(
+        (sum, p) => sum + (p.contracts > 0 ? (p.unrealizedPnl * p.notional) / p.contracts : 0),
+        0,
+      );
       ts.account.balance.total = Math.round((ts.account.balance.total + ts.account.balance.upnl - upnl) * 1e8) / 1e8;
       ts.account.balance.upnl = upnl;
     }
@@ -189,16 +218,23 @@ const summary = (impl) => ({
 });
 const t = summary('ts');
 const r = summary('rust');
-console.log(`frames ${ts.frames}, markets ${ts.markets.length}, tickers ${ts.tickers.length}, books ${Object.keys(ts.books).length}`);
+console.log(
+  `frames ${ts.frames}, markets ${ts.markets.length}, tickers ${ts.tickers.length}, books ${Object.keys(ts.books).length}`,
+);
 const row = (label, a, b, unit = 'ms') =>
-  console.log(`${label.padEnd(16)} ts ${a.toFixed(1).padStart(8)} ${unit}   rust ${b.toFixed(1).padStart(8)} ${unit}   ${(a / b).toFixed(2)}x`);
+  console.log(
+    `${label.padEnd(16)} ts ${a.toFixed(1).padStart(8)} ${unit}   rust ${b.toFixed(1).padStart(8)} ${unit}   ${(a / b).toFixed(2)}x`,
+  );
 row('main-thread cpu', t.cpuMs, r.cpuMs);
 row('steady cpu', t.steadyCpuMs, r.steadyCpuMs);
 row('process cpu', t.processCpuMs, r.processCpuMs);
 row('retained memory', t.retainedMB, r.retainedMB, 'MB');
 console.log(`(rust wasm linear memory ${r.wasmMB.toFixed(1)} MB)`);
 if (ts.account) console.log('(private tape: paced in real time, so it gates correctness only)');
-if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
+if (values.venue.startsWith('okx'))
+  console.log(
+    `(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`,
+  );
 
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.

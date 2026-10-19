@@ -115,7 +115,8 @@ export class RustEngineExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
     this.isSpot = exchangeName === 'bybitspot';
-    this.isDemo = exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
+    this.isDemo =
+      exchangeName === 'bybitdemo' || (exchangeName === 'hyrotrader' && options.extra?.hyrotraderMode === 'demo');
     this.applier = new FrameApplier(store);
   }
 
@@ -131,7 +132,14 @@ export class RustEngineExchange extends BaseExchange {
     const endpoints = this.name === 'hyrotrader' ? this.hyroEndpoints() : undefined;
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
-      JSON.stringify({ key, secret, passphrase, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly), endpoints }),
+      JSON.stringify({
+        key,
+        secret,
+        passphrase,
+        testnet: Boolean(testnet),
+        publicDataOnly: Boolean(publicDataOnly),
+        endpoints,
+      }),
     );
     this.host = new EngineHost(engine, engineTransport(), {
       onFrame: this.receiveFrame,
@@ -233,8 +241,10 @@ export class RustEngineExchange extends BaseExchange {
     if (['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name)) {
       this.assertCallerClientOrderIds(orders);
       for (const order of orders) {
-        if (this.name === 'hyrotrader' &&
-          (order.maxSlippagePct !== undefined || 'bybitBbo' in order || 'bybitSlippageToleranceTicks' in order)) {
+        if (
+          this.name === 'hyrotrader' &&
+          (order.maxSlippagePct !== undefined || 'bybitBbo' in order || 'bybitSlippageToleranceTicks' in order)
+        ) {
           this.rejectPreflight('HyroTrader does not support client-defined slippage or Bybit execution controls');
         }
         if (order.maxSlippagePct !== undefined && !Number.isFinite(order.maxSlippagePct)) {

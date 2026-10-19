@@ -46,24 +46,32 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const recorded = (body) => write({
-      type: 'http', method: request.method, url: request.url,
-      ...(request.body === undefined ? {} : { requestBody: request.body }),
-      status: response.status, headers: response.headers ?? '', body,
-    });
+    const recorded = (body) =>
+      write({
+        type: 'http',
+        method: request.method,
+        url: request.url,
+        ...(request.body === undefined ? {} : { requestBody: request.body }),
+        status: response.status,
+        headers: response.headers ?? '',
+        body,
+      });
     if (response.body instanceof Uint8Array) {
       recorded(new TextDecoder().decode(response.body));
       return response;
     }
-    return { ...response, body: (async function* () {
-      const decoder = new TextDecoder();
-      let body = '';
-      for await (const chunk of response.body) {
-        body += decoder.decode(chunk, { stream: true });
-        yield chunk;
-      }
-      recorded(body + decoder.decode());
-    })() };
+    return {
+      ...response,
+      body: (async function* () {
+        const decoder = new TextDecoder();
+        let body = '';
+        for await (const chunk of response.body) {
+          body += decoder.decode(chunk, { stream: true });
+          yield chunk;
+        }
+        recorded(body + decoder.decode());
+      })(),
+    };
   },
 };
 
@@ -81,12 +89,15 @@ for (const symbol of values.books.split(',').filter(Boolean)) {
   host.command({ op: 'subscribeOrderBook', symbol });
 }
 const flush = setInterval(() => host.flush(), 250);
-setTimeout(() => {
-  clearInterval(flush);
-  host.flush();
-  host.dispose();
-  tape.end(() => {
-    console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames }));
-    process.exit(0);
-  });
-}, Number(values.seconds) * 1000);
+setTimeout(
+  () => {
+    clearInterval(flush);
+    host.flush();
+    host.dispose();
+    tape.end(() => {
+      console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames }));
+      process.exit(0);
+    });
+  },
+  Number(values.seconds) * 1000,
+);

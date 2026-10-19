@@ -55,7 +55,7 @@ coin PnL summed into USD balance; spot instrument precision/limits and invalid
 pagination; market-buy quote/base ambiguity; derivative-only spot controls and
 position-stop endpoints; spot cancellation families and `tpslOrder` mapping;
 `PartiallyFilledCanceled` events ignored; Hyro historical partial fills replayed
-after reconnect. Each is listed in `gate.mjs`'s `KNOWN_TS_FIXES` comments.
+when an unseen partial order resumes after a snapshot. Each is listed in `gate.mjs`'s `KNOWN_TS_FIXES` comments.
 
 Live 20-second captures for inverse/spot/demo are committed as trimmed fixtures.
 Hyro origins are not configured in this environment: its public fixture is
@@ -70,3 +70,39 @@ The harness now includes module allocations symmetrically in retained memory
 (the prior baseline excluded TS imports but counted all wasm memory), compares
 market flags, isolates concurrent output files and fails bounded I/O/readiness
 waits. No correctness or performance threshold was relaxed.
+
+## Integrated local gates
+
+Integrated with the green OKX landing branch at `693ad4f139`; all gates passed:
+
+- Banned patterns; workspace fmt; strict Bybit and wasm-target Clippy.
+- Bybit 89 native tests, engine 15, Binance 29; OKX trading 21.
+- Release wasm 1,568,090 bytes, below the 1.6 MiB aggregate budget.
+- Wasm shell 22 tests; Workers host 2; independent inverse frame/copier 4.
+- Root typecheck 44 tasks, lint 28, licenses 31 workspaces. Final root test
+  run: 27 tasks passed, safe-cex 454 files / 6,498 tests passed in each run.
+  Local tests used two workers and a 30-second default timeout under shared
+  machine load; no repository assertion or timeout was changed.
+- All 17 replays passed: four variant public and private pairs, Binance and
+  Bybit linear public/private, OKX public plus all four OKX private variants.
+  Each replay run checks every requested book, seeded market/ticker state,
+  command outputs, and consumes every taped write.
+
+Median of three public replays (main-thread CPU, retained memory):
+
+| Venue | Frames | TS CPU ms | Rust CPU ms | TS MB | Rust MB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Bybit inverse | 707 | 103.2 | 27.7 | 11.8 | 1.3 |
+| Bybit spot | 4,338 | 100.0 | 77.5 | 11.9 | 1.6 |
+| Bybit demo | 5,832 | 137.0 | 99.8 | 14.3 | 2.6 |
+| Hyro documented public contract | 160 | 18.6 | 16.0 | 11.8 | 0.8 |
+| Bybit linear regression | 8,742 | 166.9 | 131.3 | 14.8 | 2.6 |
+| Binance regression | 871 | 175.7 | 73.1 | 12.7 | 2.1 |
+| OKX regression | 8,902 | 615.3 | 538.0 | 12.9 | 2.7 |
+
+Private correctness replay frame counts: inverse 14, spot 11, demo 14, Hyro 13,
+Bybit linear 18, Binance 14 and each OKX variant 29. Private tapes are paced
+and do not gate performance. Hyro numbers validate the documented fixture;
+they are not a claim of live simulator connectivity.
+
+PR adversarial review and CI must pass before merge.
