@@ -736,3 +736,14 @@ is asserted on the retained subscriber cause separately from Error::source's
 retained transport-response origin, with complete metadata still checked. The
 actual DefaultStore/handler source oracle verifies original Error identity after
 post and committed bid/ask writes.
+
+## Native perf fixtures
+
+WorkerModule owns the real record/clone/cap/dump/metronome/replay service.
+The worker_context proxy records with the supplied service before forwarding
+outbound posts. Direct config/dump/start-status posts retain their source bypass.
+Replay init does not construct a venue. Dump headers are fresh; frames and replay
+messages retain their native referents. Module disposal cancels all pending timers
+and closes the service even when callers retain a session or service handle.
+The actual listener round trip and Node structuredClone graph probes cover the
+native implementation; perfFixture.ts remains the maintained behavioral source.
