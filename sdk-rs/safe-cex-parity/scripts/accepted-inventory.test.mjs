@@ -302,3 +302,27 @@ test('canonical driver validates native pending owners before applying measureme
   assert(check < source.indexOf('const measured = scopedMeasurements('), 'pending ledger cannot be applied after owner filtering');
   assert.match(source,/root === canonicalWorkspace/, 'explicit --workspace cannot bypass the real production ledger');
 });
+
+
+test('ApexApi native response owner is recorded as exact master-introduced debt', async () => {
+  const fs = await import('node:fs');
+  const {requirePendingNativeInputs} = await import('./accepted-pending-native-inputs.mjs');
+  const ledger = JSON.parse(fs.readFileSync(new URL('../accepted-set/new-native-input-owners.json', import.meta.url)));
+  const name = 'safe_cex_venue_apexomni::api_runtime::ApexApi';
+  const carry = 'safe_cex_venue_apexomni::binding::http::carry_config';
+  const owners = [name, carry].map(name => ({name, nativeInputDiscovered:true}));
+  assert.deepEqual(requirePendingNativeInputs('safe-cex-venue-apexomni', owners, {}, ledger), {package:'safe-cex-venue-apexomni', pending:2});
+  const row = ledger.owners.find(row => row.name === name);
+  assert.equal(row.owner, 'codex-0w5ohi');
+  assert.match(row.introduced, /#901.*84b06aec6f/);
+  assert.match(row.ruling, /ordinary contract.*native.*receipt/);
+  const before = {...ledger, owners:ledger.owners.filter(row => row.name !== name)};
+  assert.throws(() => requirePendingNativeInputs('safe-cex-venue-apexomni', owners, {}, before), /unlisted native input owner safe_cex_venue_apexomni::api_runtime::ApexApi/);
+  assert.deepEqual(owners, [name, carry].map(name => ({name, nativeInputDiscovered:true})));
+  const config = ledger.owners.find(row => row.name === carry);
+  assert.equal(config.owner, 'codex-0w5ohi');
+  assert.match(config.introduced, /251d9906dea/);
+  assert.throws(() => requirePendingNativeInputs('safe-cex-venue-apexomni', owners, {}, {...ledger, owners:ledger.owners.filter(row => row.name !== carry)}), /unlisted native input owner safe_cex_venue_apexomni::binding::http::carry_config/);
+  assert.throws(() => requirePendingNativeInputs('safe-cex-venue-apexomni', [], {}, ledger), /listed owner disappeared without removal ruling/);
+  assert.throws(() => requirePendingNativeInputs('safe-cex-venue-apexomni', owners, {[name]:{category:'decoder'}}, ledger), /classification state\/ruling differs/);
+});

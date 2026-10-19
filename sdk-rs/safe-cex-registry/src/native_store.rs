@@ -1,5 +1,8 @@
 use crate::native_value::NativeValue;
-use safe_cex_exchange::js_runtime::value::{Js, to_typed_preserving_undefined};
+use safe_cex_exchange::js_runtime::{
+    store,
+    value::{Js, from_typed, to_typed},
+};
 use safe_cex_exchange::{
     delivery_timers::WorkerPortTimers,
     message_stats::MessageHandlerStatsPostprocessor,
@@ -11,7 +14,6 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeRuntime, ExchangeTask},
 };
 use safe_cex_store::Store;
-use safe_cex_types::StoreData;
 use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
@@ -101,14 +103,7 @@ impl NativeStoreDelivery {
                     250.0 * multiplier,
                     Rc::new(move |data| {
                         if let Some(delivery) = delivery.upgrade() {
-                            let snapshot: StoreData = to_typed_preserving_undefined(&data)
-                                .map_err(|cause| {
-                                    safe_cex_types::StoreReadError::new(
-                                        safe_cex_types::StoreReadPhase::Projection,
-                                        Rc::new(cause),
-                                    )
-                                })?;
-                            delivery.deliver(snapshot, false)?;
+                            delivery.deliver(data, false)?;
                         }
                         Ok(())
                     }),
@@ -116,22 +111,27 @@ impl NativeStoreDelivery {
             }
         })
     }
-    fn deliver(&self, mut data: StoreData, full: bool) -> Result<(), ExchangeError> {
+    fn deliver(&self, data: Js, full: bool) -> Result<(), ExchangeError> {
         if !self.active.get() {
             return Ok(());
         }
         let (Some(store), Some(exchange)) = (self.store.upgrade(), self.exchange.upgrade()) else {
             return Ok(());
         };
-        MessageHandlerStatsPostprocessor.process(&mut data, exchange.as_ref())?;
+        let data = data.spread_object()?;
+        // Only the diagnostic processor needs a typed field. Model rows remain
+        // their original objects all the way through preparation and post capture.
+        let mut statistics = to_typed(&data.get("messageHandlerStats")?)?;
+        MessageHandlerStatsPostprocessor.process(&mut statistics, exchange.as_ref())?;
+        data.set("messageHandlerStats", from_typed(&statistics)?)?;
         let payload = self.preparer.borrow_mut().prepare(
             &data,
             store.get_markets_version(),
             store.get_tickers_version(),
             exchange.base().options().hosted_mode == Some(true),
             Some(full),
-        );
-        let value = NativeValue::encode(&payload)?;
+        )?;
+        let value = NativeValue::from_js(&payload)?;
         (self.post)(value);
         Ok(())
     }
@@ -150,7 +150,10 @@ impl NativeStoreDelivery {
             && !exchange.base().is_disposed()
             && let Some(store) = self.store.upgrade()
         {
-            self.deliver(store.serialize()?, true)?;
+            self.deliver(
+                store::facade(store)?.call_method("serialize", vec![])?,
+                true,
+            )?;
         }
         Ok(())
     }
@@ -160,5 +163,123 @@ impl NativeStoreDelivery {
     pub fn cancel(&self) {
         self.active.set(false);
         self.throttle.cancel();
+    }
+}
+
+#[cfg(test)]
+mod construction_order_tests {
+    use super::*;
+    use crate::{
+        native_host::{hyperliquid_rate_limiter, native_venue_host},
+        rust_venues::rust_constructor,
+    };
+    use safe_cex_exchange::{js_runtime::store, native_store::DefaultStore};
+    use safe_cex_types::ExchangeName;
+
+    #[test]
+    fn actual_okx_delivery_retains_own_undefined_stark_config() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(tokio::task::LocalSet::new().run_until(async {
+                let output = std::process::Command::new("node")
+                    .arg(concat!(
+                        env!("CARGO_MANIFEST_DIR"),
+                        "/tests/native_store_order_source.mjs"
+                    ))
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                let profiles = source["ownUndefined"].as_array().unwrap();
+                assert_eq!(profiles.len(), 3);
+                let store: Rc<dyn Store> = Rc::new(DefaultStore::new());
+                let host = native_venue_host(hyperliquid_rate_limiter());
+                let exchange = rust_constructor(&ExchangeName::Okx, host)
+                    .unwrap()
+                    .construct(
+                        ExchangeName::Okx,
+                        serde_json::from_value(json!({"key":"", "secret":"", "passphrase":"fixture-only", "hostedMode":true}))
+                            .unwrap(),
+                        store.clone(),
+                    )
+                    .unwrap();
+                let posts = Rc::new(RefCell::new(Vec::new()));
+                let captured = posts.clone();
+                let delivery = NativeStoreDelivery::new(
+                    &exchange,
+                    &store,
+                    Rc::new(move |value| captured.borrow_mut().push(value)),
+                );
+                let callback = delivery.clone();
+                let unsubscribe = store.subscribe_native(Box::new(move |data, _| {
+                    callback.update(data).map_err(Into::into)
+                }));
+                delivery.snapshot().unwrap();
+                store::facade(store.clone())
+                    .unwrap()
+                    .call_method("updateStarkConfig", vec![Js::Undefined])
+                    .unwrap();
+                delivery.snapshot().unwrap();
+                let actual = posts.borrow();
+                assert_eq!(actual.len(), profiles.len());
+                for (index, profile) in profiles.iter().enumerate() {
+                    assert_eq!(
+                        profile["own"], true,
+                        "maintained TS own starkConfig {index}"
+                    );
+                    assert_eq!(
+                        profile["type"], "undefined",
+                        "maintained TS starkConfig type {index}"
+                    );
+                    assert_eq!(
+                        actual[index].get("starkConfig"),
+                        Some(&NativeValue::Undefined),
+                        "STORE-OWN-UNDEFINED actual OKX {}",
+                        profile["kind"]
+                    );
+                }
+                drop(actual);
+                unsubscribe();
+                delivery.cancel();
+                exchange.dispose().unwrap();
+            }));
+    }
+
+    #[test]
+    fn actual_native_delivery_preserves_all_model_construction_orders() {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(
+            tokio::task::LocalSet::new().run_until(async {
+                let output=std::process::Command::new("node")
+                    .arg(concat!(env!("CARGO_MANIFEST_DIR"),"/tests/native_store_order_source.mjs"))
+                    .output().unwrap();
+                assert!(output.status.success(),"{}",String::from_utf8_lossy(&output.stderr));
+                let source: serde_json::Value=serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(source["cases"].as_array().unwrap().len(),6);
+                for (index,case) in source["cases"].as_array().unwrap().iter().enumerate() {
+                    let store: Rc<dyn Store>=Rc::new(DefaultStore::new());
+                    let host=native_venue_host(hyperliquid_rate_limiter());
+                    let exchange=rust_constructor(&ExchangeName::Binance,host).unwrap().construct(
+                        ExchangeName::Binance,serde_json::from_value(json!({"key":"","secret":"","hostedMode":true})).unwrap(),store.clone()).unwrap();
+                    let posts=Rc::new(RefCell::new(Vec::new()));
+                    let captured=posts.clone();
+                    let delivery=NativeStoreDelivery::new(&exchange,&store,Rc::new(move|value|captured.borrow_mut().push(value)));
+                    let callback=delivery.clone();
+                    let unsubscribe=store.subscribe_native(Box::new(move|data,_| callback.update(data).map_err(Into::into)));
+                    let facade=store::facade(store.clone()).unwrap();
+                    facade.call_method("update",vec![NativeValue::from(case["input"].clone()).to_js()]).unwrap();
+                    let actual=posts.borrow();
+                    assert_eq!(actual.len(),1,"MODEL-CONSTRUCTION-ORDER leading delivery {index}");
+                    let expected=NativeValue::from(case["expected"].clone());
+                    assert_eq!(actual[0],expected,"MODEL-CONSTRUCTION-ORDER actual native constructor/Store/worker payload {index}");
+                    drop(actual);unsubscribe();delivery.cancel();exchange.dispose().unwrap();
+                }
+            })
+        );
     }
 }

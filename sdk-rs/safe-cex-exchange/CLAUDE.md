@@ -2138,6 +2138,16 @@ engine-dependent. Array sort compacts defined values before TimSort, then writes
 undefined values and deletes remaining holes; four native/Node profiles pin the
 comparator schedule as well as sparse output.
 
+Store payload preparation consumes the canonical `Js` graph. Its shallow root
+spread preserves construction order, including dynamically appended fields, and
+keeps model rows intact instead of round-tripping them through shared DTOs.
+Only updateIds, loaded and socketHealth are cloned before returning; truthy info
+is stripped with object rest in source order. The scalar ticker baseline reads
+only the packed protocol's eleven fields; that protocol order is independent of
+a ticker object's own-key order. Native post capture owns the resulting graph
+without JSON projection. Typed worker processors convert their existing frame
+once at the preparer's input; there is no second payload algorithm.
+
 Direct calls of the canonical Object.prototype.toString referent use the same
 intrinsic object-tag implementation as ordinary coercion. The actual Aster
 private fill witness compares an object ID against its maintained TS constructor;
