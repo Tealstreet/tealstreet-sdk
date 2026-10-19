@@ -78,11 +78,14 @@ export const isRead = (method, url) =>
 
 export const takeResponse = (queue, method, url, time = 0, commandIndex = Infinity, repeat = isRead(method, url)) => {
   if (!queue?.length) return undefined;
-  const eligible = queue.filter((r) => (r.availableAfter ?? 0) <= time && (r.afterCommand ?? 0) <= commandIndex);
+  const eligible = queue.filter(
+    (r) => (r.availableAfter ?? r.effectiveAt ?? 0) <= time && (r.afterCommand ?? 0) <= commandIndex,
+  );
   if (!eligible.length) return undefined;
   const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
   const current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
-  if (repeat && current.some((r) => r.availableAfter !== undefined)) return current.at(-1);
+  if (repeat && current.some((r) => r.availableAfter !== undefined || r.effectiveAt !== undefined))
+    return current.at(-1);
   const record = current[0];
   if (current.length > 1 || !repeat) queue.splice(queue.indexOf(record), 1);
   return record;

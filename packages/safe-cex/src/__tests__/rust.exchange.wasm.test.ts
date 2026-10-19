@@ -1,13 +1,14 @@
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeOptions, OrderBook, UpdateOrderOpts } from '../types';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { BaseExchange } from '../exchanges/base';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderStatus, OrderType } from '../types';
+import { virtualClock } from '../utils/virtualClock';
 
 const EXCHANGE_INFO = JSON.stringify({
   symbols: [
@@ -340,7 +341,10 @@ const until = async (check: () => boolean) => {
 
 describe('RustEngineExchange', () => {
   let exchange: RustEngineExchange | undefined;
-  afterEach(() => exchange?.dispose());
+  afterEach(() => {
+    exchange?.dispose();
+    vi.restoreAllMocks();
+  });
 
   it('fills the store from engine frames and serves books to listeners', async () => {
     const tape = recordedTransport();
@@ -652,10 +656,12 @@ describe('RustEngineExchange', () => {
       order: { id: '4243', clientOrderId, status: OrderStatus.Open },
     });
     expect(await exchange.findOrderByClientOrderId('BTCUSDT', 'missing')).toEqual({ found: false, definitive: false });
-    await expect(exchange.updateOrder({
-      order: store.orders.find((order) => order.id === '4243')!,
-      update: { price: 90001, amount: 0.02 },
-    })).rejects.toThrow('exactly one');
+    await expect(
+      exchange.updateOrder({
+        order: store.orders.find((order) => order.id === '4243')!,
+        update: { price: 90001, amount: 0.02 },
+      }),
+    ).rejects.toThrow('exactly one');
     expect(tape.writes).toHaveLength(2);
   });
 
@@ -742,9 +748,127 @@ describe('RustEngineExchange', () => {
     const result = await exchange.validateAccount();
     expect(result.error).toContain('Invalid API-key');
   });
+
+  it('runs Backpack perpetuals and preserves canonical caller IDs through placement and frames', async () => {
+    const sockets: Array<(text: string) => void> = [];
+    const correctedTime = 1765805280000;
+    expect(Date.now()).not.toBe(correctedTime);
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(correctedTime);
+    const signedTimestamps: string[] = [];
+    const subscriptionTimestamps: string[] = [];
+    const writes: Array<{ method: string; body?: string }> = [];
+    const responses: Record<string, string> = {
+      markets: '[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"}]',
+      tickers:
+        '[{"symbol":"SOL_USDC_PERP","lastPrice":"140","priceChangePercent":"0.01","volume":"10","quoteVolume":"1400"}]',
+      markPrices: '[]',
+      account: '{"leverageLimit":"10"}',
+      position: '[]',
+      orders: '[]',
+      collateral: '{"netEquity":"1000","netEquityAvailable":"900","netEquityLocked":"100","pnlUnrealized":"0"}',
+    };
+    const transport: Transport = {
+      now: () => Date.now(),
+      connect: (_url, { onOpen, onMessage }) => {
+        sockets.push(onMessage);
+        setTimeout(onOpen, 0);
+        return {
+          send: (text) => {
+            const message = JSON.parse(text);
+            if (message.signature) subscriptionTimestamps.push(message.signature[2]);
+          },
+          close: () => {},
+        };
+      },
+      request: async ({ method, url, body, headers }) => {
+        if (headers['X-Timestamp']) signedTimestamps.push(headers['X-Timestamp']);
+        if (method !== 'GET') writes.push({ method, body });
+        const text = method === 'POST' ? '{"id":"800"}' : responses[new URL(url).pathname.split('/').pop()!];
+        return { status: text ? 200 : 404, headers: '', body: new TextEncoder().encode(text ?? '{}') };
+      },
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    };
+    setWasmEngineLoader(loadNodeEngine);
+    class PrototypeTransport implements Transport {
+      #inner: Transport;
+      constructor(inner: Transport) {
+        this.#inner = inner;
+      }
+      now() {
+        return this.#inner.now();
+      }
+      connect(...args: Parameters<Transport['connect']>) {
+        return this.#inner.connect(...args);
+      }
+      request(...args: Parameters<Transport['request']>) {
+        return this.#inner.request(...args);
+      }
+      setTimeout(...args: Parameters<Transport['setTimeout']>) {
+        return this.#inner.setTimeout(...args);
+      }
+      clearTimeout(...args: Parameters<Transport['clearTimeout']>) {
+        return this.#inner.clearTimeout(...args);
+      }
+    }
+    setRustEngineTransport(() => new PrototypeTransport(transport));
+    const store = new DefaultStore();
+    exchange = new RustEngineExchange(
+      'backpack',
+      { key: 'public-test-key', secret: Buffer.alloc(32, 7).toString('base64') },
+      store,
+    );
+    await exchange.start();
+    const opts = {
+      symbol: 'SOL_USDC_PERP',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 1,
+      price: 140,
+      clientOrderId: '4294967295',
+    };
+    expect(await exchange.placeOrderWithClientOrderId(opts)).toEqual({
+      orderIds: ['800'],
+      clientOrderId: '4294967295',
+    });
+    expect(JSON.parse(writes[0].body!)).toMatchObject({ clientId: 4294967295, quantity: '1.00' });
+    await expect(exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: '01' })).rejects.toThrow('uint32');
+    expect(writes).toHaveLength(1);
+    await until(() => sockets.length === 2 && subscriptionTimestamps.length === 1);
+    expect(subscriptionTimestamps).toEqual([String(correctedTime)]);
+    expect(signedTimestamps.length).toBeGreaterThan(0);
+    expect(new Set(signedTimestamps)).toEqual(new Set([String(correctedTime)]));
+    sockets[1](
+      JSON.stringify({
+        stream: 'account.orderUpdate',
+        data: {
+          e: 'orderAccepted',
+          i: '800',
+          c: 4294967295,
+          E: Date.now() * 1000,
+          X: 'New',
+          s: opts.symbol,
+          o: 'Limit',
+          S: 'Bid',
+          p: '140',
+          q: '1',
+          z: '0',
+          f: 'GTC',
+        },
+      }),
+    );
+    await until(() => store.orders.some((o) => o.id === '800'));
+    expect(store.orders[0].clientOrderId).toBe('4294967295');
+    expect(await exchange.findOrderByClientOrderId(opts.symbol, '4294967295')).toMatchObject({
+      found: true,
+      order: { id: '800' },
+    });
+  });
 });
 
 it('WEEX private engines require the passphrase before starting I/O', async () => {
   const { WasmEngine } = await loadNodeEngine();
-  expect(() => new WasmEngine('weex', JSON.stringify({ key: 'replay-key', secret: 'replay-secret' }))).toThrow('WEEX requires a passphrase');
+  expect(() => new WasmEngine('weex', JSON.stringify({ key: 'replay-key', secret: 'replay-secret' }))).toThrow(
+    'WEEX requires a passphrase',
+  );
 });
