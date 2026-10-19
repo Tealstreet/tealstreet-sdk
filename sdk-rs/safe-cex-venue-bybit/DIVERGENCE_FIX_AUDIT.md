@@ -2,8 +2,9 @@
 
 Authority: the 37 exact rows in `assignments/codex-0w5ohi.json`, linked from
 `non-utf8-assignment-index.json`, and the async ruling in
-`divergence-cluster-rulings.md`. Thirty-three rows are reconciled below, including history rows 6/16 from
-PR #1198, socket rows 25/35 and public scheduling rows 1/2/12/13. Four delegated rows remain open.
+`divergence-cluster-rulings.md`. All 37 rows are reconciled below, including history rows 6/16 from
+PR #1198, socket rows 25/35, public scheduling rows 1/2/12/13 and the final
+private reconnect / position-control rows 3/7/8/23.
 
 | Assignment rows | Source owner | Verdict | Production observation |
 | --- | --- | --- | --- |
@@ -73,10 +74,10 @@ failures, restores exact bytes and requires GREEN. No WebSocket bodies change.
 The position batch reconciles five rows. With the seven rows in PR #1182,
 row 37 ACCEPT-safety in PR #1188, the five Hyro rows below and delegated
 history rows 6/16 in PR #1198, plus the seven retained rows in PR #1212,
-33 of 37 are reconciled and four remain after socket rows25/35 and the public scheduling audit below.
+37 of 37 are reconciled after socket rows25/35, the public scheduling audit and
+the final private reconnect / position-control audit below.
 
-The remaining four rows belong to codex-0efu4x:
-3/7/8/23 (private socket lifecycle and position controls).
+The final four delegated rows 3/7/8/23 are reconciled in the final audit below.
 The seven rows retained by codex-0w5ohi, 18/24/26/27/32/33/36, are reconciled
 in the retained batch below. Existing WS carrier owners retain their separate
 body changes; the socket audit owner coordinates those boundaries first.
@@ -260,4 +261,37 @@ public-scheduling-controls.py compiles four independent production faults:
 deferred subscription prefix, zero first subscription wait, discarded subscription
 tail and discarded market tail. Every fault must fail its named real-socket test;
 exact source restoration must pass before the next fault. No production body or
-identity/alias guard changes in this batch. Four delegated rows remain: 3/7/8/23.
+identity/alias guard changes in that batch. Its four remaining delegated rows
+3/7/8/23 are reconciled by the final audit below.
+
+## Final delegated reconnect and position controls
+
+| Assignment rows | Source owner | Verdict | Production observation |
+| --- | --- | --- | --- |
+| 3, 23 | Inverse / Spot `sendReconnectSequence` | ACCEPT | The constructed protocol calls the actual owned reconnect operation: clock sync starts before onOpen returns, the held clock gates the 25ms sleep and real authentication, then the variant subscribes to order+position or order only and pings. Local/signed/missing/error and initially disposed profiles match the maintained variant methods. Native disposal cancels pending tails under the existing PRIVATE_OPEN_REVIEW.md ruling; the source detached Promise survives disposal. This remains an explicit bounded divergence. |
+| 7 | Primary `setLeverage` | ACCEPT | The public SDK invokes the installed member before waiter polling. Cached positions start POST immediately; empty positions start fetch immediately. Dropping the SDK waiter preserves initial upsert, a live market-limit read after the held fetch, POST, and the original refreshed allocation's publication. Primary/demo receivers match both source profiles. The supplementary public JSON helper's first-poll contract is not the production receiver. |
+| 8 | Primary `changePositionModeHelper` | ACCEPT | The installed helper starts POST before returning its canonical Promise. Abandoning the Rust awaiter preserves all-position refresh, optional symbol refresh, publication and the final success/partial/refusal outcome, in that order. Six source profiles match each primary/demo receiver. Native fetched allocations, signed zero and lone-surrogate units survive the callbacks unchanged. Optional request omission and the documented typed helper input boundary remain classified separately. |
+
+`private-open-fixtures.mjs` extracts each maintained primary/inverse/Spot owner's
+onOpen, reconnect, auth, subscribe and ping methods. The existing eight primary
+profiles remain; the additional inverse and Spot profiles run through the real
+`PrivateProtocol`/`BaseWebSocket` composition with both queued and inline runtimes
+(32 additional comparisons). The separate disposal regression keeps all three
+unpolled/pending/inline-pending cancellation checks. No source callback recovery
+or diagnostic ruling changes.
+
+`delegated-controls-fixtures.cjs` extracts the maintained leverage and mode-helper
+methods and holds each terminal request/refresh. The native probe constructs
+primary/demo exchanges, executes their original control members and compares
+five checkpoints for each of eight source profiles (16 native compositions).
+Its Store observer checks original fetched allocation identity before conversion;
+terminal HTTP/fetch dependencies are controlled, not the control algorithm.
+Successful, partial and rejected mode responses retain exact diagnostics. The
+existing 32 retained-position and full position-control corpora remain unchanged.
+
+`delegated-audit-controls.py` independently compiles missing clock-prefix,
+forced auth-refusal, deferred SDK-unit call and lost mode-refresh publication
+faults. Each must fail its named real-binding assertion, then pass after exact
+source restoration. These are probe sensitivity controls, not new production FIX
+claims. No production algorithm, decoder, identity/alias guard, or shared Promise
+scheduler changes in this batch.
