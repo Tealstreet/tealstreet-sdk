@@ -1,6 +1,7 @@
 //! Hyperliquid perpetuals: typed, deterministic state machines without I/O.
 mod account;
 pub mod sign;
+mod trading;
 mod wire;
 
 use base64::Engine as _;
@@ -32,6 +33,7 @@ pub struct Builder {
 
 pub enum Pending {
     Account(account::Request),
+    Trade(trading::Request),
     Meta {
         dex: String,
         offset: u32,
@@ -72,6 +74,7 @@ struct Ladder {
 pub struct Hyperliquid {
     options: Options,
     account: account::Account,
+    trading: trading::Trading,
     connection: Connection,
     books: HashMap<String, Ladder>,
     candles: HashMap<(String, String), usize>,
@@ -86,6 +89,7 @@ impl Hyperliquid {
         Self {
             options,
             account: account::Account::default(),
+            trading: trading::Trading::default(),
             connection: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -543,7 +547,14 @@ impl Venue for Hyperliquid {
             return;
         }
         match pending {
-            Pending::Account(request) => self.account_response(cx, request, response),
+            Pending::Account(request) => {
+                let builder = matches!(request, account::Request::Builder);
+                self.account_response(cx, request, response);
+                if builder {
+                    self.builder_result(cx);
+                }
+            }
+            Pending::Trade(request) => self.trade_response(cx, request, Ok(response)),
             Pending::Meta {
                 dex,
                 offset,
@@ -627,6 +638,7 @@ impl Venue for Hyperliquid {
     fn on_item(&mut self, _cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Account(request) => self.account_item(_cx, request, item),
+            Pending::Trade(_) => {}
             Pending::Meta {
                 dex,
                 instruments,
@@ -667,7 +679,14 @@ impl Venue for Hyperliquid {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         match pending {
-            Pending::Account(request) => self.account_failed(cx, request, error),
+            Pending::Account(request) => {
+                let builder = matches!(request, account::Request::Builder);
+                self.account_failed(cx, request, error);
+                if builder {
+                    self.builder_result(cx);
+                }
+            }
+            Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
             Pending::Dexs { .. } => self.next_dex(cx),
             Pending::Meta {
@@ -689,6 +708,7 @@ impl Venue for Hyperliquid {
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         self.account_timer(cx, timer);
+        self.trade_timer(cx, timer);
         if let Some((dex, offset, attempt)) = self.meta_retries.remove(&timer) {
             self.meta_attempt(cx, dex, offset, attempt);
         }
@@ -806,7 +826,7 @@ impl Venue for Hyperliquid {
                     },
                 );
             }
-            _ => {}
+            trade => self.trade_command(cx, trade),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {

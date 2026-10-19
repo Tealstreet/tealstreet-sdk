@@ -3639,6 +3639,7 @@ name = "safe-cex-venue-hyperliquid"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "getrandom 0.2.17",
  "miniz_oxide 0.8.9",
  "rmp-serde",
  "safe-cex-crypto",

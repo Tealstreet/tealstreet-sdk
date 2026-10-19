@@ -63,14 +63,24 @@ const isPrivate = Boolean(ts.account);
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
-const KNOWN_TS_FIXES = (account, rustAccount) => {
+const KNOWN_TS_FIXES = {
+  hyperliquid() {
+    // Native command regressions pin these deliberate TS fixes:
+    // - Validate every cancel acknowledgement before cancel+replace continues.
+    // - Resolve queued leverage/margin settings when the step executes.
+    // - Keep each HIP-3 bracket leg's own metadata in pending/optimistic state;
+    //   TS assigns entry metadata to every returned oid in placeLimitOrder.
+    // The tape compares converged state: no account values are rewritten here.
+  },
+  binance(account, rustAccount) {
   for (const position of account.positions) {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
     if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
   }
+  },
 };
 if (isPrivate) {
-  KNOWN_TS_FIXES(ts.account, rust.account);
+  KNOWN_TS_FIXES[values.venue]?.(ts.account, rust.account);
   for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
     const left = JSON.stringify(ts.account[field]);
     const right = JSON.stringify(rust.account[field]);

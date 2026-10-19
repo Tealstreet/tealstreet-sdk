@@ -269,7 +269,8 @@ impl Hyperliquid {
         );
     }
     pub(crate) fn builder(&self) -> crate::Builder {
-        self.options
+        let mut builder = self
+            .options
             .builder
             .clone()
             .unwrap_or_else(|| crate::Builder {
@@ -280,7 +281,9 @@ impl Hyperliquid {
                 }
                 .into(),
                 f: 10,
-            })
+            });
+        builder.b.make_ascii_lowercase();
+        builder
     }
     pub(crate) fn refresh_account(&mut self, cx: &mut Cx<'_, Pending>) {
         let mut dexes = vec![String::new()];

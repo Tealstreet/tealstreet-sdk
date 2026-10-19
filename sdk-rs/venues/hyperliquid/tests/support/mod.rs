@@ -26,10 +26,19 @@ pub fn ready(mode: &str) -> (Engine<Hyperliquid>, SocketId) {
     ready_with_dex(mode, false)
 }
 pub fn ready_with_dex(mode: &str, hip: bool) -> (Engine<Hyperliquid>, SocketId) {
+    ready_custom(mode, hip, None, "30")
+}
+pub fn ready_custom(
+    mode: &str,
+    hip: bool,
+    builder: Option<safe_cex_venue_hyperliquid::Builder>,
+    approval: &str,
+) -> (Engine<Hyperliquid>, SocketId) {
     let mut e = Engine::new(Hyperliquid::new(Options {
         key: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
         secret: Some("0x0123456789012345678901234567890123456789012345678901234567890123".into()),
         application_id: Some("0x14791697260e4c9a71f18484c9f997b308e59325".into()),
+        builder,
         ..Options::default()
     }));
     e.start(1000.0);
@@ -46,7 +55,7 @@ pub fn ready_with_dex(mode: &str, hip: bool) -> (Engine<Hyperliquid>, SocketId) 
                         .unwrap()["dex"]
                         .as_str()
                         .map(str::to_owned);
-                    let body=match kind(&r).as_str(){"metaAndAssetCtxs" if dex.is_some()=>r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10}]},[{"midPx":"50","markPx":"50","oraclePx":"50"}]]"#.into(),"metaAndAssetCtxs"=>META.to_owned(),"perpDexs"=>if hip{r#"[null,{"name":"xyz"}]"#.into()}else{"[null]".into()},"userAbstraction"=>format!("\"{mode}\""),"maxBuilderFee"=>"30".into(),"userFees"=>r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#.into(),"clearinghouseState" if dex.is_some()=>r#"{"assetPositions":[],"time":1000}"#.into(),"clearinghouseState"=>STATE.into(),"frontendOpenOrders"=>"[]".into(),"spotClearinghouseState"=>r#"{"balances":[{"coin":"USDC","total":"1100","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"1050"]]}"#.into(),other=>panic!("unexpected read {other}")};
+                    let body=match kind(&r).as_str(){"metaAndAssetCtxs" if dex.is_some()=>r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10}]},[{"midPx":"50","markPx":"50","oraclePx":"50"}]]"#.into(),"metaAndAssetCtxs"=>META.to_owned(),"perpDexs"=>if hip{r#"[null,{"name":"xyz"}]"#.into()}else{"[null]".into()},"userAbstraction"=>format!("\"{mode}\""),"maxBuilderFee"=>approval.into(),"userFees"=>r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#.into(),"clearinghouseState" if dex.is_some()=>r#"{"assetPositions":[],"time":1000}"#.into(),"clearinghouseState"=>STATE.into(),"frontendOpenOrders"=>"[]".into(),"spotClearinghouseState"=>r#"{"balances":[{"coin":"USDC","total":"1100","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"1050"]]}"#.into(),other=>panic!("unexpected read {other}")};
                     reply(&mut e, &r, 200, &body);
                 }
                 Action::WsConnect { socket: s, .. } => {

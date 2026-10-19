@@ -66,7 +66,16 @@ sub-agent implementation review and fixes before every phase commit.
   debounced fill heals. Bans, fmt, clippy and all twenty native tests pass.
   Deleted unused `crypto/wallet_utils.rs`; private-key address derivation now
   uses a transport-free Ethereum primitive for non-fatal startup warnings.
-- Phase 3: pending.
+- Phase 3: implemented and reviewed by `review_trading`; nine trading tests,
+  two additional signing tests and previous tests pass (31 total). Fixed review
+  findings: leverage must use integer MessagePack, every cancel acknowledgement
+  must validate before replacement, and queued settings resolve when executed.
+  Builder timeout matches TS's explicit 8s negative-cache fallback; transport
+  errors remain unknown for lazy checking. Every wire has a cloid; own bracket
+  legs are identified from their records before REST returns.
+  Deliberate TS fixes recorded in `gate.mjs`: malformed cancel acknowledgements
+  fail closed, queued setting changes compose, and HIP-3 bracket pending rows
+  retain each leg's metadata instead of assigning entry metadata to every oid.
 - Phase 4: pending.
 - Phase 5: pending.
 

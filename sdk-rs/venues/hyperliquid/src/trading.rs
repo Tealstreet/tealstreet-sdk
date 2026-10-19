@@ -1,0 +1,1030 @@
+//! Sequenced writes. A lost response reconciles account state; writes never retry.
+use crate::{
+    Builder, Hyperliquid, Pending,
+    account::{Placement, valid_cloid},
+    sign,
+};
+use safe_cex_engine::model::*;
+use safe_cex_engine::{Command, CommandId, Cx, Method, Response, TimerId, num};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashSet, VecDeque};
+
+#[derive(Default)]
+pub struct Trading {
+    queue: VecDeque<Job>,
+    active: Option<Job>,
+    inflight: bool,
+    nonce: u64,
+    write_at: Option<f64>,
+    pace: Option<TimerId>,
+    builder_wait: Option<TimerId>,
+    retry: Option<TimerId>,
+    retry_step: usize,
+    expected: HashSet<String>,
+}
+struct Job {
+    command: CommandId,
+    steps: VecDeque<Step>,
+    ids: Vec<String>,
+    replacement: Option<String>,
+    builder_checked: bool,
+}
+enum Step {
+    Place(PlaceOrderOpts),
+    Cancel(Vec<Order>),
+    Leverage {
+        symbol: String,
+        leverage: Option<f64>,
+        isolated: Option<bool>,
+    },
+}
+pub struct Request {
+    command: CommandId,
+    effect: Effect,
+}
+enum Effect {
+    Place(Vec<Placement>),
+    Cancel(Vec<Order>),
+    Leverage {
+        symbol: String,
+        leverage: f64,
+        isolated: bool,
+    },
+}
+#[derive(Clone, Serialize)]
+struct OrderWire {
+    a: u32,
+    b: bool,
+    p: String,
+    s: String,
+    r: bool,
+    t: WireType,
+    c: String,
+}
+#[derive(Clone, Serialize)]
+#[serde(untagged)]
+enum WireType {
+    Limit { limit: LimitWire },
+    Trigger { trigger: TriggerWire },
+}
+#[derive(Clone, Serialize)]
+struct LimitWire {
+    tif: &'static str,
+}
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TriggerWire {
+    is_market: bool,
+    trigger_px: String,
+    tpsl: &'static str,
+}
+#[derive(Serialize)]
+struct CancelWire {
+    a: u32,
+    o: u64,
+}
+#[derive(Serialize)]
+#[serde(tag = "type")]
+enum Action {
+    #[serde(rename = "order")]
+    Order {
+        orders: Vec<OrderWire>,
+        grouping: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        builder: Option<Builder>,
+    },
+    #[serde(rename = "cancel")]
+    Cancel { cancels: Vec<CancelWire> },
+    #[serde(rename = "updateLeverage")]
+    Leverage {
+        asset: u32,
+        #[serde(rename = "isCross")]
+        is_cross: bool,
+        leverage: u32,
+    },
+}
+#[derive(Deserialize)]
+struct Reply<'a> {
+    #[serde(borrow)]
+    status: &'a str,
+    #[serde(borrow)]
+    response: &'a serde_json::value::RawValue,
+}
+#[derive(Deserialize)]
+struct ReplyData {
+    r#type: String,
+    #[serde(default)]
+    data: Option<Statuses>,
+}
+#[derive(Deserialize)]
+struct Statuses {
+    statuses: Vec<Status>,
+}
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Status {
+    Error { error: String },
+    Resting { resting: Oid },
+    Filled { filled: Oid },
+    Text(String),
+}
+#[derive(Deserialize)]
+struct Oid {
+    oid: u64,
+}
+impl Hyperliquid {
+    pub(crate) fn trade_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let mut replacement = None;
+        let (command, steps) = match command {
+            Command::PlaceOrders { command, orders } => {
+                if let Err(error) = self.preflight(cx, &orders) {
+                    cx.done(command, Err(error));
+                    return;
+                }
+                (command, orders.into_iter().map(Step::Place).collect())
+            }
+            Command::CancelOrders { command, ids } => (
+                command,
+                VecDeque::from([Step::Cancel(
+                    ids.iter()
+                        .filter_map(|id| cx.store.order(id).cloned())
+                        .collect(),
+                )]),
+            ),
+            Command::CancelSymbolOrders { command, symbol } => (
+                command,
+                VecDeque::from([Step::Cancel(
+                    cx.store
+                        .orders()
+                        .iter()
+                        .filter(|o| o.symbol == symbol)
+                        .cloned()
+                        .collect(),
+                )]),
+            ),
+            Command::AmendOrder {
+                command,
+                id,
+                price,
+                amount,
+            } => {
+                let Some(old) = cx.store.order(&id).cloned() else {
+                    cx.done(command, Err("Order not found".into()));
+                    return;
+                };
+                let mut opts = PlaceOrderOpts {
+                    symbol: old.symbol.clone(),
+                    kind: old.kind,
+                    side: old.side,
+                    price: Some(price.unwrap_or(old.price)),
+                    amount: amount.unwrap_or(old.amount),
+                    reduce_only: Some(old.reduce_only),
+                    time_in_force: old.time_in_force,
+                    trigger_price: None,
+                    stop_loss: None,
+                    take_profit: None,
+                    trigger_type: None,
+                    tp_trigger_type: None,
+                    sl_trigger_type: None,
+                    client_order_id: None,
+                    close: None,
+                };
+                if opts.kind == OrderType::TakeProfit
+                    && let Some(t) = cx.store.ticker(&opts.symbol)
+                {
+                    let prices = [t.mark, t.last, t.index];
+                    let prices = prices
+                        .into_iter()
+                        .filter(|v| v.is_finite() && *v > 0.0)
+                        .collect::<Vec<_>>();
+                    if let Some(reference) = prices.first()
+                        && prices
+                            .iter()
+                            .all(|p| (p - reference).abs() / reference <= 0.25)
+                    {
+                        let above = opts.price.unwrap_or(0.0) > *reference;
+                        if (opts.side == OrderSide::Sell && !above)
+                            || (opts.side == OrderSide::Buy && above)
+                        {
+                            opts.kind = OrderType::StopLoss;
+                        }
+                    }
+                }
+                let cloid = match mint_cloid() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        cx.done(command, Err(e));
+                        return;
+                    }
+                };
+                opts.client_order_id = Some(cloid.clone());
+                replacement = Some(cloid);
+                if let Err(error) = self.preflight(cx, std::slice::from_ref(&opts)) {
+                    cx.done(command, Err(error));
+                    return;
+                }
+                (
+                    command,
+                    VecDeque::from([Step::Cancel(vec![old]), Step::Place(opts)]),
+                )
+            }
+            Command::SetLeverage {
+                command,
+                symbol,
+                leverage,
+            } => (
+                command,
+                VecDeque::from([Step::Leverage {
+                    symbol,
+                    leverage: Some(leverage),
+                    isolated: None,
+                }]),
+            ),
+            Command::SetMarginType {
+                command,
+                symbol,
+                isolated,
+            } => (
+                command,
+                VecDeque::from([Step::Leverage {
+                    symbol,
+                    leverage: None,
+                    isolated: Some(isolated),
+                }]),
+            ),
+            Command::SetPositionMode { command, hedged } => {
+                if hedged {
+                    cx.done(
+                        command,
+                        Err("Hyperliquid supports one-way positions only".into()),
+                    );
+                } else {
+                    cx.store.set_hedged(false);
+                    cx.done(command, Ok("[]".into()));
+                }
+                return;
+            }
+            _ => return,
+        };
+        if self.options.public_data_only || self.options.secret.as_deref().is_none_or(str::is_empty)
+        {
+            cx.done(command, Err("Hyperliquid signing key is missing".into()));
+            return;
+        }
+        self.trading.queue.push_back(Job {
+            command,
+            steps,
+            ids: Vec::new(),
+            replacement,
+            builder_checked: false,
+        });
+        self.pump_trades(cx);
+    }
+    fn preflight(&self, cx: &Cx<'_, Pending>, orders: &[PlaceOrderOpts]) -> Result<(), String> {
+        let mut seen = HashSet::new();
+        for o in orders {
+            let m = cx
+                .store
+                .market(&o.symbol)
+                .ok_or_else(|| format!("Market {} not found", o.symbol))?;
+            if let Some(id) = o.client_order_id.as_deref() {
+                if !valid_cloid(id) {
+                    return Err("Hyperliquid client order ID must be 0x followed by 32 lowercase hex characters".into());
+                }
+                if !seen.insert(id) {
+                    return Err("Duplicate Hyperliquid client order ID in batch".into());
+                }
+                if o.amount > m.limits.amount.max {
+                    return Err(
+                        "Caller client order ID cannot be split across native orders".into(),
+                    );
+                }
+            }
+            if !matches!(
+                o.kind,
+                OrderType::Limit | OrderType::Market | OrderType::TakeProfit | OrderType::StopLoss
+            ) {
+                return Err("Hyperliquid order type is not supported".into());
+            }
+            if !o.amount.is_finite()
+                || o.amount < 0.0
+                || (o.amount == 0.0 && matches!(o.kind, OrderType::Limit | OrderType::Market))
+            {
+                return Err("Invalid Hyperliquid order amount".into());
+            }
+            if o.kind != OrderType::Market && o.price.is_none_or(|p| !p.is_finite() || p <= 0.0) {
+                return Err("Invalid Hyperliquid order price".into());
+            }
+            if [o.stop_loss, o.take_profit]
+                .into_iter()
+                .flatten()
+                .any(|p| !p.is_finite() || p <= 0.0)
+            {
+                return Err("Invalid bracket trigger price".into());
+            }
+            if o.kind != OrderType::Limit {
+                self.base_price(cx, &o.symbol)?;
+            }
+        }
+        Ok(())
+    }
+    fn base_price(&self, cx: &Cx<'_, Pending>, symbol: &str) -> Result<f64, String> {
+        let t = cx.store.ticker(symbol).ok_or("Missing ticker price data")?;
+        [t.mark, t.last, t.mid_price.unwrap_or(0.0), t.index]
+            .into_iter()
+            .find(|p| p.is_finite() && *p > 0.0)
+            .ok_or_else(|| "Missing valid ticker price data".into())
+    }
+    fn wires(
+        &self,
+        cx: &Cx<'_, Pending>,
+        opts: &PlaceOrderOpts,
+    ) -> Result<(Vec<OrderWire>, &'static str), String> {
+        let m = cx.store.market(&opts.symbol).ok_or("Market not found")?;
+        let asset = *self
+            .assets
+            .get(&opts.symbol)
+            .ok_or("Market asset index not found")?;
+        let size = num::adjust(opts.amount, m.precision.amount);
+        let trigger = matches!(opts.kind, OrderType::TakeProfit | OrderType::StopLoss);
+        let positional = trigger
+            && (opts.amount == 0.0
+                || (opts.reduce_only == Some(true)
+                    && cx.store.positions().iter().any(|p| {
+                        p.symbol == opts.symbol
+                            && p.contracts > 0.0
+                            && size >= p.contracts
+                            && ((p.side == PositionSide::Long && opts.side == OrderSide::Sell)
+                                || (p.side == PositionSide::Short && opts.side == OrderSide::Buy))
+                    })));
+        let p = if opts.kind == OrderType::Limit {
+            opts.price.unwrap_or(0.0)
+        } else {
+            self.base_price(cx, &opts.symbol)?
+                * if opts.side == OrderSide::Buy {
+                    1.05
+                } else {
+                    0.95
+                }
+        };
+        let price = price_wire(p, m.precision.amount)?;
+        let cloid = match &opts.client_order_id {
+            Some(c) => c.clone(),
+            None => mint_cloid()?,
+        };
+        let t = if trigger {
+            WireType::Trigger {
+                trigger: TriggerWire {
+                    is_market: true,
+                    trigger_px: price_wire(opts.price.unwrap_or(0.0), m.precision.amount)?,
+                    tpsl: if opts.kind == OrderType::TakeProfit {
+                        "tp"
+                    } else {
+                        "sl"
+                    },
+                },
+            }
+        } else {
+            WireType::Limit {
+                limit: LimitWire {
+                    tif: if opts.time_in_force == Some(TimeInForce::PostOnly)
+                        && opts.kind == OrderType::Limit
+                    {
+                        "Alo"
+                    } else {
+                        "Gtc"
+                    },
+                },
+            }
+        };
+        let main = OrderWire {
+            a: asset,
+            b: opts.side == OrderSide::Buy,
+            p: price,
+            s: float_wire(if positional { 0.0 } else { size })?,
+            r: opts.reduce_only.unwrap_or(false),
+            t,
+            c: cloid,
+        };
+        let mut wires = vec![main];
+        if opts.kind == OrderType::Limit {
+            for (kind, value) in [("sl", opts.stop_loss), ("tp", opts.take_profit)] {
+                if let Some(trigger) = value {
+                    wires.push(OrderWire {
+                        a: asset,
+                        b: opts.side != OrderSide::Buy,
+                        p: wires[0].p.clone(),
+                        s: float_wire(size)?,
+                        r: true,
+                        t: WireType::Trigger {
+                            trigger: TriggerWire {
+                                is_market: true,
+                                trigger_px: price_wire(trigger, m.precision.amount)?,
+                                tpsl: kind,
+                            },
+                        },
+                        c: mint_cloid()?,
+                    });
+                }
+            }
+        }
+        let grouping = if positional {
+            "positionTpsl"
+        } else if wires.len() > 1 {
+            "normalTpsl"
+        } else {
+            "na"
+        };
+        Ok((wires, grouping))
+    }
+    pub(crate) fn pump_trades(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.trading.inflight
+            || self.trading.builder_wait.is_some()
+            || self.trading.pace.is_some()
+        {
+            return;
+        }
+        if self.trading.active.is_none() {
+            self.trading.active = self.trading.queue.pop_front();
+        }
+        let Some(job) = self.trading.active.as_ref() else {
+            return;
+        };
+        if job.steps.is_empty() {
+            self.finish_trade(cx, Ok(()));
+            return;
+        }
+        if self.trading.write_at.is_some_and(|at| cx.now - at < 334.0) {
+            self.trading.pace =
+                Some(cx.set_timer(334.0 - (cx.now - self.trading.write_at.unwrap())));
+            return;
+        }
+        let needs_builder = matches!(job.steps.front(), Some(Step::Place(_)))
+            && self.account.builder_approved.is_none()
+            && !job.builder_checked;
+        if needs_builder {
+            self.trading.active.as_mut().unwrap().builder_checked = true;
+            self.check_builder(cx);
+            self.trading.builder_wait = Some(cx.set_timer(8000.0));
+            return;
+        }
+        let command = job.command;
+        let step = self
+            .trading
+            .active
+            .as_mut()
+            .unwrap()
+            .steps
+            .pop_front()
+            .unwrap();
+        let prepared = self.prepare_write(cx, step);
+        let (action, effect) = match prepared {
+            Ok(v) => v,
+            Err(error) => {
+                self.finish_trade(cx, Err(error));
+                return;
+            }
+        };
+        if matches!(&effect,Effect::Cancel(orders) if orders.is_empty()) {
+            self.pump_trades(cx);
+            return;
+        }
+        self.trading.nonce = (cx.now.max(0.0) as u64).max(self.trading.nonce.saturating_add(1));
+        let nonce = self.trading.nonce;
+        let signature = match sign::sign(
+            &action,
+            self.options.vault.as_deref(),
+            nonce,
+            !self.options.testnet,
+            self.options.secret.as_deref().unwrap_or(""),
+        ) {
+            Ok(s) => s,
+            Err(error) => {
+                self.finish_trade(cx, Err(error));
+                return;
+            }
+        };
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Payload<'a> {
+            action: &'a Action,
+            nonce: u64,
+            signature: sign::Signature,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            vault_address: Option<&'a str>,
+        }
+        let body = serde_json::to_string(&Payload {
+            action: &action,
+            nonce,
+            signature,
+            vault_address: self.options.vault.as_deref(),
+        })
+        .unwrap();
+        if let Effect::Place(records) = &effect {
+            for record in records {
+                if let Some(c) = &record.order.client_order_id {
+                    self.account.records.insert(c.clone(), record.clone());
+                }
+                if record.order.symbol.contains('|')
+                    || (!record.order.reduce_only
+                        && matches!(
+                            record.order.kind,
+                            OrderType::StopLoss | OrderType::TakeProfit
+                        ))
+                {
+                    self.account.preplacements.push_back(record.clone());
+                }
+            }
+        }
+        while self.account.records.len() > 500 {
+            if let Some(old) = self
+                .account
+                .records
+                .iter()
+                .min_by(|a, b| a.1.at.total_cmp(&b.1.at))
+                .map(|(id, _)| id.clone())
+            {
+                self.account.records.remove(&old);
+            }
+        }
+        while self.account.preplacements.len() > 500 {
+            self.account.preplacements.pop_front();
+        }
+        self.trading.inflight = true;
+        self.trading.write_at = Some(cx.now);
+        cx.request(
+            Method::Post,
+            format!("{}/exchange", self.rest()),
+            vec![("Content-Type", "application/json".into())],
+            Some(body),
+            Pending::Trade(Request { command, effect }),
+        );
+    }
+    fn prepare_write(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        step: Step,
+    ) -> Result<(Action, Effect), String> {
+        match step {
+            Step::Place(opts) => {
+                let (wires, grouping) = self.wires(cx, &opts)?;
+                let records = wires
+                    .iter()
+                    .map(|wire| {
+                        let (kind, price, tif) = match &wire.t {
+                            WireType::Limit { limit } => (
+                                OrderType::Limit,
+                                num::parse(&wire.p),
+                                crate::account::tif(limit.tif),
+                            ),
+                            WireType::Trigger { trigger } => (
+                                if trigger.tpsl == "tp" {
+                                    OrderType::TakeProfit
+                                } else {
+                                    OrderType::StopLoss
+                                },
+                                num::parse(&trigger.trigger_px),
+                                None,
+                            ),
+                        };
+                        let amount = num::parse(&wire.s);
+                        Placement {
+                            at: cx.now,
+                            order: Order {
+                                id: String::new(),
+                                parent_id: None,
+                                status: OrderStatus::Creating,
+                                symbol: opts.symbol.clone(),
+                                kind,
+                                side: if wire.b {
+                                    OrderSide::Buy
+                                } else {
+                                    OrderSide::Sell
+                                },
+                                price,
+                                amount,
+                                filled: 0.0,
+                                remaining: amount,
+                                reduce_only: wire.r,
+                                close: None,
+                                client_order_id: Some(wire.c.clone()),
+                                time_in_force: tif,
+                                last_update: cx.now,
+                                trigger_type: None,
+                                take_profit: None,
+                                stop_loss: None,
+                                extra: None,
+                            },
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let builder = self
+                    .account
+                    .builder_approved
+                    .filter(|b| *b)
+                    .map(|_| self.builder());
+                Ok((
+                    Action::Order {
+                        orders: wires,
+                        grouping,
+                        builder,
+                    },
+                    Effect::Place(records),
+                ))
+            }
+            Step::Cancel(orders) => {
+                let cancels = orders
+                    .iter()
+                    .map(|o| {
+                        Ok(CancelWire {
+                            a: *self.assets.get(&o.symbol).ok_or("Unknown cancel market")?,
+                            o: o.id.parse().map_err(|_| "Invalid Hyperliquid order ID")?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                for o in &orders {
+                    cx.store.set_order_status(&o.id, OrderStatus::Canceling);
+                }
+                Ok((Action::Cancel { cancels }, Effect::Cancel(orders)))
+            }
+            Step::Leverage {
+                symbol,
+                leverage,
+                isolated,
+            } => {
+                let setting = cx.store.setting(&symbol);
+                let leverage = leverage.unwrap_or_else(|| setting.map_or(20.0, |s| s.leverage));
+                let isolated = isolated.unwrap_or_else(|| {
+                    setting.is_some_and(|s| s.margin_type == Some(MarginType::Isolated))
+                });
+                let market = cx.store.market(&symbol).ok_or("Market not found")?;
+                if !leverage.is_finite()
+                    || leverage < 1.0
+                    || leverage > market.limits.leverage.max
+                    || leverage.fract() != 0.0
+                {
+                    return Err("Invalid Hyperliquid leverage".into());
+                }
+                let asset = *self.assets.get(&symbol).ok_or("Unknown leverage asset")?;
+                Ok((
+                    Action::Leverage {
+                        asset,
+                        is_cross: !isolated,
+                        leverage: leverage as u32,
+                    },
+                    Effect::Leverage {
+                        symbol,
+                        leverage,
+                        isolated,
+                    },
+                ))
+            }
+        }
+    }
+    pub(crate) fn builder_result(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(timer) = self.trading.builder_wait.take() {
+            cx.clear_timer(timer);
+            self.pump_trades(cx);
+        }
+    }
+    pub(crate) fn trade_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        result: Result<Response<'_>, &str>,
+    ) {
+        if self
+            .trading
+            .active
+            .as_ref()
+            .is_none_or(|j| j.command != request.command)
+        {
+            return;
+        }
+        self.trading.inflight = false;
+        let parsed = result.map_err(str::to_owned).and_then(|r| {
+            if (200..300).contains(&r.status) {
+                parse_reply(r.body)
+            } else {
+                Err(format!("Hyperliquid HTTP {}: {}", r.status, r.body))
+            }
+        });
+        let (kind, statuses) = match parsed {
+            Ok(s) => s,
+            Err(e) => {
+                if matches!(&request.effect, Effect::Cancel(_)) && only_terminal_cancel(&e) {
+                    let count = if let Effect::Cancel(orders) = &request.effect {
+                        orders.len()
+                    } else {
+                        0
+                    };
+                    (
+                        "cancel".into(),
+                        (0..count).map(|_| Status::Text("success".into())).collect(),
+                    )
+                } else {
+                    self.restore_cancel(cx, &request.effect);
+                    self.schedule_orders(cx);
+                    self.finish_trade(cx, Err(e));
+                    return;
+                }
+            }
+        };
+        let valid_shape = match &request.effect {
+            Effect::Cancel(orders) => {
+                kind == "cancel"
+                    && statuses.len() == orders.len()
+                    && statuses.iter().all(|s| {
+                        matches!(s,Status::Text(t)if t=="success")
+                            || matches!(s, Status::Error { .. })
+                    })
+            }
+            Effect::Place(records) => kind == "order" && statuses.len() == records.len(),
+            Effect::Leverage { .. } => kind == "default" && statuses.is_empty(),
+        };
+        if !valid_shape {
+            self.restore_cancel(cx, &request.effect);
+            self.schedule_orders(cx);
+            self.finish_trade(cx, Err("Invalid Hyperliquid command response".into()));
+            return;
+        }
+        let errors = statuses
+            .iter()
+            .filter_map(|s| {
+                if let Status::Error { error } = s {
+                    Some(error.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if !errors.is_empty()
+            && !(matches!(&request.effect, Effect::Cancel(_))
+                && errors.iter().all(|e| only_terminal_cancel(e)))
+        {
+            self.restore_cancel(cx, &request.effect);
+            self.schedule_orders(cx);
+            self.finish_trade(cx, Err(errors.join(", ")));
+            return;
+        }
+        match request.effect {
+            Effect::Place(records) => {
+                self.trading.active.as_mut().unwrap().builder_checked = false;
+                if statuses.is_empty() {
+                    self.schedule_orders(cx);
+                    self.finish_trade(cx, Err("Invalid response from Hyperliquid API".into()));
+                    return;
+                }
+                for (index, status) in statuses.into_iter().enumerate() {
+                    let (id, resting) = match status {
+                        Status::Resting { resting } => (Some(resting.oid.to_string()), true),
+                        Status::Filled { filled } => (Some(filled.oid.to_string()), false),
+                        Status::Text(s) if s == "waitingForTrigger" || s == "waitingForFill" => {
+                            (None, false)
+                        }
+                        _ => {
+                            self.schedule_orders(cx);
+                            self.finish_trade(cx, Err("Unknown Hyperliquid order status".into()));
+                            return;
+                        }
+                    };
+                    let Some(id) = id else {
+                        self.schedule_orders(cx);
+                        continue;
+                    };
+                    self.trading.active.as_mut().unwrap().ids.push(id.clone());
+                    if let Some(mut record) = records.get(index).cloned() {
+                        record.order.id = id.clone();
+                        if record.order.symbol.contains('|') {
+                            self.account.pending.insert(id.clone(), record.clone());
+                            if resting
+                                && cx.store.order(&id).is_none()
+                                && !self.account.suppressed.contains_key(&id)
+                            {
+                                cx.store.upsert_order(record.order);
+                            }
+                            self.trading.expected.insert(id);
+                            if self.trading.retry.is_none() {
+                                self.trading.retry_step = 0;
+                                self.trading.retry = Some(cx.set_timer(300.0));
+                            }
+                        }
+                    }
+                }
+            }
+            Effect::Cancel(orders) => {
+                for o in orders {
+                    self.account.suppressed.insert(o.id.clone(), cx.now);
+                    cx.store.remove_orders(&[&o.id]);
+                    self.account
+                        .preplacements
+                        .retain(|p| p.order.symbol != o.symbol || p.order.side != o.side);
+                    self.account.pending.remove(&o.id);
+                }
+            }
+            Effect::Leverage {
+                symbol,
+                leverage,
+                isolated,
+            } => {
+                let margin = if isolated {
+                    MarginType::Isolated
+                } else {
+                    MarginType::Cross
+                };
+                cx.store.update_setting(&symbol, |s| {
+                    s.leverage = leverage;
+                    s.margin_type = Some(margin);
+                });
+                cx.store.update_positions(|p| {
+                    if p.symbol == symbol {
+                        p.leverage = leverage;
+                        p.margin_type = Some(margin);
+                    }
+                });
+            }
+        }
+        self.pump_trades(cx);
+    }
+    fn restore_cancel(&self, cx: &mut Cx<'_, Pending>, effect: &Effect) {
+        if let Effect::Cancel(orders) = effect {
+            for o in orders {
+                cx.store.update_order(&o.id, |live| {
+                    if live.status == OrderStatus::Canceling {
+                        live.status = o.status;
+                    }
+                });
+            }
+        }
+    }
+    fn finish_trade(&mut self, cx: &mut Cx<'_, Pending>, result: Result<(), String>) {
+        self.trading.inflight = false;
+        if let Some(job) = self.trading.active.take() {
+            cx.done(
+                job.command,
+                result.map(|_| {
+                    if let Some(client_order_id) = job.replacement {
+                        #[derive(Serialize)]
+                        #[serde(rename_all = "camelCase")]
+                        struct Replacement {
+                            order_ids: Vec<String>,
+                            client_order_id: String,
+                        }
+                        serde_json::to_string(&Replacement {
+                            order_ids: job.ids,
+                            client_order_id,
+                        })
+                        .unwrap()
+                    } else {
+                        serde_json::to_string(&job.ids).unwrap()
+                    }
+                }),
+            );
+        }
+        self.pump_trades(cx);
+    }
+    pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.trading.pace == Some(timer) {
+            self.trading.pace = None;
+            self.pump_trades(cx);
+        }
+        if self.trading.builder_wait == Some(timer) {
+            self.trading.builder_wait = None;
+            self.account.builder_approved = Some(false);
+            self.pump_trades(cx);
+        }
+        if self.trading.retry == Some(timer) {
+            self.trading.retry = None;
+            self.trading.expected.retain(|id| {
+                cx.store
+                    .order(id)
+                    .is_none_or(|o| o.status != OrderStatus::Open)
+            });
+            if !self.trading.expected.is_empty() {
+                self.refresh_orders(cx);
+                self.trading.retry_step += 1;
+                if let Some(delay) =
+                    [300.0, 700.0, 1500.0, 3000.0, 5000.0].get(self.trading.retry_step)
+                {
+                    self.trading.retry = Some(cx.set_timer(*delay));
+                } else {
+                    self.trading.expected.clear();
+                }
+            }
+        }
+    }
+}
+fn parse_reply(raw: &str) -> Result<(String, Vec<Status>), String> {
+    let reply =
+        serde_json::from_str::<Reply>(raw).map_err(|_| "Invalid response from Hyperliquid API")?;
+    if reply.status != "ok" {
+        return Err(serde_json::from_str::<String>(reply.response.get())
+            .unwrap_or_else(|_| "Hyperliquid rejected request".into()));
+    }
+    let data = serde_json::from_str::<ReplyData>(reply.response.get())
+        .map_err(|_| "Invalid Hyperliquid response data")?;
+    Ok((
+        data.r#type,
+        data.data.map_or_else(Vec::new, |data| data.statuses),
+    ))
+}
+fn only_terminal_cancel(error: &str) -> bool {
+    let prefix = "Order was never placed, already canceled, or filled";
+    error.strip_prefix(prefix).is_some_and(|s| {
+        s.trim_start_matches('.').trim().is_empty()
+            || s.trim_start_matches('.')
+                .trim()
+                .strip_prefix("asset=")
+                .is_some_and(|s| s.bytes().all(|b| b.is_ascii_digit()))
+    })
+}
+fn mint_cloid() -> Result<String, String> {
+    let mut bytes = [0u8; 16];
+    getrandom::getrandom(&mut bytes).map_err(|e| e.to_string())?;
+    Ok(format!("0x{}", safe_cex_crypto::hex(&bytes)))
+}
+fn float_wire(value: f64) -> Result<String, String> {
+    if !value.is_finite() {
+        return Err("Nonfinite order number".into());
+    }
+    let text = format!("{value:.8}");
+    if (text.parse::<f64>().unwrap() - value).abs() >= 1e-9 {
+        return Err("Order number exceeds wire precision".into());
+    }
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    Ok(if text == "-0" {
+        "0".into()
+    } else {
+        text.into()
+    })
+}
+fn price_wire(price: f64, amount_step: f64) -> Result<String, String> {
+    if !price.is_finite() || price <= 0.0 {
+        return Err("Invalid order price".into());
+    }
+    let significant_step = 10f64.powi((price.log10().floor() as i32 - 4).min(0));
+    let significant = num::adjust(price, significant_step);
+    let decimals = 6 - num::decimals(amount_step) as i32;
+    float_wire(num::adjust(significant, 10f64.powi(-decimals)))
+}
+
+#[cfg(test)]
+mod signing_tests {
+    use super::*;
+    // Official Python SDK test_l1_action_signing_order_with_cloid_matches.
+    #[test]
+    fn official_order_with_cloid_signature_pins_msgpack_key_order() {
+        let action = Action::Order {
+            orders: vec![OrderWire {
+                a: 1,
+                b: true,
+                p: "100".into(),
+                s: "100".into(),
+                r: false,
+                t: WireType::Limit {
+                    limit: LimitWire { tif: "Gtc" },
+                },
+                c: "0x00000000000000000000000000000001".into(),
+            }],
+            grouping: "na",
+            builder: None,
+        };
+        let s = sign::sign(
+            &action,
+            None,
+            0,
+            true,
+            "0x0123456789012345678901234567890123456789012345678901234567890123",
+        )
+        .unwrap();
+        assert_eq!(
+            s.r,
+            "0x041ae18e8239a56cacbc5dad94d45d0b747e5da11ad564077fcac71277a946e3"
+        );
+        assert_eq!(
+            s.s,
+            "0x3c61f667e747404fe7eea8f90ab0e76cc12ce60270438b2058324681a00116da"
+        );
+        assert_eq!(s.v, 27);
+    }
+    #[test]
+    fn leverage_is_an_integer_in_signed_msgpack() {
+        let action = Action::Leverage {
+            asset: 0,
+            is_cross: true,
+            leverage: 20,
+        };
+        let mut expected = vec![0x84, 0xa4];
+        expected.extend_from_slice(b"type");
+        expected.push(0xae);
+        expected.extend_from_slice(b"updateLeverage");
+        expected.push(0xa5);
+        expected.extend_from_slice(b"asset");
+        expected.extend_from_slice(&[0, 0xa7]);
+        expected.extend_from_slice(b"isCross");
+        expected.extend_from_slice(&[0xc3, 0xa8]);
+        expected.extend_from_slice(b"leverage");
+        expected.push(20);
+        assert_eq!(rmp_serde::to_vec_named(&action).unwrap(), expected);
+    }
+}
