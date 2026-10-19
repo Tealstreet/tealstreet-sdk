@@ -139,7 +139,7 @@ impl Serialize for ChaserCompleteEvent {
         let mut record =
             serializer.serialize_struct(safe_cex_types::model_field::MODEL_RECORD, 8)?;
         record.serialize_field("id", &self.id)?;
-        safe_cex_types::ModelField::from(self.client_id.as_ref())
+        safe_cex_types::ModelField::<&str>::from(self.client_id.as_deref())
             .into_property()
             .serialize_field(&mut record, "clientId")?;
         record.serialize_field("symbol", &self.symbol)?;

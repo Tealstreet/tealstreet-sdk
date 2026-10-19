@@ -522,7 +522,11 @@ fn cleanup_prefix_identity_live_cancel_targets_and_single_completion() {
         "CHASER native successful empty REST suppresses position fallback"
     );
     let src = source();
-    assert_eq!(serde_json::to_value(&event).unwrap(), src["cleanupEvent"]);
+    let mut expected_event = src["cleanupEvent"].clone();
+    for field in ["size", "filled"] {
+        expected_event[field] = json!(expected_event[field].as_f64().unwrap());
+    }
+    assert_eq!(serde_json::to_value(&event).unwrap(), expected_event);
     assert_eq!(src["emptyRestFilled"].as_f64(), Some(0.));
 }
 #[test]

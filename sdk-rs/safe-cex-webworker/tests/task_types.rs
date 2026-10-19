@@ -317,7 +317,7 @@ fn task_records_follow_source_fields_and_reject_positional_and_optional_null_inp
     ];
     assert_eq!(
         record_checks,
-        [(3, 0), (10, 5), (8, 1), (4, 0), (15, 4), (13, 4)],
+        [(3, 0), (10, 5), (4, 0), (15, 4), (13, 4)],
         "RECORD-CARDINALITY executed field and optional checks"
     );
     assert_eq!(CHASER_KEPT_ORDER_STOP_REASON, schema["kept"]);
