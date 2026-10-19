@@ -1,7 +1,7 @@
 //! Signing primitives shared by venue engines. Pure functions: no I/O, no host.
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Encoding {
@@ -30,6 +30,10 @@ pub fn hmac_sha256(key: &[u8], payload: &[u8], encoding: Encoding) -> String {
     let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC accepts any key length");
     mac.update(payload);
     encode(&mac.finalize().into_bytes(), encoding)
+}
+
+pub fn sha256(bytes: &[u8]) -> [u8; 32] {
+    Sha256::digest(bytes).into()
 }
 
 pub mod ed25519;

@@ -346,6 +346,11 @@ describe('RustEngineExchange', () => {
     vi.restoreAllMocks();
   });
 
+  it('skips private WOO metadata for implicit public-only credentials', async () => {
+    exchange = new RustEngineExchange('woo', { key: '', secret: '' }, new DefaultStore());
+    await expect(exchange.updateSymbolMetadata('BTCUSDT')).resolves.toBeUndefined();
+  });
+
   it('keeps WOO journal PnL on the order axis when fills have no PnL', async () => {
     exchange = new RustEngineExchange('woo', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
     const orders = vi.spyOn(exchange, 'fetchHistoricalOrders').mockResolvedValue([
