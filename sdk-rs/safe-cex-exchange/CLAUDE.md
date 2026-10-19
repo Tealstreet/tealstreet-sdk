@@ -2148,3 +2148,7 @@ NaN payloads canonicalize as Node structuredClone does.
 Uncloneable values and unmodeled object kinds produce visible DataCloneError.
 The worker recorder intentionally drops clone failures as perfFixture.ts does;
 other callers receive the error. Node's real structuredClone supplies the oracle.
+
+Private authentication recovery reports the supplied ExchangeError through the
+runtime exception sink before warning/reconnect, preserving its retained cause.
+See `PRIVATE_OPEN_REVIEW.md` for the bounded disposal/recovery differences.
