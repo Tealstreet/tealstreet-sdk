@@ -166,7 +166,8 @@ merge that PR, and create a fresh follow-up branch. No rebase or force push.
 - Build wasm, run private correctness gate, record 20s BTC/ETH public tape and
   trim fixture, run public performance/correctness gate and Binance regressions.
 - Fix workspace-path integration issues and move the existing Rust wasm test
-  out of production runtime code to satisfy the package boundary invariant.
+  out of production runtime code to satisfy the package boundary invariant;
+  the landing branch's `src/__tests__` location wins during integration.
 - Run root typecheck/lint/tests plus required Rust checks. Record exact results
   and phase review; merge landing branch, rerun affected checks, then PR reviews
   and merge only after every required gate is green.
@@ -187,3 +188,19 @@ merge that PR, and create a fresh follow-up branch. No rebase or force push.
   of BTC/ETH public traffic (2,922 records); public performance gate is running.
 - 44 BloFin tests and clippy pass after review fixes. Root typecheck (44 tasks)
   and lint (28 tasks) pass; root tests and stable wasm/gates remain in progress.
+
+### Phase 5 integrated verification
+
+- Merged landing through `08662b3282`; resolved the duplicate wasm-test rename
+  in favor of landing's `src/__tests__/rust.exchange.wasm.test.ts`.
+- Release wasm rebuild, wasm-target clippy, 44 venue tests, 11 engine tests,
+  venue fmt/clippy and bans pass. SDK wasm integration tests: 4 pass.
+- Isolated gate output directories prevent concurrent runs overwriting results.
+- Stable BloFin public gate: 2,764 frames, 512 markets/tickers, 2 books, exact
+  parity. TS/Rust main CPU 126.6/125.2ms, steady CPU 82.4/74.5ms, retained
+  memory 1.6/1.5MB (Rust linear memory 0.9MB). PASS over three runs.
+- Stable private gate: 26 frames, exact account/command/fill/write/subscription
+  parity, zero unmatched or unused mutations. PASS. Private tapes gate correctness.
+- Root test run: 6,486 passed, four unrelated HyroTrader import timeouts at the
+  default five-second limit. Isolated HyroTrader recheck with 30-second timeout:
+  all 10 passed. Full root retry is running; no unrelated production edits.

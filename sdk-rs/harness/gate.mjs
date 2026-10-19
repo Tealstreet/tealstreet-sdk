@@ -16,7 +16,7 @@ const { values } = parseArgs({
     'no-egress': { type: 'boolean', default: false },
   },
 });
-const outDir = 'sdk-rs/harness/out';
+const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 
 const replay = (impl, run) => {
