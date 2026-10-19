@@ -101,6 +101,33 @@ it('preserves BloFin SDK range units, flat leverage, global margin and caller ID
         extra: { remainingNative: 1, filledInPlacementUnits: 3 },
       });
     }
+    const order = { symbol: 'BTCUSDT', type: OrderType.Limit, side: OrderSide.Buy, amount: 1, price: 60000 };
+    const originalIds = store.orders.map((current) => current.id);
+    for (const controls of [
+      { bybitSlippageToleranceTicks: NaN },
+      { bybitSlippageToleranceTicks: Infinity },
+      { bybitSlippageToleranceTicks: -Infinity },
+      { bybitSlippageToleranceTicks: null },
+      { bybitBbo: null },
+    ]) {
+      await expect(exchange.placeOrders([order, { ...order, ...controls }])).rejects.toThrow(
+        'blofin does not support Bybit BBO or TickSize controls',
+      );
+      expect(requests.filter((request) => request.method === 'POST')).toEqual([]);
+      expect(store.orders.map((current) => current.id)).toEqual(originalIds);
+      expect(main.store.orders.map((current) => current.id)).toEqual(originalIds);
+    }
+    const bracket = { ...order, stopLoss: 58000, takeProfit: 62000 };
+    for (const field of ['stopLoss', 'takeProfit', 'amount', 'price', 'triggerPrice', 'maxSlippagePct'] as const) {
+      for (const value of [NaN, Infinity, -Infinity]) {
+        await expect(exchange.placeOrders([order, { ...bracket, [field]: value }])).rejects.toThrow(
+          `blofin ${field} must be finite`,
+        );
+        expect(requests.filter((request) => request.method === 'POST')).toEqual([]);
+        expect(store.orders.map((current) => current.id)).toEqual(originalIds);
+        expect(main.store.orders.map((current) => current.id)).toEqual(originalIds);
+      }
+    }
     const leverage = await exchange.fetchLeverageForSymbol('BTCUSDT');
     expect(leverage).toMatchObject({ buyLeverage: 20, sellLeverage: 20, marginType: MarginType.Cross });
     expect(store.fetchedLeverage.BTCUSDT).toMatchObject({ buyLeverage: 20, sellLeverage: 20 });

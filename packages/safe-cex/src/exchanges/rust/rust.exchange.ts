@@ -273,8 +273,22 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   placeOrders = async (orders: PlaceOrderOpts[]) => {
+    const isBybit = ['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name);
+    if (!isBybit && orders.some((order) => 'bybitBbo' in order || 'bybitSlippageToleranceTicks' in order)) {
+      this.rejectPreflight(`${this.name} does not support Bybit BBO or TickSize controls`);
+    }
+    if (!isBybit) {
+      for (const order of orders) {
+        for (const field of ['amount', 'price', 'triggerPrice', 'stopLoss', 'takeProfit', 'maxSlippagePct'] as const) {
+          const value = order[field];
+          if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value))) {
+            this.rejectPreflight(`${this.name} ${field} must be finite`);
+          }
+        }
+      }
+    }
     if (this.name === 'bingx') this.assertCallerClientOrderIds(orders);
-    if (['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(this.name)) {
+    if (isBybit) {
       this.assertCallerClientOrderIds(orders);
       for (const order of orders) {
         for (const field of ['amount', 'price', 'triggerPrice', 'stopLoss', 'takeProfit'] as const) {
