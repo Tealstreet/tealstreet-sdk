@@ -163,6 +163,19 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     let outgoing = self.transport.connect(socket, url, self.events.clone());
                     self.sockets.insert(socket, outgoing);
                 }
+                Action::WsConnectWithHeaders {
+                    socket,
+                    url,
+                    headers,
+                } => {
+                    let outgoing = self.transport.connect_with_headers(
+                        socket,
+                        url,
+                        headers,
+                        self.events.clone(),
+                    );
+                    self.sockets.insert(socket, outgoing);
+                }
                 Action::WsSend { socket, text } => {
                     if let Some(outgoing) = self.sockets.get(&socket) {
                         let _ = outgoing.send(text);
