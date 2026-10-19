@@ -311,3 +311,20 @@ fn malformed_candle_never_enters_frame() {
         assert!(e.take_frame(1.0).is_none());
     }
 }
+
+#[test]
+fn string_depth_sequences_preserve_integer_precision() {
+    let (mut e, socket) = seed();
+    let r = subscribe(&mut e);
+    let text = r#"{"stream":"depth.SOL_USDC_PERP","data":{"s":"SOL_USDC_PERP","U":"9007199254740994","u":"9007199254740994","b":[["140","7"]],"a":[]}}"#;
+    e.handle(1.0, Event::WsMessage { socket, text });
+    reply(
+        &mut e,
+        &r,
+        r#"{"lastUpdateId":"9007199254740993","bids":[["140","1"]],"asks":[["142","1"]]}"#,
+    );
+    assert_eq!(
+        e.venue().book("SOL_USDC_PERP").unwrap().bids(),
+        [(140.0, 7.0)]
+    );
+}

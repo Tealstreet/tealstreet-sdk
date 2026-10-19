@@ -4,6 +4,19 @@ use serde::Deserialize;
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
 
+pub fn sequence<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Id<'a> {
+        Bare(u64),
+        Text(#[serde(borrow)] Str<'a>),
+    }
+    match Id::deserialize(d)? {
+        Id::Bare(id) => Ok(id),
+        Id::Text(id) => id.parse().map_err(serde::de::Error::custom),
+    }
+}
+
 pub fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -84,6 +97,7 @@ pub struct Mark<'a> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Depth {
+    #[serde(deserialize_with = "sequence")]
     pub last_update_id: u64,
     pub bids: Vec<Level>,
     pub asks: Vec<Level>,
@@ -115,9 +129,9 @@ pub struct WsError<'a> {
 pub struct DepthEvent<'a> {
     #[serde(borrow)]
     pub s: Str<'a>,
-    #[serde(rename = "U")]
+    #[serde(rename = "U", deserialize_with = "sequence")]
     pub first: u64,
-    #[serde(rename = "u")]
+    #[serde(rename = "u", deserialize_with = "sequence")]
     pub last: u64,
     pub b: Vec<Level>,
     pub a: Vec<Level>,
@@ -381,6 +395,8 @@ pub struct OrderEvent<'a> {
     pub p: Option<Number>,
     #[serde(rename = "P")]
     pub trigger_price: Option<Number>,
+    #[serde(rename = "B", borrow)]
+    pub trigger_by: Option<Str<'a>>,
     #[serde(default, deserialize_with = "number")]
     pub q: f64,
     #[serde(rename = "Y")]

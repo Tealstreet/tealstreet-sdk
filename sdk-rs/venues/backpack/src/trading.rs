@@ -434,8 +434,17 @@ impl Backpack {
                         kind: old.kind,
                         side: old.side,
                         amount: amount.unwrap_or(old.amount),
-                        price: Some(price.unwrap_or(old.price)),
-                        trigger_price: None,
+                        price: Some(
+                            old.extra
+                                .as_ref()
+                                .and_then(|e| e.conditional_order_price)
+                                .unwrap_or(price.unwrap_or(old.price)),
+                        ),
+                        trigger_price: old
+                            .extra
+                            .as_ref()
+                            .and_then(|e| e.conditional_order_price)
+                            .map(|_| price.unwrap_or(old.price)),
                         stop_loss: None,
                         take_profit: None,
                         reduce_only: Some(old.reduce_only),

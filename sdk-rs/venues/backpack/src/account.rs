@@ -102,6 +102,15 @@ pub fn tif(text: &str) -> TimeInForce {
     }
 }
 
+pub fn trigger_type(text: &str) -> Option<StopTriggerType> {
+    match text {
+        "MarkPrice" => Some(StopTriggerType::MarkPrice),
+        "LastPrice" => Some(StopTriggerType::LastPrice),
+        "IndexPrice" => Some(StopTriggerType::IndexPrice),
+        _ => None,
+    }
+}
+
 pub fn kind(
     store: &safe_cex_engine::Store,
     symbol: &str,
@@ -150,10 +159,15 @@ pub fn order(row: OrderRow<'_>, store: &safe_cex_engine::Store) -> Order {
         client_order_id: row.client_id.map(|id| id.to_string()),
         time_in_force: Some(tif(&row.time_in_force)),
         last_update: row.created_at,
-        trigger_type: None,
+        trigger_type: row.trigger_by.as_deref().and_then(trigger_type),
         take_profit: None,
         stop_loss: None,
-        extra: None,
+        extra: (trigger.is_some() && row.order_type.eq_ignore_ascii_case("Limit")).then_some(
+            OrderExtra {
+                conditional_order_price: Some(row.price),
+                ..Default::default()
+            },
+        ),
     }
 }
 
@@ -246,7 +260,16 @@ impl Backpack {
         }
         self.account.credentials = match (&self.options.key, &self.options.secret) {
             (Some(key), Some(secret)) => match Credentials::new(key.clone(), secret) {
-                Ok(c) => Some(c),
+                Ok(mut c) => {
+                    if let Some(window) = self
+                        .options
+                        .recv_window
+                        .filter(|n| n.is_finite() && *n >= 1.0 && *n <= u32::MAX as f64)
+                    {
+                        c.window = window as u32;
+                    }
+                    Some(c)
+                }
                 Err(e) => {
                     cx.log(LogLevel::Error, e);
                     None
@@ -597,7 +620,7 @@ impl Backpack {
             let trigger = d.trigger_price.map(|n| n.0);
             let side = side(&d.side);
             let price = trigger
-                .or(d.p.map(|n| n.0))
+                .or(d.p.as_ref().map(|n| n.0))
                 .or(d.execution_price.as_ref().map(|n| n.0))
                 .unwrap_or(0.0);
             self.account.orders_revision += 1;
@@ -626,10 +649,15 @@ impl Backpack {
                     client_order_id: d.c.as_ref().map(ClientId::text),
                     time_in_force: Some(tif(&d.f)),
                     last_update: (d.event_time / 1000.0).floor(),
-                    trigger_type: None,
+                    trigger_type: d.trigger_by.as_deref().and_then(trigger_type),
                     take_profit: None,
                     stop_loss: None,
-                    extra: None,
+                    extra: (trigger.is_some() && d.o.eq_ignore_ascii_case("Limit")).then_some(
+                        OrderExtra {
+                            conditional_order_price: d.p.as_ref().map(|n| n.0),
+                            ..Default::default()
+                        },
+                    ),
                 });
             }
             if d.e == "orderFill"

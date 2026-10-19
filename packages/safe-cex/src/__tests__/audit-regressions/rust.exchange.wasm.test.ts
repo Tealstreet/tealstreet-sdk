@@ -3,11 +3,11 @@ import type { OrderBook } from '../../types';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { BaseExchange } from '../../exchanges/base';
+import { loadNodeEngine } from '../../exchanges/rust/loadNodeEngine';
+import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
-import { BaseExchange } from '../base';
-import { loadNodeEngine } from './loadNodeEngine';
-import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from './rust.exchange';
 
 const EXCHANGE_INFO = JSON.stringify({
   symbols: [
@@ -39,7 +39,8 @@ const RESPONSES: Record<string, string> = {
   dual: '{"dualSidePosition":false}',
   positionRisk: '[]',
   symbolConfig: '[{"symbol":"BTCUSDT","marginType":"CROSSED","leverage":20}]',
-  account: '{"assets":[{"asset":"USDT","walletBalance":"1000","availableBalance":"900","initialMargin":"100","unrealizedProfit":"0"}]}',
+  account:
+    '{"assets":[{"asset":"USDT","walletBalance":"1000","availableBalance":"900","initialMargin":"100","unrealizedProfit":"0"}]}',
   openOrders: '[]',
   openAlgoOrders: '[]',
   order: '{"orderId":4242,"status":"NEW"}',
@@ -182,5 +183,85 @@ describe('RustEngineExchange', () => {
     exchange = new RustEngineExchange('binance', { key: 'k', secret: 's' }, new DefaultStore());
     const result = await exchange.validateAccount();
     expect(result.error).toContain('Invalid API-key');
+  });
+
+  it('runs Backpack perpetuals and preserves canonical caller IDs through placement and frames', async () => {
+    const sockets: Array<(text: string) => void> = [];
+    const writes: Array<{ method: string; body?: string }> = [];
+    const responses: Record<string, string> = {
+      markets: '[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"}]',
+      tickers:
+        '[{"symbol":"SOL_USDC_PERP","lastPrice":"140","priceChangePercent":"0.01","volume":"10","quoteVolume":"1400"}]',
+      markPrices: '[]',
+      account: '{"leverageLimit":"10"}',
+      position: '[]',
+      orders: '[]',
+      collateral: '{"netEquity":"1000","netEquityAvailable":"900","netEquityLocked":"100","pnlUnrealized":"0"}',
+    };
+    const transport: Transport = {
+      now: () => Date.now(),
+      connect: (_url, { onOpen, onMessage }) => {
+        sockets.push(onMessage);
+        setTimeout(onOpen, 0);
+        return { send: () => {}, close: () => {} };
+      },
+      request: async ({ method, url, body }) => {
+        if (method !== 'GET') writes.push({ method, body });
+        const text = method === 'POST' ? '{"id":"800"}' : responses[new URL(url).pathname.split('/').pop()!];
+        return { status: text ? 200 : 404, headers: '', body: new TextEncoder().encode(text ?? '{}') };
+      },
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    };
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => transport);
+    const store = new DefaultStore();
+    exchange = new RustEngineExchange(
+      'backpack',
+      { key: 'public-test-key', secret: Buffer.alloc(32, 7).toString('base64') },
+      store,
+    );
+    await exchange.start();
+    const opts = {
+      symbol: 'SOL_USDC_PERP',
+      type: OrderType.Limit,
+      side: OrderSide.Buy,
+      amount: 1,
+      price: 140,
+      clientOrderId: '4294967295',
+    };
+    expect(await exchange.placeOrderWithClientOrderId(opts)).toEqual({
+      orderIds: ['800'],
+      clientOrderId: '4294967295',
+    });
+    expect(JSON.parse(writes[0].body!)).toMatchObject({ clientId: 4294967295, quantity: '1.00' });
+    await expect(exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: '01' })).rejects.toThrow('uint32');
+    expect(writes).toHaveLength(1);
+    await until(() => sockets.length === 2);
+    sockets[1](
+      JSON.stringify({
+        stream: 'account.orderUpdate',
+        data: {
+          e: 'orderAccepted',
+          i: '800',
+          c: 4294967295,
+          E: Date.now() * 1000,
+          X: 'New',
+          s: opts.symbol,
+          o: 'Limit',
+          S: 'Bid',
+          p: '140',
+          q: '1',
+          z: '0',
+          f: 'GTC',
+        },
+      }),
+    );
+    await until(() => store.orders.some((o) => o.id === '800'));
+    expect(store.orders[0].clientOrderId).toBe('4294967295');
+    expect(await exchange.findOrderByClientOrderId(opts.symbol, '4294967295')).toMatchObject({
+      found: true,
+      order: { id: '800' },
+    });
   });
 });

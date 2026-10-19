@@ -51,6 +51,7 @@ pub fn ready_position(position_status: u16, position_body: &str) -> (Driver, Soc
         public_data_only: false,
         key: Some("test-public-key".into()),
         secret: Some(secret),
+        recv_window: None,
     }));
     e.start(1000.0);
     let r = requests(&mut e).pop().unwrap();

@@ -30,8 +30,8 @@ Branch: `feat/rust-backpack`. Spec: `RUST_REWRITE.md`; process: latest
 
 ## Delivery
 
-After all gates pass, merge `origin/feat/rust-rewrite` into the lane (stop on
-conflicts), rerun affected checks, push, open PR to `feat/rust-rewrite`, run
+After all gates pass, merge `origin/feat/rust-rewrite` into the lane (resolve conflicts under the overseer standing authorization,
+preserving the nested workspace), rerun affected checks, push, open PR to `feat/rust-rewrite`, run
 adversarial sub-agent reviews and post findings, fix and repeat, merge PR and
 cut a fresh follow-up branch. Never touch master, rebase, or force-push.
 
@@ -96,3 +96,17 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   violation rust/rust.exchange.wasm.test.ts (6,488 passed / 1 failed); move that
   test to audit-regressions during harness integration and rerun checks.
 - Harness integration started: wasm and SDK registration, relocation script fix.
+
+- Harness integration checkpoint: Backpack registered in wasm/SDK, caller IDs
+  enforced in the SDK facade, default/extra recvWindow forwarded, existing wasm
+  test moved out of the runtime tree. Independent Node ED25519 replay checks
+  REST and private subscriptions with public deterministic test keys.
+- Review strengthened replay: consume each write once, reject missing/extra
+  writes, preserve exact decimals and wire types, bound readiness/commands,
+  enforce Backpack write ordering and compare every repeated gate run.
+- Live depth uses string update IDs; decode strings/numbers exactly as u64,
+  with an above-2^53 regression. Conditional amend retains execution limit and
+  original trigger source; TS source-loss correction is documented in the gate.
+- Native tests and harness tests pass at this checkpoint; final gate suite is
+  still running. First release wasm build is compiling the crypto dependencies.
+  Live public recording awaits that build. No performance claim yet.

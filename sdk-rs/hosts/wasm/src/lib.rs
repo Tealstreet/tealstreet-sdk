@@ -7,6 +7,7 @@ use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
+use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -56,6 +57,8 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
+    #[serde(default)]
+    recv_window: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -416,6 +419,12 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
+            }))),
+            "backpack" => Box::new(Engine::new(Backpack::new(BackpackOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                recv_window: options.recv_window,
             }))),
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };

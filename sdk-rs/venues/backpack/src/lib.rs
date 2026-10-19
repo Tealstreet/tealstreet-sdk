@@ -23,6 +23,7 @@ pub struct Options {
     pub public_data_only: bool,
     pub key: Option<String>,
     pub secret: Option<String>,
+    pub recv_window: Option<f64>,
 }
 
 pub enum Pending {
@@ -261,6 +262,14 @@ impl Backpack {
     }
 
     fn depth(&mut self, cx: &mut Cx<'_, Pending>, event: DepthEvent<'_>) {
+        cx.store.update_ticker(&event.s, |t| {
+            if let Some(level) = event.b.first() {
+                t.bid = level.0;
+            }
+            if let Some(level) = event.a.first() {
+                t.ask = level.0;
+            }
+        });
         let Some(state) = self.books.get_mut(event.s.as_ref()) else {
             return;
         };

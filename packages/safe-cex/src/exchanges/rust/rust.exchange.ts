@@ -5,6 +5,7 @@ import type {
   ExchangeName,
   ExchangeOptions,
   Execution,
+  ExecutionsOptions,
   HistoricalOrder,
   IncomeHistoryOptions,
   IncomeRecord,
@@ -15,9 +16,9 @@ import type {
   PlaceOrderOpts,
   PublicTrade,
   UpdateOrderOpts,
-  ExecutionsOptions,
   ValidateAccountResult,
 } from '../../types';
+import type { ClientOrderIdRule } from '../clientOrderId';
 
 import { EngineHost, nativeTransport } from '@tealstreet/safe-cex-wasm/host';
 import { Frame } from '@tealstreet/safe-cex-wasm/wire';
@@ -29,6 +30,7 @@ import { BaseExchange } from '../base';
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
+  backpack: 'backpack',
   binancepm: 'binancepm',
 };
 
@@ -64,6 +66,14 @@ const STORE_FLUSH_MS = 250;
  * reads the same store it always has. Trading methods are engine commands.
  */
 export class RustEngineExchange extends BaseExchange {
+  protected readonly clientOrderIdRule: ClientOrderIdRule | undefined =
+    this.name === 'backpack'
+      ? {
+          label: 'Backpack',
+          requirement: 'be a canonical decimal uint32 between 1 and 4294967295',
+          isValid: (id) => /^[1-9]\d{0,9}$/.test(id) && Number(id) <= 0xffff_ffff,
+        }
+      : undefined;
   private host?: EngineHostType;
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
@@ -89,7 +99,13 @@ export class RustEngineExchange extends BaseExchange {
     const { key, secret, testnet, publicDataOnly } = this.options;
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
-      JSON.stringify({ key, secret, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly) }),
+      JSON.stringify({
+        key,
+        secret,
+        testnet: Boolean(testnet),
+        publicDataOnly: Boolean(publicDataOnly),
+        recvWindow: this.options.extra?.recvWindow,
+      }),
     );
     this.host = new EngineHost(engine, engineTransport(), {
       onFrame: this.receiveFrame,
@@ -176,7 +192,10 @@ export class RustEngineExchange extends BaseExchange {
     return this.host.command(command) as Promise<T>;
   };
 
-  placeOrders = (orders: PlaceOrderOpts[]) => this.command<string[]>({ op: 'placeOrders', orders });
+  placeOrders = (orders: PlaceOrderOpts[]) => {
+    if (this.name === 'backpack') this.assertCallerClientOrderIds(orders);
+    return this.command<string[]>({ op: 'placeOrders', orders });
+  };
 
   placeOrder = (opts: PlaceOrderOpts) => this.placeOrders([opts]);
 
@@ -223,8 +242,7 @@ export class RustEngineExchange extends BaseExchange {
       to: opts.to,
     });
 
-  fetchHistoricalFills = (opts: ExecutionsOptions) =>
-    this.command<Execution[]>({ op: 'fetchFills', ...opts });
+  fetchHistoricalFills = (opts: ExecutionsOptions) => this.command<Execution[]>({ op: 'fetchFills', ...opts });
 
   fetchHistoricalOrders = (opts?: OrderHistoryOptions) =>
     this.command<HistoricalOrder[]>({

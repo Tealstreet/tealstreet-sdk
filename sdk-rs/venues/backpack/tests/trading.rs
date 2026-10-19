@@ -360,6 +360,7 @@ fn delayed_account_info_cannot_restore_the_previous_leverage_after_patch() {
         public_data_only: false,
         key: Some("public-test-key".into()),
         secret: Some(STANDARD.encode([7u8; 32])),
+        recv_window: None,
     }));
     e.start(1000.0);
     let r = requests(&mut e).pop().unwrap();
@@ -386,4 +387,33 @@ fn delayed_account_info_cannot_restore_the_previous_leverage_after_patch() {
     reply(&mut e, &patch, 200, "{}");
     reply(&mut e, &info, 200, r#"{"leverageLimit":"10"}"#);
     assert_eq!(e.store().setting(SYMBOL).unwrap().leverage, 20.0);
+}
+
+#[test]
+fn amend_trigger_limit_preserves_execution_price_and_trigger_source() {
+    let (mut e, socket) = ready();
+    ws(
+        &mut e,
+        socket,
+        "account.orderUpdate",
+        r#"{"e":"orderAccepted","i":"trigger-limit","E":2000000,"X":"New","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"145","q":"5","z":"0","f":"GTC","P":"150","Y":"5","B":"LastPrice"}"#,
+    );
+    e.drain_actions().for_each(drop);
+    e.handle(
+        2000.0,
+        Event::Command(Command::AmendOrder {
+            command: 1,
+            id: "trigger-limit".into(),
+            price: Some(151.0),
+            amount: None,
+        }),
+    );
+    let cancel = requests(&mut e).pop().unwrap();
+    assert_eq!(cancel.method, Method::Delete);
+    reply(&mut e, &cancel, 200, "{}");
+    let replace = requests(&mut e).pop().unwrap();
+    let body = replace.body.as_deref().unwrap();
+    assert!(body.contains("\"price\":\"145.00\""), "{body}");
+    assert!(body.contains("\"triggerPrice\":\"151.00\""), "{body}");
+    assert!(body.contains("\"triggerBy\":\"LastPrice\""), "{body}");
 }

@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 safe-cex-engine.workspace = true
 safe-cex-venue-binance.workspace = true
+safe-cex-venue-backpack = { path = "../../venues/backpack" }
 serde.workspace = true
 serde_json.workspace = true
 wasm-bindgen.workspace = true

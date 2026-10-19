@@ -8,6 +8,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
+import { Tape } from './tape.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -30,97 +31,10 @@ const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes
 const bookSymbols = values.books.split(',').filter(Boolean);
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
-const isPrivate = records.some((r) => r.url?.includes(venue.privateSocket));
-const KEY = 'replay-key';
-const SECRET = 'replay-secret';
-
-/** Per-request values: clocks, signatures and generated client ids. */
-const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId']);
-const canonicalUrl = (url) => {
-  const parsed = new URL(url);
-  const query = [...parsed.searchParams]
-    .filter(([name]) => !VOLATILE.has(name))
-    .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"[^"]*",?/g, '')])
-    .sort(([a], [b]) => a.localeCompare(b));
-  return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
-};
-
-/** Serves recorded HTTP responses and websocket frames in tape order. */
-class Tape {
-  constructor() {
-    this.responses = new Map();
-    for (const record of records.filter((r) => r.type === 'http')) {
-      const key = `${record.method} ${canonicalUrl(record.url)}`;
-      if (!this.responses.has(key)) this.responses.set(key, []);
-      this.responses.get(key).push(record);
-    }
-    this.frames = records.filter((r) => r.type === 'ws' || r.type === 'command');
-    this.open = new Map();
-    this.waiters = [];
-    this.unserved = 0;
-  }
-
-  respond(method, url) {
-    const queue = this.responses.get(`${method} ${canonicalUrl(url)}`);
-    if (!queue?.length) {
-      this.unserved++;
-      return { status: 599, body: '' };
-    }
-    const record = queue.length > 1 ? queue.shift() : queue[0];
-    return { status: record.status, body: record.body };
-  }
-
-  connect(url, onOpen, onMessage) {
-    const socket = { url, onMessage, closed: false };
-    setImmediate(() => {
-      if (socket.closed) return;
-      this.open.set(url, socket);
-      onOpen();
-      this.waiters = this.waiters.filter((waiter) => !waiter());
-    });
-    return socket;
-  }
-
-  async socketFor(url) {
-    while (!this.open.get(url) || this.open.get(url).closed) {
-      await new Promise((resolve) => this.waiters.push(() => (this.open.get(url) ? (resolve(), true) : false)));
-    }
-    return this.open.get(url);
-  }
-
-  /**
-   * Deliver every frame in order, yielding to the event loop between frames.
-   * Commands are awaited where they fall. A private tape is paced: each record
-   * waits until its time after the account is ready.
-   */
-  async play(onTick, ready = async () => {}, runCommand = async () => {}) {
-    const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
-    for (const url of urls) await this.socketFor(url);
-    await ready();
-    const start = performance.now();
-    let delivered = 0;
-    const warm = Math.floor(this.frames.length / 4);
-    for (const frame of this.frames) {
-      if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
-      if (isPrivate) {
-        const wait = frame.t - (performance.now() - start);
-        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-      }
-      if (frame.type === 'command') {
-        this.results.push(await runCommand(frame).then((ids) => ({ ok: ids }), (error) => ({ error: String(error?.message ?? error) })));
-      } else {
-        const socket = await this.socketFor(frame.url);
-        socket.onMessage(frame.text);
-      }
-      delivered++;
-      onTick?.(frame.t);
-      await new Promise(setImmediate);
-    }
-    return delivered;
-  }
-
-  results = [];
-}
+const isPrivate = records.some(venue.isPrivateRecord ?? ((r) => r.url?.includes(venue.privateSocket)));
+const credentials = venue.replayCredentials ?? { key: 'replay-key', secret: 'replay-secret' };
+const KEY = credentials.key;
+const SECRET = credentials.secret;
 
 const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
@@ -159,7 +73,18 @@ const sortBook = (book) => ({
   asks: book.asks.map(({ price, amount }) => [price, amount]),
 });
 
-const tickerFields = ['bid', 'ask', 'last', 'mark', 'index', 'percentage', 'fundingRate', 'fundingTime', 'volume', 'quoteVolume'];
+const tickerFields = [
+  'bid',
+  'ask',
+  'last',
+  'mark',
+  'index',
+  'percentage',
+  'fundingRate',
+  'fundingTime',
+  'volume',
+  'quoteVolume',
+];
 const marketFields = (m) => ({
   id: m.id,
   symbol: m.symbol,
@@ -175,7 +100,7 @@ async function runRust() {
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine();
-  const tape = new Tape();
+  const tape = new Tape(records, venue, isPrivate);
   const encoder = new TextEncoder();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
@@ -191,10 +116,10 @@ async function runRust() {
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
       const socket = tape.connect(url, onOpen, onMessage);
-      return { send: () => {}, close: () => (socket.closed = true) };
+      return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
-    request: async ({ method, url }) => {
-      const { status, body } = tape.respond(method, url);
+    request: async ({ method, url, body: requestBody, headers }) => {
+      const { status, body } = tape.respond(method, url, requestBody, headers);
       return { status, headers: '', body: encoder.encode(body) };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
@@ -216,7 +141,13 @@ async function runRust() {
       status = frame.status() ?? status;
       const executed = frame.fills();
       for (let i = 0; i < (executed?.count ?? 0); i++) {
-        fills.push({ market: executed.market[i], side: executed.side[i], amount: executed.rows[i * 2 + 1], id: executed.orderId(i) });
+        fills.push({
+          market: executed.market[i],
+          side: executed.side[i],
+          amount: executed.rows[i * 2 + 1],
+          ...(venue.compareFillPrices ? { price: executed.rows[i * 2] } : {}),
+          id: executed.orderId(i),
+        });
       }
     },
   });
@@ -278,18 +209,33 @@ async function runRust() {
     bookRows[markets.symbol(market)] = { bids: levels(book.bids), asks: levels(book.asks) };
   }
   const account = isPrivate ? rustAccount({ markets, orders, positions, balance, settings, status, fills }) : undefined;
-  return { frames, metrics, unserved: tape.unserved, store: { markets: marketRows, tickers: tickerRows }, books: bookRows, account, commands: tape.results };
+  return {
+    frames,
+    metrics,
+    unserved: tape.unserved,
+    missingWrites: tape.missingWrites,
+    invalidSignatures: tape.invalidSignatures,
+    subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : undefined,
+    store: { markets: marketRows, tickers: tickerRows },
+    books: bookRows,
+    account,
+    commands: tape.results,
+  };
 }
 
 const commandArgs = ({ t, type, ...args }) => args;
-
 
 /** Main-thread view of the account, rebuilt from the latest frame tables. */
 function rustAccount({ markets, orders, positions, balance, settings, status, fills }) {
   const symbol = (i) => markets.symbol(i);
   const orderRows = [];
   for (let i = 0; i < (orders?.count ?? 0); i++) {
-    const row = { id: orders.id(i), symbol: symbol(orders.market[i]), ...orderEnums(orders.enums[i]) };
+    const row = {
+      id: orders.id(i),
+      ...(venue.compareClientIds ? { clientOrderId: orders.clientOrderId(i) ?? null } : {}),
+      symbol: symbol(orders.market[i]),
+      ...orderEnums(orders.enums[i]),
+    };
     for (const column of ORDER_COLUMNS) row[column] = orders[column][i];
     orderRows.push(row);
   }
@@ -301,7 +247,11 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   }
   const settingRows = [];
   for (let i = 0; i < (settings?.count ?? 0); i++) {
-    settingRows.push({ symbol: symbol(settings.market[i]), leverage: settings.leverage[i], marginType: settings.marginType(i) });
+    settingRows.push({
+      symbol: symbol(settings.market[i]),
+      leverage: settings.leverage[i],
+      marginType: settings.marginType(i),
+    });
   }
   return {
     hedged: status?.hedged ?? false,
@@ -309,12 +259,18 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
     orders: orderRows,
     positions: positionRows,
     settings: settingRows,
-    fills: fills.map((f) => ({ id: f.id, symbol: symbol(f.market), side: f.side === 0 ? 'buy' : 'sell', amount: f.amount })),
+    fills: fills.map((f) => ({
+      id: f.id,
+      symbol: symbol(f.market),
+      side: f.side === 0 ? 'buy' : 'sell',
+      amount: f.amount,
+      ...(venue.compareFillPrices ? { price: f.price } : {}),
+    })),
   };
 }
 
 async function runTs() {
-  const tape = new Tape();
+  const tape = new Tape(records, venue, isPrivate);
   class TapeWebSocket {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -343,7 +299,9 @@ async function runTs() {
     removeEventListener(type, fn) {
       this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
     }
-    send() {}
+    send(text) {
+      tape.send(this.socket, text);
+    }
     close() {
       this.readyState = 3;
       this.socket.closed = true;
@@ -358,7 +316,12 @@ async function runTs() {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString());
+    const { status, body } = tape.respond(
+      (config.method ?? 'get').toUpperCase(),
+      url.toString(),
+      config.data,
+      config.headers,
+    );
     // The raw body: the client's own transformResponse parses it, big ids included.
     const response = { data: body, status, statusText: String(status), headers: {}, config, request: {} };
     if (status >= 400) {
@@ -411,6 +374,42 @@ async function runTs() {
         await exchange.cancelSymbolOrders(record.symbol);
         return [];
       }
+      if (record.op === 'amendOrder')
+        return exchange.updateOrder({
+          order: store.orders.find((o) => o.id === record.id),
+          update: {
+            ...(record.price === undefined ? {} : { price: record.price }),
+            ...(record.amount === undefined ? {} : { amount: record.amount }),
+          },
+        });
+      if (record.op === 'setLeverage') {
+        await exchange.setLeverage(record.symbol, record.leverage);
+        return [];
+      }
+      if (record.op === 'setMarginType') {
+        await exchange.changeMarginType(record.isolated, record.symbol);
+        return [];
+      }
+      if (record.op === 'setPositionMode') {
+        await exchange.changePositionMode(record.hedged);
+        return [];
+      }
+      if (record.op === 'fetchFills')
+        return exchange.fetchHistoricalFills({
+          symbol: record.symbol,
+          orderId: record.orderId,
+          from: record.from,
+          to: record.to,
+          limit: record.limit,
+        });
+      if (record.op === 'fetchCandles')
+        return exchange.fetchOHLCV({
+          symbol: record.symbol,
+          interval: record.interval,
+          from: record.from,
+          to: record.to,
+          limit: record.limit,
+        });
       throw new Error(`unknown command ${record.op}`);
     },
   );
@@ -427,22 +426,51 @@ async function runTs() {
   const account = isPrivate
     ? {
         hedged: Boolean(store.options.isHedged),
-        balance: { used: store.balance.used, free: store.balance.free, total: store.balance.total, upnl: store.balance.upnl },
+        balance: {
+          used: store.balance.used,
+          free: store.balance.free,
+          total: store.balance.total,
+          upnl: store.balance.upnl,
+        },
         orders: store.orders.map((o) => ({ ...o })),
         // Zero-size placeholders carry each market's leverage and margin type.
         positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
-        settings: [...new Map(store.positions.filter((p) => p.leverage > 0).map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }])).values()],
-        fills: executions.map((f) => ({ id: f.id, symbol: f.symbol, side: f.side, amount: f.amount })),
+        settings: [
+          ...new Map(
+            store.positions
+              .filter((p) => p.leverage > 0)
+              .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
+          ).values(),
+        ],
+        fills: executions.map((f) => ({
+          id: f.id ?? f.orderId,
+          symbol: f.symbol,
+          side: f.side,
+          amount: f.amount,
+          ...(venue.compareFillPrices ? { price: f.price } : {}),
+        })),
       }
     : undefined;
   exchange.dispose();
-  return { frames, metrics, unserved: tape.unserved, store: snapshot, books: bookCopies, account, commands: tape.results };
+  return {
+    frames,
+    metrics,
+    unserved: tape.unserved,
+    missingWrites: tape.missingWrites,
+    invalidSignatures: tape.invalidSignatures,
+    subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : undefined,
+    store: snapshot,
+    books: bookCopies,
+    account,
+    commands: tape.results,
+  };
 }
 
 /** The fields both implementations carry, in one shape. */
 function normalizeAccount(account) {
   const order = (o) => ({
     id: String(o.id),
+    ...(venue.compareClientIds ? { clientOrderId: o.clientOrderId ?? null } : {}),
     symbol: o.symbol,
     status: o.status,
     type: o.type,
@@ -488,9 +516,14 @@ writeFileSync(
     impl: values.impl,
     frames: result.frames,
     unserved: result.unserved,
+    missingWrites: result.missingWrites,
+    invalidSignatures: result.invalidSignatures,
+    subscriptions: result.subscriptions,
     metrics: result.metrics,
-    markets: result.store.markets.map(marketFields),
-    tickers: result.store.tickers.map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, t[f]])])),
+    markets: result.store.markets.filter(venue.marketFilter ?? (() => true)).map(marketFields),
+    tickers: result.store.tickers
+      .filter(venue.marketFilter ?? (() => true))
+      .map((t) => Object.fromEntries([['symbol', t.symbol], ...tickerFields.map((f) => [f, t[f]])])),
     books: Object.fromEntries(Object.entries(result.books).map(([s, b]) => [s, sortBook(b)])),
     account: result.account && normalizeAccount(result.account),
     commands: result.commands,
