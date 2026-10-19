@@ -60,7 +60,7 @@ inverse only where its sizing and collateral behavior can be verified.
 
 ## Final integration
 
-After all gates: merge `origin/feat/rust-rewrite` into lane (stop on conflicts),
+After all gates: merge `origin/feat/rust-rewrite` into lane (resolve layout conflicts under standing authorization),
 re-run affected checks, push, PR to `feat/rust-rewrite`, adversarial local
 sub-agent reviews posted to PR, fix/review until clean or diminishing returns,
 merge PR, create fresh follow-up branch. Never touch master or force/rebase.
@@ -227,3 +227,25 @@ of three runs (Bybit regression: one run); private tapes gate correctness only.
 - Four-venue WASM is 1,918,946 bytes, within unchanged 2 MiB CI budget.
 - Post-merge venue replay regressions running before push; earlier measurements
   remain above for comparison. No gate threshold was relaxed.
+
+## Post-OKX gates
+
+Every replay gate passes on the final four-venue integration. Public medians use
+three runs, except the single-run Bybit regression. CPU contention with other
+lanes changed absolute timings; all comparisons retain the original thresholds.
+
+| Gate | TS CPU ms | Rust CPU ms | TS steady ms | Rust steady ms | TS / Rust retained MB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Bitget public | 1752.0 | 1698.5 | 1264.7 | 1220.0 | 2.9 / 2.1 |
+| Binance public | 160.8 | 71.0 | 88.4 | 27.1 | 2.3 / 2.0 |
+| Bybit public | 164.5 | 146.1 | 113.7 | 86.7 | 3.1 / 2.3 |
+| OKX public | 740.2 | 650.3 | 600.4 | 492.8 | 2.5 / 2.5 |
+
+- Bitget 11, Binance 14, Bybit 18 private frames; OKX/OKXEU/OKXDemo/OKXEUDemo
+  each 29 private frames: PASS exact account/commands and all taped writes.
+- Public counts: Bitget 36,631 frames / 846 markets / 846 tickers / 2 books;
+  Binance 871 / 917 / 783 / 3; Bybit 8,742 / 912 / 912 / 2;
+  OKX 8,902 / 494 / 494 / 2. OKX retained memory ratio is 1.01x before rounding.
+- Native workspace tests/clippy, engine 18, Bitget 67, harness 5, bans, fmt and
+  WASM workspace clippy: PASS. Repository typecheck 44 and lint 28 tasks PASS.
+- Landing is still 693ad4f139 after the final fetch. No extra merge is needed.
