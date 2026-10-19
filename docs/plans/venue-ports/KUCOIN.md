@@ -295,3 +295,28 @@ Nine-venue fmt/bans, native and wasm clippy with warnings denied, and all 634
 workspace tests PASS (KuCoin 96). Rebuilt wasm integration 21, host 15 and
 harness 57 tests PASS. KuCoin public/private and Binance public replays PASS;
 remaining integrated replays are running before the final gate checkpoint.
+
+### Backpack landing integration
+
+Before integrating Backpack, all required brief gates passed on the nine-venue
+artifact (2,846,590 bytes): KuCoin public CPU 734.6/498.4 ms, steady CPU
+516.0/344.4 ms, retained 6.6/2.7 MB (TS/Rust); 16,157 frames, 692 markets, two
+books. Private 32 frames/17 commands PASS. Binance public/private, BloFin
+public/private and MEXC public/private passed too, plus Bybit private. Remaining
+extra replay jobs were stopped because the target had advanced to Backpack.
+
+Integrating landing b265a0bab0 now. Adopt its centralized Tape implementation,
+carrying KuCoin welcome bootstrap, dynamic socket URL fields, signature headers,
+JSON pongs, query-only independent oracles and queued-read settling. Keep both
+venues' TS/Wasm options and tests, native quantities, host disposal guards and
+strict request matching. Independent audits own separate harness/TS/CI scopes;
+rebuild the ten-venue artifact, run required brief and Backpack compatibility
+gates, then commit/push and require green final-head CI before merging.
+
+Backpack merge resolution and independent cross-reviews PASS: shared harness
+88 tests, wire 4, actual wasm integration 22 and host 25 PASS. Native workspace
+684 tests, fmt/bans, native and wasm all-workspace clippy PASS. TS bridge package
+typecheck/lint PASS; root typecheck 44/lint 28 tasks PASS and root tests continue.
+Ten-venue wasm is 3,131,044 bytes, below the unchanged 3,145,728-byte budget.
+No new P1/P2 findings in the independently reviewed shared harness, TS bridge
+or gate/CI resolution. Required replay gates run next against this artifact.
