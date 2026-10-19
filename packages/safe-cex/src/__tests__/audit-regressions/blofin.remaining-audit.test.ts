@@ -413,3 +413,35 @@ describe('BloFin remaining audit regressions', () => {
     expect(fetchPositions).not.toHaveBeenCalled();
   });
 });
+
+it('keeps native remaining quantity monotonic on stale cumulative order frames', () => {
+  const exchange = createExchange();
+  const event = (filledSize: string, state = 'partially_filled') => ({
+    data: [
+      {
+        instId: MARKET.id,
+        orderId: '42',
+        orderCategory: 'normal',
+        orderType: 'limit',
+        side: 'buy',
+        positionSide: 'net',
+        marginMode: 'cross',
+        size: '10',
+        price: '60000',
+        averagePrice: '60000',
+        filledSize,
+        state,
+      },
+    ],
+  });
+  try {
+    exchange.privateWebsocket.handleOrderTopic(event('4'));
+    exchange.privateWebsocket.handleOrderTopic(event('2'));
+    expect(exchange.store.orders[0]).toMatchObject({ filled: 0.004, remaining: 0.006 });
+    exchange.privateWebsocket.handleOrderTopic(event('10', 'filled'));
+    exchange.privateWebsocket.handleOrderTopic(event('4'));
+    expect(exchange.store.orders[0].status).toBe(OrderStatus.Closed);
+  } finally {
+    exchange.dispose();
+  }
+});

@@ -330,6 +330,41 @@ ws(PRIVATE, {
     { ...conditional, state: 'canceled' },
   ],
 });
+// Read adapters must preserve windows rather than relying on final account state.
+const execution = {
+  instId: 'BTC-USDT',
+  orderId: '200',
+  tradeId: '9001',
+  side: 'buy',
+  positionSide: 'net',
+  fillPrice: '60000',
+  fillSize: '2',
+  fee: '0.5',
+  feeCurrency: 'USDT',
+  fillPnl: '0',
+  ts: '1700000050000',
+};
+command({ op: 'fetchFills', symbol: 'BTCUSDT', from: 1700000000000, to: 1700000100000, limit: 1 });
+http(
+  'GET',
+  '/api/v1/trade/fills-history',
+  'instId=BTC-USDT&begin=1700000000000&end=1700000100000&limit=1',
+  ok([execution]),
+);
+command({ op: 'fetchIncome', symbol: 'BTCUSDT', from: 1700000000000, to: 1700000100000 });
+http(
+  'GET',
+  '/api/v1/trade/fills-history',
+  'instId=BTC-USDT&begin=1700000000000&end=1700000100000&limit=100',
+  ok([execution, { ...execution, tradeId: '9000', ts: '1699999999000', fee: '99' }]),
+);
+command({ op: 'fetchLeverage', symbol: 'BTCUSDT' });
+http(
+  'GET',
+  '/api/v1/account/batch-leverage-info',
+  'instId=BTC-USDT&marginMode=cross',
+  ok([{ instId: 'BTC-USDT', marginMode: 'cross', positionSide: 'net', leverage: '30' }]),
+);
 mkdirSync(dirname(values.out), { recursive: true });
 records.sort((a, b) => a.t - b.t);
 writeFileSync(values.out, `${records.map((r) => JSON.stringify(r)).join('\n')}\n`);

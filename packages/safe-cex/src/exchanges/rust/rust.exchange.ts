@@ -6,6 +6,7 @@ import type {
   ExchangeOptions,
   Execution,
   ExecutionsOptions,
+  FetchedLeverage,
   HistoricalOrder,
   IncomeHistoryOptions,
   IncomeRecord,
@@ -24,7 +25,10 @@ import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
 import { LogSeverity } from '../../types';
+import { uuid } from '../../utils/uuid';
 import { BaseExchange } from '../base';
+import { BROKER_ID } from '../blofin/blofin.types';
+import { patternClientOrderIdRule } from '../clientOrderId';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
@@ -65,6 +69,10 @@ const STORE_FLUSH_MS = 250;
  * reads the same store it always has. Trading methods are engine commands.
  */
 export class RustEngineExchange extends BaseExchange {
+  protected readonly clientOrderIdRule =
+    this.name === 'blofin'
+      ? patternClientOrderIdRule('BloFin', /^[A-Za-z0-9]{1,32}$/, { mint: () => `${BROKER_ID}${uuid()}`.slice(0, 32) })
+      : undefined;
   private host?: EngineHostType;
   private flushTimers: Array<ReturnType<typeof setInterval>> = [];
   private readonly applier: FrameApplier;
@@ -201,8 +209,8 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   changeMarginType = async (isolated: boolean, symbol?: string) => {
-    if (!symbol) throw new Error('Symbol is required');
-    await this.command({ op: 'setMarginType', symbol, isolated });
+    if (!symbol && this.name !== 'blofin') throw new Error('Symbol is required');
+    await this.command({ op: 'setMarginType', symbol: symbol ?? '', isolated });
   };
 
   changePositionMode = async (hedged: boolean) => {
@@ -224,7 +232,34 @@ export class RustEngineExchange extends BaseExchange {
       to: opts.to,
     });
 
-  fetchHistoricalFills = (opts: ExecutionsOptions) => this.command<Execution[]>({ op: 'fetchFills', ...opts });
+  fetchHistoricalFills = (opts: ExecutionsOptions) => {
+    const milliseconds = (value?: number) =>
+      value === undefined || !Number.isFinite(value)
+        ? undefined
+        : Math.floor(value > 1_000_000_000_000 ? value : value * 1000);
+    return this.command<Execution[]>({
+      op: 'fetchFills',
+      ...opts,
+      ...(this.name === 'blofin' ? { from: milliseconds(opts.from), to: milliseconds(opts.to) } : {}),
+    });
+  };
+
+  fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
+    try {
+      let leverage: FetchedLeverage;
+      if (this.name === 'blofin') leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      else {
+        const value = await this.fetchSymbolMaxLeverage(symbol);
+        leverage = { buyLeverage: value, sellLeverage: value };
+      }
+      this.host?.flush();
+      this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: leverage } });
+      return leverage;
+    } catch (error) {
+      this.log(`Error fetching leverage for ${symbol}: ${error}`, LogSeverity.Warning);
+      return null;
+    }
+  };
 
   fetchHistoricalOrders = (opts?: OrderHistoryOptions) =>
     this.command<HistoricalOrder[]>({

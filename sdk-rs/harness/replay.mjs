@@ -515,7 +515,10 @@ async function runTs() {
       }
       if (record.op === 'amendOrder') {
         const order = store.orders.find((o) => o.id === record.id);
-        return exchange.updateOrder({ order, update: { price: record.price, amount: record.amount } });
+        const update = {};
+        if ('price' in record) update.price = record.price;
+        if ('amount' in record) update.amount = record.amount;
+        return exchange.updateOrder({ order, update });
       }
       if (record.op === 'setLeverage') {
         await exchange.setLeverage(record.symbol, record.leverage);
@@ -531,7 +534,12 @@ async function runTs() {
       }
       if (record.op === 'fetchFills') return exchange.fetchHistoricalFills(commandArgs(record));
       if (record.op === 'fetchOrderHistory') return exchange.fetchHistoricalOrders(commandArgs(record));
-      if (record.op === 'fetchIncome') return exchange.fetchIncomeHistory(commandArgs(record));
+      if (record.op === 'fetchIncome') {
+        const { from, to, ...args } = commandArgs(record);
+        return exchange.fetchIncomeHistory({ ...args, startTime: from, endTime: to });
+      }
+      if (record.op === 'fetchPublicTrades') return exchange.fetchPublicTrades(record.symbol, record.limit);
+      if (record.op === 'fetchLeverage') return exchange.fetchLeverageForSymbol(record.symbol);
       if (record.op === 'fetchCandles') return exchange.fetchOHLCV(commandArgs(record));
       throw new Error(`unknown command ${record.op}`);
     },

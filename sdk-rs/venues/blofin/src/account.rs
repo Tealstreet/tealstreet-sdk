@@ -2,7 +2,7 @@
 use super::*;
 use safe_cex_engine::Fill;
 use safe_cex_engine::model::*;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Clone, Default)]
 pub struct Source {
@@ -36,12 +36,34 @@ pub(crate) struct Account {
     pub sources: HashMap<String, Source>,
     fills: HashMap<String, (f64, f64)>,
     fill_order: VecDeque<String>,
+    terminal: HashSet<String>,
+    terminal_order: VecDeque<String>,
     tick: Option<TimerId>,
     debounce: Option<TimerId>,
     retry: Option<(TimerId, u32)>,
     auth_failures: u32,
 }
+impl Account {
+    fn remember_terminal(&mut self, id: &str) {
+        if self.terminal.insert(id.to_owned()) {
+            self.terminal_order.push_back(id.to_owned());
+            if self.terminal_order.len() > 500
+                && let Some(expired) = self.terminal_order.pop_front()
+            {
+                self.terminal.remove(&expired);
+            }
+        }
+    }
+}
 pub enum Request {
+    Leverage {
+        command: CommandId,
+        symbol: String,
+        inst_id: String,
+        margin: MarginType,
+        settings_revision: u64,
+        positions_revision: u64,
+    },
     Margin {
         revision: u64,
     },
@@ -80,6 +102,49 @@ pub enum Request {
     },
 }
 impl Blofin {
+    pub(crate) fn fetch_leverage(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: String,
+    ) {
+        let Some(market) = cx.store.market(&symbol) else {
+            cx.done(command, Err(format!("Unknown market {symbol}")));
+            return;
+        };
+        let Some(margin) = self.account.margin.filter(|_| self.account.mode_loaded) else {
+            cx.done(command, Err("BloFin margin mode is not loaded".into()));
+            return;
+        };
+        let inst_id = market.id.clone();
+        let path = format!(
+            "/api/v1/account/batch-leverage-info?instId={inst_id}&marginMode={}",
+            if margin == MarginType::Isolated {
+                "isolated"
+            } else {
+                "cross"
+            }
+        );
+        self.private_read(
+            cx,
+            &path,
+            Request::Leverage {
+                command,
+                symbol,
+                inst_id,
+                margin,
+                settings_revision: self.account.settings_revision,
+                positions_revision: self.account.positions_revision,
+            },
+            false,
+        );
+    }
+    pub(crate) fn remember_terminal(&mut self, id: &str) {
+        self.account.remember_terminal(id);
+    }
+    pub(crate) fn filled_native(&self, id: &str) -> f64 {
+        self.account.fills.get(id).map_or(0.0, |value| value.0)
+    }
     pub(crate) fn signed(&self) -> bool {
         !self.options.public_data_only
             && self.options.key.as_ref().is_some_and(|s| !s.is_empty())
@@ -485,7 +550,18 @@ impl Blofin {
                 .or_else(|| {
                     cx.store
                         .setting(&m.symbol)
-                        .map(|s| s.leverage)
+                        .map(|s| {
+                            if mode == PositionMode::Hedged {
+                                if side == PositionSide::Long {
+                                    s.buy_leverage
+                                } else {
+                                    s.sell_leverage
+                                }
+                                .unwrap_or(s.leverage)
+                            } else {
+                                s.leverage
+                            }
+                        })
                         .filter(|v| v.is_finite() && *v > 0.0)
                 })
                 .unwrap_or(0.0)
@@ -523,7 +599,17 @@ impl Blofin {
     fn commit_positions(&mut self, cx: &mut Cx<'_, Pending>, positions: Vec<Position>) {
         for p in &positions {
             cx.store.update_setting(&p.symbol, |s| {
-                s.leverage = p.leverage;
+                if p.position_mode == Some(PositionMode::Hedged) {
+                    if p.side == PositionSide::Long {
+                        s.buy_leverage = Some(p.leverage);
+                    } else {
+                        s.sell_leverage = Some(p.leverage);
+                    }
+                } else {
+                    s.buy_leverage = Some(p.leverage);
+                    s.sell_leverage = Some(p.leverage);
+                }
+                s.leverage = s.buy_leverage.or(s.sell_leverage).unwrap_or(p.leverage);
                 s.margin_type = p.margin_type;
             });
         }
@@ -614,6 +700,89 @@ impl Blofin {
         }
         self.account.auth_failures = 0;
         match request {
+            Request::Leverage {
+                command,
+                symbol,
+                inst_id,
+                margin,
+                settings_revision,
+                positions_revision,
+            } => {
+                let result = (|| {
+                    let Data { data: rows } =
+                        serde_json::from_str::<Data<Vec<LeverageRow<'_>>>>(response.body)
+                            .map_err(|_| "Malformed BloFin leverage response")?;
+                    if rows.is_empty() || rows.len() > 2 {
+                        return Err("Malformed BloFin leverage rows");
+                    }
+                    let expected_margin = if margin == MarginType::Isolated {
+                        "isolated"
+                    } else {
+                        "cross"
+                    };
+                    let mut sides = std::collections::HashSet::new();
+                    for row in &rows {
+                        if row.inst_id != inst_id
+                            || row.margin_mode != expected_margin
+                            || !matches!(row.position_side.as_ref(), "net" | "long" | "short")
+                            || !row.leverage.0.is_finite()
+                            || row.leverage.0 <= 0.0
+                            || !sides.insert(row.position_side.as_ref())
+                        {
+                            return Err("Malformed BloFin leverage row");
+                        }
+                    }
+                    let net = rows.iter().find(|row| row.position_side == "net");
+                    if net.is_some() && rows.len() != 1 {
+                        return Err("Conflicting BloFin leverage sides");
+                    }
+                    if settings_revision != self.account.settings_revision
+                        || positions_revision != self.account.positions_revision
+                    {
+                        return Err("BloFin leverage response was superseded");
+                    }
+                    let buy = rows
+                        .iter()
+                        .find(|row| row.position_side == "long")
+                        .or(net)
+                        .unwrap_or(&rows[0]);
+                    let sell = rows
+                        .iter()
+                        .find(|row| row.position_side == "short")
+                        .or(net)
+                        .unwrap_or(&rows[0]);
+                    #[derive(Serialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct FetchedLeverage {
+                        buy_leverage: f64,
+                        sell_leverage: f64,
+                        margin_type: MarginType,
+                        position_mode: PositionMode,
+                    }
+                    let result = FetchedLeverage {
+                        buy_leverage: buy.leverage.0,
+                        sell_leverage: sell.leverage.0,
+                        margin_type: margin,
+                        position_mode: if net.is_some() {
+                            PositionMode::Oneway
+                        } else {
+                            PositionMode::Hedged
+                        },
+                    };
+                    let json = serde_json::to_string(&result)
+                        .map_err(|_| "Invalid BloFin leverage result")?;
+                    self.account.settings_revision += 1;
+                    self.account.positions_revision += 1;
+                    cx.store.update_setting(&symbol, |setting| {
+                        setting.leverage = result.buy_leverage;
+                        setting.buy_leverage = Some(result.buy_leverage);
+                        setting.sell_leverage = Some(result.sell_leverage);
+                        setting.margin_type = Some(margin);
+                    });
+                    Ok(json)
+                })();
+                cx.done(command, result.map_err(str::to_owned));
+            }
             Request::Margin { revision } => {
                 if let Ok(Data { data: m }) =
                     serde_json::from_str::<Data<ModeRow<'_>>>(response.body)
@@ -774,6 +943,36 @@ impl Blofin {
                 } else {
                     self.account.orders_busy = false;
                     if revision == self.account.orders_revision {
+                        for order in cx.store.orders() {
+                            if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
+                                self.account.remember_terminal(&order.id);
+                            }
+                        }
+                        rows.retain(|order| {
+                            !self.account.terminal.contains(&order.id)
+                                && (order
+                                    .extra
+                                    .as_ref()
+                                    .and_then(|extra| extra.filled_in_placement_units)
+                                    .unwrap_or(0.0)
+                                    >= self.filled_native(&order.id)
+                                    || cx.store.order(&order.id).is_some())
+                        });
+                        let retained: HashSet<_> =
+                            rows.iter().map(|order| order.id.as_str()).collect();
+                        sources.retain(|id, _| retained.contains(id.as_str()));
+                        for order in &mut rows {
+                            if let Some(existing) = cx
+                                .store
+                                .order(&order.id)
+                                .filter(|existing| existing.filled > order.filled)
+                            {
+                                *order = existing.clone();
+                                if let Some(source) = self.account.sources.get(&order.id) {
+                                    sources.insert(order.id.clone(), source.clone());
+                                }
+                            }
+                        }
                         let mut extra = Vec::new();
                         for order in &rows {
                             let Some(source) = sources.get(&order.id) else {
@@ -829,6 +1028,7 @@ impl Blofin {
                                 });
                             }
                         }
+                        extra.retain(|order| !self.account.terminal.contains(&order.id));
                         for order in &extra {
                             if let Some(source) = order
                                 .parent_id
@@ -865,6 +1065,9 @@ impl Blofin {
         error: &str,
     ) {
         match request {
+            Request::Leverage { command, .. } => {
+                cx.done(command, Err(error.to_owned()));
+            }
             Request::Orders { attempt, .. } => {
                 self.account.orders_busy = false;
                 if attempt < 3 && self.account.auth_failures == 0 {
@@ -935,23 +1138,35 @@ impl Blofin {
                         }
                         let source = Self::source(&row);
                         for order in orders {
-                            if cx.store.order(&order.id).is_some_and(|existing| {
-                                matches!(
-                                    existing.status,
-                                    OrderStatus::Closed | OrderStatus::Canceled
-                                )
-                            }) {
+                            if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
+                                self.account.remember_terminal(&order.id);
+                                self.account.sources.remove(&order.id);
+                                if !cx
+                                    .store
+                                    .order(&order.id)
+                                    .is_some_and(|existing| existing.status == OrderStatus::Closed)
+                                {
+                                    cx.store.set_order_status(&order.id, order.status);
+                                }
+                                continue;
+                            }
+                            if self.account.terminal.contains(&order.id) {
+                                continue;
+                            }
+                            if row.filled_size.0 < self.filled_native(&order.id)
+                                || cx.store.order(&order.id).is_some_and(|existing| {
+                                    matches!(
+                                        existing.status,
+                                        OrderStatus::Closed | OrderStatus::Canceled
+                                    ) || order.filled < existing.filled
+                                })
+                            {
                                 continue;
                             }
                             self.account
                                 .sources
                                 .insert(order.id.clone(), source.clone());
-                            if matches!(order.status, OrderStatus::Closed | OrderStatus::Canceled) {
-                                self.account.sources.remove(&order.id);
-                                cx.store.set_order_status(&order.id, order.status);
-                            } else {
-                                cx.store.upsert_order(order);
-                            }
+                            cx.store.upsert_order(order);
                         }
                     }
                     if let Some(timer) = self.account.debounce.take() {

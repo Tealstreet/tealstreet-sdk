@@ -211,3 +211,38 @@ merge that PR, and create a fresh follow-up branch. No rebase or force push.
 - Every Rust/wasm/replay gate required by VENUE_PORT_BRIEF passes on the stable
   build. Phase-end adversarial reviews rechecked fixes and report no blockers.
   Proceeding to PR review while the additional full JS timeout-adjusted run finishes.
+
+### PR adversarial review rounds 1–2
+
+- PR #1300 targets `feat/rust-rewrite`. Three local reviewers' findings are
+  posted as PR comments. Fixes include regressive fill/store highwater guards,
+  terminal tombstones across WS/REST reconciliation and confirmed cancellations,
+  price-only virtual protection preserving entry remainder, and homogeneous
+  placement batches. Cancel-replace now verifies authoritative final native
+  canceled-order details and aborts on unknown terminal state or new executions.
+- SDK fills normalize seconds/milliseconds; flat-symbol leverage uses a signed
+  typed query; account-global margin changes allow no symbol. SDK caller-ID
+  helper declares BloFin's real rule. Replay covers fill/income windows and
+  leverage query results, and preserves omitted amendment fields.
+- Independent hedge leverage now travels durably in optional appended SETTINGS
+  columns with legacy scalar fallback; tests cover later worker/main frames.
+- Paired TS correction: preserve filled/remaining highwater and opt into store
+  terminal tombstones for final BloFin WS events. Existing 37 TS private/order
+  regressions pass. The expanded private tape (29 frames) passes exact parity.
+- Full JS suite: all 6,490 tests passed with a 30-second import timeout allowance;
+  default root failures were unrelated HyroTrader import timeouts. Both root
+  typecheck/lint passed after landing merge. Integrated native suite passes:
+  67 BloFin +12 engine +29 Binance tests, plus4 JS host/wire tests.
+- CI old head passed native fmt/clippy/tests, wasm and JS checks; replay stopped
+  at wasm size1,308,570 bytes above the existing1.2MiB budget. Keeping the budget
+  and stripping release-only wasm name/producers metadata, then rerunning
+  correctness/performance gates. Speed optimization remains unchanged.
+  Initial push secret scan included landing history; PR-scoped scan passed.
+
+- Final cross-review recheck reports no remaining material code blockers. Native
+  tests: engine12, BloFin67, Binance29; all-target clippy, wasm clippy, fmt and
+  bans pass. Optional side columns retain old scalar offsets and decode old
+  frames, including worker-to-main transfer. SDK typecheck/lint pass.
+- Secret-scan diagnosis: the initial branch-push range included a pre-existing
+  Binance signing fixture in landing commit `879fdc7461`; the PR's own diff scan
+  passed. No credentials were introduced by this port.

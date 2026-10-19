@@ -164,6 +164,12 @@ impl BinanceFutures {
             return;
         }
         match read {
+            Read::Leverage { .. } => {
+                cx.done(
+                    command,
+                    Err("Binance leverage lookup is unsupported".into()),
+                );
+            }
             Read::Fills {
                 symbol,
                 order_id,

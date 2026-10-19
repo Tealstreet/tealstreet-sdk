@@ -27,6 +27,7 @@ struct Job {
     ids: Vec<String>,
     creating: Vec<Order>,
     affected: Vec<String>,
+    replacement_targets: Vec<Target>,
     commit: Commit,
 }
 struct Step {
@@ -38,6 +39,7 @@ struct Step {
 enum Effect {
     Place { family: u8, count: usize },
     Cancel(Vec<Target>),
+    Verify(Target),
     Setting,
 }
 #[derive(Default)]
@@ -57,6 +59,8 @@ struct Target {
     inst_id: String,
     family: u8,
     store_ids: Vec<String>,
+    filled: f64,
+    filled_native: f64,
 }
 #[derive(Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -191,6 +195,18 @@ struct Reply<'a> {
     #[serde(borrow, default)]
     data: Option<ResultRows<'a>>,
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OrderDetail<'a> {
+    #[serde(borrow)]
+    inst_id: Str<'a>,
+    #[serde(borrow)]
+    order_id: Str<'a>,
+    #[serde(borrow)]
+    state: Str<'a>,
+    #[serde(borrow)]
+    filled_size: Str<'a>,
+}
 fn minted() -> Result<String, String> {
     Ok(format!("{BROKER}{}", safe_cex_crypto::uuid::uuid()?)
         .chars()
@@ -233,6 +249,7 @@ impl Job {
             ids: vec![],
             creating: vec![],
             affected: vec![],
+            replacement_targets: vec![],
             commit: Commit::None,
         }
     }
@@ -581,6 +598,28 @@ impl Blofin {
         Ok(result)
     }
     fn add_placements(job: &mut Job, rows: Vec<(u8, Placement, Order)>) {
+        if !rows.is_empty() {
+            job.replacement_targets = job
+                .steps
+                .iter()
+                .filter_map(|step| {
+                    if let Effect::Cancel(targets) = &step.effect {
+                        Some(targets.clone())
+                    } else {
+                        None
+                    }
+                })
+                .flatten()
+                .collect();
+            for target in job.replacement_targets.iter().filter(|t| t.family == 0) {
+                job.steps.push_back(Step {
+                    path: "/api/v1/trade/order-detail",
+                    body: String::new(),
+                    effect: Effect::Verify(target.clone()),
+                    delay: 0.0,
+                });
+            }
+        }
         let mut normal = Vec::new();
         let mut special = Vec::new();
         for (family, p, order) in rows {
@@ -591,7 +630,17 @@ impl Blofin {
                 special.push((family, p));
             }
         }
-        for batch in normal.chunks(20) {
+        // Keep caller order while respecting BloFin's homogeneous-batch rule.
+        let mut start = 0;
+        while start < normal.len() {
+            let first = &normal[start];
+            let count = normal[start..]
+                .iter()
+                .take(20)
+                .take_while(|p| p.inst_id == first.inst_id && p.margin_mode == first.margin_mode)
+                .count();
+            let batch = &normal[start..start + count];
+            start += count;
             job.steps.push_back(Step {
                 path: "/api/v1/trade/batch-orders",
                 body: serde_json::to_string(batch).unwrap(),
@@ -657,11 +706,19 @@ impl Blofin {
                     .filter(|o| o.id == real || o.id.split("__").next() == Some(real))
                     .map(|o| o.id.clone())
                     .collect();
+                let native_order = cx.store.order(real).unwrap_or(order);
+                let filled_native = native_order
+                    .extra
+                    .as_ref()
+                    .and_then(|e| e.filled_in_placement_units)
+                    .unwrap_or(native_order.filled / m.contract_size.unwrap_or(1.0));
                 out.push(Target {
                     id: real.to_string(),
                     inst_id: m.id.clone(),
                     family,
                     store_ids,
+                    filled: native_order.filled,
+                    filled_native,
                 });
             }
         }
@@ -738,7 +795,8 @@ impl Blofin {
                 .filter(|s| s.tpsl_id.is_empty() && !s.order_id.is_empty())
                 .and_then(|s| cx.store.order(&s.order_id))
         {
-            let mut rows = self.replacement(cx, parent, None, amount)?;
+            // Editing attached protection cannot resize its entry.
+            let mut rows = self.replacement(cx, parent, None, None)?;
             for (_, p, _) in &mut rows {
                 let value =
                     num::format(num::adjust(price.unwrap_or(order.price), m.precision.price));
@@ -1092,7 +1150,11 @@ impl Blofin {
                 Commit::Leverage { symbol, leverage } => {
                     self.account.settings_revision += 1;
                     self.account.positions_revision += 1;
-                    cx.store.update_setting(symbol, |s| s.leverage = *leverage);
+                    cx.store.update_setting(symbol, |s| {
+                        s.leverage = *leverage;
+                        s.buy_leverage = Some(*leverage);
+                        s.sell_leverage = Some(*leverage);
+                    });
                     cx.store.update_positions(|p| {
                         if p.symbol == *symbol {
                             p.leverage = *leverage;
@@ -1133,7 +1195,37 @@ impl Blofin {
             self.trade_next(cx);
             return;
         };
-        let headers = match self.headers(step.path, Method::Post, cx.now, &step.body) {
+        if matches!(step.effect, Effect::Place { .. } | Effect::Verify(_))
+            && job.replacement_targets.iter().any(|target| {
+                self.filled_native(&target.id) > target.filled_native
+                    || cx.store.order(&target.id).is_some_and(|o| {
+                        o.status == OrderStatus::Closed || o.filled > target.filled
+                    })
+            })
+        {
+            self.trade_failed(
+                cx,
+                Request {
+                    job,
+                    step,
+                    joined: false,
+                },
+                "BloFin replacement aborted after execution progress",
+            );
+            return;
+        }
+        let (method, path) = if let Effect::Verify(target) = &step.effect {
+            (
+                Method::Get,
+                format!(
+                    "{}?instId={}&orderId={}",
+                    step.path, target.inst_id, target.id
+                ),
+            )
+        } else {
+            (Method::Post, step.path.to_owned())
+        };
+        let headers = match self.headers(&path, method, cx.now, &step.body) {
             Ok(h) => h,
             Err(e) => {
                 self.trade_failed(
@@ -1149,10 +1241,10 @@ impl Blofin {
             }
         };
         cx.request(
-            Method::Post,
-            format!("{}{}", self.host(), step.path),
+            method,
+            format!("{}{}", self.host(), path),
             headers,
-            Some(step.body.clone()),
+            (method == Method::Post).then(|| step.body.clone()),
             Pending::Trade(Request {
                 job,
                 step,
@@ -1195,6 +1287,38 @@ impl Blofin {
                 request,
                 &format!("BloFin HTTP {}: {}", response.status, response.body),
             );
+            return;
+        }
+        if let Effect::Verify(target) = &request.step.effect {
+            let verified = check(&response).is_ok()
+                && serde_json::from_str::<Data<OneOrMany<OrderDetail<'_>>>>(response.body)
+                    .ok()
+                    .is_some_and(|reply| {
+                        let row = match &reply.data {
+                            OneOrMany::One(row) => Some(row),
+                            OneOrMany::Many(rows) if rows.len() == 1 => rows.first(),
+                            _ => None,
+                        };
+                        row.is_some_and(|row| {
+                            row.inst_id == target.inst_id
+                                && row.order_id == target.id
+                                && row.state == "canceled"
+                                && row.filled_size.parse::<f64>().ok().is_some_and(|filled| {
+                                    filled.is_finite()
+                                        && filled >= 0.0
+                                        && filled == target.filled_native
+                                })
+                        })
+                    });
+            if !verified {
+                self.trade_failed(
+                    cx,
+                    request,
+                    "BloFin replacement final order verification failed",
+                );
+            } else {
+                self.trade_step(cx, request.job);
+            }
             return;
         }
         let reply = match serde_json::from_str::<Reply<'_>>(response.body) {
@@ -1253,8 +1377,17 @@ impl Blofin {
                         || row
                             .msg
                             .contains("filled, triggered, canceled or does not exist");
+                    if gone && !request.job.replacement_targets.is_empty() {
+                        error = Some("BloFin replacement requires a confirmed cancellation".into());
+                    }
                     if gone || (reply.code == "0" && (row.code.is_empty() || row.code == "0")) {
                         self.account.orders_revision += 1;
+                        if target.family != 1 {
+                            self.remember_terminal(&target.id);
+                        }
+                        for id in &target.store_ids {
+                            self.remember_terminal(id);
+                        }
                         let ids = target
                             .store_ids
                             .iter()
@@ -1264,7 +1397,13 @@ impl Blofin {
                             cx.store.remove_orders(&ids);
                         } else {
                             for id in &target.store_ids {
-                                cx.store.set_order_status(id, OrderStatus::Canceled);
+                                if !cx
+                                    .store
+                                    .order(id)
+                                    .is_some_and(|o| o.status == OrderStatus::Closed)
+                                {
+                                    cx.store.set_order_status(id, OrderStatus::Canceled);
+                                }
                             }
                         }
                         for id in &target.store_ids {
@@ -1275,6 +1414,7 @@ impl Blofin {
                     }
                 }
             }
+            Effect::Verify(_) => unreachable!(),
             Effect::Setting => {
                 if reply.code != "0" || rows.iter().any(|r| !r.code.is_empty() && r.code != "0") {
                     error = Some(format!("BloFin setting rejected: {}", reply.msg));

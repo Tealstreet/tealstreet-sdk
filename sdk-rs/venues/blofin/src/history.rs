@@ -204,6 +204,13 @@ impl Blofin {
             return;
         }
         let (symbol, from, to) = match &query {
+            Query::Leverage { .. } => {
+                cx.done(
+                    command,
+                    Err("Leverage query requires account dispatch".into()),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 from_ms,
@@ -242,6 +249,7 @@ impl Blofin {
             return;
         }
         let rows = match query {
+            Query::Leverage { .. } => return,
             Query::Fills { .. } => Rows::Fills(vec![]),
             Query::OrderHistory { .. } => Rows::Orders(vec![]),
             Query::Income { .. } => Rows::Income(vec![]),
@@ -265,6 +273,13 @@ impl Blofin {
     }
     fn history_page(&mut self, cx: &mut Cx<'_, Pending>, request: Request) {
         let (endpoint, symbol, from, to, limit) = match &request.query {
+            Query::Leverage { .. } => {
+                cx.done(
+                    request.command,
+                    Err("Leverage query requires account dispatch".into()),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 from_ms,

@@ -63,6 +63,19 @@ fn ticker_values(t: &Ticker) -> [f64; 11] {
 pub struct MarketSetting {
     pub leverage: f64,
     pub margin_type: Option<MarginType>,
+    pub buy_leverage: Option<f64>,
+    pub sell_leverage: Option<f64>,
+}
+
+impl Default for MarketSetting {
+    fn default() -> Self {
+        Self {
+            leverage: f64::NAN,
+            margin_type: None,
+            buy_leverage: None,
+            sell_leverage: None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -286,10 +299,7 @@ impl Store {
         let Some(market) = self.market_index(symbol) else {
             return;
         };
-        let setting = self.settings.entry(market).or_insert(MarketSetting {
-            leverage: f64::NAN,
-            margin_type: None,
-        });
+        let setting = self.settings.entry(market).or_default();
         let before = *setting;
         update(setting);
         if *setting != before {
@@ -542,6 +552,11 @@ impl Store {
         );
         w.pad();
         w.f64s(rows.iter().map(|(_, s)| s.leverage));
+        w.f64s(rows.iter().map(|(_, s)| s.buy_leverage.unwrap_or(f64::NAN)));
+        w.f64s(
+            rows.iter()
+                .map(|(_, s)| s.sell_leverage.unwrap_or(f64::NAN)),
+        );
         w.end();
     }
 
@@ -608,5 +623,37 @@ mod tests {
         assert!(!second.changes.tickers_replaced);
         assert_eq!(second.ticker_deltas, [(1, (1 << 2) | (1 << 9))]);
         assert!(store.take_pending().ticker_deltas.is_empty());
+    }
+
+    #[test]
+    fn settings_append_independent_leverages_after_the_original_scalar_column() {
+        let mut store = Store::default();
+        store.set_settings([
+            (
+                0,
+                MarketSetting {
+                    leverage: 20.0,
+                    margin_type: Some(MarginType::Cross),
+                    buy_leverage: Some(20.0),
+                    sell_leverage: Some(30.0),
+                },
+            ),
+            (
+                1,
+                MarketSetting {
+                    leverage: 15.0,
+                    ..MarketSetting::default()
+                },
+            ),
+        ]);
+        let mut writer = FrameWriter::new(vec![], 0.0);
+        store.write_settings(&mut writer);
+        let frame = writer.finish();
+        let (_, payload) = crate::wire::sections(&frame).next().unwrap();
+        let value = |offset| f64::from_le_bytes(payload[offset..offset + 8].try_into().unwrap());
+        assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 2);
+        assert_eq!((value(24), value(32)), (20.0, 15.0));
+        assert_eq!((value(40), value(56)), (20.0, 30.0));
+        assert!(value(48).is_nan() && value(64).is_nan());
     }
 }

@@ -100,12 +100,14 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 9 | `BALANCE` | f64 `[used, free, total, upnl]` |
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
 | 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution |
-| 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]` |
+| 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]`; optional appended f64 `buyLeverage[n]`, `sellLeverage[n]` |
 
 A market index is a row of the most recent `MARKETS` section; a ticker index is
 a row of the most recent `TICKERS` section. `POSITIONS` holds open positions
 only; per-market leverage and margin type live in `SETTINGS`, replacing the
-zero-size placeholder positions TS kept for every market. An order's packed
+zero-size placeholder positions TS kept for every market. SETTINGS may append
+independent buy/sell leverage columns; absent/non-finite side values fall back
+to the scalar leverage, so older frames remain readable. An order's packed
 enum word carries its reject reason (flags bits 4-5). Enum codes and flag bits are
 defined once in `safe-cex-engine/src/wire.rs` and mirrored by the decoder in
 `hosts/wasm/js/wire.mjs`.

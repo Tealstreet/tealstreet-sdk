@@ -81,6 +81,10 @@ const isPrivate = Boolean(ts.account);
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
+// BloFin normal placement batches partition by instrument and margin, respecting
+// venue error 152007; legacy TS chunks incompatible rows together. Cancel-replace
+// verifies final canceled-order detail and aborts on execution progress/unknown
+// terminal outcomes, while TS can duplicate fills with stale replacement size.
 // BloFin keeps terminal status monotonic on late live/partial frames and rejects
 // replacement/merging of terminal rows; TS can reopen/resurrect these rows.
 // BloFin cancel-all now filters terminal store rows in both implementations;

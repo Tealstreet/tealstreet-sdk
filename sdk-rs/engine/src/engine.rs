@@ -151,6 +151,10 @@ pub enum Command {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Query {
+    /// Current per-side leverage and account modes for a market.
+    Leverage {
+        symbol: String,
+    },
     /// The account's own executions.
     Fills {
         symbol: Option<String>,

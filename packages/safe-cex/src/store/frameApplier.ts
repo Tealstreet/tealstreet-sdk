@@ -171,8 +171,8 @@ export class FrameApplier {
       for (let i = 0; i < settings.count; i++) {
         const value = settings.leverage[i];
         leverage[this.symbol(settings.market[i])] = {
-          buyLeverage: value,
-          sellLeverage: value,
+          buyLeverage: finite(settings.buyLeverage?.[i] ?? NaN) ?? value,
+          sellLeverage: finite(settings.sellLeverage?.[i] ?? NaN) ?? value,
           marginType: settings.marginType(i) as MarginType | undefined,
           positionMode: hedged ? PositionMode.Hedged : PositionMode.OneWay,
         };

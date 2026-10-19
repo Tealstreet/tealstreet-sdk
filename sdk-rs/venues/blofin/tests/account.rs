@@ -203,3 +203,162 @@ fn executions(frame: &[u8]) -> Vec<(f64, f64)> {
     }
     vec![]
 }
+
+fn order_event(id: &str, filled: &str, state: &str) -> String {
+    format!(
+        r#"{{"arg":{{"channel":"orders"}},"data":[{{"instId":"BTC-USDT","orderCategory":"normal","orderId":"{id}","orderType":"limit","side":"buy","size":"10","price":"60000","filledSize":"{filled}","averagePrice":"100","state":"{state}"}}]}}"#
+    )
+}
+
+#[test]
+fn first_terminal_frames_prevent_later_open_rows_for_normal_and_algo_orders() {
+    let mut h = Harness::new();
+    h.seed();
+    for (id, state, filled) in [("filled", "filled", "4"), ("canceled", "canceled", "0")] {
+        h.ws(&order_event(id, filled, state));
+        h.ws(&order_event(id, "0", "live"));
+        assert!(h.e.store().order(id).is_none());
+    }
+    let algo = |state| {
+        format!(
+            r#"{{"arg":{{"channel":"orders-algo"}},"data":[{{"instId":"BTC-USDT","tpslId":"900","side":"sell","size":"1","tpTriggerPrice":"65000","slTriggerPrice":"55000","state":"{state}"}}]}}"#
+        )
+    };
+    h.ws(&algo("canceled"));
+    h.ws(&algo("live"));
+    assert!(h.e.store().orders().is_empty());
+}
+
+#[test]
+fn regressive_partial_preserves_remaining_and_still_honors_terminal_status() {
+    use safe_cex_engine::model::OrderStatus;
+    let mut h = Harness::new();
+    h.seed();
+    h.e.take_frame(0.0);
+    h.ws(&order_event("123", "4", "partially_filled"));
+    h.ws(&order_event("123", "2", "partially_filled"));
+    let order = h.e.store().order("123").unwrap();
+    assert_eq!(order.filled, 0.004);
+    assert_eq!(order.remaining, 0.006);
+    assert_eq!(order.extra.as_ref().unwrap().remaining_native, Some(6.0));
+    assert_eq!(
+        order.extra.as_ref().unwrap().filled_in_placement_units,
+        Some(4.0)
+    );
+    h.ws(&order_event("123", "2", "canceled"));
+    assert_eq!(
+        h.e.store().order("123").unwrap().status,
+        OrderStatus::Canceled
+    );
+    assert_eq!(h.e.store().order("123").unwrap().filled, 0.004);
+    h.ws(&order_event("123", "6", "filled"));
+    h.ws(&order_event("123", "6", "filled"));
+    assert_eq!(
+        h.e.store().order("123").unwrap().status,
+        OrderStatus::Closed
+    );
+    h.ws(&order_event("123", "6", "canceled"));
+    assert_eq!(
+        h.e.store().order("123").unwrap().status,
+        OrderStatus::Closed
+    );
+    assert_eq!(
+        executions(h.e.take_frame(2.0).unwrap()),
+        [(100.0, 0.004), (100.0, 0.002)]
+    );
+}
+
+#[test]
+fn terminal_memory_survives_empty_reconciliation_and_filters_stale_snapshots() {
+    let mut h = Harness::new();
+    h.seed();
+    h.ws(&order_event("123", "4", "partially_filled"));
+    h.ws(&order_event("123", "10", "filled"));
+    h.e.handle(10_000.0, Event::TimerFired { timer: h.tick });
+    h.collect();
+    for path in [
+        "orders-pending",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        h.reply(path, r#"{"code":"0","data":[]}"#);
+    }
+    assert!(h.e.store().orders().is_empty());
+    h.ws(&order_event("123", "0", "live"));
+    assert!(h.e.store().orders().is_empty());
+    h.ws(r#"{"event":"login","code":"0","msg":""}"#);
+    h.reply("orders-pending",r#"{"code":"0","data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"123","orderType":"limit","side":"buy","size":"10","filledSize":"0","state":"live","tpTriggerPrice":"65000"}]}"#);
+    for path in [
+        "orders-pending",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        h.reply(path, r#"{"code":"0","data":[]}"#);
+    }
+    assert!(h.e.store().orders().is_empty());
+}
+
+#[test]
+fn terminal_memory_is_bounded_to_the_last_500_distinct_mapped_ids() {
+    let mut h = Harness::new();
+    h.seed();
+    for id in 0..501 {
+        h.ws(&order_event(&id.to_string(), "0", "canceled"));
+    }
+    h.ws(&order_event("500", "0", "live"));
+    h.ws(&order_event("1", "0", "live"));
+    assert!(h.e.store().orders().is_empty());
+    h.ws(&order_event("0", "0", "live"));
+    assert_eq!(h.e.store().orders().len(), 1);
+    assert_eq!(h.e.store().orders()[0].id, "0");
+}
+
+#[test]
+fn regressive_reconciliation_preserves_filled_and_native_remaining() {
+    let mut h = Harness::new();
+    h.seed();
+    h.ws(&order_event("123", "4", "partially_filled"));
+    h.e.handle(10_000.0, Event::TimerFired { timer: h.tick });
+    h.collect();
+    h.reply("orders-pending",r#"{"code":"0","data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"123","orderType":"limit","side":"buy","size":"10","filledSize":"2","state":"partially_filled"}]}"#);
+    for path in [
+        "orders-pending",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        h.reply(path, r#"{"code":"0","data":[]}"#);
+    }
+    let order = h.e.store().order("123").unwrap();
+    assert_eq!(order.filled, 0.004);
+    assert_eq!(order.remaining, 0.006);
+    assert_eq!(order.extra.as_ref().unwrap().remaining_native, Some(6.0));
+}
+
+#[test]
+fn regressive_snapshot_cannot_reinsert_an_order_removed_by_reconciliation() {
+    let mut h = Harness::new();
+    h.seed();
+    h.ws(&order_event("123", "4", "partially_filled"));
+    h.e.handle(10_000.0, Event::TimerFired { timer: h.tick });
+    h.collect();
+    for path in [
+        "orders-pending",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        h.reply(path, r#"{"code":"0","data":[]}"#);
+    }
+    assert!(h.e.store().orders().is_empty());
+    h.ws(r#"{"event":"login","code":"0","msg":""}"#);
+    h.reply("orders-pending",r#"{"code":"0","data":[{"instId":"BTC-USDT","orderCategory":"normal","orderId":"123","orderType":"limit","side":"buy","size":"10","filledSize":"2","state":"partially_filled","tpTriggerPrice":"65000"}]}"#);
+    for path in [
+        "orders-pending",
+        "orders-tpsl-pending",
+        "orders-algo-pending",
+    ] {
+        h.reply(path, r#"{"code":"0","data":[]}"#);
+    }
+    assert!(h.e.store().orders().is_empty());
+    h.ws(&order_event("123", "2", "partially_filled"));
+    assert!(h.e.store().orders().is_empty());
+}

@@ -245,6 +245,10 @@ enum CommandIn {
         #[serde(default)]
         limit: Option<u32>,
     },
+    FetchLeverage {
+        command: u32,
+        symbol: String,
+    },
     FetchPublicTrades {
         command: u32,
         symbol: String,
@@ -349,6 +353,10 @@ impl From<CommandIn> for Command {
                     to_ms: to,
                     limit,
                 },
+            },
+            CommandIn::FetchLeverage { command, symbol } => Self::Query {
+                command,
+                query: Query::Leverage { symbol },
             },
             CommandIn::FetchPublicTrades {
                 command,

@@ -311,6 +311,18 @@ pub struct AssetRow {
     pub frozen: Number,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeverageRow<'a> {
+    #[serde(borrow)]
+    pub inst_id: Str<'a>,
+    #[serde(borrow)]
+    pub margin_mode: Str<'a>,
+    #[serde(borrow)]
+    pub position_side: Str<'a>,
+    pub leverage: Number,
+}
+
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ModeRow<'a> {
