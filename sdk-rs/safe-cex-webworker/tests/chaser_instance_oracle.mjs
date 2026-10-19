@@ -23,6 +23,20 @@ const traces=[
 for(const id of Object.getOwnPropertyNames(Object.prototype))traces.push([{op:'set',id,n:3},{op:'add',id,n:1},{op:'add',id,n:2},{op:'set',id,n:12},{op:'sub',id,n:1},{op:'add',id,n:2}]);
 for(const side of ['buy','sell'])for(const kind of ['price','percent','usd'])for(const value of [-1,0,1,NaN,Infinity])traces.push([{op:'termination',side,kind,value,anchor:100,prices:[-1,-0,0,1,99,100,101,Infinity,NaN]}]);
 const program=ts.transpileModule(enums+'\n'+source('utils/clone.ts')+'\n'+source('webworker/chaserOrder/ChaserOrderInstance.ts')+'\nglobalThis.Instance=ChaserOrderInstance;globalThis.defaultState=defaultChaserState;',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+if(process.argv.includes('--default-snapshot')){
+ const context=vm.createContext({Date:{now:()=>0},nanoid:()=> 'id',structuredClone});vm.runInContext(program,context);
+ const template=context.defaultState;const ids=template.currentOrdersIds;
+ const exchange={store:{positions:[]}},options={symbol:'BTC',side:'buy',size:1,maxAttempts:1,delay:100};
+ const before=new context.Instance(exchange,options);
+ ids.push('seed');const first=new context.Instance(exchange,options);
+ ids.push('later');const second=new context.Instance(exchange,options);
+ first.state.currentOrdersIds.push('local');
+ const frozen=Object.isFrozen(template), nestedFrozen=Object.isFrozen(ids);
+ const replace=Reflect.set(template,'currentOrdersIds',[]), extend=Reflect.set(template,'extra',true);
+ const result={before:[...before.currentOrderIds],first:[...first.currentOrderIds],second:[...second.currentOrderIds],template:[...ids],frozen,nestedFrozen,replace,extend};
+ ids.length=0;
+ process.stdout.write(JSON.stringify(result));process.exit(0);
+}
 if(process.argv.includes('--representation-witness')){
  const context=vm.createContext({Date:{now:()=>0},nanoid:()=> 'id',structuredClone});vm.runInContext(program,context);
  context.defaultState.currentOrdersIds.push('seed');

@@ -360,14 +360,12 @@ Its identity checks cover every produced object, including indexed algo tails;
 mutable-length and sparse input cases pin the source loops rather than assuming
 array iteration or immutable input.
 
-`v3_ws_quotes` declares BBO/Trade records for the inert `v3_ticker` composer;
-it adds no websocket lifecycle or decoder registration. `v3_ticker` combines the
-existing futures-stat mapper with BBO bid/ask and Trade last, preserving validation
-order, normalized identity checks and native numeric bits. Its owned info copies
-BBO/Trade, while source info keeps their live referents. Its ticker/info records
-are mutable unlike the source's frozen objects. The five remaining record
-decoders capture numeric input before private map-only Serde companions. The focused source/native target retains the ticker
-and quote controls and native field assertions without roundtrip comparisons.
+The unused V3 ticker/quote tail is retired: no shipped TS caller reaches its
+composer, and no Rust consumer exists beyond the exclusive facade. The BBO/Trade
+DTOs, ticker/info records, local validation/coercion helpers and their exclusive
+fixtures are removed together. Source identities stay inventoried as retired.
+See `TICKER_RETIREMENT_REVIEW.md` for the exact caller census and live binding
+proofs. Shared `v3_public` functions retain their independent mapping corpus.
 
 
 The historical error/validator audit supplemented the pricing/account corpora with

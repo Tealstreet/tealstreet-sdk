@@ -2105,8 +2105,42 @@ fn exchange_union_rejects_forged_testnet_names() {
     );
 }
 
+fn assert_cleaning_source_profile(actual: &[Candle], profile: usize) {
+    static SOURCE: std::sync::OnceLock<Vec<serde_json::Value>> = std::sync::OnceLock::new();
+    let source = SOURCE.get_or_init(|| {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fix_audit_source.cjs"
+            ))
+            .arg("--seeded-clean-candles")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "seeded source {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let rows: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(rows.len(), 2002, "independent legacy source floor");
+        rows
+    });
+    let observed: Vec<_> = actual
+        .iter()
+        .map(|r| {
+            [r.timestamp, r.open, r.high, r.low, r.close, r.volume]
+                .map(|v| format!("{:016x}", v.to_bits()))
+        })
+        .collect();
+    assert_eq!(
+        serde_json::json!(observed),
+        source[profile],
+        "CLEAN-CANDLES exact source fields/order {profile}"
+    );
+}
+
 #[test]
-fn cleaning_nan_last_keeps_real_candles_monotonic_and_first_duplicates() {
+fn cleaning_source_nan_permutations_keep_first_duplicates() {
     let mut first_nan = candle(f64::NAN);
     first_nan.close = 777.;
     let mut candles: Vec<_> = [10., 9., 8., 7., 6.].into_iter().map(candle).collect();
@@ -2114,13 +2148,10 @@ fn cleaning_nan_last_keeps_real_candles_monotonic_and_first_duplicates() {
     candles.extend([5., 4., 3., 2., 1.].into_iter().map(candle));
     candles.push(candle(f64::from_bits(0x7ff8_0000_0000_0001)));
     let result = clean_candles(candles);
-    assert_eq!(
-        result[..10].iter().map(|c| c.timestamp).collect::<Vec<_>>(),
-        (1..=10).map(f64::from).collect::<Vec<_>>()
-    );
     assert_eq!(result.len(), 11);
-    assert!(result[10].timestamp.is_nan());
-    assert_eq!(result[10].close, 777.);
+    assert_cleaning_source_profile(&result, 0);
+    let retained_nan = result.iter().find(|c| c.timestamp.is_nan()).unwrap();
+    assert_eq!(retained_nan.close, 777.);
     let result = clean_candles(vec![
         candle(f64::NAN),
         candle(f64::INFINITY),
@@ -2128,23 +2159,25 @@ fn cleaning_nan_last_keeps_real_candles_monotonic_and_first_duplicates() {
         candle(f64::NEG_INFINITY),
         candle(0.),
     ]);
+    assert_cleaning_source_profile(&result, 1);
     assert_eq!(
-        result[..3].iter().map(|c| c.timestamp).collect::<Vec<_>>(),
-        vec![f64::NEG_INFINITY, -0., f64::INFINITY]
+        result
+            .iter()
+            .find(|c| c.timestamp == 0.)
+            .unwrap()
+            .timestamp
+            .to_bits(),
+        (-0f64).to_bits()
     );
-    assert_eq!(result[1].timestamp.to_bits(), (-0f64).to_bits());
-    assert!(result[3].timestamp.is_nan());
 }
 
 #[test]
-fn cleaning_2000_nan_permutations_orders_the_actual_output() {
+fn cleaning_2000_nan_permutations_match_actual_source_order() {
     let mut state = 0x1234_5678_9abc_def0u64;
     for case in 0..2000 {
         let mut input = Vec::new();
-        let mut first_by_timestamp = BTreeMap::new();
-        let first_nan_close = f64::from(case);
         let mut first_nan = candle(f64::NAN);
-        first_nan.close = first_nan_close;
+        first_nan.close = f64::from(case);
         input.push(first_nan);
         for index in 0..64 {
             state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -2154,21 +2187,11 @@ fn cleaning_2000_nan_permutations_orders_the_actual_output() {
                 let timestamp = ((state >> 32) % 81) as i32 - 40;
                 let mut value = candle(f64::from(timestamp));
                 value.close = f64::from(index);
-                first_by_timestamp
-                    .entry(timestamp)
-                    .or_insert_with(|| value.clone());
                 input.push(value);
             }
         }
         let actual = clean_candles(input);
-        let last = actual.last().unwrap();
-        assert!(last.timestamp.is_nan(), "case {case}");
-        assert_eq!(last.close, first_nan_close, "case {case}");
-        assert_eq!(
-            &actual[..actual.len() - 1],
-            &first_by_timestamp.into_values().collect::<Vec<_>>(),
-            "case {case}"
-        );
+        assert_cleaning_source_profile(&actual, case as usize + 2);
     }
 }
 
@@ -2734,10 +2757,25 @@ fn hydration_errors_are_diagnosed_before_and_after_timeout_without_losing_fallba
         let t = base();
         let expected = candle(t);
         let (fetch, calls) = recording(vec![expected.clone()]);
-        let mut first =
-            Box::pin(cache.fetch(request("first", "5m", t, t, 1., t + 300000., fetch.clone())));
-        let mut second =
-            Box::pin(cache.fetch(request("queued", "5m", t, t, 1., t + 300000., fetch)));
+        let completion_order = Rc::new(RefCell::new(Vec::new()));
+        let first_order = completion_order.clone();
+        let queued_order = completion_order.clone();
+        let first_fetch = fetch.clone();
+        let first_cache = cache.clone();
+        let mut first = Box::pin(async move {
+            let result = first_cache
+                .fetch(request("first", "5m", t, t, 1., t + 300000., first_fetch))
+                .await;
+            first_order.borrow_mut().push("first");
+            result
+        });
+        let mut second = Box::pin(async move {
+            let result = cache
+                .fetch(request("queued", "5m", t, t, 1., t + 300000., fetch))
+                .await;
+            queued_order.borrow_mut().push("queued");
+            result
+        });
         let mut cx = Context::from_waker(Waker::noop());
         assert!(first.as_mut().poll(&mut cx).is_pending());
         assert!(second.as_mut().poll(&mut cx).is_pending());
@@ -2760,6 +2798,11 @@ fn hydration_errors_are_diagnosed_before_and_after_timeout_without_losing_fallba
         }
         assert_eq!(e.run(second).unwrap(), vec![expected]);
         assert_eq!(calls.borrow().len(), 2);
+        assert_eq!(
+            *completion_order.borrow(),
+            ["first", "queued"],
+            "source caller settlement order"
+        );
         let mut messages = diagnostics.borrow().clone();
         messages.sort();
         assert_eq!(

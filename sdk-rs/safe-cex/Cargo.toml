@@ -23,3 +23,7 @@ features = ["health"]
 
 [dev-dependencies]
 serde_json.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { workspace = true, features = ["rt", "sync"] }
+safe-cex-exchange = { path = "../safe-cex-exchange", features = ["native"] }
