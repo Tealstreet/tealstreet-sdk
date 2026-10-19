@@ -89,8 +89,6 @@ timestamp, propagate a read-only telemetry error, or disable the shared auth
 predicate. Each fails its named binding assertion, and byte-exact restoration of
 the production file passes before the next control.
 
-Eleven of the 27 Store rows are reconciled here. The other 16 Store rows and the
-separate num row remain assigned for later batches.
 
 
 ## Compressed Blob input
@@ -114,3 +112,6 @@ controls replace byte widening with UTF-8 decoding or paired-byte reinterpretati
 Each must fail this actual socket assertion; byte-exact restoration must pass.
 This verdict covers the compressed binary input boundary, not arbitrary Blob
 subclasses, malformed-stream error wording or other socket handler policies.
+
+Twelve of the 27 Store rows are reconciled here. The other 15 Store rows and the
+separate num row remain assigned for later batches.
