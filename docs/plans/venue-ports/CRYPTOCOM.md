@@ -272,3 +272,9 @@ retention: TS/Rust CPU171.4/113.2 ms, steady106.4/59.3 ms, memory1.8/1.5 MB.
 Full repeated gates follow. Current combined wasm1,625,486 bytes (<1.6MiB).
 Findings posted at
 https://github.com/Tealstreet/tealstreet-sdk/pull/1303#issuecomment-6272649386.
+
+Final measurement audit moves CPU/wall end sampling before forced memory cleanup,
+requires three consecutive stable buffer observations (bounded eight passes),
+and rejects negative buffer deltas even when wasm growth masks them. No clamping
+or minimum-sample selection. All prior performance numbers remain superseded
+until this final measurement model completes the six-gate rerun.

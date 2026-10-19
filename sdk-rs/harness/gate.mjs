@@ -54,7 +54,7 @@ for (let run = 0; run < runs; run++) {
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
 for (const impl of ['ts', 'rust']) for (const result of results[impl]) {
-  if (result.metrics.retainedBytes < 0) differences.push(impl + ': negative retained memory; baseline is invalid');
+  if (result.metrics.retainedBytes < 0 || result.metrics.bufferRetainedBytes < 0) differences.push(impl + ': negative retained memory component; baseline is invalid');
 }
 
 

@@ -138,10 +138,11 @@ const settle = async () => {
 };
 
 const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
-  const memory = await baseline();
   const cpu = process.cpuUsage(cpuStart.process);
   const thread = process.threadCpuUsage(cpuStart.thread);
   const steady = warmMark ? process.threadCpuUsage(warmMark.thread) : { user: 0, system: 0 };
+  const wallMs = performance.now() - wallStart;
+  const memory = await baseline();
   return {
     // The worker's own thread: what competes with its message handling.
     cpuMs: (thread.user + thread.system) / 1000,
@@ -149,26 +150,32 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
     steadyCpuMs: (steady.user + steady.system) / 1000,
     // All threads, including V8 background compilation and GC helpers.
     processCpuMs: (cpu.user + cpu.system) / 1000,
-    wallMs: performance.now() - wallStart,
+    wallMs,
     rssBytes: memory.rss,
     heapUsedBytes: memory.heapUsed,
     heapRetainedBytes: memory.heapUsed - heapBefore.heapUsed,
     bufferRetainedBytes: memory.arrayBuffers - heapBefore.arrayBuffers,
+    buffersBefore: heapBefore.arrayBuffers,
+    buffersAfter: memory.arrayBuffers,
     wasmBytes,
     // What the implementation keeps alive beyond the harness and loaded code.
     retainedBytes: retainedMemory(heapBefore, memory, wasmBytes),
   };
 };
 
-/** Heap retained before the implementation loads, so both start from zero. */
+/** Loaded code is excluded; collect before I/O and after replay state settles. */
 const baseline = async () => {
-  // Module loaders and transferred buffers release backing stores after a turn.
-  for (let i = 0; i < 2; i++) {
+  let previous;
+  let stable = 0;
+  for (let i = 0; i < 8; i++) {
     globalThis.gc?.();
     await new Promise(setImmediate);
+    const memory = process.memoryUsage();
+    stable = memory.arrayBuffers === previous ? stable + 1 : 0;
+    if (stable >= 2) return memory;
+    previous = memory.arrayBuffers;
   }
-  globalThis.gc?.();
-  return process.memoryUsage();
+  throw new Error('Backing-buffer memory did not settle');
 };
 
 const sortBook = (book) => ({
