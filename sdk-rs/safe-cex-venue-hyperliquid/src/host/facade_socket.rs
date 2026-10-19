@@ -194,6 +194,8 @@ pub(crate) fn base_websocket_class(realm: &mut Host, deps: SocketDependencies) -
         r.define_str(&instance, "pingAt", Js::Number(0.0))?;
         let books = r.new_object();
         r.define_str(&instance, "orderBookInnerState", books)?;
+        let handlers = r.new_object();
+        r.define_str(&instance, "messageHandlers", handlers)?;
         Ok(instance)
     });
     class

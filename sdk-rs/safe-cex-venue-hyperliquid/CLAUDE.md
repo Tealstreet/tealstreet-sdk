@@ -510,3 +510,8 @@ It reads canonical facade own keys directly: Store diagnostics precede loaded
 state, and each ticker retains `openInterest` after `quoteVolume`. The shared
 Host facade preserves mapper construction order without a typed re-encoding;
 do not replace that ingress with a Ticker struct roundtrip or an order table.
+
+The Base socket constructor initializes its own `messageHandlers` table before
+subclass construction, as the maintained class does. Both private families retain
+that empty table; compiled private-feed tests prevent statistics from blocking
+fills, orders, positions or balances before their dispatch.

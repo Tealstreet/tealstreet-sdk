@@ -101,6 +101,31 @@ fn constructed_socket_bridges_do_not_retain_the_host_owner_after_dispose() {
         drop(clone);
         drop(context);
         assert!(owner.upgrade().is_some(), "held host must remain live");
+        let private = receiver
+            .get("parent")
+            .unwrap()
+            .get("privateWebsocket")
+            .unwrap();
+        assert!(private.is_object());
+        assert!(
+            private.has_own("messageHandlers"),
+            "HL_PRIVATE_BASE_HANDLER_TABLE: spot={spot}"
+        );
+        let private_table = private.get("messageHandlers").unwrap();
+        assert!(private_table.is_object());
+        assert!(private_table.own_keys().is_empty());
+        assert!(!private_table.same_reference(&receiver.get("messageHandlers").unwrap()));
+        private
+            .call_method("recordMessageHandlerStats", vec![Js::str("unregistered")])
+            .unwrap();
+        let private_socket = exchange.base().get_socket(SocketSlot::Private).unwrap();
+        assert_eq!(
+            private_socket.message_handlers_stats.borrow()["unregistered"].had_handlers,
+            Some(false)
+        );
+        drop(private_socket);
+        drop(private_table);
+        drop(private);
         let table = receiver.get("messageHandlers").unwrap();
         table.define("selected", Js::array(vec![Js::Null])).unwrap();
         table
