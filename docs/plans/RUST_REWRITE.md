@@ -117,8 +117,9 @@ defined once in `sdk-rs/engine/src/wire.rs` and mirrored by the decoder in
 
 ### Crossing rules
 
-- Hosts queue websocket arrivals to a macrotask batch (bounded by 256 messages
-  or roughly 1 MiB). One byte-buffer crossing carries length-prefixed UTF-8
+- Hosts queue websocket arrivals to a macrotask batch (bounded by 256 messages;
+  JS partitions at roughly 64 KiB, with oversized messages alone, and native
+  drains at 1 MiB). One byte-buffer crossing carries length-prefixed UTF-8
   payloads with socket IDs and individual arrival times; Rust borrows each text
   slice. Commands, timers, HTTP events, closes and flushes first drain queued
   arrivals. HTTP bodies cross once as streamed bytes.

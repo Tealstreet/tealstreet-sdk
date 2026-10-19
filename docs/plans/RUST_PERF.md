@@ -267,3 +267,15 @@ A comparison attempt also exhausted the one-second memory settling timeout.
 Only its deadline expands to ten seconds; the identical-readings-for-100ms rule,
 hard failure, accounting and CPU-before-GC cutoff are unchanged on both sides.
 That failed/aborted comparison attempt is not a final gate measurement.
+
+Seven-family verification passes: 478 Rust tests across 50 suites, all clippy,
+fmt/bans; seven isolated wasm clippys; 53 host/socket/Workers tests;23 SDK WASM
+checks;44 repository typecheck and28 lint tasks;134 targeted MEXC SDK tests.
+Fixed MEXC budget tightened to778240 for measured755047 bytes. Final module bytes:
+Binance799297, Bybit778868, Crypto.com647592, OKX741200, WEEX881767,
+BingX835350, MEXC755047. All family budgets pass.
+Final page traces versus exact baseline7 confirm Binance1507328→1441792
+(65536 bytes saved) and Crypto.com786432→655360 (131072 saved). These traces
+are allocation evidence, not instrumented retained-heap gate comparisons.
+Seven public before/after pairs and final profile medians remain to run; private
+suite is passing through the newly built families, including MEXC.
