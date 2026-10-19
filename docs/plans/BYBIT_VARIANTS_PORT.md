@@ -386,3 +386,10 @@ the inherited 3 MiB budget. Hyro's first full gate on that candidate passes:
 total 30.6/25.1 ms, steady 10.4/10.3 ms (a narrow margin), memory 15.5/1.0 MB.
 No fixture, CPU window, threshold or median-selection rule changed. The full
 matrix and final-head CI are still required on this candidate.
+
+That candidate completed 28/29 gates: all 16 private and 12 public gates pass,
+but BingX steady CPU failed at TS/Rust 32.0/35.2 ms. Restoring the landing
+branch's `s` dependency build, while retaining explicit engine/Bybit O3 and
+the allocation fixes, produces 3,117,529 bytes within the inherited 3 MiB
+budget. The full matrix is being rerun with that artifact, beginning with Hyro
+and BingX. All earlier failures remain recorded; fixtures and gates are exact.
