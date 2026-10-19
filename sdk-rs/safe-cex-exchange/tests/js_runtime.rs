@@ -4423,3 +4423,496 @@ fn native_accessor_integrity_failure_propagates_from_base_assembly() {
     .expect("frozen supplied receiver must refuse assembly");
     assert_eq!(error.value.get("name").unwrap().to_display(), "TypeError");
 }
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn audit_http_outcomes_keep_capture_guard_and_counter_failure_isolation() {
+    use safe_cex_exchange::js_runtime::{
+        client::factory, globals, store::facade, value::from_json,
+    };
+    use safe_cex_exchange::native::native_runtime;
+    use std::cell::Cell;
+
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_http_factory_source.cjs"
+        ))
+        .arg("outcomes")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let profiles: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(profiles.len(), 98, "OUTCOME_AUDIT complete source profiles");
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(tokio::task::LocalSet::new().run_until(async {
+            let runtime: Rc<dyn ExchangeRuntime> = native_runtime();
+            let builtins = Js::object(vec![]);
+            globals::install_builtins::<()>(&builtins, std::rc::Weak::new());
+            for profile in profiles {
+                let owner = factory_owner(runtime.clone());
+                let store = facade(owner.store.clone()).unwrap();
+                let mode = profile["mode"].as_str().unwrap();
+                let stats = if mode == "disabled" {
+                    Js::Undefined
+                } else {
+                    from_json(&json!({"ok":2,"rateLimit":3,"auth":5,"network":7,"other":11}))
+                };
+                store.call_method("update", vec![Js::object(vec![("requestStats", stats.clone())])]).unwrap();
+                if mode == "frozen" {
+                    builtins.get("Object").unwrap().call_method("freeze", vec![stats.clone()]).unwrap();
+                }
+                let notices = Rc::new(Cell::new(0));
+                let notice_counter = notices.clone();
+                store.call_method("subscribe", vec![Js::function("auditNotice", move |_, _| {
+                    notice_counter.set(notice_counter.get() + 1);
+                    Ok(Js::Undefined)
+                })]).unwrap();
+                let sends = Rc::new(Cell::new(0));
+                let capture = Rc::new(Cell::new(false));
+                let header_marker = Rc::new(Cell::new(false));
+                let rejection = safe_cex_exchange::js_runtime::value::error_object("Error", "fixture rejection");
+                let original = rejection.clone();
+                let status = profile["status"].as_f64();
+                let terminal_sends = sends.clone();
+                let terminal_capture = capture.clone();
+                let terminal_header_marker = header_marker.clone();
+                let adapter = Js::function("auditTerminal", move |_, args| {
+                    let config = arg(&args, 0);
+                    terminal_sends.set(terminal_sends.get() + 1);
+                    terminal_capture.set(config.get("__tealstreetSigningCapture")?.truthy());
+                    terminal_header_marker.set(config.get("headers")?.has_own("__tealstreetSigningCapture"));
+                    let response = Js::object(vec![
+                        ("status", status.map_or(Js::Undefined, Js::Number)),
+                        ("data", Js::object(vec![])),
+                        ("headers", Js::object(vec![])),
+                        ("config", config.clone()),
+                    ]);
+                    if status.is_none_or(|value| value >= 400.0) {
+                        rejection.define("config", config)?;
+                        if status.is_some() { rejection.define("response", response)?; }
+                        return Err(Thrown::new(rejection.clone()));
+                    }
+                    Ok(response)
+                });
+                let host = client::rest_http_host(runtime.clone(), std::sync::Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
+                let config = Js::object(vec![("baseURL", Js::str("https://venue")), ("adapter", adapter)]);
+                let options = Js::object(vec![("key", Js::str("")), ("secret", Js::str(""))]);
+                let xhr = if profile["factory"] == "direct" {
+                    factory::create_no_proxy(host, config, &owner).unwrap()
+                } else {
+                    factory::create(host, &safe_cex_transport::DirectTransport, config, &options, &owner).unwrap()
+                };
+                let marker = match profile["marker"].as_str().unwrap() {
+                    "missing" => None,
+                    "false" => Some(Js::Bool(false)),
+                    "true" => Some(Js::Bool(true)),
+                    "one" => Some(Js::Number(1.0)),
+                    "text" => Some(Js::str("yes")),
+                    "array" => Some(Js::array(vec![])),
+                    "object" => Some(Js::object(vec![])),
+                    "null" => Some(Js::Null),
+                    "zero" => Some(Js::Number(0.0)),
+                    "empty" => Some(Js::str("")),
+                    "nan" => Some(Js::Number(f64::NAN)),
+                    other => panic!("unreviewed capture profile {other}"),
+                };
+                let request = Js::object(vec![]);
+                if let Some(marker) = marker { request.define("__tealstreetSigningCapture", marker).unwrap(); }
+                let result = await_js(&runtime, xhr.call_method("get", vec![Js::str("/audit"), request]).unwrap()).await;
+                let error_identity = result.as_ref().err().is_none_or(|error| error.value.same_reference(&original));
+                let current_stats = store.get("requestStats").unwrap();
+                let observation = json!({
+                    "factory":profile["factory"], "mode":profile["mode"],
+                    "marker":profile["marker"], "status":profile["status"],
+                    "statsBits":if current_stats.is_undefined() {Value::Null} else {
+                        let mut bits = serde_json::Map::new();
+                        for key in ["ok", "rateLimit", "auth", "network", "other"] {
+                            bits.insert(key.into(), json!(format!("{:016x}", current_stats.get(key).unwrap().as_f64().unwrap().to_bits())));
+                        }
+                        Value::Object(bits)
+                    },
+                    "success":result.is_ok(), "errorIdentity":error_identity,
+                    "sameStats":current_stats.strict_equals(&stats), "notices":notices.get(),
+                    "sends":sends.get(), "capture":capture.get(), "headerMarker":header_marker.get(),
+                });
+                assert_eq!(observation, profile, "OUTCOME_AUDIT real factory and Store match maintained source");
+            }
+        }));
+}
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn audit_request_start_stamp_reaches_adapter_and_preserves_best_effort_writes() {
+    use safe_cex_exchange::js_runtime::client::factory;
+    use safe_cex_exchange::native::native_replay_runtime;
+    use std::cell::Cell;
+    const KEY: &str = "safeCexRestDiagStartedAt";
+    fn view(value: Js) -> Value {
+        match value {
+            Js::Number(number) => {
+                json!({"kind":"number","bits":format!("{:016x}", number.to_bits())})
+            }
+            Js::Undefined => json!({"kind":"undefined"}),
+            other => panic!("unexpected native timestamp {other:?}"),
+        }
+    }
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_http_factory_source.cjs"
+        ))
+        .arg("request-start")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let profiles: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        profiles.len(),
+        32,
+        "DIAGNOSTIC_START complete source profiles"
+    );
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
+        .block_on(tokio::task::LocalSet::new().run_until(async {
+            for profile in profiles {
+                let runtime: Rc<dyn ExchangeRuntime> = native_replay_runtime(profile["epoch"].as_f64().unwrap());
+                let owner = factory_owner(runtime.clone());
+                let events = Rc::new(RefCell::new(Vec::<String>::new()));
+                let terminal_events = events.clone();
+                let seen = Rc::new(RefCell::new(Value::Null));
+                let terminal_seen = seen.clone();
+                let sends = Rc::new(Cell::new(0));
+                let terminal_sends = sends.clone();
+                let adapter = Js::function("diagnosticTerminal", move |_, args| {
+                    let config = arg(&args, 0);
+                    terminal_sends.set(terminal_sends.get()+1);
+                    terminal_events.borrow_mut().push("send".into());
+                    *terminal_seen.borrow_mut() = json!({"own":config.has_own(KEY),"value":view(config.get(KEY)?)});
+                    Ok(Js::object(vec![("status", Js::Number(200.0)),("data",Js::object(vec![])),("headers",Js::object(vec![])),("config",config)]))
+                });
+                let host = client::rest_http_host(runtime.clone(), std::sync::Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
+                let config = Js::object(vec![("baseURL",Js::str("https://venue")),("adapter",adapter)]);
+                let xhr = if profile["factory"] == "direct" {
+                    factory::create_no_proxy(host, config, &owner).unwrap()
+                } else {
+                    factory::create(host, &safe_cex_transport::DirectTransport, config, &Js::object(vec![("key",Js::str("")),("secret",Js::str(""))]), &owner).unwrap()
+                };
+                let prepared = Rc::new(RefCell::new(Js::Undefined));
+                let original = prepared.clone();
+                let builtins = Js::object(vec![]);
+                safe_cex_exchange::js_runtime::globals::install_builtins::<()>(&builtins, std::rc::Weak::new());
+                let object = builtins.get("Object").unwrap();
+                let mode = profile["mode"].as_str().unwrap().to_owned();
+                let prepare_events = events.clone();
+                xhr.get("interceptors").unwrap().get("request").unwrap().call_method("use", vec![Js::function("prepareDiagnostic", move |_, args| {
+                    let config = arg(&args,0);
+                    prepare_events.borrow_mut().push("prepare".into());
+                    *original.borrow_mut()=config.clone();
+                    if mode!="fresh" {
+                        object.call_method("defineProperty", vec![config.clone(), Js::str(KEY), Js::object(vec![
+                            ("value",if mode=="readonly-undefined" {Js::Undefined} else {Js::Number(-0.0)}),
+                            ("writable",Js::Bool(!mode.starts_with("readonly"))),
+                            ("enumerable",Js::Bool(true)),("configurable",Js::Bool(true)),
+                        ])])?;
+                    }
+                    Ok(config)
+                })]).unwrap();
+                await_js(&runtime, xhr.call_method("get",vec![Js::str("/diagnostic-start")]).unwrap()).await.expect("DIAGNOSTIC_START telemetry writes must not fail the request");
+                let observed=json!({"factory":profile["factory"],"epoch":profile["epoch"],"mode":profile["mode"],
+                    "own":seen.borrow()["own"],"value":seen.borrow()["value"],
+                    "prepared":view(prepared.borrow().get(KEY).unwrap()),"sends":sends.get(),"events":*events.borrow()});
+                assert_eq!(observed,profile,"DIAGNOSTIC_START real native factory stamps before dispatch");
+            }
+            safe_cex_store::virtual_clock::set_thread_host_time(None);
+        }));
+}
+
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn diagnostic_audit_profiles(mode: &str, count: usize) -> Vec<Value> {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_http_factory_source.cjs"
+        ))
+        .arg(mode)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(rows.len(), count);
+    rows
+}
+
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn diagnostic_audit_view(config: &Js) -> Value {
+    let mut view = serde_json::Map::new();
+    for key in [
+        "safeCexRestDiagProxyHeader",
+        "safeCexRestDiagSignMs",
+        "safeCexRestDiagSignedAt",
+        "safeCexRestDiagSignatureAgeMs",
+    ] {
+        let value = config.get(key).unwrap();
+        let value = if !config.has_own(key) {
+            json!({"kind":"absent"})
+        } else if let Js::Number(number) = value {
+            json!({"kind":"number","bits":format!("{:016x}",number.to_bits())})
+        } else if value.is_undefined() {
+            json!({"kind":"undefined"})
+        } else {
+            json!({"kind":value.type_of(),"value":to_json(&value).unwrap()})
+        };
+        view.insert(key.into(), value);
+    }
+    let order: Vec<_> = config
+        .own_keys()
+        .into_iter()
+        .filter_map(|key| {
+            let key = String::from_utf16(&key).ok()?;
+            view.contains_key(&key).then_some(key)
+        })
+        .collect();
+    view.insert("order".into(), json!(order));
+    Value::Object(view)
+}
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+fn audit_native_proxy_marker_survives_authorization_and_header_replacement() {
+    use safe_cex_exchange::{
+        exchange::{BaseExchange, ExchangeSettings},
+        js_runtime::client::factory,
+        native::native_tealstreet_runtime,
+    };
+    use safe_cex_types::ExchangeName;
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
+        .block_on(tokio::task::LocalSet::new().run_until(async {
+            for profile in diagnostic_audit_profiles("proxy-diagnostics",36) {
+                let token = if profile["token"]==true {"audit-token"} else {""};
+                let native = native_tealstreet_runtime(Rc::new(move || Box::pin(async move { Ok(token.into()) })));
+                let provider = safe_cex_exchange::websocket::WsRuntime::transport(native.as_ref());
+                let runtime: Rc<dyn ExchangeRuntime> = native;
+                let exchange: ExchangeName=serde_json::from_value(profile["exchange"].clone()).unwrap();
+                let owner=Rc::new(BaseExchange::new(exchange,serde_json::from_value(json!({"key":"","secret":""})).unwrap(),Rc::new(safe_cex_exchange::native_store::DefaultStore::new()),runtime.clone(),ExchangeSettings::default()));
+                let replacement=profile["replacement"]==true;
+                let sends=Rc::new(std::cell::Cell::new(0));let sent=sends.clone();
+                let terminal=Js::function("diagnosticTerminal",move |_,args|{
+                    let config=arg(&args,0);sent.set(sent.get()+1);
+                    if replacement {config.set("headers",safe_cex_exchange::js_runtime::value::from_json(&json!({"X-Venue":"replacement"})))?;}
+                    Ok(Js::object(vec![("status",Js::Number(200.0)),("data",Js::object(vec![])),("headers",Js::object(vec![])),("config",config)]))
+                });
+                let host=client::rest_http_host(runtime.clone(),std::sync::Arc::new(safe_cex_transport::native::reqwest_adapter().unwrap()));
+                let xhr=factory::create(host,provider.as_ref(),Js::object(vec![("baseURL",Js::str("https://venue")),("adapter",terminal)]),&safe_cex_exchange::js_runtime::value::from_json(&json!({"key":"","secret":"","tealstreetProxy":true})),&owner).unwrap();
+                let mode=profile["mode"].as_str().unwrap().to_owned();
+                let builtins=Js::object(vec![]);safe_cex_exchange::js_runtime::globals::install_builtins::<()>(&builtins,std::rc::Weak::new());
+                let object=builtins.get("Object").unwrap();
+                xhr.get("interceptors").unwrap().get("request").unwrap().call_method("use",vec![Js::function("protectDiagnostic",move |_,args|{
+                    let config=arg(&args,0);
+                    if mode!="fresh" {object.call_method("defineProperty",vec![config.clone(),Js::str("safeCexRestDiagProxyHeader"),Js::object(vec![("value",if mode=="readonly-undefined" {Js::Undefined} else {Js::Number(-0.0)}),("writable",Js::Bool(false)),("enumerable",Js::Bool(true)),("configurable",Js::Bool(true))])])?;}
+                    Ok(config)
+                })]).unwrap();
+                let response=await_js(&runtime,xhr.call_method("get",vec![Js::str("/diagnostic")]).unwrap()).await.expect("PROXY_DIAGNOSTIC diagnostic write must not fail HTTP");
+                let config=response.get("config").unwrap();let headers=config.get("headers").unwrap();
+                let header=if profile["exchange"]=="okx" {"Authorization"} else {"Tealstreet-Authorization"};
+                let authorization=if headers.get("get").unwrap().is_callable() {headers.call_method("get",vec![Js::str(header)]).unwrap()} else {headers.get(header).unwrap()};
+                assert!(!headers.has_own("safeCexRestDiagProxyHeader"));assert_eq!(sends.get(),1);
+                let observed=json!({"exchange":profile["exchange"],"token":profile["token"],"replacement":replacement,"mode":profile["mode"],"view":diagnostic_audit_view(&config),"authorization":if authorization.is_undefined() {Value::Null} else {to_json(&authorization).unwrap()}});
+                assert_eq!(observed,profile,"PROXY_DIAGNOSTIC actual native transport/factory config matches source");
+            }
+        }));
+}
+
+#[test]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+#[allow(clippy::arc_with_non_send_sync)]
+fn audit_native_remote_signing_stamps_terminal_and_rejected_configs() {
+    use safe_cex_exchange::{js_runtime::client::factory, native::native_replay_runtime};
+    use safe_cex_transport::{
+        RestAdapter, RestRequest, RestResponse, RestResponseBody, signing::*,
+    };
+    struct Signer {
+        stamp: String,
+        refuse: bool,
+        calls: Rc<std::cell::Cell<usize>>,
+        clock: Rc<safe_cex_exchange::replay_clock::ReplayClock>,
+        delay: f64,
+    }
+    impl RemoteSigner for Signer {
+        fn sign(
+            &self,
+            request: RemoteSignerRequest,
+        ) -> safe_cex_transport::TransportFuture<'_, RemoteSignerResponse> {
+            self.calls.set(self.calls.get() + 1);
+            let RemoteSignerRequest::Http(request) = request else {
+                panic!("HTTP required")
+            };
+            Box::pin(async move {
+                safe_cex_exchange::replay_clock::advance(&self.clock, self.delay)
+                    .await
+                    .map_err(|e| safe_cex_transport::TransportError::Host(e.to_string()))?;
+                Ok(RemoteSignerResponse::Http(HttpSigningResponse {
+                    id: request.id,
+                    config: (!self.refuse).then(|| SignedConfig {
+                        headers: [("X-BAPI-TIMESTAMP".into(), self.stamp.clone())]
+                            .into_iter()
+                            .collect(),
+                        ..Default::default()
+                    }),
+                    error: self.refuse.then(|| "audit signer refused".into()),
+                }))
+            })
+        }
+    }
+    impl safe_cex_exchange::runtime::RemoteSigner for Signer {
+        fn is_available(&self) -> bool {
+            true
+        }
+        fn on_availability_change(
+            &self,
+            _: Rc<dyn Fn(bool)>,
+        ) -> safe_cex_exchange::runtime::Cleanup {
+            Box::new(|| {})
+        }
+    }
+    struct Terminal {
+        sent: Rc<RefCell<Option<Js>>>,
+        network: bool,
+    }
+    impl RestAdapter for Terminal {
+        fn execute(
+            &self,
+            request: RestRequest,
+        ) -> safe_cex_transport::RestFuture<'_, RestResponse> {
+            *self.sent.borrow_mut() = Some(Js::object(
+                request
+                    .config_extensions
+                    .iter()
+                    .map(|(key, value)| {
+                        (
+                            key.as_str(),
+                            safe_cex_exchange::js_runtime::value::from_retained_input(
+                                value.clone(),
+                            ),
+                        )
+                    })
+                    .collect(),
+            ));
+            Box::pin(async move {
+                if self.network {
+                    return Err(safe_cex_transport::RestFailure::from_transport(
+                        safe_cex_transport::TransportError::Host("audit network failure".into()),
+                        request,
+                    ));
+                }
+                Ok(RestResponse {
+                    status: 200,
+                    reason: None,
+                    headers: Default::default(),
+                    body: RestResponseBody::Untransformed(
+                        safe_cex_types::retained_json::RetainedJsonInput::from_value(json!({}))
+                            .unwrap(),
+                    ),
+                })
+            })
+        }
+    }
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(tokio::task::LocalSet::new().run_until(async {
+            for profile in diagnostic_audit_profiles("sign-diagnostics", 48) {
+                let native = native_replay_runtime(1000.0);
+                let clock = native.replay_clock.clone().unwrap();
+                safe_cex_exchange::replay_clock::activate(&clock).unwrap();
+                let runtime: Rc<dyn ExchangeRuntime> = native;
+                let owner = factory_owner(runtime.clone());
+                let calls = Rc::new(std::cell::Cell::new(0));
+                let sent = Rc::new(RefCell::new(None));
+                let signer = Rc::new(Signer {
+                    stamp: profile["stamp"].as_str().unwrap().into(),
+                    refuse: profile["mode"] == "sign-error",
+                    calls: calls.clone(),
+                    clock,
+                    delay: profile["delay"].as_f64().unwrap(),
+                });
+                let host = client::rest_http_host_signed(
+                    runtime.clone(),
+                    std::sync::Arc::new(Terminal {
+                        sent: sent.clone(),
+                        network: profile["mode"] == "network",
+                    }),
+                    Some((signer, None)),
+                );
+                let xhr = factory::create(
+                    host,
+                    &safe_cex_transport::DirectTransport,
+                    Js::object(vec![("baseURL", Js::str("https://venue"))]),
+                    &safe_cex_exchange::js_runtime::value::from_json(
+                        &json!({"key":"","secret":""}),
+                    ),
+                    &owner,
+                )
+                .unwrap();
+                let result = await_js(
+                    &runtime,
+                    xhr.call_method(
+                        "get",
+                        vec![
+                            Js::str("/diagnostic"),
+                            Js::object(vec![
+                                (
+                                    "safeCexSkipRemoteSigning",
+                                    Js::Bool(profile["mode"] == "skip"),
+                                ),
+                                ("safeCexRestDiagSignatureAgeMs", Js::Number(-0.0)),
+                            ]),
+                        ],
+                    )
+                    .unwrap(),
+                )
+                .await;
+                assert_eq!(
+                    result.is_ok(),
+                    profile["mode"] == "signed" || profile["mode"] == "skip",
+                    "SIGN_DIAGNOSTIC original settlement survives telemetry"
+                );
+                let config = match result {
+                    Ok(value) => value.get("config").unwrap(),
+                    Err(error) => error.value.get("config").unwrap(),
+                };
+                assert_eq!(calls.get(), if profile["mode"] == "skip" { 0 } else { 1 });
+                let expected = &profile["view"];
+                if let Some(terminal) = sent.borrow().as_ref() {
+                    assert_eq!(
+                        &diagnostic_audit_view(terminal),
+                        expected,
+                        "SIGN_DIAGNOSTIC real terminal request matches source: {profile}"
+                    );
+                    assert_eq!(
+                        &diagnostic_audit_view(&config),
+                        expected,
+                        "SIGN_DIAGNOSTIC response/rejection config retains terminal stamps"
+                    );
+                } else {
+                    assert_eq!(profile["mode"], "sign-error");
+                }
+            }
+            safe_cex_store::virtual_clock::set_thread_host_time(None);
+        }));
+}

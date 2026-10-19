@@ -11609,6 +11609,18 @@
   },
   {
     "file": "safe-cex-webworker/src/worker_session.rs",
+    "function": "drop",
+    "edges": [
+      {
+        "receiver": "dynamic",
+        "kind": "call",
+        "hook": "dispose",
+        "count": 1
+      }
+    ]
+  },
+  {
+    "file": "safe-cex-webworker/src/worker_session.rs",
     "function": "handle",
     "edges": [
       {

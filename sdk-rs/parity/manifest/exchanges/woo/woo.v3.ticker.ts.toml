@@ -1,43 +1,43 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/woo/woo.v3.ticker.ts"
-rust_files = [ "safe-cex-venue-woo/src/v3_ticker.rs" ]
+rust_files = []
 
 [[symbol]]
 ts = "WooV3AuthoritativeTickerInfo"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_ticker.rs::WooV3AuthoritativeTickerInfo"
-status = "divergent"
-note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias: typed info owns futures stats and copies BBO/Trade; source info retains live input referents. Source later BBO/Trade mutations and native retained snapshots are asserted. Native info is mutable while source freezes the containing info object. Keeping the existing owned model graph avoids a venue-specific externally mutable host graph and runtime freeze wrapper. Native record assertions precede any wire projection. Focused tests v3_request_ticker.rs and actual-source v3-request-ticker-oracle.cjs cover the symbol; this is an inert declaration/operation, not runtime registration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Closed by caller-proven removal: neither the maintained constructed WOO exchange nor its runtime import graph reaches the inert V3 ticker/quote composer. Only the removed exclusive facade consumed the Rust BBO/Trade/ticker closure. The unused implementation, private serde/validation helpers and exclusive oracle/controls were retired together. Source declarations remain inventoried; shared public stats/market helpers and live legacy socket/ticker paths remain independent. See TICKER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "WooV3AuthoritativeTicker"
 kind = "type"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_ticker.rs::WooV3AuthoritativeTicker"
-status = "divergent"
-note = "CHOSEN: exact Ticker fields plus required typed authoritative info, optional non-null midpoint and native numeric capture. Native records are owned mutable values while composeWooV3AuthoritativeTicker freezes its result; using ordinary Rust model ownership avoids a distinct frozen-output API. The info field inherits sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias, with live source and owned native witnesses. Native record assertions precede any wire projection. Focused tests v3_request_ticker.rs and actual-source v3-request-ticker-oracle.cjs cover the symbol; this is an inert declaration/operation, not runtime registration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Closed by caller-proven removal: neither the maintained constructed WOO exchange nor its runtime import graph reaches the inert V3 ticker/quote composer. Only the removed exclusive facade consumed the Rust BBO/Trade/ticker closure. The unused implementation, private serde/validation helpers and exclusive oracle/controls were retired together. Source declarations remain inventoried; shared public stats/market helpers and live legacy socket/ticker paths remain independent. See TICKER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "normalizePerpetualSymbol"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_ticker.rs::normalize_perpetual_symbol"
-status = "ported"
-note = "Strict PERP_BASE_QUOTE ASCII uppercase/digit grammar, exact error path and concatenation. Ten actual-source cases include malformed components, non-ASCII and terminal newline; no trimming or general symbol normalizer is substituted. Native record assertions precede any wire projection. Focused tests v3_request_ticker.rs and actual-source v3-request-ticker-oracle.cjs cover the symbol; this is an inert declaration/operation, not runtime registration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Closed by caller-proven removal: neither the maintained constructed WOO exchange nor its runtime import graph reaches the inert V3 ticker/quote composer. Only the removed exclusive facade consumed the Rust BBO/Trade/ticker closure. The unused implementation, private serde/validation helpers and exclusive oracle/controls were retired together. Source declarations remain inventoried; shared public stats/market helpers and live legacy socket/ticker paths remain independent. See TICKER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "requirePositiveFinitePrice"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_ticker.rs::require_positive_finite_price"
-status = "ported"
-note = "Shared JS Number string conversion, then finite/strictly-positive validation with original path/message. Fifteen actual-source cases include radix prefixes, JS whitespace, smallest subnormal, overflow and negative underflow; native f64 bits are asserted before JSON. Native record assertions precede any wire projection. Focused tests v3_request_ticker.rs and actual-source v3-request-ticker-oracle.cjs cover the symbol; this is an inert declaration/operation, not runtime registration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Closed by caller-proven removal: neither the maintained constructed WOO exchange nor its runtime import graph reaches the inert V3 ticker/quote composer. Only the removed exclusive facade consumed the Rust BBO/Trade/ticker closure. The unused implementation, private serde/validation helpers and exclusive oracle/controls were retired together. Source declarations remain inventoried; shared public stats/market helpers and live legacy socket/ticker paths remain independent. See TICKER_RETIREMENT_REVIEW.md."
 
 [[symbol]]
 ts = "composeWooV3AuthoritativeTicker"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-venue-woo/src/v3_ticker.rs::compose_woo_v3_authoritative_ticker"
-status = "divergent"
-note = "CHOSEN: source symbol validation/identity, shared existing futures-stat mapping, then bid/ask/last validation order. Fields retain native f64, including overflowing percentage, and use BBO/Trade instead of REST close for quotes. Native output and info are mutable owned records while source freezes both containers and retains BBO/Trade aliases; sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Existing owned Rust model composition avoids a venue-specific host graph/freeze mechanism. Fourteen live actual-source cases assert every output and info field, error priority and alias direction; all migration gates remain untouched. Native record assertions precede any wire projection. Focused tests v3_request_ticker.rs and actual-source v3-request-ticker-oracle.cjs cover the symbol; this is an inert declaration/operation, not runtime registration."
+layer = ""
+rs = ""
+status = "not-applicable"
+note = "Closed by caller-proven removal: neither the maintained constructed WOO exchange nor its runtime import graph reaches the inert V3 ticker/quote composer. Only the removed exclusive facade consumed the Rust BBO/Trade/ticker closure. The unused implementation, private serde/validation helpers and exclusive oracle/controls were retired together. Source declarations remain inventoried; shared public stats/market helpers and live legacy socket/ticker paths remain independent. See TICKER_RETIREMENT_REVIEW.md."

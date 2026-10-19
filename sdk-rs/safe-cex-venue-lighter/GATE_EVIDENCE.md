@@ -1,5 +1,9 @@
 # Lighter gate evidence
 
+The standalone SDK key-management fixtures below are historical after the
+unused SignerError/TransactionSigner cleanup. Shipped signer composition remains
+TransactionClient; see `../safe-cex-lighter-sdk/SIGNER_RETIREMENT_REVIEW.md`.
+
 Protocol data slice, based on `6922766a6c`. All commands run in this worktree.
 Cargo uses `/opt/homebrew/opt/rustup/bin` on PATH; Yarn uses
 `node /Users/sam/.volta/tools/image/yarn/1.22.21/bin/yarn.js`.

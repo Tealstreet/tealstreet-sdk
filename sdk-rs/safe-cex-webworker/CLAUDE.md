@@ -20,6 +20,9 @@ Worker payloads preserve missing versus explicit-null data. Incoming/outgoing op
 sets are pinned against the live TypeScript unions. Store payloads reuse the
 existing StoreUpdate directly, including PackedTickerDelta, rather than duplicate
 that contract. Incoming commands and ordinary worker payloads retain their owned JSON boundary.
+The bootstrap routing oracle checks merged message-handler statistics as native
+number bits and through actual JS JSON.stringify, independently of serde's integer
+versus floating-point JSON representation.
 CallMethod results and OHLCV DATA posts use required WorkerDataPost with existing
 runtime Js, alongside separate native book and Error capabilities. DATA envelopes
 have no Serialize implementation; browser materialization retains native numbers
@@ -126,8 +129,9 @@ Fill totals reproduce plain-object inherited keys and integer-key enumeration;
 source attempt-limit and decreasing-fill behavior are deliberately preserved.
 Disposal releases its list before invoking fallible callbacks, so reentrant
 cleanup and newly registered disposers behave like the source without panic recovery.
-The owned current-order Vec and immutable default omit mutable array identity;
-live source mutation witnesses document those representation choices.
+The owned current-order Vec still omits caller array identity. The default is a
+shared shallow-frozen native template: nested ID edits seed future constructors,
+while each constructed typed state receives its own snapshot.
 
 CallMethod dispatch uses the shared Exchange override hooks for order refresh and
 private snapshots. Its oracle supplies distinct venue overrides and checks both
@@ -333,18 +337,13 @@ Every lifecycle row asserts pre-settlement/settled placement counts and executed
 slice count: merely generating zero, negative-zero and NaN cases missed a
 source truthiness mutation. That formerly surviving mutation now fails by name.
 
-Chaser price selection consumes shared predicted bid/ask, extrema and adjust
-helpers. Shared TableHit preserves inherited market TypeError and ticker NaN;
-missing-market logging re-reads options after reentrant listeners. Its 479-case
-source oracle constructs the real DefaultStore and asserts native numeric bits.
-A separate __proto__ market write poisoning a later precision lookup remains a
-shared Store FINDING; no worker-local prototype-write shim is introduced.
-Own-only lookup, wrong clamp and array-first mutations compile and fail named
-price assertions. The oracle passes all 479 cases in a disposable tracked-source
-mirror without ancestor node_modules; a missing compiler fails MODULE_NOT_FOUND.
-Source log/error listener throws also retain a separate shared-emit FINDING:
-a log throw prevents completion, while an error throw happens after completion.
-Core infallible listeners cannot propagate either source TypeError yet.
+Chaser price selection reads the canonical native Store facade's actual symbol
+maps and array fallback. Real inherited/prototype referents reach the numeric
+helpers; a stock inherited-name table cannot substitute for the Store graph.
+The 479-case maintained oracle and separate poisoned-map case compare numeric
+bits, precision throws and stop/event state. The old poisoned-map refusal is
+removed, with no worker-local Store sidecar. Missing-market logging re-reads
+options after reentrant listeners, and listener throws retain source order.
 
 Worker log forwarding spreads own context over exchange/account defaults and
 uses shared integer-key enumeration. Its post callback is fallible; errors
@@ -731,3 +730,47 @@ continue closing. Session ingress/config/replay/perf/opaque dispatch use native
 Js directly. Decode shared models only at their actual consumers, and keep
 buffered message identity. Separate ordinary output/report DTO findings remain
 tracked in the worker FIX-audit ledger.
+
+The frontier replay fixtures allocate fresh option rows per source case and
+observe numeric-key ordering at every margin publication. BBO subscriber identity
+is asserted on the retained subscriber cause separately from Error::source's
+retained transport-response origin, with complete metadata still checked. The
+actual DefaultStore/handler source oracle verifies original Error identity after
+post and committed bid/ask writes.
+
+## Native perf fixtures
+
+WorkerModule owns the real record/clone/cap/dump/metronome/replay service.
+The worker_context proxy records with the supplied service before forwarding
+outbound posts. Direct config/dump/start-status posts retain their source bypass.
+Replay init does not construct a venue. Dump headers are fresh; frames and replay
+messages retain their native referents. Module disposal cancels all pending timers
+and closes the service even when callers retain a session or service handle.
+The actual listener round trip and Node structuredClone graph probes cover the
+native implementation; perfFixture.ts remains the maintained behavioral source.
+
+The default chaser state is one native Js template per worker module realm,
+modeled by the host thread like the existing singleton manager. The canonical
+Object.freeze builtin protects its outer fields while its nested ID array stays
+mutable. Constructors snapshot through the shared typed state decoder; remaining
+raw state admission and instance-array alias findings stay separate.
+
+Completion events are output records; their unreachable inbound codec is retired.
+Serialize through canonical MODEL_RECORD/ModelField property semantics so the
+actual chaser:complete listener owns clientId even when its value is undefined.
+The engine/source listener witness pins eight ordered keys, all values and native
+number bits; the original ten identity cases remain output checks. Other live
+task decoders retain their numeric/presence floors and independent audit rows.
+
+## Module Drop override review
+
+`WorkerModule::drop` is a production teardown boundary under the approved native
+module drop-equals-dispose policy. Its direct `self.perf.dispose()` call closes
+the module-owned recorder and cancels every pending metronome timer. The hook
+inventory records that one dynamic dispose edge; it is not a test-only call.
+Drop then unregisters listeners, removes port mappings, drains both worker maps,
+uses the shared fallible worker disposal pipeline, performs native final-drop
+cleanup and shuts down each context. Required error reporting lets later owned
+resources finish cleanup after a handler failure. The existing module-drop and
+perf-disposal binding tests pin retained-handle cleanup; the inventory guard must
+continue to detect any change in this body's hook receiver or multiplicity.

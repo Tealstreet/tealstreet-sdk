@@ -319,7 +319,12 @@ all-target clippy, wasm build, extraction check (0 changes), invention/status
 check and report all exit 0. The public calendar subset remains explicitly
 narrowed; unused utility behavior is still pending. No merge was performed.
 
-## Round 3: actual NaN sort permutations
+## Historical round 3: actual NaN sort permutations (superseded)
+
+The historical NaN-last correction below is superseded by the canonical V8
+sorter cutover in `../parity/CANDLE_CACHE_SPECIFIC_CLAIMS.md`. Current tests
+compare exact maintained-source result permutations rather than requiring a
+source-incompatible total order. Historical execution receipts remain below.
 
 With authorization to correct the source behavior, clean_candles now uses a
 total numeric order with NaN last. First-timestamp deduplication is unchanged,

@@ -258,3 +258,11 @@ subsecond precision, epoch zero, invalid-date NaN and signed zero. Both the real
 socket witness and an independent installed-library probe fail on master without
 `utcOffset` and pass with the shared #453 implementation. Callback cleanup is
 observed; typed Candle still has its separately declared retained-object limits.
+
+
+The Store readBlob audit uses the existing `exchange_binding` target's
+`audit_compressed_blob_bytes_reach_real_socket_pongs_without_utf8_decoding`.
+Its 28 real binary-frame profiles compare terminal pong UTF-16 units with
+maintained TS and installed pako. Inflated bytes are widened individually;
+UTF-8 decoding or paired-byte reinterpretation changes actual source replies.
+The source already shares this behavior; Store census row 445 is ACCEPT.

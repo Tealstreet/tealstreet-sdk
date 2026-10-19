@@ -59,7 +59,7 @@ impl Exchange for Venue {
                 )?;
             }
             if self.spec["concurrentNumeric"] == true {
-                // Supply an insertion-ordered host map so cleanup itself must restore JS key order.
+                // Insert a numeric key last; canonical Store enumeration must still match Object.keys.
                 let mut fetched = self.base.store.fetched_leverage().unwrap().clone();
                 fetched.insert("42".into(), leverage(21.0, 23.0));
                 self.base.store.update(
@@ -527,8 +527,8 @@ fn margin_cleanup_restores_native_numeric_key_order() {
     );
     assert_eq!(
         publications[1],
-        ["OTHER", "BTC", "42"],
-        "MARGIN cleanup native unsorted host precondition"
+        ["42", "OTHER", "BTC"],
+        "MARGIN cleanup native numeric keys precede string keys"
     );
     assert_eq!(
         publications[2],
@@ -545,6 +545,11 @@ fn margin_cleanup_restores_native_numeric_key_order() {
         source["publications"][2],
         json!(["42", "OTHER"]),
         "MARGIN cleanup source key order"
+    );
+    assert_eq!(
+        json!(*publications),
+        source["publications"],
+        "MARGIN all publication key orders match maintained Store"
     );
     unsubscribe();
 }
