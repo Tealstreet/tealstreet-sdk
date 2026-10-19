@@ -130,3 +130,13 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   complete write/order/signature checks). Rebuild for public wire fixes underway.
 - Root default test concurrency exposed unrelated Hyro/registry import timeouts.
   Repeat with VITEST_MAX_WORKERS=2 and serial Turbo tasks; no test changes.
+- All four venue replay gates PASS on the final build. Public medians (3 runs):
+  Backpack 1,086 frames/100 markets/91 tickers/two books: CPU TS 172.5 ms,
+  Rust 84.8 ms (2.03x); steady CPU 95.9/44.1 ms (2.17x); retained memory
+  1.7/1.6 MB (1.10x), including 1.1 MB wasm linear memory.
+  Binance 871 frames/917 markets/783 tickers/three books: CPU 234.4/86.4 ms
+  (2.71x); steady 139.7/35.3 ms (3.96x); memory 2.3/2.0 MB (1.15x).
+  Generated private gates: Backpack 21 frames, Binance 14 frames, both PASS.
+- Real SDK wasm tests: 5/5 PASS; host tests: 2/2 PASS; wasm clippy PASS.
+  Root typecheck/lint PASS. Default test budget still hits pre-existing Hyro
+  import timeouts; verifying the SDK suite separately with a 30-second budget.
