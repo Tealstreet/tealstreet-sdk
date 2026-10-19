@@ -329,7 +329,7 @@ impl MexcFutures {
         let at = if matches!(r.kind, Kind::Funding) {
             ArrayAt::Path(&["data", "resultList"])
         } else {
-            ArrayAt::Field("data")
+            ArrayAt::EnvelopeField("data")
         };
         cx.request_streamed(Method::Get, url, headers, at, Pending::History(request));
     }

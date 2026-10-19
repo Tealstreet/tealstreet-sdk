@@ -281,7 +281,9 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | --- | --- |
 | Binance USD-M, Binance PM | done |
 | Bybit linear | done ([#1298](https://github.com/Tealstreet/tealstreet-sdk/pull/1298)) |
-| OKX (+EU, demo), Bitget, Hyperliquid, BloFin, BingX, MEXC, WEEX, Bitunix, Crypto.com, Backpack | wave 1 lanes running |
+| OKX (+EU, demo) | done (#1302) |
+| Bitget, Hyperliquid, BloFin, BingX, MEXC, WEEX, Bitunix, Crypto.com, Backpack | wave 1 lanes running |
+| Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | WOO, KuCoin, Phemex, Lighter, Paradex, GRVT, AsterDEX, Orderly family, ApeX Omni, Kraken, Coinbase, Bitrue, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse, Bybit inverse/spot/demo | wave 2, as wave 1 lanes merge |
 
 ### 9. Delete TypeScript and merge

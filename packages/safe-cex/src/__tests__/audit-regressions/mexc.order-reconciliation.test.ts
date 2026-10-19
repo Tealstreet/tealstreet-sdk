@@ -95,6 +95,10 @@ describe('MEXC snapshot and bracket reconciliation', () => {
       exchange.privateWebsocket.onMessage({ data: JSON.stringify({ channel: 'push.personal.order', data: {
         ...wireOrder(2, filled), stopLossPrice: 0, takeProfitPrice: 66000, profitTrend: 2,
       } }) } as MessageEvent);
+      // A second sparse row must retain knowledge of the preceding explicit clear.
+      exchange.privateWebsocket.onMessage({ data: JSON.stringify({
+        channel: 'push.personal.order', data: wireOrder(2, filled),
+      }) } as MessageEvent);
       return ok('original');
     }).mockResolvedValueOnce(ok([{ orderId: 'original', errorCode: 0 }])).mockResolvedValueOnce(ok('replacement'));
     exchange.xhr = { post, get: vi.fn().mockResolvedValue(ok(wireOrder(4, filled))) } as any;

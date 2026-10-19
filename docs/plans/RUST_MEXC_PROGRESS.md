@@ -200,3 +200,11 @@ and cut a follow-up branch. Never touch master or force-push.
   also checks an intervening sparse WS update and authoritative corrected source.
 - Target advanced with OKX; preserve this review work in a commit, merge latest
   landing with standing conflict authorization, then rerun integrated gates/CI.
+
+- Integrated landing through OKX (693ad4f139). Independent merge reviews retain
+  opt-in EnvelopeField streaming metadata, all MEXC JSON robustness tests, OKX
+  auth/subscription/staged replay checks, every-run comparisons, all venue
+  registrations and client-ID rules. Engine tests 18/18 and harness 11/11 pass.
+- Four-venue release at opt-level 3 is 1777584 bytes, above unchanged 1468006
+  limit. A size-optimized build is being measured against the same size and CPU
+  gates; no budget change or output exemption is permitted for this integration.

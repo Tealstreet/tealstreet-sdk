@@ -8,7 +8,7 @@ import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
-import { bodyBytes, canonicalUrl } from './tape.mjs';
+import { canonicalUrl } from './tape.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -39,6 +39,7 @@ const recording = {
         handlers.onOpen();
       },
       onMessage: (text) => {
+        frames++;
         write({ type: 'ws', url, socket, text });
         handlers.onMessage(text);
       },
@@ -50,18 +51,24 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const bytes = await bodyBytes(response.body);
-    const body = new TextDecoder().decode(bytes);
-    write({
-      type: 'http',
-      method: request.method,
-      url: request.url,
-      requestBody: request.body,
-      status: response.status,
-      headers: response.headers,
-      body,
+    const recorded = (body) => write({
+      type: 'http', method: request.method, url: request.url,
+      ...(request.body === undefined ? {} : { requestBody: request.body }),
+      status: response.status, headers: response.headers ?? '', body,
     });
-    return { ...response, body: bytes };
+    if (response.body instanceof Uint8Array) {
+      recorded(new TextDecoder().decode(response.body));
+      return response;
+    }
+    return { ...response, body: (async function* () {
+      const decoder = new TextDecoder();
+      let body = '';
+      for await (const chunk of response.body) {
+        body += decoder.decode(chunk, { stream: true });
+        yield chunk;
+      }
+      recorded(body + decoder.decode());
+    })() };
   },
 };
 

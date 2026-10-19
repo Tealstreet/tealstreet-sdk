@@ -162,3 +162,11 @@ jobs:
         run: |
           yarn rust:private-tape-bybit
           yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''
+      - name: OKX public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue okx --tape sdk-rs/harness/fixtures/okx-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: OKX account and trading variants (correctness)
+        run: |
+          for venue in okx okxeu okxdemo okxeudemo; do
+            yarn rust:private-tape-okx --venue "$venue"
+            yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
+          done

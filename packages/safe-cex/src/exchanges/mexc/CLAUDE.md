@@ -169,3 +169,7 @@ placement sources, while an explicit zero bracket price clears its leg.
 When native WS precedes the placement acknowledgement, its explicit bracket
 prices and sources take precedence over the request; the optimistic row only
 supplies metadata omitted from the native snapshot.
+
+Carry native bracket field presence through sparse snapshots as well as public
+values: a clear followed by an omitted field still overrides a late placement
+acknowledgement, rather than restoring the requested bracket.

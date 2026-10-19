@@ -576,11 +576,20 @@ export class MexcExchange extends BaseExchange {
     if (current.status === OrderStatus.Closed || (current.status === OrderStatus.Canceled && order.status === OrderStatus.Open)) {
       next = { ...next, status: current.status };
     }
+    // Retain presence as well as values: a sparse frame after an explicit
+    // clear must not let a later placement acknowledgement restore that leg.
+    const info = { ...next.info };
+    for (const field of ['stopLossPrice', 'takeProfitPrice', 'lossTrend', 'profitTrend', 'trend']) {
+      if (!Object.hasOwn(order.info ?? {}, field) && Object.hasOwn(current.info ?? {}, field)) {
+        info[field] = current.info[field];
+      }
+    }
     // Omitted native fields are unknown; an explicit zero price removes a bracket.
     const slTriggerType = order.slTriggerType ?? current.slTriggerType;
     const tpTriggerType = order.tpTriggerType ?? current.tpTriggerType;
     return {
       ...next,
+      info,
       stopLoss: Object.hasOwn(order.info ?? {}, 'stopLossPrice') ? order.stopLoss : order.stopLoss ?? current.stopLoss,
       takeProfit: Object.hasOwn(order.info ?? {}, 'takeProfitPrice') ? order.takeProfit : order.takeProfit ?? current.takeProfit,
       triggerType: order.triggerType ?? (order.type === OrderType.StopLoss ? slTriggerType :

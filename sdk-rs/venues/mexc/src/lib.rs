@@ -105,7 +105,7 @@ impl MexcFutures {
             Method::Get,
             format!("{REST}{path}"),
             vec![],
-            ArrayAt::Field("data"),
+            ArrayAt::EnvelopeField("data"),
             pending,
         );
     }
