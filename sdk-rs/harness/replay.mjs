@@ -9,7 +9,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
-import { replayStoreReady, ReplayClock, Tape as SharedTape } from './tape.mjs';
+import { prepareTsReplaySockets, replayStoreReady, ReplayClock, Tape as SharedTape } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { subscriptionKeys, isRead } from './requests.mjs';
 import { venueRequestKey } from './venue-requests.mjs';
@@ -662,11 +662,10 @@ async function runTs() {
     },
     async () => {
       await Promise.all([started, subscribed]);
-      venue.prepareTsReady?.(exchange, { isPrivate });
+      await prepareTsReplaySockets(tape, () => venue.prepareTsReady?.(exchange, { isPrivate }), until);
       await until(() => venue.tsBooksSubscribed(exchange, bookSymbols.length), 'TS book subscriptions');
       const loaded = () => Object.values(store.loaded).every(Boolean);
       await until(() => !isPrivate || loaded(), `TS account startup (${JSON.stringify(store.loaded)})`);
-      await until(() => tape.open.size > 0, 'TS initial socket');
     },
     (record) => tsCommand(exchange, store, record),
     clock,

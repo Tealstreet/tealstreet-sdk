@@ -279,3 +279,17 @@ Final page traces versus exact baseline7 confirm Binance1507328→1441792
 are allocation evidence, not instrumented retained-heap gate comparisons.
 Seven public before/after pairs and final profile medians remain to run; private
 suite is passing through the newly built families, including MEXC.
+
+First complete seven-family paired run is diagnostic, not the final table.
+All public outputs passed except Crypto.com subscription audit, on both control
+and current: TS registered while its socket was CONNECTING, lost sends and retried
+only after accelerated replay. The merged readiness helper now waits for live
+open before registration, then exact audit readiness before delivering frames.
+No subscription validation changed. Deterministic real-Crypto-hook regression and
+all49 harness tests pass; a one-run strict Crypto gate also passes.
+CPU/retained ratios improved on OKX, Binance, Crypto.com, WEEX and MEXC; Bybit and
+BingX retained ratios regressed slightly despite passing gate thresholds. Work
+continues until both margins widen. All ten private variants pass on seven-family
+artifacts (MEXC21frames, other counts above). Optional CPU profiling now reports
+gross per-method thread CPU with a measured proxy/clock floor, labelled explicitly;
+normal gates still import no profiler. Final profile CPU runs remain pending.

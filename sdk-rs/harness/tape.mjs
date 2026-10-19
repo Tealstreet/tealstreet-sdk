@@ -7,6 +7,14 @@ export const replayStoreReady = (loaded, isPrivate) => {
   const required = isPrivate ? publicMask | LOADED_FLAG.BALANCE | LOADED_FLAG.ORDERS | LOADED_FLAG.POSITIONS : publicMask;
   return (loaded & required) === required;
 };
+
+// Some TS venues register subscriptions before a send can reach a CONNECTING
+// socket. Prepare only after an actual open, then require the wire audit too.
+export async function prepareTsReplaySockets(tape, prepare, until) {
+  await until(() => [...tape.open.values()].some((socket) => !socket.closed), 'TS initial socket');
+  await prepare?.();
+  await until(() => !tape.audit || tape.audit.ready(), 'TS socket authentication/subscriptions');
+}
 /** Per-request values: clocks, signatures and generated client ids. */
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
 export const canonicalUrl = (url) => {

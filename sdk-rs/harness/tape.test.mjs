@@ -1,6 +1,47 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bodyBytes, canonicalBody, canonicalUrl, replayStoreReady, ReplayClock, Tape } from './tape.mjs';
+import { bodyBytes, canonicalBody, canonicalUrl, prepareTsReplaySockets, replayStoreReady, ReplayClock, Tape } from './tape.mjs';
+import { venueOf } from './venues.mjs';
+
+test('TS readiness sends Crypto ticker subscriptions after async socket open and awaits the wire audit', async () => {
+  const venue = venueOf('cryptocom');
+  const publicUrl = 'wss://stream.crypto.com/exchange/v1/market';
+  const tape = new Tape([]);
+  tape.open.set('closed-old-generation', { closed: true });
+  tape.audit = venue.createSocketAudit('ts', { isPrivate: false, books: [], tickers: ['BTCUSD-PERP'] });
+  let isOpen = false;
+  let dropped = 0;
+  const socket = tape.connect(publicUrl, () => { isOpen = true; }, () => {});
+  const exchange = { store: { markets: [{ id: 'BTCUSD-PERP' }] }, publicWebsocket: {
+    subscribeToMarketData(markets) {
+      if (!isOpen) { dropped++; return; }
+      const frame = { method: 'subscribe', params: { channels: markets.map((m) => 'ticker.' + m.instrumentName) } };
+      // The actual wire send arrives one event-loop turn after registration.
+      setImmediate(() => tape.audit.sent(publicUrl, JSON.stringify(frame)));
+    },
+  } };
+  let prepared = false;
+  const checks = [];
+  const until = async (predicate, label) => {
+    checks.push(label);
+    for (let turns = 0; !predicate(); turns++) {
+      assert(turns < 10, label);
+      await new Promise(setImmediate);
+    }
+  };
+  await prepareTsReplaySockets(tape, () => {
+    assert(isOpen, 'the real asynchronous open must precede the preparation hook');
+    prepared = true;
+    venue.prepareTsReady(exchange, { isPrivate: false });
+    assert.equal(tape.audit.ready(), false, 'registration alone cannot satisfy readiness');
+  }, until);
+  assert(prepared);
+  assert.equal(dropped, 0);
+  assert.equal(tape.audit.ready(), true);
+  assert.deepEqual(tape.audit.errors(), []);
+  assert.deepEqual(checks, ['TS initial socket', 'TS socket authentication/subscriptions']);
+  tape.close(socket);
+});
 
 const url = 'https://api.mexc.com/api/v1/private/order/cancel';
 test('POST matching preserves snowflakes and consumes every accepted write once', () => {
