@@ -2143,3 +2143,9 @@ NaN payloads canonicalize as Node structuredClone does.
 Uncloneable values and unmodeled object kinds produce visible DataCloneError.
 The worker recorder intentionally drops clone failures as perfFixture.ts does;
 other callers receive the error. Node's real structuredClone supplies the oracle.
+
+Exchange::listen_ohlcv_retained is the native callback entry for listener payloads
+whose runtime shape differs from the explicit typed Candle API. Typed-only venues
+adapt their existing declared listener; Phemex overrides it with the original Js
+payload. Native account delivery captures that retained value without coercion.
+The 906-frame Phemex binding probe compares all 19 maintained-source callbacks.
