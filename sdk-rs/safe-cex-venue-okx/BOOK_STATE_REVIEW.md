@@ -56,5 +56,49 @@ shared comparator, including its signed-zero and alias negative controls. Raw
 V8 SHA values prove artifact integrity, not JavaScript semantic equality. No
 field normalization, report projection or partial-drain comparison is allowed.
 
-The <=2x TypeScript CPU target remains open until measured. No performance
-result is claimed before this protocol completes.
+## Measured residual result
+
+The approved single full pair completed on 2026-10-19. Control source
+`6effe3eeb90e` and selected-state source `1e31216db438` differ only in
+`src/binding/sockets.rs`; both include the same #1218 routing. Rust 1.99.0,
+opt-level 3, debug assertions off, Node 24.20.0, lockfile and dependencies match.
+Both release addons loaded and completed the original full tape.
+
+Seconds below are process CPU and feed-to-drain wall time. Each cell retains
+both independent worker samples, followed by their median in parentheses.
+
+| Side | CPU seconds | Wall seconds |
+| --- | --- | --- |
+| Native control | 207.932, 202.031 (204.981) | 759.038, 733.627 (746.332) |
+| Native selected state | 196.197, 195.757 (195.977) | 596.870, 586.730 (591.800) |
+| TypeScript with control | 58.061, 58.935 (58.498) | 483.093, 492.720 (487.907) |
+| TypeScript with selected state | 54.689, 54.807 (54.748) | 371.417, 367.163 (369.290) |
+
+Observed native CPU median decreases 4.39%; wall median decreases 20.71%.
+TypeScript CPU also decreases 6.41% between reports. This is one matched pair
+under changing shared load, with two native samples per side, so these numbers
+do not establish an isolated causal speedup or three-pair confidence. Candidate
+CPU is 3.58x its TypeScript control; the <=2x CPU target remains open.
+
+Every worker receives all 285713 frames with zero drops. Both native repeats per
+side verify physical and application drains. All four complete native retained
+graphs match, including ordered keys, descriptors, prototypes, signed zero and
+bidirectional alias identity; all four complete TypeScript graphs repeat too.
+Each graph contains 607770 objects/arrays. All eight comparator controls pass.
+Native V8 bytes differ for equivalent positive-zero encodings; per-file SHA
+checks prove integrity, while the unchanged observable graph comparator proves
+identity without normalization. This comparison is between native control and
+candidate, with TypeScript repeatability checked separately.
+
+The conservative formal window is 08:58:00-09:23:40 UTC; actual feed/report bounds
+are 08:58:13.766-09:21:49.063. No local Cargo or profiler runs during the feeds.
+Neighboring Cargo gates and WOO/Backpack feeds overlap the control; Phemex/WOO
+builds overlap the candidate. Their reported bounds and unknown starts remain
+in the local evidence. This slice excludes #1218's non-book routing improvement;
+the combined effect requires the post-merge full-master replay.
+
+Local ignored evidence is under `.cache/okx-book-state-release/` (protocol,
+shared-load notes, both original reports, retained-output integrity hashes and
+complete-graph comparison) and `.cache/okx-book-state-artifacts/` (immutable
+addons and matching release/source provenance). Generated reports and binaries
+are not committed.
