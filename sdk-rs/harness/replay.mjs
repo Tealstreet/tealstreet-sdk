@@ -137,15 +137,19 @@ async function runRust() {
   const fills = [];
   const transport = {
     now: () => Date.now(),
-    connect: (url, { onOpen, onMessage }) => {
+    webSocketHeaders: true,
+    connect: (url, { headers, onOpen, onMessage }) => {
+      venue.validateSocket?.(url, headers);
       const socket = tape.connect(url, onOpen, onMessage);
       return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
-    request: async ({ method, url, body: requestBody, headers }) => {
+    request: async ({ method, url, body: requestBody, headers, signal }) => {
+      signal?.throwIfAborted();
       const { status, headers: responseHeaders = '', body } = tape.respond(method, url, requestBody, headers);
       const chunks = async function* () {
         const bytes = encoder.encode(body);
         for (let offset = 0; offset < bytes.length; offset += 16 * 1024) {
+          signal?.throwIfAborted();
           yield bytes.subarray(offset, offset + 16 * 1024);
         }
       };
@@ -313,7 +317,8 @@ async function runTs() {
     static OPEN = 1;
     static CLOSING = 2;
     static CLOSED = 3;
-    constructor(url) {
+    constructor(url, _protocols, options = {}) {
+      venue.validateSocket?.(url, options.headers);
       this.url = url;
       this.readyState = 0;
       this.listeners = { open: [], message: [], close: [], error: [] };
@@ -354,14 +359,27 @@ async function runTs() {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const { status, body } = tape.respond(
+    const {
+      status,
+      body,
+      headers: responseHeaders,
+    } = tape.respond(
       (config.method ?? 'get').toUpperCase(),
       url.toString(),
       config.data,
-      config.headers,
+      config.headers?.toJSON?.() ?? config.headers,
     );
     // The raw body: the client's own transformResponse parses it, big ids included.
-    const response = { data: body, status, statusText: String(status), headers: {}, config, request: {} };
+    const headers = Object.fromEntries(
+      (responseHeaders ?? '')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => {
+          const colon = line.indexOf(':');
+          return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()];
+        }),
+    );
+    const response = { data: body, status, statusText: String(status), headers, config, request: {} };
     if (status >= 400) {
       const error = new Error(`Request failed with status code ${status}`);
       error.response = response;
@@ -392,6 +410,7 @@ async function runTs() {
   };
   const exchange = new Exchange(venue.ts.name, options, store);
   venue.configureTs?.(exchange);
+  venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
@@ -418,7 +437,7 @@ async function runTs() {
       }
     },
     async () => {
-      venue.prepareTs?.(exchange, { isPrivate });
+      venue.prepareTsReady?.(exchange, { isPrivate });
       while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
       const loaded = () => Object.values(store.loaded).every(Boolean);
       while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
@@ -462,7 +481,7 @@ async function runTs() {
           ).values(),
         ],
         fills: executions.map((f) => ({
-          id: f.id ?? f.orderId,
+          id: f.orderId ?? f.id,
           symbol: f.symbol,
           side: f.side,
           amount: f.amount,

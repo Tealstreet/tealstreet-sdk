@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHmac, createPrivateKey, sign } from 'node:crypto';
 import { test } from 'node:test';
-import { canonicalBody, sameCommandResults, Tape, withTimeout } from './tape.mjs';
+import { canonicalBody, canonicalUrl, sameCommandResults, Tape, withTimeout } from './tape.mjs';
 import { venueOf } from './venues.mjs';
 const URL = 'https://example.test/order';
 const record = (method, requestBody) => ({
@@ -270,4 +270,76 @@ test('shared Tape invokes socket audit hooks for object subscription params', as
     ['received', 'auth-ack'],
   ]);
   await new Promise(setImmediate);
+});
+
+test('timed read templates remain reusable and response IDs echo the actual generated request', () => {
+  const read = { ...record('GET'), effectiveAt: 0, body: 'old' };
+  const newer = { ...read, effectiveAt: 1000, body: 'new' };
+  const write = { ...record('POST', { quantity: '1' }), body: '{"clientOrderId":"$clientAlgoId"}' };
+  const tape = new Tape([read, newer, write], { matchRequestBody: true, volatileBodyFields: true }, false);
+  assert.equal(tape.respond('GET', URL).body, 'old');
+  assert.equal(tape.respond('GET', URL).body, 'old');
+  tape.time = 1000;
+  assert.equal(tape.respond('GET', URL).body, 'new');
+  assert.equal(tape.respond('GET', URL).body, 'new');
+  assert.equal(
+    tape.respond('POST', URL, '{"quantity":"1","clientAlgoId":"generated"}').body,
+    '{"clientOrderId":"generated"}',
+  );
+  assert.equal(tape.missingWrites, 0);
+});
+
+test('volatile ID normalization preserves caller IDs inside bodies and query JSON', () => {
+  const caller = new Set(['caller']);
+  const venue = { matchRequestBody: true, volatileBodyFields: true };
+  assert.notEqual(
+    canonicalBody({ newClientOrderId: 'caller' }, caller, venue),
+    canonicalBody({ newClientOrderId: 'generated' }, caller, venue),
+  );
+  const left =
+    'https://example.test/order?batchOrders=' + encodeURIComponent('[{"newClientOrderId":"caller","quantity":"1"}]');
+  const right =
+    'https://example.test/order?batchOrders=' + encodeURIComponent('[{"newClientOrderId":"changed","quantity":"1"}]');
+  assert.notEqual(canonicalUrl(left, caller, venue), canonicalUrl(right, caller, venue));
+  assert.notEqual(
+    canonicalUrl('https://example.test/order?newClientOrderId=caller', caller, venue),
+    canonicalUrl('https://example.test/order?newClientOrderId=changed', caller, venue),
+  );
+});
+
+test('venue request validation sees exact signed headers before matching a response', () => {
+  const tape = new Tape(
+    [record('GET')],
+    {
+      validateRequest: ({ headers }) => {
+        if (headers?.signature !== 'valid') throw new Error('invalid signature');
+      },
+    },
+    true,
+  );
+  assert.throws(() => tape.respond('GET', URL, undefined, { signature: 'invalid' }), /invalid signature/);
+  assert.equal(tape.respond('GET', URL, undefined, { signature: 'valid' }).status, 200);
+});
+
+test('a future-only timed read cannot expose a snapshot before its effective time', () => {
+  const future = { ...record('GET'), effectiveAt: 1000, body: 'future' };
+  const tape = new Tape([future], {}, false);
+  assert.equal(tape.respond('GET', URL).status, 599);
+  tape.time = 999;
+  assert.equal(tape.respond('GET', URL).status, 599);
+  assert.equal(tape.unserved, 2);
+  tape.time = 1000;
+  assert.equal(tape.respond('GET', URL).body, 'future');
+  assert.equal(tape.respond('GET', URL).body, 'future');
+  assert.equal(tape.missingWrites, 0);
+});
+
+test('an untimed baseline remains available before a later timed snapshot', () => {
+  const initial = { ...record('GET'), body: 'initial' };
+  const future = { ...record('GET'), effectiveAt: 1000, body: 'future' };
+  const tape = new Tape([initial, future], {}, false);
+  assert.equal(tape.respond('GET', URL).body, 'initial');
+  assert.equal(tape.respond('GET', URL).body, 'initial');
+  tape.time = 1000;
+  assert.equal(tape.respond('GET', URL).body, 'future');
 });

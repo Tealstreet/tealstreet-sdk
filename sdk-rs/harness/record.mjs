@@ -29,6 +29,7 @@ const recording = {
   ...live,
   connect(url, handlers) {
     return live.connect(url, {
+      headers: handlers.headers,
       onOpen: () => {
         write({ type: 'open', url });
         handlers.onOpen();
@@ -71,7 +72,7 @@ const { WasmEngine } = await loadEngine();
 let frames = 0;
 let updates = 0;
 const seenBooks = new Set();
-const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: false })), recording, {
+const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: true })), recording, {
   onFrame: (buffer) => {
     updates++;
     for (const book of new Frame(buffer).books()) seenBooks.add(book.market);

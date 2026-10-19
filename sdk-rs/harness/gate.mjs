@@ -9,6 +9,7 @@ import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { sameCommandResults, stable } from './tape.mjs';
 import { parseRequestJson } from './request-json.mjs';
+import { fixWeexConditionals } from './known-ts-fixes.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -93,6 +94,27 @@ const isPrivate = Boolean(ts.account);
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  weex(ts) {
+    const account = ts.account;
+    if (!account) return;
+    // TS reads opening STOP/TP stream rows as protective orders and displays
+    // the execution price as their trigger, corrupting conditional size amends.
+    const bytes = readFileSync(values.tape);
+    const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
+      .toString('utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    fixWeexConditionals(account, records);
+    // Additional deliberate fixes, covered by native regressions: failed
+    // normal/algo reads retain the complete last snapshot; stale depth/private
+    // frames cannot undo newer state; repeated fill IDs emit once; missing
+    // placement IDs fail rather than fabricating an ID; rejected cancellations
+    // retain their order; per-symbol margin changes preserve that symbol's mode.
+    // Price-only replacement preserves remaining quantity and refuses uncertain
+    // fill/bracket state; positive income cursors always report INCOMPLETE.
+  },
+
   okx: [
     'full books retain levels past a stale last trade',
     'public trades implement the inherited Not implemented method',
@@ -276,7 +298,7 @@ const fixCryptocomAccount = (account) => {
   // ignored brackets/opening triggers reject before writes; caller ids use a
   // conservative 36-byte ceiling without JS string emulation.
   // Public throttle and public-only subscription corrections are the
-  // afterTsFrame and prepareTs hooks in venues.mjs.
+  // afterTsFrame and prepareTsReady hooks in venues.mjs.
 };
 for (let run = 0; run < runs; run++) {
   const ts = results.ts[run];
@@ -285,8 +307,11 @@ for (let run = 0; run < runs; run++) {
   // Every request must match a taped one: an unserved request sent different parameters.
   for (const impl of ['ts', 'rust']) {
     const output = results[impl][run];
-    if (output.metrics.retainedBytes < 0 || output.metrics.bufferRetainedBytes < 0)
-      differences.push(impl + ': negative retained memory component; baseline is invalid');
+    for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
+      if (!Number.isFinite(output.metrics[field]) || output.metrics[field] < 0) {
+        differences.push(`${impl}: invalid ${field} (${output.metrics[field]}); baseline is invalid`);
+      }
+    }
     if (output.unusedWrites) differences.push(impl + ': ' + output.unusedWrites + ' taped mutation(s) never sent');
     for (const error of output.protocolErrors ?? []) differences.push(impl + ': ' + error);
     for (const symbol of values.books.split(',').filter(Boolean)) {

@@ -42,6 +42,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   okxeu: 'okxeu',
   okxdemo: 'okxdemo',
   okxeudemo: 'okxeudemo',
+  weex: 'weex',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
@@ -109,7 +110,12 @@ export class RustEngineExchange extends BaseExchange {
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
     this.applier = new FrameApplier(store);
+    this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
   }
+
+  private updateTickerSymbols = () => {
+    if (this.host) void this.host.command({ op: 'setTickerSymbols', symbols: this.getActiveTickerSymbols() });
+  };
 
   start = async () => {
     if (!this.isPublicDataOnly && (!this.options.key || !this.options.secret)) {
@@ -120,6 +126,7 @@ export class RustEngineExchange extends BaseExchange {
     if (this.isDisposed) return;
     const { key, secret, passphrase, testnet } = this.options;
     const publicDataOnly = this.isPublicDataOnly;
+    const transport = engineTransport();
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
       JSON.stringify({
@@ -129,13 +136,14 @@ export class RustEngineExchange extends BaseExchange {
         testnet: Boolean(testnet),
         publicDataOnly: Boolean(publicDataOnly),
         recvWindow: this.options.extra?.recvWindow,
+        privateWsHeaders: Boolean(transport.webSocketHeaders),
       }),
     );
-    const transport = engineTransport();
     this.host = new EngineHost(
       engine,
       this.name === 'backpack'
         ? {
+            webSocketHeaders: transport.webSocketHeaders,
             now: virtualClock.getCurrentTimeMs,
             connect: transport.connect.bind(transport),
             request: transport.request.bind(transport),
@@ -149,6 +157,7 @@ export class RustEngineExchange extends BaseExchange {
       },
     );
     this.host.start();
+    this.updateTickerSymbols();
     // Books, candles and fills go out at the venue's book cadence, the rest
     // at the store's, matching what the TS worker posts today.
     const multiplier = this.options.tuning?.dataUpdateThrottleMultiplier || 1;

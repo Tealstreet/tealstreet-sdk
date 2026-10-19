@@ -4,11 +4,11 @@ import { Responses } from './responses.mjs';
 
 /** Per-request values: clocks, signatures and generated client ids. */
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
-export const canonicalUrl = (url) => {
+export const canonicalUrl = (url, callerIds = new Set(), venue = {}) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams]
-    .filter(([name]) => !VOLATILE.has(name))
-    .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"[^"]*",?/g, '')])
+    .filter(([name, value]) => !VOLATILE.has(name) || callerIds.has(value))
+    .map(([name, value]) => [name, /^[\[{]/.test(value) ? canonicalBody(value, callerIds, venue) : value])
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
@@ -35,7 +35,9 @@ export const canonicalBody = (body, callerIds = new Set(), venue = {}) => {
             ([k, v]) =>
               v !== undefined &&
               !(
-                ((!venue.matchRequestBody || venue.volatileBodyFields) && VOLATILE.has(k)) ||
+                ((!venue.matchRequestBody || venue.volatileBodyFields) &&
+                  VOLATILE.has(k) &&
+                  !callerIds.has(String(v))) ||
                 (k === 'clientId' && !callerIds.has(String(v)))
               ),
           )
@@ -101,14 +103,14 @@ export class Tape {
     for (const record of records.filter((r) => r.type === 'http')) {
       // Per-fixture KNOWN_TS_FIXES exception; never a fallback for Rust.
       const expectedBody = impl === 'ts' ? (record.tsRequestBody ?? record.requestBody) : record.requestBody;
-      const key = `${record.method} ${canonicalUrl(record.url)}${expectedBody === undefined ? '' : ` BODY ${canonicalBody(expectedBody, this.callerIds, this.venue)}`}`;
+      const key = `${record.method} ${canonicalUrl(record.url, this.callerIds, this.venue)}${expectedBody === undefined ? '' : ` BODY ${canonicalBody(expectedBody, this.callerIds, this.venue)}`}`;
       if (!this.responses.has(key)) this.responses.set(key, []);
       this.responses.get(key).push(record);
       if (this.isWrite(record.method, record.url)) this.writeOrder.push(record);
     }
     if (venue.checkRequest) {
       const responseKey = (method, url, body) => {
-        const base = `${method} ${canonicalUrl(url)}`;
+        const base = `${method} ${canonicalUrl(url, this.callerIds, this.venue)}`;
         const exact = `${base} BODY ${canonicalBody(body, this.callerIds, venue)}`;
         return this.responses.has(exact) ? exact : base;
       };
@@ -139,6 +141,7 @@ export class Tape {
     return [...this.responses.values()].flat().filter((record) => this.isWrite(record.method, record.url)).length;
   }
   respond(method, url, body, headers) {
+    this.venue.validateRequest?.({ method, url, body, headers });
     if (this.isPrivate && this.venue.verifyRequest && !this.venue.verifyRequest({ method, url, body, headers })) {
       this.invalidSignatures++;
       throw new Error(`invalid replay signature: ${method} ${url}`);
@@ -148,7 +151,7 @@ export class Tape {
       this.unserved = this.responseStore.unserved;
       return response;
     }
-    const key = `${method} ${canonicalUrl(url)}`;
+    const key = `${method} ${canonicalUrl(url, this.callerIds, this.venue)}`;
     const queue =
       this.responses.get(`${key} BODY ${canonicalBody(body, this.callerIds, this.venue)}`) ?? this.responses.get(key);
     if (!queue?.length) {
@@ -165,14 +168,27 @@ export class Tape {
     }
     const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
     const current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
-    const record = current[0];
+    const timed = current.filter((record) => (record.effectiveAt ?? 0) <= (this.time ?? 0));
+    const timedRead = !this.isWrite(method, url) && current.some((record) => record.effectiveAt !== undefined);
+    const record = timedRead ? timed.at(-1) : current[0];
+    if (!record) {
+      this.unserved++;
+      return { status: 599, body: '' };
+    }
     if (this.isWrite(method, url) && this.venue.compareWriteOrder && this.writeOrder[0] !== record) {
       this.unserved++;
       return { status: 599, body: '' };
     }
     if (this.isWrite(method, url)) this.writeOrder.splice(this.writeOrder.indexOf(record), 1);
-    if (this.isWrite(method, url) || current.length > 1) queue.splice(queue.indexOf(record), 1);
-    return { status: record.status, headers: record.headers ?? '', body: record.body };
+    if (!timedRead && (this.isWrite(method, url) || current.length > 1)) queue.splice(queue.indexOf(record), 1);
+    let responseBody = record.body;
+    if (/"\$(clientAlgoId|newClientOrderId)"/.test(responseBody)) {
+      const sent = typeof body === 'string' ? parseRequestJson(body) : (body ?? {});
+      responseBody = responseBody.replace(/"\$(clientAlgoId|newClientOrderId)"/g, (_, field) =>
+        JSON.stringify(sent[field] ?? null),
+      );
+    }
+    return { status: record.status, headers: record.headers ?? '', body: responseBody };
   }
 
   connect(url, onOpen, onMessage) {
@@ -189,7 +205,7 @@ export class Tape {
     };
     setImmediate(() => {
       if (socket.closed) return;
-      const key = canonicalUrl(url);
+      const key = canonicalUrl(url, this.callerIds, this.venue);
       if (!this.open.has(key)) this.open.set(key, []);
       this.open.get(key).push(socket);
       onOpen();
@@ -308,7 +324,7 @@ export class Tape {
   async socketFor(url, text) {
     const stream = text && this.venue.streamOf?.(text);
     const find = () => {
-      const sockets = (this.open.get(canonicalUrl(url)) ?? []).filter((s) => !s.closed);
+      const sockets = (this.open.get(canonicalUrl(url, this.callerIds, this.venue)) ?? []).filter((s) => !s.closed);
       return stream
         ? sockets.find((s) => [...s.subscriptions].some((topic) => stream === topic || stream.startsWith(`${topic}.`)))
         : sockets[0];
@@ -359,6 +375,7 @@ export class Tape {
         const wait = frame.t - (performance.now() - start);
         if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
       }
+      this.time = frame.t;
       if (frame.type === 'command') {
         this.commandIndex++;
         this.results.push(

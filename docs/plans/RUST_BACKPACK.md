@@ -259,3 +259,19 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   tests, workspace native/WASM clippy, bans/fmt and root typecheck/lint pass.
   All merge reviews are clear. Pushing the final five-venue head and waiting
   for its green CI before merging PR #1299 and cutting the follow-up branch.
+- All thirteen five-venue gates passed, but WEEX PR #1301 landed before push
+  and introduced conflicts. Integrated target 4046db3826, retaining all six
+  constructors/client-ID rules and WEEX's authenticated WebSocket upgrade
+  headers, ticker selection, bounded HTTP and stricter streamed envelopes.
+- Independent merge reviews preserve Backpack exact bodies/IDs/signatures,
+  ordered single-use writes and tape-derived corrections, Crypto.com audit
+  correlation, and OKX auth/subscriptions. Fixed a future-only timed response
+  being served early; all 32 harness tests now pass, with static no-undef checks.
+- Host review found delayed callbacks evaluated engine calls before checking
+  disposal. Added pre-call guards and five regressions covering delayed chunks,
+  completion/error, signed read/write rejection and queued timers; re-review
+  clear. All 18 real-WASM SDK tests and 14 host tests pass.
+- Six-venue WASM is 2,498,285 bytes within a measured 2.5 MiB aggregate budget.
+  Backpack 49 and engine 22 tests, workspace native/WASM clippy, bans/fmt,
+  root typecheck (44) and lint (28) pass. All fifteen replay gates are running
+  before the next push and green-CI wait. No gate thresholds were weakened.

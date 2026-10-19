@@ -12,10 +12,12 @@ export interface HttpResponse {
 }
 
 export interface Transport {
+  /** Upgrade headers must be supported without dropping authentication. */
+  webSocketHeaders?: boolean;
   now(): number;
   connect(
     url: string,
-    handlers: { onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
+    handlers: { headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
   ): Socket;
   request(request: {
     method: string;
