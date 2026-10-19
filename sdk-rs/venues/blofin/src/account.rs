@@ -1112,7 +1112,7 @@ impl Blofin {
         false
     }
 }
-fn clean(n: f64) -> f64 {
+pub(crate) fn clean(n: f64) -> f64 {
     if n == 0.0 || !n.is_finite() {
         return n;
     }

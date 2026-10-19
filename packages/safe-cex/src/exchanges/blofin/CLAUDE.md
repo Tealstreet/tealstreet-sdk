@@ -782,3 +782,11 @@ Positive partial protection sizes that round to zero are rejected, and only an
 explicit zero selects full-position semantics. Unsupported time-in-force shapes
 are rejected. Split sizes conserve native lot units. These defensive corrections
 to legacy TS behavior are listed in the Rust gate and commit messages.
+
+Rust fills queries walk cursors past newer records when necessary: BloFin can
+ignore the requested time window on fills history. They return actual executions
+only; the TS fallback that treats order-total history as executions is not used.
+Income walks fail rather than silently returning a partial ledger after a failed
+page or an exhausted pagination bound. Query JSON shapes match the engine's
+Binance history surface, including seconds for execution timestamps and
+milliseconds for order/income/public-trade timestamps.

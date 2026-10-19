@@ -1,5 +1,6 @@
 //! BloFin linear perpetuals on the sans-I/O engine.
 mod account;
+mod history;
 mod sign;
 mod trading;
 mod wire;
@@ -22,6 +23,7 @@ pub struct Options {
     pub passphrase: Option<String>,
 }
 pub enum Pending {
+    History(history::Request),
     Trade(trading::Request),
     Account(account::Request),
     Markets {
@@ -486,6 +488,7 @@ impl Venue for Blofin {
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
             Pending::Trade(_) => {}
+            Pending::History(request) => self.history_item(cx, request, item),
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets { rows, failed } => match serde_json::from_str::<Instrument<'_>>(item)
             {
@@ -565,6 +568,10 @@ impl Venue for Blofin {
     }
     fn on_response(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, response: Response<'_>) {
         let pending = match pending {
+            Pending::History(request) => {
+                self.history_response(cx, request, response);
+                return;
+            }
             Pending::Account(request) => {
                 self.account_response(cx, request, response);
                 return;
@@ -615,6 +622,10 @@ impl Venue for Blofin {
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
         let pending = match pending {
+            Pending::History(request) => {
+                self.history_failed(cx, request, error);
+                return;
+            }
             Pending::Trade(request) => {
                 self.trade_failed(cx, request, error);
                 return;
@@ -758,6 +769,7 @@ impl Venue for Blofin {
                     cx.done(command, Err(format!("Unknown market {symbol}")));
                 }
             }
+            Command::Query { command, query } => self.start_query(cx, command, query),
             other => self.trading_command(cx, other),
         }
     }

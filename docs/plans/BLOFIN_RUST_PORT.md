@@ -143,3 +143,30 @@ merge that PR, and create a fresh follow-up branch. No rebase or force push.
 - Public trades and candle reads validate symbols/options; rare reads never
   mutate the store. Test fill identity, tiny quantities, fee signs, filtering,
   paging failures and exact JSON shapes; run a phase-end sub-agent review.
+
+### Phase 4 review and verification
+
+- History/fills/income/public-trade queries return typed JSON without touching
+  account state. Execution quantities retain tiny fills; history orders retain
+  TS's native units and milliseconds. Fill events use seconds.
+- Review fixes: arbitrary-length numeric cursors, invalid timestamp handling,
+  execution aliases with zero/side precedence, symbol/non-swap filtering, and
+  walking past newer pages when BloFin ignores requested fill time bounds.
+- Intentional TS corrections: never fabricate executions from order-total
+  history, walk older fill windows instead of false empty history, and fail a
+  truncated/failed income walk rather than returning partial ledger rows.
+- 43 venue tests pass, including 9 query regressions. History clippy passed after
+  the style fix; final all-target checks will repeat on stable integrated code.
+
+### Phase 5 implementation plan
+
+- Register wasm and SDK venue; pass passphrase through engine options. Add
+  documented private tape, write-body request comparison and fill-price parity
+  as generic optional harness capabilities; preserve Binance defaults.
+- Build wasm, run private correctness gate, record 20s BTC/ETH public tape and
+  trim fixture, run public performance/correctness gate and Binance regressions.
+- Fix workspace-path integration issues and move the existing Rust wasm test
+  out of production runtime code to satisfy the package boundary invariant.
+- Run root typecheck/lint/tests plus required Rust checks. Record exact results
+  and phase review; merge landing branch, rerun affected checks, then PR reviews
+  and merge only after every required gate is green.

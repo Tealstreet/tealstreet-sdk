@@ -346,3 +346,16 @@ pub struct Attachment<'a> {
 pub fn nullable_text<'de, D: Deserializer<'de>>(d: D) -> Result<Str<'de>, D::Error> {
     Ok(Option::<Str<'de>>::deserialize(d)?.unwrap_or_default())
 }
+
+pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Number>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum N<'a> {
+        Bare(f64),
+        Text(#[serde(borrow)] Str<'a>),
+    }
+    Ok(Option::<N<'de>>::deserialize(d)?.and_then(|v| match v {
+        N::Bare(n) => n.is_finite().then_some(Number(n)),
+        N::Text(s) => s.parse::<f64>().ok().filter(|n| n.is_finite()).map(Number),
+    }))
+}
