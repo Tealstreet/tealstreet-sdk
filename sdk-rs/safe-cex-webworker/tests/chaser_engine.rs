@@ -220,11 +220,12 @@ impl ChaserHost for Host {
     }
     fn emit_completion(
         &self,
-        _: Rc<dyn Exchange>,
+        exchange: Rc<dyn Exchange>,
         e: ChaserCompleteEvent,
     ) -> Result<(), ExchangeError> {
+        let value = safe_cex_exchange::js_runtime::value::from_typed(&e)?;
         self.completes.borrow_mut().push(e);
-        Ok(())
+        exchange.base().emit("chaser:complete", value)
     }
     fn spawn(&self, f: ExchangeFuture<'static, ()>) {
         self.tasks.borrow_mut().push(f)
@@ -521,9 +522,11 @@ fn cleanup_prefix_identity_live_cancel_targets_and_single_completion() {
         "CHASER native successful empty REST suppresses position fallback"
     );
     let src = source();
-    let expected: ChaserCompleteEvent =
-        serde_json::from_value(src["cleanupEvent"].clone()).unwrap();
-    assert_eq!(event, expected);
+    let mut expected_event = src["cleanupEvent"].clone();
+    for field in ["size", "filled"] {
+        expected_event[field] = json!(expected_event[field].as_f64().unwrap());
+    }
+    assert_eq!(serde_json::to_value(&event).unwrap(), expected_event);
     assert_eq!(src["emptyRestFilled"].as_f64(), Some(0.));
 }
 #[test]
@@ -1023,4 +1026,55 @@ fn manager_module_composition_runs_the_real_engine() {
     );
     let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(actual, expected, "MANAGER actual engine/module composition");
+}
+
+#[test]
+fn completion_listener_retains_own_client_id_and_native_numbers() {
+    use safe_cex_exchange::js_runtime::value::Js;
+    let expected = source()["completionProfiles"].clone();
+    let mut actual = Vec::new();
+    for size in [-0.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN, 3.0] {
+        for client_id in [None, Some(""), Some("caller")] {
+            let (host, engine, instance) = fixture(ExchangeName::Bybit, false, size);
+            instance.options().borrow_mut().client_id = client_id.map(str::to_owned);
+            instance.mark_complete(Some("user"));
+            let received = Rc::new(RefCell::new(Vec::<Js>::new()));
+            let output = received.clone();
+            instance.exchange.base().on_args(
+                "chaser:complete",
+                Rc::new(move |_, args| {
+                    assert_eq!(args.len(), 1, "COMPLETION one native event argument");
+                    output.borrow_mut().push(args[0].clone());
+                    Ok(())
+                }),
+            );
+            settle(&host.runtime, engine.emit_complete(instance)).unwrap();
+            assert_eq!(received.borrow().len(), 1);
+            let event = received.borrow()[0].clone();
+            let client = event.get("clientId").unwrap();
+            let text =
+                |key: &str| String::from_utf16_lossy(event.get(key).unwrap().as_str().unwrap());
+            let bits = |key: &str| {
+                let Js::Number(value) = event.get(key).unwrap() else {
+                    panic!("COMPLETION native Number {key}")
+                };
+                format!("{:016x}", value.to_bits())
+            };
+            actual.push(json!({
+                "keys":event.own_keys().iter().map(|key|String::from_utf16_lossy(key)).collect::<Vec<_>>(),
+                "clientOwn":event.has_own("clientId"),
+                "clientUndefined":client.is_undefined(),
+                "clientText":client.as_str().map(|text| String::from_utf16_lossy(text)),
+                "id":text("id"),"symbol":text("symbol"),"side":text("side"),
+                "reduceOnly":matches!(event.get("reduceOnly").unwrap(), Js::Bool(true)),
+                "sizeBits":bits("size"),"filledBits":bits("filled"),"stopReason":text("stopReason")
+            }));
+        }
+    }
+    assert_eq!(actual.len(), 15);
+    assert_eq!(
+        json!(actual),
+        expected,
+        "COMPLETION native listener versus actual source fields/presence/number bits"
+    );
 }

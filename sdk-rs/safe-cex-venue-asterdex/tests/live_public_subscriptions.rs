@@ -183,7 +183,10 @@ fn run(case: &Value) -> Trace {
                 .unwrap(),
             "book-data" => {
                 let data = &step["data"];
-                let book = ws_helpers::public_depth_snapshot(data).unwrap();
+                let book = ws_helpers::public_depth_snapshot(
+                    &safe_cex_exchange::js_runtime::value::from_json(&data),
+                )
+                .unwrap();
                 f.subscriptions
                     .deliver_book(
                         &format!(
@@ -197,8 +200,11 @@ fn run(case: &Value) -> Trace {
             "kline-data" => {
                 let keys = f.subscriptions.state().klines;
                 let streams: Vec<_> = keys.iter().map(String::as_str).collect();
-                if let Some(update) =
-                    ws_helpers::public_kline_update(&step["data"], &streams).unwrap()
+                if let Some(update) = ws_helpers::public_kline_update(
+                    &safe_cex_exchange::js_runtime::value::from_json(&step["data"]),
+                    &streams,
+                )
+                .unwrap()
                 {
                     f.subscriptions
                         .deliver_kline(&update.stream, update.candle)
@@ -397,11 +403,30 @@ fn native_assertions(
                 assert_eq!(expected["kind"], "candle");
                 assert_eq!(label, expected["name"].as_str().unwrap());
                 let reference = &expected["candle"];
-                assert_eq!(
-                    candle.timestamp.as_ref(),
-                    reference.get("timestamp"),
-                    "{name} native candle timestamp"
-                );
+                match (candle.timestamp.as_ref(), reference.get("timestamp")) {
+                    (
+                        Some(safe_cex_exchange::js_runtime::value::Js::Number(actual)),
+                        Some(Value::Number(expected)),
+                    ) => {
+                        assert_eq!(
+                            actual.to_bits(),
+                            expected.as_f64().unwrap().to_bits(),
+                            "{name} native candle timestamp bits"
+                        );
+                    }
+                    (actual, expected) => assert_eq!(
+                        actual.map(|value| {
+                            safe_cex_exchange::js_runtime::value::to_retained_input(value).unwrap()
+                        }),
+                        expected.map(|value| {
+                            safe_cex_exchange::js_runtime::value::to_retained_input(
+                                &safe_cex_exchange::js_runtime::value::from_json(value),
+                            )
+                            .unwrap()
+                        }),
+                        "{name} native candle timestamp retained shape",
+                    ),
+                }
                 for (key, value) in [
                     ("open", candle.open),
                     ("high", candle.high),
