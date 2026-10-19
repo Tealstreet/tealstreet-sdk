@@ -13,7 +13,7 @@ export const canonicalUrl = (url) => {
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
 
-const stable = (value) => {
+export const stable = (value) => {
   if (Array.isArray(value)) return value.map(stable);
   if (value === null || typeof value !== 'object') return value;
   return Object.fromEntries(
