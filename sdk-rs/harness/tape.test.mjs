@@ -283,3 +283,40 @@ test('legacy shared-URL initial sockets auto-open but recorded reconnects wait f
   await tape.lifecycle(tape.frames[3]);
   assert.deepEqual(seen, ['public', 'private', 'reconnect']);
 });
+
+test('recorded startup opens can finish asynchronous socket and subscription bootstrap before tape time', async () => {
+  const url = 'wss://example.test/explicit';
+  const clock = new ReplayClock(1700000000000);
+  const tape = new Tape([
+    { type: 'connect', t: 0, url, connection: 0 },
+    { type: 'open', t: 702, url, connection: 0 },
+  ], { explicitOpens: true });
+  const seen = [];
+  let subscribed;
+  const ready = new Promise((resolve) => { subscribed = resolve; });
+  clock.install();
+  try {
+    const constructed = new Promise((resolve) => setTimeout(() => {
+      tape.connect(url, () => setTimeout(() => {
+        seen.push('subscribed');
+        subscribed();
+      }, 5), () => {});
+      resolve();
+    }, 5));
+    // Playback may encounter the first recorded open before async startup runs.
+    // An inactive clock leaves those timers attached to real time.
+    await clock.advance(702);
+    assert.equal(clock.active, false);
+    await constructed;
+    await tape.lifecycle(tape.frames[0]);
+    await ready;
+    assert.deepEqual(seen, ['subscribed']);
+    clock.start(702);
+    assert.equal(Date.now(), 1700000000702);
+    setTimeout(() => seen.push(Date.now()), 100);
+    await clock.advance(801);
+    assert.deepEqual(seen, ['subscribed']);
+    await clock.advance(802);
+    assert.deepEqual(seen, ['subscribed', 1700000000802]);
+  } finally { clock.restore(); }
+});

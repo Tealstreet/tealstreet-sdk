@@ -288,6 +288,7 @@ class Tape extends SharedTape {
    */
   async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
     let initialized;
+    let startupReady = false;
     const ensureReady = () => initialized ??= within((async () => {
       await ready();
       while (this.pendingStartupSubscriptions) await new Promise((resolve) => realTimeout(resolve, 1));
@@ -305,12 +306,18 @@ class Tape extends SharedTape {
         if (performance.now() > deadline) throw new Error(`active startup topics missing: expected ${symbols * 2}, got ${active()}`);
         await new Promise((r) => realTimeout(r, 5));
       }
-    })(), 15_000, 'Replay startup');
+    })(), 15_000, 'Replay startup').then(() => { startupReady = true; });
     const recordedLifecycle = records.some((r) => r.type === 'connect');
-    if (values.venue !== 'bitunix' && !recordedLifecycle) await ensureReady();
+    const inlineStartup = values.venue === 'bitunix' || recordedLifecycle;
+    if (!inlineStartup) await ensureReady();
+    else {
+      // Explicit opens can be prerequisites of readiness. Keep startup timers
+      // live while consuming that prelude, then move both venues to tape time.
+      ensureReady().catch(() => {}); // The same promise is awaited below.
+    }
     begin();
     this.replayClock = clock;
-    clock?.start();
+    if (!inlineStartup) clock?.start();
     this.peakBytes = Math.max(this.peakBytes ?? 0, this.sampleMemory?.() ?? 0);
     const start = performance.now();
     let delivered = 0;
@@ -322,6 +329,7 @@ class Tape extends SharedTape {
         if (wait > 0) await new Promise((resolve) => realTimeout(resolve, wait));
       }
       this.time = frame.t;
+      if (clock && !clock.active && startupReady) clock.start(frame.t);
       await clock?.advance(frame.t);
       if (frame.type === 'command') {
         await ensureReady();
@@ -356,6 +364,7 @@ class Tape extends SharedTape {
       await new Promise(setImmediate);
     }
     await ensureReady();
+    if (clock && !clock.active) clock.start(this.time);
     return delivered;
   }
 

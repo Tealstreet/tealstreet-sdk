@@ -121,16 +121,17 @@ export class ReplayClock {
     } else this.timers.delete(timer);
     timer.fn(...timer.args);
   }
-  start() {
+  start(elapsed = 0) {
     const wall = this.original.now();
     for (const timer of this.timers.values()) {
       this.original.clearTimeout(timer.handle);
-      timer.at = this.epoch + Math.max(0, timer.at - wall);
+      timer.at = this.epoch + elapsed + Math.max(0, timer.at - wall);
     }
     this.active = true;
-    this.time = this.epoch;
+    this.time = this.epoch + elapsed;
   }
   async advance(t) {
+    if (!this.active) return;
     const target = this.epoch + t;
     for (;;) {
       let next;

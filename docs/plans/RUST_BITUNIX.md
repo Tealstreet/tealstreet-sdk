@@ -414,3 +414,17 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   timeouts under load; isolated 10 tests PASS and full retry is running. Bitunix
   and Binance private clock smoke PASS. Final eight-venue gates and CI are
   tracked on PR #1309 before the authorized merge/follow-up branch.
+
+### Final replay startup correction
+
+- Full eight-venue replay and CI reproduced a shared-clock bootstrap deadlock:
+  activating virtual timers before explicit socket opens froze asynchronous
+  exchange startup. Keep inline startup on real timers through bounded readiness,
+  then anchor the shared virtual clock at current recorded elapsed time.
+- Production Bitunix TS fixture passes with 28,694 records and 697 markets/tickers.
+  All 52 helper tests PASS. Independent audit plus 28 focused tests and pending
+  timer/offset probe PASS; staged-response and reconnect regressions still PASS.
+- Root full tests PASS with task concurrency one (27 tasks); both safe-cex runs
+  pass all 6,562 tests. This resolves load-induced HyroTrader import timeouts
+  without changing test deadlines or product code. Public/private final gates
+  and corrected-head CI remain tracked on PR #1309 before merge.
