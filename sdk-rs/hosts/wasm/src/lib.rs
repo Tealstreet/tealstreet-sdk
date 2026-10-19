@@ -2,7 +2,8 @@
 //!
 //! JavaScript owns sockets, fetch and timers; it forwards each event here and
 //! executes the returned actions. Every call returns the pending actions as a
-//! JSON array string, or an empty string when there are none.
+//! JSON array string, or an empty string when there are none. `wsMessage`
+//! returns `undefined` instead, avoiding empty-string decoding on the hot path.
 use safe_cex_engine::model::PlaceOrderOpts;
 use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
@@ -533,10 +534,11 @@ impl WasmEngine {
     }
 
     #[wasm_bindgen(js_name = wsMessage)]
-    pub fn ws_message(&mut self, socket: u32, text: &str, now: f64) -> String {
+    pub fn ws_message(&mut self, socket: u32, text: &str, now: f64) -> Option<String> {
         let socket = SocketId(socket);
         self.inner.handle(now, Event::WsMessage { socket, text });
-        self.flush()
+        let actions = self.inner.drain();
+        (!actions.is_empty()).then(|| encode(&actions))
     }
 
     #[wasm_bindgen(js_name = wsClose)]

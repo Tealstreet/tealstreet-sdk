@@ -223,3 +223,26 @@ last complete run. Live Hyro connectivity remains unverified.
 All 21 replay gates PASS: nine public performance/correctness gates and twelve
 private correctness gates, including WEEX 20 frames. Final-head CI is the remaining
 landing check.
+
+## CI performance follow-up
+
+Head `633d5eb8d7` passed both complete root CI runs, secret scans, native
+fmt/Clippy/tests, wasm32 and bans. The replay job failed only the documented
+Hyro public fixture's steady CPU gate: TS 2.0 ms / Rust 2.2 ms. Total main CPU
+was TS 17.4 ms / Rust 13.2 ms; memory was TS 15.5 MB / Rust 0.9 MB.
+This supersedes the earlier local passing result for merge readiness.
+
+The follow-up removes generator allocation from `Frame.first` and makes
+`wsMessage` return `undefined` when no actions exist, bypassing empty UTF-8
+decoding/freeing in generated bindings. Nonempty actions retain their order and
+errors. Both declarations match; an actual wasm ticker/error regression passed
+against the rebuilt artifact. All 34 wasm tests, 7 host/Workers tests, 4 inverse
+frame/copier checks, root typecheck (44 tasks), lint (28 tasks), bans, fmt and
+wasm Clippy pass. Independent shared-boundary review found no blocker.
+
+Borrowing public decimal strings and avoiding temporary numeric book copies
+also reduced parser allocations, with escaped-string fallback and malformed
+payload behavior independently checked. These changes alone still missed the
+small-fixture steady CPU gate locally; all failed results are retained. Further
+optimization and integration with the concurrent BingX/MEXC landing remain in
+progress. No fixture, performance threshold or sample selection was changed.

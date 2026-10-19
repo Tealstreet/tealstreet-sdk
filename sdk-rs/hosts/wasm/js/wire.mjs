@@ -127,7 +127,7 @@ export class Frame {
   }
 
   first(kind) {
-    return this.of(kind).next().value;
+    for (const section of this.sections) if (section.kind === kind) return section;
   }
 
   string(index) {
