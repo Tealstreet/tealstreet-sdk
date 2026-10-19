@@ -84,7 +84,9 @@ pub struct Account {
     last_positions: f64,
     cumulative_fills: HashMap<String, f64>,
     terminal_orders: HashMap<String, f64>,
-    fallback_fills: HashSet<String>,
+    seen_executions: HashSet<String>,
+    // REST/z can cover executions never observed individually by this account.
+    covered_history: HashSet<String>,
     retained_orders: VecDeque<String>,
     retained_terminals: VecDeque<String>,
     retained_executions: VecDeque<String>,
@@ -719,6 +721,9 @@ impl Account {
                     return;
                 }
                 for order in &rows {
+                    if order.filled > self.cumulative_fills.get(&order.id).copied().unwrap_or(0.0) {
+                        self.covered_history.insert(order.id.clone());
+                    }
                     self.record_cumulative(&order.id, order.filled);
                 }
                 self.observations.extend(metas);
@@ -852,6 +857,9 @@ impl Account {
             while self.retained_orders.len() > RETAINED_ORDERS {
                 if let Some(old) = self.retained_orders.pop_front() {
                     self.cumulative_fills.remove(&old);
+                    if !self.terminal_orders.contains_key(&old) {
+                        self.covered_history.remove(&old);
+                    }
                 }
             }
         }
@@ -867,6 +875,9 @@ impl Account {
             while self.retained_terminals.len() > RETAINED_ORDERS {
                 if let Some(old) = self.retained_terminals.pop_front() {
                     self.terminal_orders.remove(&old);
+                    if !self.cumulative_fills.contains_key(&old) {
+                        self.covered_history.remove(&old);
+                    }
                 }
             }
         }
@@ -876,13 +887,13 @@ impl Account {
     }
 
     fn first_execution(&mut self, identity: String) -> bool {
-        if !self.fallback_fills.insert(identity.clone()) {
+        if !self.seen_executions.insert(identity.clone()) {
             return false;
         }
         self.retained_executions.push_back(identity);
         while self.retained_executions.len() > RETAINED_EXECUTIONS {
             if let Some(old) = self.retained_executions.pop_front() {
-                self.fallback_fills.remove(&old);
+                self.seen_executions.remove(&old);
             }
         }
         true
@@ -934,41 +945,56 @@ impl Account {
             .copied()
             .unwrap_or(0.0)
             .max(self.terminal_orders.get(id).copied().unwrap_or(0.0));
+        let mut effective_filled = filled.max(previous);
         let trade_status = matches!(
             native.status.as_deref(),
             Some("PARTIALLY_FILLED" | "FILLED")
         );
+        let mut emitted = 0.0;
         if trade_status {
-            let delta = if native.filled.is_some() {
+            // Both event names can carry one execution with or without z.
+            let fresh = if native.last_quantity > 0.0 {
+                let identity = if !native.trade_id.is_empty() {
+                    format!("{id}:trade:{}", native.trade_id)
+                } else {
+                    format!(
+                        "{id}:time:{}:{}:{}",
+                        if native.time > 0.0 {
+                            native.time
+                        } else {
+                            event_time
+                        },
+                        native.last_quantity,
+                        native.last_price
+                    )
+                };
+                self.first_execution(identity)
+            } else {
+                true
+            };
+            // Cumulative growth proves a new fill when heuristic same-ms keys collide.
+            let duplicate = !fresh && (!native.trade_id.is_empty() || native.filled.is_none());
+            let delta = if duplicate {
+                0.0
+            } else if native.filled.is_some() {
                 let increase = (filled - previous).max(0.0);
-                // An execution after a reconnect can include missed historical
-                // fills in z. Only l belongs at this execution's price.
+                // Only l belongs at this execution's price after a blind interval.
                 if native.last_quantity > 0.0 {
                     increase.min(native.last_quantity)
                 } else {
                     increase
                 }
-            } else if self.terminal_orders.contains_key(id) {
+            } else if self.terminal_orders.contains_key(id)
+                && (native.trade_id.is_empty() || self.covered_history.contains(id))
+            {
                 0.0
             } else {
-                let identity = format!(
-                    "{}:{}:{}:{}:{}",
-                    id,
-                    native.trade_id,
-                    if native.time > 0.0 {
-                        native.time
-                    } else {
-                        event_time
-                    },
-                    native.last_quantity,
-                    native.last_price
-                );
-                if native.last_quantity > 0.0 && self.first_execution(identity) {
-                    native.last_quantity
-                } else {
-                    0.0
-                }
+                native.last_quantity.max(0.0)
             };
+            emitted = delta;
+            if native.filled.is_none() {
+                effective_filled = previous + delta;
+            }
             if delta > 0.0 {
                 let price = if native.last_price > 0.0 {
                     native.last_price
@@ -987,25 +1013,29 @@ impl Account {
                 self.bump_positions();
                 self.schedule_repair(cx);
             }
-            self.record_cumulative(
-                id,
-                if native.filled.is_some() {
-                    filled.max(previous)
-                } else {
-                    previous + delta
-                },
-            );
+            self.record_cumulative(id, effective_filled);
         }
         if matches!(
             native.status.as_deref(),
             Some("FILLED" | "CANCELED" | "CANCELLED" | "EXPIRED" | "REJECTED")
         ) {
-            self.record_cumulative(id, filled.max(previous));
+            self.record_cumulative(id, effective_filled);
             self.record_terminal(id);
         }
-        let Some(order) = map_order(&native, cx) else {
+        if native.filled.is_some()
+            && filled > previous + emitted
+            && self.cumulative_fills.contains_key(id)
+        {
+            self.covered_history.insert(id.to_owned());
+        }
+        let Some(mut order) = map_order(&native, cx) else {
             return;
         };
+        order.filled = effective_filled.max(cx.store.order(id).map_or(0.0, |order| order.filled));
+        if native.status.as_deref() == Some("FILLED") && native.filled.is_none() {
+            order.filled = order.filled.max(order.amount);
+        }
+        order.remaining = (order.amount - order.filled).max(0.0);
         if native.complete_metadata() {
             self.observations.push(observation(order.clone(), &native));
         }
@@ -1246,7 +1276,12 @@ mod tests {
 
     #[test]
     fn placement_acknowledgements_do_not_suppress_first_stream_execution() {
-        for (kind, status) in [("MARKET", "FILLED"), ("LIMIT", "PARTIALLY_FILLED")] {
+        for (kind, status, cumulative) in [
+            ("MARKET", "FILLED", true),
+            ("MARKET", "FILLED", false),
+            ("LIMIT", "PARTIALLY_FILLED", true),
+            ("LIMIT", "PARTIALLY_FILLED", false),
+        ] {
             let mut engine = Engine::new(PlacementVenue::default());
             engine.start(0.0);
             let request = engine
@@ -1274,8 +1309,9 @@ mod tests {
                 },
             );
             assert!(!engine.venue().account.cumulative_fills.contains_key("123"));
+            let cumulative_field = if cumulative { r#""z":"0.1","# } else { "" };
             let event = format!(
-                r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"i":123,"s":"BTC-USDT","o":"{kind}","S":"BUY","X":"{status}","q":"0.2","z":"0.1","l":"0.1","L":"60000"}}}}"#
+                r#"{{"e":"ORDER_TRADE_UPDATE","o":{{"i":123,"s":"BTC-USDT","o":"{kind}","S":"BUY","X":"{status}","q":"0.2",{cumulative_field}"l":"0.1","L":"60000"}}}}"#
             );
             engine.handle(
                 2.0,
@@ -1363,10 +1399,13 @@ mod tests {
             let id = i.to_string();
             account.record_cumulative(&id, 1.0);
             account.record_terminal(&id);
+            account.covered_history.insert(id);
         }
         assert_eq!(account.cumulative_fills.len(), RETAINED_ORDERS);
         assert_eq!(account.terminal_orders.len(), RETAINED_ORDERS);
         assert!(!account.cumulative_fills.contains_key("0"));
+        assert_eq!(account.covered_history.len(), RETAINED_ORDERS);
+        assert!(!account.covered_history.contains("0"));
         assert!(
             account
                 .terminal_orders
@@ -1375,6 +1414,7 @@ mod tests {
         for i in 0..RETAINED_ORDERS + 100 {
             account.record_cumulative(&format!("active-{i}"), 0.0);
         }
+        assert_eq!(account.covered_history.len(), RETAINED_ORDERS);
         assert!(
             account
                 .terminal_orders
@@ -1383,9 +1423,9 @@ mod tests {
         for i in 0..RETAINED_EXECUTIONS + 100 {
             assert!(account.first_execution(i.to_string()));
         }
-        assert_eq!(account.fallback_fills.len(), RETAINED_EXECUTIONS);
+        assert_eq!(account.seen_executions.len(), RETAINED_EXECUTIONS);
         assert!(!account.first_execution((RETAINED_EXECUTIONS + 99).to_string()));
         assert!(account.first_execution("0".into()));
-        assert_eq!(account.fallback_fills.len(), RETAINED_EXECUTIONS);
+        assert_eq!(account.seen_executions.len(), RETAINED_EXECUTIONS);
     }
 }

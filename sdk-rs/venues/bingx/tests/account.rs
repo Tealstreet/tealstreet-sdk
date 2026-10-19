@@ -499,3 +499,144 @@ fn terminal_without_cumulative_quantity_keeps_replay_protection() {
     h.message(terminal);
     assert!(h.fills().is_empty());
 }
+
+#[test]
+fn cumulative_and_non_cumulative_copies_share_execution_identity() {
+    for cumulative_first in [true, false] {
+        let mut h = Harness::ready();
+        let event = |kind: &str, cumulative: bool| {
+            format!(
+                r#"{{"e":"{kind}","E":1001,"o":{{"i":8389765519993909000,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"PARTIALLY_FILLED","q":"0.2","p":"59000","t":"execution-one","T":1001,"l":"0.05","L":"59001"{}}}}}"#,
+                if cumulative { r#", "z":"0.05""# } else { "" }
+            )
+        };
+        h.message(&event("ORDER_TRADE_UPDATE", cumulative_first));
+        assert_eq!(h.fills(), [(59001.0, 0.05)]);
+        h.message(&event("TRADE_UPDATE", !cumulative_first));
+        assert!(h.fills().is_empty());
+        h.message(&event("TRADE_UPDATE", false).replace("\"T\":1001", "\"T\":1002"));
+        assert!(h.fills().is_empty());
+        let order = h.engine.store().order(ORDER_ID).unwrap();
+        assert_eq!(order.filled, 0.05);
+        assert!((order.remaining - 0.15).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn a_partial_without_cumulative_size_updates_the_live_order_without_amend_proof() {
+    let mut h = Harness::ready();
+    h.message(r#"{"e":"ORDER_TRADE_UPDATE","E":1001,"o":{"i":8389765519993909000,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"PARTIALLY_FILLED","q":"0.2","p":"59000","t":"partial-one","T":1001,"l":"0.05","L":"59001","ps":"BOTH","f":"GTC"}}"#);
+    assert_eq!(h.fills(), [(59001.0, 0.05)]);
+    let order = h.engine.store().order(ORDER_ID).unwrap();
+    assert_eq!(order.filled, 0.05);
+    assert!((order.remaining - 0.15).abs() < 1e-12);
+    h.event(Event::Command(safe_cex_engine::Command::AmendOrder {
+        command: 42,
+        id: ORDER_ID.into(),
+        price: None,
+        amount: Some(0.3),
+    }));
+    assert!(!h.requests.iter().any(|r| r.url.contains("/trade/amend")));
+}
+
+#[test]
+fn mixed_partial_and_terminal_replays_keep_quantities_monotonic() {
+    let mut h = Harness::ready();
+    h.message(r#"{"e":"ORDER_TRADE_UPDATE","E":1001,"o":{"i":8389765519993909000,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"PARTIALLY_FILLED","q":"0.2","t":"partial-one","T":1001,"l":"0.05","L":"59001"}}"#);
+    assert_eq!(h.fills(), [(59001.0, 0.05)]);
+    let terminal = r#"{"e":"TRADE_UPDATE","E":1002,"o":{"i":8389765519993909000,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"FILLED","q":"0.2","t":"terminal-one","T":1002,"l":"0.15","L":"59002"}}"#;
+    h.message(terminal);
+    assert_eq!(h.fills(), [(59002.0, 0.15)]);
+    let order = h.engine.store().order(ORDER_ID).unwrap();
+    assert_eq!(order.status, OrderStatus::Closed);
+    assert_eq!(order.filled, 0.2);
+    assert_eq!(order.remaining, 0.0);
+    h.message(&terminal.replace("\"l\":\"0.15\"", "\"z\":\"0.2\",\"l\":\"0.15\""));
+    assert!(h.fills().is_empty());
+    h.message(r#"{"e":"TRADE_UPDATE","E":1003,"o":{"i":8389765519993909000,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"PARTIALLY_FILLED","q":"0.2","z":"0.05","t":"partial-one","T":1001,"l":"0.05","L":"59001"}}"#);
+    assert!(h.fills().is_empty());
+    assert_eq!(h.engine.store().order(ORDER_ID).unwrap().filled, 0.2);
+    assert_eq!(
+        h.engine.store().order(ORDER_ID).unwrap().status,
+        OrderStatus::Closed
+    );
+    h.engine.store_mut().set_orders(Vec::new());
+    h.message(terminal);
+    assert!(h.fills().is_empty());
+    h.message(&terminal.replace("\"l\":\"0.15\"", "\"z\":\"0.2\",\"l\":\"0.15\""));
+    assert!(h.fills().is_empty());
+    assert!(h.engine.store().orders().is_empty());
+}
+
+#[test]
+fn snapshot_started_before_a_non_cumulative_partial_cannot_roll_it_back() {
+    let mut h = Harness::ready();
+    h.fire_at(3000.0);
+    h.respond(POSITIONS, 200, POSITION);
+    h.fire_at(5000.0);
+    let snapshot = h.take(ORDERS);
+    h.message(r#"{"e":"ORDER_TRADE_UPDATE","E":5001,"o":{"i":8389765519993909000,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"PARTIALLY_FILLED","q":"0.2","t":"partial-one","T":5001,"l":"0.05","L":"59001"}}"#);
+    assert_eq!(h.fills(), [(59001.0, 0.05)]);
+    h.reply(snapshot.id, 200, OPEN);
+    assert_eq!(h.engine.store().order(ORDER_ID).unwrap().filled, 0.05);
+    assert!(h.requests.iter().any(|r| r.url.contains(ORDERS)));
+}
+
+#[test]
+fn cumulative_growth_distinguishes_equal_fills_in_the_same_millisecond_without_trade_ids() {
+    let mut h = Harness::ready();
+    let partial = r#"{"e":"ORDER_TRADE_UPDATE","E":1001,"o":{"i":8389765519993909000,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"PARTIALLY_FILLED","q":"0.2","p":"59000","T":1001,"z":"0.05","l":"0.05","L":"59001"}}"#;
+    h.message(partial);
+    assert_eq!(h.fills(), [(59001.0, 0.05)]);
+    h.message(&partial.replace("\"z\":\"0.05\"", "\"z\":\"0.1\""));
+    assert_eq!(h.fills(), [(59001.0, 0.05)]);
+    let order = h.engine.store().order(ORDER_ID).unwrap();
+    assert_eq!(order.filled, 0.1);
+    assert_eq!(order.remaining, 0.1);
+    h.message(&partial.replace("\"z\":\"0.05\",", ""));
+    assert!(h.fills().is_empty());
+    assert_eq!(h.engine.store().order(ORDER_ID).unwrap().filled, 0.1);
+}
+
+#[test]
+fn a_terminal_without_cumulative_size_accepts_a_unique_late_native_execution() {
+    let mut h = Harness::ready();
+    let terminal = r#"{"e":"ORDER_TRADE_UPDATE","E":1002,"o":{"i":8389765519993909000,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"FILLED","q":"0.2","t":"second","T":1002,"l":"0.1","L":"59002"}}"#;
+    h.message(terminal);
+    assert_eq!(h.fills(), [(59002.0, 0.1)]);
+    let order = h.engine.store().order(ORDER_ID).unwrap();
+    assert_eq!(order.status, OrderStatus::Closed);
+    assert_eq!(order.filled, 0.2);
+    assert_eq!(order.remaining, 0.0);
+    let partial = r#"{"e":"TRADE_UPDATE","E":1001,"o":{"i":8389765519993909000,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"PARTIALLY_FILLED","q":"0.2","t":"first","T":1001,"l":"0.1","L":"59001"}}"#;
+    h.message(partial);
+    assert_eq!(h.fills(), [(59001.0, 0.1)]);
+    h.message(partial);
+    assert!(h.fills().is_empty());
+    h.message(terminal);
+    assert!(h.fills().is_empty());
+    assert_eq!(
+        h.engine.store().order(ORDER_ID).unwrap().status,
+        OrderStatus::Closed
+    );
+    assert_eq!(h.engine.store().order(ORDER_ID).unwrap().filled, 0.2);
+}
+
+#[test]
+fn terminal_tombstones_suppress_unidentified_and_rest_covered_late_executions() {
+    let terminal = r#"{"e":"ORDER_TRADE_UPDATE","E":1002,"o":{"i":8389765519993909000,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"FILLED","q":"0.2","t":"second","T":1002,"l":"0.05","L":"59002"}}"#;
+    let partial = r#"{"e":"TRADE_UPDATE","E":1001,"o":{"i":8389765519993909000,"s":"BTC-USDT","o":"LIMIT","S":"BUY","X":"PARTIALLY_FILLED","q":"0.2","T":1001,"l":"0.05","L":"59001"}}"#;
+    let mut h = Harness::ready();
+    h.message(terminal);
+    assert_eq!(h.fills(), [(59002.0, 0.05)]);
+    h.message(partial);
+    assert!(h.fills().is_empty());
+    let snapshot = OPEN.replace("\"executedQty\":\"0\"", "\"executedQty\":\"0.05\"");
+    let mut h = Harness::ready_with_orders(&snapshot);
+    h.message(terminal);
+    assert_eq!(h.fills(), [(59002.0, 0.05)]);
+    h.message(&partial.replace("\"T\":1001", "\"t\":\"historical-first\",\"T\":1001"));
+    assert!(h.fills().is_empty());
+    assert_eq!(h.engine.store().order(ORDER_ID).unwrap().filled, 0.2);
+    assert_eq!(h.engine.store().order(ORDER_ID).unwrap().remaining, 0.0);
+}

@@ -279,3 +279,14 @@ Branch: `feat/rust-bingx`. Spec: `RUST_REWRITE.md`; process: `VENUE_PORT_BRIEF.m
 - These also fix TS always-mark replacement checks and its attached workingType
   omission, declared in KNOWN_TS_FIXES. Five new trading regressions pass
   (33total); standalone take-profit defaults were not conflated with brackets.
+
+### Execution review fixes
+
+- Unified native execution IDs across cumulative/no-z events; positive cumulative
+  proof still recognizes distinct fills sharing timestamp/price/size. Normalized
+  order quantities remain monotonic, including no-z partials and full terminal q.
+- Fresh identifiable late executions can arrive after a no-z terminal event
+  without reopening the order. Bounded covered-history/baseline guards still
+  suppress historical replay; placement ACK quantities do not hide first fills.
+- Independent repeat account audit is clear. Full BingX92 tests and clippy pass:
+  5unit,25account,20history,7public,2sign,33trading. Final four-venue gates next.
