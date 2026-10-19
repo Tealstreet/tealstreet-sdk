@@ -182,3 +182,26 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   subscribed topic and checks active subscriptions at completion. No V8 tiering
   flags were added. GC/ArrayBuffer deallocation must settle before retained
   measurement, as startup buffers can otherwise appear retained spuriously.
+
+### Phase 5 local gates PASS (before landing-branch integration)
+
+- Fresh 20-second live two-book fixture: 28,694 delivered records, 697 markets
+  and tickers, two books. Three-run medians TS/Rust: main CPU 560.4/456.2 ms;
+  steady CPU 321.8/274.3 ms; retained 2.3/2.1 MB; sampled peak 29.7/29.2 MB.
+  Bitunix private: 42 lifecycle/message/command records PASS.
+- Binance public three-run medians TS/Rust: CPU 282.6/156.6 ms, retained
+  3.2/2.3 MB, sampled peak 19.0/11.5 MB; private 14 records PASS.
+- Bans, venue fmt, venue/engine/native all-target clippy and wasm-target host
+  clippy PASS. Venue 48, engine 16, JS host 12, native 4, crypto 29 tests PASS.
+  Root typecheck 44 tasks, lint 28 tasks, tests 27 tasks PASS.
+- Single-pass borrowed public envelope decoding removes the redundant raw-data
+  scan while preserving arbitrary-field-order fallback, duplicate rejection,
+  and private/legacy raw payloads. Reviewer found no concrete blockers.
+- Harness follows Bitunix lifecycle records inline and waits for the current
+  topic rather than blocking reconnects behind global startup readiness. Legacy
+  Binance startup normalization remains. Both implementations include constructor
+  allocations and retained consumer books. GC and backing-buffer cleanup settle
+  before baseline/final measurement; no tiering flags or budget exceptions.
+- Next: merge latest landing branch (currently Bybit + OKX), preserve its generic
+  harness capabilities, rerun integrated gates, push and open/review PR. Merge
+  only after PR CI is green; then cut the requested fresh follow-up branch.

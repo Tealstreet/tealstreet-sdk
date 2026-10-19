@@ -44,7 +44,7 @@ enum Feed {
     Futures,
     Public {
         channel: &'static str,
-        symbols: Vec<String>,
+        range: std::ops::Range<usize>,
     },
 }
 struct Socket {
@@ -161,14 +161,17 @@ impl BitunixFutures {
             .collect()
     }
     fn public_message(&mut self, cx: &mut Cx<'_, Pending>, m: &Message<'_>) -> Result<(), String> {
-        let _ = &m.op;
-        let Some(raw) = m.data else {
-            return Ok(());
+        let fallback;
+        let public = if let Some(data) = &m.public {
+            Some(data)
+        } else if let Some(raw) = m.data {
+            fallback = PublicData::parse(&m.ch, raw.get())?;
+            fallback.as_ref()
+        } else {
+            None
         };
-        let text = raw.get();
-        match m.ch.as_ref() {
-            "ticker" => {
-                let d: Tick = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        match public {
+            Some(PublicData::Tick(d)) => {
                 cx.store.update_ticker(&m.symbol, |t| {
                     t.last = d.la.0;
                     t.percentage = (d.la.0 - d.o.0) / d.o.0 * 100.0;
@@ -176,8 +179,7 @@ impl BitunixFutures {
                     t.quote_volume = d.q.0;
                 });
             }
-            "price" => {
-                let d: Price<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
+            Some(PublicData::Price(d)) => {
                 let funding = if d.nft.is_empty() { &d.ft } else { &d.nft };
                 let funding_time = if let Some(v) = self.funding_times.get(funding.as_ref()) {
                     *v
@@ -196,8 +198,7 @@ impl BitunixFutures {
                     t.funding_time = funding_time;
                 });
             }
-            "depth_book1" => {
-                let d: Top = serde_json::from_str(text).map_err(|e| e.to_string())?;
+            Some(PublicData::Top(d)) => {
                 cx.store.update_ticker(&m.symbol, |t| {
                     t.bid = d.b.first().map_or(0.0, |v| v.0);
                     t.ask = d.a.first().map_or(0.0, |v| v.0);
@@ -205,6 +206,10 @@ impl BitunixFutures {
             }
             _ => {}
         }
+        let Some(raw) = m.data else {
+            return Ok(());
+        };
+        let text = raw.get();
         if let Some(rest) = m.channel.strip_prefix("market_") {
             if let Some((symbol, _)) = rest.split_once("_depthop_") {
                 let symbol = symbol.to_ascii_uppercase();
@@ -307,8 +312,8 @@ impl Venue for BitunixFutures {
                     cx.send(socket, topic_frame(topic, true));
                 }
             }
-            Feed::Public { channel, symbols } => {
-                for batch in symbols.chunks(20) {
+            Feed::Public { channel, range } => {
+                for batch in cx.store.markets()[range.clone()].chunks(20) {
                     let args: Vec<_> = batch
                         .iter()
                         .map(|s| {
@@ -318,7 +323,7 @@ impl Venue for BitunixFutures {
                                 ch: &'a str,
                             }
                             Arg {
-                                symbol: s,
+                                symbol: &s.symbol,
                                 ch: channel,
                             }
                         })
@@ -497,9 +502,10 @@ impl Venue for BitunixFutures {
         }
         match pending {
             Pending::Markets {
-                rows,
+                mut rows,
                 invalid: false,
             } => {
+                rows.shrink_to_fit();
                 cx.store.set_markets(rows);
                 self.connect(cx, Feed::Futures);
                 cx.request_streamed(
@@ -514,24 +520,20 @@ impl Venue for BitunixFutures {
                 );
             }
             Pending::Tickers {
-                rows,
+                mut rows,
                 invalid: false,
             } => {
+                rows.shrink_to_fit();
                 cx.store.set_tickers(rows);
                 self.private_start(cx);
-                let symbols: Vec<_> = cx
-                    .store
-                    .markets()
-                    .iter()
-                    .map(|m| m.symbol.clone())
-                    .collect();
-                for batch in symbols.chunks(300) {
+                let count = cx.store.markets().len();
+                for start in (0..count).step_by(300) {
                     for channel in ["ticker", "price"] {
                         self.connect(
                             cx,
                             Feed::Public {
                                 channel,
-                                symbols: batch.to_vec(),
+                                range: start..(start + 300).min(count),
                             },
                         );
                     }

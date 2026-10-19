@@ -141,18 +141,100 @@ pub struct Daily<'a> {
     pub base_vol: Num,
     pub quote_vol: Num,
 }
-#[derive(Deserialize, Default)]
+#[derive(Default)]
 pub struct Message<'a> {
-    #[serde(borrow, default, deserialize_with = "text")]
     pub ch: Str<'a>,
-    #[serde(borrow, default, deserialize_with = "text")]
     pub channel: Str<'a>,
-    #[serde(borrow, default, deserialize_with = "text")]
     pub symbol: Str<'a>,
-    #[serde(borrow, default, deserialize_with = "text")]
     pub op: Str<'a>,
-    #[serde(borrow, default)]
     pub data: Option<&'a serde_json::value::RawValue>,
+    pub public: Option<PublicData<'a>>,
+}
+
+pub enum PublicData<'a> {
+    Tick(Tick),
+    Price(Price<'a>),
+    Top(Top),
+}
+impl<'a> PublicData<'a> {
+    pub fn parse(channel: &str, text: &'a str) -> Result<Option<Self>, String> {
+        match channel {
+            "ticker" => serde_json::from_str(text).map(Self::Tick).map(Some),
+            "price" => serde_json::from_str(text).map(Self::Price).map(Some),
+            "depth_book1" => serde_json::from_str(text).map(Self::Top).map(Some),
+            _ => return Ok(None),
+        }
+        .map_err(|error| error.to_string())
+    }
+}
+impl<'de> Deserialize<'de> for Message<'de> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field {
+            Ch,
+            Channel,
+            Symbol,
+            Op,
+            Data,
+            #[serde(other)]
+            Other,
+        }
+        #[derive(Deserialize)]
+        struct Text<'a>(#[serde(borrow, deserialize_with = "text")] Str<'a>);
+        struct Envelope;
+        impl<'de> Visitor<'de> for Envelope {
+            type Value = Message<'de>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a Bitunix websocket envelope")
+            }
+            fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut message = Message::default();
+                let mut seen = 0u8;
+                while let Some(field) = map.next_key::<Field>()? {
+                    let (bit, name) = match field {
+                        Field::Ch => (1, "ch"),
+                        Field::Channel => (2, "channel"),
+                        Field::Symbol => (4, "symbol"),
+                        Field::Op => (8, "op"),
+                        Field::Data => (16, "data"),
+                        Field::Other => (0, ""),
+                    };
+                    if seen & bit != 0 {
+                        return Err(de::Error::duplicate_field(name));
+                    }
+                    seen |= bit;
+                    match field {
+                        Field::Ch => message.ch = map.next_value::<Text<'de>>()?.0,
+                        Field::Channel => message.channel = map.next_value::<Text<'de>>()?.0,
+                        Field::Symbol => message.symbol = map.next_value::<Text<'de>>()?.0,
+                        Field::Op => message.op = map.next_value::<Text<'de>>()?.0,
+                        Field::Data => match message.ch.as_ref() {
+                            "ticker" => {
+                                message.public =
+                                    map.next_value::<Option<Tick>>()?.map(PublicData::Tick)
+                            }
+                            "price" => {
+                                message.public = map
+                                    .next_value::<Option<Price<'de>>>()?
+                                    .map(PublicData::Price)
+                            }
+                            "depth_book1" => {
+                                message.public =
+                                    map.next_value::<Option<Top>>()?.map(PublicData::Top)
+                            }
+                            _ => message.data = map.next_value()?,
+                        },
+                        Field::Other => {
+                            map.next_value::<de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(message)
+            }
+        }
+        d.deserialize_map(Envelope)
+    }
 }
 #[derive(Deserialize)]
 pub struct Tick {
@@ -546,7 +628,35 @@ impl<'de> Deserialize<'de> for Level {
 
 #[cfg(test)]
 mod tests {
-    use super::{Num, rfc3339_ms, simple_decimal, time_ms};
+    use super::{Message, Num, PublicData, rfc3339_ms, simple_decimal, time_ms};
+
+    #[test]
+    fn websocket_data_decodes_directly_when_channel_precedes_it() {
+        for text in [
+            r#"{"ch":"ticker","symbol":"BTCUSDT","data":{"la":"7","o":"6","b":"5","q":"4"}}"#,
+            r#"{"ch":"ticker","data":{"la":"7","o":"6","b":"5","q":"4"},"symbol":"BTCUSDT"}"#,
+        ] {
+            let message: Message<'_> = serde_json::from_str(text).unwrap();
+            assert!(message.data.is_none());
+            assert!(matches!(message.public, Some(PublicData::Tick(ref tick)) if tick.la.0 == 7.0));
+            assert!(matches!(
+                message.symbol,
+                std::borrow::Cow::Borrowed("BTCUSDT")
+            ));
+        }
+        let message: Message<'_> = serde_json::from_str(
+            r#"{"data":{"la":"7","o":"6","b":"5","q":"4"},"symbol":"BTCUSDT","ch":"ticker"}"#,
+        )
+        .unwrap();
+        assert!(message.public.is_none());
+        assert!(
+            matches!(PublicData::parse(&message.ch, message.data.unwrap().get()).unwrap(), Some(PublicData::Tick(tick)) if tick.la.0 == 7.0)
+        );
+        let private: Message<'_> =
+            serde_json::from_str(r#"{"ch":"order","data":{"orderId":"one"}}"#).unwrap();
+        assert!(private.public.is_none());
+        assert_eq!(private.data.unwrap().get(), r#"{"orderId":"one"}"#);
+    }
 
     #[test]
     fn decimal_fast_path_matches_std_bits_for_prices_fees_and_signed_zero() {

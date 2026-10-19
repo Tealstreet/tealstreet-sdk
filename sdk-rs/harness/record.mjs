@@ -21,22 +21,23 @@ const out = values.out ?? `sdk-rs/harness/tapes/${values.venue}.jsonl`;
 mkdirSync(dirname(out), { recursive: true });
 const tape = createWriteStream(out);
 const started = Date.now();
-const write = (record) => tape.write(`${JSON.stringify({ t: Date.now() - started, ...record })}\n`);
+let capturing = true;
+const write = (record) => { if (capturing) tape.write(`${JSON.stringify({ t: Date.now() - started, ...record })}\n`); };
 
 const live = nativeTransport();
 const connections = new Map();
-let sawClose = false;
+const closedUrls = new Set();
 const recording = {
   ...live,
   connect(url, handlers) {
     const connection = connections.get(url) ?? 0;
     connections.set(url, connection + 1);
-    write({ type: 'connect', url, connection, initial: !sawClose });
+    write({ type: 'connect', url, connection, initial: !closedUrls.has(url) });
     let closed = false;
     const closeRecord = (code, local = false) => {
       if (closed) return;
       closed = true;
-      sawClose = true;
+      closedUrls.add(url);
       write({ type: 'close', url, connection, code, local });
     };
     const socket = live.connect(url, {
@@ -84,6 +85,7 @@ const flush = setInterval(() => host.flush(), 250);
 setTimeout(() => {
   clearInterval(flush);
   host.flush();
+  capturing = false;
   host.dispose();
   tape.end(() => {
     console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames }));

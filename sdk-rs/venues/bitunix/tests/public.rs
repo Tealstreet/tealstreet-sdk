@@ -299,6 +299,51 @@ fn accepts_extended_legacy_levels_and_documented_iso_next_funding_time() {
 }
 
 #[test]
+fn public_envelopes_accept_arbitrary_field_order_and_reject_malformed_payloads() {
+    let (mut e, s) = ready();
+    for text in [
+        r#"{"ch":"ticker","symbol":"BTCUSDT","data":{"la":"97000","o":"95000","b":"1234","q":"999"}}"#,
+        r#"{"data":{"la":"97000","o":"95000","b":"1234","q":"999"},"symbol":"BTCUSDT","ch":"ticker"}"#,
+        r#"{"ch":"ticker","data":{"la":"97000","o":"95000","b":"1234","q":"999"},"symbol":"BTCUSDT"}"#,
+    ] {
+        e.handle(1.0, Event::WsMessage { socket: s, text });
+        let ticker = e.store().ticker("BTCUSDT").unwrap();
+        assert_eq!(ticker.last, 97000.0);
+        assert_eq!(ticker.volume, 1234.0);
+        assert_eq!(ticker.quote_volume, 999.0);
+    }
+    for text in [
+        r#"{"ch":"price","data":{"mp":"97001","ip":"97002","fr":"0.0001","ft":"1800000000000"},"symbol":"BTCUSDT"}"#,
+        r#"{"data":{"mp":"97001","ip":"97002","fr":"0.0001","ft":"1800000000000"},"ch":"price","symbol":"BTCUSDT"}"#,
+    ] {
+        e.handle(2.0, Event::WsMessage { socket: s, text });
+        let ticker = e.store().ticker("BTCUSDT").unwrap();
+        assert_eq!(ticker.mark, 97001.0);
+        assert_eq!(ticker.funding_time, 1800000000000.0);
+    }
+    for text in [
+        r#"{"ch":"depth_book1","symbol":"BTCUSDT","data":{"b":[["96999","1"]],"a":[["97001","2"]]}}"#,
+        r#"{"data":{"b":[["96999","1"]],"a":[["97001","2"]]},"symbol":"BTCUSDT","ch":"depth_book1"}"#,
+    ] {
+        e.handle(3.0, Event::WsMessage { socket: s, text });
+        let ticker = e.store().ticker("BTCUSDT").unwrap();
+        assert_eq!(ticker.bid, 96999.0);
+        assert_eq!(ticker.ask, 97001.0);
+    }
+    let before = e.store().ticker("BTCUSDT").unwrap().clone();
+    for text in [
+        r#"{"ch":"ticker","symbol":"BTCUSDT","data":{"la":"1"}}"#,
+        r#"{"data":{"la":"1"},"symbol":"BTCUSDT","ch":"ticker"}"#,
+        r#"{"ch":"price","symbol":"BTCUSDT","data":[]}"#,
+        r#"{"ch":"depth_book1","symbol":"BTCUSDT","data":{"b":[],"a":[[]]}}"#,
+        r#"{"ch":"ticker","symbol":"BTCUSDT","data":null}"#,
+    ] {
+        e.handle(4.0, Event::WsMessage { socket: s, text });
+        assert_eq!(e.store().ticker("BTCUSDT").unwrap(), &before);
+    }
+}
+
+#[test]
 fn candle_requests_reject_malformed_intervals_and_compute_supported_durations() {
     let (mut e, _) = ready();
     e.drain_actions().for_each(drop);

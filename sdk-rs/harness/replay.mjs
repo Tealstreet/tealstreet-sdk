@@ -36,7 +36,7 @@ const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 
 /** Per-request values: clocks, signatures and generated client ids. */
-const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature']);
+const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'requestId']);
 const clientFields = new Set(['newClientOrderId', 'clientAlgoId', 'clientId']);
 const callerIds = new Set(records.flatMap((r) => (r.orders ?? []).map((o) => o.clientOrderId)).filter(Boolean));
 const canonicalObject = (value) => {
@@ -73,6 +73,7 @@ class Tape {
       this.responses.get(key).push(record);
     }
     this.frames = records.filter((r) => ['ws', 'command', 'open', 'close'].includes(r.type)).map((r) => {
+      if (r.url) r = { ...r, url: canonicalUrl(r.url) };
       if (r.type !== 'ws') return r;
       const m = JSON.parse(r.text);
       const topic = m.channel ? { channel: m.channel } : m.ch ? (m.symbol ? { ch: m.ch, symbol: m.symbol } : { ch: m.ch }) : undefined;
@@ -89,7 +90,6 @@ class Tape {
   subscriptions = [];
   socketErrors = [];
   signatureErrors = [];
-  publicTopics = 0;
 
   send(socket, text) {
     const { url, connection } = socket;
@@ -104,8 +104,8 @@ class Tape {
         const was = socket.topics.has(topic);
         if (message.op === 'subscribe') {
           socket.topics.add(topic);
-          if (!was && ['ticker', 'price'].includes(arg.ch)) this.publicTopics++;
-        } else socket.topics.delete(topic);
+          if (!was && ['ticker', 'price'].includes(arg.ch)) socket.publicTopics.add(topic);
+        } else { socket.topics.delete(topic); socket.publicTopics.delete(topic); }
         this.subscriptions.push(JSON.stringify([url, connection, message.op, canonicalObject(arg)]));
       }
     } else if (message.event === 'sub' || message.event === 'unsub') {
@@ -149,19 +149,18 @@ class Tape {
   }
 
   connect(url, onOpen, onMessage, onClose) {
+    url = canonicalUrl(url);
     const connection = this.connectionCounts.get(url) ?? 0;
     this.connectionCounts.set(url, connection + 1);
-    const socket = { url, connection, onOpen, onMessage, onClose, closed: false, opened: false, topics: new Set() };
+    const socket = { url, connection, onOpen, onMessage, onClose, closed: false, opened: false, topics: new Set(), publicTopics: new Set() };
     this.sockets.push(socket);
     this.byConnection.set(`${url}:${connection}`, socket);
-    const opening = records.find((r) => r.type === 'open' && r.url === url && (r.connection ?? 0) === connection);
-    // Startup connections open before readiness. Later generations follow the
-    // recorded close/open sequence; no frame can jump to a sibling shard.
-    const creation = records.find((r) => r.type === 'connect' && r.url === url && r.connection === connection);
-    const legacy = !records.some((r) => r.type === 'connect' && r.url === url);
-    const hasLifecycle = records.some((r) => r.type === 'open' && r.url === url);
-    const initial = creation?.initial ?? (legacy && (connection === 0 || !hasLifecycle));
-    if (initial && (opening || !hasLifecycle)) setImmediate(() => this.openSocket(socket));
+    // Old synthetic fixtures have no lifecycle records; live tapes drive every
+    // open explicitly, including failed startup attempts and reconnects.
+    const hasLifecycle = records.some((r) => r.type === 'open' && canonicalUrl(r.url) === url);
+    const legacyInitial = values.venue !== 'bitunix' && connection === 0 &&
+      !records.some((r) => r.type === 'connect' && canonicalUrl(r.url) === url);
+    if (!hasLifecycle || legacyInitial) setImmediate(() => this.openSocket(socket));
     return socket;
   }
 
@@ -201,24 +200,37 @@ class Tape {
     if (frame.topic && !socket.topics.has(frame.topic)) this.socketErrors.push(`unsubscribed ${socket.connection} ${frame.topic}`);
   }
 
+  async lifecycle(frame) {
+    const socket = await this.socketFor(frame);
+    if (frame.type === 'open') this.openSocket(socket);
+    else {
+      if (frame.local && !socket.closed) throw new Error(`recorded local close was not requested: ${frame.url}:${frame.connection}`);
+      if (!frame.local && socket.closed) throw new Error('socket closed before recorded remote close');
+      socket.closed = true;
+      if (!frame.local) socket.onClose?.(frame.code ?? 1006);
+    }
+  }
+
   /**
    * Deliver every frame in order, yielding to the event loop between frames.
    * Commands are awaited where they fall. A private tape is paced: each record
    * waits until its time after the account is ready.
    */
   async play(onTick, ready = async () => {}, runCommand = async () => {}) {
-    // The first live messages may precede paced startup subscriptions. Drain
-    // the same queues in both implementations before accelerated public replay.
-    if (values.venue === 'bitunix') {
+    let initialized;
+    const ensureReady = () => initialized ??= (async () => {
+      await ready();
+      if (values.venue !== 'bitunix') return;
       const symbols = JSON.parse(records.find((r) => r.type === 'http' && r.url.includes('/market/trading_pairs')).body).data
         .filter((m) => apiSupported(m.isApiSupported) && m.symbolStatus === 'OPEN' && m.quote === 'USDT').length;
+      const active = () => this.sockets.filter((s) => s.opened && !s.closed).reduce((sum, s) => sum + s.publicTopics.size, 0);
       const deadline = performance.now() + 10_000;
-      while (this.publicTopics < symbols * 2) {
-        if (performance.now() > deadline) throw new Error(`startup topics missing: expected ${symbols * 2}, got ${this.subscriptions.length}; sockets ${this.sockets.length}`);
+      while (active() < symbols * 2) {
+        if (performance.now() > deadline) throw new Error(`active startup topics missing: expected ${symbols * 2}, got ${active()}`);
         await new Promise((r) => setTimeout(r, 5));
       }
-    }
-    await ready();
+    })();
+    if (values.venue !== 'bitunix') await ensureReady();
     this.peakBytes = Math.max(this.peakBytes ?? 0, this.sampleMemory?.() ?? 0);
     const start = performance.now();
     let delivered = 0;
@@ -231,18 +243,18 @@ class Tape {
       }
       this.time = frame.t;
       if (frame.type === 'command') {
+        await ensureReady();
         this.results.push(await runCommand(frame).then((ids) => ({ ok: ids }), (error) => ({ error: String(error?.message ?? error) })));
       } else {
         const socket = await this.socketFor(frame);
-        if (frame.type === 'open') this.openSocket(socket);
-        else if (frame.type === 'close') {
-          if (frame.local && !socket.closed) throw new Error(`recorded local close was not requested: ${frame.url}:${frame.connection}`);
-          if (!frame.local && socket.closed) throw new Error('socket closed before recorded remote close');
-          socket.closed = true;
-          if (!frame.local) socket.onClose?.(frame.code ?? 1006);
-        }
+        if (frame.type === 'open' || frame.type === 'close') await this.lifecycle(frame);
         else {
           if (!socket.opened) throw new Error('frame before recorded socket open');
+          if (values.venue === 'bitunix' && frame.topic && !socket.url.includes(venue.privateSocket)) {
+            const deadline = performance.now() + 10_000;
+            while (!socket.topics.has(frame.topic) && !socket.closed && performance.now() < deadline)
+              await new Promise((r) => setTimeout(r, 5));
+          }
           this.validateTopic(socket, frame);
           socket.onMessage(frame.text);
         }
@@ -252,6 +264,7 @@ class Tape {
       onTick?.(frame.t);
       await new Promise(setImmediate);
     }
+    await ensureReady();
     return delivered;
   }
 
@@ -262,8 +275,11 @@ const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
 };
 
-const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark, peakBytes = 0) => {
+const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark, peakBytes = 0) => {
   globalThis.gc?.();
+  await settle();
+  globalThis.gc?.();
+  await settle();
   const cpu = process.cpuUsage(cpuStart.process);
   const thread = process.threadCpuUsage(cpuStart.thread);
   const steady = warmMark ? process.threadCpuUsage(warmMark.thread) : { user: 0, system: 0 };
@@ -291,8 +307,11 @@ const measure = (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark, peakB
 // Node excludes WebAssembly.Memory from arrayBuffers (verified by grow);
 // count JS backing buffers explicitly and add wasm linear memory separately.
 const jsMemoryBytes = () => { const m = process.memoryUsage(); return m.heapUsed + m.arrayBuffers; };
-const baseline = () => {
+const baseline = async () => {
   globalThis.gc?.();
+  await settle();
+  globalThis.gc?.();
+  await settle();
   const m = process.memoryUsage();
   return m.heapUsed + m.arrayBuffers;
 };
@@ -351,6 +370,11 @@ async function runRust() {
     clearTimeout: (handle) => clearTimeout(handle),
   };
   const options = isPrivate ? { key: KEY, secret: SECRET } : { publicDataOnly: true };
+  await settle();
+  const heapBefore = await baseline();
+  tape.sampleMemory = () => jsMemoryBytes() - heapBefore + wasmMemoryBytes();
+  const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
+  const wallStart = performance.now();
   const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
@@ -375,11 +399,6 @@ async function runRust() {
       }
     },
   });
-  await settle();
-  const heapBefore = baseline();
-  tape.sampleMemory = () => jsMemoryBytes() - heapBefore + wasmMemoryBytes();
-  const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
-  const wallStart = performance.now();
   const sampling = setInterval(() => { tape.peakBytes = Math.max(tape.peakBytes ?? 0, tape.sampleMemory()); }, 5);
   host.start();
   for (const symbol of bookSymbols) host.command({ op: 'subscribeOrderBook', symbol });
@@ -406,7 +425,7 @@ async function runRust() {
   clearInterval(flushTimer);
   host.flush();
   clearInterval(sampling);
-  const metrics = measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark, tape.peakBytes);
+  const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark, tape.peakBytes);
   host.dispose();
 
   // Rebuild comparable records outside the measured window.
@@ -530,21 +549,22 @@ async function runTs() {
     }
     return response;
   };
+  const finalBooks = {};
+  const bookEvents = [];
+  const candleUpdates = [];
+  const candleListeners = new Map();
+  const consumerBooks = {};
+  await settle();
+  const heapBefore = await baseline();
+  tape.sampleMemory = () => jsMemoryBytes() - heapBefore;
+  const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
+  const wallStart = performance.now();
   const store = new DefaultStore();
   const options = isPrivate ? { key: KEY, secret: SECRET } : { key: '', secret: '', publicDataOnly: true };
   const exchange = new Exchange(venue.ts.name, options, store);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
-  const finalBooks = {};
-  const bookEvents = [];
-  const candleUpdates = [];
-  const candleListeners = new Map();
-  await settle();
-  const heapBefore = baseline();
-  tape.sampleMemory = () => jsMemoryBytes() - heapBefore;
-  const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
-  const wallStart = performance.now();
   const sampling = setInterval(() => { tape.peakBytes = Math.max(tape.peakBytes ?? 0, tape.sampleMemory()); }, 5);
   const started = exchange.start();
   const subscribed = (async () => {
@@ -559,7 +579,10 @@ async function runTs() {
       if (t - lastFlush >= 250) {
         for (const [symbol, book] of Object.entries(finalBooks)) bookEvents.push(bookHash(t, symbol, book));
         if (!values['no-egress']) {
-          for (const book of Object.values(finalBooks)) posted += structuredClone(book).bids.length;
+          for (const [symbol, book] of Object.entries(finalBooks)) {
+            consumerBooks[symbol] = structuredClone(book);
+            posted += consumerBooks[symbol].bids.length;
+          }
         }
         lastFlush = t;
       }
@@ -604,7 +627,7 @@ async function runTs() {
   await Promise.all([started, subscribed]);
   await settle();
   clearInterval(sampling);
-  const metrics = measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark, tape.peakBytes);
+  const metrics = await measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark, tape.peakBytes);
   const snapshot = {
     markets: store.markets.map((m) => ({ ...m })),
     tickers: store.tickers.map((t) => ({ ...t })),
@@ -624,6 +647,7 @@ async function runTs() {
       }
     : undefined;
   exchange.dispose();
+  if (posted && !Object.keys(consumerBooks).length) throw new Error('lost consumer books');
   return { frames, metrics, bookEvents, unserved: tape.unserved, signatures: tape.signatureErrors, outbound: tape.outbound, subscriptions: tape.subscriptions.sort(), socketErrors: tape.socketErrors, candles: candleUpdates, store: snapshot, books: bookCopies, account, commands: tape.results };
 }
 
@@ -691,7 +715,7 @@ writeFileSync(
     subscriptions: result.subscriptions,
     candles: result.candles,
     socketErrors: result.socketErrors,
-    bookEvents: result.bookEvents,
+    bookEvents: result.bookEvents.sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1])),
   }),
 );
 process.exit(0);
