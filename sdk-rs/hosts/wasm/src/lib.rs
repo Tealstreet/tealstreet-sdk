@@ -57,6 +57,10 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
+    #[serde(default)]
+    passphrase: Option<String>,
+    #[serde(default)]
+    private_ws_headers: bool,
 }
 
 #[derive(Serialize)]
@@ -434,7 +438,8 @@ impl WasmEngine {
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
-                ..WeexOptions::default()
+                passphrase: options.passphrase,
+                private_ws_headers: options.private_ws_headers,
             }))),
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };

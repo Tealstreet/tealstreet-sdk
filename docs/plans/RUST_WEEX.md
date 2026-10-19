@@ -50,7 +50,25 @@ by a sub-agent at each phase boundary. Never touch master or rebase.
   Review fixed strict numeric parsing, subscription generations, stale failures,
   startup recovery and full streamed-document validation. Newest whitespace and
   cap regressions are included in the next full verification.
-- Private/trading: bounded implementations in progress in separate modules;
+- Private phase: signed private sockets and browser fallback, streamed atomic
+  order reconciliation, settings, stale guards, bounded execution/terminal state.
+  Independent review by trading implementer identified settings-order and ban
+  scheduling races; fixed with staged snapshots and delayed/resigned reads.
+  Latest 13 account integration tests pass, including terminal-cache eviction
+  with complete fresh snapshot recovery. All 57 WEEX tests pass overall.
+- Trading phase: 17 tests pass; independent private-implementer review fixed
+  per-symbol mode preservation, rollback ownership and conditional amendment
+  prices. No outstanding trading review blockers.
+- Queries phase: 15 tests pass; independent trading review fixed empty-ID
+  income fallback, ban scheduling and pathological range/request budgets.
+- Harness phase: body/signature-aware WEEX tape and generic hooks implemented;
+  first gate exposed incomplete synthetic acknowledgements (fixed), live public
+  response exposed 91KB metadata beyond prior splitter bound (raised to1MiB).
+  Full typecheck44 tasks and lint28 tasks pass. Full tests found preexisting
+  runtime-tree Rust wasm test; relocated to audit-regressions, rerun pending.
+  Private replay PASS. Public replay matched tickers/books, exposed decimal-step
+  powf rounding (fixed to reciprocal integer powers); updated public gate pending.
+- Private/trading: integrated in separate modules;
   integration and phase reviews remain. Nested workspace merged; crate now at
   `sdk-rs/venues/weex`. Standing authorization covers landing-branch conflicts;
   keep its structure, never stash. Crypto audit found no helper made unused by

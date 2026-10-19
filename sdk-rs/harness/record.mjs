@@ -28,6 +28,7 @@ const recording = {
   ...live,
   connect(url, handlers) {
     return live.connect(url, {
+      headers: handlers.headers,
       onOpen: () => {
         write({ type: 'open', url });
         handlers.onOpen();
@@ -44,17 +45,21 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const body = new TextDecoder().decode(response.body);
-    write({ type: 'http', method: request.method, url: request.url, status: response.status, body });
-    return response;
+    const buffers = [];
+    if (response.body instanceof Uint8Array) buffers.push(response.body);
+    else for await (const chunk of response.body) buffers.push(chunk);
+    const bytes = Buffer.concat(buffers);
+    const body = new TextDecoder().decode(bytes);
+    write({ type: 'http', method: request.method, url: request.url, requestBody: request.body, status: response.status, headers: response.headers, body });
+    return { ...response, body: bytes };
   },
 };
 
 const { WasmEngine } = await loadEngine();
 let frames = 0;
 let updates = 0;
-const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: false })), recording, {
-  onStoreUpdate: () => updates++,
+const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: true })), recording, {
+  onFrame: () => { updates++; frames++; },
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });
 host.start();

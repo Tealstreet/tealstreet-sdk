@@ -176,11 +176,22 @@ async function* chunks(stream) {
 }
 
 /** Transport over the runtime's own WebSocket, fetch and timers. */
-export const nativeTransport = () => ({
-  webSocketHeaders: false,
+export const nativeTransport = () => {
+  let Socket = globalThis.WebSocket;
+  let webSocketHeaders = false;
+  try {
+    const module = globalThis.process?.getBuiltinModule?.('module');
+    if (module?.createRequire) {
+      Socket = module.createRequire(import.meta.url)('ws');
+      webSocketHeaders = true;
+    }
+  } catch { /* Browser and restricted renderer transports keep REST fallback. */ }
+  return {
+  webSocketHeaders,
   now: () => Date.now(),
-  connect(url, { onOpen, onMessage, onClose }) {
-    const ws = new WebSocket(url);
+  connect(url, { headers = {}, onOpen, onMessage, onClose }) {
+    if (Object.keys(headers).length && !webSocketHeaders) throw new Error('WebSocket upgrade headers unavailable');
+    const ws = webSocketHeaders ? new Socket(url, { headers: { 'User-Agent': 'Tealstreet', ...headers } }) : new Socket(url);
     ws.addEventListener('open', () => onOpen());
     ws.addEventListener('message', (event) => {
       if (typeof event.data === 'string') onMessage(event.data);
@@ -196,4 +207,5 @@ export const nativeTransport = () => ({
   },
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (handle) => clearTimeout(handle),
-});
+};
+};

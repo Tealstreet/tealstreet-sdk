@@ -1,5 +1,11 @@
 //! WEEX Contract V3 USDT perpetual futures on the sans-I/O engine.
+mod account;
+mod account_wire;
+mod history;
 mod paths;
+mod rate;
+mod sign;
+mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
@@ -27,6 +33,9 @@ pub struct Pending {
 }
 enum Task {
     Markets(Vec<Market>),
+    Account(account::Request),
+    Trade(trading::Request),
+    History(history::Request),
     Daily,
     BookTickers,
     Depth {
@@ -103,6 +112,11 @@ impl BookState {
 }
 pub struct WeexFutures {
     public: Connection,
+    account: account::State,
+    trading: trading::State,
+    history: history::State,
+    credentials: Option<sign::Credentials>,
+    private_ws_headers: bool,
     books: HashMap<String, BookState>,
     candles: BTreeMap<(String, String), u32>,
     seed: Seed,
@@ -112,9 +126,29 @@ pub struct WeexFutures {
     seed_generation: u32,
 }
 impl WeexFutures {
-    pub fn new(_options: Options) -> Self {
+    pub fn new(options: Options) -> Self {
+        let credentials = match (options.key, options.secret, options.passphrase) {
+            (Some(key), Some(secret), Some(passphrase))
+                if !options.public_data_only
+                    && !key.is_empty()
+                    && !secret.is_empty()
+                    && !passphrase.is_empty() =>
+            {
+                Some(sign::Credentials {
+                    key,
+                    secret,
+                    passphrase,
+                })
+            }
+            _ => None,
+        };
         Self {
             public: Connection::default(),
+            account: account::State::default(),
+            trading: trading::State::default(),
+            history: history::State::default(),
+            credentials,
+            private_ws_headers: options.private_ws_headers,
             books: HashMap::new(),
             candles: BTreeMap::new(),
             seed: Seed::default(),
@@ -151,6 +185,46 @@ impl WeexFutures {
         } else {
             cx.request(Method::Get, url, vec![], None, pending);
         }
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn signed_request(
+        &self,
+        cx: &mut Cx<'_, Pending>,
+        method: Method,
+        path: &str,
+        query: &str,
+        body: Option<String>,
+        task: Task,
+        stream: Option<ArrayAt>,
+    ) -> bool {
+        let Some(credentials) = &self.credentials else {
+            return false;
+        };
+        let mut pairs: Vec<_> = query.split('&').filter(|p| !p.is_empty()).collect();
+        pairs.sort_unstable_by_key(|p| p.split('=').next().unwrap_or(""));
+        let path_query = if pairs.is_empty() {
+            path.to_owned()
+        } else {
+            format!("{path}?{}", pairs.join("&"))
+        };
+        let headers = credentials.headers(
+            method.as_str(),
+            &path_query,
+            body.as_deref().unwrap_or(""),
+            cx.now,
+        );
+        let url = format!("{}{path_query}", paths::REST);
+        let pending = Pending {
+            task,
+            invalid: false,
+            seed_generation: self.seed_generation,
+        };
+        if let Some(at) = stream {
+            cx.request_streamed_body(method, url, headers, body, at, pending);
+        } else {
+            cx.request(method, url, headers, body, pending);
+        }
+        true
     }
     fn connect_public(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public.socket = Some(cx.connect(paths::PUBLIC_WS));
@@ -324,6 +398,9 @@ impl WeexFutures {
                 }
             }
             Task::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Task::Account(r) => self.account_failed(cx, r, error),
+            Task::Trade(r) => self.trade_failed(cx, r, error),
+            Task::History(r) => self.history_failed(cx, r, error),
             Task::Markets(_) => {
                 if self.startup_retry.is_none() {
                     self.startup_retry =
@@ -371,6 +448,9 @@ impl Venue for WeexFutures {
         );
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
+        if self.account_open(cx, socket) {
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -382,6 +462,9 @@ impl Venue for WeexFutures {
         self.reconcile_topics(cx);
     }
     fn on_message(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, text: &str) {
+        if self.account_message(cx, socket, text) {
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -457,6 +540,9 @@ impl Venue for WeexFutures {
         }
     }
     fn on_close(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId, _code: u16) {
+        if self.account_close(cx, socket, _code) {
+            return;
+        }
         if self.public.socket != Some(socket) {
             return;
         }
@@ -485,6 +571,8 @@ impl Venue for WeexFutures {
             return;
         }
         let ok = match &mut p.task {
+            Task::Account(r) => self.account_item(cx, r, item),
+            Task::History(r) => self.history_item(cx, r, item),
             Task::Markets(rows) => serde_json::from_str::<Symbol<'_>>(item)
                 .map(|r| {
                     if let Some(m) = r.market() {
@@ -533,11 +621,9 @@ impl Venue for WeexFutures {
             return;
         }
         if response.status == 429 {
-            self.paused_until = cx.now
-                + response
-                    .header("retry-after")
-                    .map_or(10_000.0, |v| safe_cex_engine::num::parse(v) * 1000.0)
-                    .clamp(0.0, 60_000.0);
+            self.paused_until = self
+                .paused_until
+                .max(cx.now + rate::delay(response, cx.now));
         }
         if response.status >= 400 {
             self.fail(
@@ -552,6 +638,9 @@ impl Venue for WeexFutures {
             return;
         }
         match p.task {
+            Task::Account(r) => self.account_response(cx, r, response),
+            Task::Trade(r) => self.trade_response(cx, r, response),
+            Task::History(r) => self.history_response(cx, r, response),
             Task::Markets(markets) => {
                 cx.store.set_markets(markets);
                 self.seed = Seed {
@@ -587,9 +676,7 @@ impl Venue for WeexFutures {
                         .collect();
                     cx.store.set_tickers(rows);
                     self.connect_public(cx);
-                    cx.store.set_orders(vec![]);
-                    cx.store.set_positions(vec![]);
-                    cx.store.set_balance(Default::default());
+                    self.start_account(cx);
                 }
             }
             Task::Depth { symbol, generation } => {
@@ -638,6 +725,9 @@ impl Venue for WeexFutures {
         self.fail(cx, p.task, error);
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.account_timer(cx, timer) || self.history_timer(cx, timer) {
+            return;
+        }
         if self.startup_retry == Some(timer) {
             self.startup_retry = None;
             if !cx.store.loaded().markets {
@@ -705,7 +795,11 @@ impl Venue for WeexFutures {
         }
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Pending>, command: Command) {
+        let Some(command) = self.trade_command(cx, command) else {
+            return;
+        };
         match command {
+            Command::Query { command, query } => self.history_query(cx, command, query),
             Command::SubscribeOrderBook { symbol } => {
                 if let Some(b) = self.books.get_mut(&symbol) {
                     b.users += 1;

@@ -35,22 +35,32 @@ const KEY = 'replay-key';
 const SECRET = 'replay-secret';
 
 /** Per-request values: clocks, signatures and generated client ids. */
+const callerIds = new Set(records.flatMap((r) => r.type === 'command' ? (r.orders ?? []).map((o) => o.clientOrderId).filter(Boolean) : []));
 const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId']);
 const canonicalUrl = (url) => {
   const parsed = new URL(url);
   const query = [...parsed.searchParams]
-    .filter(([name]) => !VOLATILE.has(name))
-    .map(([name, value]) => [name, value.replace(/"(newClientOrderId|clientAlgoId)":"[^"]*",?/g, '')])
+    .filter(([name, value]) => !VOLATILE.has(name) || callerIds.has(value))
+    .map(([name, value]) => [name, /^[\[{]/.test(value) ? canonicalBody(value) : value])
     .sort(([a], [b]) => a.localeCompare(b));
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
+
+const canonicalBody = (body) => {
+  if (!body) return '';
+  const value = typeof body === 'string' ? JSON.parse(body) : body;
+  const normalize = (v) => Array.isArray(v) ? v.map(normalize) : v && typeof v === 'object'
+    ? Object.fromEntries(Object.keys(v).sort().filter((k) => !VOLATILE.has(k) || callerIds.has(String(v[k]))).map((k) => [k, normalize(v[k])])) : v;
+  return JSON.stringify(normalize(value));
+};
+const requestKey = (method, url, body) => `${method} ${canonicalUrl(url)} ${canonicalBody(body)}`;
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 class Tape {
   constructor() {
     this.responses = new Map();
     for (const record of records.filter((r) => r.type === 'http')) {
-      const key = `${record.method} ${canonicalUrl(record.url)}`;
+      const key = requestKey(record.method, record.url, record.requestBody);
       if (!this.responses.has(key)) this.responses.set(key, []);
       this.responses.get(key).push(record);
     }
@@ -60,14 +70,19 @@ class Tape {
     this.unserved = 0;
   }
 
-  respond(method, url) {
-    const queue = this.responses.get(`${method} ${canonicalUrl(url)}`);
+  respond(method, url, body, headers) {
+    venue.validateRequest?.({ method, url, body, headers });
+    const queue = this.responses.get(requestKey(method, url, body));
     if (!queue?.length) {
       this.unserved++;
+      console.error(`unserved: ${requestKey(method, url, body)}`);
       return { status: 599, body: '' };
     }
-    const record = queue.length > 1 ? queue.shift() : queue[0];
-    return { status: record.status, body: record.body };
+    const timed = queue.filter((r) => r.effectiveAt !== undefined && r.effectiveAt <= (this.time ?? 0));
+    const record = timed.length ? timed.at(-1) : queue.some((r) => r.effectiveAt !== undefined) ? queue[0] : queue.length > 1 ? queue.shift() : queue[0];
+    const sent = body ? (typeof body === 'string' ? JSON.parse(body) : body) : {};
+    const responseBody = record.body.replace(/"\$(clientAlgoId|newClientOrderId)"/g, (_, field) => JSON.stringify(sent[field] ?? null));
+    return { status: record.status, body: responseBody, headers: record.headers ?? '' };
   }
 
   connect(url, onOpen, onMessage) {
@@ -83,7 +98,13 @@ class Tape {
 
   async socketFor(url) {
     while (!this.open.get(url) || this.open.get(url).closed) {
-      await new Promise((resolve) => this.waiters.push(() => (this.open.get(url) ? (resolve(), true) : false)));
+      let timer;
+      try {
+        await Promise.race([
+          new Promise((resolve) => this.waiters.push(() => (this.open.get(url) && !this.open.get(url).closed ? (resolve(), true) : false))),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`socket did not open: ${url}`)), 30_000); }),
+        ]);
+      } finally { clearTimeout(timer); }
     }
     return this.open.get(url);
   }
@@ -96,7 +117,9 @@ class Tape {
   async play(onTick, ready = async () => {}, runCommand = async () => {}) {
     const urls = [...new Set(this.frames.filter((f) => f.url).map((f) => f.url))];
     for (const url of urls) await this.socketFor(url);
-    await ready();
+    let readyTimeout;
+    await Promise.race([ready(), new Promise((_, reject) => { readyTimeout = setTimeout(() => reject(new Error('replay startup did not become ready')), 30_000); })]);
+    clearTimeout(readyTimeout);
     const start = performance.now();
     let delivered = 0;
     const warm = Math.floor(this.frames.length / 4);
@@ -106,6 +129,7 @@ class Tape {
         const wait = frame.t - (performance.now() - start);
         if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
       }
+      this.time = frame.t;
       if (frame.type === 'command') {
         this.results.push(await runCommand(frame).then((ids) => ({ ok: ids }), (error) => ({ error: String(error?.message ?? error) })));
       } else {
@@ -189,18 +213,20 @@ async function runRust() {
   const fills = [];
   const transport = {
     now: () => Date.now(),
-    connect: (url, { onOpen, onMessage }) => {
+    webSocketHeaders: true,
+    connect: (url, { headers, onOpen, onMessage }) => {
+      venue.validateSocket?.(url, headers);
       const socket = tape.connect(url, onOpen, onMessage);
       return { send: () => {}, close: () => (socket.closed = true) };
     },
-    request: async ({ method, url }) => {
-      const { status, body } = tape.respond(method, url);
-      return { status, headers: '', body: encoder.encode(body) };
+    request: async ({ method, url, body: sentBody, headers }) => {
+      const { status, body, headers: responseHeaders } = tape.respond(method, url, sentBody, headers);
+      return { status, headers: responseHeaders, body: encoder.encode(body) };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
-  const options = isPrivate ? { key: KEY, secret: SECRET } : { publicDataOnly: true };
+  const options = isPrivate ? { key: KEY, secret: SECRET, ...venue.options } : { publicDataOnly: true };
   const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
@@ -320,7 +346,8 @@ async function runTs() {
     static OPEN = 1;
     static CLOSING = 2;
     static CLOSED = 3;
-    constructor(url) {
+    constructor(url, _protocols, options = {}) {
+      venue.validateSocket?.(url, options.headers);
       this.url = url;
       this.readyState = 0;
       this.listeners = { open: [], message: [], close: [], error: [] };
@@ -358,9 +385,9 @@ async function runTs() {
     for (const [key, value] of Object.entries(config.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    const { status, body } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString());
+    const { status, body, headers: responseHeaders } = tape.respond((config.method ?? 'get').toUpperCase(), url.toString(), config.data, config.headers?.toJSON?.() ?? config.headers);
     // The raw body: the client's own transformResponse parses it, big ids included.
-    const response = { data: body, status, statusText: String(status), headers: {}, config, request: {} };
+    const response = { data: body, status, statusText: String(status), headers: Object.fromEntries((responseHeaders ?? '').split('\n').filter(Boolean).map((line) => { const colon = line.indexOf(':'); return [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()]; })), config, request: {} };
     if (status >= 400) {
       const error = new Error(`Request failed with status code ${status}`);
       error.response = response;
@@ -370,8 +397,9 @@ async function runTs() {
     return response;
   };
   const store = new DefaultStore();
-  const options = isPrivate ? { key: KEY, secret: SECRET } : { key: '', secret: '', publicDataOnly: true };
+  const options = isPrivate ? { key: KEY, secret: SECRET, ...venue.options } : { key: '', secret: '', publicDataOnly: true };
   const exchange = new Exchange(venue.ts.name, options, store);
+  venue.prepareTs?.(exchange, TapeWebSocket);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
@@ -432,7 +460,7 @@ async function runTs() {
         // Zero-size placeholders carry each market's leverage and margin type.
         positions: store.positions.filter((p) => p.contracts > 0).map((p) => ({ ...p })),
         settings: [...new Map(store.positions.filter((p) => p.leverage > 0).map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }])).values()],
-        fills: executions.map((f) => ({ id: f.id, symbol: f.symbol, side: f.side, amount: f.amount })),
+        fills: executions.map((f) => ({ id: f.orderId ?? f.id, symbol: f.symbol, side: f.side, amount: f.amount })),
       }
     : undefined;
   exchange.dispose();

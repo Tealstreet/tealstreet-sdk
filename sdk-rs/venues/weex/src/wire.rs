@@ -80,14 +80,13 @@ impl Symbol<'_> {
         if self.quote_asset != "USDT" || self.margin_asset != "USDT" {
             return None;
         }
-        let amount = self.min_order_size.unwrap_or(
-            10f64.powf(
-                -self
-                    .quantity_precision
+        let amount = self.min_order_size.unwrap_or_else(|| {
+            decimal_step(
+                self.quantity_precision
                     .or(self.base_asset_precision)
                     .unwrap_or(8.0),
-            ),
-        );
+            )
+        });
         Some(Market {
             id: self.symbol.to_string(),
             symbol: self.symbol.into_owned(),
@@ -97,7 +96,7 @@ impl Symbol<'_> {
             active: self.forward_contract_flag != Some(false),
             precision: Precision {
                 amount,
-                price: 10f64.powf(-self.price_precision.or(self.quote_precision).unwrap_or(8.0)),
+                price: decimal_step(self.price_precision.or(self.quote_precision).unwrap_or(8.0)),
             },
             limits: Limits {
                 amount: MinMax {
@@ -337,4 +336,20 @@ pub struct TickerUpdate {
     pub v: Option<f64>,
     #[serde(deserialize_with = "optional_number")]
     pub q: Option<f64>,
+}
+
+fn decimal_step(digits: f64) -> f64 {
+    1.0 / 10f64.powi(digits as i32)
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn decimal_precision_is_an_exact_decimal_step() {
+        for n in 0..=16 {
+            assert_eq!(
+                super::decimal_step(f64::from(n)),
+                format!("1e-{n}").parse::<f64>().unwrap()
+            );
+        }
+    }
 }

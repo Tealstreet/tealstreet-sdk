@@ -164,7 +164,7 @@ impl ArraySplitter {
 
     pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
         for &byte in data {
-            if self.envelope.len() >= 65_536 {
+            if self.envelope.len() >= 1_048_576 {
                 self.invalid = true;
                 return;
             }
@@ -256,7 +256,9 @@ impl ArraySplitter {
     fn emit(&mut self, on_item: &mut impl FnMut(&str)) {
         if !self.item.is_empty() {
             match std::str::from_utf8(&self.item) {
-                Ok(text) if serde_json::from_str::<IgnoredAny>(text).is_ok() => on_item(text),
+                Ok(text) if serde_json::from_str::<IgnoredAny>(text).is_ok() => {
+                    on_item(text.trim())
+                }
                 _ => self.invalid = true,
             }
             self.envelope.extend_from_slice(b"null");

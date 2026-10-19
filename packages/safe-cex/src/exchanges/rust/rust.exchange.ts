@@ -30,6 +30,7 @@ import { BaseExchange } from '../base';
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   binancepm: 'binancepm',
+  weex: 'weex',
 };
 
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
@@ -86,12 +87,13 @@ export class RustEngineExchange extends BaseExchange {
     if (!loadWasmEngine) throw new Error('No wasm engine loader registered (setWasmEngineLoader)');
     const { WasmEngine } = await loadWasmEngine();
     if (this.isDisposed) return;
-    const { key, secret, testnet, publicDataOnly } = this.options;
+    const { key, secret, passphrase, testnet, publicDataOnly } = this.options;
+    const transport = engineTransport();
     const engine = new WasmEngine(
       RUST_VENUES[this.name]!,
-      JSON.stringify({ key, secret, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly) }),
+      JSON.stringify({ key, secret, passphrase, testnet: Boolean(testnet), publicDataOnly: Boolean(publicDataOnly), privateWsHeaders: Boolean(transport.webSocketHeaders) }),
     );
-    this.host = new EngineHost(engine, engineTransport(), {
+    this.host = new EngineHost(engine, transport, {
       onFrame: this.receiveFrame,
       onLog: this.receiveLog,
     });

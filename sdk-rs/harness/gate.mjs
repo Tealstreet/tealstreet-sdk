@@ -63,14 +63,33 @@ const isPrivate = Boolean(ts.account);
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
-const KNOWN_TS_FIXES = (account, rustAccount) => {
-  for (const position of account.positions) {
-    const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
-    if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
-  }
+const KNOWN_TS_FIXES = {
+  binance(account, rustAccount) {
+    for (const position of account.positions) {
+      const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
+      if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+    }
+  },
+  weex(account, rustAccount) {
+    // TS reads opening STOP/TP stream rows as protective orders and displays
+    // the execution price as their trigger, corrupting conditional size amends.
+    for (const order of account.orders) {
+      const fixed = rustAccount.orders.find((o) => o.id === order.id);
+      if (fixed?.type === 'conditional' && !order.reduceOnly
+        && ['conditional', 'stop_market', 'take_profit_market'].includes(order.type)) {
+        order.type = 'conditional';
+        order.price = fixed.price;
+      }
+    }
+    // Additional deliberate fixes, covered by native regressions: failed
+    // normal/algo reads retain the complete last snapshot; stale depth/private
+    // frames cannot undo newer state; repeated fill IDs emit once; missing
+    // placement IDs fail rather than fabricating an ID; rejected cancellations
+    // retain their order; per-symbol margin changes preserve that symbol's mode.
+  },
 };
 if (isPrivate) {
-  KNOWN_TS_FIXES(ts.account, rust.account);
+  KNOWN_TS_FIXES[values.venue]?.(ts.account, rust.account);
   for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
     const left = JSON.stringify(ts.account[field]);
     const right = JSON.stringify(rust.account[field]);
