@@ -41350,6 +41350,177 @@
       ]
     }
   },
+  "safe_cex_exchange::js_runtime::client::normalized_header": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "normalized_header",
+      "signature": {
+        "inputs": [
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "u16"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "safe-cex-exchange/CLIENT_NATIVE_INPUT_REVIEW.md. Installed Axios lib/core/AxiosHeaders.js normalizeHeader declaration executes directly in tests/js_headers_oracle.cjs for nine scalar/UTF-16 cases. The native adapter calls the actual private helper and observes returned units. tests/js_runtime.rs::client_header_name_coercion_matches_installed_axios independently compares twelve real public-facade get/has cases, hook order and original thrown identity; the existing four-case/seventeen-operation header corpus stays unchanged.",
+    "call": "{ use crate::js_runtime::value::Js;\nlet input = match $value[\"kind\"].as_str().unwrap() {\n    \"text\" => Js::utf16(&$value[\"units\"].as_array().unwrap().iter().map(|unit| unit.as_u64().unwrap() as u16).collect::<Vec<_>>()),\n    \"number\" => Js::Number(f64::from_bits(u64::from_str_radix($value[\"bits\"].as_str().unwrap(), 16).unwrap())),\n    \"boolean\" => Js::Bool($value[\"value\"].as_bool().unwrap()),\n    \"null\" => Js::Null,\n    \"undefined\" => Js::Undefined,\n    _ => unreachable!(),\n};\nlet units = super::normalized_header(&input).expect(\"source header normalization succeeds\");\nserde_json::json!(units) }",
+    "cases": [
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            32,
+            88,
+            45,
+            84,
+            101,
+            115,
+            116,
+            9
+          ]
+        },
+        "output": [
+          120,
+          45,
+          116,
+          101,
+          115,
+          116
+        ]
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            55296,
+            65
+          ]
+        },
+        "output": [
+          55296,
+          97
+        ]
+      },
+      {
+        "input": {
+          "kind": "text",
+          "units": [
+            304
+          ]
+        },
+        "output": [
+          105,
+          775
+        ]
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "8000000000000000"
+        },
+        "output": []
+      },
+      {
+        "input": {
+          "kind": "number",
+          "bits": "405ec00000000000"
+        },
+        "output": [
+          49,
+          50,
+          51
+        ]
+      },
+      {
+        "input": {
+          "kind": "boolean",
+          "value": true
+        },
+        "output": [
+          116,
+          114,
+          117,
+          101
+        ]
+      },
+      {
+        "input": {
+          "kind": "boolean",
+          "value": false
+        },
+        "output": []
+      },
+      {
+        "input": {
+          "kind": "null"
+        },
+        "output": []
+      },
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": []
+      }
+    ]
+  },
   "safe_cex_exchange::js_runtime::structured_clone::structured_clone": {
     "category": "decoder",
     "api": {

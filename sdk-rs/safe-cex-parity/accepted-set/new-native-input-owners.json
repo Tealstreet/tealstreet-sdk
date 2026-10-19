@@ -295,7 +295,8 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::client::normalized_header",
-      "state": "pending"
+      "state": "classified",
+      "ruling": "FIX: use canonical string-hint ToString before trim/lowercase, preserving primitive results, valueOf fallback and original throws. Real AxiosHeaders get/has compiled RED -> GREEN covers twelve installed-Axios cases; nine source-derived direct helper cases accompany the ordinary canonical contract. This classification does not claim complete Axios header-overload or HTTP adapter conformance."
     },
     {
       "package": "safe-cex-exchange",

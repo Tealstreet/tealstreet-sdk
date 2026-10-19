@@ -427,6 +427,94 @@ fn client_headers_support_source_set_get_has_without_wire_methods() {
 }
 
 #[test]
+fn client_header_name_coercion_matches_installed_axios() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_headers_oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    let cases = source["coercions"].as_array().unwrap();
+    assert_eq!(cases.len(), 12, "header name coercion source floor");
+    for case in cases {
+        let kind = case["kind"].as_str().unwrap().to_owned();
+        let trace = Rc::new(RefCell::new(Vec::<String>::new()));
+        let thrown = Js::object(vec![("marker", Js::str("header-name"))]);
+        let name = Js::object(vec![]);
+        let seen = trace.clone();
+        let behavior = kind.clone();
+        let error = thrown.clone();
+        name.define(
+            "toString",
+            if kind == "noncallable" {
+                Js::Bool(false)
+            } else {
+                Js::function("toString", move |_, _| {
+                    seen.borrow_mut().push("toString".into());
+                    match behavior.as_str() {
+                        "throws" => Err(Thrown::new(error.clone())),
+                        "number" => Ok(Js::Number(123.0)),
+                        "string" => Ok(Js::str("  X-Custom  ")),
+                        _ => Ok(Js::object(vec![])),
+                    }
+                })
+            },
+        )
+        .unwrap();
+        let seen = trace.clone();
+        let behavior = kind;
+        name.define(
+            "valueOf",
+            Js::function("valueOf", move |_, _| {
+                seen.borrow_mut().push("valueOf".into());
+                Ok(if behavior == "both-object" {
+                    Js::object(vec![])
+                } else {
+                    Js::str("  X-Custom  ")
+                })
+            }),
+        )
+        .unwrap();
+        let headers = client::axios_headers_from(&Js::object(vec![
+            ("123", Js::str("numeric")),
+            ("X-Custom", Js::str("custom")),
+        ]))
+        .unwrap();
+        let result = match headers.call_method(case["method"].as_str().unwrap(), vec![name]) {
+            Ok(Js::String(units)) => json!({"kind":"string","units":units.as_ref()}),
+            Ok(Js::Bool(value)) => json!({"kind":"boolean","value":value}),
+            Ok(Js::Undefined) => json!({"kind":"undefined"}),
+            Ok(_) => panic!("unexpected header lookup result"),
+            Err(error) => {
+                let same = error.value.same_reference(&thrown);
+                let name = if same {
+                    Value::Null
+                } else {
+                    json!(error.value.get("name").unwrap().to_display())
+                };
+                json!({"kind":"throw","sameThrown":same,"name":name})
+            }
+        };
+        assert_eq!(
+            result, case["result"],
+            "HEADER_NAME_COERCION source result: {case}"
+        );
+        assert_eq!(
+            json!(*trace.borrow()),
+            case["trace"],
+            "HEADER_NAME_COERCION source hook order: {case}"
+        );
+    }
+}
+
+#[test]
 fn client_header_facade_matches_installed_axios() {
     let output = std::process::Command::new("node")
         .arg(concat!(
