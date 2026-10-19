@@ -3,7 +3,7 @@
 The REST `fetchOrderBook` binding parses string prices with `parseFloat`, so NaN
 reaches both subtraction comparators in `exchange_helpers::transform_order_book`.
 Rust slice sorting can panic on these inputs. Both sides now delegate to shared
-`js_runtime::sorting::stable_sort`, preserving TS subtraction and NaN-as-equality.
+`safe_cex_num::sorting::stable_sort`, preserving TS subtraction and NaN-as-equality.
 Cumulative quote totals still run only after each side is completely sorted.
 
 The two `native_exchange::fix_audit_tests::rest_book_*` regressions construct the

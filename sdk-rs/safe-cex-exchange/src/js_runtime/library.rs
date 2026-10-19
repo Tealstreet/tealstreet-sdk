@@ -194,7 +194,7 @@ fn order_by(collection: &Js, iteratees: &Js, orders: &Js) -> Result<Js, Thrown> 
             .collect::<Result<Vec<_>, _>>()?;
         rows.push((criteria, index, value));
     }
-    super::sorting::stable_sort(&mut rows, |(a, ai, _), (b, bi, _)| {
+    safe_cex_num::sorting::stable_sort::<_, Thrown>(&mut rows, |(a, ai, _), (b, bi, _)| {
         for (i, (x, y)) in a.iter().zip(b).enumerate() {
             match compare_ascending(x, y)? {
                 Ordering::Equal => continue,

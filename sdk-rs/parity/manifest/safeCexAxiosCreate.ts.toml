@@ -120,7 +120,7 @@ kind = "const-fn"
 layer = "mirror"
 rs = "safe-cex-store/src/request_stats.rs::record_request_outcome"
 status = "divergent"
-note = "CHOSEN Host supplies signing-capture boolean instead of config predicate; guard and HTTP-only classification preserved. Typed optional store eliminates missing-method/throw cases; source catch-all has no equivalent fallible path. HttpClient::record_outcome forwards through the typed Store operation."
+note = "ACCEPT non-UTF-8 audit row 133: the canonical native Axios factories use the native config marker and the fallible Store counter path, suppressing telemetry write errors exactly as the source catch-all does. NativeRuntime and actual maintained TS factories/DefaultStore agree across 98 profiles, including frozen/absent counters, rejection identity, no notification and capture exclusion; see safe-cex-store/per-row-rulings.md. The typed HttpClient composes an optional Store and host capture predicate; arbitrary replacement of that protocol is not a production capability. HttpClient::record_outcome forwards through the typed Store operation."
 
 [[symbol]]
 ts = "safeCexAxiosCreateNoProxy"
