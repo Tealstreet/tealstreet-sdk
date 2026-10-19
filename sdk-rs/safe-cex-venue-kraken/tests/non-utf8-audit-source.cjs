@@ -39,6 +39,7 @@ for (const [label,patch] of [
  ['nonfinite',{realized_pnl:NaN,realized_funding:Infinity,fee:-Infinity}],
  ['date-array',{date:['2023-11-14T22:13:19.750Z']}],
  ['invalid-date',{date:'not a date'}],
+ ['nonfinite-date',{date:NaN}],
  ['transfer',{realized_pnl:null,realized_funding:null,fee:null,liquidation_fee:null,info:'deposit',old_balance:'7.25',new_balance:'9.75'}],
 ]) {
  const rows=[{...log,...patch},{...log,booking_uid:'neighbor'}];

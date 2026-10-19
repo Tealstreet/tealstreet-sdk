@@ -12,7 +12,10 @@ use safe_cex_exchange::{
 };
 use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 fn source() -> Value {
     let out = std::process::Command::new("node")
@@ -148,7 +151,26 @@ fn six_read_entries_start_without_polling_and_finish_exactly_once() {
     ] {
         let h = harness(venue.clone(), options(), |http| http.ok(verb, path, body));
         h.http.hold_responses.set(true);
+        let client = h.exchange.rt.this.get("xhr").unwrap();
+        let method = verb.to_ascii_lowercase();
+        let original = client.get(&method).unwrap();
+        let prefixes = Rc::new(Cell::new(0));
+        let seen = prefixes.clone();
+        client
+            .define(
+                &method,
+                Js::function("observe original HTTP entry", move |receiver, args| {
+                    seen.set(seen.get() + 1);
+                    original.call(receiver, args)
+                }),
+            )
+            .unwrap();
         let promise = h.exchange.rt.this.call_method(member, args).unwrap();
+        assert_eq!(
+            prefixes.get(),
+            1,
+            "{member}: original client invoked before returning its Promise"
+        );
         // This runtime queues spawn_local; it never eagerly polls a fixture spawn.
         h.runtime.pump();
         assert_eq!(
@@ -190,6 +212,7 @@ fn six_read_entries_start_without_polling_and_finish_exactly_once() {
             assert_eq!(result.get("length").unwrap().as_f64(), Some(0.0));
         }
         assert_eq!(h.http.calls(path).len(), 1, "{member}: no restart on await");
+        assert_eq!(prefixes.get(), 1, "{member}: original client invoked once");
         assert!(
             h.runtime.reports.borrow().is_empty(),
             "{member}: no hidden runtime failure"
@@ -215,37 +238,58 @@ fn fill_scalar_rows_reach_the_live_mapper_without_the_old_dto_boundary() {
     }
 }
 
+fn assert_income_case(case: &Value) {
+    let input = native(&case["rows"]);
+    let body = Js::object(vec![("logs", input.clone())]);
+    let h = harness(ExchangeName::Kraken, options(), |http| {
+        http.route_native("GET", "/history/v3/account-log", 200.0, body)
+    });
+    let pending = IncomeHost::account_log_page(
+        &h.exchange.rt,
+        Rc::new(from_json(&json!({"startTime":1,"limit":37}))),
+    )
+    .unwrap();
+    let actual = h
+        .drive(Box::pin(async {
+            pending.await.map_err(|e| e.to_exchange_error())
+        }))
+        .unwrap_or_else(|e| panic!("{}: {}", case["label"], e.message));
+    assert_native(&actual, &case["output"], case["label"].as_str().unwrap());
+    assert_eq!(h.http.calls("/history/v3/account-log").len(), 1);
+    assert_eq!(
+        h.http.calls("/history/v3/account-log")[0].url,
+        "/history/v3/account-log?count=37&since=1"
+    );
+    if case["label"] == "missing" {
+        assert!(input.get("0").unwrap().has_own("realized_pnl"));
+    }
+    assert!(h.runtime.reports.borrow().is_empty());
+}
 #[test]
 fn income_scalar_rows_survive_native_missing_and_nonfinite_cells() {
     let source = source();
     let cases = source["incomeCases"].as_array().unwrap();
-    assert_eq!(cases.len(), 7);
+    assert_eq!(cases.len(), 8);
     for case in cases {
-        let input = native(&case["rows"]);
-        let body = Js::object(vec![("logs", input.clone())]);
-        let h = harness(ExchangeName::Kraken, options(), |http| {
-            http.route_native("GET", "/history/v3/account-log", 200.0, body)
-        });
-        let pending = IncomeHost::account_log_page(
-            &h.exchange.rt,
-            Rc::new(from_json(&json!({"startTime":1,"limit":37}))),
-        )
-        .unwrap();
-        let actual = h
-            .drive(Box::pin(async {
-                pending.await.map_err(|e| e.to_exchange_error())
-            }))
-            .unwrap_or_else(|e| panic!("{}: {}", case["label"], e.message));
-        assert_native(&actual, &case["output"], case["label"].as_str().unwrap());
-        assert_eq!(h.http.calls("/history/v3/account-log").len(), 1);
-        assert_eq!(
-            h.http.calls("/history/v3/account-log")[0].url,
-            "/history/v3/account-log?count=37&since=1"
-        );
-        if case["label"] == "missing" {
-            assert!(input.get("0").unwrap().has_own("realized_pnl"));
-        }
-        assert!(h.runtime.reports.borrow().is_empty());
+        assert_income_case(case);
+    }
+}
+#[test]
+fn income_date_rows_skip_nonfinite_dates_and_keep_neighbors() {
+    let source = source();
+    let cases: Vec<_> = source["incomeCases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|case| case["label"].as_str().unwrap().contains("date"))
+        .collect();
+    assert_eq!(
+        cases.len(),
+        3,
+        "array, invalid text and nonfinite date profiles"
+    );
+    for case in cases {
+        assert_income_case(case);
     }
 }
 
