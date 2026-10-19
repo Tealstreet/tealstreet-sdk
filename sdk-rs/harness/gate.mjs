@@ -91,6 +91,8 @@ const KNOWN_TS_FIXES = (account, rustAccount) => {
     // emit once; history dedupes by tradeId rather than collapsing equal fills;
     // split orders use distinct generated client IDs; cancel replies
     // require per-order success; replacements reconcile final remaining quantity.
+    // Full-position TP/SL batches coalesce sibling edits. Setting ACKs fence
+    // stale reads; cancel ACKs preserve newer terminal events.
     // TS never emits Bitunix live fills. This independent tape oracle validates
     // cumulative quantities/costs; it does not copy anything from Rust's output.
     const totals = new Map();

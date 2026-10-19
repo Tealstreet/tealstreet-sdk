@@ -110,6 +110,41 @@ fn full_snapshots_replace_both_sides_and_replay_on_reconnect() {
     ));
 }
 #[test]
+fn an_authoritative_empty_snapshot_clears_the_consumer_book() {
+    use safe_cex_engine::wire::{section, sections};
+    let (mut e, socket) = ready();
+    e.handle(
+        0.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    assert!(e.book("BTCUSDT").is_none());
+    e.take_frame(0.0);
+    e.handle(1.0, Event::WsMessage { socket, text: r#"{"channel":"market_btcusdt_depthop_0.1","data":{"bids":[["96000","2"]],"asks":[["96001","3"]]}}"# });
+    let frame = e.take_frame(1.0).unwrap();
+    assert!(sections(frame).any(|(kind, _)| kind == section::BOOK));
+    e.handle(
+        2.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"channel":"market_btcusdt_depthop_0.1","data":{"bids":[],"asks":[]}}"#,
+        },
+    );
+    let frame = e.take_frame(2.0).expect("empty snapshot must be delivered");
+    let book = sections(frame)
+        .find(|(kind, _)| *kind == section::BOOK)
+        .unwrap()
+        .1;
+    assert_eq!(book.len(), 16);
+    assert_eq!(&book[4..12], &[0; 8]);
+    assert!(e.book("BTCUSDT").unwrap().is_empty());
+    assert!(
+        sections(e.snapshot_frame(3.0))
+            .any(|(kind, data)| kind == section::BOOK && data[4..12] == [0; 8])
+    );
+}
+#[test]
 fn incomplete_stream_never_commits_a_partial_market_list() {
     let mut e = Engine::new(BitunixFutures::new(Options::default()));
     e.start(0.0);

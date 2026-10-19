@@ -57,6 +57,11 @@ struct Socket {
     queue_timer: Option<TimerId>,
     queue: VecDeque<String>,
 }
+#[derive(Default)]
+struct BookState {
+    levels: Book,
+    initialized: bool,
+}
 
 pub struct BitunixFutures {
     options: Options,
@@ -64,7 +69,7 @@ pub struct BitunixFutures {
     account: account::AccountState,
     trading: trading::TradingState,
     sockets: Vec<Socket>,
-    books: HashMap<String, Book>,
+    books: HashMap<String, BookState>,
     candles: HashSet<(String, String)>,
     retry: Option<TimerId>,
     funding_times: HashMap<String, f64>,
@@ -216,8 +221,11 @@ impl BitunixFutures {
                 if let Some(book) = self.books.get_mut(&symbol) {
                     let d: Depth = serde_json::from_str(text).map_err(|e| e.to_string())?;
                     // Legacy depthop frames are complete sorted snapshots, without sequence ids.
-                    book.load_sorted(BookSide::Bids, d.bids.into_iter().map(|v| (v.0, v.1)));
-                    book.load_sorted(BookSide::Asks, d.asks.into_iter().map(|v| (v.0, v.1)));
+                    book.levels
+                        .load_sorted(BookSide::Bids, d.bids.into_iter().map(|v| (v.0, v.1)));
+                    book.levels
+                        .load_sorted(BookSide::Asks, d.asks.into_iter().map(|v| (v.0, v.1)));
+                    book.initialized = true;
                     cx.book_changed(&symbol);
                 }
             } else if let Some((symbol, native)) = rest.split_once("_klineop_") {
@@ -303,7 +311,8 @@ impl Venue for BitunixFutures {
             Feed::Private => {}
             Feed::Futures => {
                 for book in self.books.values_mut() {
-                    book.clear();
+                    book.levels.clear();
+                    book.initialized = false;
                 }
                 for topic in ["system_notice", "reconnected", "onconnected"]
                     .into_iter()
@@ -632,7 +641,7 @@ impl Venue for BitunixFutures {
                 if self.books.contains_key(&symbol) {
                     return;
                 }
-                self.books.insert(symbol.clone(), Book::default());
+                self.books.insert(symbol.clone(), BookState::default());
                 if let Some(t) = self.futures_topic(cx, &symbol) {
                     self.send_topic(cx, &t, true);
                 }
@@ -714,14 +723,17 @@ impl Venue for BitunixFutures {
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {
-        self.books.get(symbol).filter(|b| !b.is_empty())
+        self.books
+            .get(symbol)
+            .filter(|b| b.initialized)
+            .map(|b| &b.levels)
     }
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
         Box::new(
             self.books
                 .iter()
-                .filter(|(_, b)| !b.is_empty())
-                .map(|(s, b)| (s.as_str(), b)),
+                .filter(|(_, b)| b.initialized)
+                .map(|(s, b)| (s.as_str(), &b.levels)),
         )
     }
 }

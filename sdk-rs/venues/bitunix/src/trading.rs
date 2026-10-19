@@ -587,9 +587,28 @@ impl BitunixFutures {
         retried: bool,
     ) {
         let result = (|| {
-            let mut plan = vec![];
+            let mut plan: Vec<(&'static str, Payload)> = vec![];
             for o in &orders {
-                plan.extend(self.payloads(cx, o)?);
+                for (path, p) in self.payloads(cx, o)? {
+                    if path == FULL_TPSL
+                        && let Some((_, existing)) = plan.iter_mut().find(|(kind, row)| {
+                            *kind == FULL_TPSL
+                                && row.symbol == p.symbol
+                                && row.position_id == p.position_id
+                        })
+                    {
+                        // Each payload carries an old sibling; merge only the requested leg.
+                        if o.kind == OrderType::TakeProfit {
+                            existing.tp_price = p.tp_price;
+                            existing.tp_stop_type = p.tp_stop_type;
+                        } else {
+                            existing.sl_price = p.sl_price;
+                            existing.sl_stop_type = p.sl_stop_type;
+                        }
+                    } else {
+                        plan.push((path, p));
+                    }
+                }
             }
             let mut job = Job::default();
             if orders.len() == 1 && !retried {
@@ -1090,6 +1109,11 @@ impl BitunixFutures {
         if let Call::Cancel { ids, .. } = &step.call {
             self.account.generations[2] += 1;
             for id in ids {
+                if cx.store.order(id).is_some_and(|row| {
+                    matches!(row.status, OrderStatus::Closed | OrderStatus::Canceled)
+                }) {
+                    continue;
+                }
                 if !job.optimistic.contains(id)
                     && let Some(row) = cx.store.order(id)
                 {
@@ -1440,7 +1464,14 @@ impl BitunixFutures {
                             .map_or(id.as_str(), |n| n.raw_id.as_str())
                             .to_owned();
                         if (!*require_ack && !failed) || succeeded.contains(raw.as_str()) {
-                            cx.store.set_order_status(id, OrderStatus::Canceled);
+                            cx.store.update_order(id, |row| {
+                                if !matches!(
+                                    row.status,
+                                    OrderStatus::Closed | OrderStatus::Canceled
+                                ) {
+                                    row.status = OrderStatus::Canceled;
+                                }
+                            });
                         }
                     }
                     if *require_ack
@@ -1498,6 +1529,7 @@ impl BitunixFutures {
                     }
                 }
                 Call::Leverage { symbol, value } => {
+                    self.account.generations[Axis::Positions.index()] += 1;
                     cx.store.update_setting(symbol, |s| s.leverage = *value);
                     cx.store.update_positions(|p| {
                         if p.symbol == *symbol {
@@ -1506,6 +1538,7 @@ impl BitunixFutures {
                     });
                 }
                 Call::Margin { symbol, isolated } => {
+                    self.account.generations[Axis::Positions.index()] += 1;
                     let margin = if *isolated {
                         MarginType::Isolated
                     } else {
@@ -1520,6 +1553,8 @@ impl BitunixFutures {
                     });
                 }
                 Call::Mode { hedged } => {
+                    self.account.generations[Axis::Balance.index()] += 1;
+                    self.account.generations[Axis::Positions.index()] += 1;
                     cx.store.set_hedged(*hedged);
                     self.debounce(cx, Axis::Positions);
                 }

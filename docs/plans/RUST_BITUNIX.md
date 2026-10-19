@@ -313,3 +313,22 @@ review each phase with a sub-agent. Never touch master, rebase, or force-push.
   root typecheck/lint/tests, adapter 17/host 20 tests; bundle 2,518,643 bytes.
   Next: push, PR into feat/rust-rewrite, adversarial reviews, then green CI and
   authorized PR merge/fresh follow-up branch.
+
+### PR #1309 adversarial review and fixes
+
+- Posted three independent reviews on PR #1309. Shared engine/harness review
+  PASS (31 engine/20 helper tests); coverage limits are recorded on the PR.
+- Fixed public empty snapshots: initialized books emit zero-level BOOK sections,
+  while new/reconnected subscriptions remain unavailable until synchronized.
+  Regression failed before fix; public 11 tests PASS; second public review PASS.
+- Fixed three confirmed trading races: coalesce full-position TP/SL sibling
+  requests by position (last requested leg wins), fence positions/balance reads
+  after acknowledged settings changes, and preserve terminal rows when a cancel
+  ACK arrives. These intentionally correct TS preformatted sibling writes and
+  stale-setting/cancel-terminal behavior; listed in KNOWN_TS_FIXES.
+- Seven new trading regressions, full venue 56 tests, fmt/clippy PASS. Independent
+  reviewer reran original probes plus repeated-leg/multiple-position grouping:
+  all PASS, no further findings. PNL remains verbatim net fees/funding.
+- BingX landed at 022ab79de5 while PR reviews ran, introducing merge conflicts.
+  Commit fixes before merging that pinned landing; preserve independent request
+  oracles, all current protocols and the new BingX APIs, then rerun gates/CI.
