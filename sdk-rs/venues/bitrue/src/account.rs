@@ -86,12 +86,18 @@ pub struct Account {
     order_active: Option<String>,
     order_timer: Option<TimerId>,
     initial_orders: HashSet<String>,
-    progress: HashMap<String, f64>,
+    progress: HashMap<String, OrderProgress>,
     quotes: HashMap<String, (f64, f64)>,
     leverage_queries: Vec<(CommandId, String)>,
     progress_queue: VecDeque<String>,
-    terminal: HashSet<String>,
+    terminal: HashMap<String, OrderStatus>,
     terminal_queue: VecDeque<String>,
+}
+#[derive(Clone, Copy, Default)]
+struct OrderProgress {
+    filled: f64,
+    amount: f64,
+    time: f64,
 }
 
 #[derive(Deserialize)]
@@ -302,14 +308,22 @@ fn trigger(value: f64) -> Option<StopTriggerType> {
     }
 }
 impl Account {
-    fn progress(&mut self, id: &str, amount: f64) {
+    fn progress(&mut self, id: &str, filled: f64, amount: f64, time: f64) {
         if !self.progress.contains_key(id) {
             self.progress_queue.push_back(id.to_owned());
         }
         self.progress
             .entry(id.to_owned())
-            .and_modify(|v| *v = v.max(amount))
-            .or_insert(amount);
+            .and_modify(|v| {
+                v.filled = v.filled.max(filled);
+                v.amount = v.amount.max(amount);
+                v.time = v.time.max(time);
+            })
+            .or_insert(OrderProgress {
+                filled,
+                amount,
+                time,
+            });
         while self.progress_queue.len() > HISTORY_LIMIT {
             if let Some(old) = self.progress_queue.pop_front() {
                 self.progress.remove(&old);
@@ -317,10 +331,18 @@ impl Account {
             }
         }
     }
-    pub(crate) fn remember_terminal(&mut self, id: &str) {
-        if self.terminal.insert(id.to_owned()) {
+    fn remember_terminal(&mut self, id: &str, status: OrderStatus) {
+        if !self.terminal.contains_key(id) {
             self.terminal_queue.push_back(id.to_owned());
         }
+        self.terminal
+            .entry(id.to_owned())
+            .and_modify(|previous| {
+                if *previous != OrderStatus::Closed {
+                    *previous = status;
+                }
+            })
+            .or_insert(status);
         while self.terminal_queue.len() > HISTORY_LIMIT {
             if let Some(old) = self.terminal_queue.pop_front() {
                 self.terminal.remove(&old);
@@ -330,11 +352,11 @@ impl Account {
 }
 impl Bitrue {
     pub(crate) fn remember_terminal(&mut self, id: &str) {
-        self.account.remember_terminal(id);
+        self.account.remember_terminal(id, OrderStatus::Canceled);
     }
     /// Bitrue's REST placement/detail quantities are base units.
     pub(crate) fn filled_native(&self, id: &str) -> f64 {
-        self.account.progress.get(id).copied().unwrap_or(0.0)
+        self.account.progress.get(id).map_or(0.0, |v| v.filled)
     }
     pub(crate) fn start_private(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.started
@@ -649,6 +671,12 @@ impl Bitrue {
         let previous = self
             .filled_native(&id)
             .max(existing.as_ref().map_or(0.0, |o| o.filled));
+        let watermark = self.account.progress.get(&id).copied().unwrap_or_default();
+        let time = time.max(row.time.0);
+        let amount = amount
+            .max(existing.as_ref().map_or(0.0, |o| o.amount))
+            .max(watermark.amount)
+            .max(filled);
         let prior_quote = self
             .account
             .quotes
@@ -701,32 +729,31 @@ impl Bitrue {
         {
             self.account.quotes.insert(id.clone(), (filled, quote));
         }
-        self.account.progress(&id, filled);
+        self.account.progress(&id, filled, amount, time);
         if terminal(status) {
-            self.account.remember_terminal(&id);
+            self.account.remember_terminal(&id, status);
         }
         if !terminal(status)
-            && (self.account.terminal.contains(&id)
+            && (self.account.terminal.contains_key(&id)
                 || filled < previous
-                || existing.as_ref().is_some_and(|o| {
-                    terminal(o.status)
-                        || o.last_update > time.max(row.time.0) && time.max(row.time.0) > 0.0
-                }))
+                || time > 0.0 && time < watermark.time
+                || existing
+                    .as_ref()
+                    .is_some_and(|o| terminal(o.status) || o.last_update > time && time > 0.0))
         {
             return;
         }
-        if existing
-            .as_ref()
-            .is_some_and(|o| o.status == OrderStatus::Closed)
+        if (self.account.terminal.get(&id) == Some(&OrderStatus::Closed)
+            || existing
+                .as_ref()
+                .is_some_and(|o| o.status == OrderStatus::Closed))
             && status == OrderStatus::Canceled
         {
             return;
         }
         self.account.orders_revision += 1;
         let filled = filled.max(previous);
-        let amount = amount
-            .max(existing.as_ref().map_or(0.0, |o| o.amount))
-            .max(filled);
+        let amount = amount.max(filled);
         let price = if matches!(kind, OrderType::StopLoss | OrderType::TakeProfit) {
             if row.trigger_price.0 > 0.0 {
                 row.trigger_price.0
@@ -769,7 +796,7 @@ impl Bitrue {
                 "POST_ONLY" => Some(TimeInForce::PostOnly),
                 _ => None,
             },
-            last_update: time.max(row.time.0),
+            last_update: time,
             trigger_type: trigger(row.trigger_price_type.0)
                 .or_else(|| existing.as_ref().and_then(|o| o.trigger_type)),
             take_profit: existing.as_ref().and_then(|o| o.take_profit),
@@ -1246,7 +1273,10 @@ impl Bitrue {
                         .cloned()
                         .collect::<Vec<_>>();
                     for row in rows {
-                        if self.account.terminal.contains(&row.id) && !terminal(row.status) {
+                        if self.account.terminal.contains_key(&row.id) && !terminal(row.status)
+                            || self.account.terminal.get(&row.id) == Some(&OrderStatus::Closed)
+                                && row.status == OrderStatus::Canceled
+                        {
                             continue;
                         }
                         if row.filled < self.filled_native(&row.id) {
@@ -1255,14 +1285,15 @@ impl Bitrue {
                             }
                             continue;
                         }
-                        self.account.progress(&row.id, row.filled);
+                        self.account
+                            .progress(&row.id, row.filled, row.amount, row.last_update);
                         if let Some(value) = quotes.get(&row.id) {
                             self.account
                                 .quotes
                                 .insert(row.id.clone(), (row.filled, *value));
                         }
                         if terminal(row.status) {
-                            self.account.remember_terminal(&row.id);
+                            self.account.remember_terminal(&row.id, row.status);
                         }
                         retained.push(row);
                     }

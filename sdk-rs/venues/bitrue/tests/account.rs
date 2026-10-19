@@ -258,6 +258,49 @@ fn an_inflight_order_snapshot_cannot_undo_stream_fills_and_reconciliation_cannot
     assert!(h.e.store().orders().is_empty());
 }
 #[test]
+fn terminal_status_survives_empty_reconciliation_without_losing_closed_precedence() {
+    for initial_status in ["FILLED", "CANCELED"] {
+        let mut h = Harness::new();
+        h.seed();
+        h.order(10, initial_status, "LIMIT", 111);
+        h.reply("/openOrders", r#"{"code":"0","data":[]}"#);
+        assert!(h.e.store().orders().is_empty());
+        h.order(10, "CANCELED", "LIMIT", 111);
+        if initial_status == "FILLED" {
+            assert!(h.e.store().orders().is_empty());
+        } else {
+            assert_eq!(h.e.store().orders()[0].status, OrderStatus::Canceled);
+        }
+        h.order(10, "FILLED", "LIMIT", 111);
+        assert_eq!(h.e.store().orders()[0].status, OrderStatus::Closed);
+        h.order(10, "CANCELED", "LIMIT", 111);
+        assert_eq!(h.e.store().orders()[0].status, OrderStatus::Closed);
+        assert_eq!(h.fills(), vec![(111.0, 100.0)]);
+    }
+}
+#[test]
+fn progress_time_and_amount_survive_an_empty_authoritative_snapshot() {
+    let mut h = Harness::new();
+    h.seed();
+    let event = |time, amount| {
+        format!(
+            r#"{{"e":"ORDER_TRADE_UPDATE","E":{time},"o":{{"s":"E_BTCUSDT","i":2334151155877155281,"S":"BUY","o":"LIMIT","x":"TRADE","X":"PART_FILLED","q":"{amount}","z":"4","L":"111"}}}}"#
+        )
+    };
+    h.ws(&event(100, 100));
+    h.reply("/openOrders", r#"{"code":"0","data":[]}"#);
+    assert!(h.e.store().orders().is_empty());
+    h.ws(&event(50, 100));
+    assert!(h.e.store().orders().is_empty());
+    h.ws(&event(101, 80));
+    let order = &h.e.store().orders()[0];
+    assert_eq!(order.last_update, 101.0);
+    assert_eq!(order.amount, 100.0);
+    assert_eq!(order.filled, 40.0);
+    assert_eq!(order.remaining, 60.0);
+    assert_eq!(h.fills(), vec![(111.0, 40.0)]);
+}
+#[test]
 fn malformed_order_snapshot_retains_the_complete_symbol() {
     let mut h = Harness::new();
     h.seed();

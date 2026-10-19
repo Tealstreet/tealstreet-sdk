@@ -496,9 +496,16 @@ impl Bitrue {
                             .and_then(|data| {
                                 let rows: Vec<CandleWire<'_>> =
                                     serde_json::from_str(data.get()).map_err(|e| e.to_string())?;
-                                let mut result: Vec<_> = rows
+                                let candles = rows
                                     .iter()
-                                    .filter_map(|r| candle(r, multiplier))
+                                    .map(|row| {
+                                        candle(row, multiplier).ok_or_else(|| {
+                                            "Malformed Bitrue candle timestamp".to_owned()
+                                        })
+                                    })
+                                    .collect::<Result<Vec<_>, _>>()?;
+                                let mut result: Vec<_> = candles
+                                    .into_iter()
                                     .filter(|c| {
                                         from.is_none_or(|f| c.timestamp * 1000.0 >= f)
                                             && to.is_none_or(|t| c.timestamp * 1000.0 <= t)

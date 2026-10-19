@@ -620,3 +620,7 @@ The live [official futures documentation](https://www.bitrue.com/api_docs_includ
 contains current conditional/child schemas; the older GitHub v2 Markdown omits some
 of those fields. Its private payload section documents the original quantity's face
 value, cumulative fills, current execution size/price, and timestamp-echo pong.
+
+The Rust candle-history reader rejects a malformed timestamp anywhere in a
+response before applying the requested time window. It never reports a partial
+or empty successful history by silently dropping malformed rows.

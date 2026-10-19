@@ -120,3 +120,19 @@ create a clean follow-up branch. Never stash, rebase, force-push or touch master
 - Opening a draft PR for required local adversarial review and CI while the
   complete TS suite's local 30-second import-timeout recheck finishes. It must
   be ready and every CI check green before merging.
+
+### PR #1314 adversarial round 1
+
+- Posted three concrete P2 findings in PR comment 6275171502; fixed all three
+  with regressions. Independent focused re-reviews PASS: Closed dominance and
+  timestamp/amount watermarks survive empty reconciliation; malformed candle
+  timestamps reject the complete history before filtering.
+- Native Bitrue tests now 56 PASS, native/wasm clippy PASS and private gate PASS.
+  Complete safe-cex suite PASS: 6,597 tests (30-second local import timeout),
+  plus all 22 SDK WASM and 25 host tests PASS.
+- Initial CI passed native/wasm/size and earlier venue gates, then rejected an
+  invalid Bybit TS memory baseline (-136 backing-buffer bytes). Guards remain
+  unchanged; latest-head CI will rerun.
+- A final local public run narrowly missed steady CPU (Rust151.7/TS147.0ms),
+  despite main CPU and memory passing. Optimizing duplicate ticker JSON scans
+  before advancing the PR; no threshold or output normalization changes.

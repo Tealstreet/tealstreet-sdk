@@ -291,3 +291,29 @@ fn rejected_candle_history_never_returns_an_authoritative_empty_list() {
     assert_eq!(done[0].0, 1);
     assert!(done[0].1.is_err());
 }
+
+#[test]
+fn malformed_candle_dates_reject_empty_and_mixed_history_before_window_filtering() {
+    let invalid = CANDLE.replace("2024-01-01", "2024-02-30");
+    for rows in [invalid.clone(), format!("{CANDLE},{invalid}")] {
+        let (mut e, socket) = boot();
+        candles(&mut e, 1, Some(1704067260000.0));
+        e.drain_actions().for_each(drop);
+        message(
+            &mut e,
+            socket,
+            3.0,
+            &format!(
+                r#"{{"event_rep":"rep","channel":"market_e_btcusdt_kline_1min","status":"ok","data":[{rows}]}}"#
+            ),
+        );
+        let done = completions(&e.drain_actions().collect::<Vec<_>>());
+        assert_eq!(done[0].0, 1);
+        assert!(
+            done[0]
+                .1
+                .as_ref()
+                .is_err_and(|error| error.contains("Malformed Bitrue candle timestamp"))
+        );
+    }
+}
