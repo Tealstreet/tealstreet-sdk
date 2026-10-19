@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
+import { sameCommandResults } from './tape.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -79,6 +80,10 @@ const KNOWN_TS_FIXES = {
       if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
     }
   },
+  // Attached TP/SL must remain market exits. The private tape declares the
+  // exact buggy TS request with tsRequestBody; Rust must match requestBody.
+  // Native regressions also correct TS repair losses (post-only/TIF/reduce-only)
+  // and cancellation races across concurrent writes and REST reconciliation.
   backpack: (ts) => {
     const bytes = readFileSync(values.tape);
     const records = (values.tape.endsWith('.gz') ? gunzipSync(bytes) : bytes)
@@ -99,7 +104,8 @@ const KNOWN_TS_FIXES = {
         new URL(record.url).pathname === '/api/v1/orders' &&
         record.status === 200
       ) {
-        for (const order of JSON.parse(record.body)) orders.set(String(order.id), { c: order.clientId });
+        for (const order of JSON.parse(record.body))
+          orders.set(String(order.id), { c: order.clientId, y: order.postOnly });
       }
       if (record.type !== 'ws') continue;
       const { stream, data: d } = JSON.parse(record.text);
@@ -158,6 +164,8 @@ const KNOWN_TS_FIXES = {
       if (!d) continue;
       // TS drops native client IDs on both REST and stream mapping.
       order.clientOrderId = d.c == null ? null : String(d.c);
+      // REST postOnly / WS y are separate from GTC. TS loses maker protection.
+      if (d.y) order.timeInForce = 'PostOnly';
       // Y is trigger quantity; Q is reverse-market quote quantity. A failed
       // protection order is terminal, not open.
       if (d.P !== undefined && d.Y !== undefined) {
@@ -200,10 +208,9 @@ for (let run = 0; run < runs; run++) {
       const right = JSON.stringify(rust.account[field]);
       if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
     }
-    const left = JSON.stringify(ts.commands);
-    const right = JSON.stringify(rust.commands);
-    if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
   }
+  if (!sameCommandResults(ts.commands, rust.commands))
+    differences.push(`command results: ts=${JSON.stringify(ts.commands)} rust=${JSON.stringify(rust.commands)}`);
   compare('market', ts.markets, rust.markets);
   compare('ticker', ts.tickers, rust.tickers);
   for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {

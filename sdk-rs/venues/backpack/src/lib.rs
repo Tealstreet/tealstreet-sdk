@@ -90,6 +90,15 @@ struct BookState {
 struct Seed {
     daily: Option<Vec<Ticker>>,
     marks: Option<Vec<(String, [f64; 4])>>,
+    retries: Vec<(TimerId, SeedRead)>,
+    attempts: [u32; 3],
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum SeedRead {
+    Markets,
+    Daily,
+    Marks,
 }
 
 pub struct Backpack {
@@ -104,6 +113,43 @@ pub struct Backpack {
 }
 
 impl Backpack {
+    fn seed_read(&self, cx: &mut Cx<'_, Pending>, kind: SeedRead) {
+        let (path, pending) = match kind {
+            SeedRead::Markets => (
+                "/api/v1/markets",
+                Pending::Markets {
+                    rows: vec![],
+                    invalid: false,
+                },
+            ),
+            SeedRead::Daily => (
+                "/api/v1/tickers",
+                Pending::Daily {
+                    rows: vec![],
+                    invalid: false,
+                },
+            ),
+            SeedRead::Marks => (
+                "/api/v1/markPrices",
+                Pending::Marks {
+                    rows: vec![],
+                    invalid: false,
+                },
+            ),
+        };
+        self.get(cx, path, Default::default(), pending, true);
+    }
+
+    fn retry_seed(&mut self, cx: &mut Cx<'_, Pending>, kind: SeedRead, error: &str) {
+        cx.log(LogLevel::Warning, error);
+        if self.seed.retries.iter().any(|(_, k)| *k == kind) {
+            return;
+        }
+        let attempt = &mut self.seed.attempts[kind as usize];
+        let delay = (1000u32 << (*attempt).min(5)).min(30000);
+        *attempt = attempt.saturating_add(1);
+        self.seed.retries.push((cx.set_timer(delay as f64), kind));
+    }
     pub fn new(options: Options) -> Self {
         Self {
             options,
@@ -380,16 +426,7 @@ impl Backpack {
 impl Venue for Backpack {
     type Pending = Pending;
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.get(
-            cx,
-            "/api/v1/markets",
-            Default::default(),
-            Pending::Markets {
-                rows: vec![],
-                invalid: false,
-            },
-            true,
-        );
+        self.seed_read(cx, SeedRead::Markets);
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
         if self.account.socket.socket == Some(socket) {
@@ -629,6 +666,7 @@ impl Venue for Backpack {
                 rows,
                 invalid: false,
             } => {
+                self.seed.attempts[SeedRead::Markets as usize] = 0;
                 cx.store.set_markets(rows);
                 self.get(
                     cx,
@@ -655,6 +693,7 @@ impl Venue for Backpack {
                 rows,
                 invalid: false,
             } => {
+                self.seed.attempts[SeedRead::Daily as usize] = 0;
                 self.seed.daily = Some(rows);
                 self.finish_seed(cx);
             }
@@ -662,6 +701,7 @@ impl Venue for Backpack {
                 rows,
                 invalid: false,
             } => {
+                self.seed.attempts[SeedRead::Marks as usize] = 0;
                 self.seed.marks = Some(rows);
                 self.finish_seed(cx);
             }
@@ -730,6 +770,15 @@ impl Venue for Backpack {
             Pending::Candles { command, .. } => {
                 cx.done(command, Err("Backpack invalid candles".into()))
             }
+            Pending::Markets { .. } => {
+                self.retry_seed(cx, SeedRead::Markets, "Backpack invalid markets")
+            }
+            Pending::Daily { .. } => {
+                self.retry_seed(cx, SeedRead::Daily, "Backpack invalid tickers")
+            }
+            Pending::Marks { .. } => {
+                self.retry_seed(cx, SeedRead::Marks, "Backpack invalid mark prices")
+            }
             _ => cx.log(LogLevel::Error, "Backpack invalid REST list"),
         }
     }
@@ -747,11 +796,19 @@ impl Venue for Backpack {
                 self.recover_book(cx, &symbol)
             }
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
+            Pending::Markets { .. } => self.retry_seed(cx, SeedRead::Markets, error),
+            Pending::Daily { .. } => self.retry_seed(cx, SeedRead::Daily, error),
+            Pending::Marks { .. } => self.retry_seed(cx, SeedRead::Marks, error),
             _ => cx.log(LogLevel::Error, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
         if self.account_timer(cx, timer) {
+            return;
+        }
+        if let Some(index) = self.seed.retries.iter().position(|(t, _)| *t == timer) {
+            let (_, kind) = self.seed.retries.swap_remove(index);
+            self.seed_read(cx, kind);
             return;
         }
         if self.public.reconnect == Some(timer) {

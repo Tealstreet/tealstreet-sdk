@@ -51,6 +51,17 @@ pub fn ready_window(
     position_body: &str,
     auth_window: Option<(f64, u32)>,
 ) -> (Driver, SocketId) {
+    ready_snapshot(position_status, position_body, auth_window, "[]")
+}
+pub fn ready_orders(orders: &str) -> (Driver, SocketId) {
+    ready_snapshot(200, POSITIONS, None, orders)
+}
+fn ready_snapshot(
+    position_status: u16,
+    position_body: &str,
+    auth_window: Option<(f64, u32)>,
+    orders: &str,
+) -> (Driver, SocketId) {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     // Public deterministic test seed; never a real exchange account.
     let secret = STANDARD.encode([7u8; 32]);
@@ -93,7 +104,7 @@ pub fn ready_window(
                     } else if r.url.ends_with("/collateral") {
                         BALANCE
                     } else {
-                        "[]"
+                        orders
                     };
                     assert!(r.headers.iter().any(|(n, _)| *n == "X-Signature"));
                     let expected = auth_window.map(|w| w.1).unwrap_or(60000);

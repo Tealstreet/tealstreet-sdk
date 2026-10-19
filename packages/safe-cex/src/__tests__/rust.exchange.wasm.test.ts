@@ -1,13 +1,14 @@
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { OrderBook } from '../types';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { BaseExchange } from '../exchanges/base';
 import { loadNodeEngine } from '../exchanges/rust/loadNodeEngine';
 import { RustEngineExchange, setRustEngineTransport, setWasmEngineLoader } from '../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../store/store.base';
 import { OrderSide, OrderType } from '../types';
+import { virtualClock } from '../utils/virtualClock';
 
 const EXCHANGE_INFO = JSON.stringify({
   symbols: [
@@ -80,7 +81,10 @@ const until = async (check: () => boolean) => {
 
 describe('RustEngineExchange', () => {
   let exchange: RustEngineExchange | undefined;
-  afterEach(() => exchange?.dispose());
+  afterEach(() => {
+    exchange?.dispose();
+    vi.restoreAllMocks();
+  });
 
   it('fills the store from engine frames and serves books to listeners', async () => {
     const tape = recordedTransport();
@@ -187,6 +191,11 @@ describe('RustEngineExchange', () => {
 
   it('runs Backpack perpetuals and preserves canonical caller IDs through placement and frames', async () => {
     const sockets: Array<(text: string) => void> = [];
+    const correctedTime = 1765805280000;
+    expect(Date.now()).not.toBe(correctedTime);
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(correctedTime);
+    const signedTimestamps: string[] = [];
+    const subscriptionTimestamps: string[] = [];
     const writes: Array<{ method: string; body?: string }> = [];
     const responses: Record<string, string> = {
       markets: '[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"}]',
@@ -203,9 +212,16 @@ describe('RustEngineExchange', () => {
       connect: (_url, { onOpen, onMessage }) => {
         sockets.push(onMessage);
         setTimeout(onOpen, 0);
-        return { send: () => {}, close: () => {} };
+        return {
+          send: (text) => {
+            const message = JSON.parse(text);
+            if (message.signature) subscriptionTimestamps.push(message.signature[2]);
+          },
+          close: () => {},
+        };
       },
-      request: async ({ method, url, body }) => {
+      request: async ({ method, url, body, headers }) => {
+        if (headers['X-Timestamp']) signedTimestamps.push(headers['X-Timestamp']);
         if (method !== 'GET') writes.push({ method, body });
         const text = method === 'POST' ? '{"id":"800"}' : responses[new URL(url).pathname.split('/').pop()!];
         return { status: text ? 200 : 404, headers: '', body: new TextEncoder().encode(text ?? '{}') };
@@ -214,7 +230,28 @@ describe('RustEngineExchange', () => {
       clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
     };
     setWasmEngineLoader(loadNodeEngine);
-    setRustEngineTransport(() => transport);
+    class PrototypeTransport implements Transport {
+      #inner: Transport;
+      constructor(inner: Transport) {
+        this.#inner = inner;
+      }
+      now() {
+        return this.#inner.now();
+      }
+      connect(...args: Parameters<Transport['connect']>) {
+        return this.#inner.connect(...args);
+      }
+      request(...args: Parameters<Transport['request']>) {
+        return this.#inner.request(...args);
+      }
+      setTimeout(...args: Parameters<Transport['setTimeout']>) {
+        return this.#inner.setTimeout(...args);
+      }
+      clearTimeout(...args: Parameters<Transport['clearTimeout']>) {
+        return this.#inner.clearTimeout(...args);
+      }
+    }
+    setRustEngineTransport(() => new PrototypeTransport(transport));
     const store = new DefaultStore();
     exchange = new RustEngineExchange(
       'backpack',
@@ -237,7 +274,10 @@ describe('RustEngineExchange', () => {
     expect(JSON.parse(writes[0].body!)).toMatchObject({ clientId: 4294967295, quantity: '1.00' });
     await expect(exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: '01' })).rejects.toThrow('uint32');
     expect(writes).toHaveLength(1);
-    await until(() => sockets.length === 2);
+    await until(() => sockets.length === 2 && subscriptionTimestamps.length === 1);
+    expect(subscriptionTimestamps).toEqual([String(correctedTime)]);
+    expect(signedTimestamps.length).toBeGreaterThan(0);
+    expect(new Set(signedTimestamps)).toEqual(new Set([String(correctedTime)]));
     sockets[1](
       JSON.stringify({
         stream: 'account.orderUpdate',

@@ -140,3 +140,23 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
 - Real SDK wasm tests: 5/5 PASS; host tests: 2/2 PASS; wasm clippy PASS.
   Root typecheck/lint PASS. Default test budget still hits pre-existing Hyro
   import timeouts; verifying the SDK suite separately with a 30-second budget.
+- Merged the landing branch at e2dc51f927, retaining its __tests__ wasm-test
+  location plus Backpack coverage; all five wasm tests passed after the rename.
+  PR #1299 is open as a draft into feat/rust-rewrite.
+- Adversarial review round 1 posted six accepted findings on the PR. Fixed:
+  post-only loss on REST/WS amend, unsafe attached stop-limit protection,
+  startup seed retry gaps, unsynchronized SDK auth time, concurrent cancel
+  rollback, and public query results escaping replay comparison.
+- Follow-up review fixed class-based transport delegation, preservation of
+  post-only/TIF/reduce-only during automatic trigger repair, and cancel/cancel-all
+  acknowledgement guards across REST creation-time snapshots. Guards now use
+  stream event stamps; concurrent cancellation state is bounded by active jobs.
+- Re-review is clear. All 49 native tests and seven harness tests pass. The
+  private tape declares the exact legacy TS stop-limit request separately;
+  Rust must match the correct market-protection request (tested negatively).
+  Final wasm rebuild, gates and SDK clock/class-transport verification pending.
+- Repository tests: default run passed 6,482 SDK tests and timed out seven tests
+  in two unrelated import-heavy files. Both files pass in isolation (15/15,
+  one worker, 30-second budget); other root packages passed. No product or test
+  code changed for these timing failures. PR-range gitleaks is clean; the initial
+  branch-push scan flags an inherited Binance test vector before this PR's base.

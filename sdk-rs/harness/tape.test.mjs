@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createPrivateKey, sign } from 'node:crypto';
 import { test } from 'node:test';
-import { canonicalBody, Tape, withTimeout } from './tape.mjs';
+import { canonicalBody, sameCommandResults, Tape, withTimeout } from './tape.mjs';
 import { venueOf } from './venues.mjs';
 const URL = 'https://example.test/order';
 const record = (method, requestBody) => ({
@@ -111,4 +111,23 @@ test('Backpack rejects replacement before its recorded cancellation', () => {
   assert.equal(tape.respond('DELETE', URL, JSON.stringify({ orderId: '1' })).status, 200);
   assert.equal(tape.respond('POST', URL, JSON.stringify({ quantity: '1' })).status, 200);
   assert.equal(tape.missingWrites, 0);
+});
+
+test('public candle command mismatches are checked', () => {
+  const ts = [{ ok: [{ timestamp: 1000, open: 1, high: 2, low: 1, close: 2, volume: 5 }] }];
+  assert.equal(sameCommandResults(ts, structuredClone(ts)), true);
+  assert.equal(sameCommandResults(ts, [{ ok: [] }]), false);
+  assert.equal(sameCommandResults(ts, [{ error: 'unavailable' }]), false);
+});
+
+test('declared TS wire defect does not relax the Rust request body', () => {
+  const row = {
+    ...record('POST', { orderType: 'Market', stopLossTriggerPrice: '120' }),
+    tsRequestBody: JSON.stringify({ orderType: 'Market', stopLossTriggerPrice: '120', stopLossLimitPrice: '120' }),
+  };
+  const rust = new Tape([row], {}, false, 30000, 'rust');
+  assert.equal(rust.respond('POST', URL, row.tsRequestBody).status, 599);
+  assert.equal(rust.respond('POST', URL, row.requestBody).status, 200);
+  const ts = new Tape([row], {}, false, 30000, 'ts');
+  assert.equal(ts.respond('POST', URL, row.tsRequestBody).status, 200);
 });

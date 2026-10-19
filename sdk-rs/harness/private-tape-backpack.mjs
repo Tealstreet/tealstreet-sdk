@@ -73,6 +73,7 @@ http('GET', '/api/v1/capital/collateral', {
 const resting = {
   id: '100',
   clientId: 42,
+  postOnly: true,
   symbol: SYMBOL,
   side: 'Bid',
   orderType: 'Limit',
@@ -199,13 +200,18 @@ const attached = {
   orderType: 'Market',
   quantity: '2.00',
   takeProfitTriggerPrice: '160.00',
-  takeProfitLimitPrice: '160.00',
   takeProfitTriggerBy: 'MarkPrice',
   stopLossTriggerPrice: '120.00',
-  stopLossLimitPrice: '120.00',
   stopLossTriggerBy: 'MarkPrice',
 };
 http('POST', '/api/v1/order', placed('500', attached), attached);
+// Known TS bug: attached protective exits become stop-limit orders. Keep its
+// exact legacy request separately; Rust must send the market-protection body.
+records.at(-1).tsRequestBody = JSON.stringify({
+  ...attached,
+  takeProfitLimitPrice: '160.00',
+  stopLossLimitPrice: '120.00',
+});
 command({
   op: 'placeOrders',
   orders: [{ symbol: SYMBOL, type: 'limit', side: 'buy', amount: 1, price: 135, takeProfit: 150, stopLoss: 125 }],
@@ -229,7 +235,7 @@ for (const [id, price] of [
 }
 command({ op: 'cancelSymbolOrders', symbol: SYMBOL });
 http('DELETE', '/api/v1/orders', [], { symbol: SYMBOL });
-ws('account.orderUpdate', order('100', { e: 'orderCancelled', X: 'Cancelled', p: '130', q: '5', c: 42 }));
+ws('account.orderUpdate', order('100', { e: 'orderCancelled', X: 'Cancelled', p: '130', q: '5', c: 42, y: true }));
 ws(
   'account.orderUpdate',
   order('300', {

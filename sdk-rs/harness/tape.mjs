@@ -9,6 +9,8 @@ export const canonicalUrl = (url) => {
   return `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
 };
 
+export const sameCommandResults = (ts, rust) => JSON.stringify(ts) === JSON.stringify(rust);
+
 export const canonicalBody = (body, callerIds = new Set()) => {
   if (!body) return '';
   const clean = (value, key = '') => {
@@ -50,7 +52,7 @@ export const withTimeout = async (promise, label, ms = 30000) => {
 
 /** Serves recorded HTTP responses and websocket frames in tape order. */
 export class Tape {
-  constructor(records, venue, isPrivate, timeoutMs = 30000) {
+  constructor(records, venue, isPrivate, timeoutMs = 30000, impl) {
     this.venue = venue;
     this.isPrivate = isPrivate;
     this.timeoutMs = timeoutMs;
@@ -63,7 +65,9 @@ export class Tape {
     this.responses = new Map();
     this.writeOrder = [];
     for (const record of records.filter((r) => r.type === 'http')) {
-      const key = `${record.method} ${canonicalUrl(record.url)}${record.requestBody === undefined ? '' : ` BODY ${canonicalBody(record.requestBody, this.callerIds)}`}`;
+      // Per-fixture KNOWN_TS_FIXES exception; never a fallback for Rust.
+      const expectedBody = impl === 'ts' ? (record.tsRequestBody ?? record.requestBody) : record.requestBody;
+      const key = `${record.method} ${canonicalUrl(record.url)}${expectedBody === undefined ? '' : ` BODY ${canonicalBody(expectedBody, this.callerIds)}`}`;
       if (!this.responses.has(key)) this.responses.set(key, []);
       this.responses.get(key).push(record);
       if (record.method !== 'GET') this.writeOrder.push(record);

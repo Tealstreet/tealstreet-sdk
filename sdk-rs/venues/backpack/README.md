@@ -9,7 +9,9 @@ Caller client IDs are canonical decimal strings from `1` through `4294967295`.
 They are sent as JSON uint32 numbers. Preflight rejects unsupported shapes and
 invalid IDs before any write. Amend cancels and replaces, preserving trigger
 source and execution limit, and never reuses the original caller ID. A lost
-write response is not retried.
+write response is not retried. Post-only and time-in-force flags survive
+reconciliation, amend and trigger repair. Attached protective stops remain market
+orders, including after a gap.
 
 Account leverage is global. Position mode is fixed hedged, and margin mode is
 fixed cross; requests for another mode return an error. Private reconciliation
@@ -21,6 +23,10 @@ sequenced cancel/replace jobs.
 Ticker statistics support documented opening-price/quote-volume fields. Best
 quotes come from bookTicker; partial depth changes never replace them, and null
 book sides clear stale quotes.
+
+Failed startup reads retry independently with bounded exponential delays. The
+SDK uses its synchronized clock for Backpack authentication and supports custom
+class-based transports.
 
 Depth snapshots accept exact string or integer sequence IDs. The first buffered
 update must bridge the snapshot; later updates must begin at the next sequence.

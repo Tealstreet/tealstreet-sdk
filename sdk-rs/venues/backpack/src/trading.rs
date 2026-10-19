@@ -35,13 +35,9 @@ pub struct NativeOrder {
     #[serde(skip_serializing_if = "Option::is_none")]
     take_profit_trigger_price: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    take_profit_limit_price: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     take_profit_trigger_by: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stop_loss_trigger_price: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stop_loss_limit_price: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stop_loss_trigger_by: Option<&'static str>,
 }
@@ -73,16 +69,11 @@ impl NativeOrder {
             "takeProfitTriggerPrice",
             self.take_profit_trigger_price.as_deref()
         );
-        field!(
-            "takeProfitLimitPrice",
-            self.take_profit_limit_price.as_deref()
-        );
         field!("takeProfitTriggerBy", self.take_profit_trigger_by);
         field!(
             "stopLossTriggerPrice",
             self.stop_loss_trigger_price.as_deref()
         );
-        field!("stopLossLimitPrice", self.stop_loss_limit_price.as_deref());
         field!("stopLossTriggerBy", self.stop_loss_trigger_by);
         p
     }
@@ -126,6 +117,7 @@ struct Job {
 pub struct Trading {
     jobs: HashMap<u64, Job>,
     next_client: u32,
+    cancels: HashMap<String, (usize, OrderStatus)>,
 }
 
 fn client_id(id: &str) -> Result<u32, String> {
@@ -218,10 +210,8 @@ impl Backpack {
                 .map(|id| client_id(id))
                 .transpose()?,
             take_profit_trigger_price: None,
-            take_profit_limit_price: None,
             take_profit_trigger_by: None,
             stop_loss_trigger_price: None,
-            stop_loss_limit_price: None,
             stop_loss_trigger_by: None,
         };
         if limit {
@@ -255,14 +245,12 @@ impl Backpack {
         if !limit {
             if let Some(price) = o.take_profit {
                 let p = formatted(price, m.precision.price)?;
-                native.take_profit_trigger_price = Some(p.clone());
-                native.take_profit_limit_price = Some(p);
+                native.take_profit_trigger_price = Some(p);
                 native.take_profit_trigger_by = Some(trigger(o.tp_trigger_type));
             }
             if let Some(price) = o.stop_loss {
                 let p = formatted(price, m.precision.price)?;
-                native.stop_loss_trigger_price = Some(p.clone());
-                native.stop_loss_limit_price = Some(p);
+                native.stop_loss_trigger_price = Some(p);
                 native.stop_loss_trigger_by = Some(trigger(o.sl_trigger_type));
             }
         }
@@ -566,7 +554,21 @@ impl Backpack {
             Step::Cancel { symbol, id, .. } => {
                 self.account.orders_revision += 1;
                 previous = cx.store.order(id).map(|o| o.status);
-                cx.store.set_order_status(id, OrderStatus::Canceling);
+                if let Some(order) = cx.store.order(id) {
+                    targets.push((id.clone(), self.order_stream_time(id)));
+                    let state = self
+                        .trading
+                        .cancels
+                        .entry(id.clone())
+                        .or_insert((0, order.status));
+                    state.0 += 1;
+                    previous = Some(state.1);
+                }
+                if cx.store.order(id).is_some_and(|o| {
+                    !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
+                }) {
+                    cx.store.set_order_status(id, OrderStatus::Canceling);
+                }
                 let p: Params = [
                     ("symbol".into(), symbol.clone()),
                     ("orderId".into(), id.clone()),
@@ -589,7 +591,7 @@ impl Backpack {
                         o.symbol == *symbol
                             && !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
                     })
-                    .map(|o| (o.id.clone(), o.last_update))
+                    .map(|o| (o.id.clone(), self.order_stream_time(&o.id)))
                     .collect();
                 let p: Params = [("symbol".into(), symbol.clone())].into();
                 (
@@ -730,8 +732,15 @@ impl Backpack {
                 }
                 Step::Cancel { id, .. } => {
                     self.account.orders_revision += 1;
+                    self.finish_cancel(id);
+                    let unchanged = request
+                        .targets
+                        .first()
+                        .is_some_and(|(_, stamp)| *stamp == self.order_stream_time(id));
                     cx.store.update_order(id, |o| {
-                        if o.status == OrderStatus::Canceling {
+                        if unchanged
+                            && !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
+                        {
                             o.status = OrderStatus::Canceled;
                         }
                     });
@@ -739,8 +748,9 @@ impl Backpack {
                 Step::CancelAll { .. } => {
                     self.account.orders_revision += 1;
                     for (id, stamp) in &request.targets {
+                        let unchanged = self.order_stream_time(id) == *stamp;
                         cx.store.update_order(id, |o| {
-                            if o.last_update == *stamp
+                            if unchanged
                                 && !matches!(o.status, OrderStatus::Closed | OrderStatus::Canceled)
                             {
                                 o.status = OrderStatus::Canceled;
@@ -768,10 +778,15 @@ impl Backpack {
     }
     pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
         if let Step::Cancel { id, .. } = &request.step
+            && self.finish_cancel(id)
             && let Some(previous) = request.previous
         {
+            let unchanged = request
+                .targets
+                .first()
+                .is_some_and(|(_, stamp)| *stamp == self.order_stream_time(id));
             cx.store.update_order(id, |o| {
-                if o.status == OrderStatus::Canceling {
+                if o.status == OrderStatus::Canceling && unchanged {
                     o.status = previous;
                 }
             });
@@ -793,6 +808,19 @@ impl Backpack {
             } else {
                 cx.done(request.command as CommandId, Err(error.into()));
             }
+        }
+    }
+
+    fn finish_cancel(&mut self, id: &str) -> bool {
+        let Some(state) = self.trading.cancels.get_mut(id) else {
+            return false;
+        };
+        state.0 -= 1;
+        if state.0 == 0 {
+            self.trading.cancels.remove(id);
+            true
+        } else {
+            false
         }
     }
 }
@@ -832,7 +860,13 @@ impl Backpack {
                 trigger_price: Some(trigger),
                 trigger_quantity: Some(quantity),
                 trigger_by: Some("MarkPrice"),
-                reduce_only: Some(true),
+                reduce_only: row.reduce_only,
+                post_only: limit.then_some(row.post_only || row.time_in_force == "PO"),
+                time_in_force: limit.then_some(match row.time_in_force.as_ref() {
+                    "IOC" => "IOC",
+                    "FOK" => "FOK",
+                    _ => "GTC",
+                }),
                 ..Default::default()
             },
         })

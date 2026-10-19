@@ -1,4 +1,5 @@
 mod support;
+use safe_cex_engine::model::OrderStatus;
 use safe_cex_engine::{Action, Command, Event, Method, Notice};
 use support::*;
 fn place(e: &mut Driver, id: u32, orders: &str) {
@@ -108,7 +109,8 @@ fn market_attached_brackets_and_standalone_trigger_payloads() {
     let r = requests(&mut e).pop().unwrap();
     let body = r.body.as_deref().unwrap();
     assert!(body.contains("\"takeProfitTriggerPrice\":\"150.00\""));
-    assert!(body.contains("\"stopLossLimitPrice\":\"130.00\""));
+    assert!(body.contains("\"stopLossTriggerPrice\":\"130.00\""));
+    assert!(!body.contains("LimitPrice"));
     assert!(!body.contains("timeInForce"));
     reply(&mut e, &r, 200, r#"{"id":"market"}"#);
     e.drain_actions().for_each(drop);
@@ -416,4 +418,168 @@ fn amend_trigger_limit_preserves_execution_price_and_trigger_source() {
     assert!(body.contains("\"price\":\"145.00\""), "{body}");
     assert!(body.contains("\"triggerPrice\":\"151.00\""), "{body}");
     assert!(body.contains("\"triggerBy\":\"LastPrice\""), "{body}");
+}
+
+#[test]
+fn rest_and_stream_post_only_orders_remain_post_only_when_amended() {
+    let snapshot = format!(
+        "[{}]",
+        ORDER.replace(
+            "\"timeInForce\":\"GTC\"",
+            "\"timeInForce\":\"GTC\",\"postOnly\":true"
+        )
+    );
+    for rest in [false, true] {
+        let (mut e, socket) = if rest {
+            ready_orders(&snapshot)
+        } else {
+            ready()
+        };
+        if !rest {
+            ws(
+                &mut e,
+                socket,
+                "account.orderUpdate",
+                r#"{"e":"orderAccepted","i":"123","E":2000000,"X":"New","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"140","q":"5","z":"0","f":"GTC","y":true}"#,
+            );
+        }
+        assert_eq!(
+            e.store().order("123").unwrap().time_in_force,
+            Some(safe_cex_engine::model::TimeInForce::PostOnly)
+        );
+        e.drain_actions().for_each(drop);
+        e.handle(
+            2000.0,
+            Event::Command(Command::AmendOrder {
+                command: 1,
+                id: "123".into(),
+                price: Some(142.0),
+                amount: None,
+            }),
+        );
+        let cancel = requests(&mut e).pop().unwrap();
+        reply(&mut e, &cancel, 200, "{}");
+        let replacement = requests(&mut e).pop().unwrap();
+        assert!(
+            replacement
+                .body
+                .as_deref()
+                .unwrap()
+                .contains("\"postOnly\":true")
+        );
+    }
+}
+
+#[test]
+fn concurrent_cancel_failures_cannot_undo_another_success() {
+    for (a, b) in [(503, 200), (200, 503), (503, 503)] {
+        let (mut e, socket) = ready();
+        ws(
+            &mut e,
+            socket,
+            "account.orderUpdate",
+            r#"{"e":"orderAccepted","i":"123","E":2000000,"X":"New","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"140","q":"5","z":"0","f":"GTC"}"#,
+        );
+        e.drain_actions().for_each(drop);
+        e.handle(
+            2000.0,
+            Event::Command(Command::CancelOrders {
+                command: 1,
+                ids: vec!["123".into()],
+            }),
+        );
+        let one = requests(&mut e).pop().unwrap();
+        e.handle(
+            2000.0,
+            Event::Command(Command::CancelOrders {
+                command: 2,
+                ids: vec!["123".into()],
+            }),
+        );
+        let two = requests(&mut e).pop().unwrap();
+        reply(&mut e, &one, a, "{}");
+        if a == 503 {
+            assert_eq!(
+                e.store().order("123").unwrap().status,
+                OrderStatus::Canceling
+            );
+        }
+        reply(&mut e, &two, b, "{}");
+        assert_eq!(
+            e.store().order("123").unwrap().status,
+            if a == 200 || b == 200 {
+                OrderStatus::Canceled
+            } else {
+                OrderStatus::Open
+            }
+        );
+    }
+}
+
+#[test]
+fn trigger_limit_repairs_preserve_post_only_time_in_force_and_reduce_only() {
+    for (post_only, tif) in [(true, "GTC"), (false, "IOC"), (false, "FOK")] {
+        let (mut e, socket) = ready();
+        e.handle(1000.0, Event::WsOpened { socket });
+        let read = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.ends_with("/orders"))
+            .unwrap();
+        let old = ORDER.replace("\"orderType\":\"Limit\"", "\"orderType\":\"Limit\",\"triggerPrice\":\"130\",\"triggerQuantity\":\"5\",\"reduceOnly\":false")
+            .replace("\"timeInForce\":\"GTC\"", &format!("\"timeInForce\":\"{tif}\",\"postOnly\":{post_only}"));
+        reply(&mut e, &read, 200, &format!("[{old}]"));
+        let cancel = requests(&mut e).pop().unwrap();
+        reply(&mut e, &cancel, 200, "{}");
+        let replacement = requests(&mut e).pop().unwrap();
+        let body = replacement.body.as_deref().unwrap();
+        assert!(
+            body.contains(&format!("\"postOnly\":{post_only}")),
+            "{body}"
+        );
+        assert!(
+            body.contains(&format!("\"timeInForce\":\"{tif}\"")),
+            "{body}"
+        );
+        assert!(body.contains("\"reduceOnly\":false"), "{body}");
+        assert!(body.contains("\"price\":\"140.00\""), "{body}");
+    }
+}
+
+#[test]
+fn reconciliation_created_at_cannot_invalidate_pending_cancel_acknowledgements() {
+    for all in [false, true] {
+        let (mut e, socket) = ready();
+        ws(
+            &mut e,
+            socket,
+            "account.orderUpdate",
+            r#"{"e":"orderAccepted","i":"123","E":2000000,"X":"New","s":"SOL_USDC_PERP","o":"Limit","S":"Bid","p":"140","q":"5","z":"0","f":"GTC"}"#,
+        );
+        e.drain_actions().for_each(drop);
+        let command = if all {
+            Command::CancelSymbolOrders {
+                command: 1,
+                symbol: SYMBOL.into(),
+            }
+        } else {
+            Command::CancelOrders {
+                command: 1,
+                ids: vec!["123".into()],
+            }
+        };
+        e.handle(2000.0, Event::Command(command));
+        let cancel = requests(&mut e).pop().unwrap();
+        e.handle(2100.0, Event::WsOpened { socket });
+        let read = requests(&mut e)
+            .into_iter()
+            .find(|r| r.url.ends_with("/orders"))
+            .unwrap();
+        reply(&mut e, &read, 200, &format!("[{ORDER}]"));
+        assert_eq!(e.store().order("123").unwrap().last_update, 1000.0);
+        reply(&mut e, &cancel, 200, "{}");
+        assert_eq!(
+            e.store().order("123").unwrap().status,
+            OrderStatus::Canceled
+        );
+    }
 }

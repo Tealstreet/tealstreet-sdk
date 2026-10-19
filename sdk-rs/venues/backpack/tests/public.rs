@@ -369,3 +369,82 @@ fn documented_ticker_uses_open_price_and_uppercase_quote_volume_and_empty_quotes
     assert_eq!(e.store().tickers()[0].bid, 0.0);
     assert_eq!(e.store().tickers()[0].ask, 0.0);
 }
+
+#[test]
+fn failed_seed_reads_retry_independently_and_start_the_socket_after_recovery() {
+    let mut e = Engine::new(Backpack::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.start(0.0);
+    let markets = http(&mut e, "markets");
+    e.handle(
+        0.0,
+        Event::HttpFailed {
+            request: markets.id,
+            error: "temporary outage",
+        },
+    );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, .. } = a {
+                Some(timer)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(1000.0, Event::TimerFired { timer });
+    let markets = http(&mut e, "markets");
+    reply(
+        &mut e,
+        &markets,
+        r#"[{"symbol":"SOL_USDC_PERP","marketType":"PERP","quantityIncrement":"0.01","priceIncrement":"0.01"}]"#,
+    );
+    let requests: Vec<_> = e
+        .drain_actions()
+        .filter_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect();
+    for r in requests {
+        if r.url.contains("tickers") {
+            reply(
+                &mut e,
+                &r,
+                r#"[{"symbol":"SOL_USDC_PERP","lastPrice":"141","priceChangePercent":"0.05","volume":"10","quoteVolume":"1410"}]"#,
+            );
+        } else {
+            reply(&mut e, &r, "malformed");
+        }
+    }
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !actions
+            .iter()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+    let timer = actions
+        .into_iter()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, .. } = a {
+                Some(timer)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(2000.0, Event::TimerFired { timer });
+    let marks = http(&mut e, "markPrices");
+    reply(&mut e, &marks, "[]");
+    assert_eq!(e.store().tickers()[0].last, 141.0);
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+}

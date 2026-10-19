@@ -375,6 +375,8 @@ pub struct OrderRow<'a> {
     pub executed_quote_quantity: Option<Number>,
     #[serde(borrow, default)]
     pub time_in_force: Str<'a>,
+    #[serde(default)]
+    pub post_only: bool,
     #[serde(borrow)]
     pub status: Str<'a>,
     #[serde(deserialize_with = "datetime")]
@@ -414,6 +416,8 @@ pub struct OrderEvent<'a> {
     pub z: f64,
     #[serde(borrow, default)]
     pub f: Str<'a>,
+    #[serde(default)]
+    pub y: bool,
     #[serde(default)]
     pub r: bool,
     pub t: Option<u64>,

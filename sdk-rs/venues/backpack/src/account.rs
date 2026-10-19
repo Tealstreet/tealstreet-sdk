@@ -157,7 +157,11 @@ pub fn order(row: OrderRow<'_>, store: &safe_cex_engine::Store) -> Order {
         reduce_only: row.reduce_only.unwrap_or(trigger.is_some()),
         close: None,
         client_order_id: row.client_id.map(|id| id.to_string()),
-        time_in_force: Some(tif(&row.time_in_force)),
+        time_in_force: Some(if row.post_only {
+            TimeInForce::PostOnly
+        } else {
+            tif(&row.time_in_force)
+        }),
         last_update: row.created_at,
         trigger_type: row.trigger_by.as_deref().and_then(trigger_type),
         take_profit: None,
@@ -213,6 +217,9 @@ fn position(
 }
 
 impl Backpack {
+    pub(crate) fn order_stream_time(&self, id: &str) -> f64 {
+        self.account.order_times.get(id).copied().unwrap_or(0.0)
+    }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn signed(
         &self,
@@ -647,7 +654,11 @@ impl Backpack {
                     reduce_only: d.r || trigger.is_some(),
                     close: None,
                     client_order_id: d.c.as_ref().map(ClientId::text),
-                    time_in_force: Some(tif(&d.f)),
+                    time_in_force: Some(if d.y {
+                        TimeInForce::PostOnly
+                    } else {
+                        tif(&d.f)
+                    }),
                     last_update: (d.event_time / 1000.0).floor(),
                     trigger_type: d.trigger_by.as_deref().and_then(trigger_type),
                     take_profit: None,

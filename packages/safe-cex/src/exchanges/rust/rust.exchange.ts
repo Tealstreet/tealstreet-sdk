@@ -25,6 +25,7 @@ import { Frame } from '@tealstreet/safe-cex-wasm/wire';
 import { exchangeMetadata } from '../../exchangeMetadata';
 import { FrameApplier } from '../../store/frameApplier';
 import { LogSeverity } from '../../types';
+import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
@@ -107,10 +108,23 @@ export class RustEngineExchange extends BaseExchange {
         recvWindow: this.options.extra?.recvWindow,
       }),
     );
-    this.host = new EngineHost(engine, engineTransport(), {
-      onFrame: this.receiveFrame,
-      onLog: this.receiveLog,
-    });
+    const transport = engineTransport();
+    this.host = new EngineHost(
+      engine,
+      this.name === 'backpack'
+        ? {
+            now: virtualClock.getCurrentTimeMs,
+            connect: transport.connect.bind(transport),
+            request: transport.request.bind(transport),
+            setTimeout: transport.setTimeout.bind(transport),
+            clearTimeout: transport.clearTimeout.bind(transport),
+          }
+        : transport,
+      {
+        onFrame: this.receiveFrame,
+        onLog: this.receiveLog,
+      },
+    );
     this.host.start();
     // Books, candles and fills go out at the venue's book cadence, the rest
     // at the store's, matching what the TS worker posts today.

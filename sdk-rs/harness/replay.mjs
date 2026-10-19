@@ -101,7 +101,7 @@ async function runRust() {
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine();
-  const tape = new Tape(records, venue, isPrivate);
+  const tape = new Tape(records, venue, isPrivate, 30000, 'rust');
   const encoder = new TextEncoder();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
@@ -271,7 +271,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
 }
 
 async function runTs() {
-  const tape = new Tape(records, venue, isPrivate);
+  const tape = new Tape(records, venue, isPrivate, 30000, 'ts');
   class TapeWebSocket {
     static CONNECTING = 0;
     static OPEN = 1;
@@ -480,6 +480,7 @@ function normalizeAccount(account) {
     amount: o.amount,
     filled: o.filled,
     remaining: o.remaining,
+    ...(venue.compareClientIds && o.type === 'limit' ? { timeInForce: o.timeInForce ?? null } : {}),
     reduceOnly: Boolean(o.reduceOnly),
     close: Boolean(o.close),
     trigger: o.tpTriggerType ?? o.slTriggerType ?? o.triggerType ?? null,
