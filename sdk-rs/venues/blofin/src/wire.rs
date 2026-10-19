@@ -219,6 +219,8 @@ impl From<BooleanWire<'_>> for Boolean {
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderRow<'a> {
+    #[serde(borrow, default)]
+    pub attach_algo_orders: Vec<Attachment<'a>>,
     #[serde(borrow)]
     pub inst_id: Str<'a>,
     #[serde(borrow, default)]
@@ -322,4 +324,25 @@ pub struct ModeRow<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct AccountRow {
     pub total_equity: Number,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment<'a> {
+    #[serde(default)]
+    pub tp_trigger_price: Number,
+    #[serde(default)]
+    pub sl_trigger_price: Number,
+    #[serde(default)]
+    pub tp_order_price: Number,
+    #[serde(default)]
+    pub sl_order_price: Number,
+    #[serde(borrow, default)]
+    pub tp_trigger_price_type: Str<'a>,
+    #[serde(borrow, default)]
+    pub sl_trigger_price_type: Str<'a>,
+}
+
+pub fn nullable_text<'de, D: Deserializer<'de>>(d: D) -> Result<Str<'de>, D::Error> {
+    Ok(Option::<Str<'de>>::deserialize(d)?.unwrap_or_default())
 }

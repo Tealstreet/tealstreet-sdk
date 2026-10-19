@@ -393,6 +393,18 @@ impl Blofin {
         }]
     }
     fn source(o: &OrderRow<'_>) -> Source {
+        let attached = o.attach_algo_orders.first();
+        let (tp, sl, tp_order_price, sl_order_price, tp_type, sl_type) =
+            attached.map_or((0.0, 0.0, 0.0, 0.0, "", ""), |a| {
+                (
+                    a.tp_trigger_price.0,
+                    a.sl_trigger_price.0,
+                    a.tp_order_price.0,
+                    a.sl_order_price.0,
+                    a.tp_trigger_price_type.as_ref(),
+                    a.sl_trigger_price_type.as_ref(),
+                )
+            });
         Source {
             inst_id: o.inst_id.to_string(),
             margin_mode: o.margin_mode.to_string(),
@@ -402,12 +414,36 @@ impl Blofin {
             algo_id: o.algo_id.to_string(),
             trigger_price_type: o.trigger_price_type.to_string(),
             order_price: o.order_price.0,
-            tp: o.tp_trigger_price.0,
-            sl: o.sl_trigger_price.0,
-            tp_type: o.tp_trigger_price_type.to_string(),
-            sl_type: o.sl_trigger_price_type.to_string(),
-            tp_order_price: o.tp_order_price.0,
-            sl_order_price: o.sl_order_price.0,
+            tp: if o.tp_trigger_price.0 > 0.0 {
+                o.tp_trigger_price.0
+            } else {
+                tp
+            },
+            sl: if o.sl_trigger_price.0 > 0.0 {
+                o.sl_trigger_price.0
+            } else {
+                sl
+            },
+            tp_type: if o.tp_trigger_price_type.is_empty() {
+                tp_type.to_owned()
+            } else {
+                o.tp_trigger_price_type.to_string()
+            },
+            sl_type: if o.sl_trigger_price_type.is_empty() {
+                sl_type.to_owned()
+            } else {
+                o.sl_trigger_price_type.to_string()
+            },
+            tp_order_price: if o.tp_order_price.0 != 0.0 {
+                o.tp_order_price.0
+            } else {
+                tp_order_price
+            },
+            sl_order_price: if o.sl_order_price.0 != 0.0 {
+                o.sl_order_price.0
+            } else {
+                sl_order_price
+            },
         }
     }
     fn map_position(&self, cx: &Cx<'_, Pending>, p: &PositionRow<'_>) -> Option<Position> {

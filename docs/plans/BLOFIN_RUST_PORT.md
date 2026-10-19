@@ -115,3 +115,31 @@ merge that PR, and create a fresh follow-up branch. No rebase or force push.
 - Verify all-or-nothing IDs, placement sizing/brackets, response-loss no-retry,
   conditional provenance, cancel correlation and sibling preservation, mode and
   leverage rejections, optimistic states and cleanup.
+
+### Phase 3 review and verification
+
+- Sequenced jobs preflight every write, replan queued commands against confirmed
+  state, and never retry uncertain writes. Normal batches, standalone/full-position
+  TP/SL, opening triggers, cancel/amend and settings are implemented.
+- Review caught and fixed nullable response messages, tiny partial sizes becoming
+  full-position stops, edits dropping native entries or bracket provenance,
+  sibling execution/reference changes and live-position margin overwrites.
+- Both isolated-hedged leverage writes are issued together and joined before
+  settings commit. Lot-unit splitting preserves quantity without rounding loss.
+- Final review recheck: no remaining blockers. 34 venue tests pass (16 trading,
+  9 account, 8 public, 1 signing); clippy and bans pass.
+- Additional intentional TS corrections: validate every cancel row and its exact
+  submitted identity even under code 0; reject unsupported TIF/tiny partial
+  protection instead of silently changing semantics; conserve split lot units.
+
+### Phase 4 implementation plan
+
+- Borrowed history payloads stream into typed result rows; commands return the
+  same JSON keys as Binance's history module. Preserve per-fill trade IDs,
+  native-to-base execution quantities, fee sign conventions and time units.
+- Orders preserve TS's native quantity history shape. Income uses cursor paging
+  and client-side time windows because BloFin ignores begin/end on fills history;
+  page failures fail the read rather than silently returning partial history.
+- Public trades and candle reads validate symbols/options; rare reads never
+  mutate the store. Test fill identity, tiny quantities, fee signs, filtering,
+  paging failures and exact JSON shapes; run a phase-end sub-agent review.

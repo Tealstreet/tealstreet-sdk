@@ -63,6 +63,9 @@ const isPrivate = Boolean(ts.account);
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
+// BloFin trading validates per-row cancels and requested identities even under
+// code 0; rejects rounded-to-zero partial stops and unsupported TIF; and splits
+// in integral lots without losing quantity. Valid command tapes need no rewrite.
 // BloFin also rejects malformed successful margin/position-mode responses
 // instead of silently choosing cross/one-way, and clears used/upnl after an
 // empty position push. Valid payloads need no mode normalization.

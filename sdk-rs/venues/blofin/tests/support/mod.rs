@@ -120,26 +120,3 @@ impl Harness {
         self.collect();
     }
 }
-pub fn executions(frame: &[u8]) -> Vec<(f64, f64)> {
-    let mut offset = 16;
-    while offset < frame.len() {
-        let kind = u16::from_le_bytes(frame[offset..offset + 2].try_into().unwrap());
-        let len = u32::from_le_bytes(frame[offset + 4..offset + 8].try_into().unwrap()) as usize;
-        if kind == 11 {
-            let data = &frame[offset + 8..offset + 8 + len];
-            let count = u32::from_le_bytes(data[..4].try_into().unwrap()) as usize;
-            let start = (4 + count * 12 + 7) & !7;
-            return (0..count)
-                .map(|i| {
-                    let j = start + i * 16;
-                    (
-                        f64::from_le_bytes(data[j..j + 8].try_into().unwrap()),
-                        f64::from_le_bytes(data[j + 8..j + 16].try_into().unwrap()),
-                    )
-                })
-                .collect();
-        }
-        offset += 8 + len;
-    }
-    vec![]
-}

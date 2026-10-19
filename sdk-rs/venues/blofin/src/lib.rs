@@ -1,6 +1,7 @@
 //! BloFin linear perpetuals on the sans-I/O engine.
 mod account;
 mod sign;
+mod trading;
 mod wire;
 use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::ArrayAt;
@@ -21,6 +22,7 @@ pub struct Options {
     pub passphrase: Option<String>,
 }
 pub enum Pending {
+    Trade(trading::Request),
     Account(account::Request),
     Markets {
         rows: Vec<Market>,
@@ -60,6 +62,7 @@ struct CandleState {
 pub struct Blofin {
     options: Options,
     account: account::Account,
+    trading: trading::Trading,
     public: Connection,
     books: HashMap<String, DepthState>,
     candles: HashMap<(String, String), CandleState>,
@@ -117,6 +120,7 @@ impl Blofin {
         Self {
             options,
             account: account::Account::default(),
+            trading: trading::Trading::default(),
             public: Connection::default(),
             books: HashMap::new(),
             candles: HashMap::new(),
@@ -481,6 +485,7 @@ impl Venue for Blofin {
     }
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
         match pending {
+            Pending::Trade(_) => {}
             Pending::Account(request) => self.account_item(cx, request, item),
             Pending::Markets { rows, failed } => match serde_json::from_str::<Instrument<'_>>(item)
             {
@@ -564,6 +569,10 @@ impl Venue for Blofin {
                 self.account_response(cx, request, response);
                 return;
             }
+            Pending::Trade(request) => {
+                self.trade_response(cx, request, response);
+                return;
+            }
             other => other,
         };
         if let Err(error) = check(&response) {
@@ -605,6 +614,13 @@ impl Venue for Blofin {
         }
     }
     fn on_request_failed(&mut self, cx: &mut Cx<'_, Pending>, pending: Pending, error: &str) {
+        let pending = match pending {
+            Pending::Trade(request) => {
+                self.trade_failed(cx, request, error);
+                return;
+            }
+            other => other,
+        };
         if let Pending::Account(request) = pending {
             self.account_failed(cx, request, error);
             return;
@@ -616,6 +632,9 @@ impl Venue for Blofin {
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        if self.trading_timer(cx, timer) {
+            return;
+        }
         if self.account_timer(cx, timer) {
             return;
         }
@@ -739,7 +758,7 @@ impl Venue for Blofin {
                     cx.done(command, Err(format!("Unknown market {symbol}")));
                 }
             }
-            _ => {}
+            other => self.trading_command(cx, other),
         }
     }
     fn book(&self, symbol: &str) -> Option<&Book> {

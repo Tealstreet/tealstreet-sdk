@@ -773,3 +773,12 @@ malformed successful mode reads do not silently initialize cross/one-way mode,
 and an empty position push clears used margin and unrealized PnL. Per-market
 settings retain leverage and margin when positions close. Cumulative fills keep
 quantity and traded-value watermarks for 500 orders, including terminal rows.
+
+Rust commands preflight an entire batch before I/O. Cancel responses must cover
+exactly the requested native identities even when the top-level code is zero;
+per-row failures are never swallowed. Cancel-replace keeps attached trigger
+references and execution prices and gives each replacement a new client ID.
+Positive partial protection sizes that round to zero are rejected, and only an
+explicit zero selects full-position semantics. Unsupported time-in-force shapes
+are rejected. Split sizes conserve native lot units. These defensive corrections
+to legacy TS behavior are listed in the Rust gate and commit messages.
