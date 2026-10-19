@@ -359,3 +359,18 @@ The rebuilt nine-venue wasm is 2,844,905 bytes at LLVM `z`. The 3 MiB budget com
 from the Backpack landing unchanged. The complete matrix is now 29 replay gates
 (13 public, 16 private); final validation and green final-head CI remain required
 before merge. Hyro live connectivity remains unverified.
+
+Independent extraction review caught a missing `stable` import at the gate's
+market comparator. The first replay reproduced the ReferenceError; restore the
+import and rerun the complete matrix. A new integration test executes the actual
+gate CLI with controlled replay outputs across every venue's public/private
+oracle, including populated comparisons, independent mismatches and invalid
+memory components on a later private run. Removing the import in a temporary
+copy proves this test fails. All 87 harness tests and the undefined-symbol audit
+pass; a second adversarial extraction review found no further defects.
+
+Nine-venue functional checks pass: 659 native workspace cases (Bybit 105,
+engine 46, Backpack 50), 39 wasm boundary cases, 25 host/socket/Workers cases and
+eight frame/copier cases. Workspace bans, fmt, strict all-target Clippy,
+wasm Clippy, typecheck (44 tasks), lint (28 tasks), licenses (31 workspaces)
+and the lane commit secret scan pass. Final replay results and CI remain pending.

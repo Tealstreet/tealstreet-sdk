@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
-import { sameCommandResults } from './tape.mjs';
+import { sameCommandResults, stable } from './tape.mjs';
 import { normalizeTsBybitSubscriptions } from './bybit-subscriptions.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { fixWeexConditionals } from './known-ts-fixes.mjs';
