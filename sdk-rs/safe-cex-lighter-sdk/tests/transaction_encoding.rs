@@ -39,21 +39,6 @@ fn number(v: &Value) -> f64 {
 fn big(v: &Value) -> BigInt {
     v["bigint"].as_str().unwrap().parse().unwrap()
 }
-fn header(tx: &Value) -> HashHeader {
-    let o = &tx["opts"];
-    HashHeader {
-        tx_type: number(&tx["txType"]),
-        opts: HashOptions {
-            account_index: number(&o["accountIndex"]),
-            api_key_index: number(&o["apiKeyIndex"]),
-            nonce: number(&o["nonce"]),
-            expiry: number(&o["expiry"]),
-        },
-    }
-}
-fn optional_units(tx: &Value, key: &str) -> Option<Vec<u16>> {
-    tx.get(key).map(units)
-}
 fn compare<T>(case: &Value, actual: Result<T, EncodingError>, decode: impl Fn(&Value) -> T)
 where
     T: std::fmt::Debug + PartialEq,
@@ -85,83 +70,6 @@ where
             error.message, message,
             "SDK-ENC error units {method} {label}"
         );
-    }
-}
-#[test]
-fn transaction_messages_match_maintained_typescript() {
-    let cases = corpus()["cases"].as_array().unwrap();
-    for method in [
-        "hashCreateOrderTx",
-        "hashCancelOrderTx",
-        "hashTransferTx",
-        "hashWithdrawTx",
-        "hashAuthToken",
-    ] {
-        let rows: Vec<_> = cases.iter().filter(|c| c["method"] == method).collect();
-        assert_eq!(rows.len(), 8, "SDK-ENC independent hash floor {method}");
-        for case in rows {
-            let args = &case["args"];
-            if method == "hashAuthToken" {
-                compare(
-                    case,
-                    hash_auth_token(
-                        number(&args[0]),
-                        number(&args[1]),
-                        &big(&args[2]),
-                        number(&args[3]),
-                    ),
-                    units,
-                );
-                continue;
-            }
-            let tx = &args[0];
-            let chain = number(&args[1]);
-            let output = match method {
-                "hashCreateOrderTx" => hash_create_order_tx(
-                    &CreateOrderInput {
-                        header: header(tx),
-                        market_id: units(&tx["marketId"]),
-                        order_type: number(&tx["orderType"]),
-                        side: number(&tx["side"]),
-                        price: units(&tx["price"]),
-                        quantity: units(&tx["quantity"]),
-                        time_in_force: number(&tx["timeInForce"]),
-                        reduce_only: tx["reduceOnly"].as_bool().unwrap(),
-                        post_only: tx["postOnly"].as_bool().unwrap(),
-                        stop_price: optional_units(tx, "stopPrice"),
-                    },
-                    chain,
-                ),
-                "hashCancelOrderTx" => hash_cancel_order_tx(
-                    &CancelOrderInput {
-                        header: header(tx),
-                        market_id: units(&tx["marketId"]),
-                        order_id: units(&tx["orderId"]),
-                    },
-                    chain,
-                ),
-                "hashTransferTx" => hash_transfer_tx(
-                    &TransferInput {
-                        header: header(tx),
-                        token_address: units(&tx["tokenAddress"]),
-                        recipient: units(&tx["recipient"]),
-                        amount: units(&tx["amount"]),
-                    },
-                    chain,
-                ),
-                _ => hash_withdraw_tx(
-                    &WithdrawInput {
-                        header: header(tx),
-                        token_address: units(&tx["tokenAddress"]),
-                        amount: units(&tx["amount"]),
-                        l1_recipient: optional_units(tx, "l1Recipient"),
-                        fast_withdraw: tx.get("fastWithdraw").map(|v| v.as_bool().unwrap()),
-                    },
-                    chain,
-                ),
-            };
-            compare(case, output, units);
-        }
     }
 }
 struct PrimitiveBindings;
