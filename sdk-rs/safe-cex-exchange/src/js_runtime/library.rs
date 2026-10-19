@@ -34,7 +34,10 @@ impl safe_cex_store::remaining_utils::UnknownOutcomeValue for NativeOutcome {
         self.0.truthy()
     }
     fn outcome_number(&self) -> Result<f64, Thrown> {
-        self.0.to_number()
+        ops::number(&self.0)
+    }
+    fn outcome_at_least(&self, minimum: f64) -> Result<bool, Thrown> {
+        ops::greater_equal(&self.0, &Js::Number(minimum))
     }
     fn outcome_network_code(&self) -> bool {
         ["ECONNRESET", "ECONNABORTED", "ETIMEDOUT", "ERR_NETWORK"]

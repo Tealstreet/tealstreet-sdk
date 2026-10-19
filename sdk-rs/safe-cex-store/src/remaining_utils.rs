@@ -91,6 +91,7 @@ pub trait UnknownOutcomeValue: Sized {
     fn outcome_nullish(&self) -> bool;
     fn outcome_truthy(&self) -> bool;
     fn outcome_number(&self) -> Result<f64, Self::Error>;
+    fn outcome_at_least(&self, minimum: f64) -> Result<bool, Self::Error>;
     fn outcome_network_code(&self) -> bool;
     fn outcome_test(&self, pattern: &str, ignore_case: bool) -> Result<bool, Self::Error>;
 }
@@ -112,7 +113,7 @@ pub fn is_unknown_outcome_value<V: UnknownOutcomeValue>(error: &V) -> Result<boo
     }
     if response.outcome_truthy() {
         let status = response.outcome_get("status")?;
-        if !status.outcome_nullish() && status.outcome_number()? >= 500.0 {
+        if !status.outcome_nullish() && status.outcome_at_least(500.0)? {
             return Ok(true);
         }
         let data = response.outcome_get("data")?;
@@ -143,6 +144,9 @@ impl UnknownOutcomeValue for JsonOutcome<'_> {
     }
     fn outcome_number(&self) -> Result<f64, String> {
         js_number(self.0).map_err(|error| format!("{error:?}"))
+    }
+    fn outcome_at_least(&self, minimum: f64) -> Result<bool, String> {
+        Ok(self.outcome_number()? >= minimum)
     }
     fn outcome_network_code(&self) -> bool {
         self.0.and_then(Value::as_str).is_some_and(|code| {

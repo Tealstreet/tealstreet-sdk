@@ -36125,5 +36125,150 @@
         }
       }
     ]
+  },
+  "safe_cex_exchange::js_runtime::ops::number": {
+    "api": {
+      "kind": "function",
+      "name": "number",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "The installed Number builtin and retained unknown-outcome adapter share this single canonical Number conversion. Actual constructed Bybit primary/demo bindings compare BigInt response status and venue codes against maintained TS, including valueOf order and overflow.",
+    "call": "{let marker=super::Js::object(vec![]);let primitive=match $value[\"kind\"].as_str().unwrap(){\"negative-zero\"=>super::Js::Number(-0.0),\"nan\"=>super::Js::Number(f64::NAN),\"symbol\"=>super::Js::SymbolIterator,_=>super::Js::BigInt(std::rc::Rc::new($value[\"text\"].as_str().unwrap_or(\"0\").parse().unwrap()))};let trace=std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));let input=if $value[\"object\"].as_bool().unwrap_or(false){let seen=trace.clone();let reason=marker.clone();let throws=$value[\"throws\"].as_bool().unwrap_or(false);super::Js::object(vec![(\"valueOf\",super::Js::function(\"valueOf\",move |_,_|{seen.borrow_mut().push(\"number\");if throws {Err(super::Thrown::new(reason.clone()))}else{Ok(primitive.clone())}}))])}else{primitive};match $type(&input){Ok(number)=>serde_json::json!({\"bits\":format!(\"{:016x}\",number.to_bits()),\"events\":*trace.borrow()}),Err(error)=>serde_json::json!({\"throws\":true,\"original\":error.value.same_reference(&marker),\"events\":*trace.borrow()})}}",
+    "cases": [
+      {
+        "input": {
+          "kind": "bigint",
+          "text": "503"
+        },
+        "output": {
+          "bits": "407f700000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "bigint",
+          "text": "-1007"
+        },
+        "output": {
+          "bits": "c08f780000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "bigint",
+          "text": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "output": {
+          "bits": "7ff0000000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "negative-zero"
+        },
+        "output": {
+          "bits": "8000000000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "nan"
+        },
+        "output": {
+          "bits": "7ff8000000000000",
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "bigint",
+          "text": "503",
+          "object": true
+        },
+        "output": {
+          "bits": "407f700000000000",
+          "events": [
+            "number"
+          ]
+        }
+      },
+      {
+        "input": {
+          "kind": "symbol"
+        },
+        "output": {
+          "throws": true,
+          "original": false,
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "kind": "bigint",
+          "object": true,
+          "throws": true
+        },
+        "output": {
+          "throws": true,
+          "original": true,
+          "events": [
+            "number"
+          ]
+        }
+      }
+    ]
   }
 }

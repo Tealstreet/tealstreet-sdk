@@ -211,10 +211,10 @@ returned empty results before serialization. Profiles include opaque UTF-16,
 own undefined/NaN, inherited codes, hidden messages, infinity, unused throwing
 getters, source response precedence, the signing veto and absent caller IDs.
 
-Ten further profiles per variant call the same installed native global and
+Sixteen further profiles per variant call the same installed native global and
 maintained TS helper. They retain exact property/coercion order, original getter
 and conversion throws, repeated message coercion, function exclusion, inherited
-array fields and short-circuited response data. The original production code
+array fields and short-circuited response data. Six BigInt profiles pin mixed relational comparison and explicit Number conversion, including valueOf order and overflow, through the canonical shared operations. The original production code
 compiles but fails the real submission comparison by replacing the rejection with
 a typed UTF-16 admission error. No placement retry, signing or request-method
 policy changes; a potentially executed order is still never automatically resent.

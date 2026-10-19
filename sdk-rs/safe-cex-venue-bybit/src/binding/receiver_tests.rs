@@ -1967,7 +1967,12 @@ fn audit_unknown_outcome_preserves_native_submission_rejection() {
                             input
                         }
                         22..=27 => {
-                            let big = |text: &str| rt.global("BigInt").unwrap().call(Js::Undefined, vec![Js::str(text)]).unwrap();
+                            let big = |text: &str| {
+                                rt.global("BigInt")
+                                    .unwrap()
+                                    .call(Js::Undefined, vec![Js::str(text)])
+                                    .unwrap()
+                            };
                             let huge = big(&format!("1{}", "0".repeat(400)));
                             let status = match profile {
                                 22 => big("503"),
@@ -1975,23 +1980,41 @@ fn audit_unknown_outcome_preserves_native_submission_rejection() {
                                 24 => {
                                     let trace = events.clone();
                                     let value = big("503");
-                                    Js::object(vec![("valueOf", Js::function("valueOf", move |_, _| {
-                                        trace.borrow_mut().push("big-status".into());
-                                        Ok(value.clone())
-                                    }))])
-                                },
+                                    Js::object(vec![(
+                                        "valueOf",
+                                        Js::function("valueOf", move |_, _| {
+                                            trace.borrow_mut().push("big-status".into());
+                                            Ok(value.clone())
+                                        }),
+                                    )])
+                                }
                                 26 => huge.clone(),
                                 _ => big("499"),
                             };
                             let code = if profile == 25 {
                                 let trace = events.clone();
                                 let value = big("-1007");
-                                Js::object(vec![("valueOf", Js::function("valueOf", move |_, _| {
-                                    trace.borrow_mut().push("big-venue".into());
-                                    Ok(value.clone())
-                                }))])
-                            } else if profile == 27 { huge } else { big("-1007") };
-                            input.define("response", Js::object(vec![("status", status), ("data", Js::object(vec![("code", code)]))])).unwrap();
+                                Js::object(vec![(
+                                    "valueOf",
+                                    Js::function("valueOf", move |_, _| {
+                                        trace.borrow_mut().push("big-venue".into());
+                                        Ok(value.clone())
+                                    }),
+                                )])
+                            } else if profile == 27 {
+                                huge
+                            } else {
+                                big("-1007")
+                            };
+                            input
+                                .define(
+                                    "response",
+                                    Js::object(vec![
+                                        ("status", status),
+                                        ("data", Js::object(vec![("code", code)])),
+                                    ]),
+                                )
+                                .unwrap();
                             input
                         }
                         _ => unreachable!(),
