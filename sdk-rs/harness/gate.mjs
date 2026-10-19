@@ -55,14 +55,8 @@ for (let run = 0; run < runs; run++) {
   for (const impl of ['ts', 'rust']) results[impl].push(replay(impl, run));
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
-
-if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
-// Every request must match a taped one: an unserved request sent different parameters.
-for (const impl of ['ts', 'rust']) {
-  const unserved = results[impl][0].unserved;
-  if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
-}
 const isPrivate = Boolean(ts.account);
+
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 //  - A position first seen on the user stream keeps the margin size of TS's
 //    zero-size placeholder (0); Rust takes the isolated wallet, or notional
@@ -86,28 +80,44 @@ const KNOWN_TS_FIXES = {
     'new account equity survives delayed snapshots and local balance ticks',
   ],
   account: (account, rustAccount) => {
-  for (const position of account.positions) {
-    const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
-    if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
-  }
+    for (const position of account.positions) {
+      const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
+      if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+    }
   },
 };
-if (isPrivate) {
-  if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
-  for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
-    const left = JSON.stringify(ts.account[field]);
-    const right = JSON.stringify(rust.account[field]);
-    if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
+for (let run = 0; run < runs; run++) {
+  const ts = results.ts[run];
+  const rust = results.rust[run];
+  if (ts.frames !== rust.frames) differences.push(`frames: ts=${ts.frames} rust=${rust.frames}`);
+  // Every request must match a taped one: an unserved request sent different parameters.
+  for (const impl of ['ts', 'rust']) {
+    const output = impl === 'ts' ? ts : rust;
+    const unserved = output.unserved;
+    for (const symbol of values.books.split(',').filter(Boolean)) {
+      if (!output.books[symbol]) differences.push(`${impl}: requested book ${symbol} is missing`);
+    }
+    if (!output.markets.length || !output.tickers.length) differences.push(`${impl}: empty public seed`);
+    if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
+  }
+  const isPrivate = Boolean(ts.account);
+  if (isPrivate) {
+    if (values.venue === 'binance') KNOWN_TS_FIXES.account(ts.account, rust.account);
+    for (const field of ['hedged', 'balance', 'orders', 'positions', 'settings', 'fills']) {
+      const left = JSON.stringify(ts.account[field]);
+      const right = JSON.stringify(rust.account[field]);
+      if (left !== right) differences.push(`account ${field}:\n    ts=${left}\n  rust=${right}`);
+    }
   }
   const left = JSON.stringify(stable(ts.commands));
   const right = JSON.stringify(stable(rust.commands));
   if (left !== right) differences.push(`command results: ts=${left} rust=${right}`);
-}
-compare('market', ts.markets, rust.markets);
-compare('ticker', ts.tickers, rust.tickers);
-for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
-  if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
-    differences.push(`book ${symbol} differs`);
+  compare('market', ts.markets, rust.markets);
+  compare('ticker', ts.tickers, rust.tickers);
+  for (const symbol of new Set([...Object.keys(ts.books), ...Object.keys(rust.books)])) {
+    if (JSON.stringify(ts.books[symbol]) !== JSON.stringify(rust.books[symbol])) {
+      differences.push(`book ${symbol} differs`);
+    }
   }
 }
 

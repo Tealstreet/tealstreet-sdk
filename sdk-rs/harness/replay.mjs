@@ -35,11 +35,12 @@ const replayDeadline = setTimeout(() => {
   process.exit(1);
 }, 120_000);
 replayDeadline.unref();
+class ReplayTimeout extends Error {}
 const within = async (promise, ms, label) => {
   let timer;
   try {
     return await Promise.race([promise, new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${label} exceeded ${ms} ms`)), ms);
+      timer = setTimeout(() => reject(new ReplayTimeout(`${label} exceeded ${ms} ms`)), ms);
     })]);
   } finally { clearTimeout(timer); }
 };
@@ -119,7 +120,7 @@ class Tape {
   }
 
   connect(url, onOpen, onMessage) {
-    const socket = { url, onMessage, closed: false, loginVerified: false };
+    const socket = { url, onMessage, closed: false, loginVerified: false, topics: new Map() };
     setImmediate(() => {
       if (socket.closed) return;
       this.open.set(url, socket);
@@ -134,12 +135,26 @@ class Tape {
       setImmediate(() => { if (!socket.closed) socket.onMessage('pong'); });
       return;
     }
-    if (!venue.validateLogin || !/\/(private|business)$/.test(new URL(socket.url).pathname)) return;
+    // OKX's opt-in auth validation also uses its v5 subscription argument model.
+    const validateTopics = venue.validateSubscriptions ?? venue.validateLogin;
+    if (!venue.validateLogin && !validateTopics) return;
     const message = JSON.parse(text);
+    if (validateTopics && ['subscribe', 'unsubscribe'].includes(message.op)) {
+      if (!Array.isArray(message.args)) throw new Error(`Invalid subscription on ${socket.url}`);
+      for (const topic of message.args) {
+        if (!topic || typeof topic.channel !== 'string' || !topic.channel) throw new Error(`Invalid subscription topic on ${socket.url}`);
+        const key = JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
+        if (message.op === 'subscribe') socket.topics.set(key, topic);
+        else socket.topics.delete(key);
+      }
+      return;
+    }
+    if (!venue.validateLogin || !/\/(private|business)$/.test(new URL(socket.url).pathname)) return;
     if (message.op !== 'login') return;
     const arg = message.args?.length === 1 ? message.args[0] : undefined;
     const timestamp = String(arg?.timestamp ?? '');
-    if (arg?.apiKey !== KEY || arg?.passphrase !== PASSPHRASE || !/^\d+$/.test(timestamp) || !Number.isSafeInteger(Number(timestamp))) {
+    if (arg?.apiKey !== KEY || arg?.passphrase !== PASSPHRASE || !/^\d+$/.test(timestamp)
+      || !Number.isSafeInteger(Number(timestamp)) || Math.abs(Number(timestamp) - Date.now() / 1000) > 30) {
       throw new Error(`Invalid OKX login credentials/timestamp on ${socket.url}`);
     }
     const expected = createHmac('sha256', SECRET).update(`${timestamp}GET/users/self/verify`).digest('base64');
@@ -149,6 +164,29 @@ class Tape {
       throw new Error(`Invalid OKX login signature on ${socket.url}`);
     }
     socket.loginVerified = true;
+  }
+
+  assertSubscribed(socket, message) {
+    if (!(venue.validateSubscriptions ?? venue.validateLogin) || !message.arg?.channel || !Array.isArray(message.data)) return;
+    const topics = [...socket.topics.values()].filter((topic) => topic.channel === message.arg.channel);
+    // Some documented messages put instId only on each data row, not arg.
+    const rows = message.data.length ? message.data : [null];
+    for (const row of rows) {
+      const object = row && !Array.isArray(row) && typeof row === 'object' ? row : {};
+      const covered = topics.some((topic) => Object.entries(topic).every(([key, value]) => {
+        if (key === 'channel') return true;
+        if (key === 'instType' && value === 'ANY') return true;
+        const values = [message.arg[key], object[key]].filter((v) => v !== undefined && v !== '');
+        if (!values.length && key === 'instType') {
+          const id = object.instId ?? message.arg.instId;
+          if (id?.endsWith('-SWAP')) values.push('SWAP');
+        }
+        return values.length > 0 && values.every((v) => v === value);
+      }));
+      if (!covered) {
+        throw new Error(`Unsubscribed ${message.arg.channel} frame on ${socket.url}: ${JSON.stringify(message.arg)}${object.instId ? ` instId=${object.instId}` : ''}`);
+      }
+    }
   }
 
   assertWritesConsumed() {
@@ -187,14 +225,18 @@ class Tape {
       }
       if (frame.type === 'command') {
         this.commandIndex++;
-        this.results.push(await within(runCommand(frame), 15_000, `Command ${frame.op}`).then((ids) => ({ ok: ids }), (error) => ({ error: String(error?.message ?? error) })));
+        this.results.push(await within(runCommand(frame), 15_000, `Command ${frame.op}`).then((ids) => ({ ok: ids }), (error) => {
+          if (error instanceof ReplayTimeout) throw error;
+          return { error: String(error?.message ?? error) };
+        }));
       } else {
         const socket = await this.socketFor(frame.url);
-        if (venue.validateLogin && frame.text.startsWith('{')) {
+        if ((venue.validateLogin || venue.validateSubscriptions) && frame.text.trimStart().startsWith('{')) {
           const message = JSON.parse(frame.text);
-          if (message.event === 'login' && String(message.code) === '0' && !socket.loginVerified) {
+          if (venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified) {
             throw new Error(`Taped login success preceded a valid login on ${frame.url}`);
           }
+          this.assertSubscribed(socket, message);
         }
         socket.onMessage(frame.text);
       }
