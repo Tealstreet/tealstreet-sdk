@@ -171,7 +171,7 @@ type Formatter = Rc<dyn Fn(&Value) -> Option<String>>;
 type Redactor = Rc<dyn Fn(&str) -> Option<String>>;
 type ChannelFilter = Rc<dyn Fn(&Value) -> Result<bool, ExchangeError>>;
 type SendFormatter = Rc<dyn Fn(&str) -> Option<String>>;
-pub type MessageHandler = Rc<dyn Fn(&Value) -> Result<(), ExchangeError>>;
+pub type MessageHandler = Rc<dyn Fn(&crate::js_runtime::value::Js) -> Result<(), ExchangeError>>;
 pub type HandlerList = Rc<RefCell<Vec<MessageHandler>>>;
 /// Source topic statistics using the existing native statistics record.
 pub type MessageHandlersStats = indexmap::IndexMap<String, MessageHandlerStat>;
@@ -2467,7 +2467,11 @@ impl BaseWebSocket {
             reconnect_count: s.reconnect_count,
         }
     }
-    pub fn dispatch_message(&self, key: &str, message: &Value) -> Result<(), ExchangeError> {
+    pub fn dispatch_message(
+        &self,
+        key: &str,
+        message: &crate::js_runtime::value::Js,
+    ) -> Result<(), ExchangeError> {
         let Some(callbacks) = self.message_handlers.borrow().get(key).cloned() else {
             return Ok(());
         };
@@ -4899,9 +4903,11 @@ mod tests {
                 c.set(c.get() + 1);
                 Ok(())
             }));
-        s.dispatch_message("book.ETH", &Value::Null).unwrap();
+        s.dispatch_message("book.ETH", &crate::js_runtime::value::Js::Null)
+            .unwrap();
         assert_eq!(calls.get(), 0);
-        s.dispatch_message("book.BTC", &Value::Null).unwrap();
+        s.dispatch_message("book.BTC", &crate::js_runtime::value::Js::Null)
+            .unwrap();
         assert_eq!(calls.get(), 2);
         assert_eq!(
             s.message_handlers_stats.borrow()["book.BTC"].had_handlers,
@@ -4993,10 +4999,16 @@ mod tests {
             .message_handlers
             .borrow_mut()
             .insert("empty".into(), Rc::new(RefCell::new(vec![])));
-        assert_eq!(socket.dispatch_message("absent", &Value::Null), Ok(()));
-        assert_eq!(socket.dispatch_message("empty", &Value::Null), Ok(()));
+        assert_eq!(
+            socket.dispatch_message("absent", &crate::js_runtime::value::Js::Null),
+            Ok(())
+        );
+        assert_eq!(
+            socket.dispatch_message("empty", &crate::js_runtime::value::Js::Null),
+            Ok(())
+        );
         assert!(socket.message_handlers_stats.borrow().is_empty());
-        let result = socket.dispatch_message("ticker", &Value::Null);
+        let result = socket.dispatch_message("ticker", &crate::js_runtime::value::Js::Null);
         assert_eq!(
             later_calls.get(),
             0,
@@ -5061,7 +5073,7 @@ mod tests {
             .borrow_mut()
             .insert("__proto__".into(), Rc::new(RefCell::new(vec![handler])));
         let error = socket
-            .dispatch_message("__proto__", &Value::Null)
+            .dispatch_message("__proto__", &crate::js_runtime::value::Js::Null)
             .unwrap_err();
         assert_eq!(
             error.name, "TypeError",
@@ -5134,7 +5146,7 @@ mod tests {
 
             if let Some(count) = case["ownHandlers"].as_u64() {
                 let handlers: Vec<MessageHandler> = (0..count)
-                    .map(|_| Rc::new(|_: &Value| Ok(())) as MessageHandler)
+                    .map(|_| Rc::new(|_: &crate::js_runtime::value::Js| Ok(())) as MessageHandler)
                     .collect();
                 socket
                     .message_handlers

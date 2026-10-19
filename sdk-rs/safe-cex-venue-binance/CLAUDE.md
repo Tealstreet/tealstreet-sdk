@@ -788,9 +788,9 @@ The actual native ticker census in private_classes retains source comparisons fo
 all three families; its production field-routing control requires three compiled
 failures and exact-restored passes.
 
-The remaining five public stream aliases have a finite authenticated compiler
+The remaining four public stream aliases have a finite authenticated compiler
 runner, `scripts/public-stream-alias-contracts.mjs`. Failure, TickerFields,
-CallbackList and CoreInvoke are specific non-decoder capabilities; their native
+CallbackList are specific non-decoder capabilities; their native
 trait receipts do not claim callback execution. The constructed native ticker
 census and inverse socket topic/depth tests execute their live consumers.
 BinanceDepthUpdate remains a live map decoder. Its two native observations read
@@ -1031,6 +1031,12 @@ only to the canonical order_logic/request_weight helpers. The actual interceptor
 and post-only classifier bindings already call those helpers directly. Keep the
 native signed-client and batch-rejection canaries in DEAD_STATE_FORWARDER_REVIEW.md
 when changing either live binding. The complete State receipt remains separate.
+
+Shared WebSocket message handlers now borrow the canonical `Js` frame graph.
+Restore retained ingress once per frame, preserve it across all callbacks, and
+project only reached typed output fields; see exchange/WS_CONTRACT.md and the
+actual-source/native retained-handler witnesses. Do not reintroduce Value frame
+projections or a second callback registry.
 
 The three concrete exchange classes and ExchangeState have exact accepted-set
 contracts in CLASS_STATE_CONTRACT_REVIEW.md. All 16 raw State APIs execute actual

@@ -12,7 +12,22 @@ const units = value => Array.from({ length: value.length }, (_, i) => value.char
 const bits = value => { assert.equal(typeof value, 'number'); const b = Buffer.alloc(8); b.writeDoubleBE(value); return b.toString('hex'); };
 const wire = value => JSON.stringify(value).replaceAll('"__INFINITY__"', '1e400').replaceAll('"__NEGATIVE_ZERO__"', '-0.0');
 const cases = [];
+const privateCases = [];
 try {
+  const socket = exchange.privateWebsocket;
+  const received = [];
+  socket.messageHandlers.retainedProbe = [value => received.push(value)];
+  for (const marker of ['\ud800', '\udfff', '\ud83e\udd80']) {
+    const frame = JSON.stringify({ e: 'retainedProbe', unused: { [marker]: [marker] } });
+    socket.onMessage({ data: frame });
+    const value = received.at(-1);
+    assert.deepEqual(units(Object.keys(value.unused)[0]), units(marker));
+    assert.deepEqual(units(Object.values(value.unused)[0][0]), units(marker));
+    privateCases.push({ frame, units: units(marker) });
+  }
+  socket.onMessage({ data: JSON.stringify({ e: 'retainedProbe', neighbor: true }) });
+  assert.equal(received.length, 4);
+  assert.equal(received.at(-1).neighbor, true);
   for (const [label, marker] of [['high', '\ud800'], ['low', '\udfff'], ['pair', '\ud83e\udd80'], ['text', 'plain']]) {
     for (const channel of ['bare', 'wrapped', 'stream']) {
       store.update({ tickers: structuredClone(seed) });
@@ -32,5 +47,5 @@ try {
     }
   }
   assert.equal(cases.length, 12);
-  process.stdout.write(JSON.stringify({ cases }), () => process.exit(0));
+  process.stdout.write(JSON.stringify({ cases, privateCases }), () => process.exit(0));
 } finally { exchange.dispose(); }

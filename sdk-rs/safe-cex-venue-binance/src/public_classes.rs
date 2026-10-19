@@ -3,8 +3,8 @@
 //! Typed Store updates use native f64 patches. JavaScript object mutation and
 //! prototype-statistics side effects remain explicit representation differences.
 use crate::{
-    private_event_value::{EventOps, EventValue},
-    public_dispatch::{CoreInvoke, Handler, Handlers, dispatch_binance_message},
+    private_event_value::EventValue,
+    public_dispatch::{Handler, Handlers, dispatch_binance_message},
     public_listeners::{
         Action, Book, Job, ListenerHost, ListenerState, Parser, Snapshot, SyncState, Unsubscribe,
         Venue, listen_futures_book, listen_futures_market, listen_pm_book, listen_pm_market,
@@ -52,31 +52,23 @@ pub struct PublicState {
     pub listeners: ListenerState,
     base: OnceCell<Weak<BaseWebSocket>>,
     pub market_websocket: OnceCell<Rc<PublicSocket>>,
-    this: Weak<PublicState>,
     foreign: RefCell<
         Vec<(
-            Weak<dyn Fn(&serde_json::Value) -> Result<(), ExchangeError>>,
+            Weak<dyn Fn(&EventValue) -> Result<(), ExchangeError>>,
             Weak<dyn Fn(EventValue) -> Result<(), Failure>>,
         )>,
     >,
     bridges: RefCell<
         Vec<(
             Weak<dyn Fn(EventValue) -> Result<(), Failure>>,
-            Weak<dyn Fn(&serde_json::Value) -> Result<(), ExchangeError>>,
+            Weak<dyn Fn(&EventValue) -> Result<(), ExchangeError>>,
         )>,
     >,
-    frames: RefCell<Vec<(EventValue, Option<Failure>)>>,
     pub stream_methods: RefCell<JsObjectMap<Parser>>,
     ticker_captures: RefCell<Vec<Rc<crate::ticker_capture::Capture>>>,
     operations: Rc<dyn ListenerHost>,
 }
 struct Protocol(Rc<PublicState>);
-struct FrameGuard<'a>(&'a RefCell<Vec<(EventValue, Option<Failure>)>>);
-impl Drop for FrameGuard<'_> {
-    fn drop(&mut self) {
-        self.0.borrow_mut().pop();
-    }
-}
 fn failure(message: impl Into<String>) -> Failure {
     Rc::new(ExchangeError::new(message))
 }
@@ -91,16 +83,14 @@ impl PublicSocket {
         &self.socket
     }
     pub fn new(kind: PublicKind, id: u64, d: PublicDependencies) -> Rc<Self> {
-        let owner = Rc::new_cyclic(|this| PublicState {
+        let owner = Rc::new(PublicState {
             kind,
             parent: d.parent.clone(),
             listeners: ListenerState::default(),
             base: OnceCell::new(),
             market_websocket: OnceCell::new(),
-            this: this.clone(),
             foreign: Default::default(),
             bridges: Default::default(),
-            frames: Default::default(),
             stream_methods: Default::default(),
             ticker_captures: Default::default(),
             operations: d.operations.clone(),
@@ -234,61 +224,21 @@ impl PublicState {
         }) {
             return found;
         }
-        let owner = self.this.upgrade().expect("live public state");
         let native = parser.clone();
-        let core: MessageHandler = Rc::new(move |fallback| {
-            let events = owner
-                .frames
-                .borrow()
-                .last()
-                .map(|f| f.0.clone())
-                .unwrap_or_else(|| crate::private_session::native(fallback.clone()));
-            let result = native(events);
-            if let Err(e) = &result {
-                if let Some(frame) = owner.frames.borrow_mut().last_mut() {
-                    frame.1 = Some(e.clone());
-                }
-            }
-            result.map_err(error)
-        });
+        let core: MessageHandler =
+            Rc::new(move |events| native(events.clone()).map_err(core_callback_error));
         self.bridges
             .borrow_mut()
             .push((Rc::downgrade(&parser), Rc::downgrade(&core)));
         core
     }
-    fn invoke_core(&self, callback: MessageHandler, events: EventValue) -> Result<(), Failure> {
-        self.frames.borrow_mut().push((events, None));
-        let guard = FrameGuard(&self.frames);
-        let is_native = self.bridges.borrow().iter().any(|(_, core)| {
-            core.upgrade()
-                .is_some_and(|core| Rc::ptr_eq(&core, &callback))
-        });
-        let foreign = self.frames.borrow().last().unwrap().0.clone();
-        let result = if is_native {
-            callback(&serde_json::Value::Null)
-        } else {
-            match core_json(&foreign) {
-                Ok(value) => callback(&value),
-                Err(e) => {
-                    self.frames.borrow_mut().last_mut().unwrap().1 = Some(e.clone());
-                    Err(error(e))
-                }
-            }
-        };
-        let original = self.frames.borrow().last().and_then(|f| f.1.clone());
-        drop(guard);
-        result.map_err(|e| original.unwrap_or_else(|| Rc::new(e)))
-    }
     fn dispatch_handlers(&self) -> Handlers {
-        let retained = self.this.upgrade().expect("live state");
-        let invoke: CoreInvoke =
-            Rc::new(move |callback, events| retained.invoke_core(callback, events));
         let map = self
             .base()
             .message_handlers
             .borrow()
             .iter()
-            .map(|(key, list)| (key.clone(), Handler::CoreList(list.clone(), invoke.clone())))
+            .map(|(key, list)| (key.clone(), Handler::CoreList(list.clone())))
             .collect();
         Handlers {
             own: RefCell::new(map),
@@ -486,7 +436,7 @@ impl ListenerHost for PublicState {
                     }
                     let original = callback.clone();
                     let native: Parser =
-                        Rc::new(move |events| original(&core_json(&events)?).map_err(Rc::new));
+                        Rc::new(move |events| original(&events).map_err(native_callback_error));
                     self.foreign
                         .borrow_mut()
                         .push((Rc::downgrade(callback), Rc::downgrade(&native)));
@@ -643,38 +593,34 @@ pub(crate) fn encode(value: &EventValue) -> Result<String, Failure> {
         .ok_or_else(|| failure("payload is undefined"))
 }
 
-/// Foreign core callbacks expose an immutable JSON carrier. Reject unsupported
-/// native graph values explicitly rather than silently collapsing them to null.
-fn core_json(value: &EventValue) -> Result<serde_json::Value, Failure> {
-    use serde_json::Value as V;
-    Ok(match value {
-        EventValue::Null => V::Null,
-        EventValue::Bool(v) => V::Bool(*v),
-        EventValue::String(_) => V::String(value.text()?),
-        EventValue::Number(v) => V::Number(serde_json::Number::from_f64(*v).ok_or_else(|| {
-            crate::request_weight::type_error(
-                "core JSON callback cannot represent nonfinite native number",
-            )
-        })?),
-        EventValue::Array(_) => V::Array(
-            value
-                .array_values()?
-                .expect("array")
-                .iter()
-                .map(core_json)
-                .collect::<Result<_, _>>()?,
-        ),
-        EventValue::Object(_) => V::Object(
-            value
-                .spread()
-                .into_iter()
-                .map(|(key, value)| Ok((key, core_json(&value)?)))
-                .collect::<Result<_, Failure>>()?,
-        ),
-        _ => {
-            return Err(crate::request_weight::type_error(
-                "core JSON callback requires JSON graph values",
-            ));
-        }
-    })
+#[derive(Debug)]
+struct CallbackFailure(Failure);
+impl std::fmt::Display for CallbackFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self.0.as_ref(), f)
+    }
+}
+impl std::error::Error for CallbackFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref())
+    }
+}
+
+/// Preserve the original callback failure through the core's owned error ABI.
+/// The cold error path carries the existing Rc in the canonical opaque origin;
+/// successful dispatch needs no per-frame side channel or graph projection.
+fn core_callback_error(original: Failure) -> ExchangeError {
+    let mut error = (*original).clone();
+    error.origin = Some(safe_cex_exchange::runtime::ExchangeErrorOrigin::new(
+        CallbackFailure(original),
+    ));
+    error
+}
+pub(crate) fn native_callback_error(error: ExchangeError) -> Failure {
+    error
+        .origin
+        .as_ref()
+        .and_then(|origin| origin.error().downcast_ref::<CallbackFailure>())
+        .map(|original| original.0.clone())
+        .unwrap_or_else(|| Rc::new(error))
 }

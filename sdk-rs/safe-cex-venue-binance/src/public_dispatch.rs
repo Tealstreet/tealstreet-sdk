@@ -10,31 +10,29 @@ use safe_cex_types::object_map::JsObjectMap;
 use std::{cell::RefCell, rc::Rc};
 
 pub type CallbackList = Rc<RefCell<Vec<Parser>>>;
-pub type CoreInvoke =
-    Rc<dyn Fn(safe_cex_exchange::websocket::MessageHandler, EventValue) -> Result<(), Failure>>;
 #[derive(Clone)]
 pub enum Handler {
     List(CallbackList),
-    CoreList(safe_cex_exchange::websocket::HandlerList, CoreInvoke),
+    CoreList(safe_cex_exchange::websocket::HandlerList),
     Value(EventValue),
 }
 impl Handler {
     fn length(&self, optional: bool) -> Result<EventValue, Failure> {
         match self {
             Self::List(v) => Ok(number(v.borrow().len() as f64)),
-            Self::CoreList(v, _) => Ok(number(v.borrow().len() as f64)),
+            Self::CoreList(v) => Ok(number(v.borrow().len() as f64)),
             Self::Value(v) if optional && v.nullish() => Ok(EventValue::Undefined),
             Self::Value(v) => v.read("length"),
         }
     }
     fn run(&self, events: EventValue, expression: &str) -> Result<(), Failure> {
         match self {
-            Self::CoreList(list, invoke) => {
+            Self::CoreList(list) => {
                 let mut i = 0;
                 loop {
                     let next = list.borrow().get(i).cloned();
                     let Some(next) = next else { break };
-                    invoke(next, events.clone())?;
+                    next(&events).map_err(crate::public_classes::native_callback_error)?;
                     i += 1;
                 }
                 Ok(())

@@ -2086,6 +2086,12 @@ all loop host effects; remaining_utils compares invocation, continuation and
 callback scheduling with the maintained TypeScript function in Node.
 
 
+Shared WebSocket message handlers now borrow the canonical `Js` frame graph.
+Restore retained ingress once per frame, preserve it across all callbacks, and
+project only reached typed output fields; see exchange/WS_CONTRACT.md and the
+actual-source/native retained-handler witnesses. Do not reintroduce Value frame
+projections or a second callback registry.
+
 
 BaseExchange socket-health publication constructs own undefined timestamp/close-code properties and passes them to the canonical Store partial merge. It never removes keys through a JSON read/replacement. Typed Store notifications and prepared payloads retain the same health field.
 
@@ -2121,6 +2127,11 @@ The differential rejects other Node versions: inconsistent comparator ordering i
 engine-dependent. Array sort compacts defined values before TimSort, then writes
 undefined values and deletes remaining holes; four native/Node profiles pin the
 comparator schedule as well as sparse output.
+
+Direct calls of the canonical Object.prototype.toString referent use the same
+intrinsic object-tag implementation as ordinary coercion. The actual Aster
+private fill witness compares an object ID against its maintained TS constructor;
+an own noncallable toString shadow still refuses and emits no fill.
 
 ## Worker structured clone
 
