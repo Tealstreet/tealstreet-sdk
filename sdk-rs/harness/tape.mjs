@@ -1,7 +1,7 @@
 // Shared tape transport: matching is strict except documented generated fields.
 import { setTimeout as realTimeout } from 'node:timers';
 /** Per-request values: clocks, signatures and generated client ids. */
-const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId']);
+const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
 export const canonicalUrl = (url) => {
   const parsed = new URL(url);
   // Active trigger lists use a rolling lookback ending at request time.
@@ -24,19 +24,25 @@ export const canonicalUrl = (url) => {
 
 // JSON object order is immaterial; snowflake ids must never pass through f64.
 export const canonicalBody = (body) => {
-  const parsed =
-    typeof body === 'string'
-      ? JSON.parse(body, (_key, value, context) =>
-          typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value) ? context.source : value,
-        )
-      : body;
+  if (body === undefined || body === null || body === '') return '';
+  if (body instanceof Uint8Array) body = new TextDecoder().decode(body);
+  let parsed = body;
+  if (typeof body === 'string') {
+    try {
+      parsed = JSON.parse(body, (_key, value, context) =>
+        typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value) ? context.source : value,
+      );
+    } catch {
+      return body;
+    }
+  }
   const sorted = (value) =>
     Array.isArray(value)
       ? value.map(sorted)
       : value && typeof value === 'object'
         ? Object.fromEntries(
             Object.keys(value)
-              .filter((key) => key !== 'externalOid')
+              .filter((key) => key !== 'externalOid' && key !== 'requestId')
               .sort()
               .map((key) => [key, sorted(value[key])]),
           )
@@ -172,12 +178,13 @@ export class Tape {
   }
 
   connect(url, onOpen, onMessage, onClose) {
-    const ordinal = this.ordinals.get(url) ?? 0;
-    this.ordinals.set(url, ordinal + 1);
-    const socket = { url, ordinal, onMessage, onClose, closed: false };
+    const key = canonicalUrl(url);
+    const ordinal = this.ordinals.get(key) ?? 0;
+    this.ordinals.set(key, ordinal + 1);
+    const socket = { url, key, ordinal, onMessage, onClose, closed: false };
     setImmediate(() => {
       if (socket.closed) return;
-      this.open.set(`${url}\n${ordinal}`, socket);
+      this.open.set(`${key}\n${ordinal}`, socket);
       onOpen();
     });
     return socket;
@@ -189,15 +196,20 @@ export class Tape {
     socket.onClose?.(code);
   }
 
-  async socketFor(url, ordinal = 0) {
-    const key = `${url}\n${ordinal}`;
+  async socketFor(url, ordinal) {
+    const key = canonicalUrl(url);
+    // Older tapes lack ordinals; retain their latest-connection behavior.
+    const current = () =>
+      ordinal === undefined
+        ? [...this.open.values()].findLast((socket) => socket.key === key && !socket.closed)
+        : this.open.get(`${key}\n${ordinal}`);
     const deadline = performance.now() + 15000;
-    while (!this.open.get(key) || this.open.get(key).closed) {
+    while (!current() || current().closed) {
       if (performance.now() > deadline)
         throw new Error(`Tape socket did not open: ${url} #${ordinal}; opened ${[...this.open.keys()].join(', ')}`);
       await new Promise((resolve) => realTimeout(resolve, 5));
     }
-    return this.open.get(key);
+    return current();
   }
 
   /**

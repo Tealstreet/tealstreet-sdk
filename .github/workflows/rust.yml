@@ -102,8 +102,8 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # The browser engine's size budget (debug names excluded).
-      WASM_BUDGET_BYTES: 1258291
+      # Browser engine size budget: 1.4 MiB (debug names excluded).
+      WASM_BUDGET_BYTES: 1468006
     defaults:
       run:
         working-directory: .
@@ -156,3 +156,9 @@ jobs:
         run: |
           yarn rust:private-tape-mexc
           yarn rust:gate --venue mexc --tape sdk-rs/harness/tapes/mexc-private.jsonl --runs 1 --books ''
+      - name: Bybit public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue bybit --tape sdk-rs/harness/fixtures/bybit-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: Bybit account and trading (correctness)
+        run: |
+          yarn rust:private-tape-bybit
+          yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''

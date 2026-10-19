@@ -22,7 +22,19 @@ mkdirSync(outDir, { recursive: true });
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
-  args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
+  args.push(
+    'sdk-rs/harness/replay.mjs',
+    '--impl',
+    impl,
+    '--venue',
+    values.venue,
+    '--tape',
+    values.tape,
+    '--books',
+    values.books,
+    '--out',
+    out,
+  );
   if (values['no-egress']) args.push('--no-egress');
   const result = spawnSync(process.execPath, args, { encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`${impl} replay failed:\n${result.stderr}`);
@@ -74,6 +86,12 @@ const binanceFixes = (account, rustAccount) => {
 const KNOWN_TS_FIXES = {
   binance: binanceFixes,
   binancepm: binanceFixes,
+  // Bybit shares the zero-size-placeholder margin-size defect. Its PostOnly
+  // rejection reason is recovered from the original TS row in venues.mjs.
+  // Other native regressions intentionally corrected by the Bybit port:
+  // exact split remainders, no fallback after ambiguous batch-write failure,
+  // ticker seeding before connecting, and native Partial-stop amendment.
+  bybit: binanceFixes,
   mexc: () => {
     // Full incremental depth, rather than replacing a 20-level snapshot.
     // Sized stops choose the closing leverage rail even without reduceOnly.
@@ -114,9 +132,13 @@ const summary = (impl) => ({
 });
 const t = summary('ts');
 const r = summary('rust');
-console.log(`frames ${ts.frames}, markets ${ts.markets.length}, tickers ${ts.tickers.length}, books ${Object.keys(ts.books).length}`);
+console.log(
+  `frames ${ts.frames}, markets ${ts.markets.length}, tickers ${ts.tickers.length}, books ${Object.keys(ts.books).length}`,
+);
 const row = (label, a, b, unit = 'ms') =>
-  console.log(`${label.padEnd(16)} ts ${a.toFixed(1).padStart(8)} ${unit}   rust ${b.toFixed(1).padStart(8)} ${unit}   ${(a / b).toFixed(2)}x`);
+  console.log(
+    `${label.padEnd(16)} ts ${a.toFixed(1).padStart(8)} ${unit}   rust ${b.toFixed(1).padStart(8)} ${unit}   ${(a / b).toFixed(2)}x`,
+  );
 row('main-thread cpu', t.cpuMs, r.cpuMs);
 row('steady cpu', t.steadyCpuMs, r.steadyCpuMs);
 row('process cpu', t.processCpuMs, r.processCpuMs);

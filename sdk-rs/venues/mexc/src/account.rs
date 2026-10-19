@@ -102,13 +102,7 @@ impl MexcFutures {
             format!("{}{path}", crate::REST)
         };
         if streamed {
-            cx.request_streamed(
-                method,
-                url,
-                headers,
-                ArrayAt::EnvelopeField("data"),
-                pending,
-            );
+            cx.request_streamed(method, url, headers, ArrayAt::Field("data"), pending);
         } else {
             cx.request(
                 method,

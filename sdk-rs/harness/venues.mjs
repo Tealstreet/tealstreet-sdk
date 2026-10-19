@@ -31,6 +31,19 @@ export const VENUES = {
       count,
     privateSocket: '/private/ws',
   },
+  bybit: {
+    rust: 'bybit',
+    ts: { module: `${root}/bybit/bybit.exchange.ts`, className: 'BybitExchange', name: 'bybit' },
+    /** Book topics get a message handler once each subscription reaches the socket. */
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >=
+      count,
+    privateSocket: '/v5/private',
+    tsRejectReason: (order) =>
+      order.status === 'canceled' && order.info?.rejectReason === 'EC_PostOnlyWillTakeLiquidity'
+        ? 'PostOnly'
+        : undefined,
+  },
 };
 
 export const venueOf = (name) => {

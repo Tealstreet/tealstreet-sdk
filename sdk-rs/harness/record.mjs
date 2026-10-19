@@ -8,7 +8,7 @@ import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
-import { bodyBytes } from './tape.mjs';
+import { bodyBytes, canonicalUrl } from './tape.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -30,8 +30,9 @@ const ordinals = new Map();
 const recording = {
   ...live,
   connect(url, handlers) {
-    const socket = ordinals.get(url) ?? 0;
-    ordinals.set(url, socket + 1);
+    const key = canonicalUrl(url);
+    const socket = ordinals.get(key) ?? 0;
+    ordinals.set(key, socket + 1);
     return live.connect(url, {
       onOpen: () => {
         write({ type: 'open', url, socket });

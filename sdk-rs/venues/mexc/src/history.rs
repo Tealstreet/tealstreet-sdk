@@ -327,9 +327,9 @@ impl MexcFutures {
             self.credentials.as_ref().unwrap().headers(cx.now, &payload)
         };
         let at = if matches!(r.kind, Kind::Funding) {
-            ArrayAt::EnvelopeNestedField("data", "resultList")
+            ArrayAt::Path(&["data", "resultList"])
         } else {
-            ArrayAt::EnvelopeField("data")
+            ArrayAt::Field("data")
         };
         cx.request_streamed(Method::Get, url, headers, at, Pending::History(request));
     }

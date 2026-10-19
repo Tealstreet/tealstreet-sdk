@@ -143,3 +143,44 @@ test('the replay epoch begins after account startup and before its first command
   );
   assert.deepEqual(seen, ['ready', 'epoch', 'command']);
 });
+
+test('Bybit request IDs are volatile while native client order IDs remain exact', () => {
+  assert.equal(
+    canonicalUrl('wss://stream.bybit.com/v5/private?requestId=recorded'),
+    canonicalUrl('wss://stream.bybit.com/v5/private?requestId=runtime'),
+  );
+  assert.equal(
+    canonicalBody('{"requestId":"recorded","qty":"1","orderLinkId":"caller"}'),
+    canonicalBody('{"qty":"1","orderLinkId":"caller","requestId":"runtime"}'),
+  );
+  assert.notEqual(canonicalBody('{"orderLinkId":"caller"}'), canonicalBody('{"orderLinkId":"different"}'));
+  assert.notEqual(canonicalBody('{"qty":"1"}'), canonicalBody('{"qty":"2"}'));
+});
+
+test('legacy Bybit sockets match generated URLs and retain latest-connection routing', { timeout: 1000 }, async () => {
+  const url = 'wss://stream.bybit.com/v5/private';
+  const tape = new Tape([{ type: 'ws', t: 0, url, text: 'private' }]);
+  const seen = [];
+  const first = tape.connect(
+    `${url}?requestId=first`,
+    () => {},
+    (text) => seen.push(`first:${text}`),
+  );
+  await new Promise(setImmediate);
+  tape.close(first);
+  tape.connect(
+    `${url}?requestId=second`,
+    () => {},
+    (text) => seen.push(`second:${text}`),
+  );
+  assert.equal(await tape.play(), 1);
+  assert.deepEqual(seen, ['second:private']);
+});
+
+test('Bybit PostOnly rejection derives from the original TS row, independently of Rust', async () => {
+  const { VENUES } = await import('./venues.mjs');
+  const reason = VENUES.bybit.tsRejectReason;
+  assert.equal(reason({ status: 'canceled', info: { rejectReason: 'EC_PostOnlyWillTakeLiquidity' } }), 'PostOnly');
+  assert.equal(reason({ status: 'canceled', info: { rejectReason: 'EC_PerCancelRequest' } }), undefined);
+  assert.equal(reason({ status: 'open', info: { rejectReason: 'EC_PostOnlyWillTakeLiquidity' } }), undefined);
+});

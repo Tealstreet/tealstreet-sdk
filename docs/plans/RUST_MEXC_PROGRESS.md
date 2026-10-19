@@ -147,3 +147,12 @@ and cut a follow-up branch. Never touch master or force-push.
   pass. Final TS-focused run passes 110 tests. Full root checks rerun after
   final edits before pushing. Browser build strips debug names only, retaining
   the existing code optimization and the unchanged 1258291-byte CI budget.
+- Landing branch advanced through Bybit linear PR #1298 while final checks ran.
+  Merged 20dd66dddb, preserving all three registrations, Bybit requestId/socket
+  matching and CI gates. Consolidated MEXC streaming onto landing's generic
+  ArrayAt::Field/Path+outside envelope API, retaining malformed-array, UTF-8 and
+  bounded-envelope failure checks. Added MarketSetting defaults to Bybit's
+  existing initializer. All affected replays must run again after this merge.
+- The updated Process explicitly requires green PR CI before merging; wait for
+  those checks after local adversarial PR reviews. The landing branch's wasm
+  budget is now 1468006 bytes and is retained unchanged.

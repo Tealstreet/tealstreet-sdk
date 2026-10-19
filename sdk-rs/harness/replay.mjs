@@ -501,7 +501,7 @@ function normalizeAccount(account) {
     reduceOnly: Boolean(o.reduceOnly),
     close: Boolean(o.close),
     trigger: o.tpTriggerType ?? o.slTriggerType ?? o.triggerType ?? null,
-    rejectReason: o.extra?.rejectReason ?? o.rejectReason ?? null,
+    rejectReason: o.extra?.rejectReason ?? o.rejectReason ?? venue.tsRejectReason?.(o) ?? null,
   });
   const position = (p) => ({
     symbol: p.symbol,
