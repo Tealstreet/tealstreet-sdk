@@ -57,3 +57,21 @@ green final-head CI. No stash, rebase, force push or master changes.
   TS defaults 1/20. Documented-schema regression covers both product environments,
   two markets, wrong quote filtering, precision and unchanged book quantities.
 - Public native tests: 16/16 PASS. Private/trading/query work continues separately.
+
+## Private checkpoint
+
+- Inverse snapshots read each collateral coin and commit positions atomically;
+  preserve native amounts/filled, round display remaining/positions to 8 decimals,
+  keep native notional/PnL, and value per-coin collateral into aggregate USD.
+- Optional collateral columns cross the real transferable frame. Both worker
+  consumers retain coin balances and inverse native extras from existing columns.
+- UTA trailing fetch/read lifecycle added beside TPSL; native callback metadata
+  stages until successful fresh snapshots. Classic-only inverse never promotes UTA.
+- Independent review found duplicate collateral double-counting and fractional
+  native-extra reconstruction; fixed with atomic duplicate rejection and decimal
+  subtraction. Native private cases cover failed/late reads, two coins, snapshots,
+  invalid data, native fills and shared stream/REST consistency.
+- Verified engine48 tests, private account15 + inverse12 + review3 tests, Worker/wire
+  26 tests, TS frame4 tests PASS. Native amend regression reserved for trading.
+- TS defects explicitly listed in gate notes: inverse WS conversion/aggregate
+  balance, native stop clamp and sized amend. No parity output normalization.

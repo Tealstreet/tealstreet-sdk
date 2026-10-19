@@ -127,7 +127,7 @@ export class RustEngineExchange extends BaseExchange {
 
   constructor(exchangeName: ExchangeName, options: ExchangeOptions, store: Store) {
     super(exchangeName, options, store);
-    this.applier = new FrameApplier(store, this.name === 'mexc');
+    this.applier = new FrameApplier(store, this.name === 'mexc', this.name === 'bitgetinverse');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
   }
 
