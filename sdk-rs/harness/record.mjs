@@ -44,9 +44,17 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const body = new TextDecoder().decode(response.body);
-    write({ type: 'http', method: request.method, url: request.url, status: response.status, body });
-    return response;
+    // A streamed body is gathered so the tape holds it whole.
+    let bytes = response.body;
+    if (!(bytes instanceof Uint8Array)) {
+      const chunks = [];
+      for await (const chunk of bytes) chunks.push(chunk);
+      bytes = Buffer.concat(chunks);
+    }
+    const body = new TextDecoder().decode(bytes);
+    const requestBody = request.body ? { requestBody: request.body } : {};
+    write({ type: 'http', method: request.method, url: request.url, ...requestBody, status: response.status, body });
+    return { ...response, body: bytes };
   },
 };
 
