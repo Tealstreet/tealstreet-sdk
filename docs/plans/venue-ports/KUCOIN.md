@@ -380,3 +380,28 @@ Previous head e5c9b0e38a's FULL CI is green (including both root suites and all
 ten-venue replays); that closes the unchanged local import-latency diagnostic
 without weakening assertions/timeouts. Current integrated KuCoin/Binance private
 PASS; remaining public/incoming compatibility gates run before the next push.
+
+### Final eleven-venue brief gates
+
+Eight required/compatibility replays PASS: KuCoin, Binance, Bitget and Backpack
+public/private. All outputs, signed requests, typed bodies, stage/time matching,
+mutation accounting and socket protocols compare exactly. Three-run public
+medians (TS/Rust):
+
+| Venue | CPU ms | Steady CPU ms | Retained MB |
+| --- | ---: | ---: | ---: |
+| KuCoin | 509.0 / 231.1 | 295.9 / 134.7 | 6.8 / 2.7 |
+| Binance | 181.5 / 80.0 | 94.3 / 29.6 | 4.4 / 2.3 |
+| Bitget | 554.6 / 533.6 | 367.6 / 365.1 | 6.0 / 2.5 |
+| Backpack | 172.8 / 100.9 | 95.0 / 67.2 | 3.4 / 1.8 |
+
+KuCoin public16,157 frames/692 markets/two books; private32frames/17commands
+PASS. Baseline construction is symmetric; compiler-worker exclusion restored
+for both implementations, and strict public CPU/steady/memory and buffer/heap
+settling assertions remain intact. Private memory remains informational.
+
+Workspace763 native tests(KuCoin96), fmt/bans/native+wasm clippy, harness129,
+wire4, real wasm26, host25, root typecheck44/lint28 tasks PASS. Eleven-venue
+wasm3,775,268 bytes < fixed4MiB. All R1–R11 and final shared-code reviews pass.
+Push the final integration checkpoint and require green CI at this exact head
+before merging PR1312 into feat/rust-rewrite; then cut the follow-up branch.
