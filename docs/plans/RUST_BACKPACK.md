@@ -349,3 +349,22 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   clippy targets, bans/fmt, typecheck44/lint28 and PR-range secrets scan pass.
   Pushing this reviewed candidate for CI while auxiliary venue replays finish;
   all nineteen CI gates and repository jobs must be green before landing.
+- Eight-venue head 46c5a726ad completed every repository and Rust CI job green,
+  including all nineteen replays. CI Backpack CPU 143.6/58.0 ms (2.48x), steady
+  67.3/22.5 ms (2.99x), retained memory 3.2/1.5 MB (2.09x). BloFin PR #1300
+  and MEXC parity PR #1311 landed before the final repository job completed,
+  causing new conflicts; the guarded landing command correctly refused them.
+- Integrated target a4d9e2ec84, preserving all nine venues and Backpack behavior.
+  Reviews confirm scalar leverage/quantity compatibility and keep sparse string
+  caches plus side-column regressions. Shared memory settling is now a tested
+  helper with real-time pauses under recorded public clocks. Nine-venue wasm
+  measures 2,863,225 bytes within the unchanged 3 MiB budget. Backpack49/engine44,
+  bans/fmt, both workspace clippy targets, typecheck44/lint28 pass. Harness
+  matching/oracles, final SDK/host tests and twenty-one replays remain pending.
+- Harness review restored `effectiveAt` support while integrating BloFin's
+  opt-in typed matcher/default trigger references and native WS comparisons.
+  Avoided copying BloFin margin values from Rust into the oracle; only the
+  independently defined empty-position aggregate correction remains. All
+  73 harness tests, undefined-name checks and independent re-review pass.
+  SDK21/host25 pass on the nine-venue artifact. Twenty-one replays are running;
+  Backpack public already passes. No public performance threshold changed.

@@ -26,6 +26,7 @@ js-sys = "0.3.106"
 safe-cex-crypto = { path = "crypto" }
 safe-cex-engine = { path = "engine" }
 safe-cex-venue-binance = { path = "venues/binance" }
+safe-cex-venue-blofin = { path = "venues/blofin" }
 safe-cex-venue-mexc = { path = "venues/mexc" }
 safe-cex-venue-bingx = { path = "venues/bingx" }
 safe-cex-venue-bybit = { path = "venues/bybit" }
@@ -77,3 +78,19 @@ debug = "line-tables-only"
 lto = "fat"
 codegen-units = 1
 opt-level = 3
+
+# Keep dispatch/serialization glue compact. The shared engine stays at O3.
+[profile.release.package.safe-cex-wasm]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-binance]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-bybit]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-bingx]
+opt-level = "z"
+
+[profile.release.package.safe-cex-venue-weex]
+opt-level = "z"

@@ -62,6 +62,35 @@ fn every_caller_id_rejects_the_whole_batch_before_a_write() {
 }
 
 #[test]
+fn unsupported_opening_conditional_and_trailing_reject_before_any_batch_write() {
+    use safe_cex_engine::model::OrderType;
+    for kind in [OrderType::Conditional, OrderType::TrailingStopLoss] {
+        for prefix in [false, true] {
+            let mut e = ready();
+            let mut invalid = order();
+            invalid.kind = kind;
+            invalid.trigger_price = Some(61000.0);
+            let orders = if prefix {
+                vec![order(), invalid]
+            } else {
+                vec![invalid]
+            };
+            e.handle(
+                200.0,
+                Event::Command(Command::PlaceOrders { command: 1, orders }),
+            );
+            let actions: Vec<_> = e.drain_actions().collect();
+            assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+            assert!(e.store().orders().is_empty());
+            assert!(actions.iter().any(|a| matches!(a,
+                Action::Notice(Notice::CommandDone { result: Err(error), .. })
+                if error == "MEXC opening conditional and trailing-stop placement is not implemented"
+            )));
+        }
+    }
+}
+
+#[test]
 fn denied_batch_falls_back_once_and_paces_subsequent_writes() {
     let mut e = ready();
     e.handle(

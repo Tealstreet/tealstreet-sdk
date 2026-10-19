@@ -27,7 +27,7 @@ const tapeRecords = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeB
   .trim()
   .split('\n')
   .map(JSON.parse);
-const outDir = 'sdk-rs/harness/out';
+const outDir = `sdk-rs/harness/out/${values.venue}-${process.pid}`;
 mkdirSync(outDir, { recursive: true });
 
 const replay = (impl, run) => {
@@ -112,6 +112,16 @@ const records = tapeRecords;
 // TS bugs intentionally corrected in Rust. Backpack normalization derives
 // expected fields only from the input tape, never from Rust's answer.
 const KNOWN_TS_FIXES = {
+  blofin: (ts) => {
+    const account = ts.account;
+    if (!account) return;
+    // The native empty position snapshot clears both aggregates; TS retains
+    // its last margin and unrealized PnL after the final position closes.
+    if (account.positions.length === 0) {
+      account.balance.used = 0;
+      account.balance.upnl = 0;
+    }
+  },
   mexc: () => {
     // Full incremental depth, rather than replacing a 20-level snapshot.
     // Sized stops choose the closing leverage rail even without reduceOnly.
@@ -473,6 +483,10 @@ for (let run = 0; run < runs; run++) {
     if (invalidSignatures) differences.push(`${impl}: ${invalidSignatures} invalid signatures`);
   }
   if (typeof KNOWN_TS_FIXES[values.venue] === 'function') KNOWN_TS_FIXES[values.venue](ts, rust);
+  if (JSON.stringify(ts.wsRequests) !== JSON.stringify(rust.wsRequests))
+    differences.push(
+      `websocket requests differ: ts=${JSON.stringify(ts.wsRequests)} rust=${JSON.stringify(rust.wsRequests)}`,
+    );
   // OKX checks native wildcard coverage; Crypto audits auth/topics/heartbeats per socket.
   if (
     !values.venue.startsWith('okx') &&

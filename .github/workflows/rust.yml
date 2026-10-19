@@ -102,7 +102,7 @@ jobs:
     timeout-minutes: 30
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Eight venues, size-optimized wasm: measured 2,702,020 bytes; allow 3 MiB.
+      # Nine venues, size-optimized wasm: measured 2,863,225 bytes; allow 3 MiB.
       WASM_BUDGET_BYTES: 3145728
     defaults:
       run:
@@ -165,6 +165,12 @@ jobs:
         run: |
           corepack yarn -s rust:private-tape-backpack
           corepack yarn -s rust:gate --venue backpack --tape sdk-rs/harness/tapes/backpack-private.jsonl --runs 1 --books ''
+      - name: BloFin public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue blofin --tape sdk-rs/harness/fixtures/blofin-public.jsonl.gz --books BTCUSDT,ETHUSDT
+      - name: BloFin account and trading (correctness)
+        run: |
+          yarn rust:private-tape:blofin
+          yarn rust:gate --venue blofin --tape sdk-rs/harness/tapes/blofin-private.jsonl --runs 1 --books ''
       - name: Harness protocol regressions
         run: yarn rust:test-harness
       - name: BingX public data (correctness, CPU and memory)

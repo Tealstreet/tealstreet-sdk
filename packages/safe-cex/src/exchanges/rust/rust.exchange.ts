@@ -29,14 +29,16 @@ import { LogSeverity } from '../../types';
 import { uuid } from '../../utils/uuid';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
+import { BROKER_ID as BLOFIN_BROKER_ID } from '../blofin/blofin.types';
 import { isRegularClientOrderShape, patternClientOrderIdRule } from '../clientOrderId';
-import { BROKER_ID } from '../okx/okx.types';
+import { BROKER_ID as OKX_BROKER_ID } from '../okx/okx.types';
 
 /** Venues the Rust engine runs, by exchange name, and its name for each. */
 export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
   binance: 'binance',
   backpack: 'backpack',
   binancepm: 'binancepm',
+  blofin: 'blofin',
   mexc: 'mexc',
   bingx: 'bingx',
   bybit: 'bybit',
@@ -51,7 +53,7 @@ export const RUST_VENUES: Partial<Record<ExchangeName, string>> = {
 export const isRustVenue = (name: ExchangeName) => RUST_VENUES[name] !== undefined;
 
 const okxClientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, {
-  mint: () => `${BROKER_ID}${uuid()}`.slice(0, 32),
+  mint: () => `${OKX_BROKER_ID}${uuid()}`.slice(0, 32),
 });
 const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
   backpack: {
@@ -59,6 +61,9 @@ const clientOrderIdRules: Partial<Record<ExchangeName, ClientOrderIdRule>> = {
     requirement: 'be a canonical decimal uint32 between 1 and 4294967295',
     isValid: (id) => /^[1-9]\d{0,9}$/.test(id) && Number(id) <= 0xffff_ffff,
   },
+  blofin: patternClientOrderIdRule('BloFin', /^[A-Za-z0-9]{1,32}$/, {
+    mint: () => `${BLOFIN_BROKER_ID}${uuid()}`.slice(0, 32),
+  }),
   bingx: {
     label: 'BingX',
     isHonorableShape: (opts) => isRegularClientOrderShape(opts) && opts.close !== true,
@@ -292,8 +297,8 @@ export class RustEngineExchange extends BaseExchange {
   };
 
   changeMarginType = async (isolated: boolean, symbol?: string) => {
-    if (!symbol) throw new Error('Symbol is required');
-    await this.command({ op: 'setMarginType', symbol, isolated });
+    if (!symbol && this.name !== 'blofin') throw new Error('Symbol is required');
+    await this.command({ op: 'setMarginType', symbol: symbol ?? '', isolated });
   };
 
   changePositionMode = async (hedged: boolean) => {
@@ -315,7 +320,34 @@ export class RustEngineExchange extends BaseExchange {
       to: opts.to,
     });
 
-  fetchHistoricalFills = (opts: ExecutionsOptions) => this.command<Execution[]>({ op: 'fetchFills', ...opts });
+  fetchHistoricalFills = (opts: ExecutionsOptions) => {
+    const milliseconds = (value?: number) =>
+      value === undefined || !Number.isFinite(value)
+        ? undefined
+        : Math.floor(value > 1_000_000_000_000 ? value : value * 1000);
+    return this.command<Execution[]>({
+      op: 'fetchFills',
+      ...opts,
+      ...(this.name === 'blofin' ? { from: milliseconds(opts.from), to: milliseconds(opts.to) } : {}),
+    });
+  };
+
+  fetchLeverageForSymbol = async (symbol: string): Promise<FetchedLeverage | null> => {
+    try {
+      let leverage: FetchedLeverage;
+      if (this.name === 'blofin') leverage = await this.command<FetchedLeverage>({ op: 'fetchLeverage', symbol });
+      else {
+        const value = await this.fetchSymbolMaxLeverage(symbol);
+        leverage = { buyLeverage: value, sellLeverage: value };
+      }
+      this.host?.flush();
+      this.store.update({ fetchedLeverage: { ...this.store.fetchedLeverage, [symbol]: leverage } });
+      return leverage;
+    } catch (error) {
+      this.log(`Error fetching leverage for ${symbol}: ${error}`, LogSeverity.Warning);
+      return null;
+    }
+  };
 
   fetchHistoricalOrders = (opts?: OrderHistoryOptions) =>
     this.command<HistoricalOrder[]>({

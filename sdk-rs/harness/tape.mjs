@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
 import { Responses } from './responses.mjs';
-import { isRead, subscriptionKeys } from './requests.mjs';
+import { isRead, subscriptionKeys, requestKey as typedRequestKey } from './requests.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
 
@@ -241,12 +241,13 @@ export class Tape {
     );
     this.pendingStartupSubscriptions = this.startupSubscriptions.size;
     this.audit = venue.createSocketAudit?.(impl, { isPrivate, books, tickers: venue.publicTickers?.(records) });
-    this.callerIds = new Set(
-      records
-        .flatMap((r) => r.orders ?? [])
-        .map((o) => o.clientOrderId)
-        .filter((id) => id !== undefined),
-    );
+    this.callerIds = new Set();
+    const collectCallerIds = (value) => {
+      if (!value || typeof value !== 'object') return;
+      if (typeof value.clientOrderId === 'string') this.callerIds.add(value.clientOrderId);
+      for (const nested of Object.values(value)) collectCallerIds(nested);
+    };
+    for (const record of records) if (record.type === 'command') collectCallerIds(record);
     this.responses = new Map();
     this.writeOrder = [];
     for (const record of records.filter((r) => r.type === 'http')) {
@@ -257,9 +258,10 @@ export class Tape {
       this.responses.get(key).push(record);
       if (this.isWrite(record.method, record.url)) this.writeOrder.push(record);
     }
-    if (venue.checkRequest || venue.requestKey) {
+    if (venue.checkRequest || venue.requestKey || venue.requestBodies) {
       const responseKey = (method, url, body) => {
         if (venue.requestKey) return venue.requestKey(method, url, body, this.callerIds);
+        if (venue.requestBodies) return typedRequestKey(method, url, body, this.callerIds, venue);
         const base = `${method} ${canonicalUrl(url, this.callerIds, this.venue)}`;
         const exact = `${base} BODY ${canonicalBody(body, this.callerIds, venue)}`;
         return this.responses.has(exact) ? exact : base;
@@ -379,6 +381,7 @@ export class Tape {
   }
 
   send(socket, text) {
+    this.sent(socket.url, text);
     for (const key of subscriptionKeys(socket.url, text)) {
       this.protocolSubscriptions.add(`${socket.generation} ${key}`);
       if (this.startupSubscriptions.get(key) === false) {
@@ -606,4 +609,21 @@ export class Tape {
   }
 
   results = [];
+  sentRequests = new Set();
+  sent(url, text) {
+    if (!this.venue.requestBodies || text === 'ping' || text === 'pong') return;
+    let message;
+    try {
+      message = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (message.op === 'subscribe' || message.op === 'unsubscribe') {
+      for (const topic of message.args ?? [])
+        this.sentRequests.add(JSON.stringify(stable({ url, op: message.op, topic })));
+    } else if (message.op === 'login') {
+      const args = message.args.map(({ timestamp, nonce, sign, ...credentials }) => credentials);
+      this.sentRequests.add(JSON.stringify(stable({ url, op: 'login', args })));
+    }
+  }
 }

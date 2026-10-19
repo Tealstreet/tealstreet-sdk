@@ -10,7 +10,7 @@ import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../h
 import { axiosClients, venueOf } from './venues.mjs';
 import { Tape, withTimeout, replayStoreReady, ReplayClock } from './tape.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
-import { retainedMemory } from './memory.mjs';
+import { retainedMemory, settledMemory } from './memory.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -79,24 +79,7 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark)
 };
 
 /** Loaded code is excluded; collect before I/O and after replay state settles. */
-const baseline = async () => {
-  const deadline = performance.now() + 1000;
-  let previous;
-  let stableSince;
-  while (performance.now() < deadline) {
-    globalThis.gc?.();
-    // Loader/native cleanup can outlive several immediate turns. Require real
-    // elapsed quiescence so imported transient buffers cannot inflate baseline.
-    await new Promise((resolve) => realTimeout(resolve, 10));
-    const memory = process.memoryUsage();
-    const now = performance.now();
-    if (now >= deadline) break;
-    if (memory.arrayBuffers !== previous) stableSince = now;
-    if (now - stableSince >= 100) return memory;
-    previous = memory.arrayBuffers;
-  }
-  throw new Error('Backing-buffer memory did not settle');
-};
+const baseline = () => settledMemory({ pause: () => new Promise((resolve) => realTimeout(resolve, 10)) });
 
 const sortBook = (book) => ({
   bids: book.bids.map(({ price, amount }) => [price, amount]),
@@ -294,6 +277,7 @@ async function runRust() {
     unusedWrites: tape.missingWrites,
     protocolErrors: tape.audit?.errors() ?? [],
     invalidSignatures: tape.invalidSignatures,
+    wsRequests: [...tape.sentRequests].sort(),
     subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : [...tape.protocolSubscriptions].sort(),
     store: { markets: marketRows, tickers: tickerRows },
     books: bookRows,
@@ -326,6 +310,8 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
   }
   const settingRows = [];
   for (let i = 0; i < (settings?.count ?? 0); i++) {
+    // TS has no margin-only placeholder; frames retain it for actual consumers.
+    if (!venue.independentLeverage && !(settings.leverage[i] > 0)) continue;
     settingRows.push({
       symbol: symbol(settings.market[i]),
       marginType: settings.marginType(i),
@@ -557,6 +543,7 @@ async function runTs() {
     unusedWrites: tape.missingWrites,
     protocolErrors: tape.audit?.errors() ?? [],
     invalidSignatures: tape.invalidSignatures,
+    wsRequests: [...tape.sentRequests].sort(),
     subscriptions: venue.compareSubscriptions ? [...tape.subscriptions].sort() : [...tape.protocolSubscriptions].sort(),
     store: snapshot,
     books: bookCopies,
@@ -578,7 +565,7 @@ async function runTsCommand(exchange, store, record) {
       return [];
     case 'amendOrder': {
       const order = store.orders.find((o) => o.id === args.id);
-      if (!order) throw new Error(`unknown order ${args.id}`);
+      if (!order) throw new Error(values.venue === 'mexc' ? `Order ${args.id} not found` : `unknown order ${args.id}`);
       const update = Object.fromEntries(
         ['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]),
       );
@@ -675,6 +662,7 @@ writeFileSync(
     unusedWrites: result.unusedWrites,
     protocolErrors: result.protocolErrors,
     invalidSignatures: result.invalidSignatures,
+    wsRequests: result.wsRequests,
     subscriptions: result.subscriptions,
     metrics: result.metrics,
     markets: result.store.markets.filter(venue.marketFilter ?? (() => true)).map(marketFields),

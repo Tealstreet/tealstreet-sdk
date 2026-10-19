@@ -10,6 +10,7 @@ use safe_cex_engine::{
 use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
+use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
@@ -231,10 +232,6 @@ enum CommandIn {
         command: u32,
         hedged: bool,
     },
-    FetchLeverage {
-        command: u32,
-        symbol: String,
-    },
     #[serde(rename_all = "camelCase")]
     FetchFills {
         command: u32,
@@ -273,6 +270,10 @@ enum CommandIn {
         to: Option<f64>,
         #[serde(default)]
         limit: Option<u32>,
+    },
+    FetchLeverage {
+        command: u32,
+        symbol: String,
     },
     FetchPublicTrades {
         command: u32,
@@ -331,7 +332,6 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
-            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
                 command,
                 symbol,
@@ -381,6 +381,7 @@ impl From<CommandIn> for Command {
                     limit,
                 },
             },
+            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchPublicTrades {
                 command,
                 symbol,
@@ -467,6 +468,13 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 recv_window: options.recv_window,
+            }))),
+            "blofin" => Box::new(Engine::new(Blofin::new(BlofinOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                passphrase: options.passphrase,
             }))),
             "bingx" => Box::new(Engine::new(Bingx::new(BingxOptions {
                 public_data_only: options.public_data_only,

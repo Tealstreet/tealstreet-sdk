@@ -739,3 +739,37 @@ test('public routing waits pump subscription timers and still require the actual
     clock.restore();
   }
 });
+
+test('BloFin typed request matching preserves nested caller IDs and single-use writes', () => {
+  const venue = venueOf('blofin');
+  const route = 'https://openapi.blofin.com/api/v1/trade/batch-orders';
+  const caller = 'b3cdedc0a20880baCaller123';
+  const expected = [{ size: '1', clientOrderId: caller }];
+  const tape = new Tape(
+    [
+      { type: 'command', op: 'amendOrder', update: { nested: { clientOrderId: caller } } },
+      { ...record('POST'), url: route, requestBody: JSON.stringify(expected) },
+    ],
+    venue,
+  );
+  assert.equal(tape.respond('POST', route, [{ size: '1', clientOrderId: 'b3cdedc0a20880baMinted1' }]).status, 599);
+  assert.equal(tape.respond('POST', route, [{ size: 1, clientOrderId: caller }]).status, 599);
+  assert.equal(tape.respond('POST', route, [{ ...expected[0], triggerPriceType: 'last' }]).status, 200);
+  assert.equal(tape.respond('POST', route, expected).status, 599);
+  assert.equal(tape.missingWrites, 0);
+});
+
+test('BloFin socket request comparison preserves credentials and native topics', () => {
+  const tape = new Tape([], venueOf('blofin'));
+  const route = 'wss://openapi.blofin.com/ws/private';
+  tape.sent(route, JSON.stringify({ op: 'login', args: [{ apiKey: 'key', timestamp: '1', nonce: 'a', sign: 'a' }] }));
+  tape.sent(route, JSON.stringify({ op: 'login', args: [{ apiKey: 'key', timestamp: '2', nonce: 'b', sign: 'b' }] }));
+  assert.equal(tape.sentRequests.size, 1);
+  tape.sent(route, JSON.stringify({ op: 'login', args: [{ apiKey: 'wrong', sign: 'b' }] }));
+  assert.equal(tape.sentRequests.size, 2);
+  tape.sent(route, JSON.stringify({ op: 'subscribe', args: [{ channel: 'orders', instType: 'SWAP' }] }));
+  tape.sent(route, JSON.stringify({ op: 'subscribe', args: [{ instType: 'SWAP', channel: 'orders' }] }));
+  assert.equal(tape.sentRequests.size, 3);
+  tape.sent(route, JSON.stringify({ op: 'subscribe', args: [{ channel: 'positions', instType: 'SWAP' }] }));
+  assert.equal(tape.sentRequests.size, 4);
+});
