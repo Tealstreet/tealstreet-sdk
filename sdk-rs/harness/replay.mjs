@@ -383,14 +383,6 @@ async function runTs() {
         await exchange.cancelSymbolOrders(record.symbol);
         return [];
       }
-      if (record.op === 'amendOrder')
-        return exchange.updateOrder({
-          order: store.orders.find((o) => o.id === record.id),
-          update: {
-            ...(record.price === undefined ? {} : { price: record.price }),
-            ...(record.amount === undefined ? {} : { amount: record.amount }),
-          },
-        });
       if (record.op === 'setLeverage') {
         await exchange.setLeverage(record.symbol, record.leverage);
         return [];
