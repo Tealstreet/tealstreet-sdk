@@ -456,6 +456,12 @@ The native adapter witness checks both Rc counts, shared retry state, primary
 identity and real GET/write routing after the original handle is dropped. A
 compiled swapped-owner Clone control must fail that witness before exact restore.
 
+The REST read fixture's indexed array assignment must grow the fake array and
+preserve holes, as the production canonical Value::set does. In the live getter
+shrink witness, reading the old order ID clears its array during findIndex;
+assigning the replacement at index zero grows it again. Keep the maintained TS
+oracle and the original length, ID, getter-count and call-order assertions.
+
 Production derived types in `batch_orders` and `adapter_runtime` use explicit
 imports so the accepted-set scanner can authenticate their attribute scope.
 Keep the scanner guard active; source-oracle batch tests and constructed native

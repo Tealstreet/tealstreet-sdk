@@ -998,7 +998,12 @@ fn bound_chart_snapshot_warning_uses_error_message_and_retries() {
         source["error"],
         json!([[warning, "warning"], [warning, "warning"]])
     );
-    let expected_console = source["error"][0]
+    let enhanced_warning = "[Phemex] Orderbook snapshot request failed for BTCUSDT; waiting for next delta to retry: [phemex] Request setup error: unscripted request GET /md/v2/fullbook";
+    assert_eq!(
+        source["enhanced"],
+        json!([[enhanced_warning, "warning"], [enhanced_warning, "warning"]])
+    );
+    let expected_console = source["enhanced"][0]
         .as_array()
         .unwrap()
         .iter()

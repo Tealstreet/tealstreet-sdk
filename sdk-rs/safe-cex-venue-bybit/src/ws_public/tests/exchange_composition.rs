@@ -13,6 +13,17 @@ use safe_cex_transport::{
 struct Clock {
     now: Cell<u64>,
     sleeps: RefCell<Vec<u64>>,
+    waiters: RefCell<Vec<Waker>>,
+}
+impl Clock {
+    fn advance_to(&self, milliseconds: u64) {
+        assert!(milliseconds >= self.now.get());
+        self.now.set(milliseconds);
+        let waiters = std::mem::take(&mut *self.waiters.borrow_mut());
+        for waiter in waiters {
+            waiter.wake();
+        }
+    }
 }
 impl RateLimitClock for Clock {
     fn now_ms(&self) -> u64 {
@@ -20,8 +31,18 @@ impl RateLimitClock for Clock {
     }
     fn sleep_ms(&self, milliseconds: u64) -> TransportFuture<'_, ()> {
         self.sleeps.borrow_mut().push(milliseconds);
-        self.now.set(self.now.get() + milliseconds);
-        Box::pin(async { Ok(()) })
+        let deadline = self.now.get() + milliseconds;
+        Box::pin(std::future::poll_fn(move |cx| {
+            if self.now.get() >= deadline {
+                Poll::Ready(Ok(()))
+            } else {
+                let mut waiters = self.waiters.borrow_mut();
+                if !waiters.iter().any(|waiter| waiter.will_wake(cx.waker())) {
+                    waiters.push(cx.waker().clone());
+                }
+                Poll::Pending
+            }
+        }))
     }
 }
 struct Adapter {
@@ -325,20 +346,67 @@ fn constructor_clients_and_sockets_follow_actual_source() {
             venue.xhr()
         ));
         // Actual throttling, not just a constructor argument comparison.
-        for _ in 0..6 {
+        for _ in 0..5 {
             ready(venue.xhr().request(RestRequest::default())).unwrap();
         }
         assert_eq!(
+            calls.borrow().len(),
+            5,
+            "five requests dispatch in the first window"
+        );
+        assert_eq!(
+            clock.now.get(),
+            0,
+            "registering a sleep must not advance time"
+        );
+        assert_eq!(
             *clock.sleeps.borrow(),
             [1000],
+            "first dispatch arms one window timer"
+        );
+        let client = venue.xhr();
+        let mut sixth = Box::pin(client.request(RestRequest::default()));
+        assert!(
+            sixth
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        assert_eq!(
+            calls.borrow().len(),
+            5,
             "sixth primary request must wait at five RPS"
+        );
+        clock.advance_to(999);
+        assert!(
+            sixth
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        assert_eq!(
+            calls.borrow().len(),
+            5,
+            "sixth request cannot dispatch before 1000ms"
+        );
+        clock.advance_to(1000);
+        ready(sixth).unwrap();
+        assert_eq!(
+            calls.borrow().len(),
+            6,
+            "sixth dispatches when the window completes"
+        );
+        assert_eq!(
+            *clock.sleeps.borrow(),
+            [1000, 1000],
+            "sixth primary request starts the next five-RPS window"
         );
         for _ in 0..6 {
             ready(venue.unlimited_xhr().execute(RestRequest::default())).unwrap();
         }
         assert_eq!(
             *clock.sleeps.borrow(),
-            [1000],
+            [1000, 1000],
             "unlimited client must not share primary throttle"
         );
         if case["options"]["secondary_key"] == "read-key" {
@@ -347,7 +415,7 @@ fn constructor_clients_and_sockets_follow_actual_source() {
             }
             assert_eq!(
                 *clock.sleeps.borrow(),
-                [1000],
+                [1000, 1000],
                 "read-only secondary has no primary rate limiter"
             );
             assert!(calls.borrow()[12..].iter().all(|key| key == "read-key"));

@@ -17,10 +17,15 @@ remaining owned tasks; timer futures hold
 only weak references, so discarded host tasks cannot retain the manager.
 
 Worker payloads preserve missing versus explicit-null data. Incoming/outgoing op
-sets are pinned against the live TypeScript unions. The typed Store wire decoder reuses StoreUpdate, including PackedTickerDelta.
-Outgoing Store payload preparation uses canonical Js instead of serializing that
-DTO; the library's typed processor frame converts once at the preparation input.
-The same preparer serves native account delivery directly from the live graph. Incoming commands and ordinary worker payloads retain their owned JSON boundary.
+sets are pinned against the live TypeScript unions. The typed Store wire decoder
+reuses StoreUpdate, including PackedTickerDelta. Outgoing Store payload preparation
+uses canonical Js instead of serializing that DTO; the library's typed processor
+frame converts once at the preparation input. The same preparer serves native
+account delivery directly from the live graph. Incoming commands and ordinary
+worker payloads retain their owned JSON boundary.
+The bootstrap routing oracle checks merged message-handler statistics as native
+number bits and through actual JS JSON.stringify, independently of serde's integer
+versus floating-point JSON representation.
 CallMethod results and OHLCV DATA posts use required WorkerDataPost with existing
 runtime Js, alongside separate native book and Error capabilities. DATA envelopes
 have no Serialize implementation; browser materialization retains native numbers
