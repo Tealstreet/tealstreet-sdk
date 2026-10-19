@@ -14,8 +14,8 @@ SDK constructor as the second argument. A weak constructor reference avoids a
 self-retaining closure while preserving identity if the global name changes.
 The metadata DTO remains the source of name and default code.
 
-Two actual NativeRuntime/production-Realm regressions use the real reqwest HTTP
-host, without substitute runtime/HTTP/error constructors. On master, both compile
+Two actual NativeRuntime/production-Realm regressions assemble the real reqwest
+HTTP host and invoke the installed SDK error constructor. On master, both compile
 and fail: message enumerable=true, and capture call count=0 instead of 1.
 Test-only RED commit: d04a0970d8. The repaired binding passes both; the existing
 SDK binding group passes 18 tests. The source oracle loads the maintained TS
@@ -29,6 +29,10 @@ of the native descriptor regression.
 A source scan of every venue crate found no other Error-labelled plain-object
 constructor or custom Error constructor binding requiring this cutover. Raw
 transport Axios metadata constructors are a different pre-interceptor boundary.
+
+After normally merging master c1ad856ceb, restoring its constructor body still
+compiles and fails both named regressions. Exact restoration of the repair passes
+all 18 SDK binding tests, including both NativeRuntime constructor witnesses.
 
 The shared Error implementation does not generate an engine call stack or
 provide a stock captureStackTrace. The repair preserves supplied diagnostics and
