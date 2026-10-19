@@ -142,7 +142,6 @@ the four identical-input replays. ApexOmni accepts a full capture as well as its
 existing bounded `--startup-only --replay` proof. Unsupported channels, public
 startup refusals and incomplete native drains remain explicit failures.
 
-
 `streams.mjs` uses the actual TS exchange and ExchangeWorker Store delivery,
 plus the compiled native account binding. Public host adapters cover Binance
 USD-M, Bybit, OKX and Hyperliquid, in that order. No credentials are accepted.
@@ -215,6 +214,11 @@ under the replay clock, through the real production throttle.
 Missing/extra frames, unfinished handlers, unread control frames and clock
 rollback fail closed. An ack-only instrument tape proves receipt wiring but
 provides no ticker/orderbook/candle coverage or 60-second venue result.
+When several public sockets share a URL, replay binds each connection using its
+exact first captured subscription bytes. Missing or ambiguous subscriptions fail
+closed. Parser and physical receipt identities are established independently by
+each frame's exact counter change, then remain fixed for the replay. The report
+retains both bindings; URL totals cannot establish drain or hide extra work.
 The [post-emitter checkpoint](evidence/streams-post-emitter-2026-10-19.json)
 records verified Binance and Bybit drain, repeatable channel matches and the
 remaining metadata differences. OKX and Hyperliquid are explicitly pending in
