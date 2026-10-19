@@ -91,7 +91,8 @@ const marketFields = (m) => ({
   base: m.base,
   quote: m.quote,
   active: m.active,
-  precision: m.precision,
+  // The engine frame carries trading increments (RUST_REWRITE.md MARKETS).
+  precision: { amount: m.precision.amount, price: m.precision.price },
   limits: { amount: m.limits.amount },
 });
 

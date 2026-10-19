@@ -262,14 +262,6 @@ impl Backpack {
     }
 
     fn depth(&mut self, cx: &mut Cx<'_, Pending>, event: DepthEvent<'_>) {
-        cx.store.update_ticker(&event.s, |t| {
-            if let Some(level) = event.b.first() {
-                t.bid = level.0;
-            }
-            if let Some(level) = event.a.first() {
-                t.ask = level.0;
-            }
-        });
         let Some(state) = self.books.get_mut(event.s.as_ref()) else {
             return;
         };
@@ -334,7 +326,13 @@ impl Backpack {
                 let d: TickerEvent<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
                 cx.store.update_ticker(&d.s, |t| {
                     t.last = d.c;
-                    t.percentage = d.percentage * 100.0;
+                    if let Some(change) = d
+                        .percentage
+                        .map(|n| n.0)
+                        .or_else(|| d.o.filter(|n| n.0 > 0.0).map(|n| (d.c - n.0) / n.0))
+                    {
+                        t.percentage = change * 100.0;
+                    }
                     t.volume = d.v;
                     t.quote_volume = d.q;
                 });

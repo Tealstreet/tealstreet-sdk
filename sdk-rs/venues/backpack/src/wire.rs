@@ -34,6 +34,10 @@ pub fn number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     Ok(n)
 }
 
+fn nullable_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    Ok(Option::<Number>::deserialize(d)?.map_or(0.0, |n| n.0))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketRow<'a> {
@@ -143,11 +147,13 @@ pub struct TickerEvent<'a> {
     pub s: Str<'a>,
     #[serde(deserialize_with = "number")]
     pub c: f64,
-    #[serde(deserialize_with = "number", rename = "P")]
-    pub percentage: f64,
+    #[serde(default, rename = "P")]
+    pub percentage: Option<Number>,
+    #[serde(default)]
+    pub o: Option<Number>,
     #[serde(deserialize_with = "number")]
     pub v: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number", alias = "V")]
     pub q: f64,
 }
 
@@ -163,9 +169,9 @@ pub struct TradeEvent<'a> {
 pub struct BookEvent<'a> {
     #[serde(borrow)]
     pub s: Str<'a>,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "nullable_number")]
     pub b: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "nullable_number")]
     pub a: f64,
 }
 

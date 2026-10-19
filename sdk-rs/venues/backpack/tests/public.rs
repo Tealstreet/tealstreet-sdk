@@ -328,3 +328,44 @@ fn string_depth_sequences_preserve_integer_precision() {
         [(140.0, 7.0)]
     );
 }
+
+#[test]
+fn depth_changed_levels_do_not_override_authoritative_book_ticker() {
+    let (mut e, socket) = seed();
+    let text =
+        r#"{"stream":"bookTicker.SOL_USDC_PERP","data":{"s":"SOL_USDC_PERP","b":"140","a":"142"}}"#;
+    e.handle(1.0, Event::WsMessage { socket, text });
+    let r = subscribe(&mut e);
+    reply(&mut e, &r, SNAP);
+    let text = r#"{"stream":"depth.SOL_USDC_PERP","data":{"s":"SOL_USDC_PERP","U":11,"u":11,"b":[["139","3"]],"a":[["142","0"]]}}"#;
+    e.handle(1.0, Event::WsMessage { socket, text });
+    assert_eq!(e.store().tickers()[0].bid, 140.0);
+    assert_eq!(e.store().tickers()[0].ask, 142.0);
+    let text = r#"{"stream":"depth.SOL_USDC_PERP","data":{"s":"SOL_USDC_PERP","U":13,"u":13,"b":[["999","3"]],"a":[]}}"#;
+    e.handle(2.0, Event::WsMessage { socket, text });
+    assert_eq!(
+        e.store().tickers()[0].bid,
+        140.0,
+        "unbridged gaps cannot change quotes"
+    );
+}
+
+#[test]
+fn documented_ticker_uses_open_price_and_uppercase_quote_volume_and_empty_quotes_clear() {
+    let (mut e, socket) = seed();
+    let text = r#"{"stream":"ticker.SOL_USDC_PERP","data":{"s":"SOL_USDC_PERP","o":"100","c":"105","v":"32123","V":"928190","h":"110","l":"99","n":93828}}"#;
+    e.handle(1.0, Event::WsMessage { socket, text });
+    let t = &e.store().tickers()[0];
+    assert_eq!(t.last, 105.0);
+    assert_eq!(t.percentage, 5.0);
+    assert_eq!(t.volume, 32123.0);
+    assert_eq!(t.quote_volume, 928190.0);
+    let text =
+        r#"{"stream":"bookTicker.SOL_USDC_PERP","data":{"s":"SOL_USDC_PERP","b":"104","a":"106"}}"#;
+    e.handle(2.0, Event::WsMessage { socket, text });
+    let text =
+        r#"{"stream":"bookTicker.SOL_USDC_PERP","data":{"s":"SOL_USDC_PERP","b":null,"a":null}}"#;
+    e.handle(3.0, Event::WsMessage { socket, text });
+    assert_eq!(e.store().tickers()[0].bid, 0.0);
+    assert_eq!(e.store().tickers()[0].ask, 0.0);
+}

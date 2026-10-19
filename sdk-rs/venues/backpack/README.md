@@ -18,6 +18,10 @@ protect newer data from delayed snapshots. Execution IDs suppress duplicate
 fills. Missing trigger sources on existing protection orders are repaired by
 sequenced cancel/replace jobs.
 
+Ticker statistics support documented opening-price/quote-volume fields. Best
+quotes come from bookTicker; partial depth changes never replace them, and null
+book sides clear stale quotes.
+
 Depth snapshots accept exact string or integer sequence IDs. The first buffered
 update must bridge the snapshot; later updates must begin at the next sequence.
 Three consecutive failed recovery attempts clear only the affected book.

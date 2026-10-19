@@ -91,6 +91,7 @@ const KNOWN_TS_FIXES = {
     const fills = [];
     const executions = new Set();
     const tickers = new Map(ts.tickers.map((t) => [t.symbol, t]));
+    for (const ticker of tickers.values()) Object.assign(ticker, { bid: 0, ask: 0 });
     for (const record of records) {
       if (
         record.type === 'http' &&
@@ -103,23 +104,30 @@ const KNOWN_TS_FIXES = {
       if (record.type !== 'ws') continue;
       const { stream, data: d } = JSON.parse(record.text);
       if (!d) continue;
-      // TS globally throttles tickers and throttles depth side effects. That
+      // TS globally throttles tickers. That
       // drops other markets' last updates. Rust coalesces at the flush boundary.
+      // TS also reads P/q instead of the documented o/V ticker fields.
       const ticker = tickers.get(d.s);
       if (ticker) {
-        if (stream?.startsWith('ticker.'))
+        if (stream?.startsWith('ticker.')) {
+          const change =
+            d.P !== undefined
+              ? Number(d.P) * 100
+              : Number(d.o) > 0
+                ? ((Number(d.c) - Number(d.o)) / Number(d.o)) * 100
+                : undefined;
           Object.assign(ticker, {
             last: Number(d.c),
-            percentage: Number(d.P) * 100,
+            ...(change === undefined ? {} : { percentage: change }),
             volume: Number(d.v),
-            quoteVolume: Number(d.q),
+            quoteVolume: Number(d.q ?? d.V),
           });
+        }
         if (stream?.startsWith('trade.')) ticker.last = Number(d.p);
         if (stream?.startsWith('bookTicker.')) Object.assign(ticker, { bid: Number(d.b), ask: Number(d.a) });
-        if (stream?.startsWith('depth.')) {
-          if (d.b.length) ticker.bid = Number(d.b[0][0]);
-          if (d.a.length) ticker.ask = Number(d.a[0][0]);
-        }
+        // TS mistakes the first changed depth level for the best quote.
+        // bookTicker is the venue's authoritative best bid/ask stream; null
+        // sides mean empty (zero), which TS incorrectly leaves stale.
       }
       if (stream?.startsWith('account.orderUpdate')) {
         const previous = orders.get(String(d.i));

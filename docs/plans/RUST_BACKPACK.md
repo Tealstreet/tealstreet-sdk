@@ -115,3 +115,18 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   oversized and invalid values. All 42 native tests pass. Harness re-review
   confirms no remaining blockers after the five regression tests.
 - Repository typecheck passes (44 tasks); lint/tests and final wasm checks run.
+- Live public recording completed: 20 seconds, 5,656 records; trimmed six-second
+  fixture has 1,092 records. Recorder repaired for the landing host's async HTTP
+  response bodies and corrected its diagnostic frame counters.
+- Live/documented ticker payload uses o/c/v/V, while TS reads P/q. Support both
+  formats in Rust; declare the tape-derived correction. Null bookTicker sides
+  clear quotes. Depth deltas must not supply best quotes from changed levels;
+  use authoritative bookTicker only. Review and two new regressions pass.
+- MARKET normalization now projects both implementations to the spec's amount
+  and price increment columns; TS-only base/quote display decimals are outside
+  this frame contract. Public review confirms this matches the spec.
+- All 44 native tests and five harness tests pass; bans/fmt/clippy and wasm
+  clippy pass. Backpack private correctness gate PASS (21 frames, two markets,
+  complete write/order/signature checks). Rebuild for public wire fixes underway.
+- Root default test concurrency exposed unrelated Hyro/registry import timeouts.
+  Repeat with VITEST_MAX_WORKERS=2 and serial Turbo tasks; no test changes.
