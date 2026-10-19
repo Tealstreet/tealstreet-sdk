@@ -1230,12 +1230,6 @@ fn demo_fill_reconciliation_pages_to_exhaustion_and_fails_closed() {
             )],
             false,
         ),
-        (
-            (0..20)
-                .map(|i| page(json!([]), &format!("cursor-{i}")))
-                .collect(),
-            false,
-        ),
     ];
     for (pages, retired) in cases {
         let expected_calls = if pages.len() == 1 && pages[0]["nextPageCursor"] != "" {
@@ -1262,12 +1256,8 @@ fn demo_fill_reconciliation_pages_to_exhaustion_and_fails_closed() {
         )
         .unwrap();
         h.advance(1100.);
-        if expected_calls == 20 {
-            h.advance(3000.);
-        }
         let calls = h.wire.calls("/v5/execution/list");
-        // The scripted limiter advances virtual time, so a long first read may
-        // also fire the next reconciliation timer. Count the first read only.
+        // These short reads settle before the next reconciliation timer.
         let first_read_len = calls
             .iter()
             .skip(1)
@@ -1292,7 +1282,138 @@ fn demo_fill_reconciliation_pages_to_exhaustion_and_fails_closed() {
             retired,
             "partial or truncated fill history cannot retire the order"
         );
-        if expected_calls == 20 {
+    }
+    demo_pagination_timeline();
+}
+
+fn demo_pagination_timeline() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/reconciliation-timeline-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let profiles: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        profiles.len(),
+        2,
+        "shared FIFO and cursor-keyed response profiles"
+    );
+    for profile in profiles {
+        let routed = profile["routed"].as_bool().unwrap();
+        let h = support::harness_as(safe_cex_types::ExchangeName::Bybitdemo, options(), |wire| {
+            wire.ok(
+                "GET",
+                "/v5/position/list",
+                json!({"list":[],"nextPageCursor":""}),
+            );
+            wire.ok("POST", "/v5/order/create", json!({"orderId":"ro-1"}));
+            for index in 0..20 {
+                let result = json!({"list":[],"nextPageCursor":format!("cursor-{index}")});
+                if routed && index > 0 {
+                    wire.route_when(
+                        "GET",
+                        "/v5/execution/list",
+                        "cursor",
+                        &format!("cursor-{}", index - 1),
+                        json!({"retCode":0,"retMsg":"OK","result":result}),
+                    );
+                } else {
+                    wire.ok("GET", "/v5/execution/list", result);
+                }
+            }
+        });
+        seed_market(&h);
+        place(&h, json!({"symbol":"BTCUSDT","type":"limit","side":"sell","amount":0.01,"price":26000,"reduceOnly":true})).unwrap();
+        let mut elapsed = 0;
+        for checkpoint in profile["checkpoints"].as_array().unwrap() {
+            let at = checkpoint["at"].as_u64().unwrap();
+            h.advance((at - elapsed) as f64);
+            elapsed = at;
+            let calls = h.wire.calls("/v5/execution/list");
+            let cursors: Vec<_> = calls
+                .iter()
+                .map(|call| call.params.get("cursor").cloned().unwrap_or(json!("")))
+                .collect();
+            let expected: Vec<_> = checkpoint["calls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|call| call["cursor"].clone())
+                .collect();
+            assert_eq!(
+                cursors, expected,
+                "source request sequence: routed={routed}, at={at}"
+            );
+            assert!(
+                calls
+                    .iter()
+                    .all(|call| call.params["symbol"] == "BTCUSDT" && call.params["limit"] == "50")
+            );
+            let warnings: Vec<_> =
+                h.runtime
+                    .console_calls
+                    .borrow()
+                    .iter()
+                    .filter(|(level, _)| level == "warning")
+                    .map(|(_, args)| {
+                        assert_eq!(
+                            args.len(),
+                            2,
+                            "source warning message plus severity argument"
+                        );
+                        assert!(args[1].strict_equals(
+                            &safe_cex_exchange::js_runtime::value::Js::str("warning")
+                        ));
+                        String::from_utf16(args[0].as_str().unwrap()).unwrap()
+                    })
+                    .collect();
+            let expected_logs: Vec<_> = checkpoint["logs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|entry| {
+                    assert_eq!(entry["severity"], "warning");
+                    entry["message"].as_str().unwrap().to_owned()
+                })
+                .collect();
+            assert_eq!(
+                warnings, expected_logs,
+                "source warnings: routed={routed}, at={at}"
+            );
+            assert!(
+                h.store
+                    .orders()
+                    .unwrap()
+                    .iter()
+                    .any(|order| order.id == "ro-1"),
+                "partial or truncated fill history cannot retire the order"
+            );
+        }
+        if routed {
+            let calls = h.wire.calls("/v5/execution/list");
+            assert_eq!(calls.len(), 40, "two complete twenty-page reads");
+            let cursors: std::collections::BTreeSet<_> = calls
+                .iter()
+                .map(|call| {
+                    call.params
+                        .get("cursor")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("")
+                        .to_owned()
+                })
+                .collect();
+            assert_eq!(
+                cursors.len(),
+                20,
+                "all twenty pages reached despite interleaving"
+            );
             assert!(
                 h.runtime
                     .logs
@@ -1302,6 +1423,7 @@ fn demo_fill_reconciliation_pages_to_exhaustion_and_fails_closed() {
                 "a page limit is an observable error, never an empty fill result"
             );
         }
+        h.venue().dispose().unwrap();
     }
 }
 

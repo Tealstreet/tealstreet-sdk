@@ -86,7 +86,8 @@ impl Runtime {
                 }
             }
             let added = !self.jobs.borrow().is_empty();
-            self.jobs.borrow_mut().extend(pending);
+            pending.extend(std::mem::take(&mut *self.jobs.borrow_mut()));
+            *self.jobs.borrow_mut() = pending;
             if !progressed && !added && !signal.take() {
                 return;
             }
@@ -454,15 +455,21 @@ impl HttpHost for Host {
     }
 }
 
-struct Clock(Rc<Runtime>);
+struct Clock(std::rc::Weak<Runtime>);
 impl RateLimitClock for Clock {
     fn now_ms(&self) -> u64 {
-        self.0.now.get() as u64
+        self.0.upgrade().expect("fixture runtime").now.get() as u64
     }
     fn sleep_ms(&self, milliseconds: u64) -> TransportFuture<'_, ()> {
-        let sleep = self.0.sleep(milliseconds);
+        let sleep = self
+            .0
+            .upgrade()
+            .expect("fixture runtime")
+            .sleep(milliseconds);
         Box::pin(async move {
-            sleep.await.map_err(|error| safe_cex_transport::TransportError::Host(error.message))
+            sleep
+                .await
+                .map_err(|error| safe_cex_transport::TransportError::Host(error.message))
         })
     }
 }
@@ -556,7 +563,7 @@ fn configured_harness(
             remote_signer,
             wire: wire.clone(),
             http_host: Rc::new(Host),
-            retry_clock: Rc::new(Clock(runtime.clone())),
+            retry_clock: Rc::new(Clock(Rc::downgrade(&runtime))),
             clock,
             external_public_data,
             relay_enabled: false,
@@ -597,6 +604,38 @@ impl Harness {
     pub fn venue(&self) -> &dyn Exchange {
         self.exchange.as_ref()
     }
+}
+
+#[test]
+fn retry_sleep_keeps_time_fixed_until_explicit_deadline() {
+    let runtime = Rc::new(Runtime::default());
+    let clock = Clock(Rc::downgrade(&runtime));
+    let mut sleep = clock.sleep_ms(10);
+    assert_eq!(
+        runtime.now.get(),
+        0.0,
+        "sleep registration cannot advance time"
+    );
+    assert!(
+        sleep
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    runtime.now.set(9.0);
+    runtime.pump();
+    assert!(
+        sleep
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending()
+    );
+    runtime.now.set(10.0);
+    runtime.pump();
+    assert!(matches!(
+        sleep.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(Ok(()))
+    ));
 }
 
 #[test]
