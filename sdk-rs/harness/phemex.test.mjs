@@ -29,3 +29,12 @@ test('Phemex socket audit rejects private subscriptions before a valid authentic
   assert.equal(audit.errors().length, 1);
   assert.equal(audit.ready(), false);
 });
+
+test('Phemex full-depth audit rejects a default shallow subscription', () => {
+  const audit = venue.createSocketAudit('rust', { isPrivate:false, books:['BTCUSDT'] });
+  audit.sent('wss://ws.phemex.com', '{"method":"orderbook_p.subscribe","params":["BTCUSDT"]}');
+  assert.match(audit.errors().join(), /full depth0/);
+});
+test('Phemex history reads require authenticated headers', () => {
+  for (const path of ['trades', 'orders']) assert.throws(() => venue.validateRequest({ url:'https://api.phemex.com/api-data/g-futures/' + path, headers:{} }), /invalid Phemex request/);
+});

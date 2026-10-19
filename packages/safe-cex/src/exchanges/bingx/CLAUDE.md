@@ -411,7 +411,15 @@ wrong side of that mark price:
 
 ### Full-position vs. partial stops
 
-Current official Swap docs make `closePosition` and `quantity` mutually exclusive. Partial TP/SL orders send an explicit quantity and never `closePosition`. Full-position orders (`close: true` or amount `0`) require an existing opposite-side position and send `closePosition: 'true'` without quantity or `reduceOnly`. Attached stops use the entry quantity and are therefore partial/size-bound. This behavior is contract-verified; the July 2026 audit did not place an unauthorized live order.
+Current official Swap docs explicitly require `quantity` and `stopPrice` for
+`STOP_MARKET` and `TAKE_PROFIT_MARKET` even with `closePosition: true` (the
+current Place Order notes and parameter table supersede the older contradictory
+field description). Partial stops send quantity without `closePosition`.
+The Rust engine uses the reconciled opposite position's contracts as quantity
+for full-position stops and omits `reduceOnly`. The TS adapter still omits
+quantity on that path; this is a declared Rust replay-gate fix. Attached stops
+use the entry quantity and remain size-bound. Deterministic contract tests do
+not submit live orders.
 
 ## Symbol Format
 
@@ -651,3 +659,22 @@ Key validation points:
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `clientOrderId`, rule 1-40 characters with **no uppercase letters**: BingX lowercases the field server-side, so an uppercase ID could never be looked up by the caller's value.
+
+
+## Rust engine
+
+`sdk-rs/venues/bingx` implements the sans-I/O engine. Its transport connects
+straight to `https://open-api.bingx.com`,
+`wss://ws-market-swap.qq-os.com/ws` (the internal public feed described above),
+and `wss://open-api-swap.bingx.com/swap-market` (private). It does not use the
+Tealstreet CORS proxy or tunnel. Browser deployment therefore needs a transport
+with permitted REST egress/CORS; a server or Worker can provide it. API key IP
+allowlists must allow the engine host's direct egress IP.
+
+Rust corrects TS's precision-zero step, descending asks, non-finite ticker
+placeholders, terminal cumulative/repeated fills, native `cp` alias and
+full-position stop quantity. It also stops a sequenced placement after a
+rejected or ambiguous entry, so a remaining bracket leg cannot open exposure.
+Rare query reads use documented `startTs`/`endTs`/`pageSize`/`pageIndex` for fill
+history; saturated unpageable ranges fail explicitly instead of returning a
+partial success. See the crate's tests and `harness/gate.mjs` known fixes.

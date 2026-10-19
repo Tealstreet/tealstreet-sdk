@@ -6,7 +6,8 @@ use crate::model::{
     RejectReason, StopTriggerType, TimeInForce,
 };
 use crate::store::TICKER_FIELDS;
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::DefaultHasher};
+use std::hash::{Hash, Hasher};
 
 pub const MAGIC: [u8; 4] = *b"SCXF";
 pub const FORMAT: u16 = 1;
@@ -92,7 +93,7 @@ pub struct FrameWriter<'a> {
     sections: u16,
     open: Option<usize>,
     strings: Vec<&'a str>,
-    string_index: HashMap<&'a str, u32>,
+    string_index: HashMap<u32, u32>,
 }
 
 impl<'a> FrameWriter<'a> {
@@ -111,18 +112,36 @@ impl<'a> FrameWriter<'a> {
         }
     }
 
+    /// Reserve known table sizes once, avoiding geometric growth during startup frames.
+    pub fn reserve_tables(&mut self, bytes: usize, strings: usize) {
+        self.buf.reserve_exact(bytes);
+        self.strings.reserve_exact(strings);
+        self.string_index.reserve(strings);
+    }
+
     pub fn is_empty(&self) -> bool {
         self.sections == 0
     }
 
     pub fn string(&mut self, value: &'a str) -> u32 {
-        if let Some(&index) = self.string_index.get(value) {
-            return index;
+        let mut hasher = DefaultHasher::new();
+        value.hash(&mut hasher);
+        self.intern(value, hasher.finish() as u32)
+    }
+
+    fn intern(&mut self, value: &'a str, mut hash: u32) -> u32 {
+        loop {
+            match self.string_index.get(&hash) {
+                Some(&index) if self.strings[index as usize] == value => return index,
+                Some(_) => hash = hash.wrapping_add(1),
+                None => {
+                    let index = self.strings.len() as u32;
+                    self.strings.push(value);
+                    self.string_index.insert(hash, index);
+                    return index;
+                }
+            }
         }
-        let index = self.strings.len() as u32;
-        self.strings.push(value);
-        self.string_index.insert(value, index);
-        index
     }
 
     pub fn optional_string(&mut self, value: Option<&'a str>) -> u32 {
@@ -254,6 +273,19 @@ mod tests {
 
     fn u32_at(buf: &[u8], at: usize) -> u32 {
         u32::from_le_bytes(buf[at..at + 4].try_into().unwrap())
+    }
+
+    #[test]
+    fn interning_resolves_hash_collisions_by_full_string_equality() {
+        let mut w = FrameWriter::new(Vec::new(), 0.);
+        assert_eq!(w.intern("one", 7), 0);
+        assert_eq!(w.intern("two", 7), 1);
+        assert_eq!(w.intern("three", 8), 2);
+        assert_eq!(w.intern("two", 7), 1);
+        assert_eq!(w.intern("one", 7), 0);
+        assert_eq!(w.intern("wrap", u32::MAX), 3);
+        assert_eq!(w.intern("wrap-two", u32::MAX), 4);
+        assert_eq!(w.intern("wrap-two", u32::MAX), 4);
     }
 
     #[test]

@@ -61,7 +61,7 @@ export const VENUES = {
       const parsed = new URL(url);
       const get = (name) => Object.entries(headers).find(([key]) => key.toLowerCase() === name)?.[1];
       const expiry = get('x-phemex-request-expiry');
-      if (!expiry && !parsed.pathname.startsWith('/g-')) return;
+      if (!expiry && !parsed.pathname.startsWith('/g-') && !parsed.pathname.startsWith('/api-data/g-futures/')) return;
       const query = decodeURIComponent(parsed.search.slice(1).replace(/\+/g, '%20'));
       const expected = createHmac('sha256', 'replay-secret').update(parsed.pathname + query + expiry + (body || '')).digest('hex');
       if (get('x-phemex-access-token') !== 'replay-key' || get('x-phemex-request-signature') !== expected || !Number.isSafeInteger(Number(expiry)) || Math.abs(Number(expiry) - Date.now() / 1000 - 60) > 5) throw new Error(`invalid Phemex request: ${parsed.pathname}`);
@@ -76,6 +76,7 @@ export const VENUES = {
             auth = kind === 'API' && key === 'replay-key' && Number.isSafeInteger(expiry) && Math.abs(expiry - Date.now() / 1000 - 60) < 5 && sig === createHmac('sha256', 'replay-secret').update(key + expiry).digest('hex');
             if (!auth) failures.push('invalid Phemex WS auth');
           }
+          if (m.method === 'orderbook_p.subscribe' && (m.params?.length !== 3 || m.params[1] !== false || m.params[2] !== 0)) failures.push('Phemex books require full depth0 at20ms');
           if (m.method === 'aop_p.subscribe' && !acknowledged) failures.push('Phemex private subscribe preceded auth acknowledgement');
           if (m.method?.endsWith('.subscribe')) topics.add(m.method + ':' + (m.params?.[0] ?? ''));
         },
@@ -86,6 +87,14 @@ export const VENUES = {
     },
   },
 
+  bingx: {
+    rust: 'bingx',
+    ts: { module: `${root}/bingx/bingx.exchange.ts`, className: 'BingxExchange', name: 'bingx' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('market.depth.')).length >= count,
+    privateSocket: '?listenKey=',
+    matchRequestBody: true,
+  },
   weex: {
     rust: 'weex',
     ts: { module: `${root}/weex/weex.exchange.ts`, className: 'WeexExchange', name: 'weex' },
@@ -129,6 +138,7 @@ export const VENUES = {
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('book.')).length >= count,
     privateSocket: '/exchange/v1/user',
     matchRequestBody: true,
+    requestBody: (body) => body?.params ?? body,
     publicTickers: (records) => {
       const seed = records.find((r) => r.type === 'http' && r.url.endsWith('/public/get-instruments'));
       return seed ? JSON.parse(seed.body).result.data.filter((r) => r.inst_type === 'PERPETUAL_SWAP' && r.tradable).map((r) => r.symbol) : [];
@@ -236,6 +246,21 @@ export const VENUES = {
     /** Book topics get a message handler once each subscription reaches the socket. */
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >= count,
+    startupSubscriptions: (records, books) => {
+      const symbols = new Set();
+      for (const record of records) {
+        if (record.type !== 'http' || record.method !== 'GET' || !(record.status >= 200 && record.status < 300) ||
+            new URL(record.url).pathname !== '/v5/market/instruments-info') continue;
+        const body = JSON.parse(record.body);
+        if (Number(body.retCode) !== 0) continue;
+        for (const row of body.result?.list ?? []) {
+          if (['USDT', 'USDC'].includes(row.quoteCoin) && typeof row.symbol === 'string' && row.symbol) symbols.add(row.symbol);
+        }
+      }
+      const socket = 'wss://stream.bybit.com/v5/public/linear subscribe ';
+      return [...symbols].map((symbol) => `${socket}tickers.${symbol}`)
+        .concat(books.map((symbol) => `${socket}orderbook.1000.${symbol}`));
+    },
     privateSocket: '/v5/private',
     isWrite: (method) => method === 'POST',
     matchRequestBody: true,

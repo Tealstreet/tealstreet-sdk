@@ -33,3 +33,10 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 - Live full-depth public fixture: 20 seconds, 533 replayed frames, 891 markets, 324 tickers, 2 books. First passing median gate: TS/Rust CPU 277.9/90.9ms, steady 178.4/30.6ms, retained 5.8/2.8MB. Further final gates follow landing merge.
 - TS bugs fixed and recorded in KNOWN_TS_FIXES: implicit depth30 subscription leaves deep levels stale; lost outer sequence discards buffered deltas; periodic full snapshots must replace old levels; zero-open percentage must remain finite; fills deduplicate by execution rather than order/message; cumulative executed exposure survives cancellation; exact split lots and partial-fill replacement remain bounded and fail closed.
 - Crypto audit: this port reuses only existing HMAC/SHA/UUID primitives and replaces no currently called crypto helper; no additional provably unused helper introduced.
+
+### Landing integration checkpoint
+
+- Merged BingX landing head `9ddec5d0a4`. Independent merge reviews preserve incoming selectors, elapsed memory quiescence, strict write/subscription gates, and all Phemex hooks.
+- Engine 36 tests pass after combining catalog omission and incoming selector aliases. WASM registers all seven venues. The Phemex public gate passed before integration; final full matrix will run on the combined artifact.
+- Private first run found TS drops flat ETHUSDC leverage settings; the independent taped-row oracle now restores that known setting, cumulative fills, and per-execution fills without referencing Rust output.
+- Harness review fixed unsigned history reads accepted by audit, missing full-depth subscription validation, and ambiguous shared-endpoint close records (fail closed). Added independent oracle regression and signature/depth tests.
