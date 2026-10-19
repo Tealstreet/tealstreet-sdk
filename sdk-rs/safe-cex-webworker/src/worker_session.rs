@@ -1,10 +1,11 @@
-//! store.webworker.start and its two live worker tables. The native host owns
-//! browser callback installation, proxy objects, perf-fixture imports and clock
-//! setters. This module executes the actual protocol/init/map/cleanup body.
+//! store.webworker.start, worker tables and module-owned perf fixtures.
+//! Hosts supply callback installation, recording proxies and clock setters.
+//! This module executes the actual protocol/init/map/cleanup body.
 use crate::{
     exchange_worker::{ExchangeWorker, WorkerConstruction},
     exchange_worker_start::{WorkerBootstrapHost, decode_update, exchange_text},
     payload::{StoreWorkerOp, StoreWorkerPayload},
+    perf_fixture::{PerfFixture, PerfFixtureHost},
     telegram::{TelegramHost, TelegramWorker},
     worker_ports::{WorkerConfigHandler, WorkerMessage, WorkerPort, WorkerPorts},
 };
@@ -28,7 +29,9 @@ impl WorkerMessage for Js {
     }
 }
 pub type WorkerTable<H> = Rc<RefCell<IndexMap<String, Rc<ExchangeWorker<H>>>>>;
-pub trait WorkerSessionHost: WorkerBootstrapHost + WorkerPort<Js, Error = ExchangeError> {
+pub trait WorkerSessionHost:
+    WorkerBootstrapHost + WorkerPort<Js, Error = ExchangeError> + PerfFixtureHost
+{
     /// Return the cleanup that unregisters this listener at module teardown.
     fn install_message_listener(
         &self,
@@ -40,16 +43,10 @@ pub trait WorkerSessionHost: WorkerBootstrapHost + WorkerPort<Js, Error = Exchan
         shared: bool,
         port_key: Rc<RefCell<String>>,
         ports: Rc<WorkerPorts<Js, Self, Self>>,
+        perf: Rc<PerfFixture<Self>>,
     ) -> Rc<Self>
     where
         Self: Sized;
-    fn is_replaying_perf_fixture(&self) -> bool;
-    fn start_replay(
-        &self,
-        post: Rc<dyn Fn(Js) -> Result<(), ExchangeError>>,
-    ) -> Result<(), ExchangeError>;
-    fn configure_perf_fixture(&self, value: Js) -> Result<(), ExchangeError>;
-    fn take_perf_fixture(&self) -> Result<Js, ExchangeError>;
     fn set_tick_interval_multipliers(&self, value: Js) -> Result<(), ExchangeError>;
     fn set_ws_diagnostics_enabled(&self, enabled: bool) -> Result<(), ExchangeError>;
     fn config_handlers(&self) -> Rc<RefCell<Vec<WorkerConfigHandler<Js>>>>;
@@ -69,12 +66,14 @@ pub struct WorkerModule<H: WorkerSessionHost> {
     pub anonymous_exchange_workers: WorkerTable<H>,
     pub ports: Rc<WorkerPorts<Js, H, H>>,
     sessions: RefCell<Vec<Rc<WorkerSession<H>>>>,
+    pub perf: Rc<PerfFixture<H>>,
 }
 impl<H: WorkerSessionHost> WorkerModule<H> {
     pub fn new(host: Rc<H>) -> Rc<Self> {
         Rc::new(Self {
             exchange_workers: Rc::default(),
             anonymous_exchange_workers: Rc::default(),
+            perf: PerfFixture::new(&host),
             ports: WorkerPorts::new(host),
             sessions: RefCell::default(),
         })
@@ -113,6 +112,7 @@ impl<H: WorkerSessionHost> WorkerModule<H> {
 }
 impl<H: WorkerSessionHost> Drop for WorkerModule<H> {
     fn drop(&mut self) {
+        self.perf.dispose();
         let sessions = std::mem::take(self.sessions.get_mut());
         for session in &sessions {
             if let Some(unregister) = session.unregister.borrow_mut().take() {
@@ -234,13 +234,13 @@ impl<H: WorkerSessionHost> WorkerSession<H> {
             } else {
                 Some(to_typed(&raw_name)?)
             };
-            if self.ctx.is_replaying_perf_fixture() {
+            if module.perf.is_replaying() {
                 self.ctx.post_payload(StoreWorkerPayload {
                     op: StoreWorkerOp::StartStatus,
                     instance_id: None,
                     data: Some(serde_json::Value::Bool(true)),
                 })?;
-                self.ctx.start_replay(self.replay_post())?;
+                module.perf.start_replay(self.replay_post())?;
                 return Ok(None);
             }
             let name: ExchangeName = to_typed(&raw_name)?;
@@ -251,9 +251,12 @@ impl<H: WorkerSessionHost> WorkerSession<H> {
                 format!("exchange:{}", exchange_text(&name))
             };
             // Source constructs the recording proxy even when shared reuse returns early.
-            let mut wrapped =
-                self.ctx
-                    .worker_context(false, self.port_key.clone(), module.ports.clone());
+            let mut wrapped = self.ctx.worker_context(
+                false,
+                self.port_key.clone(),
+                module.ports.clone(),
+                module.perf.clone(),
+            );
             if self.shared {
                 let key = self.port_key.borrow().clone();
                 let list = {
@@ -276,9 +279,12 @@ impl<H: WorkerSessionHost> WorkerSession<H> {
                         return Ok(None);
                     }
                 }
-                wrapped =
-                    self.ctx
-                        .worker_context(true, self.port_key.clone(), module.ports.clone());
+                wrapped = self.ctx.worker_context(
+                    true,
+                    self.port_key.clone(),
+                    module.ports.clone(),
+                    module.perf.clone(),
+                );
             }
             let decode = |key: &str| -> Result<Js, ExchangeError> { Ok(data.get(key)?) };
             let worker = ExchangeWorker::new(WorkerConstruction {
@@ -393,16 +399,16 @@ impl<H: WorkerSessionHost> WorkerSession<H> {
                     index += 1;
                 }
                 if in_operator(&cfg, "perfFixture")? {
-                    self.ctx.configure_perf_fixture(cfg.get("perfFixture")?)?;
-                    if self.ctx.is_replaying_perf_fixture() {
-                        self.ctx.start_replay(self.replay_post())?;
+                    module.perf.configure(cfg.get("perfFixture")?)?;
+                    if module.perf.is_replaying() {
+                        module.perf.start_replay(self.replay_post())?;
                     }
                 }
                 return Ok(None);
             }
             if is_op("__perfFixtureDump")? {
                 let _ = (|| -> Result<(), ExchangeError> {
-                    let data = self.ctx.take_perf_fixture()?;
+                    let data = module.perf.take()?;
                     self.original_post(Js::object(vec![
                         ("op", Js::str("__perfFixtureDump")),
                         ("data", data),

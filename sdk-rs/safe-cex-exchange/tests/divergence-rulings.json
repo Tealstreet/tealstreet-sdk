@@ -23,6 +23,17 @@
       "probe": "tests/journal.rs::journal_ready_reads_defer_fold_and_preserve_settlement_rejection",
       "source": "scripts/journal-oracle.cjs::buildTimingCases",
       "evidence": "Full maintained TS throws the supplied SettlementDenied object after exactly one BTC settlement lookup; native preserves that referent, exact metadata, callback count and ready-read await fence"
+    },
+    {
+      "assignment": "codex-l89ogr",
+      "row": 90,
+      "symbol": "fillEventUnits",
+      "verdict": "ACCEPT",
+      "reason": "The actual maintained module and exported Rust helper agree for all 49 ExchangeName members: 15 native, 7 base, 27 absent. The 22 own keys retain source insertion order. Every inherited stock Object.prototype member retains its symbolic identity, arity and V8 string observation. Executing or mutating inherited prototype capabilities is excluded by the prototype-semantics ruling; none of the admitted venue names selects one. The private source table is not exported. This is an acceptance of the closed output/prototype representation, not a claim to emulate arbitrary prototype mutation.",
+      "authority": "divergence-cluster-rulings.md: prototype semantics; shared-type-decisions-final.md: decision 2",
+      "probe": "tests/root_rows.rs::root_fill_table_native_values_keys_and_prototype_kind",
+      "source": "tests/root_rows_oracle.cjs fill executes packages/safe-cex/src/exchanges/fillEventUnits.ts and discovers ExchangeName from maintained types.ts",
+      "evidence": "Source/native probe PASS for all 49 admitted names, all 12 inherited builtin observations and five missing keys. The earlier count-50 failure was a fixture typo, not a production RED."
     }
   ]
 }

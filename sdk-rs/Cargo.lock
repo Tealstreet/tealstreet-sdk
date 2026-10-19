@@ -3914,7 +3914,6 @@ name = "safe-cex-lighter-sdk"
 version = "0.1.0"
 dependencies = [
  "num-bigint 0.4.6",
- "safe-cex-crypto",
  "safe-cex-num",
  "serde_json",
 ]
