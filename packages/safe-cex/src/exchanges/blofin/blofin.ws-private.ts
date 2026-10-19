@@ -198,26 +198,34 @@ export class BlofinPrivateWebsocket extends BaseWebSocket<BlofinExchange> {
   };
 
   handleOrderTopic = ({ data: blofinOrders }: Record<string, any>) => {
+    const latest = new Map(this.store.orders.map((order) => [order.id, order]));
     for (const o of blofinOrders) {
       const orders = this.parent.mapOrders([o]);
       const orderId = String(o.orderId || o.ordId || orders[0]?.id || '');
 
       if (orders.length) {
         if (o.state === 'filled') {
-          this.store.updateOrdersStatus(orders, OrderStatus.Closed);
+          this.store.markOrdersTerminal(orders, OrderStatus.Closed);
         }
         if (o.state === 'canceled') {
-          this.store.updateOrdersStatus(orders, OrderStatus.Canceled);
+          this.store.markOrdersTerminal(orders, OrderStatus.Canceled);
         }
         if (o.state === 'effective') {
-          this.store.updateOrdersStatus(orders, OrderStatus.Closed);
+          this.store.markOrdersTerminal(orders, OrderStatus.Closed);
         }
         if (o.state === 'order_failed') {
-          this.store.updateOrdersStatus(orders, OrderStatus.Canceled);
+          this.store.markOrdersTerminal(orders, OrderStatus.Canceled);
         }
 
         if (o.state === 'live' || o.state === 'partially_filled') {
-          this.store.addOrUpdateOrders(orders);
+          this.store.addOrUpdateOrders(
+            orders.filter((order) => {
+              const existing = latest.get(order.id);
+              if (existing && order.filled < existing.filled) return false;
+              latest.set(order.id, order);
+              return true;
+            }),
+          );
         }
 
         if (o.state === 'filled' || o.state === 'partially_filled') {

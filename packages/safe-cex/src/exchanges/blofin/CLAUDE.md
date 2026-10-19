@@ -422,6 +422,14 @@ Execution history follows the same conversion rule (`qty = nativeQty * contractS
 
 BloFin's public `Order.filled` remains base quantity. `Order.extra.filledInPlacementUnits` preserves the same cumulative native-contract value accepted by `PlaceOrderOpts.amount`, so chaser remainder arithmetic does not mix base quantity with placement units.
 
+### Book snapshots
+
+`books5` replaces the price range covered by its top levels, preserving only
+levels deeper than that range. Replacing the first N array entries loses sorted
+price order and can duplicate a price after the top of book moves. The Rust
+engine uses the same merge and requires matching `prevSeqId` for full-book
+updates; a gap clears sequence state and requests a fresh snapshot.
+
 ### Order Book Amount Conversion
 
 Order book amounts from WS are contract counts. Keep them in native contracts in `blofin.ws-public.ts`; web orderbook/DOM grouping utilities convert to base or quote exactly once using `contractSize`.
@@ -752,3 +760,38 @@ Notable cross-references for leverage handling:
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `clientOrderId`, rule `^[A-Za-z0-9]{1,32}$`, on `placeOrder` and on each regular order of `placeOrders`. Replaces the generated `BROKER_ID…` ID; no prefix is composed.
+
+## Rust engine account safety
+
+The Rust venue lives at `sdk-rs/venues/blofin`. It retains each large REST
+response's status envelope while streaming its data rows, so a non-zero API
+code or a failed page cannot commit as an empty authoritative snapshot.
+Snapshot revisions prevent older REST data from overwriting newer socket events.
+
+Two defensive corrections to the TS behavior are recorded in the replay gate:
+malformed successful mode reads do not silently initialize cross/one-way mode,
+and an empty position push clears used margin and unrealized PnL. Per-market
+settings retain leverage and margin when positions close. Cumulative fills keep
+quantity and traded-value watermarks for 500 orders, including terminal rows.
+
+Rust commands preflight an entire batch before I/O. Cancel responses must cover
+exactly the requested native identities even when the top-level code is zero;
+per-row failures are never swallowed. Cancel-replace keeps attached trigger
+references and execution prices and gives each replacement a new client ID.
+Positive partial protection sizes that round to zero are rejected, and only an
+explicit zero selects full-position semantics. Unsupported time-in-force shapes
+are rejected. Split sizes conserve native lot units. These defensive corrections
+to legacy TS behavior are listed in the Rust gate and commit messages.
+
+Rust fills queries walk cursors past newer records when necessary: BloFin can
+ignore the requested time window on fills history. They return actual executions
+only; the TS fallback that treats order-total history as executions is not used.
+Income walks fail rather than silently returning a partial ledger after a failed
+page or an exhausted pagination bound. Query JSON shapes match the engine's
+Binance history surface, including seconds for execution timestamps and
+milliseconds for order/income/public-trade timestamps.
+
+Terminal order rows remain until reconciliation, and cancel-all selects only open
+orders in both TS and Rust. Rust additionally keeps terminal socket states
+monotonic and rejects amending or merging terminal protection, preventing late
+frames or retained canceled legs from creating new orders.

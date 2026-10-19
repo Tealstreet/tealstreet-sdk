@@ -1025,3 +1025,110 @@ mod mexc_regressions {
         }
     }
 }
+
+#[cfg(test)]
+mod blofin_envelope_tests {
+    use super::*;
+    #[test]
+    fn streamed_envelope_retains_status_after_array_at_every_chunk_boundary() {
+        let body = br#"{"msg":"a[\"b","data":[{"nested":[1,2]},3],"code":"152401"}"#;
+        for size in 1..body.len() {
+            let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
+            let mut items = Vec::new();
+            for chunk in body.chunks(size) {
+                splitter.feed(chunk, |s| items.push(s.to_owned()));
+            }
+            assert!(splitter.finished());
+            assert_eq!(items, [r#"{"nested":[1,2]}"#, "3"]);
+            assert_eq!(
+                std::str::from_utf8(splitter.outside()).unwrap(),
+                r#"{"msg":"a[\"b","data":[],"code":"152401"}"#
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod malformed_stream_tests {
+    use super::*;
+    #[test]
+    fn rejects_empty_elements_trailing_commas_and_invalid_utf8() {
+        for body in [
+            br#"{"code":"0","data":[,]}"#.as_slice(),
+            br#"{"data":[1,]}"#,
+            br#"{"data":[1 2]}"#,
+            b"{\"data\":[\"\xff\"]}",
+        ] {
+            let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
+            splitter.feed(body, |_| {});
+            assert!(!splitter.finished());
+        }
+    }
+}
+
+#[cfg(test)]
+mod merged_stream_tests {
+    use super::*;
+
+    #[test]
+    fn large_venue_lists_keep_status_and_cursor_outside_the_streamed_array() {
+        let rows = (0..4096)
+            .map(|i| format!(r#"{{"id":{i},"name":"{}"}}"#, "x".repeat(128)))
+            .collect::<Vec<_>>()
+            .join(",");
+        for (at, body, expected) in [
+            (
+                ArrayAt::EnvelopeField("data"),
+                format!(r#"{{"data":[{rows}],"code":"152401"}}"#),
+                r#"{"data":[],"code":"152401"}"#,
+            ),
+            (
+                ArrayAt::Path(&["result", "list"]),
+                format!(
+                    r#"{{"result":{{"list":[{rows}],"nextPageCursor":"cursor"}},"retCode":10001}}"#
+                ),
+                r#"{"result":{"list":[],"nextPageCursor":"cursor"},"retCode":10001}"#,
+            ),
+        ] {
+            for chunk in [7, 4096, 65_536] {
+                let mut splitter = ArraySplitter::new(at);
+                let mut count = 0;
+                for bytes in body.as_bytes().chunks(chunk) {
+                    splitter.feed(bytes, |_| count += 1);
+                }
+                assert!(splitter.finished());
+                assert_eq!(count, 4096);
+                assert_eq!(std::str::from_utf8(splitter.outside()).unwrap(), expected);
+                assert!(splitter.item.capacity() < 1024);
+            }
+        }
+    }
+
+    #[test]
+    fn nested_paths_reject_invalid_items_and_incomplete_or_oversized_envelopes() {
+        for body in [
+            br#"{"retCode":0,"result":{"list":[,]}}"#.as_slice(),
+            br#"{"retCode":0,"result":{"list":[1,]}}"#,
+            br#"{"retCode":0,"result":{"list":[1 2]}}"#,
+            br#"{"retCode":0,"result":{"list":[{"a":tru}]}}"#,
+            br#"{"retCode":0,"result":{"list":[]}"#,
+            b"{\"retCode\":0,\"result\":{\"list\":[\"\xff\"]}}",
+        ] {
+            for chunk in [1, 7, 1024] {
+                let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
+                for bytes in body.chunks(chunk) {
+                    splitter.feed(bytes, |_| {});
+                }
+                assert!(!splitter.finished());
+            }
+        }
+        let body = format!(
+            r#"{{"result":{{"list":[]}},"metadata":"{}"}}"#,
+            "x".repeat(METADATA_LIMIT)
+        );
+        let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
+        splitter.feed(body.as_bytes(), |_| {});
+        assert!(!splitter.finished());
+        assert_eq!(splitter.outside().len(), METADATA_LIMIT);
+    }
+}
