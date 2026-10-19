@@ -328,3 +328,34 @@ harness tests and syntax checks pass. Workspace523 native tests, native/wasm
 Clippy, bans, fmt, root typecheck/lint pass; new host regression, combined bridge,
 root tests and all settled-tree replay gates are running. Independent final
 harness correction review remains pending before the gate completion claim.
+
+Eight-venue gate checkpoint on 0192036dd5: CI passes native fmt/Clippy/tests,
+wasm32, bans, secret scan, and public/private gates for Binance, Bybit, BingX,
+Crypto.com, WEEX and all four OKX aliases. Hyperliquid public output/performance
+pass but CI rejects one TS backing-buffer baseline (-64 bytes); do not clamp it
+or relax any assertion. Fresh local Hyperliquid public/private gates both pass:
+298.1/49.6 ms TS/Rust CPU, 18.6/16.4 steady, 5.5/1.9 MB retained, bundle985134.
+Binance public passes 244.8/113.2 ms CPU,139.5/47.0 steady,4.3/2.4 MB retained,
+bundle795305. Bybit public/private pass locally after symmetric startup fix,
+498.1/350.1 ms CPU,306.6/192.4 steady,5.9/2.2 MB retained,bundle774985.
+All three sizes stay below1258291. Default combined19 real-Wasm/13 host tests
+pass. A new CI head is required for the MEXC correction below and will supply
+fresh Hyperliquid samples; add no sampling/retry policy for one invalid baseline.
+
+Strict MEXC private read parity exposed its protective placement refresh using
+account-wide reads where TS debounces three per-symbol order surfaces. Implement
+scoped, serialized reconciliation retaining other symbols and all revision,
+terminal/placed, and failed-batch fences. Add two-symbol, newer-WS and failed-read
+regressions; independently review before commit. This fixes the actual lifecycle
+rather than weakening request parity or appending unused dummy reads.
+
+MEXC correction complete: per-symbol1500ms debounce queues serialized three-surface
+snapshots through existing staging and revision fences, retaining unrelated rows
+and committing no subset after failure. Reviewer caught scoped regular-row
+preservation in the TS contract; retain absent same-symbol regular Open rows only
+on scoped refreshes, leaving full-account cleanup unchanged. Reconciliation also
+schedules when WS wins the placement-ack race. Four regressions cover scope,
+newer WS/terminal rows, failed subsets, timer serialization and WS-before-HTTP.
+All55 MEXC native tests, strict Clippy, fmt and independent re-review pass.
+Wasm private replay and a fresh Node22 Hyperliquid sample are running; new CI
+must pass before merge. Both general PR CI jobs on0192036dd5 are now green.
