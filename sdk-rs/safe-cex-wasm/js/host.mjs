@@ -95,7 +95,13 @@ export class EngineHost {
     switch (action.op) {
       case 'wsConnect': {
         const id = action.socket;
+        if (action.headers?.length && !transport.webSocketHeaders) {
+          this.handlers.onLog?.('warning', 'WebSocket upgrade headers unavailable; continuing REST reconciliation');
+          transport.setTimeout(() => this.run(engine.wsClose(id, 1006, transport.now())), 0);
+          break;
+        }
         const socket = transport.connect(action.url, {
+          headers: action.headers && Object.fromEntries(action.headers),
           onOpen: () => this.run(engine.wsOpen(id, transport.now())),
           onMessage: (text) => this.run(engine.wsMessage(id, text, transport.now())),
           onClose: (code) => {
@@ -171,6 +177,7 @@ async function* chunks(stream) {
 
 /** Transport over the runtime's own WebSocket, fetch and timers. */
 export const nativeTransport = () => ({
+  webSocketHeaders: false,
   now: () => Date.now(),
   connect(url, { onOpen, onMessage, onClose }) {
     const ws = new WebSocket(url);

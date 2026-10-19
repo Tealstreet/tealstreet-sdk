@@ -75,12 +75,31 @@ pub struct Fill {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
-    WsConnect { socket: SocketId, url: String },
-    WsSend { socket: SocketId, text: String },
-    WsClose { socket: SocketId },
+    WsConnect {
+        socket: SocketId,
+        url: String,
+    },
+    /// Upgrade authentication; hosts must fail closed if headers are unsupported.
+    WsConnectWithHeaders {
+        socket: SocketId,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+    },
+    WsSend {
+        socket: SocketId,
+        text: String,
+    },
+    WsClose {
+        socket: SocketId,
+    },
     Http(HttpRequest),
-    SetTimer { timer: TimerId, at_ms: f64 },
-    ClearTimer { timer: TimerId },
+    SetTimer {
+        timer: TimerId,
+        at_ms: f64,
+    },
+    ClearTimer {
+        timer: TimerId,
+    },
     Notice(Notice),
 }
 
@@ -310,6 +329,20 @@ impl<P> Cx<'_, P> {
         socket
     }
 
+    pub fn connect_with_headers(
+        &mut self,
+        url: impl Into<String>,
+        headers: Vec<(&'static str, String)>,
+    ) -> SocketId {
+        let socket = SocketId(self.io.next());
+        self.io.actions.push(Action::WsConnectWithHeaders {
+            socket,
+            url: url.into(),
+            headers,
+        });
+        socket
+    }
+
     pub fn send(&mut self, socket: SocketId, text: impl Into<String>) {
         self.io.actions.push(Action::WsSend {
             socket,
@@ -353,7 +386,19 @@ impl<P> Cx<'_, P> {
         at: ArrayAt,
         pending: P,
     ) -> RequestId {
-        let id = self.request(method, url, headers, None, pending);
+        self.request_streamed_body(method, url, headers, None, at, pending)
+    }
+
+    pub fn request_streamed_body(
+        &mut self,
+        method: Method,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        body: Option<String>,
+        at: ArrayAt,
+        pending: P,
+    ) -> RequestId {
+        let id = self.request(method, url, headers, body, pending);
         self.io.streams.insert(id, at);
         id
     }

@@ -42,8 +42,17 @@ by a sub-agent at each phase boundary. Never touch master or rebase.
 
 ## Progress
 
-- Planning: complete. Repository/engine/reference/TS contracts inspected;
-  current official futures docs retrieved. No implementation changes yet.
+- Public phase: implemented and reviewed by `public_review`; all findings fixed.
+  WEEX public tests: 8 passed. Engine tests: 10 passed. Existing Binance tests:
+  29 passed. WEEX/native clippy and bans passed. Required-header host test passed;
+  complete Workers suite awaits wasm artifact build (missing pkg/node, not built
+  yet). Added supporting authenticated-socket action across native/JS/Workers.
+  Review fixed strict numeric parsing, subscription generations, stale failures,
+  startup recovery and full streamed-document validation. Newest whitespace and
+  cap regressions are included in the next full verification.
+- Private/trading: bounded implementations in progress in separate modules;
+  integration and phase reviews remain. Before further work, merging the nested
+  workspace layout requested by the overseer.
 - Observed TS defect to cover: `fetchOrders` turns a failed normal/algo read
   into an empty half-snapshot. Rust must retain last-known-good state and
   document the deliberate difference in gate and commit message.

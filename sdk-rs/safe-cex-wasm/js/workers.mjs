@@ -12,12 +12,13 @@ import { EngineHost } from './host.mjs';
 
 /** Outbound sockets and requests from a Worker or Durable Object. */
 export const workersTransport = () => ({
+  webSocketHeaders: true,
   now: () => Date.now(),
-  connect(url, { onOpen, onMessage, onClose }) {
+  connect(url, { headers = {}, onOpen, onMessage, onClose }) {
     let socket;
     let closed = false;
     // Workers open client WebSockets with an upgrade request over https.
-    fetch(url.replace(/^ws/, 'http'), { headers: { Upgrade: 'websocket' } }).then(
+    fetch(url.replace(/^ws/, 'http'), { headers: { ...headers, Upgrade: 'websocket' } }).then(
       (response) => {
         socket = response.webSocket;
         if (!socket) return onClose(1006);

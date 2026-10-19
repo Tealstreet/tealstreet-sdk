@@ -130,6 +130,10 @@ pub struct ArraySplitter {
     /// The wanted key and its colon were just seen.
     armed: bool,
     item: Vec<u8>,
+    // Keep metadata and separators, replacing streamed rows with null. This
+    // validates the complete document without retaining the large array.
+    envelope: Vec<u8>,
+    invalid: bool,
 }
 
 impl ArraySplitter {
@@ -145,18 +149,30 @@ impl ArraySplitter {
             capturing_key: false,
             armed: false,
             item: Vec::new(),
+            envelope: Vec::new(),
+            invalid: false,
         }
     }
 
     /// Whether the array was found and closed.
     pub fn finished(&self) -> bool {
         self.phase == Phase::Done
+            && !self.invalid
+            && std::str::from_utf8(&self.envelope).is_ok()
+            && serde_json::from_slice::<IgnoredAny>(&self.envelope).is_ok()
     }
 
     pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
         for &byte in data {
-            if self.phase == Phase::Done {
+            if self.envelope.len() >= 65_536 {
+                self.invalid = true;
                 return;
+            }
+            if self.phase != Phase::InArray {
+                self.envelope.push(byte);
+            }
+            if self.phase == Phase::Done {
+                continue;
             }
             if self.in_string {
                 if self.phase == Phase::InArray {
@@ -211,6 +227,7 @@ impl ArraySplitter {
                 b']' | b'}' => {
                     if at_array_level && byte == b']' {
                         self.emit(&mut on_item);
+                        self.envelope.push(b']');
                         self.phase = Phase::Done;
                         continue;
                     }
@@ -218,9 +235,14 @@ impl ArraySplitter {
                 }
                 b',' if at_array_level => {
                     self.emit(&mut on_item);
+                    // Collapse completed rows; preserve malformed separators.
+                    if self.envelope.ends_with(b"null,null") {
+                        self.envelope.truncate(self.envelope.len() - 5);
+                    }
+                    self.envelope.push(b',');
                     continue;
                 }
-                b' ' | b'\n' | b'\r' | b'\t' if at_array_level => continue,
+                b' ' | b'\n' | b'\r' | b'\t' if at_array_level && self.item.is_empty() => continue,
                 b' ' | b'\n' | b'\r' | b'\t' => {}
                 _ if self.phase == Phase::Seeking && self.depth == 1 => self.armed = false,
                 _ => {}
@@ -233,9 +255,11 @@ impl ArraySplitter {
 
     fn emit(&mut self, on_item: &mut impl FnMut(&str)) {
         if !self.item.is_empty() {
-            if let Ok(text) = std::str::from_utf8(&self.item) {
-                on_item(text);
+            match std::str::from_utf8(&self.item) {
+                Ok(text) if serde_json::from_str::<IgnoredAny>(text).is_ok() => on_item(text),
+                _ => self.invalid = true,
             }
+            self.envelope.extend_from_slice(b"null");
             self.item.clear();
         }
     }
@@ -244,6 +268,30 @@ impl ArraySplitter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_invalid_documents_after_streaming_rows() {
+        for text in [
+            r#"{"symbols":[{"v":1}]"#,
+            r#"{"symbols":[{"v":1},,]}"#,
+            r#"{"symbols":[{"v":1}]}x"#,
+            r#"[1,]"#,
+            r#"[1,,2]"#,
+            r#"[1 2]"#,
+            r#"[tru e]"#,
+        ] {
+            let at = if text.starts_with('{') {
+                ArrayAt::Field("symbols")
+            } else {
+                ArrayAt::Root
+            };
+            let mut splitter = ArraySplitter::new(at);
+            for byte in text.bytes() {
+                splitter.feed(&[byte], |_| {});
+            }
+            assert!(!splitter.finished(), "{text}");
+        }
+    }
 
     fn split(at: ArrayAt, body: &str, chunk: usize) -> Vec<String> {
         let mut splitter = ArraySplitter::new(at);

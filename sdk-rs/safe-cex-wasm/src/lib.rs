@@ -8,6 +8,7 @@ use safe_cex_engine::{
     Action, Command, Engine, Event, LogLevel, Notice, Query, RequestId, SocketId, TimerId, Venue,
 };
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
+use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -64,6 +65,8 @@ enum ActionOut<'a> {
     WsConnect {
         socket: u32,
         url: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        headers: Option<Vec<(&'static str, &'a str)>>,
     },
     WsSend {
         socket: u32,
@@ -110,6 +113,16 @@ fn encode(actions: &[Action]) -> String {
             Action::WsConnect { socket, url } => ActionOut::WsConnect {
                 socket: socket.0,
                 url,
+                headers: None,
+            },
+            Action::WsConnectWithHeaders {
+                socket,
+                url,
+                headers,
+            } => ActionOut::WsConnect {
+                socket: socket.0,
+                url,
+                headers: Some(headers.iter().map(|(k, v)| (*k, v.as_str())).collect()),
             },
             Action::WsSend { socket, text } => ActionOut::WsSend {
                 socket: socket.0,
@@ -416,6 +429,12 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
                 portfolio_margin: venue == "binancepm",
+            }))),
+            "weex" => Box::new(Engine::new(WeexFutures::new(WeexOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                ..WeexOptions::default()
             }))),
             other => return Err(JsError::new(&format!("unsupported venue: {other}"))),
         };
