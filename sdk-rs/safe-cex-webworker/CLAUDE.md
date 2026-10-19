@@ -727,7 +727,13 @@ Js directly. Decode shared models only at their actual consumers, and keep
 buffered message identity. Separate ordinary output/report DTO findings remain
 tracked in the worker FIX-audit ledger.
 
-<<<<<<< HEAD
+The frontier replay fixtures allocate fresh option rows per source case and
+observe numeric-key ordering at every margin publication. BBO subscriber identity
+is asserted on the retained subscriber cause separately from Error::source's
+retained transport-response origin, with complete metadata still checked. The
+actual DefaultStore/handler source oracle verifies original Error identity after
+post and committed bid/ask writes.
+
 ## Native perf fixtures
 
 WorkerModule owns the real record/clone/cap/dump/metronome/replay service.
@@ -738,11 +744,3 @@ messages retain their native referents. Module disposal cancels all pending time
 and closes the service even when callers retain a session or service handle.
 The actual listener round trip and Node structuredClone graph probes cover the
 native implementation; perfFixture.ts remains the maintained behavioral source.
-=======
-The frontier replay fixtures allocate fresh option rows per source case and
-observe numeric-key ordering at every margin publication. BBO subscriber identity
-is asserted on the retained subscriber cause separately from Error::source's
-retained transport-response origin, with complete metadata still checked. The
-actual DefaultStore/handler source oracle verifies original Error identity after
-post and committed bid/ask writes.
->>>>>>> origin/master
