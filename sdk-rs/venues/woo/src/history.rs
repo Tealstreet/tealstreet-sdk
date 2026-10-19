@@ -371,6 +371,13 @@ impl Woo {
         query: Query,
     ) {
         let (route, symbol, order_id, kind, from, to, limit) = match query {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    command,
+                    Err("WOO remote client order lookup is unsupported".into()),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 order_id,

@@ -1081,6 +1081,11 @@ impl MexcFutures {
         id: String,
         scope: Scope,
     ) {
+        // The stream may publish the accepted order before HTTP acknowledges it.
+        // Reconciliation still follows every successful stop placement.
+        if scope != Scope::Regular {
+            self.schedule_stop_refresh(cx, &opts.symbol);
+        }
         if self.account.terminal.contains_key(&id)
             || cx
                 .store
@@ -1173,10 +1178,6 @@ impl MexcFutures {
         }
         if scope != Scope::Regular {
             self.account.placed.insert(id, cx.now);
-            if let Some(t) = self.account.stop_refresh.take() {
-                cx.clear_timer(t);
-            }
-            self.account.stop_refresh = Some(cx.set_timer(1500.0));
         }
         cx.store.upsert_order(order);
     }
