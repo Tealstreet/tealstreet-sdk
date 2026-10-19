@@ -11,8 +11,8 @@ use safe_cex_exchange::{
     websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
 use safe_cex_transport::{
-    DirectTransport, RestAdapter, RestBody, RestFuture, RestRequest, RestResponse,
-    RestResponseBody, TransportFuture, TransportProvider,
+    DirectTransport, RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    TransportFuture, TransportProvider,
     socket::{SocketCapabilities, TunnelDialOptions, TunnelHost, TunnelSocket, TunnelTask},
 };
 use serde_json::{Value, json};
@@ -417,12 +417,10 @@ impl Routes {
 }
 impl RestAdapter for Routes {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
-        let body = match &request.body {
-            Some(RestBody::Untransformed(v)) => v.clone().into_value().unwrap(),
-            Some(RestBody::Transformed(d)) => d.value().clone().into_value().unwrap(),
-            Some(RestBody::Encoded(bytes)) => serde_json::from_slice(bytes).unwrap_or(Value::Null),
-            None => Value::Null,
-        };
+        let body = request.body.as_ref().map_or(Value::Null, |body| {
+            serde_json::from_slice(&body.wire_bytes().expect("actual HTTP request bytes"))
+                .expect("scripted routes accept JSON wire bodies")
+        });
         let route = Self::route_of(&request.url, &body);
         self.requests.borrow_mut().push((route.clone(), body));
         let answer = self

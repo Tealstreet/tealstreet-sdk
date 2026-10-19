@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "reason": "Exact native input classification debt: original149 from #1193 plus3 introduced on master by #1238,2 ApexOmni owners introduced on master (251d9906de and #901), and3 Store payload owners introduced by #1248 (94c1cdc90d), separately marked. No exemption/filter: normal measurements still require contracts. Any new owner or disappearance requires an explicit ledger update and ruling.",
+  "reason": "Exact native input classification debt: original149 from #1193 plus3 introduced on master by #1238,2 ApexOmni owners introduced on master (251d9906de and #901), and3 Store payload owners introduced by #1248 (94c1cdc90d), separately marked. No exemption/filter: normal measurements still require contracts. Any new owner or disappearance requires an explicit ledger update and ruling. Separately approved:13 introduced by the #1264 shared-Host cutover, owned by codex-l89ogr; ten duplicate argument helpers were deleted, not added to this ledger.",
   "owners": [
     {
       "package": "safe-cex-venue-asterdex",
@@ -790,26 +790,26 @@
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::structured_clone::structured_clone",
-      "state": "pending",
+      "state": "classified",
       "introduced": "introduced on master by #1238",
       "owner": "codex-0xekzz",
-      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+      "ruling": "ACCEPT reviewed existing recorder clone scope; STRUCTURED_CLONE_REVIEW.md records Node graph, UTF16, native number/presence/identity and Error descriptor observations. Ordinary exact-API graph-reader decoder contracts execute actual native values; hidden is only the internal descriptor writer with no decode/validation. Only V8 lazy stack accessor representation is accepted; stack values/read/write/flags and message/cause data descriptors stay pinned. No pending-ledger measurement exemption."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::structured_clone::copy",
-      "state": "pending",
+      "state": "classified",
       "introduced": "introduced on master by #1238",
       "owner": "codex-0xekzz",
-      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+      "ruling": "ACCEPT reviewed existing recorder clone scope; STRUCTURED_CLONE_REVIEW.md records Node graph, UTF16, native number/presence/identity and Error descriptor observations. Ordinary exact-API graph-reader decoder contracts execute actual native values; hidden is only the internal descriptor writer with no decode/validation. Only V8 lazy stack accessor representation is accepted; stack values/read/write/flags and message/cause data descriptors stay pinned. No pending-ledger measurement exemption."
     },
     {
       "package": "safe-cex-exchange",
       "name": "safe_cex_exchange::js_runtime::structured_clone::hidden",
-      "state": "pending",
+      "state": "classified",
       "introduced": "introduced on master by #1238",
       "owner": "codex-0xekzz",
-      "ruling": "Coordinator approved exact pending addition during #1193 master integration; original149 cohort remains separate. Classification and native binding receipt still required."
+      "ruling": "ACCEPT reviewed existing recorder clone scope; STRUCTURED_CLONE_REVIEW.md records Node graph, UTF16, native number/presence/identity and Error descriptor observations. Ordinary exact-API graph-reader decoder contracts execute actual native values; hidden is only the internal descriptor writer with no decode/validation. Only V8 lazy stack accessor representation is accepted; stack values/read/write/flags and message/cause data descriptors stay pinned. No pending-ledger measurement exemption."
     },
     {
       "package": "safe-cex-venue-apexomni",
@@ -850,6 +850,110 @@
       "introduced": "introduced on master by #1248, commit 94c1cdc90d",
       "owner": "codex-4ri6pb",
       "ruling": "Coordinator-approved exact pending addition for the canonical Js input exposed by copy_from(&Js) and pack_deltas(&Js). The #1248 cutover replaced typed/JSON Store payload ingress; full core compiler discovery found this owner. Ordinary classification and native binding receipts remain required; this row grants no measurement permission."
+    },
+    {
+      "package": "safe-cex-venue-hyperliquid",
+      "name": "safe_cex_venue_hyperliquid::host::facade_exchange::error_input",
+      "state": "pending",
+      "introduced": "introduced by #1264",
+      "owner": "codex-l89ogr",
+      "ruling": "Coordinator approved the exact 13 native Host adapters as pending for #1264 landing. Immediate follow-up uses the same real Host with the existing native runtime capability and requiredFeatures native observations; this row grants no decoder classification or measurement exemption."
+    },
+    {
+      "package": "safe-cex-venue-hyperliquid",
+      "name": "safe_cex_venue_hyperliquid::host::facade_socket::handle_of",
+      "state": "pending",
+      "introduced": "introduced by #1264",
+      "owner": "codex-l89ogr",
+      "ruling": "Coordinator approved the exact 13 native Host adapters as pending for #1264 landing. Immediate follow-up uses the same real Host with the existing native runtime capability and requiredFeatures native observations; this row grants no decoder classification or measurement exemption."
+    },
+    {
+      "package": "safe-cex-venue-hyperliquid",
+      "name": "safe_cex_venue_hyperliquid::host::host_leaves::pair",
+      "state": "pending",
+      "introduced": "introduced by #1264",
+      "owner": "codex-l89ogr",
+      "ruling": "Coordinator approved the exact 13 native Host adapters as pending for #1264 landing. Immediate follow-up uses the same real Host with the existing native runtime capability and requiredFeatures native observations; this row grants no decoder classification or measurement exemption."
+    },
+    {
+      "package": "safe-cex-venue-hyperliquid",
+      "name": "safe_cex_venue_hyperliquid::host::imports_venue::num",
+      "state": "pending",
+      "introduced": "introduced by #1264",
+      "owner": "codex-l89ogr",
+      "ruling": "Coordinator approved the exact 13 native Host adapters as pending for #1264 landing. Immediate follow-up uses the same real Host with the existing native runtime capability and requiredFeatures native observations; this row grants no decoder classification or measurement exemption."
+    },
+    {
+      "package": "safe-cex-venue-hyperliquid",
+      "name": "safe_cex_venue_hyperliquid::host::imports_venue::order_request_to_wire",
+      "state": "pending",
+      "introduced": "introduced by #1264",
+      "owner": "codex-l89ogr",
+      "ruling": "Coordinator approved the exact 13 native Host adapters as pending for #1264 landing. Immediate follow-up uses the same real Host with the existing native runtime capability and requiredFeatures native observations; this row grants no decoder classification or measurement exemption."
+    },
+    {
+      "package": "safe-cex-venue-hyperliquid",
+      "name": "safe_cex_venue_hyperliquid::host::imports_venue::order_wire_float",
+      "state": "pending",
+      "introduced": "introduced by #1264",
+      "owner": "codex-l89ogr",
+      "ruling": "Coordinator approved the exact 13 native Host adapters as pending for #1264 landing. Immediate follow-up uses the same real Host with the existing native runtime capability and requiredFeatures native observations; this row grants no decoder classification or measurement exemption."
+    },
+    {
+      "package": "safe-cex-venue-hyperliquid",
+      "name": "safe_cex_venue_hyperliquid::host::imports_venue::order_wire_type",
+      "state": "pending",
+      "introduced": "introduced by #1264",
+      "owner": "codex-l89ogr",
+      "ruling": "Coordinator approved the exact 13 native Host adapters as pending for #1264 landing. Immediate follow-up uses the same real Host with the existing native runtime capability and requiredFeatures native observations; this row grants no decoder classification or measurement exemption."
+    },
+    {
+      "package": "safe-cex-venue-hyperliquid",
+      "name": "safe_cex_venue_hyperliquid::host::imports_venue::resolve_builder",
+      "state": "pending",
+      "introduced": "introduced by #1264",
+      "owner": "codex-l89ogr",
+      "ruling": "Coordinator approved the exact 13 native Host adapters as pending for #1264 landing. Immediate follow-up uses the same real Host with the existing native runtime capability and requiredFeatures native observations; this row grants no decoder classification or measurement exemption."
+    },
+    {
+      "package": "safe-cex-venue-hyperliquid",
+      "name": "safe_cex_venue_hyperliquid::host::signature::compact",
+      "state": "pending",
+      "introduced": "introduced by #1264",
+      "owner": "codex-l89ogr",
+      "ruling": "Coordinator approved the exact 13 native Host adapters as pending for #1264 landing. Immediate follow-up uses the same real Host with the existing native runtime capability and requiredFeatures native observations; this row grants no decoder classification or measurement exemption."
+    },
+    {
+      "package": "safe-cex-venue-hyperliquid",
+      "name": "safe_cex_venue_hyperliquid::host::signature::diagnostic",
+      "state": "pending",
+      "introduced": "introduced by #1264",
+      "owner": "codex-l89ogr",
+      "ruling": "Coordinator approved the exact 13 native Host adapters as pending for #1264 landing. Immediate follow-up uses the same real Host with the existing native runtime capability and requiredFeatures native observations; this row grants no decoder classification or measurement exemption."
+    },
+    {
+      "package": "safe-cex-venue-hyperliquid",
+      "name": "safe_cex_venue_hyperliquid::host::signature::from",
+      "state": "pending",
+      "introduced": "introduced by #1264",
+      "owner": "codex-l89ogr",
+      "ruling": "Coordinator approved the exact 13 native Host adapters as pending for #1264 landing. Immediate follow-up uses the same real Host with the existing native runtime capability and requiredFeatures native observations; this row grants no decoder classification or measurement exemption."
+    },
+    {
+      "package": "safe-cex-venue-hyperliquid",
+      "name": "safe_cex_venue_hyperliquid::host::signature::normalized_v",
+      "state": "pending",
+      "introduced": "introduced by #1264",
+      "owner": "codex-l89ogr",
+      "ruling": "Coordinator approved the exact 13 native Host adapters as pending for #1264 landing. Immediate follow-up uses the same real Host with the existing native runtime capability and requiredFeatures native observations; this row grants no decoder classification or measurement exemption."
+    },
+    {
+      "package": "safe-cex-venue-hyperliquid",
+      "name": "safe_cex_venue_hyperliquid::host::signature::uint256",
+      "state": "pending",
+      "introduced": "introduced by #1264",
+      "owner": "codex-l89ogr",
+      "ruling": "Coordinator approved the exact 13 native Host adapters as pending for #1264 landing. Immediate follow-up uses the same real Host with the existing native runtime capability and requiredFeatures native observations; this row grants no decoder classification or measurement exemption."
     }
   ]
 }

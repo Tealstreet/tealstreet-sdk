@@ -673,6 +673,20 @@ impl Js {
         matches!(self, Js::Function(function) if function.construct.is_some())
     }
 
+    pub fn instance_of(&self, constructor: &Js) -> Result<bool, Thrown> {
+        if !constructor.is_object() {
+            return Err(Thrown::type_error(
+                "Right-hand side of 'instanceof' is not an object",
+            ));
+        }
+        if !constructor.is_callable() {
+            return Err(Thrown::type_error(
+                "Right-hand side of 'instanceof' is not callable",
+            ));
+        }
+        constructor.ordinary_has_instance(self)
+    }
+
     /// OrdinaryHasInstance follows bound targets and internal prototypes without reading __proto__.
     pub fn ordinary_has_instance(&self, value: &Js) -> Result<bool, Thrown> {
         if !self.is_callable() {
@@ -1080,7 +1094,7 @@ impl Js {
         }
     }
 
-    pub(super) fn prototype(&self) -> Option<Js> {
+    pub fn prototype(&self) -> Option<Js> {
         match self {
             Js::Object(object) => object.proto.borrow().clone(),
             Js::Function(function) => function.proto.borrow().clone(),
@@ -1146,7 +1160,7 @@ impl Js {
     pub fn get_key(&self, key: &[u16]) -> Result<Js, Thrown> {
         self.get_key_receiver(key, self)
     }
-    fn get_key_receiver(&self, key: &[u16], receiver: &Js) -> Result<Js, Thrown> {
+    pub fn get_key_receiver(&self, key: &[u16], receiver: &Js) -> Result<Js, Thrown> {
         match self {
             Js::Builtin(reference) => {
                 let Ok(key) = String::from_utf16(key) else {
@@ -1589,10 +1603,10 @@ impl Js {
         })
     }
     /// ToPropertyDescriptor observes fields in order and retains accessor identities.
-    pub(super) fn define_property(&self, key: &[u16], descriptor: &Js) -> Result<(), Thrown> {
+    pub fn define_property(&self, key: &[u16], descriptor: &Js) -> Result<(), Thrown> {
         self.define_property_slot(key, descriptor, false)
     }
-    pub(super) fn define_property_for(&self, key: &Js, descriptor: &Js) -> Result<(), Thrown> {
+    pub fn define_property_for(&self, key: &Js, descriptor: &Js) -> Result<(), Thrown> {
         if matches!(key, Js::SymbolIterator) {
             self.define_property_slot(&[], descriptor, true)
         } else {
@@ -2095,12 +2109,46 @@ impl Js {
     /// `{ ...value }`: nullish spreads nothing, strings spread indexed characters.
     pub fn spread_object(&self) -> Result<Js, Thrown> {
         let out = Js::object(vec![]);
-        if !self.is_nullish() {
-            for (k, v) in self.own_entries()? {
-                out.define_key(&k, v)?;
+        self.copy_data_properties_to(&out)?;
+        Ok(out)
+    }
+    /// CopyDataProperties snapshots keys, then rechecks each live descriptor before Get.
+    pub fn copy_data_properties_to(&self, target: &Js) -> Result<(), Thrown> {
+        if self.is_nullish() {
+            return Ok(());
+        }
+        let mut keys: Vec<Js> = self
+            .for_in_own_names()?
+            .into_iter()
+            .map(Js::String)
+            .collect();
+        if self
+            .symbol_iterator_slot()
+            .is_some_and(|slot| slot.borrow().is_some())
+        {
+            keys.push(Js::SymbolIterator);
+        }
+        for key in keys {
+            let enumerable = if let Js::String(units) = &key {
+                self.own_enumerability(units)?.unwrap_or(false)
+            } else {
+                let descriptor = self.own_property_descriptor_for(&key)?;
+                !descriptor.is_undefined() && descriptor.get("enumerable")?.truthy()
+            };
+            if enumerable {
+                let value = self.get_property(&key)?;
+                target.define_property_for(
+                    &key,
+                    &Js::object(vec![
+                        ("value", value),
+                        ("writable", Js::Bool(true)),
+                        ("enumerable", Js::Bool(true)),
+                        ("configurable", Js::Bool(true)),
+                    ]),
+                )?;
             }
         }
-        Ok(out)
+        Ok(())
     }
     /// Typed snapshot: capture length once, then HasProperty/Get each live slot.
     pub fn array_items(&self) -> Result<Option<Vec<Option<Js>>>, Thrown> {

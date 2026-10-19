@@ -7,13 +7,15 @@
 use crate::{
     native_callback::{Callback, Request},
     native_lifecycle::NativeStartup,
+    native_notifications::Notifications,
     native_value::{JsData, check_status},
 };
 use napi::{
-    Env, Status,
-    bindgen_prelude::{FromNapiValue, JsObjectValue, Object, PromiseRaw, ToNapiValue, Unknown},
+    Env,
+    bindgen_prelude::{
+        FromNapiValue, Function, JsObjectValue, Object, PromiseRaw, ToNapiValue, Unknown,
+    },
     sys,
-    threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use safe_cex_registry::native_account::{
     NativeAccount, NativeAccountFuture, NativeAccountSpec, native_account_call,
@@ -31,7 +33,6 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
-pub(crate) type Notify = ThreadsafeFunction<JsData, Unknown<'static>, JsData, Status, false>;
 type Reply<T> = oneshot::Sender<Result<T, NativeValue>>;
 
 /// A structured options object plus the account's name for remote signing.
@@ -48,8 +49,7 @@ enum Command {
         init: NativeAccountInit,
         sign: Option<Request>,
         proxy_token: Option<Request>,
-        on_event: Notify,
-        on_store: Notify,
+        notifications: Notifications,
         reply: Reply<u32>,
     },
     Call {
@@ -115,8 +115,7 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
                     init,
                     sign,
                     proxy_token,
-                    on_event,
-                    on_store,
+                    notifications,
                     reply,
                 } => {
                     // VirtualClock is thread-local: a replay account must be the
@@ -132,8 +131,7 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
                         init,
                         sign,
                         proxy_token,
-                        on_event,
-                        on_store,
+                        notifications,
                         hyperliquid_limiter.clone(),
                     );
                     let _ = reply.send(opened.map(|open| {
@@ -286,8 +284,7 @@ fn open(
     init: NativeAccountInit,
     sign: Option<Request>,
     proxy_token: Option<Request>,
-    on_event: Notify,
-    on_store: Notify,
+    notifications: Notifications,
     hyperliquid_limiter: Rc<safe_cex_registry::native_host::HyperliquidRateLimiter>,
 ) -> Result<Open, NativeValue> {
     if init.replay_epoch_ms.is_some_and(|epoch| {
@@ -327,11 +324,11 @@ fn open(
             }) as NativeAccountFuture<String>
         }) as Rc<dyn Fn() -> NativeAccountFuture<String>>
     });
-    let on_event = Rc::new(on_event);
+    let notifications = Rc::new(notifications);
     let startup = Rc::new(NativeStartup::new(
         &init.exchange,
         init.account_name.clone(),
-        on_event.clone(),
+        notifications.clone(),
     ));
     let account = open_native_account_with_replay(
         NativeAccountSpec {
@@ -345,6 +342,7 @@ fn open(
         init.replay_epoch_ms,
     )?;
     let event_startup = startup.clone();
+    let event_notifications = notifications.clone();
     let watched_account = Rc::downgrade(&account);
     let unwatch = native_account_watch(
         &account,
@@ -354,13 +352,10 @@ fn open(
             {
                 event_startup.cancel(&account);
             }
-            on_event.call(
-                JsData(native_account_event(event, data)),
-                ThreadsafeFunctionCallMode::NonBlocking,
-            );
+            event_notifications.event(JsData(native_account_event(event, data)));
         }),
         Rc::new(move |slices: NativeValue| {
-            on_store.call(JsData(slices), ThreadsafeFunctionCallMode::NonBlocking);
+            notifications.store(JsData(slices));
         }),
     );
     Ok(Open {
@@ -419,11 +414,12 @@ fn settle<'env, T: Send + ToNapiValue + 'static>(
 pub fn native_account_open<'env>(
     env: &'env Env,
     init: NativeAccountInit,
-    on_event: Notify,
-    on_store: Notify,
+    on_event: Function<'env, Unknown<'static>, Unknown<'static>>,
+    on_store: Function<'env, Unknown<'static>, Unknown<'static>>,
     sign: Option<Callback<'env>>,
     proxy_token: Option<Callback<'env>>,
 ) -> napi::Result<PromiseRaw<'env, u32>> {
+    let notifications = Notifications::new(env, on_event, on_store)?;
     let sign = sign
         .map(|callback| crate::native_callback::wrap(env, callback))
         .transpose()?;
@@ -434,8 +430,7 @@ pub fn native_account_open<'env>(
         init,
         sign,
         proxy_token,
-        on_event,
-        on_store,
+        notifications,
         reply,
     })
 }

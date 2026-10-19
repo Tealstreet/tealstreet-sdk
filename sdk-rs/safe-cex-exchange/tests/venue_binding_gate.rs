@@ -624,6 +624,33 @@ impl<'a> Visit<'a> for Scan {
         visit::visit_expr_match(self, n);
     }
     fn visit_expr_for_loop(&mut self, n: &'a syn::ExprForLoop) {
+        struct GlobalDescriptor(bool);
+        impl<'a> Visit<'a> for GlobalDescriptor {
+            fn visit_arm(&mut self, arm: &'a syn::Arm) {
+                if !skip(&arm.attrs) {
+                    visit::visit_arm(self, arm);
+                }
+            }
+            fn visit_expr_block(&mut self, block: &'a syn::ExprBlock) {
+                if !skip(&block.attrs) {
+                    visit::visit_expr_block(self, block);
+                }
+            }
+            fn visit_expr_method_call(&mut self, call: &'a syn::ExprMethodCall) {
+                if skip(&call.attrs) {
+                    return;
+                }
+                let receiver = call.receiver.to_token_stream().to_string();
+                if call.method == "define_property"
+                    && matches!(receiver.as_str(), "g" | "globals" | "global")
+                {
+                    self.0 = true;
+                }
+                visit::visit_expr_method_call(self, call);
+            }
+        }
+        let mut descriptor = GlobalDescriptor(false);
+        descriptor.visit_block(&n.body);
         if self.binding {
             let body = n.body.to_token_stream().to_string();
             if [
@@ -638,6 +665,7 @@ impl<'a> Visit<'a> for Scan {
             ]
             .iter()
             .any(|p| body.contains(p))
+                || descriptor.0
             {
                 self.globals
                     .extend(object_keys(&n.expr, &self.pair_helpers));
@@ -660,7 +688,7 @@ impl<'a> Visit<'a> for Scan {
                 }
             }
             fn visit_expr_method_call(&mut self, n: &'a syn::ExprMethodCall) {
-                if n.method == "define" {
+                if n.method == "define" || n.method == "define_property" {
                     self.0
                         .insert(n.receiver.to_token_stream().to_string().replace(' ', ""));
                 }
@@ -1016,9 +1044,7 @@ fn every_venue_reference_has_a_production_binding() {
                     || (venue.intrinsic_globals
                         && (venue.globals.contains(name) || shared.globals.contains(name)))
             } else {
-                venue.globals.contains(name)
-                    || (dir.file_name().unwrap() != "safe-cex-venue-hyperliquid"
-                        && shared.globals.contains(name))
+                venue.globals.contains(name) || shared.globals.contains(name)
             };
             if !bound
                 && !(name == "super.dispose"
@@ -1189,6 +1215,10 @@ fn table_values_and_unrelated_object_members_are_not_global_registrations() {
         fn install(g:&Js){
             for (name,value) in [("bound","not-a-global")] {g.define(name,value);}
             for (name,value) in [("also-not-global",1)] {number.define(name,value);}
+            for (name,value) in [("Infinity","not-a-descriptor-global")] {g.define_property(&name.encode_utf16().collect::<Vec<_>>(), &Js::object(vec![("value", value)]));}
+            for (name,value) in [("not-a-global-descriptor",1)] {number.define_property(&name.encode_utf16().collect::<Vec<_>>(), &Js::object(vec![("value", value)]));}
+            for (name,value) in [("suffix-is-not-global",1)] {nong.define_property(&name.encode_utf16().collect::<Vec<_>>(), &Js::object(vec![("value", value)]));}
+            for (name,value) in [("test-arm-is-not-global",1)] {match flag { #[cfg(test)] 0 => { g.define_property(&name.encode_utf16().collect::<Vec<_>>(), &Js::object(vec![("value", value)])); }, _ => {} }}
         }
     "#,
     )
@@ -1201,6 +1231,11 @@ fn table_values_and_unrelated_object_members_are_not_global_registrations() {
     assert!(scan.globals.contains("bound"));
     assert!(!scan.globals.contains("not-a-global"));
     assert!(!scan.globals.contains("also-not-global"));
+    assert!(scan.globals.contains("Infinity"));
+    assert!(!scan.globals.contains("not-a-descriptor-global"));
+    assert!(!scan.globals.contains("not-a-global-descriptor"));
+    assert!(!scan.globals.contains("suffix-is-not-global"));
+    assert!(!scan.globals.contains("test-arm-is-not-global"));
 }
 
 #[test]

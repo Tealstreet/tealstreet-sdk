@@ -532,3 +532,9 @@ regression; strict typed historical output/option boundaries remain separate.
 History options follow source coercion before the typed request. Selected output
 assets use one row-admission pass after slicing; one malformed asset is reported
 and omitted while good rows survive. See HISTORY_OUTPUT_REVIEW.md.
+
+The constructed legacy startup ticker-order probe in binding_reads compares
+actual market/ticker HTTP, canonical Store rows and prepared native payloads with
+the maintained WOOXExchange parser. Index precedes mark and openInterest stays
+last. This post-#1248 positive covers that ingress/output path; typed SDK returns
+and inactive V3 producers remain separate surfaces.
