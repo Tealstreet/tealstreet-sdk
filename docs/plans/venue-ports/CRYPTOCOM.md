@@ -278,3 +278,30 @@ requires three consecutive stable buffer observations (bounded eight passes),
 and rejects negative buffer deltas even when wasm growth masks them. No clamping
 or minimum-sample selection. All prior performance numbers remain superseded
 until this final measurement model completes the six-gate rerun.
+
+### Final corrected gates and review disposition
+
+All six gates PASS at a0914cd9d6. These measurements supersede earlier tables:
+CPU excludes forced end-of-run memory cleanup; retained memory includes V8 heap,
+JS ArrayBuffer backing stores and wasm linear memory, with stable baseline and
+nonnegative-component checks. Public values are medians of three runs.
+
+| Tape | Frames | Main CPU TS / Rust ms | Steady CPU TS / Rust ms | Retained TS / Rust MB |
+| --- | ---: | ---: | ---: | ---: |
+| Crypto.com public | 2177 | 67.7 / 60.5 | 37.0 / 20.2 | 1.8 / 1.5 |
+| Crypto.com private | 21 | 35.4 / 37.6 | 12.2 / 15.2 | 0.7 / 0.8 |
+| Binance public | 871 | 168.0 / 64.7 | 93.3 / 20.4 | 4.3 / 2.5 |
+| Binance private | 14 | 40.1 / 27.7 | 10.6 / 11.9 | 0.9 / 0.8 |
+| Bybit public | 8742 | 186.4 / 116.1 | 120.7 / 60.3 | 6.0 / 2.5 |
+| Bybit private | 18 | 69.7 / 29.4 | 27.4 / 13.8 | 3.4 / 0.7 |
+
+Private gates validate correctness only. Crypto.com42native tests, engine12,
+harness8(Node22/24), bans/fmt/clippy/wasm checks PASS; six wasm integration tests
+and package/root TS checks described above pass. Combined wasm1,625,486bytes.
+All three adversarial scopes now pass with no remaining concrete P1/P2 findings;
+all confirmed findings were fixed and posted on PR1303. Final passing review:
+https://github.com/Tealstreet/tealstreet-sdk/pull/1303#issuecomment-6272721603.
+
+Port and local review phases complete. Landing remains subject to green CI on
+the final PR head, then authorized merge into feat/rust-rewrite and a fresh
+follow-up branch. PR: https://github.com/Tealstreet/tealstreet-sdk/pull/1303.
