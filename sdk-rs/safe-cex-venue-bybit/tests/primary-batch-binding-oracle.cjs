@@ -37,7 +37,7 @@ if (process.argv.includes('--unknown-outcome')) {
       assert.equal(sends,1);assert.equal(reports,1);
       outputs.push({rejected,original,sends,reports});
     }
-    for (let profile=12;profile<22;profile++) {
+    for (let profile=12;profile<28;profile++) {
       const events=[], marker={marker:73}, error={message:'timeout'};
       if(profile===12) for(const [key,value] of Object.entries({code:undefined,message:'timeout',name:undefined,response:undefined})) Object.defineProperty(error,key,{configurable:true,get(){events.push(key);return value;}});
       if(profile===13) Object.defineProperty(error,'name',{get(){throw marker;}});
@@ -50,10 +50,16 @@ if (process.argv.includes('--unknown-outcome')) {
       if(profile===19) {input=[];Object.setPrototypeOf(input,{message:'timeout'});}
       if(profile===20) error.message=null;
       if(profile===21) error.response={status:{valueOf(){events.push('status');return 400;}},data:{code:{valueOf(){events.push('venue');return -1007;}}}};
+      if(profile===22) error.response={status:503n};
+      if(profile===23) error.response={status:400,data:{code:-1007n}};
+      if(profile===24) error.response={status:{valueOf(){events.push('big-status');return 503n;}}};
+      if(profile===25) error.response={status:499n,data:{code:{valueOf(){events.push('big-venue');return -1007n;}}}};
+      if(profile===26) error.response={status:10n**400n};
+      if(profile===27) error.response={status:499n,data:{code:10n**400n}};
       let value=null,original=false;try{value=isUnknownOutcome(input);}catch(e){assert.equal(e,marker);original=true;}
       outputs.push({value,original,events});
     }
-    assert.equal(outputs.length,22);process.stdout.write(JSON.stringify(outputs));
+    assert.equal(outputs.length,28);process.stdout.write(JSON.stringify(outputs));
   })().catch(e=>{console.error(e);process.exitCode=1;});
 } else {
 // Maintained class bodies run together; scripted I/O supplies the same envelopes

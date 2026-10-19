@@ -1826,7 +1826,7 @@ fn audit_unknown_outcome_preserves_native_submission_rejection() {
         String::from_utf8_lossy(&output.stderr)
     );
     let source: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(source.len(), 22);
+    assert_eq!(source.len(), 28);
     run(async {
         for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
             for (profile, expected) in source.iter().enumerate() {
@@ -1965,6 +1965,34 @@ fn audit_unknown_outcome_preserves_native_submission_rejection() {
                                     ]),
                                 )
                                 .unwrap();
+                            input
+                        }
+                        22..=27 => {
+                            let big = |text: &str| rt.global("BigInt").unwrap().call(Js::Undefined, vec![Js::str(text)]).unwrap();
+                            let huge = big(&format!("1{}", "0".repeat(400)));
+                            let status = match profile {
+                                22 => big("503"),
+                                23 => Js::Number(400.),
+                                24 => {
+                                    let trace = events.clone();
+                                    let value = big("503");
+                                    Js::object(vec![("valueOf", Js::function("valueOf", move |_, _| {
+                                        trace.borrow_mut().push("big-status".into());
+                                        Ok(value.clone())
+                                    }))])
+                                },
+                                26 => huge.clone(),
+                                _ => big("499"),
+                            };
+                            let code = if profile == 25 {
+                                let trace = events.clone();
+                                let value = big("-1007");
+                                Js::object(vec![("valueOf", Js::function("valueOf", move |_, _| {
+                                    trace.borrow_mut().push("big-venue".into());
+                                    Ok(value.clone())
+                                }))])
+                            } else if profile == 27 { huge } else { big("-1007") };
+                            input.define("response", Js::object(vec![("status", status), ("data", Js::object(vec![("code", code)]))])).unwrap();
                             input
                         }
                         _ => unreachable!(),
