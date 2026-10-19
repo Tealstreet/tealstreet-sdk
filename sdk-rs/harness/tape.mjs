@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
 import { Responses } from './responses.mjs';
-import { isRead, subscriptionKeys, requestKey as typedRequestKey } from './requests.mjs';
+import { subscriptionKeys, requestKey as nativeRequestKey } from './requests.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
 
@@ -62,7 +62,7 @@ export const canonicalBody = (body, callerIds = new Set(), venue = {}) => {
                 ((!venue.matchRequestBody || venue.volatileBodyFields) &&
                   VOLATILE.has(k) &&
                   !callerIds.has(String(v))) ||
-                (k === 'clientId' && !callerIds.has(String(v))) ||
+                (k === 'clientId' && !venue.preserveClientId && !callerIds.has(String(v))) ||
                 (venue.ignoredBodyFields?.includes(k) && !callerIds.has(String(v)))
               ),
           )
@@ -94,20 +94,7 @@ export const canonicalBody = (body, callerIds = new Set(), venue = {}) => {
     return String(body);
   }
 };
-
-export const withTimeout = async (promise, label, ms = 30000) => {
-  let timer;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        timer = realTimeout(() => reject(new Error(`replay timeout: ${label}`)), ms);
-      }),
-    ]);
-  } finally {
-    realClearTimeout(timer);
-  }
-};
+const canonicalBackpackBody = canonicalBody;
 
 export async function bodyBytes(body) {
   if (body instanceof Uint8Array) return body;
@@ -227,435 +214,563 @@ export class ReplayClock {
   }
 }
 
-/** Serves recorded HTTP responses and websocket frames in tape order. */
-export class Tape {
-  constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = 30000, impl, books = []) {
-    this.venue = venue;
-    this.isPrivate = isPrivate;
-    this.timeoutMs = timeoutMs;
-    this.commandIndex = 0;
-    this.time = 0;
-    this.generations = new Map();
-    this.startupSubscriptions = new Map(
-      Array.from(venue.startupSubscriptions?.(records, books) ?? [], (key) => [key, false]),
-    );
-    this.pendingStartupSubscriptions = this.startupSubscriptions.size;
-    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books, tickers: venue.publicTickers?.(records) });
-    this.callerIds = new Set();
-    const collectCallerIds = (value) => {
-      if (!value || typeof value !== 'object') return;
-      if (typeof value.clientOrderId === 'string') this.callerIds.add(value.clientOrderId);
-      for (const nested of Object.values(value)) collectCallerIds(nested);
-    };
-    for (const record of records) if (record.type === 'command') collectCallerIds(record);
-    this.responses = new Map();
-    this.writeOrder = [];
-    for (const record of records.filter((r) => r.type === 'http')) {
-      // Per-fixture KNOWN_TS_FIXES exception; never a fallback for Rust.
-      const expectedBody = impl === 'ts' ? (record.tsRequestBody ?? record.requestBody) : record.requestBody;
-      const key = `${record.method} ${canonicalUrl(record.url, this.callerIds, this.venue)}${expectedBody === undefined ? '' : ` BODY ${canonicalBody(expectedBody, this.callerIds, this.venue)}`}`;
-      if (!this.responses.has(key)) this.responses.set(key, []);
-      this.responses.get(key).push(record);
-      if (this.isWrite(record.method, record.url)) this.writeOrder.push(record);
-    }
-    // Existing venue contracts compare typed requests. Canonical decimal/ID
-    // equivalence is an explicit venue opt-in (Backpack and MEXC).
-    const typedRequests = !venue.canonicalRequests && !venue.canonicalIntegerStrings &&
-      (venue.matchRequestBody || venue.volatileBodyFields || venue.generatedQueryId || venue.requestBodies);
-    if (venue.checkRequest || venue.requestKey || venue.requestBodies || typedRequests) {
-      const typedOptions = venue.requestBodyParams && !venue.requestBody
-        ? { ...venue, requestBody: (body) => body?.params ?? body }
-        : venue;
-      const responseKey = (method, url, body) => {
-        if (venue.requestKey) return venue.requestKey(method, url, body, this.callerIds);
-        if (venue.requestBodies || typedRequests) return typedRequestKey(method, url, body, this.callerIds, typedOptions);
-        const base = `${method} ${canonicalUrl(url, this.callerIds, this.venue)}`;
-        const exact = `${base} BODY ${canonicalBody(body, this.callerIds, venue)}`;
-        return this.responses.has(exact) ? exact : base;
-      };
-      this.responseStore = new Responses(
-        records.map((record) =>
-          impl === 'ts' && record.tsRequestBody !== undefined
-            ? { ...record, requestBody: record.tsRequestBody }
-            : record,
-        ),
-        responseKey,
-        venue.checkRequest,
-        this.isWrite.bind(this),
-      );
-    }
-    this.frames = records.filter(
-      (r) => r.type === 'ws' || r.type === 'command' || r.type === 'close' || r.type === 'open',
-    );
-    this.open = new Map();
-    this.waiters = new Set();
-    this.unserved = 0;
-  }
 
-  invalidSignatures = 0;
-  subscriptions = new Set();
-  protocolSubscriptions = new Set();
-  isWrite(method, url) {
-    return this.venue.isWrite?.(method, url) ?? !isRead(method, url);
+export class ReplayTimeout extends Error {}
+export const within = async (promise, ms, label) => {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = realTimeout(() => reject(new ReplayTimeout(`${label} exceeded ${ms} ms`)), ms);
+      }),
+    ]);
+  } finally {
+    realClearTimeout(timer);
   }
-  get missingWrites() {
-    if (this.responseStore) return this.responseStore.unusedWrites();
-    return [...this.responses.values()].flat().filter((record) => this.isWrite(record.method, record.url)).length;
-  }
-  respond(method, url, body, headers) {
-    this.venue.validateRequest?.({ method, url, body, headers });
-    if (this.isPrivate && this.venue.verifyRequest && !this.venue.verifyRequest({ method, url, body, headers })) {
-      this.invalidSignatures++;
-      throw new Error(`invalid replay signature: ${method} ${url}`);
-    }
-    const now = this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time;
-    if (this.responseStore) {
-      const response = this.responseStore.respond(method, url, body, this.commandIndex, now);
-      this.unserved = this.responseStore.unserved;
-      return this.echoRequestIds(response, body);
-    }
-    const key = `${method} ${canonicalUrl(url, this.callerIds, this.venue)}`;
-    const queue =
-      this.responses.get(`${key} BODY ${canonicalBody(body, this.callerIds, this.venue)}`) ?? this.responses.get(key);
-    if (!queue?.length) {
-      if (this.unserved < 10)
-        console.error(`unserved ${method} ${url} ${canonicalBody(body, this.callerIds, this.venue)}`);
-      this.unserved++;
-      return { status: 599, body: '' };
-    }
-    // Reconciliation reads may advance to a new fixture stage after a command.
-    const eligible = queue.filter(
-      (r) => (r.afterCommand ?? 0) <= this.commandIndex && (r.availableAfter ?? r.effectiveAt ?? 0) <= now,
-    );
-    if (!eligible.length) {
-      this.unserved++;
-      return { status: 599, body: '' };
-    }
-    const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
-    const current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
-    const timed = current.filter((record) => (record.availableAfter ?? record.effectiveAt ?? 0) <= now);
-    const timedRead =
-      !this.isWrite(method, url) &&
-      current.some((record) => record.availableAfter !== undefined || record.effectiveAt !== undefined);
-    const record = timedRead ? timed.at(-1) : current[0];
-    if (!record) {
-      this.unserved++;
-      return { status: 599, body: '' };
-    }
-    if (this.isWrite(method, url) && this.venue.compareWriteOrder && this.writeOrder[0] !== record) {
-      this.unserved++;
-      return { status: 599, body: '' };
-    }
-    if (this.isWrite(method, url)) this.writeOrder.splice(this.writeOrder.indexOf(record), 1);
-    if (!timedRead && (this.isWrite(method, url) || current.length > 1)) queue.splice(queue.indexOf(record), 1);
-    return this.echoRequestIds({ status: record.status, headers: record.headers ?? '', body: record.body }, body);
-  }
+};
+export const withTimeout = (promise, label, ms = 30_000) => within(promise, ms, `replay timeout: ${label}`);
+class WriteOrderMismatch extends Error {}
 
-  echoRequestIds(response, body) {
-    if (/"\$(clientAlgoId|newClientOrderId)"/.test(response.body)) {
-      let sent = body ?? {};
-      if (ArrayBuffer.isView(sent) || sent instanceof ArrayBuffer) sent = new TextDecoder().decode(sent);
-      if (typeof sent === 'string') sent = sent ? parseRequestJson(sent) : {};
-      return { ...response, body: response.body.replace(/"\$(clientAlgoId|newClientOrderId)"/g,
-        (_, field) => JSON.stringify(sent[field] ?? null)) };
+export const createTape = (records, venue, isPrivate, {
+  impl, books = [], socketTimeoutMs = 30_000, commandTimeoutMs = 15_000, credentials = venue.replayCredentials,
+} = {}) => {
+  const KEY = credentials?.key ?? 'replay-key',
+    SECRET = credentials?.secret ?? 'replay-secret',
+    PASSPHRASE = credentials?.passphrase ?? 'replay-passphrase';
+  const callerIds = new Set();
+  const collectCallerIds = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (typeof value.clientOrderId === 'string') callerIds.add(value.clientOrderId);
+    for (const nested of Object.values(value)) collectCallerIds(nested);
+  };
+  for (const record of records) if (record.type === 'command') collectCallerIds(record);
+  /** Per-request values: clocks, signatures, request ids and generated client ids. */
+  const VOLATILE = new Set(['timestamp', 'recvWindow', 'signature', 'newClientOrderId', 'clientAlgoId', 'requestId']);
+  const urlKeys = new Map();
+  const bitget = venue.rust?.startsWith('bitget') ?? false;
+  const mexc = venue.rust === 'mexc';
+  const backpack = venue.rust === 'backpack';
+  const canonicalUrl = (url) => {
+    if (urlKeys.has(url)) return urlKeys.get(url);
+    const parsed = new URL(url);
+    if (
+      mexc && /\/private\/(planorder|stoporder)\/list\/orders$/.test(parsed.pathname) &&
+      parsed.searchParams.has('start_time') && parsed.searchParams.has('end_time')
+    ) {
+      const end = Number(parsed.searchParams.get('end_time'));
+      parsed.searchParams.set('start_time', String(Number(parsed.searchParams.get('start_time')) - end));
+      parsed.searchParams.set('end_time', 'now');
     }
-    return response;
-  }
+    const query = [...parsed.searchParams]
+      .filter(([name, value]) => !VOLATILE.has(name) || callerIds.has(value))
+      .map(([name, value]) => [name, /^[\[{]/.test(value) ? canonicalBody(value, url) : value])
+      .sort(([a], [b]) => a.localeCompare(b));
+    const key = `${parsed.origin}${parsed.pathname}?${new URLSearchParams(query)}`;
+    urlKeys.set(url, key);
+    return key;
+  };
 
-  connect(url, onOpen, onMessage, onClose) {
-    const key = canonicalUrl(url, this.callerIds, this.venue);
-    const generation = (this.generations.get(key) ?? 0) + 1;
-    this.generations.set(key, generation);
-    const socket = {
-      url,
-      generation,
-      ordinal: generation - 1,
-      onClose,
-      onMessage: (text) => {
-        this.audit?.received(url, text);
-        onMessage(text);
-      },
-      closed: false,
-      subscriptions: new Set(),
-      loginVerified: false,
-      topics: new Map(),
-    };
-    setImmediate(() => {
-      if (socket.closed) return;
-      const key = canonicalUrl(url, this.callerIds, this.venue);
-      if (!this.open.has(key)) this.open.set(key, []);
-      this.open.get(key).push(socket);
-      onOpen();
-      for (const waiter of [...this.waiters]) waiter();
-    });
-    return socket;
-  }
-
-  send(socket, text) {
-    this.venue.onSocketSend?.(socket, text);
-    this.sent(socket.url, text);
-    for (const key of subscriptionKeys(socket.url, text)) {
-      this.protocolSubscriptions.add(`${socket.generation} ${key}`);
-      if (this.startupSubscriptions.get(key) === false) {
-        this.startupSubscriptions.set(key, true);
-        this.pendingStartupSubscriptions--;
-      }
-    }
-    this.audit?.sent(socket.url, text);
-    if (this.venue.pingReply) {
-      const reply = this.venue.pingReply(text);
-      if (reply) setImmediate(() => { if (!socket.closed) socket.onMessage(reply); });
-    }
-    if (this.venue.respondToPing && text === 'ping') {
-      setImmediate(() => {
-        if (!socket.closed) socket.onMessage('pong');
-      });
-      return;
-    }
+  const generatedAliases = new Map();
+  const mintedField = (key, url) => {
+    const path = new URL(url).pathname;
+    return key === 'newClientOid'
+      ? /\/modify-order$/.test(path)
+      : key === 'clientOid' &&
+          /\/(?:batch-place-order|place-order|place-tpsl-order|place-plan-order|place-strategy-order)$/.test(path);
+  };
+  const canonicalBody = (body, url) => {
+    const classicBatch = bitget && new URL(url).pathname === '/api/v2/mix/order/batch-place-order';
+    if (body === undefined || body === null || body === '') return '';
+    let parsed = body;
     try {
-      const message = JSON.parse(text);
-      if (this.isPrivate && this.venue.verifySubscribe && !this.venue.verifySubscribe(message)) {
+      if (typeof body === 'string') parsed = parseRequestJson(body);
+      else if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer)
+        parsed = parseRequestJson(new TextDecoder().decode(body));
+    } catch {
+      return String(body);
+    }
+    if (venue.requestBody) parsed = venue.requestBody(parsed);
+    else if ((venue.rust === 'cryptocom' || venue.requestBodyParams) && parsed?.method && parsed?.params) parsed = parsed.params;
+    const sorted = (value) => {
+      if (mexc && typeof value === 'bigint') return String(value);
+      if (Array.isArray(value)) return value.map(sorted);
+      if (value === null || typeof value !== 'object') return value;
+      const keys = Object.keys(value)
+        .filter(
+          (key) =>
+            value[key] !== undefined &&
+            !(mexc && ['externalOid', 'requestId'].includes(key) && !callerIds.has(String(value[key]))) &&
+            !(venue.volatileBodyFields && VOLATILE.has(key) && !callerIds.has(String(value[key]))),
+        )
+        .sort();
+      return Object.fromEntries(
+        keys.map((key) => [
+          key,
+          ((bitget && mintedField(key, url) && typeof value[key] === 'string' && value[key].length) ||
+            venue.generatedBodyId?.(key, value[key])) &&
+          !callerIds.has(value[key])
+            ? '<generated>'
+            : classicBatch && key === 'marginMode' && value[key] === 'cross'
+              ? 'crossed'
+              : bitget && key === 'clientOid' && typeof value[key] === 'string'
+                ? (generatedAliases.get(value[key]) ?? value[key])
+                : sorted(value[key]),
+        ]),
+      );
+    };
+    return JSON.stringify(sorted(parsed), (_key, value) =>
+      typeof value === 'bigint' ? { integer: String(value) } : value,
+    );
+  };
+  const backpackBody = (body, url, method) => canonicalBackpackBody(body, callerIds, {
+    ...venue,
+    // Existing identities on cancellation remain exact; only creation mints IDs.
+    preserveClientId: method !== 'POST' || !/\/api\/v1\/orders?$/.test(new URL(url).pathname),
+  });
+  const typedOptions = (venue.requestBodyParams || venue.rust === 'cryptocom') && !venue.requestBody
+    ? { ...venue, requestBody: (body) => body?.params ?? body }
+    : venue;
+  const typedRequests = !bitget && !backpack && !mexc && !venue.canonicalRequests;
+  const topicKey = (arg) => `${arg.instType ?? ''}|${arg.channel ?? arg.topic}|${arg.instId ?? arg.symbol ?? ''}`;
+  const requestKey = (method, url, body) =>
+    !bitget && venue.requestKey
+      ? venue.requestKey(method, url, body, callerIds)
+      : typedRequests || ['bingx', 'blofin'].includes(venue.rust) || venue.requestBodies
+      ? nativeRequestKey(method, url, body, callerIds, typedOptions)
+      : `${method} ${canonicalUrl(url)}${(bitget || backpack || mexc || venue.matchRequestBody) && (method !== 'GET' || mexc) ? ` ${backpack ? backpackBody(body, url, method) : canonicalBody(body, url)}` : ''}`;
+
+  /** Serves recorded HTTP responses and websocket frames in tape order. */
+  class Tape {
+    constructor() {
+      this.audit = venue.createSocketAudit?.(impl, {
+        isPrivate,
+        books,
+        tickers: venue.publicTickers?.(records),
+      });
+      const responseRecords = records.map((record) => ({
+        ...record,
+        ...(impl === 'ts' && record.tsRequestBody !== undefined ? { requestBody: record.tsRequestBody } : {}),
+        ...(record.effectiveAt !== undefined && record.availableAfter === undefined ? { availableAfter: record.effectiveAt } : {}),
+      }));
+      this.responses = new Responses(
+        responseRecords,
+        requestKey,
+        venue.checkRequest,
+        venue.isWrite,
+        bitget || backpack || Boolean(venue.matchRequestBody || venue.requestKey || venue.requestBodies || venue.isWrite),
+      );
+      this.writeOrder = venue.compareWriteOrder
+        ? responseRecords.filter((record) => record.type === 'http' && this.responses.isWrite(record.method, record.url))
+        : undefined;
+      this.frames = records.filter((r) => ['ws', 'command', 'open', 'close'].includes(r.type));
+      this.open = new Map();
+      this.waiters = [];
+      this.commandIndex = 0;
+      this.time = 0;
+      this.generated = new Set();
+      this.invalidSignatures = 0;
+      this.sentRequests = new Set();
+      this.subscriptions = new Set();
+      this.protocolSubscriptions = this.subscriptions;
+      this.normalizedSubscriptions = new Set();
+      this.startupSubscriptions = new Map(
+        Array.from(venue.startupSubscriptions?.(records, books) ?? [], (key) => [key, false]),
+      );
+      this.pendingStartupSubscriptions = this.startupSubscriptions.size;
+      this.generations = new Map();
+    }
+
+    respond(method, url, body, headers) {
+      venue.validateRequest?.({ method, url, body, headers });
+      if (isPrivate && venue.verifyRequest && !venue.verifyRequest({ method, url, body, headers })) {
         this.invalidSignatures++;
-        throw new Error('invalid replay websocket signature');
+        throw new Error(`invalid replay signature: ${method} ${url}`);
       }
-      for (const topic of Array.isArray(message.params) ? message.params : []) {
-        if (message.method === 'SUBSCRIBE') {
-          socket.subscriptions.add(topic);
-          if (
-            !this.venue.marketFilter ||
-            topic.startsWith('account.') ||
-            this.venue.marketFilter({ symbol: topic.split('.').at(-1) })
-          )
-            this.subscriptions.add(`${message.method} ${topic}`);
+      let matchedWrite = false;
+      try {
+        const response = this.responses.respond(
+          method,
+          url,
+          body,
+          this.commandIndex,
+          (record) => {
+            if (this.writeOrder && this.responses.isWrite(method, url)) {
+              if (this.writeOrder[0] !== record) throw new WriteOrderMismatch();
+              matchedWrite = true;
+            }
+            if (method !== 'GET' && venue.rust.startsWith('bitget') && /(?:place|modify)-/.test(new URL(url).pathname)) {
+              const ids = [];
+              const visit = (value) => {
+                if (!value || typeof value !== 'object') return;
+                for (const [key, item] of Object.entries(value)) {
+                  if (mintedField(key, url) && (key === 'newClientOid' || !callerIds.has(item))) {
+                    if (
+                      typeof item !== 'string' ||
+                      !/^[.A-Za-z0-9:/_-]{1,32}$/.test(item) ||
+                      (key === 'newClientOid' && callerIds.has(item))
+                    )
+                      throw new Error(`invalid generated ${key}`);
+                    ids.push(item);
+                  } else visit(item);
+                }
+              };
+              visit(typeof body === 'string' ? parseRequestJson(body) : body);
+              const reply = JSON.parse(record.body);
+              // A rejected signature may be re-signed once with the same identity.
+              if (String(reply.code) !== '40009')
+                for (const id of ids) {
+                  if (this.generated.has(id)) throw new Error(`generated client ID reused: ${id}`);
+                  this.generated.add(id);
+                }
+            }
+            if (bitget && method !== 'GET') {
+              const decode = (value) => (typeof value === 'string' ? parseRequestJson(value) : value);
+              const bind = (expected, actual) => {
+                if (!expected || !actual || typeof expected !== 'object' || typeof actual !== 'object') return;
+                for (const key of Object.keys(expected)) {
+                  if (
+                    mintedField(key, url) &&
+                    typeof expected[key] === 'string' &&
+                    typeof actual[key] === 'string' &&
+                    !callerIds.has(actual[key])
+                  )
+                    generatedAliases.set(actual[key], expected[key]);
+                  else bind(expected[key], actual[key]);
+                }
+              };
+              bind(decode(record.requestBody), decode(body));
+            }
+          },
+          this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time,
+        );
+        if (matchedWrite) this.writeOrder.shift();
+        return response;
+      } catch (error) {
+        if (!(error instanceof WriteOrderMismatch)) throw error;
+        this.responses.unserved++;
+        return { status: 599, body: '' };
+      }
+    }
+
+    connect(url, onOpen, onMessage, onClose) {
+      const key = canonicalUrl(url);
+      const generation = (this.generations.get(key) ?? 0) + 1;
+      this.generations.set(key, generation);
+      const socket = {
+        url, generation, ordinal: generation - 1, onClose, closed: false, loginVerified: false,
+        topics: new Map(), subscriptions: new Set(),
+        onMessage: (text) => { this.audit?.received(url, text); onMessage(text); },
+      };
+      setImmediate(() => {
+        if (socket.closed) return;
+        // Bybit adds a generated requestId to each connection URL.
+        if (!this.open.has(canonicalUrl(url))) this.open.set(canonicalUrl(url), new Set());
+        this.open.get(canonicalUrl(url)).add(socket);
+        onOpen();
+        this.waiters = this.waiters.filter((waiter) => !waiter());
+      });
+      return socket;
+    }
+
+    send(socket, text) {
+      venue.onSocketSend?.(socket, text);
+      // Authentication hooks can classify an already-open shared-URL socket.
+      if (venue.onSocketSend) this.waiters = this.waiters.filter((waiter) => !waiter());
+      if (venue.verifySubscribe || venue.streamOf || venue.compareSubscriptions) {
+        let message;
+        try { message = JSON.parse(text); } catch { /* Literal heartbeat. */ }
+        if (message && isPrivate && venue.verifySubscribe && !venue.verifySubscribe(message)) {
+          this.invalidSignatures++;
+          throw new Error('invalid replay websocket signature');
         }
-        if (message.method === 'UNSUBSCRIBE') socket.subscriptions.delete(topic);
+        for (const topic of Array.isArray(message?.params) ? message.params : []) {
+          if (message.method === 'SUBSCRIBE') {
+            socket.subscriptions.add(topic);
+            if (!venue.marketFilter || topic.startsWith('account.') || venue.marketFilter({ symbol: topic.split('.').at(-1) }))
+              this.normalizedSubscriptions.add(`${message.method} ${topic}`);
+          } else if (message.method === 'UNSUBSCRIBE') socket.subscriptions.delete(topic);
+        }
+        this.waiters = this.waiters.filter((waiter) => !waiter());
       }
-      for (const waiter of [...this.waiters]) waiter();
+      if (venue.requestBodies && text !== 'ping' && text !== 'pong') {
+        let message;
+        try {
+          message = JSON.parse(text);
+        } catch {
+          /* Literal heartbeats carry no request body. */
+        }
+        const sorted = (value) =>
+          Array.isArray(value)
+            ? value.map(sorted)
+            : value && typeof value === 'object'
+              ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
+                  .map(([key, item]) => [key, sorted(item)]))
+              : value;
+        if (message?.op === 'subscribe' || message?.op === 'unsubscribe') {
+          for (const topic of message.args ?? [])
+            this.sentRequests.add(JSON.stringify({ url: socket.url, op: message.op, topic: sorted(topic) }));
+        } else if (message?.op === 'login') {
+          const args = message.args.map(({ timestamp, nonce, sign, ...credentials }) => sorted(credentials));
+          this.sentRequests.add(JSON.stringify({ url: socket.url, op: 'login', args }));
+        }
+      }
+      for (const key of subscriptionKeys(socket.url, text)) {
+        this.subscriptions.add(`${socket.generation} ${key}`);
+        if (this.startupSubscriptions.get(key) === false) {
+          this.startupSubscriptions.set(key, true);
+          this.pendingStartupSubscriptions--;
+        }
+      }
+      this.audit?.sent(socket.url, text);
+      if (venue.pingReply) {
+        const reply = venue.pingReply(text);
+        if (reply) setImmediate(() => { if (!socket.closed) socket.onMessage(reply); });
+      }
+      if (venue.respondToPing && text === 'ping') {
+        setImmediate(() => {
+          if (!socket.closed) socket.onMessage('pong');
+        });
+        return;
+      }
       // OKX's opt-in auth validation also uses its v5 subscription argument model.
-      const validateTopics = this.venue.validateSubscriptions ?? this.venue.validateLogin;
+      const validateTopics = bitget || (venue.validateSubscriptions ?? venue.validateLogin);
+      if (!venue.validateLogin && !validateTopics) return;
+      if (text === 'ping') return;
+      const message = JSON.parse(text);
       if (validateTopics && ['subscribe', 'unsubscribe'].includes(message.op)) {
         if (!Array.isArray(message.args)) throw new Error(`Invalid subscription on ${socket.url}`);
         for (const topic of message.args) {
-          if (!topic || typeof topic.channel !== 'string' || !topic.channel)
+          if (!topic || typeof (topic.channel ?? topic.topic) !== 'string' || !(topic.channel ?? topic.topic))
             throw new Error(`Invalid subscription topic on ${socket.url}`);
-          const key = JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
+          const key = bitget
+            ? topicKey(topic)
+            : JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
           if (message.op === 'subscribe') socket.topics.set(key, topic);
           else socket.topics.delete(key);
         }
         return;
       }
-      if (
-        !this.venue.validateLogin ||
-        !/\/(private|business)$/.test(new URL(socket.url).pathname) ||
-        message.op !== 'login'
-      )
-        return;
+      if (!venue.validateLogin || !/\/(private|business)$/.test(new URL(socket.url).pathname)) return;
+      if (message.op !== 'login') return;
       const arg = message.args?.length === 1 ? message.args[0] : undefined;
       const timestamp = String(arg?.timestamp ?? '');
       if (
-        arg?.apiKey !== (this.venue.replayCredentials?.key ?? 'replay-key') ||
-        arg?.passphrase !== (this.venue.replayCredentials?.passphrase ?? 'replay-passphrase') ||
+        arg?.apiKey !== KEY ||
+        arg?.passphrase !== PASSPHRASE ||
         !/^\d+$/.test(timestamp) ||
         !Number.isSafeInteger(Number(timestamp)) ||
         Math.abs(Number(timestamp) - Date.now() / 1000) > 30
       ) {
         throw new Error(`Invalid OKX login credentials/timestamp on ${socket.url}`);
       }
-      const expected = createHmac('sha256', this.venue.replayCredentials?.secret ?? 'replay-secret')
-        .update(`${timestamp}GET/users/self/verify`)
-        .digest('base64');
+      const expected = createHmac('sha256', SECRET).update(`${timestamp}GET/users/self/verify`).digest('base64');
       const supplied = Buffer.from(String(arg.sign ?? ''));
       const expectedBytes = Buffer.from(expected);
       if (supplied.length !== expectedBytes.length || !timingSafeEqual(supplied, expectedBytes)) {
         throw new Error(`Invalid OKX login signature on ${socket.url}`);
       }
       socket.loginVerified = true;
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error;
     }
-  }
 
-  assertSubscribed(socket, message) {
-    if (
-      !(this.venue.validateSubscriptions ?? this.venue.validateLogin) ||
-      !message.arg?.channel ||
-      !Array.isArray(message.data)
-    )
-      return;
-    const topics = [...socket.topics.values()].filter((topic) => topic.channel === message.arg.channel);
-    // Some documented messages put instId only on each data row, not arg.
-    const rows = message.data.length ? message.data : [null];
-    for (const row of rows) {
-      const object = row && !Array.isArray(row) && typeof row === 'object' ? row : {};
-      const covered = topics.some((topic) =>
-        Object.entries(topic).every(([key, value]) => {
-          if (key === 'channel') return true;
-          if (key === 'instType' && value === 'ANY') return true;
-          const values = [message.arg[key], object[key]].filter((v) => v !== undefined && v !== '');
-          if (!values.length && key === 'instType') {
-            const id = object.instId ?? message.arg.instId;
-            if (id?.endsWith('-SWAP')) values.push('SWAP');
-          }
-          return values.length > 0 && values.every((v) => v === value);
-        }),
-      );
-      if (!covered) {
-        throw new Error(
-          `Unsubscribed ${message.arg.channel} frame on ${socket.url}: ${JSON.stringify(message.arg)}${object.instId ? ` instId=${object.instId}` : ''}`,
+    assertSubscribed(socket, message) {
+      if (
+        !(venue.validateSubscriptions ?? venue.validateLogin) ||
+        !message.arg?.channel ||
+        !Array.isArray(message.data)
+      )
+        return;
+      const topics = [...socket.topics.values()].filter((topic) => topic.channel === message.arg.channel);
+      // Some documented messages put instId only on each data row, not arg.
+      const rows = message.data.length ? message.data : [null];
+      for (const row of rows) {
+        const object = row && !Array.isArray(row) && typeof row === 'object' ? row : {};
+        const covered = topics.some((topic) =>
+          Object.entries(topic).every(([key, value]) => {
+            if (key === 'channel') return true;
+            if (key === 'instType' && value === 'ANY') return true;
+            const values = [message.arg[key], object[key]].filter((v) => v !== undefined && v !== '');
+            if (!values.length && key === 'instType') {
+              const id = object.instId ?? message.arg.instId;
+              if (id?.endsWith('-SWAP')) values.push('SWAP');
+            }
+            return values.length > 0 && values.every((v) => v === value);
+          }),
         );
+        if (!covered) {
+          throw new Error(
+            `Unsubscribed ${message.arg.channel} frame on ${socket.url}: ${JSON.stringify(message.arg)}${object.instId ? ` instId=${object.instId}` : ''}`,
+          );
+        }
       }
     }
-  }
 
-  assertWritesConsumed() {
-    if (this.missingWrites) throw new Error(`${this.missingWrites} taped write(s) were not sent`);
-  }
+    assertWritesConsumed() {
+      const missing = this.responses.unusedWrites();
+      if (missing) throw new Error(`${missing} taped write(s) were not sent`);
+    }
 
-  close(socket, code = 1000) {
-    if (socket.closed) return;
-    socket.closed = true;
-    socket.onClose?.(code);
-  }
+    close(socket, code = 1000) {
+      if (socket.closed) return;
+      socket.closed = true;
+      socket.onClose?.(code);
+    }
 
-  async socketFor(url, text, ordinal, openingOnly = false) {
-    const stream = !openingOnly && text && this.venue.streamOf?.(text);
-    const find = () => {
-      const sockets = (this.open.get(canonicalUrl(url, this.callerIds, this.venue)) ?? []).filter(
+    sockets(url, ordinal) {
+      return [...(this.open.get(canonicalUrl(url)) ?? [])].filter(
         (socket) => !socket.closed && (ordinal === undefined || socket.ordinal === ordinal),
       );
-      if (!openingOnly && ordinal === undefined && text !== undefined && this.venue.socketMatches) {
-        return sockets.findLast((socket) => this.venue.socketMatches(socket, text));
-      }
-      return stream
-        ? sockets.find((s) => [...s.subscriptions].some((topic) => stream === topic || stream.startsWith(`${topic}.`)))
-        : sockets.at(-1);
-    };
-    const ready = find();
-    if (ready) return ready;
-    let waiter;
-    try {
-      const pending = new Promise((resolve) => {
-        waiter = () => {
-          const socket = find();
-          if (socket) resolve(socket);
-        };
-        this.waiters.add(waiter);
-        waiter();
-      });
-      const label = `socket ${url} ${stream ?? 'open'}`;
-      return await (this.replayClock?.active
-        ? this.replayClock.wait(pending, label, this.timeoutMs)
-        : withTimeout(pending, label, this.timeoutMs));
-    } finally {
-      this.waiters.delete(waiter);
     }
-  }
 
-  /**
-   * Deliver every frame in order, yielding to the event loop between frames.
-   * Commands are awaited where they fall. A private tape is paced: each record
-   * waits until its time after the account is ready.
-   */
-  async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
-    await withTimeout(
-      (async () => {
-        // Market-derived startup hooks run only after the first seed socket.
-        const first = this.frames.find((frame) => frame.url);
-        // Commands may subscribe to the first stream later in the tape. This
-        // fence requires only its physical socket; bootstrap classifies auth.
-        if (first) await this.socketFor(first.url, first.text, first.socket, true);
-        for (const frame of this.frames.filter((frame) => this.venue.bootstrapFrame?.(frame))) {
-          const socket = await this.socketFor(frame.url, frame.text, frame.socket);
-          socket.onMessage(frame.text);
-          await new Promise(setImmediate);
+    sent(socket, text) {
+      this.send(typeof socket === 'string' ? { url: socket, generation: 0, subscriptions: new Set() } : socket, text);
+    }
+
+    async socketFor(url, textOrOrdinal, taggedOrdinal, openingOnly = false) {
+      const text = typeof textOrOrdinal === 'string' ? textOrOrdinal : undefined;
+      const ordinal = typeof textOrOrdinal === 'number' ? textOrOrdinal : taggedOrdinal;
+      const stream = !openingOnly && text && venue.streamOf?.(text);
+      const find = () => {
+        const sockets = this.sockets(url, ordinal);
+        if (!openingOnly && ordinal === undefined && text !== undefined && venue.socketMatches) {
+          return sockets.findLast((socket) => venue.socketMatches(socket, text));
         }
-        await ready();
-        while ((this.audit && !this.audit.ready()) || this.pendingStartupSubscriptions)
-          await new Promise((resolve) => realTimeout(resolve, 5));
-      })(),
-      'account/books readiness',
-      this.timeoutMs,
-    );
-    begin();
-    clock?.start();
-    this.replayClock = clock;
-    const start = performance.now();
-    let delivered = 0;
-    const warm = Math.floor(this.frames.reduce((count, frame) => count + (this.venue.bootstrapFrame?.(frame) ? 0 : 1), 0) / 4);
-    for (const frame of this.frames) {
-      if (this.venue.bootstrapFrame?.(frame)) continue;
-      if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
-      if (this.isPrivate) {
-        const wait = frame.t - (performance.now() - start);
-        if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+        return stream
+          ? sockets.find((socket) => [...socket.subscriptions].some((topic) => stream === topic || stream.startsWith(`${topic}.`)))
+          : sockets.at(-1);
+      };
+      while (!find()) {
+        let waiter;
+        const opened = new Promise((resolve) => {
+          waiter = () => (find() ? (resolve(), true) : false);
+          this.waiters.push(waiter);
+        });
+        try {
+          const label = `socket did not open: ${canonicalUrl(url)} #${ordinal ?? 'latest'} ${stream ?? ''}`;
+          if (this.replayClock?.active) await this.replayClock.wait(opened, label, socketTimeoutMs);
+          else await within(opened, socketTimeoutMs, `replay timeout: ${label}`);
+        } finally {
+          this.waiters = this.waiters.filter((queued) => queued !== waiter);
+        }
       }
-      this.time = frame.t;
-      await clock?.advance(frame.t);
-      if (frame.type === 'command') {
-        this.commandIndex++;
-        this.results.push(
-          await (
-            clock
-              ? clock.wait(runCommand(frame), `command ${frame.op}`, this.timeoutMs)
-              : withTimeout(runCommand(frame), `command ${frame.op}`, this.timeoutMs)
-          ).then(
-            (ids) => ({ ok: ids }),
-            (error) => {
-              if (String(error?.message).startsWith('replay timeout:')) throw error;
-              return { error: String(error?.message ?? error) };
-            },
-          ),
-        );
-      } else {
-        if (frame.type === 'close' && frame.socket === undefined && this.venue.socketMatches
-          && (this.open.get(canonicalUrl(frame.url, this.callerIds, this.venue)) ?? []).filter((socket) => !socket.closed).length > 1) {
-          throw new Error('Ambiguous close on a shared public/private endpoint');
+      return find();
+    }
+
+    async deliver(frame) {
+      if (frame.type === 'close' && frame.socket === undefined && venue.socketMatches && this.sockets(frame.url).length > 1) {
+        throw new Error('Ambiguous close on a shared public/private endpoint');
+      }
+      const latest = await this.socketFor(frame.url, frame.text, frame.socket);
+      const sockets = bitget && frame.socket === undefined ? this.sockets(frame.url) : [latest];
+      if (frame.type === 'close') {
+        for (const socket of sockets) this.close(socket, frame.code ?? 1006);
+        return;
+      }
+      // connect() already fired onOpen. Metadata only waits for its exact socket.
+      if (frame.type === 'open') return;
+      let arg;
+      try {
+        arg = JSON.parse(frame.text)?.arg;
+      } catch {
+        /* literal heartbeat */
+      }
+      const key = bitget && arg && topicKey(arg);
+      // Bitget has three sockets at the same URL; recorded frames belong to
+      // their subscribed topics, not whichever socket connected last.
+      const matching = key ? sockets.filter((socket) => socket.topics.has(key)) : sockets;
+      if (key && !matching.length) throw new Error(`frame has no subscribed socket: ${frame.url} ${key}`);
+      for (const socket of matching) {
+        if ((venue.validateLogin || venue.validateSubscriptions) && frame.text.trimStart().startsWith('{')) {
+          const message = JSON.parse(frame.text);
+          if (venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified)
+            throw new Error(`Taped login success preceded a valid login on ${frame.url}`);
+          this.assertSubscribed(socket, message);
         }
-        const socket = await this.socketFor(frame.url, frame.text, frame.socket);
-        if (frame.type === 'close') {
-          this.close(socket, frame.code ?? 1006);
-        } else if (frame.type === 'ws') {
-          if (
-            (this.venue.validateLogin || this.venue.validateSubscriptions) &&
-            frame.text.trimStart().startsWith('{')
-          ) {
-            const message = JSON.parse(frame.text);
-            if (
-              this.venue.validateLogin &&
-              message.event === 'login' &&
-              String(message.code) === '0' &&
-              !socket.loginVerified
-            ) {
-              throw new Error(`Taped login success preceded a valid login on ${frame.url}`);
-            }
-            this.assertSubscribed(socket, message);
+        socket.onMessage(frame.text);
+      }
+    }
+
+    /**
+     * Deliver every frame in order, yielding to the event loop between frames.
+     * Commands are awaited where they fall. A private tape is paced: each record
+     * waits until its time after the account is ready.
+     */
+    async play(onTick, ready = async () => {}, runCommand = async () => {}, clock, begin = () => {}) {
+      await within(
+        (async () => {
+          // This fences the market seed without requiring a future command's
+          // stream subscription. Bootstrap then selects the authenticated socket.
+          const first = this.frames.find((frame) => frame.url);
+          if (first) await this.socketFor(first.url, first.text, first.socket, true);
+          for (const frame of this.frames.filter((frame) => venue.bootstrapFrame?.(frame))) {
+            await this.deliver(frame);
+            await new Promise(setImmediate);
           }
-          socket.onMessage(frame.text);
+          await ready();
+          while ((this.audit && !this.audit.ready()) || this.pendingStartupSubscriptions)
+            await new Promise((resolve) => realTimeout(resolve, 1));
+        })(),
+        15_000,
+        'Replay startup',
+      );
+      begin();
+      clock?.start();
+      this.replayClock = clock;
+      const start = performance.now();
+      let delivered = 0;
+      const warm = Math.floor(this.frames.reduce((count, frame) => count + (venue.bootstrapFrame?.(frame) ? 0 : 1), 0) / 4);
+      for (const frame of this.frames) {
+        if (venue.bootstrapFrame?.(frame)) continue;
+        if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
+        if (isPrivate) {
+          const wait = frame.t - (performance.now() - start);
+          if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
         }
+        this.time = frame.t;
+        await clock?.advance(frame.t);
+        if (frame.type === 'command') {
+          this.commandIndex++;
+          this.results.push(
+            await (clock
+              ? clock.wait(runCommand(frame), `command ${frame.op}`, commandTimeoutMs)
+              : within(runCommand(frame), commandTimeoutMs, `Command ${frame.op}`)).then(
+              (ids) => ({ ok: ids }),
+              (error) => {
+                if (error instanceof ReplayTimeout) throw error;
+                return { error: String(error?.message ?? error) };
+              },
+            ),
+          );
+        } else {
+          await this.deliver(frame);
+        }
+        delivered++;
+        onTick?.(frame.t);
+        await new Promise(setImmediate);
       }
-      delivered++;
-      onTick?.(frame.t);
-      await new Promise(setImmediate);
+      return delivered;
     }
-    return delivered;
+
+    get unusedWrites() {
+      return this.responses.unusedWrites();
+    }
+    get missingWrites() { return this.unusedWrites; }
+
+    get unserved() {
+      return this.responses.unserved;
+    }
+
+    results = [];
   }
 
-  results = [];
-  sentRequests = new Set();
-  sent(url, text) {
-    if (!this.venue.requestBodies || text === 'ping' || text === 'pong') return;
-    let message;
-    try {
-      message = JSON.parse(text);
-    } catch {
-      return;
-    }
-    if (message.op === 'subscribe' || message.op === 'unsubscribe') {
-      for (const topic of message.args ?? [])
-        this.sentRequests.add(JSON.stringify(stable({ url, op: message.op, topic })));
-    } else if (message.op === 'login') {
-      const args = message.args.map(({ timestamp, nonce, sign, ...credentials }) => credentials);
-      this.sentRequests.add(JSON.stringify(stable({ url, op: 'login', args })));
-    }
+  return new Tape();
+};
+
+// Compatibility constructor delegates to the single venue-aware transport.
+export class Tape {
+  constructor(records, venue = {}, isPrivate = venue.isPrivate ?? false, timeoutMs = 30_000, impl, books = []) {
+    return createTape(records, { rust: 'backpack', matchRequestBody: true, ...venue }, isPrivate, {
+      impl, books, socketTimeoutMs: timeoutMs, commandTimeoutMs: timeoutMs,
+    });
   }
 }
