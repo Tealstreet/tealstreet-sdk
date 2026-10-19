@@ -144,6 +144,13 @@ Executions use floor-seconds timestamps; order history, funding income and
 public trades retain milliseconds to match the engine's query result shapes.
 Only explicit `FUNDING_FEE` income is supported; an all-kind income request
 fails because the funding endpoint cannot supply a complete general ledger.
+This is additional Rust functionality: TS MEXC inherits the empty branded
+`BaseExchange.fetchIncomeHistory` / `fetchIncomeHistoryRange` fallbacks and
+does not implement an income ledger. Neither TS nor Rust implements opening
+conditional orders or trailing stops. Before the Rust port, Conditional fell
+through to a regular type-1 limit submit without trigger fields; rejecting it
+prevents an unintended immediate order. Private replay covers whole-batch
+preflight for both unsupported types alongside caller client IDs.
 The public deals feed exposes no execution ID, so its result keys include the
 response ordinal and preserve otherwise identical prints.
 

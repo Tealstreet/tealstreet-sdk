@@ -22,7 +22,7 @@ const ids = {
 const records = [{ t: 0, type: 'meta', private: true, epoch: EPOCH }];
 const payload = (value) => JSON.stringify(value).replace(/"@(\d+)"/g, '$1');
 const envelope = (data) => ({ success: true, code: 0, data });
-const http = (method, path, query, response, requestBody) =>
+const http = (method, path, query, response, requestBody, stage = {}) =>
   records.push({
     t: 0,
     type: 'http',
@@ -31,6 +31,7 @@ const http = (method, path, query, response, requestBody) =>
     status: 200,
     body: payload(response),
     ...(requestBody === undefined ? {} : { requestBody: JSON.stringify(requestBody) }),
+    ...stage,
   });
 const ws = (t, socket, channel, data) =>
   records.push({ t, type: 'ws', url: SOCKET, socket, text: payload({ channel, symbol: data?.symbol, data }) });
@@ -275,8 +276,39 @@ http('POST', '/api/v1/private/stoporder/cancel_all', null, envelope(null), { sym
 ws(3100, 1, 'push.personal.order', { ...resting, state: 4 });
 // The denied-batch fallback waits 1500ms before its first regular submit,
 // delaying the later plan acknowledgement and scoped refresh beyond 3300ms.
-// Observe that reconciliation before ending the tape.
-ws(4300, 1, 'push.personal.stop.order', { ...stop, state: 2 });
+// The final pong observations below keep the tape alive through reconciliation.
+ws(3300, 1, 'push.personal.stop.order', { ...stop, state: 2 });
+
+// TS has no opening conditional/trailing implementation. A valid first leg
+// must not leak a regular write when a later leg requests either capability.
+for (const [index, type] of ['conditional', 'trailing_stop_market'].entries()) {
+  command(575 + index * 50, 'placeOrders', { orders: [
+    { symbol: 'BTCUSDT', type: 'limit', side: 'buy', amount: 20, price: 59000 },
+    { symbol: 'BTCUSDT', type, side: 'buy', amount: 20, price: 59000, triggerPrice: 61000 },
+  ] });
+}
+
+// Open-order reads reflect the accepted cancel-all instead of replaying startup
+// rows forever. Gate the snapshots on command order, including the early rejects.
+const afterCommand = records.filter((r) => r.type === 'command' && r.t <= 2900).length;
+for (const path of ['/api/v1/private/order/list/open_orders', '/api/v1/private/order/list/open_orders/BTC_USDT']) {
+  http('GET', path, { page_num: 1, page_size: 100 }, envelope([]), undefined, { afterCommand });
+}
+for (const symbol of [undefined, 'BTC_USDT']) {
+  const window = {
+    start_time: EPOCH - 89 * 86400000,
+    end_time: EPOCH,
+    page_num: 1,
+    page_size: 100,
+    ...(symbol ? { symbol } : {}),
+  };
+  http('GET', '/api/v1/private/planorder/list/orders', { ...window, states: '1' }, envelope([]), undefined, { afterCommand });
+  http('GET', '/api/v1/private/stoporder/list/orders', { ...window, is_finished: 0 }, envelope([]), undefined, { afterCommand });
+}
+// Both polling loops observe a post-cancel snapshot after the terminal WS frames
+// before the gate compares their reconciled account state.
+ws(4000, 1, 'pong', {});
+ws(6000, 1, 'pong', {});
 
 records.sort((a, b) => a.t - b.t);
 mkdirSync(dirname(values.out), { recursive: true });

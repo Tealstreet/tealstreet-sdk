@@ -87,6 +87,52 @@ export const VENUES = {
     publicOptions: { key: '' },
     recordOptions: { publicDataOnly: true, key: '' },
   },
+  blofin: {
+    rust: 'blofin',
+    blofinProtocol: true,
+    validateSocketMessage(socket, text, now = Date.now()) {
+      if (text === 'ping' || text === 'pong') return;
+      const frame = JSON.parse(text);
+      if (frame.op === 'subscribe' && new URL(socket.url).pathname === '/ws/private' && !socket.loginAcknowledged)
+        throw new Error('BloFin subscriptions preceded valid login acknowledgement');
+      if (frame.op !== 'login') return;
+      const arg = frame.args?.length === 1 ? frame.args[0] : {};
+      const { apiKey, passphrase, timestamp, nonce, sign } = arg ?? {};
+      if (!validWeexTimestamp(String(timestamp), now) || apiKey !== 'replay-key' || passphrase !== 'replay-passphrase'
+        || typeof nonce !== 'string' || !nonce.length) throw new Error('invalid BloFin socket login');
+      const expected = Buffer.from(createHmac('sha256', 'replay-secret')
+        .update(`/users/self/verifyGET${timestamp}${nonce}`).digest('hex')).toString('base64');
+      if (sign !== expected) throw new Error('invalid BloFin socket signature');
+      socket.loginVerified = true;
+    },
+    validateSocketFrame(socket, text) {
+      if (text === 'pong') return;
+      const frame = JSON.parse(text);
+      if (frame.event === 'login' && String(frame.code) === '0') {
+        if (!socket.loginVerified) throw new Error('BloFin login acknowledgement preceded valid login');
+        socket.loginAcknowledged = true;
+      }
+    },
+    requestUrl(url) {
+      const parsed = new URL(url);
+      if (parsed.pathname === '/api/v1/market/instruments') {
+        for (const [key, value] of parsed.searchParams) if (value === '') parsed.searchParams.delete(key);
+      }
+      return parsed.href;
+    },
+    ts: { module: `${root}/blofin/blofin.exchange.ts`, className: 'BlofinExchange', name: 'blofin' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('books.')).length >= count,
+    privateSocket: '/ws/private',
+    compareFillPrices: true,
+    options: { passphrase: 'replay-passphrase' },
+    cacheBustPaths: ['/api/v1/market/instruments'],
+    requestBodies: true,
+    volatileBodyFields: true,
+    isWrite: (method) => method !== 'GET',
+    defaultBodyValues: { tpTriggerPriceType: 'last', slTriggerPriceType: 'last', triggerPriceType: 'last' },
+    generatedId: (key, value) => key === 'clientOrderId' && value.startsWith('b3cdedc0a20880ba'),
+  },
   mexc: {
     rust: 'mexc',
     mexcProtocol: true,
@@ -129,7 +175,8 @@ export const VENUES = {
     rust: 'bingx',
     ts: { module: `${root}/bingx/bingx.exchange.ts`, className: 'BingxExchange', name: 'bingx' },
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('market.depth.')).length >= count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('market.depth.')).length >=
+      count,
     privateSocket: '?listenKey=',
     matchRequestBody: true,
     bingxProtocol: true,
@@ -143,9 +190,11 @@ export const VENUES = {
     matchRequestBody: true,
     volatileBodyFields: true,
     // WEEX's income history is a read despite using POST.
-    isWrite: (method, url) => method !== 'GET' && !(method === 'POST' && new URL(url).pathname === '/capi/v3/account/income'),
+    isWrite: (method, url) =>
+      method !== 'GET' && !(method === 'POST' && new URL(url).pathname === '/capi/v3/account/income'),
     options: { passphrase: 'replay-passphrase', privateWsHeaders: true },
-    tsBooksSubscribed: (exchange, count) => [...exchange.publicWebsocket.topics].filter((t) => t.endsWith('@depth200')).length >= count,
+    tsBooksSubscribed: (exchange, count) =>
+      [...exchange.publicWebsocket.topics].filter((t) => t.endsWith('@depth200')).length >= count,
     prepareTs(exchange, WebSocket) {
       for (const socket of [exchange.publicWebsocket, exchange.privateWebsocket]) {
         socket.createWebsocket = (url, protocols, options = {}) => {
@@ -171,7 +220,12 @@ export const VENUES = {
       const time = lookup('ACCESS-TIMESTAMP');
       if (!validWeexTimestamp(time, now)) throw new Error('invalid WEEX authentication timestamp');
       const signature = createHmac('sha256', 'replay-secret').update(`${time}/v3/ws/private`).digest('base64');
-      if (lookup('ACCESS-KEY') !== 'replay-key' || lookup('ACCESS-PASSPHRASE') !== 'replay-passphrase' || lookup('ACCESS-SIGN') !== signature) throw new Error('invalid WEEX upgrade authentication');
+      if (
+        lookup('ACCESS-KEY') !== 'replay-key' ||
+        lookup('ACCESS-PASSPHRASE') !== 'replay-passphrase' ||
+        lookup('ACCESS-SIGN') !== signature
+      )
+        throw new Error('invalid WEEX upgrade authentication');
     },
   },
   cryptocom: {
@@ -186,11 +240,18 @@ export const VENUES = {
     requestBody: (body) => body?.method && body?.params ? body.params : body,
     publicTickers: (records) => {
       const seed = records.find((r) => r.type === 'http' && r.url.endsWith('/public/get-instruments'));
-      return seed ? JSON.parse(seed.body).result.data.filter((r) => r.inst_type === 'PERPETUAL_SWAP' && r.tradable).map((r) => r.symbol) : [];
+      return seed
+        ? JSON.parse(seed.body)
+            .result.data.filter((r) => r.inst_type === 'PERPETUAL_SWAP' && r.tradable)
+            .map((r) => r.symbol)
+        : [];
     },
     // KNOWN_TS_FIXES: public-only startup returns before market subscriptions.
     prepareTsReady: (exchange, { isPrivate }) => {
-      if (!isPrivate) exchange.publicWebsocket.subscribeToMarketData(exchange.store.markets.map((m) => ({ instrumentName: m.id, indexInstrumentName: m.info?.underlyingSymbol })));
+      if (!isPrivate)
+        exchange.publicWebsocket.subscribeToMarketData(
+          exchange.store.markets.map((m) => ({ instrumentName: m.id, indexInstrumentName: m.info?.underlyingSymbol })),
+        );
     },
     // KNOWN_TS_FIXES: the global ticker/book throttles drop updates across
     // symbols. Reset after every frame so each next update gets a leading call,
@@ -199,12 +260,14 @@ export const VENUES = {
       exchange.publicWebsocket.handleTickerUpdate.cancel();
       exchange.publicWebsocket.handleBookUpdate.cancel();
     },
-    isWrite: (method, url) => method === 'POST' && /private\/(advanced\/)?(create|amend|cancel|change|close)-/.test(new URL(url).pathname),
+    isWrite: (method, url) =>
+      method === 'POST' && /private\/(advanced\/)?(create|amend|cancel|change|close)-/.test(new URL(url).pathname),
     createSocketAudit: (impl, { isPrivate, books, tickers = [] }) => {
       const connections = new Map();
       const failures = [];
       const socket = (url) => {
-        if (!connections.has(url)) connections.set(url, { auth: false, authAck: false, channels: new Set(), heartbeats: new Set() });
+        if (!connections.has(url))
+          connections.set(url, { auth: false, authAck: false, channels: new Set(), heartbeats: new Set() });
         return connections.get(url);
       };
       return {
@@ -223,10 +286,16 @@ export const VENUES = {
           const state = socket(url);
           if (frame.method === 'public/auth') {
             const payload = frame.method + frame.id + frame.api_key + frame.nonce;
-            state.auth = Number.isSafeInteger(frame.id) && Number.isSafeInteger(frame.nonce) && Math.abs(Date.now() - frame.nonce) < 60_000 && frame.api_key === 'replay-key' && frame.sig === createHmac('sha256', 'replay-secret').update(payload).digest('hex');
+            state.auth =
+              Number.isSafeInteger(frame.id) &&
+              Number.isSafeInteger(frame.nonce) &&
+              Math.abs(Date.now() - frame.nonce) < 60_000 &&
+              frame.api_key === 'replay-key' &&
+              frame.sig === createHmac('sha256', 'replay-secret').update(payload).digest('hex');
             if (!state.auth) failures.push('invalid private WS auth signature');
           } else if (frame.method === 'subscribe') {
-            if (url.endsWith('/user') && !state.authAck) failures.push('private subscriptions sent before authentication');
+            if (url.endsWith('/user') && !state.authAck)
+              failures.push('private subscriptions sent before authentication');
             for (const channel of frame.params.channels) state.channels.add(channel);
           } else if (frame.method === 'unsubscribe') {
             for (const channel of frame.params.channels) state.channels.delete(channel);
@@ -239,8 +308,23 @@ export const VENUES = {
         ready() {
           const entries = [...connections.entries()];
           if (isPrivate && !entries.some(([url, state]) => url.endsWith('/user') && state.auth)) return false;
-          if (tickers.length && !entries.some(([url, state]) => url.endsWith('/market') && tickers.slice(0, 350 - books.length).every((symbol) => state.channels.has('ticker.' + symbol)))) return false;
-          if (books.length && !entries.some(([url, state]) => url.endsWith('/market') && books.every((symbol) => state.channels.has('book.' + symbol + '.50')))) return false;
+          if (
+            tickers.length &&
+            !entries.some(
+              ([url, state]) =>
+                url.endsWith('/market') &&
+                tickers.slice(0, 350 - books.length).every((symbol) => state.channels.has('ticker.' + symbol)),
+            )
+          )
+            return false;
+          if (
+            books.length &&
+            !entries.some(
+              ([url, state]) =>
+                url.endsWith('/market') && books.every((symbol) => state.channels.has('book.' + symbol + '.50')),
+            )
+          )
+            return false;
           return true;
         },
         errors() {
@@ -248,15 +332,24 @@ export const VENUES = {
             if (state.heartbeats.size) failures.push('heartbeat response missing');
             if (url.endsWith('/user') && isPrivate) {
               if (!state.auth) failures.push('private WS never authenticated');
-              const required = ['user.order', 'user.advance.order', 'user.positions', 'user.balance', ...(impl === 'rust' ? ['user.trade'] : [])];
-              for (const channel of required) if (!state.channels.has(channel)) failures.push('missing private subscription ' + channel);
+              const required = [
+                'user.order',
+                'user.advance.order',
+                'user.positions',
+                'user.balance',
+                ...(impl === 'rust' ? ['user.trade'] : []),
+              ];
+              for (const channel of required)
+                if (!state.channels.has(channel)) failures.push('missing private subscription ' + channel);
             }
-            if (url.endsWith('/market')) for (const symbol of tickers.slice(0, 350 - books.length)) {
-              if (!state.channels.has('ticker.' + symbol)) failures.push('missing ticker subscription ' + symbol);
-            }
-            if (url.endsWith('/market')) for (const symbol of books) {
-              if (!state.channels.has('book.' + symbol + '.50')) failures.push('missing book subscription ' + symbol);
-            }
+            if (url.endsWith('/market'))
+              for (const symbol of tickers.slice(0, 350 - books.length)) {
+                if (!state.channels.has('ticker.' + symbol)) failures.push('missing ticker subscription ' + symbol);
+              }
+            if (url.endsWith('/market'))
+              for (const symbol of books) {
+                if (!state.channels.has('book.' + symbol + '.50')) failures.push('missing book subscription ' + symbol);
+              }
           }
           return failures;
         },
@@ -267,14 +360,26 @@ export const VENUES = {
       if (!path.startsWith('private/')) return true;
       try {
         const envelope = parseRequestJson(body);
-        const params = Object.keys(envelope.params).sort().map((key) => {
-          const value = envelope.params[key];
-          return key + (Array.isArray(value) ? value.join('') : String(value));
-        }).join('');
+        const params = Object.keys(envelope.params)
+          .sort()
+          .map((key) => {
+            const value = envelope.params[key];
+            return key + (Array.isArray(value) ? value.join('') : String(value));
+          })
+          .join('');
         const payload = envelope.method + envelope.id + envelope.api_key + params + envelope.nonce;
-        return method === 'POST' && envelope.method === path && Number.isSafeInteger(envelope.id) && Number.isSafeInteger(envelope.nonce) && Math.abs(Date.now() - envelope.nonce) < 60_000 && envelope.api_key === 'replay-key' &&
-          createHmac('sha256', 'replay-secret').update(payload).digest('hex') === envelope.sig;
-      } catch { return false; }
+        return (
+          method === 'POST' &&
+          envelope.method === path &&
+          Number.isSafeInteger(envelope.id) &&
+          Number.isSafeInteger(envelope.nonce) &&
+          Math.abs(Date.now() - envelope.nonce) < 60_000 &&
+          envelope.api_key === 'replay-key' &&
+          createHmac('sha256', 'replay-secret').update(payload).digest('hex') === envelope.sig
+        );
+      } catch {
+        return false;
+      }
     },
   },
   binance: {
@@ -293,7 +398,8 @@ export const VENUES = {
     ts: { module: `${root}/bybit/bybit.exchange.ts`, className: 'BybitExchange', name: 'bybit' },
     /** Book topics get a message handler once each subscription reaches the socket. */
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >= count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('orderbook.')).length >=
+      count,
     startupSubscriptions: (records, books) => {
       const symbols = new Set();
       for (const record of records) {
@@ -303,7 +409,8 @@ export const VENUES = {
         const body = JSON.parse(record.body);
         if (Number(body.retCode) !== 0) continue;
         for (const row of body.result?.list ?? []) {
-          if (['USDT', 'USDC'].includes(row.quoteCoin) && typeof row.symbol === 'string' && row.symbol) symbols.add(row.symbol);
+          if (['USDT', 'USDC'].includes(row.quoteCoin) && typeof row.symbol === 'string' && row.symbol)
+            symbols.add(row.symbol);
         }
       }
       const socket = records.find((record) => record.type === 'ws' && new URL(record.url).pathname === '/v5/public/linear')?.url

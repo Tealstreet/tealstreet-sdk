@@ -400,3 +400,39 @@ Origin has advanced to d9db55921c with BloFin and MEXC parity fixtures. Merge
 that landing tree before final CI; preserve all nine constructors, the scoped
 reconciliation/terminal fixes, strict request identity, and validated net-memory
 arithmetic. Re-run affected gates and independent integration reviews.
+
+Nine-venue merge resolution: all nine optional/default constructors retained,
+incoming BloFin leverage/margin/fill-unit helpers and compact package profiles
+adopted, per-venue CI budget remains1258291. BloFin-only/default builds pass;
+its query surface explicitly rejects the Hyperliquid-only cloid lookup. Independent
+host/CI/wrapper review accepts the union. Reviewing the incoming range conversion
+exposed Hyperliquid's missing seconds-or-ms wrapper normalization: apply the same
+TS floor/units contract before native millisecond queries. Three command-forwarding
+regressions pass;295 targeted wrapper/common-ID tests pass. Root typecheck/lint,
+all605 native workspace tests, native/wasm Clippy, bans and fmt pass.
+
+Harness union passes102tests and all28module/build syntax checks. Preserve strict
+writes/caller/economic/u64 identity, all topic checks, HL fanout/classification,
+Bybit startup readiness, validated signed-memory arithmetic, and incoming elapsed
+quiescence with real timer pauses. BloFin authentication is audited before nonce
+normalization, including credentials, signature, timestamp, nonce and auth-ack
+ordering. MEXC parity fixtures add unsupported-shape probes and post-cancel empty
+snapshots; terminal3300 plus4000/6000pongs now observes delayed scoped reconciliation
+and subsequent polls. Final integration audit and real nine-venue CI remain gated.
+
+Final nine-venue integration audit accepted after one correction: incoming BloFin
+oracle copied Rust margin into the TS expectation. BloFin declares position margin
+unsupported and native rows use None; normalize only the TS zero placeholder to
+null independently, retaining explicit values for comparison. Regressions prove
+arbitrary123456 and plausible8 Rust margins cannot establish their own expectation.
+Existing Binance behavior remains untouched. All104 harness tests, syntax and diff
+checks pass, and localized independent re-review reports no remaining findings.
+
+Settled nine-venue local checkpoint: all605 native tests; native/wasm Clippy, bans,
+fmt; typecheck44,lint28,all27root test tasks (6602safe-cex tests in each task);
+20combined real-Wasm bridge tests and15host tests pass. Hyperliquid public/private
+pass on Node22: CPU374.3/72.6ms,steady47.4/28.0ms,retained5.5/1.8MB (TS/Rust),
+bundle951036bytes. Binance public passes259.1/117.4ms,steady145.7/47.2ms,
+retained4.2/2.2MB. Final remaining local private/integration replays and CI on the
+pushed nine-venue head remain required before merge. Findings/resolutions are
+posted on PR1306; no performance threshold or byte budget was raised.

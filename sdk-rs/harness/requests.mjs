@@ -51,17 +51,25 @@ const parseJson = (text) => JSON.parse(text, (_key, value, context) =>
   typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)
     ? JSON.rawJSON(context.source) : value);
 
-export const callerIdsOf = (records) => new Set(records
-  .filter((record) => record.type === 'command')
-  .flatMap((record) => (record.orders ?? []).map((order) => order.clientOrderId))
-  .filter((id) => typeof id === 'string'));
+export const callerIdsOf = (records) => {
+  const ids = new Set();
+  const collect = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (typeof value.clientOrderId === 'string') ids.add(value.clientOrderId);
+    for (const nested of Object.values(value)) collect(nested);
+  };
+  for (const record of records) if (record.type === 'command') collect(record);
+  return ids;
+};
 
 const normalize = (value, callerIds, root = true, options = {}) => {
   if (JSON.isRawJSON(value)) return value;
   if (Array.isArray(value)) return value.map((item) => normalize(item, callerIds, false, options));
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()
     .filter((key) => !(root && (CLOCKS.has(key) || (key === 'nonce' && value.action))))
-    .filter((key) => !CLIENT_IDS.has(key) || callerIds.has(value[key]))
+    .filter((key) => options.defaultBodyValues?.[key] !== value[key])
+    .filter((key) => !CLIENT_IDS.has(key) || callerIds.has(value[key])
+      || (options.generatedId && !options.generatedId(key, String(value[key]))))
     .map((key) => [key, !callerIds.has(value[key]) && options.generatedBodyId?.(key, value[key])
       ? '<generated>' : normalize(value[key], callerIds, false, options)]));
   return value;
@@ -122,7 +130,8 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
     // OKX login signatures and clocks are checked against credentials by Tape;
     // the outbound identity retains API key and passphrase for comparison.
     if (method === 'login' && Array.isArray(message.args)) {
-      message.args = message.args.map((arg) => ({ ...arg, timestamp: '<timestamp>', sign: '<signature>' }));
+      message.args = message.args.map((arg) => ({ ...arg, timestamp: '<timestamp>', sign: '<signature>',
+        ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}) }));
     }
     // Bybit signs a fresh expiration per connection. Keep the API identity.
     if (method === 'auth' && Array.isArray(message.args) && message.args.length === 3) {

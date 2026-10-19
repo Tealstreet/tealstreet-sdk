@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { subscriptionKeys } from './requests.mjs';
 import { gunzipSync } from 'node:zlib';
-import { fixWeexConditionals } from './known-ts-fixes.mjs';
+import { fixBlofinAccount, fixWeexConditionals } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { venueOf } from './venues.mjs';
 import { memoryMetricErrors } from './memory.mjs';
@@ -118,6 +118,7 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
+  blofin: fixBlofinAccount,
   hyperliquid() {
     // Native command regressions pin these deliberate TS fixes:
     // - Validate every cancel acknowledgement before cancel+replace continues.
@@ -337,7 +338,11 @@ for (let run = 0; run < runs; run++) {
     if (!output.markets.length || !output.tickers.length) differences.push(`${impl}: empty public seed`);
     if (unserved) differences.push(`${impl}: ${unserved} request(s) matched nothing on the tape`);
   }
+  if (JSON.stringify(ts.wsRequests) !== JSON.stringify(rust.wsRequests)) differences.push(
+    `websocket requests differ: ts=${JSON.stringify(ts.wsRequests)} rust=${JSON.stringify(rust.wsRequests)}`,
+  );
   if (isPrivate && ts.account && rust.account) {
+    if (values.venue === 'blofin') KNOWN_TS_FIXES.blofin(ts.account);
     if (values.venue === 'cryptocom') {
       fixCryptocomAccount(ts.account);
       // Rust consumes authoritative user.trade; TS omits that feed entirely.

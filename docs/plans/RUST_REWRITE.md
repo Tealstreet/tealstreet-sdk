@@ -100,7 +100,7 @@ then the payload. Absent optional numbers are `NaN`; absent strings are
 | 9 | `BALANCE` | f64 `[used, free, total, upnl]` |
 | 10 | `STATUS` | `u32 loaded` bits, `u32` flags (bit 0: hedge mode), f64 latency |
 | 11 | `FILLS` | `u32 n`; `u32 strings[n]` (order id); `u32 market[n]`; `u32 side[n]`; f64 rows `[price, amount]`, one row per execution |
-| 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]` |
+| 12 | `SETTINGS` (replace) | `u32 n`; `u32 market[n]`; `u32 marginType[n]` (0 unknown); f64 `leverage[n]`; optional appended f64 `buyLeverage[n]`, `sellLeverage[n]` |
 
 Venues with independent hedge leverage append f64 `buyLeverage[n]` and
 `sellLeverage[n]` columns to `SETTINGS`. Section length distinguishes this
@@ -110,7 +110,9 @@ one leverage keep the original payload unchanged.
 A market index is a row of the most recent `MARKETS` section; a ticker index is
 a row of the most recent `TICKERS` section. `POSITIONS` holds open positions
 only; per-market leverage and margin type live in `SETTINGS`, replacing the
-zero-size placeholder positions TS kept for every market. An order's packed
+zero-size placeholder positions TS kept for every market. SETTINGS may append
+independent buy/sell leverage columns; absent/non-finite side values fall back
+to the scalar leverage, so older frames remain readable. An order's packed
 enum word carries its reject reason (flags bits 4-5). Enum codes and flag bits are
 defined once in `sdk-rs/engine/src/wire.rs` and mirrored by the decoder in
 `hosts/wasm/js/wire.mjs`.
@@ -285,7 +287,10 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Crypto.com | done (#1303) |
 | WEEX | done (#1301) |
 | BingX | done (#1305) |
-| Bitget, Hyperliquid, BloFin, MEXC, Bitunix, Backpack | wave 1, PRs in review |
+| MEXC | done (#1304); conditional/trailing parity checked (#1311) |
+| BloFin | done (#1300) |
+| Hyperliquid perps | Rust port [#1306](https://github.com/Tealstreet/tealstreet-sdk/pull/1306); implementation and reviews complete, CI gated |
+| Bitget, Bitunix, Backpack | wave 1, PRs in review |
 | Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | lane starting |
 | KuCoin, Phemex | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |

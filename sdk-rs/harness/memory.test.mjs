@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { memoryMetricErrors, retainedMemory } from './memory.mjs';
+import { memoryMetricErrors, retainedMemory, settledMemory } from './memory.mjs';
 
 test('retained frame backing buffers are included', () => {
   const before = process.memoryUsage();
@@ -76,4 +76,47 @@ test('reported deltas and aggregate must exactly match the absolute samples', ()
     assert(memoryMetricErrors({ ...valid, [field]: valid[field] + 1 }).some((error) => error.startsWith(`inconsistent ${field} (`)), field);
   }
   assert.deepEqual(memoryMetricErrors(metricsFor({ heapUsed: 0, arrayBuffers: 0 }, { heapUsed: 0, arrayBuffers: 0 })), []);
+});
+
+test('three equal samples do not hide a delayed loader-buffer release', async () => {
+  let time = 0;
+  const baseline = await settledMemory({
+    collect() {},
+    pause: async () => {
+      time += 10;
+    },
+    now: () => time,
+    sample: () => ({ arrayBuffers: time < 40 ? 100 : 44, heapUsed: 1000 }),
+  });
+  assert.equal(time, 140);
+  assert.deepEqual(baseline, { arrayBuffers: 44, heapUsed: 1000 });
+  assert.equal(retainedMemory(baseline, { arrayBuffers: 44, heapUsed: 1000 }), 0);
+});
+
+test('backing stores that never settle fail instead of choosing or clamping a sample', async () => {
+  let time = 0;
+  await assert.rejects(
+    settledMemory({
+      collect() {},
+      pause: async () => {
+        time += 10;
+      },
+      now: () => time,
+      sample: () => ({ arrayBuffers: time, heapUsed: 1000 }),
+      timeoutMs: 200,
+    }),
+    /Backing-buffer memory did not settle/,
+  );
+});
+
+test('settled samples use real time when replay replaces global timers', async () => {
+  const original = globalThis.setTimeout;
+  globalThis.setTimeout = () => { throw new Error('virtual timer must not pace memory samples'); };
+  try {
+    assert.deepEqual(await settledMemory({
+      collect() {}, sample: () => ({ arrayBuffers: 42, heapUsed: 1000 }), quietMs: 0,
+    }), { arrayBuffers: 42, heapUsed: 1000 });
+  } finally {
+    globalThis.setTimeout = original;
+  }
 });

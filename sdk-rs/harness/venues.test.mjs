@@ -171,3 +171,27 @@ test('Bybit startup topics include all successful stablecoin pages and requested
   assert.equal(pending.size, 5, 'retain startup backing storage across memory samples');
   assert.equal(bybit.startupSubscriptions(rows, []).length, 3, 'no books still requires every ticker');
 });
+
+test('BloFin login checks account, fresh timestamp, nonce and hex-base64 signature before subscriptions', () => {
+  const venue = venueOf('blofin');
+  const url = 'wss://openapi.blofin.com/ws/private';
+  const now = Date.now();
+  const message = (patch = {}) => {
+    const arg = { apiKey: 'replay-key', passphrase: 'replay-passphrase', timestamp: now, nonce: 'fresh-nonce', ...patch };
+    arg.sign ??= Buffer.from(createHmac('sha256', 'replay-secret')
+      .update(`/users/self/verifyGET${arg.timestamp}${arg.nonce}`).digest('hex')).toString('base64');
+    return JSON.stringify({ op: 'login', args: [arg] });
+  };
+  const socket = { url };
+  const feeds = '{"op":"subscribe","args":[{"channel":"orders","instType":"SWAP","instId":"ANY"}]}';
+  assert.throws(() => venue.validateSocketMessage(socket, feeds, now));
+  assert.throws(() => venue.validateSocketFrame(socket, '{"event":"login","code":"0"}'));
+  for (const patch of [{ sign: 'wrong' }, { apiKey: 'other' }, { passphrase: 'other' }, { nonce: '' },
+    { timestamp: now - 30001 }, { timestamp: now + 30001 }, { timestamp: 'bad' }]) {
+    assert.throws(() => venue.validateSocketMessage({ url }, message(patch), now));
+  }
+  venue.validateSocketMessage(socket, message(), now);
+  assert.throws(() => venue.validateSocketMessage(socket, feeds, now));
+  venue.validateSocketFrame(socket, '{"event":"login","code":"0"}');
+  venue.validateSocketMessage(socket, feeds, now);
+});

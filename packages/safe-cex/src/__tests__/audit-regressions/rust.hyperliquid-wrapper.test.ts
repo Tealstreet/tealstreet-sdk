@@ -96,6 +96,25 @@ describe('Rust Hyperliquid wrapper', () => {
     exchanges.splice(0).forEach((exchange) => exchange.dispose());
   });
 
+  it.each([
+    { from: 1_700_000_000.123, to: 1_700_000_001.456 },
+    { from: 1_700_000_000_123.9, to: 1_700_000_001_456.9 },
+    { from: 1_700_000_000.123, to: 1_700_000_001_456.9 },
+  ])('forwards execution ranges as integer milliseconds: %j', async ({ from, to }) => {
+    const { exchange, commands } = setup();
+    await exchange.start();
+    await exchange.fetchHistoricalFills({ symbol: MARKET.symbol, from, to, limit: 7 });
+    expect(commands).toEqual([
+      expect.objectContaining({
+        op: 'fetchFills',
+        symbol: MARKET.symbol,
+        from: 1_700_000_000_123,
+        to: 1_700_000_001_456,
+        limit: 7,
+      }),
+    ]);
+  });
+
   it('registers perps and forwards wallet, vault and builder settings together', async () => {
     expect(isRustVenue('hyperliquid')).toBe(true);
     expect(isRustVenue('hyperliquidspot')).toBe(false);
