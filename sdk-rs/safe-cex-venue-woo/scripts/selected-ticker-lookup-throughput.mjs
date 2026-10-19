@@ -32,7 +32,7 @@ for (const [side, report] of reports.entries()) {
     const implementation = run.implementation;
     const first = graphs.find(item => item.implementation === implementation);
     const observation = first ? assertOutputIdentity(first.value, value) : null;
-    graphs.push({ implementation, side, label: run.label, value, observation });
+    graphs.push({ implementation, side, label: run.label, fixture: run.fixture, fixtureSha256: run.outputHash, value, observation });
     assert.equal(run.receipt.delivered, 260);
     assert.equal(run.receipt.dropped, 0);
     assert.equal(run.receipt.inputHash, reports[0].runs[0].receipt.inputHash);
@@ -45,11 +45,12 @@ for (const [side, report] of reports.entries()) {
     }
     assert(run.replayWallMs > 0 && Number.isFinite(run.replayWallMs));
     for (const key of ['user', 'system', 'total']) assert(run.replayCpuMs[key] >= 0 && Number.isFinite(run.replayCpuMs[key]));
+    assert(run.replayCpuMs.total > 0, run.label + ' missing positive CPU delta');
   }
 }
 const stats = values => ({ samples: values, median: (values[0] + values[1]) / 2, min: Math.min(...values), max: Math.max(...values) });
 const profile = runs => ({ cpuMs: stats(runs.map(run => run.replayCpuMs.total)), userCpuMs: stats(runs.map(run => run.replayCpuMs.user)), systemCpuMs: stats(runs.map(run => run.replayCpuMs.system)), wallMs: stats(runs.map(run => run.replayWallMs)) });
 const [control, candidate] = bySide.map(profile);
 const ts = reports.map(report => profile(report.runs.filter(run => run.implementation === 'ts')));
-console.log(JSON.stringify({ sampleCountQualification: 'One approved full pair, two native repeats per side; no three-pair inference.', paths, controls, graphs: graphs.map(({ value, ...item }) => item), control, candidate, ts, cpuSpeedup: control.cpuMs.median / candidate.cpuMs.median, candidateToTsCpu: candidate.cpuMs.median / ts[1].cpuMs.median, candidateToTsWall: candidate.wallMs.median / ts[1].wallMs.median }, null, 2));
+console.log(JSON.stringify({ sampleCountQualification: 'One approved full pair, two native repeats per side; no three-pair inference.', paths, controls, graphs: graphs.map(({ value, ...item }) => item), control, candidate, ts, cpuSpeedup: control.cpuMs.median / candidate.cpuMs.median, candidateToTsCpu: candidate.cpuMs.median / ts[1].cpuMs.median, candidateToTsWall: candidate.wallMs.median / ts[1].wallMs.median, targetCpuWithinTwoTimesTs: candidate.cpuMs.median <= 2 * ts[1].cpuMs.median }, null, 2));
 assert(candidate.cpuMs.median < control.cpuMs.median, 'Selected lookup must reduce CPU on the matched full tape');

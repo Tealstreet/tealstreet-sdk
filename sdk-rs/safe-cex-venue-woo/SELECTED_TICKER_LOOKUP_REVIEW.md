@@ -50,8 +50,8 @@ Both immutable addons use Rust 1.99.0, `CARGO_INCREMENTAL=0`, the same Cargo.loc
 `cargo build --release --locked -p safe-cex-ffi --no-default-features --features node --jobs 1`,
 opt-level 3 and disabled debug assertions. The control is source `890f341bb7`,
 addon SHA256 `e8020b05fa3174ed408d65e175617e0300a19062c4d9eed1b3fd28aaab4607fe`.
-The corrected candidate artifact will be pinned after rebuilding the selected-ID
-control. The first draft artifact is excluded from the experiment.
+The candidate is source `c7b52975ac83`, addon SHA256
+`76e22c417665eae022ad340b677c287f063255f3d214803c6c9a895a0ef6e2be`.
 
 The maintainer-approved timing gate is one complete control/candidate pair,
 each with two fresh native and two fresh TS workers. CPU is primary; all CPU and
