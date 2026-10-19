@@ -27,5 +27,6 @@
     "build-wasm": "bash ../../harness/build.sh",
     "test": "node --test js/*.test.mjs"
   },
+  "dependencies": { "ws": "^8.21.3" },
   "license": "MIT"
 }

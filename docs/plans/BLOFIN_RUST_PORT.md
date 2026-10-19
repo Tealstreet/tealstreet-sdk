@@ -394,3 +394,20 @@ and three-run public medians:
 - WEEX landed concurrently at `6cd219ce4c`, including shared transport/parser
   changes and its existing2.25MiB budget. Integrate and review before final CI;
   the remaining old-artifact aliases are finishing, then affected gates rerun.
+
+### WEEX landing integration
+
+- All13 five-venue replay gates completed successfully, including all four OKX
+  private variants. Native266/SDK17/host4/harness11 and root checks pass on the
+  preceding artifact. The public table above uses explicit Node22.
+- Merge landing `6cd219ce4c`: retain six boxed venue registrations, WEEX upgrade
+  headers/capability checks, ticker filtering and strict socket/request audits.
+  BloFin ignores SetTickerSymbols (it subscribes its full set), preventing a
+  spurious unsupported-command0 notice. WEEX rejects unsupported leverage reads
+  even without credentials; settings literals retain legacy scalar fallback.
+- Adopt landing's deliberate always-metadata streamed-response contract and
+ 1MiB cap, keeping every prior BloFin/Bybit large/nested/strict regression and
+  explicit UTF8 failure handling. Engine26 tests, clippy and independent merge
+  review pass. Preserve the corrected exact stable memory baseline.
+- Landing budget is now2.25MiB (2,359,296bytes); this lane does not raise it.
+  Six-venue build, root checks and final exact-artifact replays are running.

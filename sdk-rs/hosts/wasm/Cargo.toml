@@ -14,6 +14,7 @@ safe-cex-venue-blofin.workspace = true
 safe-cex-venue-bybit.workspace = true
 safe-cex-venue-cryptocom.workspace = true
 safe-cex-venue-okx.workspace = true
+safe-cex-venue-weex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 wasm-bindgen.workspace = true
