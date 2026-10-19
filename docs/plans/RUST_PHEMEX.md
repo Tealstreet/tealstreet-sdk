@@ -72,3 +72,8 @@ USDT/USDC PerpetualV2 g-API uses Rp/Rv values. Legacy Ep/Er scaling is handled o
 
 - Landing advanced to `d9db55921c` while final-head CI was running. Merged BloFin and retained both registrations, typed request matching/caller IDs, Phemex bootstrap and first-socket readiness, MEXC ordinals, incoming normalized BloFin WS request audits and elapsed memory settlement using real timers. Independent cross-reviews of replay/requests/venues/gate/engine/store/wasm/workflow are clean;54 harness tests and BloFin private TS smoke pass. Matrix expands to21 gates (nine public, twelve private).
 - Combined nine-venue artifact2,868,430bytes within3MiB. Phemex public gate PASS on it: TS/Rust CPU411.7/138.5ms, steady283.9/59.2ms, retained5.8/2.8MB. Full matrix and renewed final-head CI follow this stable merge.
+
+### Final nine-venue validation
+
+- All21/21 replay gates PASS (nine public, twelve private) on source4cc11fc375 and the2,868,430byte artifact. Median TS/Rust workerCPUms and retainedMB: phemex411.7/138.5,5.8/2.8; blofin204.8/189.9,3.4/2.1; mexc1171.1/670.3,10.1/3.6; binance183.3/80.1,4.3/2.4; bybit232.3/162.4,6.2/2.6; bingx93.1/66.5,3.6/2.1; cryptocom70.9/63.6,2.0/1.6; okx627.0/569.8,5.2/3.5; weex112.8/80.1,5.2/2.3. Phemex steady283.9/59.2ms.
+- Workspace618 native tests (Phemex77), SDK6,567 tests/458files, wasm20/host15/harness54, fmt/bans/native+wasm clippy and typecheck44/lint28 PASS. Independent merge reviews are clean; latest landingd9db55921c integrated. Push this checkpoint; merge only after renewed final-head CI is green.
