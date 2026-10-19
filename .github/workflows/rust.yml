@@ -118,7 +118,7 @@ jobs:
             private_script: rust:private-tape-cryptocom
           - venue: weex
             books: BTCUSDT,ETHUSDT
-            private_script: rust:private-tape-weex
+            private_script: rust:private-tape:weex
           - venue: hyperliquid
             books: BTC-PERP,ETH-PERP
             private_script: rust:private-tape-hyperliquid
