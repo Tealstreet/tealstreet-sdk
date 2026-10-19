@@ -21,7 +21,9 @@ impl Venue for RecordingVenue {
     fn on_response(&mut self, _: &mut Cx<'_, ()>, _: (), _: Response<'_>) {}
     fn on_request_failed(&mut self, _: &mut Cx<'_, ()>, _: (), _: &str) {}
     fn on_timer(&mut self, _: &mut Cx<'_, ()>, _: TimerId) {}
-    fn on_command(&mut self, _: &mut Cx<'_, ()>, _: Command) {}
+    fn on_command(&mut self, cx: &mut Cx<'_, ()>, _: Command) {
+        self.0.push((cx.now, SocketId(0), "command".into()));
+    }
     fn book(&self, _: &str) -> Option<&Book> {
         None
     }
@@ -185,4 +187,43 @@ fn an_oversized_message_does_not_capture_the_next_message() {
     assert_eq!(host.engine.venue().0.len(), 1);
     dispatch_next(&mut host);
     assert_eq!(host.engine.venue().0.last().unwrap().2, "small");
+}
+
+#[tokio::test]
+async fn command_time_precedes_arrivals_while_its_ready_prefix_drains() {
+    static TIME: AtomicU64 = AtomicU64::new(70);
+    fn clock() -> f64 {
+        TIME.load(Ordering::Relaxed) as f64
+    }
+    let mut host = host();
+    host.clock = clock;
+    host.events.clock = clock;
+    host.events
+        .send(HostEvent::WsMessage(SocketId(1), "before".into()))
+        .unwrap();
+    TIME.store(80, Ordering::Relaxed);
+    let events = host.events.clone();
+    host.dispatch_command(
+        Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        },
+        &mut |_| {
+            TIME.store(90, Ordering::Relaxed);
+            events
+                .send(HostEvent::WsMessage(SocketId(1), "later".into()))
+                .unwrap();
+            TIME.store(100, Ordering::Relaxed);
+        },
+    )
+    .await;
+    dispatch_next(&mut host);
+    assert_eq!(
+        host.engine
+            .venue()
+            .0
+            .iter()
+            .map(|(time, _, text)| (*time, text.as_str()))
+            .collect::<Vec<_>>(),
+        [(70.0, "before"), (80.0, "command"), (90.0, "later")]
+    );
 }

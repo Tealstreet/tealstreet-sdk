@@ -101,3 +101,33 @@ OKX 8,904 single calls -> 427 batches, Bybit 8,742 -> 126. Raw text crossing is
 instrumented WS wall medians: OKX 240.23 -> 34.17 ms, Bybit 48.84 -> 18.96 ms;
 frame calls 4.49 -> 3.24 / 3.64 -> 3.45 ms. Wall samples include scheduler noise;
 these are diagnostics, not final uninstrumented CPU gate numbers.
+
+### Four-family integration and adversarial fixes
+
+Merged Crypto.com landing `c63c3e5670` with the lane's family isolation. It also
+landed stable async backing-buffer collection and captures CPU before final GC;
+preserved both. The controlled before build is now rebuilt from that landing
+source with the final replay/gate but original aggregate binary/unbatched host,
+so all four venues share the same timing, memory accounting and burst cadence.
+Earlier exploratory numbers above are not a final before/after comparison.
+
+Adversarial review found/fixed:
+
+- Native command clock was captured after yielding to drain a ready prefix;
+  later arrivals could then carry an earlier time. Capture the selected command
+  time first; regression verifies prior/command/later clocks 70/80/90 even when
+  dispatch wall time reaches 100.
+- Disposal left in-flight command promises pending after late HTTP completions
+  were suppressed. Reject/clear them and reject new commands after disposal.
+- Disposal from an action callback could leave later socket/timer actions live;
+  stop action execution and recheck disposal after every draining barrier.
+- Crypto.com profiling used the wrong default symbols. Explicit family defaults
+  and a cadence option now match each fixture.
+
+Independent review reproduces the disposal fix and finds no remaining harness
+or family-build issues. Native six tests/clippy, 21 JS host tests, 20 SDK WASM
+adapter tests and four isolated wasm32 clippy checks pass. Repository-wide
+44 typecheck and 28 lint tasks pass; full tests are still running.
+
+Family WASM bytes/budgets after integration: Binance 769031/786432,
+Bybit 748585/765952, Crypto.com 617650/638976, OKX 711518/729088.

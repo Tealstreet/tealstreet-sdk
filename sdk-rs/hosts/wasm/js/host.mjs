@@ -36,12 +36,15 @@ export class EngineHost {
   }
 
   start() {
+    if (this.disposed) return;
     this.run(this.engine.start(this.transport.now()));
   }
 
   /** Send a command; resolves with its result for commands that report one. */
   command(command) {
+    if (this.disposed) return Promise.reject(new Error('engine disposed'));
     this.drainMessages();
+    if (this.disposed) return Promise.reject(new Error('engine disposed'));
     const reply = command.op === 'subscribeOrderBook' || command.op === 'unsubscribeOrderBook'
       || command.op === 'subscribeCandles' || command.op === 'unsubscribeCandles'
       ? undefined
@@ -60,7 +63,9 @@ export class EngineHost {
    * fills go out, for flushing those at the venue's faster book cadence.
    */
   flush(marketOnly = false) {
+    if (this.disposed) return;
     this.drainMessages();
+    if (this.disposed) return;
     const frame = this.engine.takeFrame(this.transport.now(), marketOnly);
     if (frame) this.handlers.onFrame?.(frame.buffer);
   }
@@ -68,11 +73,14 @@ export class EngineHost {
   /** The whole current state as one frame (an ArrayBuffer), for a consumer
    * that starts late or skipped frames; later flushes apply on top of it. */
   snapshot() {
+    if (this.disposed) throw new Error('engine disposed');
     this.drainMessages();
+    if (this.disposed) throw new Error('engine disposed');
     return this.engine.snapshotFrame(this.transport.now()).buffer;
   }
 
   dispose() {
+    if (this.disposed) return;
     this.disposed = true;
     this.transport.clearTimeout(this.batchTimer);
     this.batchTimer = undefined;
@@ -83,6 +91,8 @@ export class EngineHost {
     for (const handle of this.timers.values()) this.transport.clearTimeout(handle);
     this.sockets.clear();
     this.timers.clear();
+    for (const { reject } of this.commands.values()) reject(new Error('engine disposed'));
+    this.commands.clear();
   }
 
   /** Feed a response to the engine in chunks of at most `CHUNK_BYTES`. */
@@ -90,28 +100,33 @@ export class EngineHost {
     if (this.disposed) return;
     const { engine, transport } = this;
     this.drainMessages();
+    if (this.disposed) return;
     this.run(engine.httpStart(id, status, headers, transport.now()));
     try {
       if (body instanceof Uint8Array) {
         for (let at = 0; at < body.length; at += CHUNK_BYTES) {
           this.drainMessages();
+          if (this.disposed) return;
           this.run(engine.httpChunk(id, body.subarray(at, at + CHUNK_BYTES), transport.now()));
         }
       } else {
         for await (const chunk of body) {
           if (this.disposed) return;
           this.drainMessages();
+          if (this.disposed) return;
           this.run(engine.httpChunk(id, chunk, transport.now()));
         }
       }
     } catch (error) {
       if (this.disposed) return;
       this.drainMessages();
+      if (this.disposed) return;
       this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));
       return;
     }
     if (this.disposed) return;
     this.drainMessages();
+    if (this.disposed) return;
     this.run(engine.httpEnd(id, transport.now()));
   }
 
@@ -139,7 +154,7 @@ export class EngineHost {
 
   /** Deliver queued arrivals before any later event can overtake them. */
   drainMessages() {
-    if (!this.messages.length) return;
+    if (this.disposed || !this.messages.length) return;
     this.transport.clearTimeout(this.batchTimer);
     this.batchTimer = undefined;
     const messages = this.messages;
@@ -164,11 +179,15 @@ export class EngineHost {
   }
 
   run(actionsJson) {
-    if (!actionsJson) return;
-    for (const action of JSON.parse(actionsJson)) this.execute(action);
+    if (this.disposed || !actionsJson) return;
+    for (const action of JSON.parse(actionsJson)) {
+      if (this.disposed) break;
+      this.execute(action);
+    }
   }
 
   execute(action) {
+    if (this.disposed) return;
     const { engine, transport } = this;
     switch (action.op) {
       case 'wsConnect': {
@@ -177,17 +196,20 @@ export class EngineHost {
           onOpen: () => {
             if (this.disposed) return;
             this.drainMessages();
+            if (this.disposed) return;
             this.run(engine.wsOpen(id, transport.now()));
           },
           onMessage: (text) => this.message(id, text),
           onClose: (code) => {
             if (this.disposed) return;
             this.drainMessages();
+            if (this.disposed) return;
             this.sockets.delete(id);
             this.run(engine.wsClose(id, code ?? 1006, transport.now()));
           },
         });
-        this.sockets.set(id, socket);
+        if (this.disposed) socket.close();
+        else this.sockets.set(id, socket);
         break;
       }
       case 'wsSend':
@@ -211,6 +233,7 @@ export class EngineHost {
             (error) => {
               if (this.disposed) return;
               this.drainMessages();
+              if (this.disposed) return;
               this.run(engine.httpFailed(id, String(error?.message ?? error), transport.now()));
             },
           );
@@ -222,6 +245,7 @@ export class EngineHost {
         const handle = transport.setTimeout(() => {
           if (this.disposed) return;
           this.drainMessages();
+          if (this.disposed) return;
           this.timers.delete(id);
           this.run(engine.timer(id, transport.now()));
         }, Math.max(0, action.at - transport.now()));

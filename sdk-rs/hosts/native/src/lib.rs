@@ -127,8 +127,7 @@ impl<V: Venue, T: Transport> Host<V, T> {
                 },
                 command = commands.recv() => match command {
                     Some(command) => {
-                        self.drain_ready_prefix(&mut on_notice).await;
-                        self.engine.handle((self.clock)(), Event::Command(command));
+                        self.dispatch_command(command, &mut on_notice).await;
                     }
                     None => {
                         self.drain_ready_prefix(&mut on_notice).await;
@@ -154,6 +153,12 @@ impl<V: Venue, T: Transport> Host<V, T> {
             timer.abort();
         }
         self.engine
+    }
+
+    async fn dispatch_command(&mut self, command: Command, on_notice: &mut impl FnMut(Notice)) {
+        let selected_at = (self.clock)();
+        self.drain_ready_prefix(on_notice).await;
+        self.engine.handle(selected_at, Event::Command(command));
     }
 
     async fn drain_ready_prefix(&mut self, on_notice: &mut impl FnMut(Notice)) {

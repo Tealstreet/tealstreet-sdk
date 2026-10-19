@@ -130,3 +130,54 @@ test('disposal cancels queued deliveries and ignores late transport callbacks', 
   assert.equal(f.calls.length, 0);
   assert.equal(f.tasks.size, 0);
 });
+
+test('disposal rejects pending commands and ignores their later HTTP responses', async () => {
+  const f = fixture();
+  const command = f.host.command({ op: 'fetchCandles', symbol: 'BTCUSDT', interval: '1m' });
+  const rejected = assert.rejects(command, /engine disposed/);
+  assert.equal(f.host.commands.size, 1);
+  f.host.dispose();
+  await rejected;
+  assert.equal(f.host.commands.size, 0);
+  await f.host.receive(1, { status: 200, body: new Uint8Array([1]) });
+  assert.deepEqual(f.calls.map(([name]) => name), ['command']);
+  await assert.rejects(f.host.command({ op: 'fetchCandles' }), /engine disposed/);
+  assert.deepEqual(f.calls.map(([name]) => name), ['command']);
+});
+
+test('synchronous command validation failure leaves no hidden pending promise', async () => {
+  const f = fixture();
+  f.engine.command = () => { throw new Error('invalid command'); };
+  await assert.rejects(Promise.resolve().then(() => f.host.command({ op: 'invalid' })), /invalid command/);
+  assert.equal(f.host.commands.size, 0);
+  f.host.dispose();
+});
+
+test('disposal during an action callback stops the remaining resource actions', () => {
+  const f = fixture();
+  f.host.handlers.onLog = () => f.host.dispose();
+  f.host.run(JSON.stringify([
+    { op: 'log', level: 'error', message: 'stop' },
+    { op: 'wsConnect', socket: 7, url: 'after-dispose' },
+    { op: 'setTimer', timer: 1, at: 0 },
+  ]));
+  assert.equal(f.arrivals.has('after-dispose'), false);
+  assert.equal(f.tasks.size, 0);
+  assert.equal(f.host.sockets.size, 0);
+  f.host.execute({ op: 'wsConnect', socket: 8, url: 'direct-after-dispose' });
+  assert.equal(f.arrivals.has('direct-after-dispose'), false);
+});
+
+test('disposal while draining a batch prevents its enclosing flush or command', async () => {
+  for (const enclosing of ['flush', 'command']) {
+    const f = fixture();
+    f.engine.wsMessages = () => JSON.stringify([{ op: 'log', level: 'error', message: 'stop' }]);
+    f.host.handlers.onLog = () => f.host.dispose();
+    f.send(1, 'pending');
+    if (enclosing === 'command') await assert.rejects(f.host.command({ op: 'fetchCandles' }), /engine disposed/);
+    else f.host.flush();
+    assert.deepEqual(f.calls, []);
+    assert.equal(f.host.commands.size, 0);
+    assert.throws(() => f.host.snapshot(), /engine disposed/);
+  }
+});

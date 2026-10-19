@@ -19,6 +19,7 @@ const { values } = parseArgs({ options: {
   tape: { type: 'string' },
   books: { type: 'string' },
   delivery: { type: 'string', default: 'single' },
+  cadence: { type: 'string', default: 'recorded' },
   runs: { type: 'string', default: '5' },
   'probe-rounds': { type: 'string', default: '5' },
   'batch-size': { type: 'string', default: '64' },
@@ -33,9 +34,17 @@ const runs = positive('runs', values.runs);
 const rounds = positive('probe-rounds', values['probe-rounds']);
 const batchSize = positive('batch-size', values['batch-size']);
 if (!['single', 'batch'].includes(values.delivery)) throw new Error('delivery must be single or batch');
+if (!['frame', 'recorded'].includes(values.cadence)) throw new Error('cadence must be frame or recorded');
 const dir = fileURLToPath(new URL('.', import.meta.url));
 const tape = resolve(values.tape ?? join(dir, 'fixtures', `${family}-public.jsonl.gz`));
-const books = values.books ?? (family === 'binance' ? 'BTCUSDT,ETHUSDT,SOLUSDT' : 'BTCUSDT,ETHUSDT');
+const defaultBooks = {
+  binance: 'BTCUSDT,ETHUSDT,SOLUSDT',
+  bybit: 'BTCUSDT,ETHUSDT',
+  okx: 'BTCUSDT,ETHUSDT',
+  cryptocom: 'BTCUSD-PERP,ETHUSD-PERP',
+};
+const books = values.books ?? defaultBooks[family];
+if (books === undefined) throw new Error(`Specify --books for ${family}`);
 const compressed = readFileSync(tape);
 const records = (tape.endsWith('.gz') ? gunzipSync(compressed) : compressed).toString('utf8').split('\n').filter(Boolean).map(JSON.parse);
 const texts = records.filter((row) => row.type === 'ws').map((row) => row.text);
@@ -94,7 +103,7 @@ try {
   for (let run = 0; run < runs; run++) {
     const out = join(scratch, `${run}.json`);
     const child = spawnSync(process.execPath, ['--expose-gc', join(dir, 'replay.mjs'), '--impl', 'rust', '--venue', values.venue,
-      '--tape', tape, '--books', books, '--delivery', values.delivery, '--profile', '--out', out], { encoding: 'utf8', timeout: 150_000 });
+      '--tape', tape, '--books', books, '--delivery', values.delivery, '--cadence', values.cadence, '--profile', '--out', out], { encoding: 'utf8', timeout: 150_000 });
     if (child.status !== 0) throw new Error(`Replay failed (${child.status}): ${child.stderr}\n${child.stdout}`);
     const result = JSON.parse(readFileSync(out, 'utf8'));
     replaySamples.push({ metrics: result.metrics, frames: result.frames });
@@ -105,7 +114,7 @@ for (const name of new Set(replaySamples.flatMap((row) => Object.keys(row.metric
   const samples = replaySamples.map((row) => row.metrics.profile[name] ?? { calls: 0, wallMs: 0 });
   methods[name] = { calls: median(samples.map((s) => s.calls)), medianWallMs: median(samples.map((s) => s.wallMs)) };
 }
-console.log(JSON.stringify({ venue: values.venue, delivery: values.delivery, tape, node: process.version, runs, rounds,
+console.log(JSON.stringify({ venue: values.venue, delivery: values.delivery, cadence: values.cadence, tape, node: process.version, runs, rounds,
   messages: texts.length, utf8Bytes: encoded.reduce((n, row) => n + row.length, 0), batchSize, preparedBatchCalls: batches.length,
   probes, replay: { methods, samples: replaySamples }, sink,
   interpretation: 'wsMessage/wsMessages includes crossing, venue parsing/state and returned-action serialization. takeFrame includes binary frame writing and wasm-bindgen return copy. JSON validation is a parser floor, not typed venue parsing. Prepared batch probes exclude host packing. Instrumented wall timings are diagnostics, not gate CPU metrics.',
