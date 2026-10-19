@@ -51,18 +51,21 @@ const scanner = buildScanner(jobs);
 const found = [];
 const dependencyExports = new Map();
 const featureKey = (id, features) => JSON.stringify([id, [...features].sort()]);
-const queued = new Set(members.map(pkg => featureKey(pkg.id, pkg.probeFeatures)));
+const queued = new Set();
 const compiled = new Set();
 function queuePackage(pkg, features) {
   const key = featureKey(pkg.id, features);
   if (queued.has(key)) return;
   queued.add(key);
-  members.push({...pkg, probeFeatures: features});
+  members.push({...pkg, probeFeatures: features, exactFeatures: true});
 }
 let compilerSysroot;
 for (const pkg of members) {
-  if (compiled.has(featureKey(pkg.id, pkg.probeFeatures))) continue;
-  const featureArgs = pkg.probeFeatures.length ? ['--features', pkg.probeFeatures.join(',')] : [];
+  if (pkg.exactFeatures && compiled.has(featureKey(pkg.id, pkg.probeFeatures))) continue;
+  // Dependency features are the compiler's complete set; requested roots retain
+  // Cargo defaults, while queued owners must not add implicit default features.
+  const featureArgs = [...(pkg.exactFeatures ? ['--no-default-features'] : []),
+    ...(pkg.probeFeatures.length ? ['--features', pkg.probeFeatures.join(',')] : [])];
   const targets = pkg.targets.filter(target => target.kind.some(kind => ['lib', 'cdylib', 'bin'].includes(kind)));
   assert.ok(targets.length, `accepted-set: missing production target for ${pkg.name}`);
   for (const target of targets) {
@@ -74,6 +77,8 @@ for (const pkg of members) {
   const artifacts = cargo(['check', '--locked', '-p', pkg.name, '--jobs', jobs, ...selector, ...targetArgs, ...featureArgs, '--message-format=json']).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(item => item.reason === 'compiler-artifact');
   const ownArtifact = artifacts.find(item => item.package_id === pkg.id && item.target.name === target.name);
   assert.ok(ownArtifact, `${pkg.name}: accepted-set assertion: missing production compiler artifact`);
+  if (pkg.exactFeatures) assert.deepEqual(ownArtifact.features.slice().sort(), pkg.probeFeatures.slice().sort(),
+    `${pkg.name}: accepted-set assertion: canonical owner compiler features changed`);
   compiled.add(featureKey(pkg.id, ownArtifact.features));
   queued.add(featureKey(pkg.id, ownArtifact.features));
   if (!compilerSysroot) {

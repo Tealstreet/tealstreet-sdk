@@ -752,3 +752,138 @@ fn array_coercion_uses_live_hooks_original_receivers_and_throw_identity() {
         expected("coercionHooks")
     );
 }
+
+#[test]
+fn array_prototype_constructor_identity_matches_node() {
+    let realm = Rc::new(safe_cex_num::PrototypeRealm::default());
+    let _binding = realm.bind();
+    let globals = Js::object(vec![]);
+    install_builtins::<()>(&globals, std::rc::Weak::new());
+    let array = globals.get("Array").unwrap();
+    let object = globals.get("Object").unwrap();
+    let prototype = array.get("prototype").unwrap();
+    let instance = Js::array(vec![]);
+    assert!(
+        prototype.get("constructor").unwrap().same_reference(&array),
+        "ARRAY_CONSTRUCTOR prototype backlink retains the installed Array referent"
+    );
+    let original = descriptor(&object, &prototype, "constructor");
+    let mut observed = json!({
+        "prototype": prototype.get("constructor").unwrap().same_reference(&array),
+        "instance": instance.get("constructor").unwrap().same_reference(&array),
+        "descriptor": [original.get("value").unwrap().same_reference(&array), original.get("writable").unwrap().truthy(), original.get("enumerable").unwrap().truthy(), original.get("configurable").unwrap().truthy()],
+        "enumerated": keys(prototype.own_keys()).contains(&"constructor".to_owned()),
+    });
+    let replacement = Js::object(vec![]);
+    prototype.set("constructor", replacement.clone()).unwrap();
+    observed["replaced"] = json!(
+        instance
+            .get("constructor")
+            .unwrap()
+            .same_reference(&replacement)
+    );
+    instance.set("constructor", array.clone()).unwrap();
+    observed["shadowed"] = json!(
+        instance.get("constructor").unwrap().same_reference(&array)
+            && prototype
+                .get("constructor")
+                .unwrap()
+                .same_reference(&replacement)
+    );
+    instance
+        .delete(&"constructor".encode_utf16().collect::<Vec<_>>())
+        .unwrap();
+    observed["unshadowed"] = json!(
+        instance
+            .get("constructor")
+            .unwrap()
+            .same_reference(&replacement)
+    );
+    define(&object, &prototype, Js::str("constructor"), original).unwrap();
+    observed["restored"] = json!(instance.get("constructor").unwrap().same_reference(&array));
+    assert_eq!(observed, expected("constructorIdentity"));
+}
+
+#[test]
+fn array_constructor_retention_is_bounded_to_one_pair_per_realm() {
+    let mut retained = Vec::new();
+    for _ in 0..8 {
+        let realm = Rc::new(safe_cex_num::PrototypeRealm::default());
+        let binding = realm.bind();
+        let mut previous = None;
+        let mut discarded = Vec::new();
+        for _ in 0..32 {
+            let globals = Js::object(vec![]);
+            install_builtins::<()>(&globals, std::rc::Weak::new());
+            let constructor = globals.get("Array").unwrap();
+            let prototype = constructor.get("prototype").unwrap();
+            let Js::Object(owner) = &constructor else {
+                panic!("Array facade");
+            };
+            let Js::Array(storage) = &prototype else {
+                panic!("Array prototype");
+            };
+            if let Some((old_constructor, old_prototype)) = previous.take() {
+                let old_constructor: std::rc::Weak<
+                    safe_cex_exchange::js_runtime::value::ObjectData,
+                > = old_constructor;
+                let old_prototype: std::rc::Weak<safe_cex_exchange::js_runtime::value::ArrayData> =
+                    old_prototype;
+                assert!(
+                    old_constructor.upgrade().is_none(),
+                    "ARRAY_CONSTRUCTOR reinstall releases the previous facade"
+                );
+                assert!(
+                    Rc::ptr_eq(&old_prototype.upgrade().unwrap(), storage),
+                    "ARRAY_CONSTRUCTOR one prototype per realm"
+                );
+            }
+            let before = (Rc::strong_count(owner), Rc::strong_count(storage));
+            for _ in 0..128 {
+                let value = Js::array(vec![Js::Number(-0.0)]);
+                assert!(
+                    value
+                        .get("constructor")
+                        .unwrap()
+                        .same_reference(&constructor)
+                );
+                let Js::Array(value) = value else {
+                    unreachable!()
+                };
+                discarded.push(Rc::downgrade(&value));
+            }
+            assert_eq!(
+                (Rc::strong_count(owner), Rc::strong_count(storage)),
+                before,
+                "ARRAY_CONSTRUCTOR operations do not retain extra owners"
+            );
+            previous = Some((Rc::downgrade(owner), Rc::downgrade(storage)));
+        }
+        assert!(
+            discarded.iter().all(|value| value.upgrade().is_none()),
+            "ARRAY_CONSTRUCTOR all operation arrays release"
+        );
+        drop(binding);
+        drop(realm);
+        let pair = previous.unwrap();
+        assert_eq!(
+            (pair.0.strong_count(), pair.1.strong_count()),
+            (1, 1),
+            "ARRAY_CONSTRUCTOR one retained pair after realm disposal"
+        );
+        retained.push(pair);
+    }
+    assert_eq!(retained.len(), 8);
+    for (constructor, prototype) in retained {
+        assert_eq!(
+            (constructor.strong_count(), prototype.strong_count()),
+            (1, 1)
+        );
+        let prototype = Js::Array(prototype.upgrade().unwrap());
+        prototype
+            .delete(&"constructor".encode_utf16().collect::<Vec<_>>())
+            .unwrap();
+        drop(prototype);
+        assert!(constructor.upgrade().is_none());
+    }
+}
