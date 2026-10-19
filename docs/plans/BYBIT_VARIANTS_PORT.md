@@ -466,3 +466,13 @@ comparisons are unchanged. Timeout errors now expose sample/transition counts,
 last buffer bytes and elapsed time for diagnosis. All 127 harness tests pass,
 including child-env preservation and deterministic timeout diagnostics. Restart
 the full matrix on this configuration; all 45 wasm and 28 host cases pass.
+
+With memory sampling valid, Hyro then failed steady CPU narrowly (TS/Rust
+6.5/6.6 ms), while total CPU 30.8/27.3 ms and memory 15.5/1.0 MB passed.
+The next source candidate retains book-symbol strings behind an active prefix
+and returns drained ticker-delta storage after frame serialization. It removes
+repeated symbol and delta-vector allocations while preserving symbol-based
+deduplication, publication order, snapshots, market replacement and field masks.
+All 52 engine and 105 Bybit tests, strict Clippy and independent adversarial
+review pass. The artifact is 3,658,442 bytes within the same inherited budget.
+The 31-gate matrix must pass before pushing; all earlier failures are retained.
