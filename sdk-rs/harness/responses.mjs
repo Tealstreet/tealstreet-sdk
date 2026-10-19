@@ -15,16 +15,23 @@ export class Responses {
       this.queues.get(id).push(record);
     }
   }
-  respond(method, url, body, commandIndex = 0, elapsed = 0) {
+  respond(method, url, body, commandIndex = 0, timeOrMatch = 0, matchTime = 0) {
+    const onMatch = typeof timeOrMatch === 'function' ? timeOrMatch : undefined;
+    const elapsed = onMatch ? matchTime : timeOrMatch;
     const queue = this.check?.(method, url, body) === false ? undefined : this.queues.get(this.key(method, url, body));
     if (!queue?.length) {
       this.unserved++;
       return { status: 599, body: '' };
     }
-    const record = selectResponse(queue, elapsed, { commandIndex, write: this.isWrite(method, url) });
+    const candidates = onMatch && queue ? [...queue] : queue;
+    const record = selectResponse(candidates, elapsed, { commandIndex, write: this.isWrite(method, url) });
     if (!record) {
       this.unserved++;
       return { status: 599, body: '' };
+    }
+    if (onMatch) {
+      try { onMatch(record); }
+      catch (error) { this.unserved++; throw error; }
     }
     // WEEX acknowledges generated IDs from the actual request, never a fixed ID.
     let responseBody = record.body;
@@ -35,6 +42,7 @@ export class Responses {
         (_, field) => JSON.stringify(sent?.[field] ?? null,
           (_key, value) => typeof value === 'bigint' ? JSON.rawJSON(String(value)) : value));
     }
+    if (onMatch && candidates.length !== queue.length) queue.splice(queue.indexOf(record), 1);
     return { status: record.status, headers: record.headers ?? '', body: responseBody };
   }
   unusedWrites() {

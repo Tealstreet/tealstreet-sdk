@@ -84,12 +84,13 @@ const until = async (predicate, label) => {
   }
 };
 
-const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark) => {
+const measure = async (cpuStart, wallStart, heapBefore, wasmMemory = 0, warmMark) => {
   const cpu = process.cpuUsage(cpuStart.process);
   const thread = process.threadCpuUsage(cpuStart.thread);
   const steady = warmMark ? process.threadCpuUsage(warmMark.thread) : { user: 0, system: 0 };
   const wallMs = performance.now() - wallStart;
   const memory = await baseline();
+  const wasmBytes = typeof wasmMemory === 'function' ? wasmMemory() : wasmMemory;
   return {
     // The worker's own thread: what competes with its message handling.
     cpuMs: (thread.user + thread.system) / 1000,
@@ -258,7 +259,7 @@ async function runRust() {
   tape.assertWritesConsumed();
   clearInterval(flushTimer);
   host.flush();
-  const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
+  const metrics = await measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes, tape.warmMark);
   host.dispose();
   clock?.restore();
 

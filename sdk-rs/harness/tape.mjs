@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { canonicalUrl as strictUrl, requestKey, callerIdsOf, isWriteRequest, subscriptionKeys } from './requests.mjs';
+import { parseRequestJson } from './request-json.mjs';
 import { Responses } from './responses.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
@@ -154,7 +155,11 @@ export class Tape {
     this.options = options ?? { key: 'replay-key', secret: 'replay-secret', passphrase: 'replay-passphrase', ...venue.replayCredentials };
     this.callerIds = callerIdsOf(records);
     this.bookSymbols = books;
-    this.keyFor = (method, url, body) => requestKey(method, url, body, this.callerIds, venue);
+    this.bitget = venue.rust?.startsWith('bitget') ?? false;
+    this.generated = new Set();
+    this.generatedAliases = new Map();
+    this.identityOptions = this.bitget ? { ...venue, requestBody: (body, context) => this.bitgetBody(body, context) } : venue;
+    this.keyFor = (method, url, body) => requestKey(method, url, body, this.callerIds, this.identityOptions);
     this.wireAliases = new Map();
     if (impl === 'ts') for (const record of records) if (record.tsRequestBody !== undefined) {
       this.wireAliases.set(this.keyFor(record.method, record.url, record.tsRequestBody), this.keyFor(record.method, record.url, record.requestBody));
@@ -178,6 +183,63 @@ export class Tape {
   }
 
   get unserved() { return this.responses.unserved; }
+
+  mintedField(key, url) {
+    const path = new URL(url).pathname;
+    return key === 'newClientOid' ? /\/modify-order$/.test(path)
+      : key === 'clientOid' && /\/(?:batch-place-order|place-order|place-tpsl-order|place-plan-order|place-strategy-order)$/.test(path);
+  }
+
+  bitgetBody(body, { url }) {
+    const visit = (value) => {
+      if (JSON.isRawJSON(value)) return value;
+      if (Array.isArray(value)) return value.map(visit);
+      if (!value || typeof value !== 'object') return value;
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key,
+        this.mintedField(key, url) && typeof item === 'string' && item.length && !this.callerIds.has(item)
+          ? '<generated>' : key === 'clientOid' && typeof item === 'string'
+            ? this.generatedAliases.get(item) ?? item : visit(item)]));
+    };
+    return visit(body);
+  }
+
+  validateBitgetMatch(record, method, url, body) {
+    if (!this.bitget || method === 'GET') return;
+    const decode = (value) => {
+      if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) value = new TextDecoder().decode(value);
+      return typeof value === 'string' ? parseRequestJson(value) : value;
+    };
+    const sent = decode(body);
+    const ids = [];
+    const visit = (value) => {
+      if (!value || typeof value !== 'object') return;
+      for (const [key, item] of Object.entries(value)) {
+        if (this.mintedField(key, url) && (key === 'newClientOid' || !this.callerIds.has(item))) {
+          if (typeof item !== 'string' || !/^[.A-Za-z0-9:/_-]{1,32}$/.test(item)
+            || (key === 'newClientOid' && this.callerIds.has(item))) throw new Error(`invalid generated ${key}`);
+          ids.push(item);
+        } else visit(item);
+      }
+    };
+    visit(sent);
+    const retry = String(JSON.parse(record.body).code) === '40009';
+    if (!retry) {
+      if (new Set(ids).size !== ids.length) throw new Error('generated client ID reused within batch');
+      for (const id of ids) if (this.generated.has(id)) throw new Error(`generated client ID reused: ${id}`);
+      for (const id of ids) this.generated.add(id);
+    }
+    const bind = (expected, actual) => {
+      if (!expected || !actual || typeof expected !== 'object' || typeof actual !== 'object') return;
+      for (const key of Object.keys(expected)) {
+        if (this.mintedField(key, url) && typeof expected[key] === 'string' && typeof actual[key] === 'string'
+          && !this.callerIds.has(actual[key])) this.generatedAliases.set(actual[key], expected[key]);
+        else bind(expected[key], actual[key]);
+      }
+    };
+    bind(decode(record.requestBody), sent);
+  }
+
+  topicKey(topic) { return `${topic.instType ?? ''}|${topic.channel ?? topic.topic}|${topic.instId ?? topic.symbol ?? ''}`; }
 
   verifySignature(verify, value, label) {
     try {
@@ -203,7 +265,10 @@ export class Tape {
       this.responses.unserved++;
       return { status: 599, body: '' };
     }
-    const response = this.responses.respond(method, url, body, this.commandIndex, this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time);
+    const elapsed = this.replayClock?.active ? this.replayClock.time - this.replayClock.epoch : this.time;
+    const response = this.bitget
+      ? this.responses.respond(method, url, body, this.commandIndex, (record) => this.validateBitgetMatch(record, method, url, body), elapsed)
+      : this.responses.respond(method, url, body, this.commandIndex, elapsed);
     if (this.responses.isWrite(method, url) && response.status !== 599) this.expectedWrites.shift();
     return response;
   }
@@ -254,15 +319,16 @@ export class Tape {
       return;
     }
     // OKX's opt-in auth validation also uses its v5 subscription argument model.
-    const validateTopics = this.venue.validateSubscriptions ?? this.venue.validateLogin;
+    const validateTopics = this.bitget || (this.venue.validateSubscriptions ?? this.venue.validateLogin);
     if (!this.venue.validateLogin && !validateTopics) return;
+    if (text === 'ping' || text === 'pong') return;
     message = JSON.parse(text);
     if (validateTopics && ['subscribe', 'unsubscribe'].includes(message.op)) {
       if (!Array.isArray(message.args)) throw new Error(`Invalid subscription on ${socket.url}`);
       for (const topic of message.args) {
-        if (!topic || typeof topic.channel !== 'string' || !topic.channel)
+        if (!topic || typeof (topic.channel ?? (this.bitget ? topic.topic : undefined)) !== 'string' || !(topic.channel ?? topic.topic))
           throw new Error(`Invalid subscription topic on ${socket.url}`);
-        const key = JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
+        const key = this.bitget ? this.topicKey(topic) : JSON.stringify(Object.fromEntries(Object.entries(topic).sort(([a], [b]) => a.localeCompare(b))));
         if (message.op === 'subscribe') socket.topics.set(key, topic);
         else socket.topics.delete(key);
       }
@@ -350,6 +416,7 @@ export class Tape {
   }
 
   deliver(socket, text) {
+    if (text === undefined && socket.text !== undefined) return this.deliverFrame(socket);
     if ((this.venue.validateLogin || this.venue.validateSubscriptions) && text.trimStart().startsWith('{')) {
       const message = JSON.parse(text);
       if (this.venue.validateLogin && message.event === 'login' && String(message.code) === '0' && !socket.loginVerified)
@@ -357,6 +424,20 @@ export class Tape {
       this.assertSubscribed(socket, message);
     }
     deliverSocketFrame(socket, text, this.audit, this.venue.validateSocketFrame);
+  }
+
+  async deliverFrame(frame) {
+    const latest = await this.socketFor(frame.url, frame.text, frame.socket);
+    const sockets = this.bitget && frame.socket === undefined
+      ? [...(this.open.get(canonicalUrl(frame.url, this.callerIds)) ?? [])].filter((socket) => !socket.closed) : [latest];
+    if (frame.type === 'close') { for (const socket of sockets) this.close(socket, frame.code ?? 1006); return; }
+    if (frame.type === 'open') return;
+    let arg;
+    try { arg = JSON.parse(frame.text)?.arg; } catch { /* Plain heartbeat. */ }
+    const key = this.bitget && arg && this.topicKey(arg);
+    const matching = key ? sockets.filter((socket) => socket.topics.has(key)) : sockets;
+    if (key && !matching.length) throw new Error(`frame has no subscribed socket: ${frame.url} ${key}`);
+    for (const socket of matching) this.deliver(socket, frame.text);
   }
 
   /**
@@ -397,6 +478,8 @@ export class Tape {
           if (error instanceof ReplayTimeout || String(error?.message).startsWith('replay timeout:')) throw error;
           return { error: String(error?.message ?? error) };
         }));
+      } else if (this.bitget) {
+        await this.deliverFrame(frame);
       } else {
         const socket = await this.socketFor(frame.url, frame.text, frame.socket);
         if (frame.type === 'close') { if (socket.url) this.close(socket, frame.code ?? 1006); else socket.onClose(frame.code ?? 1006); }
@@ -423,6 +506,7 @@ export class Tape {
   writes = [];
   sentRequests = new Set();
   sent(url, text) {
+    if (typeof url !== 'string') return this.send(url, text);
     if (!this.venue.requestBodies || text === 'ping' || text === 'pong') return;
     let message;
     try {
@@ -440,3 +524,8 @@ export class Tape {
     }
   }
 }
+
+
+// Compatibility factory uses the same reviewed transport as actual replay.
+export const createTape = (records, venue, isPrivate, settings = {}) => new Tape(records, venue, isPrivate,
+  settings.socketTimeoutMs ?? 30000, settings.impl, settings.books ?? [], settings.credentials);

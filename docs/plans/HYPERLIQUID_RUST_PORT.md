@@ -460,3 +460,43 @@ remaining bounded integration issues. All137 harness tests pass, including the
 existing104 plus shared transport/Backpack tests;29module/build syntax checks
 pass. All655 native workspace tests and the combined Wasm bridge pass. Final
 Clippy/root tests and real ten-venue replays/CI are still required before merge.
+
+Ten-venue settled head d8a71bef5e passed Rust CI39308564809: all ten public and
+private replays, four OKX aliases, native/wasm checks,137harness tests, and
+original1258291-byte per-venue size budget. CI Hyperliquid: CPU253.5/57.2ms,
+steady30.0/16.6ms,retained4.9/1.8MB (TS/Rust),951261bytes;26private events.
+CI Binance: CPU278.7/132.3ms,steady156.0/50.9ms,retained4.2/2.2MB,689741bytes.
+Local public/private replays pass too. One initial local TS public baseline did
+not settle before measurement; the same unchanged sampler then passed all three
+pairs. No sample selection within a gate or threshold adjustment. All27root
+test tasks passed (6602safe-cex tests in each CI/unit task), typecheck44,lint28,
+655native tests, native/wasm Clippy,21real-Wasm bridge tests and25host tests.
+
+Bitget PR1308 landed at4e468ed2e5 before general CI finished and created a new
+conflict. Integrate its crate,USDT/USDC constructor aliases, streamed envelope
+errors and JSON path handling, and incoming O3 dispatch/Bitget profiles. Keep
+all eleven optional/default features and unchanged per-venue size budget. The
+new venue explicitly rejects HL-only cloid queries. Shared harness union and
+independent reviews are required before the next checkpoint; native and host
+checks plus affected replay/CI gates are running. The ten-venue full root suite
+already passed; rerun affected typecheck/lint and real-Wasm integration tests.
+
+Eleven-venue root review found two incoming integration omissions: the build
+selector rejected Bitget and the wrapper lacked client-order-ID rules for both
+Bitget aliases. Add selector/help/error support and the exact TS charset/length
+rule for bitget/bitgetusdc. Common fail-closed coverage plus placement/mint/live
+lookup regressions pass315tests; final typecheck/lint pass. Localized independent
+re-review accepts both fixes. All734native tests, native/wasm Clippy, bans/fmt,
+25combined real-Wasm bridge tests and25host tests pass. Bitget-only/default
+constructors build; incoming O3 dispatch leaves HL single-venue986799bytes.
+All147harness tests (137baseline plus Bitget contracts/exact Backpack cancellation)
+and30module/build syntax checks pass. Independent harness audit and required real
+HL/Binance replays are running before the integration checkpoint and final CI.
+
+Independent eleven-venue harness audit accepts the union with no actionable
+findings: Bitget IDs are validated before consuming replies and alias only
+matched creations; the taped40009retry preserves ACK accounting; routing keeps
+exact product/topic/instrument. TS Classic margin spelling is an exact fixture
+body exception. Backpack cancellation IDs remain exact. Wasm bytes are sampled
+synchronously after settled JS memory, preserving consistent signed arithmetic.
+No broad fallback, threshold or budget relaxation was adopted.

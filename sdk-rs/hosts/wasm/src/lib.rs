@@ -10,13 +10,14 @@
     feature = "cryptocom",
     feature = "bingx",
     feature = "mexc",
+    feature = "bitget",
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, bingx, blofin, mexc, backpack, hyperliquid, okx or weex"
+    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -29,6 +30,8 @@ use safe_cex_venue_backpack::{Backpack, Options as BackpackOptions};
 use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 #[cfg(feature = "bingx")]
 use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
+#[cfg(feature = "bitget")]
+use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
 #[cfg(feature = "blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 #[cfg(feature = "bybit")]
@@ -87,6 +90,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "cryptocom",
     feature = "bingx",
     feature = "mexc",
+    feature = "bitget",
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
@@ -101,6 +105,7 @@ struct EngineOptions {
         feature = "bybit",
         feature = "cryptocom",
         feature = "hyperliquid",
+        feature = "bitget",
         feature = "okx"
     ))]
     #[serde(default)]
@@ -114,7 +119,12 @@ struct EngineOptions {
     #[cfg(feature = "backpack")]
     #[serde(default)]
     recv_window: Option<f64>,
-    #[cfg(any(feature = "okx", feature = "weex", feature = "blofin"))]
+    #[cfg(any(
+        feature = "okx",
+        feature = "weex",
+        feature = "blofin",
+        feature = "bitget"
+    ))]
     #[serde(default)]
     passphrase: Option<String>,
     #[cfg(feature = "hyperliquid")]
@@ -534,6 +544,7 @@ impl WasmEngine {
         feature = "cryptocom",
         feature = "bingx",
         feature = "mexc",
+        feature = "bitget",
         feature = "backpack",
         feature = "weex",
         feature = "hyperliquid",
@@ -600,6 +611,28 @@ impl WasmEngine {
                 key: options.key,
                 secret: options.secret,
             }))),
+            #[cfg(feature = "bitget")]
+            "bitget" | "bitgetusdc" => {
+                if !options.public_data_only
+                    && options.key.as_ref().is_some_and(|s| !s.is_empty())
+                    && options.secret.as_ref().is_some_and(|s| !s.is_empty())
+                    && options.passphrase.as_ref().is_none_or(|s| s.is_empty())
+                {
+                    return Err(JsError::new("Bitget requires a passphrase"));
+                }
+                Box::new(Engine::new(BitgetFutures::new(BitgetOptions {
+                    testnet: options.testnet,
+                    public_data_only: options.public_data_only,
+                    key: options.key,
+                    secret: options.secret,
+                    passphrase: options.passphrase,
+                    product: if venue == "bitgetusdc" {
+                        Product::Usdc
+                    } else {
+                        Product::Usdt
+                    },
+                })))
+            }
             #[cfg(feature = "cryptocom")]
             "cryptocom" => Box::new(Engine::new(Cryptocom::new(CryptocomOptions {
                 testnet: options.testnet,

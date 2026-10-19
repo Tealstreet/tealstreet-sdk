@@ -68,7 +68,7 @@ const normalize = (value, callerIds, root = true, options = {}) => {
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()
     .filter((key) => !(root && (CLOCKS.has(key) || (key === 'nonce' && value.action))))
     .filter((key) => options.defaultBodyValues?.[key] !== value[key])
-    .filter((key) => !options.ignoreGeneratedBodyId?.(key, value[key], callerIds))
+    .filter((key) => !options.ignoreGeneratedBodyId?.(key, value[key], callerIds, options.bodyContext))
     .filter((key) => !CLIENT_IDS.has(key) || callerIds.has(value[key])
       || (options.generatedId && !options.generatedId(key, String(value[key]))))
     .map((key) => [key, !callerIds.has(value[key]) && options.generatedBodyId?.(key, value[key])
@@ -104,7 +104,8 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
       ? canonicalParams(new URLSearchParams(body), callerIds) : body}`;
   }
   parsed = options.requestBody?.(parsed, { method, url, callerIds }) ?? parsed;
-  return `${prefix} ${JSON.stringify(normalize(parsed, callerIds, true, options))}`;
+  return `${prefix} ${JSON.stringify(normalize(parsed, callerIds, true, options.ignoreGeneratedBodyId
+    ? { ...options, bodyContext: { method: method.toUpperCase(), url } } : options))}`;
 };
 
 export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) => {

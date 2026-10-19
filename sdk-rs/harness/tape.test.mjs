@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { bodyBytes, canonicalBody, canonicalUrl, deliverSocketFrame, replayStoreReady, ReplayClock, Tape } from './tape.mjs';
-import { withTimeout, sameCommandResults } from './tape.mjs';
+import { createTape, withTimeout, sameCommandResults } from './tape.mjs';
 import { createHmac, createPrivateKey, sign } from 'node:crypto';
 import { venueOf } from './venues.mjs';
 import { VENUES } from './venues.mjs';
@@ -907,4 +907,168 @@ test('caught throwing signature verifiers persist exactly one final audit failur
     assert.equal(tape.missingWrites, 0);
     assert.throws(() => tape.assertWritesConsumed(), /1 invalid replay signature/);
   }
+});
+
+const bitgetVenue = { rust: 'bitget' };
+const bitgetUrl = 'https://api.bitget.com/api/v2/mix/order/modify-order';
+const bitgetResponse = (body, overrides = {}) => ({
+  type: 'http',
+  method: 'POST',
+  url: bitgetUrl,
+  requestBody: body,
+  status: 200,
+  body: '{"code":"00000","data":{"orderId":"2"}}',
+  ...overrides,
+});
+
+test('mutation replies are consumed once; omitted writes remain visible', () => {
+  const tape = createTape([bitgetResponse({ orderId: '1', newClientOid: 'expected' })], bitgetVenue, true);
+  assert.equal(tape.unusedWrites(), 1);
+  assert.equal(tape.respond('POST', bitgetUrl, { orderId: '1', newClientOid: 'fresh' }).status, 200);
+  assert.equal(tape.unusedWrites(), 0);
+  assert.equal(tape.respond('POST', bitgetUrl, { orderId: '1', newClientOid: 'fresh' }).status, 599);
+  assert.equal(tape.unserved, 1);
+});
+
+test('generated IDs preserve field presence, type, and freshness', () => {
+  for (const body of [{ orderId: '1' }, { orderId: '1', newClientOid: null }, { orderId: '1', newClientOid: '' }]) {
+    const tape = createTape([bitgetResponse({ orderId: '1', newClientOid: 'expected' })], bitgetVenue, true);
+    assert.equal(tape.respond('POST', bitgetUrl, body).status, 599);
+  }
+  const tape = createTape(
+    [bitgetResponse({ orderId: '1', newClientOid: 'a' }), bitgetResponse({ orderId: '2', newClientOid: 'b' })],
+    bitgetVenue,
+    true,
+  );
+  tape.respond('POST', bitgetUrl, { orderId: '1', newClientOid: 'fresh' });
+  assert.throws(() => tape.respond('POST', bitgetUrl, { orderId: '2', newClientOid: 'fresh' }), /reused/);
+});
+
+test('caller IDs compare verbatim and Classic margin spelling exception is TS-only', () => {
+  const place = 'https://api.bitget.com/api/v3/trade/place-order';
+  const records = [
+    { type: 'command', orders: [{ clientOrderId: 'caller' }] },
+    bitgetResponse({ clientOid: 'caller' }, { url: place }),
+  ];
+  assert.equal(createTape(records, bitgetVenue, true).respond('POST', place, { clientOid: 'wrong' }).status, 599);
+  assert.equal(createTape(records, bitgetVenue, true).respond('POST', place, { clientOid: 'caller' }).status, 200);
+  assert.equal(
+    createTape([bitgetResponse({ marginMode: 'crossed' }, { url: place })], bitgetVenue, true).respond('POST', place, {
+      marginMode: 'cross',
+    }).status,
+    599,
+  );
+  const classic = 'https://api.bitget.com/api/v2/mix/order/batch-place-order';
+  assert.equal(createTape([bitgetResponse({ marginMode: 'crossed' }, { url: classic })], bitgetVenue, true).respond('POST', classic, { marginMode: 'cross' }).status, 599);
+  assert.equal(
+    createTape([{ ...bitgetResponse({ marginMode: 'crossed' }, { url: classic }), tsRequestBody: { marginMode: 'cross' } }], bitgetVenue, true, { impl: 'ts' }).respond('POST', classic, {
+      marginMode: 'cross',
+    }).status,
+    200,
+  );
+});
+
+test('signature rejection permits exactly the taped same-ID retry; reads can poll', () => {
+  const body = { orderId: '1', newClientOid: 'fresh' };
+  const tape = createTape([bitgetResponse(body, { body: '{"code":"40009"}' }), bitgetResponse(body)], bitgetVenue, true);
+  assert.equal(tape.respond('POST', bitgetUrl, body).status, 200);
+  assert.equal(tape.respond('POST', bitgetUrl, body).status, 200);
+  const reads = createTape([bitgetResponse(undefined, { method: 'GET' })], bitgetVenue, false);
+  assert.equal(reads.respond('GET', bitgetUrl).status, 200);
+  assert.equal(reads.respond('GET', bitgetUrl).status, 200);
+});
+
+test('same-URL sockets receive only exact product/topic subscriptions', async () => {
+  const tape = createTape([], bitgetVenue, false);
+  const ws = 'wss://ws.bitget.com/v2/ws/public';
+  let correct = 0;
+  let wrong = 0;
+  const good = tape.connect(
+    ws,
+    () => {},
+    () => correct++,
+  );
+  const bad = tape.connect(
+    ws,
+    () => {},
+    () => wrong++,
+  );
+  tape.sent(
+    good,
+    JSON.stringify({ op: 'subscribe', args: [{ instType: 'USDT-FUTURES', channel: 'books', instId: 'BTCUSDT' }] }),
+  );
+  tape.sent(
+    bad,
+    JSON.stringify({ op: 'subscribe', args: [{ instType: 'USDC-FUTURES', channel: 'books', instId: 'BTCUSDT' }] }),
+  );
+  await tape.deliver({
+    url: ws,
+    text: JSON.stringify({ arg: { instType: 'USDT-FUTURES', channel: 'books', instId: 'BTCUSDT' } }),
+  });
+  assert.equal(correct, 1);
+  assert.equal(wrong, 0);
+  await assert.rejects(
+    tape.deliver({ url: ws, text: JSON.stringify({ arg: { instType: 'UTA', topic: 'books', symbol: 'BTCUSDT' } }) }),
+    /no subscribed/,
+  );
+});
+
+test('existing client IDs are exact identities; only created aliases can translate', () => {
+  const cancel = 'https://api.bitget.com/api/v3/trade/cancel-strategy-order';
+  const tape = createTape([bitgetResponse({ clientOid: 'resting-client' }, { url: cancel })], bitgetVenue, true);
+  assert.equal(tape.respond('POST', cancel, { clientOid: 'wrong-order' }).status, 599);
+  assert.equal(tape.unusedWrites(), 1);
+  assert.equal(tape.respond('POST', cancel, { clientOid: 'resting-client' }).status, 200);
+  const place = 'https://api.bitget.com/api/v3/trade/place-order';
+  const linked = createTape(
+    [bitgetResponse({ clientOid: 'taped-minted' }, { url: place }), bitgetResponse({ clientOid: 'taped-minted' }, { url: cancel })],
+    bitgetVenue,
+    true,
+  );
+  assert.equal(linked.respond('POST', place, { clientOid: 'actual-minted' }).status, 200);
+  assert.equal(linked.respond('POST', cancel, { clientOid: 'unrelated' }).status, 599);
+  assert.equal(linked.respond('POST', cancel, { clientOid: 'actual-minted' }).status, 200);
+});
+
+test('modify-by-client-id preserves an existing generated identity', () => {
+  const place = 'https://api.bitget.com/api/v3/trade/place-order';
+  const tape = createTape(
+    [
+      bitgetResponse({ clientOid: 'taped-old' }, { url: place }),
+      bitgetResponse({ clientOid: 'taped-old', newClientOid: 'taped-new' }),
+    ],
+    bitgetVenue,
+    true,
+  );
+  assert.equal(tape.respond('POST', place, { clientOid: 'actual-old' }).status, 200);
+  assert.equal(tape.respond('POST', bitgetUrl, { clientOid: 'actual-old', newClientOid: 'actual-new' }).status, 200);
+});
+
+
+test('Bitget callback validation fails before consuming a matched mutation', () => {
+  const tape = createTape([bitgetResponse({ orderId: '1', newClientOid: 'recorded' })], bitgetVenue, true);
+  assert.throws(() => tape.respond('POST', bitgetUrl, { orderId: '1', newClientOid: 'invalid id' }), /invalid generated/);
+  assert.equal(tape.unusedWrites(), 1);
+  assert.equal(tape.respond('POST', bitgetUrl, { orderId: '1', newClientOid: 'fresh' }).status, 200);
+  assert.equal(tape.unusedWrites(), 0);
+});
+
+
+test('Bitget duplicate generated IDs inside one batch fail before response consumption', () => {
+  const url = 'https://api.bitget.com/api/v3/trade/place-order';
+  const tape = createTape([bitgetResponse([{ clientOid: 'first' }, { clientOid: 'second' }], { url })], bitgetVenue, true);
+  assert.throws(() => tape.respond('POST', url, [{ clientOid: 'reused' }, { clientOid: 'reused' }]), /reused/);
+  assert.equal(tape.unusedWrites(), 1);
+  assert.equal(tape.respond('POST', url, [{ clientOid: 'fresh-one' }, { clientOid: 'fresh-two' }]).status, 200);
+});
+
+
+test('Backpack cancellation client IDs stay exact while only valid creation IDs can vary', () => {
+  const venue = venueOf('backpack');
+  const cancel = 'https://api.backpack.exchange/api/v1/order';
+  const row = { type: 'http', method: 'DELETE', url: cancel, requestBody: '{"clientId":42}', status: 200, body: '{}' };
+  const tape = new Tape([row], venue, false);
+  assert.equal(tape.respond('DELETE', cancel, '{"clientId":43}').status, 599);
+  assert.equal(tape.respond('DELETE', cancel, '{"clientId":"42"}').status, 599);
+  assert.equal(tape.respond('DELETE', cancel, '{"clientId":42}').status, 200);
 });

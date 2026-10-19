@@ -107,6 +107,9 @@ jobs:
           - venue: binance
             books: BTCUSDT,ETHUSDT,SOLUSDT
             private_script: rust:private-tape
+          - venue: bitget
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-bitget
           - venue: backpack
             books: SOL_USDC_PERP,BTC_USDC_PERP
             private_script: rust:private-tape-backpack

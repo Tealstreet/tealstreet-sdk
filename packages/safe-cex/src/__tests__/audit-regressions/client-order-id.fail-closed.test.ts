@@ -39,7 +39,7 @@ import { RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { WeexExchange } from '../../exchanges/weex/weex.exchange';
 import { WOOXExchange } from '../../exchanges/woo/woo.exchange';
 import { DefaultStore } from '../../store/store.base';
-import { OrderSide, OrderType } from '../../types';
+import { OrderSide, OrderStatus, OrderType } from '../../types';
 
 // Contract: a caller clientOrderId is sent verbatim on one native order, or the
 // call rejects — emitting first — before ANY transport is touched.
@@ -65,6 +65,8 @@ const HONORING: Array<[string, ExchangeCtor]> = [
   ['binancespot', BinanceSpotExchange],
   ['bingx', BingxExchange],
   ['bitget', BitgetExchange],
+  ['bitget', RustEngineExchange],
+  ['bitgetusdc', RustEngineExchange],
   ['bitrue', BitrueExchange],
   ['bitunix', BitunixExchange],
   ['blofin', BlofinExchange],
@@ -150,6 +152,42 @@ const setup = (name: string, Ctor: ExchangeCtor) => {
 };
 
 describe('clientOrderId fails closed before any write', () => {
+  it.each(['bitget', 'bitgetusdc'])('%s Rust wrapper honors caller IDs and finds their live orders', async (name) => {
+    const store = new DefaultStore();
+    store.update({ markets: [MARKET] });
+    const exchange = new RustEngineExchange(
+      name as any,
+      { key: 'key', secret: 'secret', passphrase: 'passphrase' },
+      store,
+    );
+    const opts = order({ clientOrderId: 'caller.id:/A_-' });
+    const place = vi.spyOn(exchange, 'placeOrders').mockResolvedValue(['order-1']);
+    await expect(
+      exchange.placeOrderWithClientOrderId({ ...opts, clientOrderId: opts.clientOrderId! }),
+    ).resolves.toEqual({
+      orderIds: ['order-1'],
+      clientOrderId: opts.clientOrderId,
+    });
+    expect(place).toHaveBeenCalledWith([opts]);
+    expect(exchange.mintClientOrderId(order())).toMatch(/^[.A-Z:/a-z0-9_-]{1,32}$/);
+    const live = {
+      ...opts,
+      id: 'order-1',
+      price: 50_000,
+      status: OrderStatus.Open,
+      filled: 0,
+      remaining: 1,
+      reduceOnly: false,
+      lastUpdate: 1,
+    };
+    exchange.store.update({ orders: [live] });
+    await expect(exchange.findOrderByClientOrderId(opts.symbol, opts.clientOrderId!)).resolves.toEqual({
+      found: true,
+      order: live,
+    });
+    exchange.dispose();
+  });
+
   beforeEach(() => {
     // HyroTrader's REST origin is fixed at build time; any origin lets it construct.
     vi.spyOn(HyrotraderExchange.prototype, 'getBybitRestBaseUrl').mockReturnValue('https://simulator.test');

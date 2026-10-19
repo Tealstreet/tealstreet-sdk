@@ -143,9 +143,27 @@ export const mexcRequestUrl = (url) => {
 };
 
 export const VENUES = {
+  bitget: {
+    rust: 'bitget',
+    ts: { module: `${root}/bitget/bitget.exchange.ts`, className: 'BitgetExchange', name: 'bitget' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.entries(exchange.publicWebsocket.messageHandlers).filter(([key, handlers]) => key.startsWith('orderBook_') && handlers.length).length >= count,
+    privateSocket: '/ws/private',
+    options: { passphrase: 'replay-passphrase' },
+  },
+  bitgetusdc: {
+    rust: 'bitgetusdc',
+    ts: { module: `${root}/bitget/bitgetusdc.exchange.ts`, className: 'BitgetUSDCExchange', name: 'bitgetusdc' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.entries(exchange.publicWebsocket.messageHandlers).filter(([key, handlers]) => key.startsWith('orderBook_') && handlers.length).length >= count,
+    privateSocket: '/ws/private',
+    options: { passphrase: 'replay-passphrase' },
+  },
   backpack: {
     rust: 'backpack',
-    ignoreGeneratedBodyId: (key, value, callerIds) => key === 'clientId' && !callerIds.has(String(value)),
+    ignoreGeneratedBodyId: (key, value, callerIds, context) => key === 'clientId' && !callerIds.has(String(value))
+      && context?.method === 'POST' && /^\/api\/v1\/orders?$/.test(new URL(context.url).pathname)
+      && typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 0xffff_ffff,
     ts: { module: `${root}/backpack/backpack.exchange.ts`, className: 'BackpackExchange', name: 'backpack' },
     tsBooksSubscribed: (exchange, count) =>
       Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depth.')).length >= count,
