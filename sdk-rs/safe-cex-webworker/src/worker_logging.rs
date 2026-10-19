@@ -1,5 +1,8 @@
 use crate::{data_post::WorkerDataPayload, payload::StoreWorkerOp};
-use safe_cex_exchange::js_runtime::value::{Js, Thrown, from_typed};
+use safe_cex_exchange::js_runtime::{
+    ops,
+    value::{Js, Thrown, from_typed},
+};
 
 pub fn is_record(value: &Js) -> bool {
     value.is_object() && !value.is_callable() && !value.is_array()
@@ -18,8 +21,10 @@ pub fn get_worker_sentry_control(error: &Js) -> Result<Js, Thrown> {
     let ms = error.get("safeCexSentryReportCooldownMs")?;
     let ms = if matches!(ms, Js::Number(_))
         && matches!(error.get("safeCexSentryReportCooldownMs")?, Js::Number(n) if n.is_finite())
-        && error.get("safeCexSentryReportCooldownMs")?.to_number()? > 0.0
-    {
+        && ops::greater_than(
+            &error.get("safeCexSentryReportCooldownMs")?,
+            &Js::Number(0.0),
+        )? {
         error.get("safeCexSentryReportCooldownMs")?
     } else {
         Js::Undefined
@@ -147,25 +152,31 @@ pub fn forward_error<E: From<Thrown>>(
     let split = split_worker_log_extra(extra)?;
     let mut effective_send = send_to_sentry;
     let mut suppress_console = split.get("suppressConsoleLog")?.truthy();
-    let mut suppressed_reports = 0.0;
+    let mut suppressed_reports = Js::Number(0.0);
     let key = control.get("reportKey")?;
     let cooldown = control.get("reportCooldownMs")?;
     if send_to_sentry && key.truthy() && cooldown.truthy() {
         let now = clock()?;
         let previous = cooldowns.call_method("get", vec![key.clone()])?;
         let should_report = previous.is_undefined()
-            || now - previous.get("lastReportedAt")?.to_number()? >= cooldown.to_number()?;
+            || ops::greater_equal(
+                &ops::subtract(&Js::Number(now), &previous.get("lastReportedAt")?)?,
+                &cooldown,
+            )?;
         let next = if should_report {
             if !previous.is_undefined() {
-                suppressed_reports = previous.get("suppressedCount")?.to_number()?;
+                let count = previous.get("suppressedCount")?;
+                if !count.is_nullish() {
+                    suppressed_reports = count;
+                }
             }
-            (now, 0.0)
+            (Js::Number(now), Js::Number(0.0))
         } else {
             effective_send = false;
             suppress_console = true;
             (
-                previous.get("lastReportedAt")?.to_number()?,
-                previous.get("suppressedCount")?.to_number()? + 1.0,
+                previous.get("lastReportedAt")?,
+                ops::add(&previous.get("suppressedCount")?, &Js::Number(1.0))?,
             )
         };
         cooldowns.call_method(
@@ -173,8 +184,8 @@ pub fn forward_error<E: From<Thrown>>(
             vec![
                 key,
                 Js::object(vec![
-                    ("lastReportedAt", Js::Number(next.0)),
-                    ("suppressedCount", Js::Number(next.1)),
+                    ("lastReportedAt", next.0),
+                    ("suppressedCount", next.1),
                 ]),
             ],
         )?;
@@ -199,8 +210,8 @@ pub fn forward_error<E: From<Thrown>>(
         ] {
             spread_into(&extra, &value)?;
         }
-        if suppressed_reports > 0.0 {
-            extra.define("suppressedRepeatedReports", Js::Number(suppressed_reports))?;
+        if ops::greater_than(&suppressed_reports, &Js::Number(0.0))? {
+            extra.define("suppressedRepeatedReports", suppressed_reports)?;
         }
         post(WorkerDataPayload {
             op: StoreWorkerOp::Error,

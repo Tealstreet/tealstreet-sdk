@@ -55,7 +55,7 @@ fn sentry_controls_and_log_extras_match_live_worker_helpers() {
     for witness in data["nonfiniteSuppression"].as_array().unwrap() {
         assert_eq!(witness["input"]["suppressConsoleLog"], Value::Null);
         assert_eq!(witness["split"]["suppressConsoleLog"], true);
-        assert_eq!(
+        assert!(
             split_worker_log_extra(Some(&Js::object(vec![(
                 "suppressConsoleLog",
                 Js::Number(if witness["split"]["suppressConsoleLog"] == true {
@@ -67,8 +67,7 @@ fn sentry_controls_and_log_extras_match_live_worker_helpers() {
             .unwrap()
             .get("suppressConsoleLog")
             .unwrap()
-            .truthy(),
-            true
+            .truthy()
         );
     }
     for witness in data["overflowJson"].as_array().unwrap() {
