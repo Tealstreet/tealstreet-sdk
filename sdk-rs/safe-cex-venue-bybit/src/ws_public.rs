@@ -1,4 +1,5 @@
 //! Public protocol operations; dialing remains owned by BaseWebSocket.
+use safe_cex_exchange::js_runtime::value::{Js, from_retained_input};
 use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeRuntime},
     websocket::{BaseWebSocket, HandlerList, WsDiagnosticReceiveOptions, WsDiagnosticSendOptions},
@@ -156,7 +157,7 @@ pub fn emit_ohlcv_diagnostic_receive(
     )
 }
 
-fn run_handlers(handlers: &HandlerList, value: &Value) -> Result<(), ExchangeError> {
+fn run_handlers(handlers: &HandlerList, value: &Js) -> Result<(), ExchangeError> {
     let mut index = 0;
     loop {
         // Source captures the array but observes changes to its length/elements.
@@ -169,41 +170,19 @@ fn run_handlers(handlers: &HandlerList, value: &Value) -> Result<(), ExchangeErr
     Ok(())
 }
 
-fn parse_frame(data: &str) -> Option<Value> {
-    fn round_numbers(value: &mut Value) -> Option<()> {
-        match value {
-            Value::Number(number) => {
-                let n = number.as_f64().filter(|n| n.is_finite())?;
-                let text = if n == 0.0 && n.is_sign_negative() {
-                    "-0".into()
-                } else {
-                    safe_cex_num::js_number_string(n)
-                };
-                *number = text.parse().ok()?;
-            }
-            Value::Array(values) => {
-                for value in values {
-                    round_numbers(value)?;
-                }
-            }
-            Value::Object(values) => {
-                for value in values.values_mut() {
-                    round_numbers(value)?;
-                }
-            }
-            _ => {}
-        }
-        Some(())
-    }
-    let mut value: Value = serde_json::from_str(data).ok()?;
-    round_numbers(&mut value)?;
-    Some(value)
+fn parse_frame(data: &str) -> Option<Js> {
+    safe_cex_types::retained_json::RetainedJsonInput::parse_json(
+        &data.encode_utf16().collect::<Vec<_>>(),
+    )
+    .ok()
+    .map(from_retained_input)
 }
 
 pub fn on_message(socket: &Rc<BaseWebSocket>, data: &str) -> Result<(), ExchangeError> {
     if socket.is_disposed() {
         return Ok(());
     }
+    let _realm = socket.prototype_realm.bind();
     socket.track_last_received()?;
     socket.direct_fallback.borrow_mut().on_message();
     emit_ohlcv_diagnostic_receive(socket, data)?;
@@ -250,7 +229,7 @@ pub fn on_message(socket: &Rc<BaseWebSocket>, data: &str) -> Result<(), Exchange
         let handlers = socket.message_handlers.borrow().get("pong").cloned();
         if let Some(handlers) = handlers.filter(|handlers| !handlers.borrow().is_empty()) {
             socket.record_message_handler_stats("pong")?;
-            run_handlers(&handlers, &json!({}))?;
+            run_handlers(&handlers, &Js::object(vec![]))?;
         }
     }
     Ok(())
@@ -283,22 +262,35 @@ impl std::error::Error for TickerEventError {
 // fundingTime. Keep the source truthiness checks before fallible parseFloat.
 pub fn handle_tickers_event(
     store: &dyn safe_cex_store::Store,
-    frame: &Value,
+    frame: &Js,
     is_spot: bool,
     swap_volume: bool,
+    capture_volumes: bool,
 ) -> Result<(), TickerEventError> {
-    if frame.is_null() {
+    if matches!(frame, Js::Null) {
         return Err(TickerEventError::Source(
             "Cannot read properties of null (reading 'data')".into(),
         ));
     }
-    let data = &frame["data"];
-    let symbol = &data["symbol"];
-    if !crate::api::truthy(symbol) {
+    let native = |error: safe_cex_exchange::js_runtime::value::Thrown| {
+        TickerEventError::Source(error.to_exchange_error().message)
+    };
+    let data = frame.get("data").map_err(native)?;
+    let symbol = if data.is_nullish() {
+        Js::Undefined
+    } else {
+        data.get("symbol").map_err(native)?
+    };
+    if !symbol.truthy() {
         return Ok(());
     }
-    let symbol = safe_cex_num::js_string(Some(symbol))
-        .map_err(|error| TickerEventError::Source(error.message.to_owned()))?;
+    let symbol = String::from_utf16_lossy(
+        &data
+            .get("symbol")
+            .map_err(native)?
+            .to_js_string()
+            .map_err(native)?,
+    );
     let ticker = store.lookup_ticker_by_symbol(&symbol)?;
     if !ticker.is_truthy() {
         return Ok(());
@@ -319,23 +311,52 @@ pub fn handle_tickers_event(
         ("openInterest", "openInterest", 1.),
         ("fundingRate", "fundingRate", 1.),
         ("nextFundingTime", "fundingTime", 1.),
-        (base_volume, "volume", 1.),
-        (quote_volume, "quoteVolume", 1.),
     ] {
-        let value = &data[source];
-        if !crate::api::truthy(value) || (is_spot && source == "nextFundingTime") {
+        if is_spot && source == "nextFundingTime" {
+            continue;
+        }
+        let value = data.get(source).map_err(native)?;
+        if !value.truthy() {
             continue;
         }
         let number = if is_spot && source == "fundingRate" {
             0.
         } else {
-            crate::exchange_state::parse_float(Some(value))
-                .map_err(|message| TickerEventError::Source(message.into()))?
+            data.get(source)
+                .map_err(native)?
+                .parse_float()
+                .map_err(native)?
                 * multiplier
         };
         // Native patches preserve both presence and the binary64 value, including
         // NaN/Infinity; JSON would collapse these to null before the Store saw them.
         update.set_number(target, number);
+    }
+    // The shared category handler destructures both volumes before either parse;
+    // spot and the dedicated inverse source read each condition and value in order.
+    let captured = if capture_volumes {
+        Some((
+            data.get(base_volume).map_err(native)?,
+            data.get(quote_volume).map_err(native)?,
+        ))
+    } else {
+        None
+    };
+    for (source, target, captured) in [
+        (base_volume, "volume", captured.as_ref().map(|v| &v.0)),
+        (quote_volume, "quoteVolume", captured.as_ref().map(|v| &v.1)),
+    ] {
+        let value = match captured {
+            Some(value) => value.clone(),
+            None => data.get(source).map_err(native)?,
+        };
+        if value.truthy() {
+            let value = match captured {
+                Some(_) => value,
+                None => data.get(source).map_err(native)?,
+            };
+            update.set_number(target, value.parse_float().map_err(native)?);
+        }
     }
     let Some(id) = ticker.update_id()? else {
         return Ok(());
@@ -390,6 +411,7 @@ impl PublicProtocol {
                 json,
                 socket.emitter().name() == "bybitspot",
                 swap_volume,
+                !matches!(socket.emitter().name(), "bybitspot" | "bybitinverse"),
             )
             .map_err(|error| match error {
                 TickerEventError::Store(error) => error.into(),

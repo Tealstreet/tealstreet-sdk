@@ -66,19 +66,21 @@ fn prototype_socket_paths_preserve_typescript_defects() {
             serde_json::json!(["received", ["stats", key]]),
             "AsterDEXPublicWebsocket#handleEventData stats then caught batch abort {key}"
         );
-        let actual =
-            public_event_data_dispatch(&serde_json::json!({"e":key}), &handler_keys).unwrap();
-        assert_eq!(
-            actual,
-            PublicEventDataDispatch::InheritedHandlerFailure {
-                event_type: key.to_owned(),
-                member: match safe_cex_num::js_table_lookup::<&str, ()>(&[], key) {
-                    safe_cex_num::TableHit::Inherited(member) => member,
-                    other => panic!("expected inherited member for {key}: {other:?}"),
-                },
-            },
-            "AsterDEXPublicWebsocket#handleEventData inherited dispatch {key}"
-        );
+        let actual = public_event_data_dispatch(
+            &safe_cex_exchange::js_runtime::value::from_json(&serde_json::json!({"e":key})),
+            &handler_keys,
+        )
+        .unwrap();
+        let PublicEventDataDispatch::InheritedHandlerFailure { event_type, member } = actual else {
+            panic!("AsterDEXPublicWebsocket inherited handler {key}");
+        };
+        assert_eq!(event_type, key);
+        let safe_cex_num::TableHit::Inherited(expected) =
+            safe_cex_num::js_table_lookup::<&str, ()>(&[], key)
+        else {
+            panic!("inherited source member");
+        };
+        assert_eq!(member, expected);
     }
     let ordinary = cases
         .iter()
@@ -89,13 +91,17 @@ fn prototype_socket_paths_preserve_typescript_defects() {
         serde_json::json!(["received", ["stats", "aggTrade"], "handleTradeUpdate"]),
         "AsterDEXPublicWebsocket#handleEventData ordinary event continues batch"
     );
-    assert_eq!(
-        public_event_data_dispatch(&serde_json::json!({"e":"aggTrade"}), &handler_keys).unwrap(),
-        PublicEventDataDispatch::Handlers {
-            event_type: "aggTrade".to_owned(),
-            data: serde_json::json!({"e":"aggTrade"}),
-        },
-        "AsterDEXPublicWebsocket#handleEventData ordinary handler identity"
+    let original =
+        safe_cex_exchange::js_runtime::value::from_json(&serde_json::json!({"e":"aggTrade"}));
+    let PublicEventDataDispatch::Handlers { event_type, data } =
+        public_event_data_dispatch(&original, &handler_keys).unwrap()
+    else {
+        panic!("ordinary handler");
+    };
+    assert_eq!(event_type, "aggTrade");
+    assert!(
+        data.strict_equals(&original),
+        "ordinary handler retains original input identity"
     );
 
     let source_control = Command::new("node")

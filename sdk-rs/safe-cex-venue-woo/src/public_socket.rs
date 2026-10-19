@@ -178,7 +178,10 @@ pub(crate) fn on_message(socket: &Rc<BaseWebSocket>, data: &str) -> Result<(), E
     };
     // Own keys shadow prototype members, including an explicitly empty list.
     if socket.message_handlers.borrow().contains_key(key) {
-        return socket.dispatch_message(key, &message);
+        return socket.dispatch_message(
+            key,
+            &safe_cex_exchange::js_runtime::value::from_json(&message),
+        );
     }
     if let TableHit::Inherited(member) = js_table_lookup::<&str, ()>(&[], key)
         && member.length().is_some_and(|length| length != 0)

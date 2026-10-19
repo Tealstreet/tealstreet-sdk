@@ -421,3 +421,9 @@ The login signer also uses the shared eager boundary instead of manual first-pol
 code. Other direct typed readers retain their separate timing audit obligations.
 The constructed `exchange_trait` eager tests hold/release real terminal REST
 responses and observe production Store commits, throws and cancel/replace order.
+
+Shared WebSocket message handlers now borrow the canonical `Js` frame graph.
+Restore retained ingress once per frame, preserve it across all callbacks, and
+project only reached typed output fields; see exchange/WS_CONTRACT.md and the
+actual-source/native retained-handler witnesses. Do not reintroduce Value frame
+projections or a second callback registry.
