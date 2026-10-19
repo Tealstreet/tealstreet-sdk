@@ -1597,9 +1597,9 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "d22b7fde099ce03e23903e0d9cfdc916efbf7c7a2ae7cebc02d5626d525b077f",
+      "producer_sha256": "0f8a6a04a0c9ccf593a0ec91a98b4bb0f98ea244802d0c26c8d163d45fe80b51",
       "classification": "no-owned-latch",
-      "reason": "Owns the fold inputs and callback future; it reserves no task slot, listener or shared waiter. Reviewed Store cutover: settlement lookup is fallible and propagates the original Store failure; the existing fold continuation owns no additional latch or reservation."
+      "reason": "Owns the fold inputs and callback future; it reserves no task slot, listener or shared waiter. Reviewed Store cutover: settlement lookup is fallible and propagates the original Store failure; the existing fold continuation owns no additional latch or reservation. Reviewed owned-callback migration: the resolver captures its Store Rc and no longer borrows the awaiting caller. The wrapper still directly awaits the installed folder, adds no task registry/latch, and delegates continuation ownership to the shared eager reader; constructed Binance/Bitget/Hyperliquid/Paradex history tests exercise the installed consumers."
     },
     {
       "owner": "src/js_runtime/base_exchange.rs::create",
