@@ -153,6 +153,7 @@ fn worker_structured_clone_matches_node_graphs_and_refusals() {
     let output = Command::new("node").args(["-e", r#"
       const assert=require('node:assert/strict');
       const bits=n=>{const b=new DataView(new ArrayBuffer(8));b.setFloat64(0,n);return b.getBigUint64(0).toString(16).padStart(16,'0')};
+      const nanClones=[0x7ff8000000000042n,0xfff8000000000042n].map(raw=>{const b=new DataView(new ArrayBuffer(8));b.setBigUint64(0,raw);return bits(structuredClone(b.getFloat64(0)))});
       const child={n:17}, a=[];a.length=3;a[1]=child;a.extra=undefined;
       const root={child,again:child,a,nums:[NaN,Infinity,-Infinity,-0],text:'\ud800X\udc00',big:9007199254740993n,flag:true,nil:null,own:undefined};root.self=root;
       root.map=new Map([[child,root]]);root.set=new Set([child,root]);
@@ -164,7 +165,7 @@ fn worker_structured_clone_matches_node_graphs_and_refusals() {
       const emptyStack=new Error('x');emptyStack.stack=17;const noStack=structuredClone(emptyStack);assert.ok(Object.hasOwn(noStack,'stack'));assert.equal(noStack.stack,undefined);
       const failure={marker:NaN};assert.throws(()=>structuredClone({get value(){throw failure}}),x=>x===failure);
       const refused=[()=>{},Symbol.iterator,Promise.resolve()].map(v=>{try{structuredClone(v);throw Error('accepted')}catch(e){return e.name}});
-      console.log(JSON.stringify({nums:copy.nums.map(bits),text:Array.from({length:copy.text.length},(_,i)=>copy.text.charCodeAt(i)),big:String(copy.big),enumFlip:Object.keys(flipped),emptyStack:[Object.hasOwn(noStack,'stack'),noStack.stack===undefined],keys:Object.keys(copy.a),events,error:[e.name,e.message,e.stack,Object.getOwnPropertyDescriptor(e,'message').enumerable],refused}));
+      console.log(JSON.stringify({nanClones,nums:copy.nums.map(bits),text:Array.from({length:copy.text.length},(_,i)=>copy.text.charCodeAt(i)),big:String(copy.big),enumFlip:Object.keys(flipped),emptyStack:[Object.hasOwn(noStack,'stack'),noStack.stack===undefined],keys:Object.keys(copy.a),events,error:[e.name,e.message,e.stack,Object.getOwnPropertyDescriptor(e,'message').enumerable],refused}));
     "#]).output().unwrap();
     assert!(
         output.status.success(),
@@ -172,6 +173,19 @@ fn worker_structured_clone_matches_node_graphs_and_refusals() {
         String::from_utf8_lossy(&output.stderr)
     );
     let source: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let nan_clones: Vec<_> = [0x7ff8000000000042_u64, 0xfff8000000000042]
+        .into_iter()
+        .map(|bits| {
+            format!(
+                "{:016x}",
+                structured_clone(&Js::Number(f64::from_bits(bits)))
+                    .unwrap()
+                    .as_f64()
+                    .unwrap()
+                    .to_bits()
+            )
+        })
+        .collect();
     let child = Js::object(vec![("n", Js::Number(17.))]);
     let array = Js::array(vec![]);
     array.set("length", Js::Number(3.)).unwrap();
@@ -369,7 +383,7 @@ fn worker_structured_clone_matches_node_graphs_and_refusals() {
         })
         .collect();
     assert_eq!(
-        json!({"nums":observed,"text":copy.get("text").unwrap().as_str().unwrap().as_ref(),"big":copy.get("big").unwrap().to_display(),"emptyStack":[no_stack.has_own("stack"),no_stack.get("stack").unwrap().is_undefined()],"enumFlip":flipped.own_keys().iter().map(|key|String::from_utf16(key).unwrap()).collect::<Vec<_>>(),"keys":a.own_keys().iter().filter(|k|**k!=utf16("length")).map(|k|String::from_utf16(k).unwrap()).collect::<Vec<_>>(),"events":*events.borrow(),"error":[e.get("name").unwrap().to_display(),e.get("message").unwrap().to_display(),e.get("stack").unwrap().to_display(),enumerable],"refused":refused}),
+        json!({"nanClones":nan_clones,"nums":observed,"text":copy.get("text").unwrap().as_str().unwrap().as_ref(),"big":copy.get("big").unwrap().to_display(),"emptyStack":[no_stack.has_own("stack"),no_stack.get("stack").unwrap().is_undefined()],"enumFlip":flipped.own_keys().iter().map(|key|String::from_utf16(key).unwrap()).collect::<Vec<_>>(),"keys":a.own_keys().iter().filter(|k|**k!=utf16("length")).map(|k|String::from_utf16(k).unwrap()).collect::<Vec<_>>(),"events":*events.borrow(),"error":[e.get("name").unwrap().to_display(),e.get("message").unwrap().to_display(),e.get("stack").unwrap().to_display(),enumerable],"refused":refused}),
         source
     );
     for graph in [&root, &copy, &e.get("cause").unwrap()] {

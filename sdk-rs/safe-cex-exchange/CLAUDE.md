@@ -2100,8 +2100,9 @@ comparator schedule as well as sparse output.
 
 js_runtime::structured_clone implements the recorder's platform clone operation
 for native primitives, ordinary objects, sparse arrays, Map/Set and intrinsic
-Errors. It preserves cycles/aliases, binary64 bits and UTF16, invokes own
+Errors. It preserves cycles/aliases, non-NaN binary64 bits and UTF16, invokes own
 enumerable getters in source order, and retains original getter failures.
+NaN payloads canonicalize as Node structuredClone does.
 Uncloneable values and unmodeled object kinds produce visible DataCloneError.
 The worker recorder intentionally drops clone failures as perfFixture.ts does;
 other callers receive the error. Node's real structuredClone supplies the oracle.

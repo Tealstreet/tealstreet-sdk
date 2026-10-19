@@ -328,7 +328,8 @@ Shared `js_runtime::structured_clone` is one platform operation, with no JSON
 adapter. Native primitives, ordinary objects, sparse arrays, Map, Set and intrinsic
 Errors are checked against Node's real structuredClone, including graph identity,
 cycles, getters/deletion, Error cause/hidden fields and original getter throws.
-Functions, symbols, Promises and unsupported native object kinds refuse visibly
+NaN payload bits canonicalize exactly as Node structuredClone does; other numeric
+bits remain intact. Functions, symbols, Promises and unsupported native object kinds refuse visibly
 with DataCloneError; the recorder drops clone failures exactly as the source does.
 The operation does not claim unmodeled browser resource clone/transfer support.
 
@@ -339,3 +340,7 @@ and session handles. The module cancels all pending metronome callbacks and clos
 the service, following the approved full-teardown native lifetime policy.
 
 The transferred cohort now has 11 FIX, 4 ACCEPT and 12 OPEN rows.
+
+A compiled missing-NaN-normalization control fails the actual Node clone-bit
+comparison; exact restoration passes. The real listener additionally records a
+negative NaN with a non-default payload and checks Node's canonical output bits.

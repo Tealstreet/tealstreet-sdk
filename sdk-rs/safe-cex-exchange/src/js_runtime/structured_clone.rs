@@ -23,6 +23,7 @@ fn hidden(target: &Js, name: &str, value: Js) {
 
 fn copy(value: &Js, seen: &mut Vec<(Js, Js)>) -> Result<Js, Thrown> {
     match value {
+        Js::Number(value) if value.is_nan() => return Ok(Js::Number(f64::NAN)),
         Js::Undefined | Js::Null | Js::Bool(_) | Js::Number(_) | Js::BigInt(_) | Js::String(_) => {
             return Ok(value.clone());
         }

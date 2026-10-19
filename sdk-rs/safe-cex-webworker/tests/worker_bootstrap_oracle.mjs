@@ -45,10 +45,10 @@ if(process.argv.includes('--perf-service')) {
  await recording.ctx.listener({data:{op:'__workerConfig',data:{perfFixture:{mode:'record'}}}});
  await recording.ctx.listener({data:recording.init});
  const worker=recording.c.workerTable.a;
- const shared={v:NaN},input={n:17,shared,again:shared,own:undefined,text:'\ud800X\udc00',nums:[Infinity,-Infinity,-0]};input.self=input;worker.exchange.emit('fill',input);input.n=42;
+ const nanView=new DataView(new ArrayBuffer(8));nanView.setBigUint64(0,0xfff8000000000042n);const shared={v:nanView.getFloat64(0)},input={n:17,shared,again:shared,own:undefined,text:'\ud800X\udc00',nums:[Infinity,-Infinity,-0]};input.self=input;worker.exchange.emit('fill',input);input.n=42;
  await recording.ctx.listener({data:{op:'__perfFixtureDump'}});
  const captured=recording.posts.find(p=>p.op==='__perfFixtureDump').data;
- const nativeFill=captured.frames.find(f=>f.msg.op==='fill').msg.data;assert.equal(nativeFill.self,nativeFill);assert.equal(nativeFill.shared,nativeFill.again);assert.ok(Number.isNaN(nativeFill.shared.v));assert.ok(Object.hasOwn(nativeFill,'own'));assert.equal(nativeFill.text,'\ud800X\udc00');assert.ok(Object.is(nativeFill.nums[2],-0));
+ const nativeFill=captured.frames.find(f=>f.msg.op==='fill').msg.data;assert.equal(nativeFill.self,nativeFill);assert.equal(nativeFill.shared,nativeFill.again);assert.ok(Number.isNaN(nativeFill.shared.v));nanView.setFloat64(0,nativeFill.shared.v);assert.equal(nanView.getBigUint64(0),0x7ff8000000000000n);assert.ok(Object.hasOwn(nativeFill,'own'));assert.equal(nativeFill.text,'\ud800X\udc00');assert.ok(Object.is(nativeFill.nums[2],-0));
  assert.ok(captured.frames.length>0);assert.equal(captured.frames.filter(f=>f.msg.op==='fill').length,1);assert.equal(captured.frames.find(f=>f.msg.op==='fill').msg.data.n,17);
  const replay=fixture(false,true);replay.setWorker(undefined);replay.c.sessionStart(replay.ctx,false);
  await replay.ctx.listener({data:{op:'__workerConfig',data:{perfFixture:{mode:'replay',fixture:captured,intervalMs:7,loop:false}}}});

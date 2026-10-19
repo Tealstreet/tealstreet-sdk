@@ -1933,7 +1933,7 @@ fn native_perf_record_dump_replay_matches_maintained_listener_roundtrip() {
     )
     .unwrap();
     finish(&host, host.send(init_payload())).unwrap();
-    let shared = Js::object(vec![("v", Js::Number(f64::NAN))]);
+    let shared = Js::object(vec![("v", Js::Number(f64::from_bits(0xfff8000000000042)))]);
     let input = Js::object(vec![
         ("n", Js::Number(17.)),
         ("shared", shared.clone()),
@@ -2020,6 +2020,17 @@ fn native_perf_record_dump_replay_matches_maintained_listener_roundtrip() {
             .as_f64()
             .unwrap()
             .is_nan()
+    );
+    assert_eq!(
+        data.get("shared")
+            .unwrap()
+            .get("v")
+            .unwrap()
+            .as_f64()
+            .unwrap()
+            .to_bits(),
+        f64::NAN.to_bits(),
+        "PERF native listener matches Node clone NaN payload canonicalization"
     );
     assert!(data.has_own("own"));
     assert!(data.get("own").unwrap().is_undefined());
