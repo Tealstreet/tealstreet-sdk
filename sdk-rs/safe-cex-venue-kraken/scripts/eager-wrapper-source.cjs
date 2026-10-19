@@ -45,23 +45,48 @@ function method(filename, className, member, receiver, bindings) {
   return vm.runInNewContext(code.outputText + ';make', bindings, {filename: file}).call(receiver);
 }
 async function main() {
+  const audit = process.argv.includes("--audit");
+  const entries = [
+    ...(audit ? [
+      ["krakenspot.exchange.ts", "KrakenSpotExchange", "fetchBalance", {ENDPOINTS: spotTypes.ENDPOINTS, normalizeAsset: spotTypes.normalizeAsset}, [], {result: {ZUSD: "13.25"}}],
+      ["kraken.exchange.ts", "KrakenExchange", "fetchOrders", {ENDPOINTS: futuresTypes.ENDPOINTS}, [], {openOrders: []}],
+      ["kraken.exchange.ts", "KrakenExchange", "fetchOHLCV", {}, [{symbol: "PF_XBTUSD", interval: "1m", from: 1000, to: 120000}], {candles: []}],
+      ["kraken.exchange.ts", "KrakenExchange", "validateAccount", {ENDPOINTS: futuresTypes.ENDPOINTS}, [], {result: "failure", error: ["invalid key"]}],
+    ] : []),
+  ];
   for (const [filename, className, member, bindings, opts, body] of [
     ['kraken.exchange.ts', 'KrakenExchange', 'fetchTickers', {ENDPOINTS: futuresTypes.ENDPOINTS}, [], {tickers: []}],
     ['krakenspot.exchange.ts', 'KrakenSpotExchange', 'fetchOHLCV', {ENDPOINTS: spotTypes.ENDPOINTS, INTERVAL: spotTypes.INTERVAL}, [{symbol: 'BTC/USD', interval: '1m'}], {result: {}}],
+    ...entries,
   ]) {
     const calls = [];
     let release;
     const pending = new Promise(resolve => { release = resolve; });
     const receiver = {
-      xhr: {get(...args) { calls.push(args); return pending; }},
-      store: {marketsBySymbol: {}}, emitAndLogError() { assert.fail('unexpected source error'); },
+      xhr: {get(...args) { calls.push(args); return pending; }, post(...args) { calls.push(args); return pending; }},
+      options: {},
+      store: {marketsBySymbol: {}, tickers: []}, emitAndLogError() { assert.fail('unexpected source error'); },
     };
     const fn = method(filename, className, member, receiver, bindings);
     const waiter = fn(...opts);
     assert.equal(calls.length, 1, `${member} calls HTTP before returning its Promise`);
     release({data: body});
-    assert.equal((await waiter).length, 0);
+    const output = await waiter;
+    if (member === 'fetchBalance') assert.equal(output.total, 13.25);
+    else if (member === 'validateAccount') assert.match(output.error, /Invalid API key/);
+    else assert.equal(output.length, 0);
     assert.equal(calls.length, 1);
+  }
+  if (audit) {
+    const calls=[];
+    const receiver={foldClosedPositionRecords(...args) { calls.push(args);return Promise.resolve([{id:'first'},{id:'second'}]); }};
+    const fn=method('kraken.exchange.ts','KrakenExchange','fetchHistoricalPositions',receiver,{});
+    const opts={account:'acct-A'};
+    const waiter=fn(opts);
+    assert.equal(calls.length,1,'journal delegation precedes waiter');
+    assert.equal(calls[0][0],opts,'original options identity');
+    assert.equal(calls[0][1].symbolScoped,false);
+    assert.deepEqual(Array.from(await waiter, r=>r.id),['first','second']);
   }
   let release;
   const pending = new Promise(resolve => { release = resolve; });
@@ -88,6 +113,6 @@ async function main() {
   assert.equal(errors.length, 1, 'rejection reporting precedes returning the Promise');
   await assert.rejects(rejected, /Market UNKNOWN not found/);
   assert.equal(calls.length, 1);
-  console.log(JSON.stringify({receipts, synchronousHttpPrefixes: 3, detachedContinuation: true, rejectionPrefix: true}));
+  console.log(JSON.stringify({receipts, synchronousHttpPrefixes: audit ? 7 : 3, detachedContinuation: true, rejectionPrefix: true}));
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

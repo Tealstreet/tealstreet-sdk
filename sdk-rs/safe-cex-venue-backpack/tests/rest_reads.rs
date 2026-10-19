@@ -396,7 +396,12 @@ impl Host for H {
         Ok(a.borrow().get(index).cloned().flatten())
     }
     fn array_set(&mut self, a: &Array<V>, index: usize, value: V) -> Result<(), Rc<str>> {
-        a.borrow_mut()[index] = Some(value);
+        let mut a = a.borrow_mut();
+        // JS indexed assignment can regrow an array cleared by a live getter.
+        if index >= a.len() {
+            a.resize_with(index + 1, || None);
+        }
+        a[index] = Some(value);
         Ok(())
     }
     fn array_from(&mut self, values: Vec<Option<V>>) -> Array<V> {

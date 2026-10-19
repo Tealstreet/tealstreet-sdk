@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const { setTimeout: deadlineTimer, clearTimeout: clearDeadline } = require('node:timers');
 const root = path.resolve(__dirname, '../../..');
 const load = file => require(path.join(root, 'packages/safe-cex/src', file));
 const { AsterDEXExchange } = load('exchanges/asterdex/asterdex.exchange.ts');
@@ -8,9 +9,30 @@ const { asterDEXVirtualClock: clock } = load('exchanges/asterdex/asterdex.virtua
 const { generateAsterDEXCodeMessageSignature: signature } = load('exchanges/asterdex/asterdex.api.ts');
 const { DefaultStore } = load('store/store.base.ts');
 const axios = require('axios');
-const turn = () => new Promise(setImmediate);
-const until = async predicate => { for (let i=0;i<100&&!predicate();i++) await turn(); assert(predicate()); };
 const deferred = () => { let release; const promise=new Promise(resolve=>{release=resolve}); return { promise, release }; };
+const observed = async (promise, label) => {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = deadlineTimer(() => reject(new Error(`ASTER-LIFECYCLE ${label} was not observed`)), 5000);
+    })]);
+  } finally { clearDeadline(timer); }
+};
+const holdRequestAdmission = () => {
+  const queued = deferred();
+  const originalSet = global.setTimeout;
+  let dispatch;
+  global.setTimeout = (callback, delay, ...args) => {
+    if (delay !== 0 || dispatch) return originalSet(callback, delay, ...args);
+    dispatch = () => callback(...args);
+    queued.release();
+  };
+  return {
+    queued: queued.promise,
+    release: () => { global.setTimeout = originalSet; assert.equal(typeof dispatch, 'function'); dispatch(); },
+    restore: () => { global.setTimeout = originalSet; },
+  };
+};
 const fixture = () => { const store=new DefaultStore(); const venue=new AsterDEXExchange('asterdex',{key:'fixture-key',secret:'fixture-secret',tuning:{consoleLogging:false}},store); return {venue,store}; };
 const ticker = {id:'BTCUSDT',symbol:'BTCUSDT',bid:0,ask:0,last:1,mark:0,index:0,percentage:0,fundingRate:0,fundingTime:0,openInterest:0,volume:0,quoteVolume:0};
 const response = (config,data) => ({config,data,status:200,statusText:'OK',headers:{}});
@@ -26,18 +48,28 @@ const response = (config,data) => ({config,data,status:200,statusText:'OK',heade
     result.clock={settled:true,slot:false,offset:0};
   } finally { axios.defaults.adapter=async config=>response(config,{serverTime:Date.now()});clock.stop(); }
   {
-    const {venue,store}=fixture();store.update({tickers:[{...ticker}]});const gate=deferred();let sent=0;
-    venue.publicAPI.defaults.adapter=async config=>{sent++;await gate.promise;return response(config,{symbol:'BTCUSDT',openInterest:'7'});};
-    venue.startOpenInterestPolling();await until(()=>sent===1);venue.dispose();store.update({tickers:[{...ticker}]});gate.release();
-    await until(()=>store.tickers[0].openInterest===7);result.interest=store.tickers[0].openInterest;
+    const {venue,store}=fixture();store.update({tickers:[{...ticker}]});const gate=deferred(),started=deferred(),updated=deferred();let sent=0;
+    const unsubscribe=store.subscribe(data=>{if(data.tickers[0]?.openInterest===7) updated.release();});
+    try {
+      venue.publicAPI.defaults.adapter=async config=>{sent++;started.release();await gate.promise;return response(config,{symbol:'BTCUSDT',openInterest:'7'});};
+      venue.startOpenInterestPolling();await observed(started.promise,'open-interest request');assert.equal(sent,1);
+      venue.dispose();store.update({tickers:[{...ticker}]});gate.release();
+      await observed(updated.promise,'late source open-interest Store write');assert.equal(store.tickers[0].openInterest,7);result.interest=store.tickers[0].openInterest;
+    } finally {unsubscribe();gate.release();venue.dispose();}
   }
   {
-    const {venue,store}=fixture();const socket=new AsterDEXPrivateWebsocket(venue,store);const gate=deferred();let sent=0;
-    venue.primaryAPI.defaults.adapter=async config=>{sent++;await gate.promise;return response(config,[]);};
-    const pending=socket.runPositionRepair();assert(socket.positionRepairInFlight);await until(()=>sent===1);
-    socket.dispose();venue.dispose();assert(socket.positionRepairInFlight);gate.release();await pending;
-    assert(!socket.positionRepairInFlight);assert.equal(store.positions.length,0);assert.equal(store.loaded.positions,false);
-    result.repair={before:true,after:false,positions:0,loaded:false};
+    const {venue,store}=fixture();const socket=new AsterDEXPrivateWebsocket(venue,store);const gate=deferred(),started=deferred();let sent=0;
+    venue.primaryAPI.defaults.adapter=async config=>{sent++;started.release();await gate.promise;return response(config,[]);};
+    const admission=holdRequestAdmission();
+    try {
+      const pending=socket.runPositionRepair();assert(socket.positionRepairInFlight);
+      await observed(admission.queued,'rate-limit admission timer');assert.equal(sent,0);assert(socket.positionRepairInFlight);
+      admission.release();await observed(started.promise,'signed position repair request');assert.equal(sent,1);
+      await Promise.resolve();assert(socket.positionRepairInFlight);
+      socket.dispose();venue.dispose();assert(socket.positionRepairInFlight);gate.release();await observed(pending,'position repair finally');
+      assert(!socket.positionRepairInFlight);assert.equal(store.positions.length,0);assert.equal(store.loaded.positions,false);
+      result.repair={queued:true,sent,before:true,after:false,positions:0,loaded:false};
+    } finally {admission.restore();gate.release();socket.dispose();venue.dispose();}
   }
   {
     const {venue,store}=fixture();const socket=new AsterDEXPrivateWebsocket(venue,store);const timers=new Map();let id=1;

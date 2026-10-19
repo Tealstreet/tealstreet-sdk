@@ -66,7 +66,13 @@ pub fn create(
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .record_request(&stats_exchange, stats_runtime.now_ms());
-        Ok(arg(&args, 0))
+        let config = arg(&args, 0);
+        // Source telemetry catches a sealed/read-only config write without failing HTTP.
+        drop(config.set(
+            "safeCexRestDiagStartedAt",
+            Js::Number(stats_runtime.now_ms().floor()),
+        ));
+        Ok(config)
     });
     client
         .get("interceptors")?
@@ -129,7 +135,13 @@ pub fn create_no_proxy(host: Host, config: Js, owner: &Rc<BaseExchange>) -> Resu
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .record_request(&stats_exchange, stats_runtime.now_ms());
-        Ok(arg(&args, 0))
+        let config = arg(&args, 0);
+        // Source telemetry catches a sealed/read-only config write without failing HTTP.
+        drop(config.set(
+            "safeCexRestDiagStartedAt",
+            Js::Number(stats_runtime.now_ms().floor()),
+        ));
+        Ok(config)
     });
     client
         .get("interceptors")?
@@ -328,6 +340,10 @@ fn apply_changes(config: &Js, before: &Js, after: &Js) -> Result<(), Thrown> {
                     super::set_header(&headers, Js::utf16(&name), value, Js::Undefined)?;
                 }
             }
+        } else if key.as_ref() == super::super::value::utf16("safeCexRestDiagProxyHeader").as_ref()
+        {
+            // Proxy telemetry is best-effort even when the live config is read-only.
+            drop(config.set_key(&key, value));
         } else {
             config.set_key(&key, value)?;
         }

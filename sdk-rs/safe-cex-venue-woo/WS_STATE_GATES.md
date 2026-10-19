@@ -20,10 +20,10 @@ generated gate reports and the exact unused book-level array registration are
 removed too. Eighty manifest mappings retain their source identities with
 not-applicable status; no identity fallback or alias permission is added.
 
-`v3_ws_quotes` remains because the separate ticker composer consumes its BBO and
-Trade declarations. All unrelated source corpora and native assertions remain.
-The four remaining structural aliases still have their native contract runner.
-The retired book-array identity now reaches the ordinary unsupported-alias refusal.
+The ticker composer and its remaining BBO/Trade declarations were subsequently
+retired after their independent caller census. See `TICKER_RETIREMENT_REVIEW.md`.
+The four remaining structural aliases retain their native contract runner; the
+retired book-array identity still reaches the ordinary unsupported-alias refusal.
 
 Validation uses the real `fix_audit_tests::` source/native registration probes,
 plus the actual legacy public startup, private authentication and execution

@@ -1,4 +1,6 @@
 //! Terminal memory through the actual JavaScript facade and native Store.
+#[path = "support/store_correctness_source.rs"]
+mod store_correctness_source;
 use safe_cex_exchange::js_runtime::{
     store,
     value::{Js, from_typed},
@@ -160,10 +162,11 @@ fn terminal_subscriber_error_preserves_committed_status_response_and_origin() {
 }
 
 #[test]
-fn terminal_typed_ids_refuse_lone_surrogates_before_mutation() {
+fn terminal_raw_ids_preserve_surrogates_without_replacement_aliasing() {
+    let source = store_correctness_source::capture();
     let native = Rc::new(DefaultStore::new());
     let facade = store::facade(native.clone()).unwrap();
-    let error = facade
+    facade
         .call_method(
             "markOrdersTerminal",
             vec![
@@ -171,25 +174,31 @@ fn terminal_typed_ids_refuse_lone_surrogates_before_mutation() {
                 from_typed(&OrderStatus::Closed).unwrap(),
             ],
         )
-        .expect_err("terminal typed ID must refuse rather than replace a surrogate");
-    assert_eq!(error.to_exchange_error().name, "TypeError");
-    assert_eq!(
-        error.message(),
-        "invalid utf-16: lone surrogate found",
-        "the native String decoder must refuse rather than replace a surrogate"
-    );
-    Store::update(
-        native.as_ref(),
-        StoreUpdate {
-            orders: Some(vec![order("�")]),
-            ..Default::default()
-        },
-        false,
-    )
-    .unwrap();
-    assert_eq!(
-        native.orders().unwrap().len(),
-        1,
-        "refused ID must not record a replacement-character terminal key"
-    );
+        .unwrap();
+    let replacement = from_typed(&order("�")).unwrap();
+    let surrogate = from_typed(&order("�")).unwrap();
+    surrogate.set("id", Js::utf16(&[0xd800])).unwrap();
+    facade
+        .call_method(
+            "update",
+            vec![Js::object(vec![(
+                "orders",
+                Js::array(vec![replacement.clone(), surrogate]),
+            )])],
+        )
+        .unwrap();
+    let rows = facade
+        .get("orders")
+        .unwrap()
+        .array_values()
+        .unwrap()
+        .unwrap();
+    assert_eq!(rows.len(), 1, "only the original surrogate ID is filtered");
+    assert!(rows[0].same_reference(&replacement));
+    let ids: Vec<Vec<u16>> = rows
+        .iter()
+        .map(|row| row.get("id").unwrap().as_str().unwrap().to_vec())
+        .collect();
+    assert_eq!(json!(ids), source["terminalIds"]);
+    assert_eq!(native.orders().unwrap()[0].id, "�");
 }

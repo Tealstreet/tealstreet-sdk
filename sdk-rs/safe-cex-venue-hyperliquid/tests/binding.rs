@@ -67,10 +67,30 @@ fn fixture_with_provider(
         safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory,
     >,
 ) -> Fixture {
-    let host = Rc::new(Host::default());
+    fixture_on_runtime(
+        Rc::new(Host::default()),
+        routes,
+        options,
+        signers,
+        external_public_data,
+        None,
+    )
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+fn fixture_on_runtime(
+    host: Rc<Host>,
+    routes: Vec<(&str, Value)>,
+    options: Value,
+    signers: ExchangeSigners,
+    external_public_data: Option<
+        safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory,
+    >,
+    pacing_runtime: Option<Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime>>,
+) -> Fixture {
     let routes = Routes::new(routes);
     let clock = Arc::new(safe_cex_venue_hyperliquid::binding::RuntimeClock::new(
-        host.clone(),
+        pacing_runtime.unwrap_or_else(|| host.clone()),
     ));
     let options = serde_json::from_value(options).unwrap();
     let exchange = HyperliquidExchange::new(
@@ -598,6 +618,42 @@ fn place_order_signs_a_cloid_order_and_returns_the_resting_oid() {
         "minted cloid: {wire}"
     );
     assert!(body["signature"]["r"].is_string(), "signed: {body}");
+}
+
+#[test]
+fn cloid_audit_exported_placement_produces_boolean_record_inputs() {
+    let f = started();
+    for reduce_only in [false, true] {
+        for side in ["buy", "sell"] {
+            for kind in ["limit", "stop_market"] {
+                let opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({
+                    "symbol":"BTC-PERP", "type":kind, "side":side,
+                    "amount":0.01, "price":60000, "reduceOnly":reduce_only,
+                }))
+                .unwrap();
+                let before = f.routes.count("exchange:order");
+                let ids = f
+                    .host
+                    .block_on(f.exchange.base().place_order(&*f.exchange, opts))
+                    .unwrap();
+                assert_eq!(ids, ["777"]);
+                assert_eq!(f.routes.count("exchange:order"), before + 1);
+                let body = last_body(&f, "exchange:order");
+                let wire = &body["action"]["orders"][0];
+                assert_eq!(
+                    wire["r"],
+                    json!(reduce_only),
+                    "HL_CLOID_AUDIT exported {kind}/{side} producer"
+                );
+                assert!(
+                    wire["c"]
+                        .as_str()
+                        .is_some_and(safe_cex_venue_hyperliquid::cloid::is_hyperliquid_cloid)
+                );
+                assert!(body["signature"]["r"].is_string());
+            }
+        }
+    }
 }
 
 #[test]
@@ -1632,4 +1688,95 @@ fn production_ticker_coercion_matches_constructed_typescript() {
         f.host.reports.borrow()
     );
     f.exchange.dispose().unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn startup_finishes_all_hip3_requests_under_fixed_and_advancing_native_clocks() {
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/rate-limit-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "{}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let profiles: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(profiles.as_array().unwrap().len(), 2);
+    for profile in profiles.as_array().unwrap() {
+        assert_eq!(profile["dispatched"].as_array().unwrap().len(), 13);
+    }
+    let tokio = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&tokio, async {
+        for replay in [true, false] {
+            let runtime = if replay {
+                safe_cex_exchange::native::native_replay_runtime(1_700_000_000_000.)
+            } else {
+                safe_cex_exchange::native::native_runtime()
+            };
+            let host = Rc::new(Host::with_native(runtime.clone()));
+            let mut routes = venue_routes();
+            routes
+                .iter_mut()
+                .find(|(name, _)| *name == "info:perpDexs")
+                .unwrap()
+                .1 = json!([null,{"name":"xyz"},{"name":"abc"},{"name":"qwe"},{"name":"zxc"}]);
+            let f = fixture_on_runtime(
+                host,
+                routes,
+                json!({"key":"", "secret":"", "publicDataOnly":true}),
+                ExchangeSigners::default(),
+                None,
+                Some(safe_cex_exchange::native::native_runtime()),
+            );
+            let started =
+                tokio::time::timeout(std::time::Duration::from_secs(8), f.exchange.start()).await;
+            assert!(
+                started.is_ok(),
+                "HL_STARTUP_RATE_WINDOW replay={replay} requests={:?}; raw={}",
+                f.routes.requests.borrow(),
+                safe_cex_exchange::native::replay_raw_tasks(&runtime)
+            );
+            started.unwrap().unwrap();
+            let elapsed =
+                safe_cex_exchange::runtime::ExchangeRuntime::monotonic_now_ms(runtime.as_ref());
+            if replay {
+                assert_eq!(
+                    elapsed.to_bits(),
+                    0.0f64.to_bits(),
+                    "timer reset leaves replay time fixed"
+                );
+            } else {
+                assert!(
+                    elapsed > 0.,
+                    "production monotonic clock advances during startup"
+                );
+            }
+
+            assert_eq!(
+                f.routes.count("info:metaAndAssetCtxs"),
+                5,
+                "all four HIP3 DEX requests complete"
+            );
+            assert_eq!(
+                f.host.sockets.borrow().len(),
+                1,
+                "public-only binding connects public socket"
+            );
+            assert!(
+                f.host.reports.borrow().is_empty(),
+                "{:?}",
+                f.host.reports.borrow()
+            );
+            f.exchange.dispose().unwrap();
+            safe_cex_store::virtual_clock::set_thread_host_time(None);
+        }
+    });
 }

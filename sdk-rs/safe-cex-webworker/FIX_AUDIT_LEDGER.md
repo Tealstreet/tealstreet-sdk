@@ -15,20 +15,20 @@ not a new census. Row 30 was already repaired by merged PR #1158. The other
 | 7 | UpdatePositionsHandler.handleUpdatePositions | FIX | Shared eager boundary; source/native timing profiles below. |
 | 8 | UpdatePositionsHandler.handle | FIX | Same operation invoked during dispatch, without an extra spawn. |
 | 17 | StoreWorkerPayload | OPEN | Whole worker carrier and report boundary. |
-| 18 | WorkerConfig | OPEN | Actual admitted config and host reachability. |
+| 18 | WorkerConfig | ACCEPT | Unreachable strict codec removed; actual config/listener preserves the original native values. |
 | 19 | splitWorkerLogExtra | OPEN | Retained carrier across callers; no isolated JSON shim. |
-| 20 | start | OPEN | Startup listener ownership repaired below; raw init/config and session boundaries remain. |
+| 20 | start | FIX | Native Js ingress/config/dispatch, module-owned listeners and deterministic context teardown below. |
 | 21 | ChaserOrderState | OPEN | Native state and output boundary. |
-| 22 | defaultChaserState | OPEN | Native default ownership and caller mutation. |
+| 22 | defaultChaserState | FIX | Shared shallow-frozen native template; actual constructor snapshots and compiled old-constructor refusal below. |
 | 23 | ChaserOrderManager | ACCEPT | Explicit required host composition; actual singleton/engine/Store binding below. |
 | 24 | ChaserTerminate | OPEN | Live termination admission. |
-| 25 | ChaserCompleteEvent | OPEN | Native event payload. |
+| 25 | ChaserCompleteEvent | FIX | Dead inbound codec removed; canonical native output retains own undefined clientId. |
 | 26 | CallMethodHandler.handleCallMethod | OPEN | Continuation timing repaired below; typed arguments/primitive rejection admission remains. |
 | 30 | readStringProperty | ACCEPT | Merged #1158: native Get, getter cause and approved typed String replacement. |
 | 71 | ExchangeWorker.start | FIX | Canonical eager startup, source await checkpoints and dropped-waiter continuation below. |
-| 72 | PerfFixtureFrame | OPEN | Recording/replay carrier reachability. |
-| 73 | PerfFixture | OPEN | Recording/replay envelope. |
-| 74 | PerfFixtureConfig | OPEN | Actual config admission. |
+| 72 | PerfFixtureFrame | FIX | Native record/clone/cap/metronome service and actual TS/listener round trip below. |
+| 73 | PerfFixture | FIX | Module-owned fixture, dump identity and actual record/replay round trip below. |
+| 74 | PerfFixtureConfig | FIX | Native config/modes, interval/loop and full timer teardown below. |
 | 75 | ChaserOrderOptions | OPEN | Shared task model and live reads. |
 | 76 | TwapOptions | OPEN | Shared task model and live reads. |
 | 77 | TwapState | OPEN | Native state/serialization. |
@@ -204,3 +204,200 @@ buffer and forced-snapshot tests remain mandatory.
 Row 71's scheduling/ownership finding is repaired. Row 20 stays OPEN for raw
 init/config admission and independently declared session lifetime costs; this
 batch supplies no JSON/carrier/depth acceptance.
+
+## Native session ingress and ownership: completion of row 20
+
+The installed listener now accepts native Js directly. Config values, perf
+configure/dump/replay arguments, buffered messages and opaque handler calls use
+that same carrier; there is no JSON admission or fallback adapter. Unknown keys,
+array configs, nonfinite values, own undefined and UTF-16 text survive unchanged.
+Config uses the canonical in operator and ordinary Get in source order. Registered
+callbacks retain the same object, see live list appends, and may change the perf
+argument read after the loop. Console receives the original thrown value, not a
+name/message reconstruction. Shared options/settings/metadata and Store updates
+are decoded only where their existing typed consumers use them. Host identifiers
+keep their previously approved typed String boundary. Replay does not decode an
+unread exchange constructor, options or Store snapshot.
+
+The module owns its installed sessions, while sessions hold a weak reverse
+reference. Dropping the optional start return does not remove a live listener.
+The required registration cleanup detaches callbacks during module destruction.
+Maps and port state are removed before worker disposal; canonical native base
+teardown completes shared exchange cleanup. The required shutdown_context leaf
+releases remaining context runtime/replay/timer work, including startup losers.
+This implements the coordinator-approved native module drop-equals-dispose
+policy and prevents dangling callbacks without creating a module/session cycle.
+Teardown errors are reported and do not stop later cleanup stages or contexts.
+Source disposal and native teardown share one stage sequence with explicit error
+handling: the normal source entry returns the first error; native context cleanup
+reports it and continues. Native/actual-source observations preserve the normal
+first-handler throw, while module teardown disposes all nine exactly once even
+if the first fails. The two reviewed override edges moved with their shared
+function bodies; receiver/hook classifications and counts are unchanged.
+
+Compiled baseline 55d99ce37a (fresh master b10cec94d3 plus the now-merged #1203
+continuation prerequisite) fails three named real-listener tests: native NaN
+admission, array config delivery, and liveness after the start return is dropped.
+The actual-source oracle runs maintained ExchangeWorker and store.webworker.
+Native probes run WorkerModule/WorkerSession, the real worker, BaseExchange,
+DefaultStore and canonical runtime, supplying only terminal host capabilities.
+Additional observations pin config setter/callback/console/perf order, original
+non-Error cause identity, raw dump payload identity and binary64 bits, unknown-op
+fanout to all nine receivers, shared buffered identity and replay short circuit.
+A 150-level unread config remains intact; this is a preservation witness, not an
+accepted shared numeric-depth limit. Held startup teardown detaches listeners,
+disposes the actual exchange, clears timers/tasks, prevents a late snapshot and
+releases worker ownership even if a caller still holds the session handle.
+
+Independent compiled controls replace native config or buffering with JSON,
+remove module session ownership, omit context shutdown, or move constructor
+decoding before replay. All nine controls compiled and failed their named binding tests, including
+original-cause reconstruction, partial teardown, swallowed normal-dispose errors
+and a perf-dump JSON hop. Exact production bytes were restored before the
+positive gates. Existing numeric/field/source
+input corpora and worker lifecycle/buffer tests remain in place. The generic
+buffer helper keeps its owned-record fixture as a distinct parameter profile;
+production Js identity is proved through the actual worker binding.
+
+This closes row 20. It does not classify the separate legacy strict DTOs, worker
+logging/report carrier, or raw admission inside the called operation handlers
+(rows 17/18/19/26/72-79). Those remain OPEN with their original source cases.
+
+## Config and perf codec retirement: row 18; rows 72-74 stay OPEN
+
+After the native session cutover, a tracked-source Rust caller search finds the
+six WorkerConfig/PerfFixtureFrame/PerfFixture/PerfFixtureConfig/PerfFixtureVersion/
+PerfFixtureMode codecs only in their declarations, private serde/output helpers
+and test consumers. The installed listener, config callbacks, perf arguments,
+replay callback and dump result already use canonical Js. No runtime, FFI,
+registry or browser binding calls these decoders. Their strict record/literal,
+null and bounded-depth differences cannot affect that native session path.
+The six codecs, private companions, numeric eligibility and orphan-only tests
+are removed; the compiler checks that no real consumer depended on them.
+WorkerConfig row 18 is ACCEPT-as-removed, without a depth-bound acceptance.
+
+The native envelope remains independently live: its three public operation
+literal inventories, instanceId null rejection, explicit data null, nested
+Store/settings/error validation, and all ninety number-bit comparisons across
+the original ten spellings and nine encoding routes remain. Config/perf-only
+rejection and codec-only numeric/depth tests are retired with their subjects.
+The source-only eleven-field optionality census and its refusal controls remain
+unchanged, but its six retired config fields are no longer claimed native
+record-validation coverage.
+
+A real installed-listener supplement executes maintained store.webworker and
+native WorkerModule/WorkerSession. Ten original numeric spellings produce fifteen
+config deliveries, ten dump replies and sixty independent native bit assertions.
+It retains cfg/perf/frame/msg references, own undefined and UTF16 code units;
+non-record perf arguments, unknown mode, version 2 and explicit optional nulls
+reach the host exactly as source does. Existing config getter/callback ordering,
+array admission, original failure and unread-depth150 binding probes remain.
+These observations prove the carrier, not an implementation of imported perf
+functions: their terminal calls are explicitly supplied host capabilities.
+Two independent compiled production controls replace the configure argument or
+dump value with Null; each fails the named native identity assertion. Exact
+producer bytes are restored and the same binding probe passes.
+
+Rows 72-74 stay OPEN FIX. Maintained perfFixture.ts implements recording,
+structured clone, a 20000-frame cap, timestamps, mode/reset/interval/loop rules,
+and timer-based replay. The native host currently requires these callbacks but
+has no service implementation. The real app uses record/replay and dump, as
+confirmed by the coordinator; no dead-code or host-linking acceptance closes
+that behavior. Its own following PR must implement and compare real TS/native
+record-to-replay round trips. This batch closes one row: 8 FIX / 4 ACCEPT /
+15 OPEN. All other worker ownership remains with codex-0xekzz; codex-l89ogr has
+no active worker edits or source snapshot.
+
+## Native perf service: rows 72–74
+
+The source service has real host record/replay callers. Required perf host stubs
+are replaced by one module-owned `PerfFixture` using canonical native `Js`.
+`worker_context` receives that service and records at the outbound post choke
+point before dedicated forwarding or shared-port broadcast. Config and dump
+messages use the installed listener; replay init never loads a venue.
+
+The maintained `perfFixture.ts` oracle records three actual outbound log, Store
+and fill frames, dumps them, and replays them from a fresh module at 7ms cadence.
+The native listener baseline at a11c258daa compiled and failed with zero frames
+versus the source's three. The native implementation preserves captured snapshots
+across later mutation, shared/cyclic references, own undefined, nonfinite/signed
+zero bits and lone-surrogate UTF16. Replay posts each original captured message
+reference, ignores atMs, and ends after the final non-looping frame.
+
+Shared `js_runtime::structured_clone` is one platform operation, with no JSON
+adapter. Native primitives, ordinary objects, sparse arrays, Map, Set and intrinsic
+Errors are checked against Node's real structuredClone, including graph identity,
+cycles, getters/deletion, Error cause/hidden fields and original getter throws.
+NaN payload bits canonicalize exactly as Node structuredClone does; other numeric
+bits remain intact. Functions, symbols, Promises and unsupported native object kinds refuse visibly
+with DataCloneError; the recorder drops clone failures exactly as the source does.
+The operation does not claim unmodeled browser resource clone/transfer support.
+
+Additional source/native probes cover the cap before getters/clone, dropped
+uncloneable records, frames-array identity and replacement on record reset,
+interval clamping, fixed-cadence looping and module disposal with retained service
+and session handles. The module cancels all pending metronome callbacks and closes
+the service, following the approved full-teardown native lifetime policy.
+
+The transferred cohort now has 11 FIX, 4 ACCEPT and 12 OPEN rows.
+
+A compiled missing-NaN-normalization control fails the actual Node clone-bit
+comparison; exact restoration passes. The real listener additionally records a
+negative NaN with a non-default payload and checks Node's canonical output bits.
+
+## Mutable default template: row 22
+
+The source exports a shallow-frozen default, so edits to its nested ID array
+seed later instances without changing earlier constructor snapshots. The native
+constant always supplied a new empty array. One thread-local native Js template
+now models the worker module realm and uses the existing Object.freeze builtin.
+The constructor snapshots it at the existing shared typed state leaf before
+reading options/positions; no JSON carrier or second default path is retained.
+
+The compiled original constructor body on master 2a9ed2be9a, with the new template
+access seam available, fails constructors_snapshot_the_live_shallow_frozen_default:
+its first and second arrays lack the source seed/later IDs. The actual TS module
+and native constructor compare empty, seeded and later snapshots, independent
+instance mutations, retained template identity, outer freeze and mutable nested
+arrays. A second native realm starts empty. The exact original constructor state
+initialization is independently restored as a compiled control, then the fixed
+bytes are restored for positive replay. Existing 648 source transition scenarios
+and owned-instance-array mutation witnesses remain intact.
+
+This closes the mutable default finding only. Rows 21/24/25/75-79 concern distinct
+model/dispatcher consumers, so sharing task_types.rs does not make their raw
+admission, output or depth questions evidence for acceptance. They remain OPEN.
+With merged perf rows 72-74 in #1238, the transferred cohort now has 12 FIX,
+4 ACCEPT and 11 OPEN rows.
+
+## Completion event output and codec retirement: row 25
+
+The maintained manager constructs its event at ChaserOrderManager.ts:937 with
+`clientId: instance.options.clientId`, creating an own property even when that
+option is absent. The native derived serializer omitted that property. The
+output now uses canonical MODEL_RECORD and ModelField::into_property, retaining
+own undefined in native Js while ordinary JSON continues to omit it. All eight
+fields keep the source insertion order; no JSON adapter or alternate event path
+is introduced.
+
+The old ChaserCompleteEvent inbound Deserialize/Wire codec has no production
+caller: the actual engine constructs the record, then passes it to the required
+ChaserHost::emit_completion output capability. Tracked registry, FFI, worker and
+venue searches find no decoder consumer. Its orphan-only codec assertions are
+removed with it; compiler checks cover the remaining callers. Row 25 closes by
+that retirement plus the observable output repair, not by accepting a depth
+limit. The other task/options/state decoder findings stay OPEN.
+
+The actual engine/emitter listener compares 15 maintained-TS completion profiles:
+absent, empty and present clientId across negative zero, infinities, NaN and a
+finite size. It observes exactly one argument/event, eight ordered own keys,
+undefined presence, all fields and native binary64 bits. The compiled original
+serializer at master 49c825adc6 fails the named completion listener regression
+with seven own keys when clientId is absent; exact repaired bytes restore it.
+The original ten identity cases/eight leaves remain as output observations.
+The retired decoder's two numeric fields no longer claim ingress coverage:
+the five remaining records keep 45 requiredness and 13 optional-null checks;
+scalar ingress checks retain 18 fields/378 comparisons, and the separate
+terminate/state numeric matrix retains its three fields/270 comparisons with
+unchanged inputs/routes. Source inventories keep the retired event declarations
+as output evidence. The cohort now has 13 FIX, 4 ACCEPT and 10 OPEN rows.

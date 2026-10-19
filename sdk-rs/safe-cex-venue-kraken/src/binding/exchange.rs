@@ -53,6 +53,9 @@ mod accepted_topic_alias;
 #[cfg(test)]
 #[path = "../../tests/support/accepted_trading_error_receivers.rs"]
 mod accepted_trading_error_receivers;
+#[cfg(test)]
+#[path = "../../tests/support/non_utf8_fix_audit.rs"]
+mod non_utf8_fix_audit;
 use super::{
     globals,
     promise::await_js,

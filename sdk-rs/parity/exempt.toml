@@ -5113,108 +5113,8 @@ rs = "safe-cex-venue-bitget/src/order_placement.rs::OrderPlacementHost::assign_k
 reason = "Actual venue-local native array/iterator/callable-owner binding helper extending the existing native REST operation contract for eight separately mapped placement/cancel bodies. Concrete runtime assembly remains pending; no source target fabricated."
 
 [[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::GeneratedKeys"
-reason = "Generic retained crypto-result field carrier; SDK body returns raw private/public property values, not a new TypeScript declaration."
-
-[[exempt]]
 rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyFuture"
 reason = "Native async result handle; source Promise plumbing with no independent SDK symbol."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost"
-reason = "Required imported crypto, ECMAScript primitive and scheduler capabilities; SDK function bodies remain in Rust."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::Api"
-reason = "Opaque imported crypto-export receiver identity."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::Error"
-reason = "Opaque retained exception identity from imported primitives and crypto exports."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::Value"
-reason = "Opaque retained imported JS values used by the Rust SDK body."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::derive_public_key"
-reason = "Imported already-ported Schnorr public-key export call with bound receiver."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::generate_keys"
-reason = "Imported already-ported Schnorr key generation export call with bound receiver."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::get_crypto_api"
-reason = "Imported Poseidon module API access; not the SDK orchestration body."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::has_error"
-reason = "ECMAScript in primitive including inherited property membership and proxy failures."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::init_wasm"
-reason = "Imported Poseidon init call including synchronous and asynchronous failures."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::is_null"
-reason = "ECMAScript strict null comparison primitive."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::is_object"
-reason = "ECMAScript typeof object primitive; function values excluded."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::is_ready"
-reason = "Imported Poseidon readiness query."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::key_error"
-reason = "Construction of the already-mapped KeyManagerError declaration at the native host boundary."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::promise_resolve"
-reason = "Imported PromiseResolve primitive for async returned-value/thenable assimilation."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::property"
-reason = "Imported ECMAScript property access preserving values and thrown identities."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::spawn"
-reason = "Required owned task scheduling; source async bodies continue when returned awaiter is dropped."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/key_runtime.rs::KeyHost::string"
-reason = "Imported ECMAScript ToString primitive used by template substitution; not String constructor semantics."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/poseidon_bridge.rs::KeyScheduler"
-reason = "Native executor injection for the SDK/Poseidon adapter, not a TypeScript declaration."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/poseidon_bridge.rs::KeyScheduler::spawn"
-reason = "Owned SDK/Poseidon task scheduling capability."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/poseidon_bridge.rs::NativeCryptoValue"
-reason = "Typed adapter carrier for the already-ported Poseidon export ABI."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/poseidon_bridge.rs::NativeKeyError"
-reason = "Typed adapter exception carrier retaining imported loader causes."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/poseidon_bridge.rs::PoseidonKeyHost"
-reason = "Production adapter connecting SDK bodies to the already-ported Poseidon index and crypto exports."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_types.rs::AuthToken::new"
-reason = "Native field construction plumbing for the mapped AuthToken value interface."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_types.rs::TransactionSignature::new"
-reason = "Native field construction plumbing for the mapped TransactionSignature value interface."
 
 [[exempt]]
 rs = "safe-cex-venue-bitget/src/order_preparation.rs::OrderPreparationHost"
@@ -5245,32 +5145,8 @@ rs = "safe-cex-lighter-sdk/src/amount_encoding.rs::TextIntrinsics::pow10"
 reason = "Imported BigInt exponentiation primitive with source engine limits/errors."
 
 [[exempt]]
-rs = "safe-cex-lighter-sdk/src/transaction_encoding.rs::CancelOrderInput"
-reason = "Native ordinary-record view for already-mapped L2CancelOrderTxInfo fields."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/transaction_encoding.rs::CreateOrderInput"
-reason = "Native ordinary-record view for already-mapped L2CreateOrderTxInfo fields; no added behavior."
-
-[[exempt]]
 rs = "safe-cex-lighter-sdk/src/transaction_encoding.rs::EncodingError"
 reason = "Native result/error carrier for UTF16 computational outputs; not a new SDK error class."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/transaction_encoding.rs::HashHeader"
-reason = "Native common transaction field input carrier, not a new TypeScript SDK declaration."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/transaction_encoding.rs::HashOptions"
-reason = "Native hash-input view for already-mapped TransactOpts fields, with full binary64 values."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/transaction_encoding.rs::TransferInput"
-reason = "Native ordinary-record view for already-mapped L2TransferTxInfo fields."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/transaction_encoding.rs::WithdrawInput"
-reason = "Native ordinary-record view for already-mapped L2WithdrawTxInfo optional fields."
 
 [[exempt]]
 rs = "safe-cex-lighter-sdk/src/http_types.rs::CallbackReturn"
@@ -5655,90 +5531,6 @@ reason = "C3: mandatory opaque language/property/callee/receiver/iterator/constr
 [[exempt]]
 rs = "safe-cex-venue-lighter/src/public_ingress.rs::IngressCallback"
 reason = "C3: retained native arrow callback signature for source interceptors, array methods and timer/iterator callbacks; no separately named TypeScript declaration."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::HashKind"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::boolean"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::call_method"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::ensure_wasm_initialized"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::greater_than"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::hash_auth_token"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::hash_transaction"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::less_than"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::normalize_private_key"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::number"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::object"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::poseidon2_hash"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::remainder_16"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::schnorr_sign"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::schnorr_verify"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::set_property"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::signer_error"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::template_string"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::text"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
-
-[[exempt]]
-rs = "safe-cex-lighter-sdk/src/signing_runtime.rs::SigningHost::truthy"
-reason = "Required receiver Get/Call, ECMAScript primitive, error constructor or original already-mapped key/hash/crypto dependency ABI (or named four-way hash selector) for the nine individually mapped signer method bodies. No pending signer algorithm is delegated or exempted; current ensureInitialized/signMessage bindings are exercised with the native bodies and explicit overrides."
 
 [[exempt]]
 rs = "safe-cex-venue-coinbase/src/api_factory.rs::ApiCreateConfig"
@@ -7822,5 +7614,5 @@ rs = "safe-cex-transport/src/native.rs::prepare_websocket"
 reason = "Native host capability: synchronously validates physical WebSocket constructor inputs and returns the one owned handshake future shared by connect_websocket and NativeRuntime's CONNECTING bridge. There is no maintained SDK declaration for the platform WebSocket constructor or native TCP/TLS handshake. This splits the existing terminal algorithm without adding a venue scheduler; registry native_connecting_socket real upgrades and source Bitget/BaseWebSocket witnesses cover admission, stable handle identity, send/close, cancellation and frames."
 
 [[exempt]]
-rs = "safe-cex-exchange/src/js_runtime/sorting.rs::stable_sort"
-reason = "Native JS intrinsic capability: one stable fallible merge sorter backs Array.sort, lodash orderBy and venue comparator ports without Rust's total-order requirement. This exposes the shared V8 TimSort implementation for cross-crate reuse; no standalone maintained TS declaration. Native js_sort coverage and constructed Paradex socket/getter regressions exercise NaN comparisons, retained levels, stability and first-throw termination."
+rs = "safe-cex-num/src/sorting.rs::stable_sort"
+reason = "Native JS intrinsic capability: one error-generic V8 TimSort backs Array.sort, lodash orderBy and venue comparator ports without Rust's total-order requirement. This exposes the shared V8 TimSort implementation for cross-crate reuse; no standalone maintained TS declaration. Native js_sort coverage and constructed Paradex socket/getter regressions exercise NaN comparisons, retained levels, stability and first-throw termination."

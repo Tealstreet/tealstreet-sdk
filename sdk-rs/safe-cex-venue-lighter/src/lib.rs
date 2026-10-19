@@ -66,8 +66,6 @@ pub mod sdk_field_encoding;
 
 pub mod sdk_http_access;
 
-pub mod sdk_key_management;
-
 pub mod ws_private_recovery;
 
 pub mod ws_public_readiness;

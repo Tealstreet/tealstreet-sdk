@@ -96,4 +96,17 @@ for (const wire of wires) {
   });
 }
 assert.equal(cases.length, 34, 'cloid fixed source case inventory');
-console.log(JSON.stringify({ source: 'actual hyperliquid.cloid, clientOrderId and order-inference modules with actual shared enums', cases }));
+if (process.argv.includes('--binding-audit')) {
+  const inputs = JSON.parse(fs.readFileSync(0, 'utf8'));
+  assert.equal(inputs.length, 12, 'constructed native wire cohort');
+  const outsideDomain = { ...inputs[0].wire, r: 'outside-placement-domain' };
+  assert.equal(cloid.placementRecordFromWire(outsideDomain, 'BTC-PERP', 0).reduceOnly,
+    'outside-placement-domain', 'source copies a nonboolean r when types are bypassed');
+  console.log(JSON.stringify(inputs.map(({ wire, symbol, placedAt }) => {
+    assert.equal(typeof wire.r, 'boolean', 'actual producer boolean r');
+    const record = cloid.placementRecordFromWire(wire, symbol, placedAt);
+    return { ...record, price: bits(record.price), amount: bits(record.amount), placedAt: bits(record.placedAt), timeInForce: record.timeInForce ?? null };
+  })));
+} else {
+  console.log(JSON.stringify({ source: 'actual hyperliquid.cloid, clientOrderId and order-inference modules with actual shared enums', cases }));
+}

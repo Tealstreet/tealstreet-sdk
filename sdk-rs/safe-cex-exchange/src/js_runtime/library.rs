@@ -194,7 +194,7 @@ fn order_by(collection: &Js, iteratees: &Js, orders: &Js) -> Result<Js, Thrown> 
             .collect::<Result<Vec<_>, _>>()?;
         rows.push((criteria, index, value));
     }
-    super::sorting::stable_sort(&mut rows, |(a, ai, _), (b, bi, _)| {
+    safe_cex_num::sorting::stable_sort::<_, Thrown>(&mut rows, |(a, ai, _), (b, bi, _)| {
         for (i, (x, y)) in a.iter().zip(b).enumerate() {
             match compare_ascending(x, y)? {
                 Ordering::Equal => continue,
@@ -1290,12 +1290,17 @@ fn update_order_book(book: &Js, side: &Js, update: Js, upsert: bool) -> Result<J
                 return Ok(Js::Number(-1.0));
             }
             let length = levels.get("length")?.to_number()? as usize;
-            levels.splice_array((left as usize).min(length), 0, vec![update])?;
+            levels.splice_array(length, (left as usize).min(length), 0, vec![update])?;
             left
         }
         Some(index) => {
             if update.get("amount")?.strict_equals(&Js::Number(0.0)) {
-                levels.splice_array(index as usize, 1, vec![])?;
+                levels.splice_array(
+                    levels.get("length")?.to_number()? as usize,
+                    index as usize,
+                    1,
+                    vec![],
+                )?;
                 return Ok(Js::Number(-1.0));
             }
             let level = levels.get(&Js::Number(index).to_display())?;

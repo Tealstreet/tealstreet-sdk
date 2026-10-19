@@ -168,3 +168,37 @@ fn maintained_woo_inherits_the_exact_base_schedule_cancel_rejection() {
     assert_eq!(result["message"], "Not implemented");
     assert_eq!(result["cases"], 4);
 }
+
+#[test]
+fn inactive_v3_ticker_tail_has_no_constructed_registration() {
+    let h = harness::harness(ExchangeName::Woo, harness::options(), |_| {});
+    let receiver = &h.exchange.rt.this;
+    assert!(receiver.get("fetchTickers").unwrap().is_callable());
+    for name in [
+        "WooV3WsBbo",
+        "WooV3WsTrade",
+        "WooV3AuthoritativeTickerInfo",
+        "WooV3AuthoritativeTicker",
+        "normalizePerpetualSymbol",
+        "requirePositiveFinitePrice",
+        "composeWooV3AuthoritativeTicker",
+    ] {
+        assert!(
+            receiver.get(name).unwrap().is_undefined(),
+            "unexpected ticker member {name}"
+        );
+        assert!(
+            h.exchange
+                .rt
+                .shared
+                .globals
+                .get(name)
+                .unwrap()
+                .is_undefined(),
+            "unexpected ticker global {name}"
+        );
+    }
+    assert!(h.http.requests.borrow().is_empty());
+    assert!(h.runtime.sockets.borrow().is_empty());
+    assert!(h.runtime.reports.borrow().is_empty());
+}

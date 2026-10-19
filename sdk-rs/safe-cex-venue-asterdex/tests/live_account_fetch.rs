@@ -1,6 +1,9 @@
 #[path = "support/log_observer.rs"]
 mod log_observer;
 
+use safe_cex_exchange::js_runtime::value::{
+    Js, OwnedJsValue, error_object, owned::OwnedCallbackError,
+};
 use safe_cex_exchange::native_store::DefaultStore;
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
@@ -9,6 +12,7 @@ use safe_cex_exchange::{
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_transport::{
     RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    TransportError, provider::TransportErrorOrigin,
 };
 use safe_cex_types::{
     Balance, ExchangeName, Market, Order, Position, StoreDataLoaded, StoreSubscriberError, Ticker,
@@ -183,6 +187,15 @@ impl RestAdapter for Adapter {
         }
         Box::pin(async move {
             if let Some(error) = next["error"].as_str() {
+                if next["errorType"] == "axios" {
+                    let value = error_object("AxiosError", error);
+                    value.define("isAxiosError", Js::Bool(true)).unwrap();
+                    let cause = OwnedCallbackError::new(OwnedJsValue::from_js(&value).unwrap());
+                    return Err(RestFailure::from_transport(
+                        TransportError::Rejected(TransportErrorOrigin::new(cause)),
+                        request,
+                    ));
+                }
                 return Err(RestFailure::pre_transmit(error.into(), request));
             }
             Ok(RestResponse {
@@ -434,14 +447,10 @@ fn account_fetch_matches_source() {
                         c["error"]["name"], "AxiosError",
                         "source AxiosError name floor"
                     );
-                    assert_eq!(
-                        error.name, "Error",
-                        "native RestFailure error-name boundary"
-                    );
+                    assert_eq!(c["error"]["isAxiosError"], true, "source Axios flag");
                     assert!(error.is_axios_error, "native REST failure provenance");
-                } else {
-                    assert_eq!(error.name, c["error"]["name"], "{name} native error name");
                 }
+                assert_eq!(error.name, c["error"]["name"], "{name} native error name");
                 assert_eq!(
                     error.message, c["error"]["message"],
                     "{name} native error message"

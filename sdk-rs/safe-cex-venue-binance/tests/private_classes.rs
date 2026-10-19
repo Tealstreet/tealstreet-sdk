@@ -58,6 +58,7 @@ struct Runtime {
     now: Cell<f64>,
     monotonic_clock: Cell<Option<f64>>,
     sleep_clock: Rc<Cell<f64>>,
+    sleep_wakers: Rc<RefCell<Vec<(f64, Waker)>>>,
     sleeps: RefCell<Vec<u64>>,
     reported: RefCell<Vec<String>>,
     console_frames: RefCell<Vec<(String, Vec<EventValue>)>>,
@@ -66,6 +67,15 @@ struct Runtime {
 }
 impl Runtime {
     fn pump(&self) {
+        let ready: Vec<_> = self
+            .sleep_wakers
+            .borrow_mut()
+            .extract_if(.., |(deadline, _)| self.sleep_clock.get() >= *deadline)
+            .map(|(_, waker)| waker)
+            .collect();
+        for waker in ready {
+            waker.wake();
+        }
         let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
         for mut job in jobs {
             if job
@@ -88,11 +98,19 @@ impl ExchangeRuntime for Runtime {
     fn sleep(&self, delay: u64) -> ExchangeFuture<'static, ()> {
         self.sleeps.borrow_mut().push(delay);
         let clock = self.sleep_clock.clone();
+        let wakers = self.sleep_wakers.clone();
         let deadline = self.now.get() + delay as f64;
-        Box::pin(std::future::poll_fn(move |_| {
+        Box::pin(std::future::poll_fn(move |cx| {
             if clock.get() >= deadline {
                 Poll::Ready(Ok(()))
             } else {
+                let mut wakers = wakers.borrow_mut();
+                if !wakers
+                    .iter()
+                    .any(|(at, waker)| *at == deadline && waker.will_wake(cx.waker()))
+                {
+                    wakers.push((deadline, cx.waker().clone()));
+                }
                 Poll::Pending
             }
         }))
@@ -588,7 +606,7 @@ fn shared_runtime_graph_enters_bound_private_orders_without_projection() {
             Js::object(vec![("o", data.clone())])
         };
         let events = Js::array(vec![event]);
-        events.splice_array(0, 0, vec![Js::Undefined]).unwrap();
+        events.splice_array(1, 0, 0, vec![Js::Undefined]).unwrap();
         events.delete(&[u16::from(b'0')]).unwrap();
         owner.handle_events(1, events).unwrap();
         let effects = parent.effects.borrow();
@@ -1879,7 +1897,7 @@ fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
 }
 
 #[test]
-fn private_escaped_surrogate_order_callback_loss_is_inventoried() {
+fn private_surrogate_frames_reach_the_source_order_dispatch() {
     for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
         let (owner, _, base, _, _) = fixture(venue);
         let ordinary = if venue == Venue::Spot {
@@ -1896,9 +1914,10 @@ fn private_escaped_surrogate_order_callback_loss_is_inventoried() {
         base.stats.borrow_mut().clear();
         let escaped = ordinary.replace("\"ok\"", r#""\ud800""#);
         owner.on_message(string(escaped)).unwrap();
-        assert!(
-            base.stats.borrow().is_empty(),
-            "FORCED native escaped surrogate suppresses private order callback"
+        assert_eq!(
+            *base.stats.borrow(),
+            ["order"],
+            "native escaped surrogate reaches private order callback"
         );
     }
     let source = std::process::Command::new("node")
@@ -2742,7 +2761,9 @@ fn exchange_class_actual_constructors_bind_watchdog_across_retained_child_lifeti
                 .store
                 .update(
                     safe_cex_store::StoreUpdate {
-                        socket_health: Some(json!({"publicHealthy":false,"privateHealthy":false})),
+                        socket_health: Some(
+                            json!({"publicHealthy":false,"privateHealthy":false}).into(),
+                        ),
                         ..Default::default()
                     },
                     false,
@@ -2759,6 +2780,8 @@ fn exchange_class_actual_constructors_bind_watchdog_across_retained_child_lifeti
                     .store
                     .socket_health()
                     .unwrap()
+                    .unwrap()
+                    .into_value()
                     .unwrap()["publicHealthy"],
                 json!(true),
                 "native watchdog performs real canonical health publication"

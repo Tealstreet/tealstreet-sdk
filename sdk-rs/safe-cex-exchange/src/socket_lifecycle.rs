@@ -1,6 +1,6 @@
 //! Exchange socket grouping and watchdog; see exchanges/base.ts lifecycle contract.
 use crate::websocket::BaseWebSocket;
-use serde_json::Value;
+use safe_cex_types::retained_json::RetainedJsonInput;
 use std::rc::Rc;
 
 pub enum SocketSlot {
@@ -14,7 +14,10 @@ pub enum SocketSlot {
     ThirdTickers = 7,
 }
 
-pub(crate) fn socket_diagnostics(sockets: &[Rc<BaseWebSocket>], private: bool) -> Value {
+pub(crate) fn socket_diagnostics(
+    sockets: &[Rc<BaseWebSocket>],
+    private: bool,
+) -> Vec<(Vec<u16>, RetainedJsonInput)> {
     let sources: Vec<_> = sockets
         .iter()
         .map(|socket| {
@@ -28,8 +31,29 @@ pub(crate) fn socket_diagnostics(sockets: &[Rc<BaseWebSocket>], private: bool) -
             })
         })
         .collect();
-    serde_json::to_value(safe_cex_store::socket_health::summarize_socket_diagnostics(
-        &sources, private,
-    ))
-    .expect("socket diagnostic scalars serialize")
+    let summary = safe_cex_store::socket_health::summarize_socket_diagnostics(&sources, private);
+    let kind = if private { "private" } else { "public" };
+    [
+        (
+            format!("{kind}CloseCode"),
+            summary
+                .close_code
+                .map_or(RetainedJsonInput::Undefined, RetainedJsonInput::Float),
+        ),
+        (
+            format!("{kind}CloseCountTotal"),
+            RetainedJsonInput::Float(summary.close_count_total),
+        ),
+        (
+            format!("{kind}CloseStreak"),
+            RetainedJsonInput::Float(summary.close_streak),
+        ),
+        (
+            format!("{kind}ReconnectPaused"),
+            RetainedJsonInput::Bool(summary.reconnect_paused),
+        ),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.encode_utf16().collect(), value))
+    .collect()
 }

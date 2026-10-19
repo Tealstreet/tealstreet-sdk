@@ -243,6 +243,22 @@ fn header(headers: &IndexMap<String, String>, name: &str) -> Option<String> {
         .find(|(key, _)| key.eq_ignore_ascii_case(name))
         .map(|(_, value)| value.clone())
 }
+fn stamp_signing_diagnostics(request: &mut RestRequest, elapsed: f64, now: u64) {
+    request
+        .config_extensions
+        .insert("safeCexRestDiagSignMs".into(), Input::Float(elapsed));
+    request
+        .config_extensions
+        .insert("safeCexRestDiagSignedAt".into(), Input::Float(now as f64));
+    let timestamp = header(&request.headers, "x-bapi-timestamp")
+        .map_or(f64::NAN, |value| safe_cex_num::number_from_string(&value));
+    if timestamp.is_finite() && timestamp > 0.0 {
+        request.config_extensions.insert(
+            "safeCexRestDiagSignatureAgeMs".into(),
+            Input::Float(now as f64 - timestamp),
+        );
+    }
+}
 impl RemoteSigningAdapter {
     fn execute_query(
         &self,
@@ -291,6 +307,7 @@ impl RemoteSigningAdapter {
                 })
                 .await
                 .map_err(|e| crate::RestFailure::from_transport(e, original.clone()))?;
+            let completed = (self.now_ms)();
             if let Some(error) = response.error.filter(|s| !s.is_empty()) {
                 return Err(crate::RestFailure::pre_transmit(
                     format!("Remote signing failed: {error}"),
@@ -320,7 +337,12 @@ impl RemoteSigningAdapter {
             }
             request.query_params = signed.params;
             request.body = signed.data.map(crate::RestBody::from_remote_adapter_data);
-            request.sign_ms = Some((self.now_ms)().saturating_sub(started));
+            request.sign_ms = Some(completed.saturating_sub(started));
+            stamp_signing_diagnostics(
+                &mut request,
+                completed as f64 - started as f64,
+                (self.now_ms)(),
+            );
             let inner = self.inner.read().expect("inner adapter lock").clone();
             inner.execute_with_receipt(request).await
         })
@@ -369,6 +391,7 @@ impl RemoteSigningAdapter {
                 .map_err(failure)?
                 .cloned();
             let mut sign_ms = None;
+            let mut diagnostics = None;
             if !request.skip_remote_signing {
                 let started = (self.now_ms)();
                 let response = self
@@ -399,7 +422,9 @@ impl RemoteSigningAdapter {
                         )));
                     }
                 };
-                sign_ms = Some((self.now_ms)().saturating_sub(started));
+                let signed_at = (self.now_ms)();
+                sign_ms = Some(signed_at.saturating_sub(started));
+                diagnostics = Some(signed_at as f64 - started as f64);
                 if let Some(error) = response.error.filter(|s| !s.is_empty()) {
                     return Err(failure(TransportError::Host(format!(
                         "Remote signing failed: {error}"
@@ -457,6 +482,9 @@ impl RemoteSigningAdapter {
             // The source calls the selected inner adapter directly. Running
             // Axios transformation here would stringify an echoed object again.
             retry_config.merge_axios_headers(&IndexMap::new());
+            if let Some(elapsed) = diagnostics {
+                stamp_signing_diagnostics(&mut retry_config, elapsed, (self.now_ms)());
+            }
             inner.execute_with_receipt(retry_config).await
         })
     }

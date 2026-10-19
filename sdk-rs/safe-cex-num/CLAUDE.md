@@ -384,3 +384,7 @@ Node comparison and pass again after exact source restoration.
 checks the six compiler-owned writer APIs: one native prepared-value conversion
 and five specific outbound classifications. Those classifications are separate
 from the executed Node comparisons and corruption controls above.
+
+`sorting::stable_sort` owns the single V8 13.6 TimSort implementation, moved
+from Exchange. Generic comparator errors remain original values; infallible
+callers use Infallible. Store and native JS callers share the same algorithm.

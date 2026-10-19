@@ -252,7 +252,7 @@ pub(crate) fn base_exchange_class(
                 // These are the concrete class's ported own methods, not the
                 // inert BaseExchange capability fallbacks.
                 let (fills_realm, fills_owner) = (realm.clone(), owner.clone());
-                let mut fills = move |options: safe_cex_types::ExecutionsOptions| {
+                let fills = move |options: safe_cex_types::ExecutionsOptions| {
                     let (mut realm, owner) = (fills_realm.clone(), fills_owner.clone());
                     Box::pin(async move {
                         let options = realm
@@ -275,7 +275,7 @@ pub(crate) fn base_exchange_class(
                         >
                 };
                 let income_realm = realm.clone();
-                let mut income = move |from, to| {
+                let income = move |from, to| {
                     let (mut realm, owner) = (income_realm.clone(), owner.clone());
                     Box::pin(async move {
                         let result = realm
@@ -298,7 +298,7 @@ pub(crate) fn base_exchange_class(
                             Vec<safe_cex_types::IncomeRecord>,
                         >
                 };
-                let mut settle = move |symbol: &str| {
+                let settle = move |symbol: &str| {
                     Ok(base
                         .store
                         .markets_by_symbol()?
@@ -308,16 +308,17 @@ pub(crate) fn base_exchange_class(
                         .unwrap_or_else(|| "USDT".into()))
                 };
                 let result = build_folded_position_records(
-                    &mut FoldableExchange {
-                        fetch_historical_fills: &mut fills,
-                        fetch_income_history_range: Some(&mut income),
+                    FoldableExchange {
+                        runtime: realm.runtime(),
+                        fetch_historical_fills: Rc::new(fills),
+                        fetch_income_history_range: Some(Rc::new(income)),
                     },
-                    &mut BuildRecordsOptions {
-                        account: &account,
+                    BuildRecordsOptions {
+                        account,
                         from,
                         to,
                         symbol_scoped,
-                        resolve_settle_currency: &mut settle,
+                        resolve_settle_currency: Rc::new(settle),
                     },
                 )
                 .await

@@ -2,8 +2,8 @@
 
 Authority: the 37 exact rows in `assignments/codex-0w5ohi.json`, linked from
 `non-utf8-assignment-index.json`, and the async ruling in
-`divergence-cluster-rulings.md`. Eighteen rows are reconciled below; the other
-19 remain pending individual production-binding audits.
+`divergence-cluster-rulings.md`. Twenty-nine rows are reconciled below, including history rows6/16 from
+PR #1198 and socket rows25/35. The other eight delegated rows remain open.
 
 | Assignment rows | Source owner | Verdict | Production observation |
 | --- | --- | --- | --- |
@@ -71,14 +71,14 @@ compiles early-copy and nonzero-Spot-return faults, requires named runtime
 failures, restores exact bytes and requires GREEN. No WebSocket bodies change.
 
 The position batch reconciles five rows. With the seven rows in PR #1182,
-row 37 ACCEPT-safety in PR #1188 and the five Hyro rows below, 18 of 37
-are reconciled and 19 remain.
+row 37 ACCEPT-safety in PR #1188, the five Hyro rows below and delegated
+history rows 6/16 in PR #1198, plus the seven retained rows in PR #1212,
+29 of 37 are reconciled and eight remain after socket rows25/35 below.
 
-The remaining 19 rows are split by module: codex-0efu4x owns rows
-1/2/3/6/7/8/12/13/16/23/25/35 (public/private socket lifecycle, history mapping
-and position controls); codex-0w5ohi retains rows
-18/24/26/27/32/33/36 (Spot, placement options, account,
-market and startup/facade work). Existing WS carrier owners retain their separate
+The remaining eight rows belong to codex-0efu4x:
+1/2/3/7/8/12/13/23 (public/private socket lifecycle and position controls).
+The seven rows retained by codex-0w5ohi, 18/24/26/27/32/33/36, are reconciled
+in the retained batch below. Existing WS carrier owners retain their separate
 body changes; the socket audit owner coordinates those boundaries first.
 
 ## Original-method retry guard: row 37 ACCEPT-safety
@@ -137,3 +137,97 @@ and prove that shadowed `__proto__` accessors are not read.
 `scripts/hyro-account-controls.py` mutates each accepted guard/result and the
 Error classification separately, requires compiled named native failures, then
 restores exact source bytes and replays the receiver.
+
+## Delegated history: rows 6 and 16
+
+Both primary and inverse history mapper rows are FIX in PR #1198. The live
+historical-fills reader visibly refuses malformed strict output fields after
+source paging and recovery, preserving valid neighbors and source error priority.
+The synchronous raw mapper and its original identity/alias guards are unchanged.
+See `DELEGATED_HISTORY_FIX_AUDIT.md` for the real-binding RED/GREEN, six compiled
+production controls and the ten remaining delegated rows.
+
+## Retained startup, markets, tickers and placement: rows 18/24/26/27/32/33/36
+
+| Row | Verdict | Production binding evidence |
+| --- | --- | --- |
+| 18 | FIX | Spot startup kept its eager Promise and sequential markets/tickers flow, but narrowed the private-probe warning to UTF-8. The original warning code units now reach the logger. |
+| 24 | ACCEPT | The stronger enum is strictly placement input. Six null/malformed/conflicting extension profiles refuse through the actual placement capability before signing or HTTP; existing positive BBO/tick-size/ordinary bindings retain allowed fields. |
+| 26 | ACCEPT | Decision 3 applies per market row. Good/bad/good HTTP pages retain both valid neighbors through fetch and refresh, while malformed asset/symbol values are visibly reported. Source property/coercion errors remain distinct. |
+| 27 | FIX | Spot's production helper projected the complete response through JSON before mapping. It now captures retained metadata directly, including own undefined, lone-surrogate text and infinity; row-only typed refusal remains. |
+| 32 | ACCEPT | The actual primary receiver already starts its canonical Promise eagerly, fetches markets/tickers concurrently and keeps continuations after waiter abandonment. Detached cache failures visibly report the original value under the shared no-silent-failure rule, instead of the source empty catch. |
+| 33 | FIX | Primary/Spot production parsing now uses the original indexed list and live market dictionary. Falsy input returns the original cached array; unread metadata is untouched and parseFloat retains UTF-16 prefixes. |
+| 36 | ACCEPT | The shared Rust carrier installs the separate Spot members. Existing actual facade/socket/trading tests confirm Spot class identity, category, fixed leverage, empty positions and inherited refusals. |
+
+`receiver_tests::retained_audit_*` constructs the native production owner and
+observes raw identity, UTF-16 units, IEEE bits, held clock/request settlement,
+loaded flags, detached reporting and private connection/snapshot/tick ordering.
+The three master defects compile and fail by assertion before their fixes.
+`scripts/retained-audit-fixtures.cjs` executes the maintained TS members through
+the existing API-validation source gate. `retained-audit-controls.py` compiles
+cache-copy, numeric-prefix, raw-info projection and warning-text faults, then
+restores exact production bytes and requires the named native witnesses GREEN. The market-row HTTP, Spot facade and
+primary placement targets retain their original cases and effects. The exported
+JSON mappers remain supplemental tests, with no production fallback through them.
+
+This batch reconciles all seven rows retained by codex-0w5ohi. Delegated socket
+rows25/35 are reconciled below; history rows6/16 retain their separate #1198
+milestone. The other eight delegated rows remain open.
+
+
+## Delegated private trade filter: row 35 FIX
+
+The production private-frame handler took a dense snapshot before invoking the
+live category selector. A selector replacing a later row therefore delivered the
+old row, unlike the maintained `rowsThisConnectionTrades` member. The native
+binding now calls the original array filter member. The shared array algorithm
+captures the initial length, skips absent indices and reads later rows after
+each preceding callback. Its completed result feeds the existing event consumers.
+
+`binding::delegated_socket_tests::private_filter_reads_live_indices_through_real_frame_binding`
+constructs primary and demo exchanges and enters through their real private
+socket. Fourteen profiles check callback order, selected count and original row
+identity under replacement, deletion, truncation, appends, sparse input and false
+selectors. The seven corresponding maintained-member profiles run directly from
+`scripts/private-filter-fixtures.cjs`. Existing account-category, dedicated
+Spot/Inverse and typed event/output guards stay in place. Independent compiled
+snapshot and ignored-selector faults must fail the named real-frame witness;
+`private-filter-controls.py` restores exact source bytes and requires GREEN.
+
+This milestone reconciles delegated row35. Rows6/16 retain their separate #1198
+history milestone; the other delegated rows retain the separate verdicts below.
+
+
+## Delegated inverse auth: row 25 ACCEPT
+
+The numeric-expiry difference requires a nonfinite clock result. The production
+native registry supplies `VIRTUAL_CLOCK`, whose default clock reads SystemTime;
+private reconnect clears its prior offset before the auth sample. Auth adds a
+fixed10000ms, with no account/configuration expiry input. An injected broken clock
+can still exercise the previously recorded nonfinite JSON boundary; it does not
+describe this constructed native production path. The coordinator authorized this
+reachability classification on thread-dm50ve5c1yer,2026-10-19.
+
+`inverse_auth_production_clock_keeps_finite_expiry_at_real_signer` enters the real
+inverse private onOpen, waits for its source25ms boundary and captures the original
+hosted signer request before its pending result settles. It verifies the actual
+clock interval, cleared stale offset, finite native expiry, exact signing payload,
+request kind and account identity. The maintained inverse auth and clock members
+execute three native-Node profiles with real Date.now and the original offset
+reset. A compiled null-expiry production fault must fail this witness before an
+exact restored GREEN. No auth/signing carrier or production body changes here.
+
+This socket batch reconciles rows25 and35. History rows6/16 are merged from #1198;
+the eight other delegated rows remain open.
+
+
+The shared public-topic timing control is strengthened alongside this socket
+batch, without closing additional assignment rows. The older witness advanced
+virtual time in50ms increments, so a first market-chunk wait changed from5ms to0ms
+could survive. `market_additions_wait_five_ms_between_real_socket_chunks` now
+runs actual Spot and dedicated Inverse sockets at unchanged time,4ms and5ms for
+each remaining chunk. It retains the eager first send, exact topic count/order,
+and existing pending-tail disposal/weak-owner guards. Both maintained TS methods
+independently execute with held sleeps, checking sends at0/5/10ms and the final
+wait through15ms. `public-topic-controls.py` requires each production fault to
+compile RED, restores every source byte and requires the full target GREEN.

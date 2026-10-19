@@ -656,7 +656,10 @@ fn public_stats_native_fields_match_actual_source() {
                         runtime.now.set(time);
                         if let Some(count) = own_count {
                             let callbacks: Vec<MessageHandler> = (0..count)
-                                .map(|_| Rc::new(|_: &Value| Ok(())) as MessageHandler)
+                                .map(|_| {
+                                    Rc::new(|_: &safe_cex_exchange::js_runtime::value::Js| Ok(()))
+                                        as MessageHandler
+                                })
                                 .collect();
                             socket
                                 .message_handlers
@@ -986,7 +989,10 @@ fn prototype_statistics_sequences_preserve_native_values_and_realms_before_sourc
             clock_a.now.set(1000.0);
             if let Some(n) = count {
                 let callbacks: Vec<MessageHandler> = (0..n)
-                    .map(|_| Rc::new(|_: &Value| Ok(())) as MessageHandler)
+                    .map(|_| {
+                        Rc::new(|_: &safe_cex_exchange::js_runtime::value::Js| Ok(()))
+                            as MessageHandler
+                    })
                     .collect();
                 a.message_handlers
                     .borrow_mut()
