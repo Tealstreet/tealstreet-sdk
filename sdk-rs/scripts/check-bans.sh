@@ -20,7 +20,7 @@ ban() {
   fi
 }
 
-crates=$(ls -d safe-cex-*/)
+crates=$(ls -d engine/ crypto/ hosts/*/ venues/*/)
 
 # JavaScript value, number, string and runtime emulation.
 ban 'JS-shaped value types' '\bJs[A-Z][A-Za-z]*\b|\bjs_runtime\b|\bJsValue\b' $crates
@@ -32,7 +32,7 @@ ban 'JSON map-order or arbitrary-precision emulation' 'preserve_order|arbitrary_
 ban 'deleted port crates' 'safe-cex-(exchange|registry|parity|ffi|webworker|types|num|store|transport|candle-cache|lighter-sdk)\b|safe_cex_(exchange|registry|parity|ffi|webworker|types|num|store|transport|candle_cache|lighter_sdk)\b' $crates
 
 # Untyped JSON trees stay out of engine and venue hot paths.
-hot=$(ls -d safe-cex-engine/src safe-cex-venue-*/src 2>/dev/null || true)
+hot=$(ls -d engine/src venues/*/src 2>/dev/null || true)
 if [[ -n $hot ]]; then
   ban 'serde_json::Value in engine or venue source' 'serde_json::Value|\bValue::(Object|Array)' $hot
 fi

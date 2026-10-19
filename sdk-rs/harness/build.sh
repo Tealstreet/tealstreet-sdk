@@ -9,8 +9,8 @@ if [[ $(uname) == Darwin ]]; then
 fi
 cargo build --locked --release -p safe-cex-wasm --target wasm32-unknown-unknown
 for target in web nodejs; do
-  wasm-bindgen --target "$target" --out-dir "safe-cex-wasm/pkg/${target/nodejs/node}" \
+  wasm-bindgen --target "$target" --out-dir "hosts/wasm/pkg/${target/nodejs/node}" \
     target/wasm32-unknown-unknown/release/safe_cex_wasm.wasm
 done
 # The Node bindings are CommonJS inside an ESM package.
-echo '{"type":"commonjs"}' > safe-cex-wasm/pkg/node/package.json
+echo '{"type":"commonjs"}' > hosts/wasm/pkg/node/package.json

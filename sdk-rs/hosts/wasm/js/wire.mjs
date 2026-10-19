@@ -1,5 +1,5 @@
 // Reader for the engine's flush frame (docs/plans/RUST_REWRITE.md,
-// "Data shapes: the flush frame"; encoder: safe-cex-engine/src/wire.rs).
+// "Data shapes: the flush frame"; encoder: engine/src/wire.rs).
 // Everything is a view over the transferred buffer: numbers are typed-array
 // columns, strings are decoded only when asked for.
 
