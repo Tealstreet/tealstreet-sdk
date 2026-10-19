@@ -169,3 +169,30 @@ Each received its own independent phase review before this checkpoint.
   marginal (21.1 ms TS / 21.7 Rust). A one-pass typed ticker envelope is being
   implemented to remove repeated RawValue scanning before final acceptance.
   Other venue regressions are replaying on this size-compliant artifact.
+
+## Per-venue build integration (final architecture)
+
+Landing `c5bc2c4adf` introduced venue-feature wasm bundles and a per-venue
+1,258,291-byte cap. Integrated that structure and discarded all aggregate
+compiler-profile experiments. No shared release profile change remains.
+WOO is an optional/default host feature, build allowlist entry and CI matrix row.
+Independent integration review PASS; 152 strict harness tests PASS.
+
+- WOO single-venue wasm: 813443 bytes < 1258291.
+- WOO public: PASS, 77 frames, 222 markets/tickers, two books; CPU 71.1 →
+  59.4 ms, steady 34.7 → 27.1 ms, retained 1.6 → 1.1 MB.
+- WOO private: PASS, 56 frames, 18 commands, 132 fixture records. Exact bodies,
+  HMAC/auth, socket generations, ping replies, request/write consumption,
+  account state, fills and query results all match. Informational private CPU
+  116.5 → 89.7 ms, retained 4.1 → 0.9 MB.
+- Public ticker envelopes decode once. Bitwise no-op guards avoid the store's
+  full-field scan while retaining signed-zero updates. Known ticker fallback
+  decoding became provably unreachable and was deleted. Independent review
+  PASS; WOO native tests now 89, complete workspace 823 PASS.
+- Kept shared exact-ID parsing for queries; compact original scalar enum
+  decoding was smaller than new ID/maker visitors. All boundary regressions
+  remain. New Hyperliquid-only remote client lookup query rejects explicitly
+  on WOO; its SDK caller-ID lookup retains the existing local contract.
+- Bans, formatting, workspace native clippy, root typecheck (44 tasks) and lint
+  (28 tasks) PASS. Final combined SDK tests, Binance feature-bundle regressions,
+  PR adversarial reviews and CI remain before landing.
