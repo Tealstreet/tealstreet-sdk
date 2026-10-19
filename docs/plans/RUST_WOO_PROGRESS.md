@@ -141,3 +141,31 @@ Each received its own independent phase review before this checkpoint.
   venue error messages. The original regex helper corrupts numbers inside text.
 - Root typecheck 44 tasks and lint 28 tasks passed before integration. Full tests
   and the integrated release artifact are running; final acceptance remains open.
+
+## Final landing integration and size checkpoint
+
+- Integrated Bitget landing `4e468ed2e5` and its completion note `3a7b46407d`.
+  The new shared `createTape` retains WOO HMAC validation, socket generation
+  resets, typed subscription keys, strict staged snapshots and one-use writes.
+  Independent integration review PASS; 118 harness tests PASS.
+- Final healthy private fixture: 132 records, 18 commands, 56 replay frames,
+  22 seconds. Full terminal algo leaves remain decodable after the server's
+  empty snapshot; public server pings require audited pong replies. Independent
+  tail review PASS. WOO/Binance required private/public gates passed before this
+  final size tuning. No output comparison or performance threshold changed.
+- Full repository validation PASS: 44 typecheck tasks, 28 lint tasks, 27 test
+  tasks; safe-cex runs both test entrypoints with 6594 tests each. Three initial
+  unrelated timeout/in-flight integration failures passed isolated reruns and
+  then the complete clean rerun. Latest wasm SDK suite: 27 tests PASS.
+- Direct scalar visitors remove duplicate untagged ID/maker representations.
+  Required/optional IDs preserve exact u64, null/empty and type-rejection rules;
+  independent bounded review PASS, WOO native tests now 84. Workspace native
+  baseline was 747 before four new WOO regressions; final rerun in progress.
+- Eleven-venue wasm initially 3,782,678 bytes. WOO-wide size optimization hurt
+  steady CPU and still missed the cap. Keep WOO, Bitget and engine at O3; use
+  compact host dispatch and global wasm level-z (native release unchanged).
+  Current artifact: 3,642,686 < inherited 3,670,016 bytes. No lane budget increase.
+- The latest shared harness removes enough overhead that WOO steady CPU is
+  marginal (21.1 ms TS / 21.7 Rust). A one-pass typed ticker envelope is being
+  implemented to remove repeated RawValue scanning before final acceptance.
+  Other venue regressions are replaying on this size-compliant artifact.
