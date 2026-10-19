@@ -125,7 +125,7 @@ impl JournalFolder for Folder {
         from: f64,
         to: f64,
         symbol_scoped: bool,
-        _: Box<dyn Fn(&str) -> Result<String, ExchangeError> + 'a>,
+        _: Box<dyn Fn(&str) -> Result<String, ExchangeError>>,
     ) -> ExchangeFuture<'a, Vec<Value>> {
         assert!(
             std::ptr::eq(venue.base(), self.expected_base),
