@@ -114,3 +114,29 @@ using shared start_eager. Its real held HTTP probes preserve request-start timin
 and verify post-response catch/log and reconciliation after waiter drop. The
 original source timer callback body is shared with the weak native timer binding;
 no duplicate subscription or reconciliation algorithm is introduced.
+
+## Shared journal reader
+
+`safe-cex-exchange/src/build_records.rs::build_folded_position_records` is a
+standalone exported utility rather than another venue `impl Exchange`. Its former
+borrowed async body delayed the first read until polling and lost the remaining
+fold when the waiter was dropped. The direct cutover takes owned options and
+read/settlement callbacks with their existing runtime, and uses shared
+`eager::start_eager`. Each read uses the same boundary to preserve ready-result
+await fences. The native `BuildRecordsError` result and wrapped income cause are
+retained directly; there is no JSON transport or second task driver.
+
+`tests/journal.rs::journal_read_starts_at_call_and_finishes_after_waiter_drop`
+compares both income-first and fills-only paths with the maintained whole TS
+function. The original body compiled RED independently for immediate entry and
+post-drop continuation. A separate ready-read/throwing-settlement probe preserves
+the await fence and original error referent. The original 12 build scenarios,
+192 interval/funding cases and mixed-ID/nonfinite sort profiles remain exercised.
+The closed input/model and host JournalFolder composition choices are separate
+from this measured scheduling repair.
+
+The production Binance NativeImports, Bitget ReceiverFolder, Hyperliquid Realm
+facade and Paradex NativeJournal consumers use that same owned reader API and
+their existing runtime/receiver. The host JournalFolder settlement callback owns
+its Store capture rather than borrowing the awaiting fold. This consumer migration
+does not claim each outer SDK wrapper has independently measured eager timing.

@@ -100,4 +100,28 @@ for(const count of [24,32,64,128])for(let seed=1;seed<=32;seed++){
  nonfiniteCases.push({fills:fills.map(row=>({...row,timestamp:0})),
   timestamps:fills.map(row=>observe(row.timestamp)),intervals:observe(result)});
 }
-buildCases().then(buildCases=>process.stdout.write(JSON.stringify({cases,direct,fundingRows,buildCases,orderingCases,nonfiniteCases}))).catch(e=>{console.error(e);process.exitCode=1;});
+async function buildTimingCases() {
+ const out=[];
+ for(const income of [false,true]) {
+  let release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const trace=[];
+  const exchange={fetchHistoricalFills:async()=>{trace.push('fills');if(!income)await gate;return [buy,sell];}};
+  if(income)exchange.fetchIncomeHistoryRange=async()=>{trace.push('income');await gate;return [];};
+  const pending=build.buildFoldedPositionRecords(exchange,{account:'acct',from:0,to:3,resolveSettleCurrency:s=>{trace.push('currency:'+s);return 'USDT';}});
+  const before=trace.slice();
+  release();
+  const result=await pending;
+  out.push({income,before,after:trace,totalFills:result.totalFills,records:result.records.length});
+ }
+ const trace=[];
+ const reason=new build.sourceError('settlement lookup failed');reason.name='SettlementDenied';
+ let same=false,before;
+ try {const pending=build.buildFoldedPositionRecords({fetchHistoricalFills:async()=>[buy,sell]},
+  {account:'acct',from:0,to:3,resolveSettleCurrency:s=>{trace.push(s);throw reason;}});before=trace.slice();await pending;}
+ catch(error){same=error===reason;assert.equal(error.name,'SettlementDenied');assert.equal(error.message,'settlement lookup failed');}
+ assert.equal(same,true,'BUILD settlement callback rejection is original');
+ assert.deepEqual(before,[],'BUILD ready read crosses an await before settlement');
+ return {timing:out,settlement:{same,before,trace}};
+}
+Promise.all([buildCases(),buildTimingCases()]).then(([buildCases,buildTiming])=>process.stdout.write(JSON.stringify({cases,direct,fundingRows,buildCases,buildTiming,orderingCases,nonfiniteCases}))).catch(e=>{console.error(e);process.exitCode=1;});

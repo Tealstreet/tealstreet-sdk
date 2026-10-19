@@ -25,13 +25,16 @@ and fill effects. The corresponding position test dispatches account messages
 through real Futures/PM state and reads contracts, entry, PnL, side and notional.
 Only primitive host ports are scripted; no event mapper or Store is replaced.
 
-The new `accepted_receivers` witness invokes the actual `EventOps::read` on four
-primitive/array receivers and three stock keys plus a missing key. It checks the
-exact selected current realm/member identity, rejects identity with another
-realm, then observes later signed-zero and Boolean property writes through the
-retained referent before serialization. It strengthens the existing identity
-boundary. These finite data-property profiles do not claim arbitrary getters or
-executable callables.
+The `accepted_receivers` witness keeps the three primitive receivers' stock
+constructor/toString/prototype and missing-key checks. Arrays have a distinct
+canonical Array.prototype and its own toString, matching JavaScript. Their
+separate thirteen-field native/Node vm profile checks same-realm sharing,
+cross-realm separation, retained identity after rebinding, later prototype and
+function property writes, native signed-zero element/property bits and the
+rendered value.
+Native references and number bits are observed before projection. The mandatory
+Binance oracle includes the ignored Node comparison. These finite profiles do
+not claim arbitrary getters/callables or Array constructor coverage.
 
 The whole-source `text_in` and `attach` pins and all external-Js receiver item
 pins remain exact. Do not refresh them for temporary mutation controls. Native
@@ -41,11 +44,12 @@ then restore the original source before canonical inventory is rerun.
 From `sdk-rs`, run serially:
 
 ```sh
+export CARGO_INCREMENTAL=0
 node safe-cex-venue-binance/scripts/private-event-role-contracts.mjs
 python3 safe-cex-venue-binance/scripts/private-event-role-controls.py
-cargo test --locked --jobs 2 -p safe-cex-venue-binance --test accepted_receivers
+cargo test --locked --jobs 2 -p safe-cex-venue-binance --test accepted_receivers -- --include-ignored
 cargo clippy --locked --jobs 2 -p safe-cex-venue-binance --features native --lib --test private_classes --test accepted_receivers -- -D warnings
-cargo test --locked --jobs 2 -p safe-cex-exchange --all-features --test cancellable_future_inventory
+cargo test --locked --jobs 1 -p safe-cex-exchange --all-features --test cancellable_future_inventory
 ```
 
 The pre-contract canonical RED requires all six compiled missing-contract

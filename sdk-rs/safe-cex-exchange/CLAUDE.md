@@ -8,7 +8,14 @@ Executable config capabilities retain the owned-data boundary. Constructed Aster
 and WOO witnesses cover scalar/Error rejection and release without an Rc cycle.
 The typed REST host recovers owned callback errors through the canonical
 ExchangeError-to-Thrown conversion and attaches the effective request config.
+Both JS factory request interceptors stamp the live config with integer
+request-start time after accounting. Read-only telemetry fields do not fail HTTP;
+the maintained-source comparison observes both prepared and terminal configs.
+Socket diagnostics reuse the shared auth-operation predicate after JSON parsing.
 The Bitget owned-transport regression pins retry eligibility after that boundary.
+Native network rejections retain the actual RestRequest as an opaque request
+capability, so Axios enhancement selects its network branch. Setup refusals have
+no request; the native adapter retains its existing name/code and Axios flag.
 
 Behavioral sources are [exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md)
 and [SDK guidance](../../packages/safe-cex/CLAUDE.md). This document records the
@@ -246,7 +253,8 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     js_runtime::value::Js,
 };
-use safe_cex_store::{store::DefaultStore, Store, StoreUpdate};
+use safe_cex_exchange::native_store::DefaultStore;
+use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{ExchangeName, PlaceOrderOpts};
 use serde_json::{json, Value};
 use std::{cell::RefCell, future::Future, pin::Pin, rc::Rc, task::{Context, Poll, Waker}};
@@ -990,14 +998,22 @@ source slice(-1) symbols. Native stable sort does not claim V8 comparator schedu
 for non-transitive mixed-ID ties. No journal grading or venue fetch composition
 is implied. The scoped live test is `--test journal -- --include-ignored`.
 
-build_records ports the standalone journal reader over a callable FoldableExchange
-projection. Income failures are fatal when their symbols drive scoped fills reads;
+build_records ports the standalone journal reader over an owned FoldableExchange
+projection. The caller supplies its runtime and owned read/settlement callbacks;
+canonical start_eager starts the first read during invocation and retains the
+fold after its waiter drops. Each read crosses the canonical Promise await fence,
+including immediately-ready leaves. BuildRecordsError stays native throughout.
+Income failures are fatal when their symbols drive scoped fills reads;
 account-wide reads continue with unavailable funding. Errors retain a wrapped
-native cause and source name. Typed shared read rows/errors exclude malformed
-optional income rows and raw falsy JS rejections; native futures are lazy.
+native cause and source name. Settlement callback failures propagate their
+original native error and stop record construction. Typed shared read rows retain
+their separate model boundary; arbitrary malformed income objects are not claimed.
 Read symbols in first-seen order, request the 14-day straddle lookback, fold
-account-wide fills per symbol, then omit pre-window/open intervals. The existing
-JournalFolder host seam is not automatically bound to this implementation.
+account-wide fills per symbol, then omit pre-window/open intervals. The native
+Binance, Bitget, Hyperliquid and Paradex consumers pass their actual runtimes
+and read receivers. JournalFolder settlement callbacks own the captured
+Store so eager work can outlive its observer; arbitrary external host composition
+remains explicit.
 
 
 Venue callbacks that test `this.ws` must use BaseWebSocket::has_websocket, not
@@ -1145,7 +1161,11 @@ Array and accessor descriptors share this checked property machinery; arrays now
 retain sparse indexed/named slots and a virtual length in one ArrayData owner.
 Existing host define_accessor remains the fallible host accessor seam.
 The engine oracle in tests/js_data_descriptors_oracle.cjs checks the data-flag and
-redefinition matrix; the native error test covers Polymarket's enhanced message.
+redefinition matrix, including empty and sparse array targets. Array observations
+retain holes, own undefined and negative-zero bits before JSON, and check hidden
+readonly properties plus rejected writes, deletes and redefinitions. Malformed
+descriptors still leave targets unchanged. The native error test covers
+Polymarket's enhanced message.
 
 The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
 worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
@@ -1384,7 +1404,7 @@ full-string, whitespace and arbitrary-length binary64 rounding rules. The native
 host `js_string_number` target compares 93 Node results through installed Number,
 including signed radix refusals, large values, overflow and signed zero.
 
-Array `sort` and Lodash `orderBy` use one private fallible stable merge sort.
+Array `sort` and Lodash `orderBy` use the shared safe-cex-num fallible V8 TimSort.
 JavaScript callbacks need not define a Rust total order: NaN comparison results
 mean equality, and inconsistent callbacks must not panic. The first source throw
 stops comparisons immediately. Default Array sorting compares original UTF-16
@@ -2082,7 +2102,7 @@ The js_construction Node comparison covers bound constructors, primitive left
 operands, null prototypes and invalid prototypes; native getter checks preserve
 original thrown identity. Hyro validation consumes this operation directly.
 
-`js_runtime::sorting::stable_sort` follows CI Node 24.20.0 / V8 13.6 TimSort comparison scheduling:
+`safe_cex_num::sorting::stable_sort` follows CI Node 24.20.0 / V8 13.6 TimSort comparison scheduling:
 natural-run detection, minrun, binary insertion, stack collapse, directional merges
 and adaptive galloping. Comparators may be inconsistent or equate NaN; callers
 retain source comparisons and the first failure. The 4096-case real Node
@@ -2094,3 +2114,14 @@ The differential rejects other Node versions: inconsistent comparator ordering i
 engine-dependent. Array sort compacts defined values before TimSort, then writes
 undefined values and deletes remaining holes; four native/Node profiles pin the
 comparator schedule as well as sparse output.
+
+## Worker structured clone
+
+js_runtime::structured_clone implements the recorder's platform clone operation
+for native primitives, ordinary objects, sparse arrays, Map/Set and intrinsic
+Errors. It preserves cycles/aliases, non-NaN binary64 bits and UTF16, invokes own
+enumerable getters in source order, and retains original getter failures.
+NaN payloads canonicalize as Node structuredClone does.
+Uncloneable values and unmodeled object kinds produce visible DataCloneError.
+The worker recorder intentionally drops clone failures as perfFixture.ts does;
+other callers receive the error. Node's real structuredClone supplies the oracle.

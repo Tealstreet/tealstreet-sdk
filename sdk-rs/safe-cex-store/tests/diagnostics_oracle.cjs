@@ -3,6 +3,20 @@ const {load, root} = require('../../safe-cex-types/scripts/accounts-source.cjs')
 const path = require('node:path');
 const ws = load(path.join(root, 'packages/safe-cex/src/utils/wsDiagnostics.ts'));
 const rest = load(path.join(root, 'packages/safe-cex/src/utils/venueRestDiagnostics.ts'));
+function authAudit() {
+ const rows=[];
+ for(const key of ['op','method','type','event'])for(const value of ['login','AUTH','signature_request','JWT','subscribe','unauthenticated','',null,42,false,['login']]) {
+  const input=JSON.stringify({[key]:value,args:['CREDENTIAL',{ordinary:'visible',params:['NESTED_CREDENTIAL']}],keep:'public'});
+  const expected=ws.redactWsDiagnosticPayload(input);
+  const auth=typeof value==='string'&&/auth|login|signature|jwt/i.test(value);
+  assert.equal(JSON.parse(expected).args[0],auth?'[redacted]':'CREDENTIAL');
+  assert.equal(JSON.parse(expected).keep,'public');
+  rows.push({input,expected});
+ }
+ assert.equal(rows.length,44);return rows;
+}
+if(process.argv[2]==='auth')console.log(JSON.stringify(authAudit()));
+else {
 const redacted = JSON.parse(ws.redactWsDiagnosticPayload(JSON.stringify({op:'login', args:['credential',{ordinary:'visible',params:['private']}], 'API-Key':'sensitive', market:'BTC'})));
 assert.equal(redacted.args[0], '[redacted]'); assert.equal(redacted.args[1].ordinary, 'visible'); assert.equal(redacted.args[1].params[0], '[redacted]');
 assert.equal(redacted['API-Key'],'[redacted]'); assert.equal(redacted.market,'BTC');
@@ -28,3 +42,5 @@ for (const arrivals of [['0','-0'],['-0','0']]) {
  for(const age of [-0,0]) {rest.noteRestFailure('zero',{config:{safeCexRestDiagSignatureAgeMs:age}},1);assert.ok(Object.is(rest.getVenueRestStats(1).zero.maxSignatureAgeMs,0),'REST native age Math.max signed zero');}
 }
 console.log(JSON.stringify({redacted,stats,sample,stoppedAfterCases:2}));
+
+}
