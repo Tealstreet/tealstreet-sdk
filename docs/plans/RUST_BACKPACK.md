@@ -45,7 +45,7 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   Corrected conflicting older recovery documentation to match TS behavior.
 - Live markets endpoint checked: current payload uses nested filters and null
   maxQuantity, supported alongside top-level increment fields.
-- Next: private phase. PATCH transport groundwork remains uncommitted until
+- Private phase in progress. PATCH transport groundwork remains uncommitted until
   used there. Local corepack was absent; installed a temporary executable in
   /tmp/backpack-tools and installing frozen Yarn dependencies for later gates.
 
@@ -59,3 +59,20 @@ cut a fresh follow-up branch. Never touch master, rebase, or force-push.
   remove old explicit Backpack workspace registration before the structural
   merge, then move crate to sdk-rs/venues/backpack (glob member discovery).
   Re-read updated brief; audit crypto leftovers for provably unused code.
+
+- Merged origin/feat/rust-rewrite cleanly at fa9798de88 and moved crate to
+  sdk-rs/venues/backpack. Workspace discovers it without members edits.
+- Expanded private suite passed before relocation: 17 tests total. Native
+  PATCH transport check also passed. Post-move verification in progress.
+- Crypto cleanup audit: wallet_utils module has no callsites anywhere in
+  SDK, docs, CI, or tests; remove that obsolete wallet facade. Keep uuid:
+  Binance trading still calls it. Other signing modules serve planned venues.
+
+- Private review final: no remaining blockers after HTTP-only endpoint fallback
+  and subscription-error reconnect fixes. Expanded suite now includes failed
+  startup domain continuation, overlapping read ordering and rejected auth.
+- TS corrections recorded in gate comments; harness phase will apply only
+  tape-derived normalization for documented differences, never copy Rust state
+  into TS as an oracle. Still need final tests/clippy result below.
+
+- Private phase final verification: all 21 tests, clippy and bans pass.

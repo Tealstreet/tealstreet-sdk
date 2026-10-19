@@ -186,3 +186,84 @@ fn newer_rest_snapshot_wins_even_without_an_intervening_stream_event() {
     );
     assert_eq!(e.store().positions()[0].contracts, 7.0);
 }
+
+#[test]
+fn a_failed_position_refresh_keeps_positions_and_does_not_block_other_reads() {
+    let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    let reads = requests(&mut e);
+    let positions = reads.iter().find(|r| r.url.ends_with("/position")).unwrap();
+    reply(&mut e, positions, 503, "unavailable");
+    let balance = reads
+        .iter()
+        .find(|r| r.url.ends_with("/collateral"))
+        .unwrap();
+    reply(&mut e, balance, 200, &BALANCE.replace("1005", "2005"));
+    assert_eq!(e.store().positions()[0].contracts, 5.0);
+    assert_eq!(e.store().balance().total, 2005.0);
+}
+
+#[test]
+fn dns_not_found_never_becomes_an_empty_position_snapshot() {
+    let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    let r = requests(&mut e)
+        .into_iter()
+        .find(|r| r.url.ends_with("/position"))
+        .unwrap();
+    e.handle(
+        2000.0,
+        Event::HttpFailed {
+            request: r.id,
+            error: "host not found",
+        },
+    );
+    assert_eq!(e.store().positions()[0].contracts, 5.0);
+}
+#[test]
+fn startup_position_failure_still_loads_balance_orders_and_connects_private_socket() {
+    let (e, _) = ready_position(503, "upstream not found");
+    assert!(e.store().loaded().balance && e.store().loaded().orders);
+    assert!(!e.store().loaded().positions);
+    let (e, _) = ready_position(404, "endpoint not found");
+    assert!(e.store().loaded().positions);
+    assert!(e.store().positions().is_empty());
+}
+
+#[test]
+fn rejected_authentication_reconnects_despite_later_pong_replies() {
+    let (mut e, socket) = ready();
+    e.handle(1000.0, Event::WsOpened { socket });
+    e.drain_actions().for_each(drop);
+    e.handle(
+        2000.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"error":{"code":4001,"message":"signature expired"}}"#,
+        },
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(actions.contains(&Action::WsClose { socket }));
+    let timer = actions
+        .into_iter()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, .. } = a {
+                Some(timer)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(
+        2100.0,
+        Event::WsMessage {
+            socket,
+            text: r#"{"error":{"code":4002}}"#,
+        },
+    );
+    e.handle(3000.0, Event::TimerFired { timer });
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
+}

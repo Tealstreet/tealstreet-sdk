@@ -63,6 +63,13 @@ const isPrivate = Boolean(ts.account);
 //    over leverage for cross.
 //  - Fills: TS prices an execution at the order's average price (`ap`); Rust at
 //    the execution's own price (`L`). Fill prices are not compared.
+// Backpack corrections, exercised by its documented private tape:
+// - Trigger quantity is Y (Q is quote quantity); TriggerFailed is terminal.
+// - Position B is entry; b is breakeven.
+// - Duplicate executions emit once; older snapshots/events cannot reopen state.
+// - Rejected private subscriptions reconnect; a failed domain preserves its
+//   state while healthy domains keep reconciling. Transport "not found" never
+//   becomes an empty position list. Venue-specific normalization is below.
 const KNOWN_TS_FIXES = (account, rustAccount) => {
   for (const position of account.positions) {
     const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);

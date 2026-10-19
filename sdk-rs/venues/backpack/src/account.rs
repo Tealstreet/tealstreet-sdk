@@ -398,6 +398,15 @@ impl Backpack {
         pending: Request,
         response: Response<'_>,
     ) {
+        if response.status == 404
+            && let Request::Positions { revision, next, .. } = &pending
+        {
+            if *revision == self.account.positions_revision {
+                cx.store.set_positions(vec![]);
+            }
+            self.next_account(cx, *next);
+            return;
+        }
         if !(200..300).contains(&response.status) {
             self.account_failed(
                 cx,
@@ -494,14 +503,7 @@ impl Backpack {
         cx.log(LogLevel::Error, error);
         let next = match pending {
             Request::Info => Next::Positions,
-            Request::Positions { revision, next, .. } => {
-                if error.to_ascii_lowercase().contains("not found")
-                    && revision == self.account.positions_revision
-                {
-                    cx.store.set_positions(vec![]);
-                }
-                next
-            }
+            Request::Positions { next, .. } => next,
             Request::Orders { next, .. } | Request::Balance { next, .. } => next,
         };
         self.next_account(cx, next);
@@ -528,7 +530,6 @@ impl Backpack {
             .unwrap(),
         );
         self.account.socket.open = true;
-        self.account.socket.attempts = 0;
         self.account.socket.received = cx.now;
         self.account.socket.ping_at = cx.now;
         self.account.socket.watchdog = Some(cx.set_timer(5000.0));
@@ -550,6 +551,10 @@ impl Backpack {
             if error.code == 4002 {
                 return Ok(());
             }
+            if let Some(socket) = self.account.socket.socket {
+                cx.close(socket);
+                self.private_close(cx, socket);
+            }
             return Err(format!(
                 "Backpack private socket {}: {}",
                 error.code, error.message
@@ -558,6 +563,7 @@ impl Backpack {
         let Some(raw) = envelope.data else {
             return Ok(());
         };
+        self.account.socket.attempts = 0;
         if envelope.stream.starts_with("account.orderUpdate") {
             let d: OrderEvent<'_> = serde_json::from_str(raw.get()).map_err(|e| e.to_string())?;
             if cx.store.market(&d.s).is_none() {

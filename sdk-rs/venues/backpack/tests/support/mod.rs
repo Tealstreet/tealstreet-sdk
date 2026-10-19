@@ -41,6 +41,9 @@ pub fn ws(e: &mut Driver, socket: SocketId, stream: &str, data: &str) {
     );
 }
 pub fn ready() -> (Driver, SocketId) {
+    ready_position(200, POSITIONS)
+}
+pub fn ready_position(position_status: u16, position_body: &str) -> (Driver, SocketId) {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     // Public deterministic test seed; never a real exchange account.
     let secret = STANDARD.encode([7u8; 32]);
@@ -78,14 +81,23 @@ pub fn ready() -> (Driver, SocketId) {
                     let body = if r.url.ends_with("/account") {
                         r#"{"leverageLimit":"10"}"#
                     } else if r.url.ends_with("/position") {
-                        POSITIONS
+                        position_body
                     } else if r.url.ends_with("/collateral") {
                         BALANCE
                     } else {
                         "[]"
                     };
                     assert!(r.headers.iter().any(|(n, _)| *n == "X-Signature"));
-                    reply(&mut e, &r, 200, body);
+                    reply(
+                        &mut e,
+                        &r,
+                        if r.url.ends_with("/position") {
+                            position_status
+                        } else {
+                            200
+                        },
+                        body,
+                    );
                 }
                 Action::WsConnect { socket, .. } => private = Some(socket),
                 _ => {}
