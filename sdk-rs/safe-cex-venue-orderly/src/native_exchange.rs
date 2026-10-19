@@ -291,6 +291,11 @@ mod tests {
                 .any(|message| message.contains("Explicit reconnect call")),
             "reconnect attempted"
         );
+        assert_eq!(
+            runtime.errors.borrow().as_slice(),
+            ["Expected String"],
+            "shared recovery must report the original signing cause exactly once"
+        );
         assert!(
             !runtime
                 .console

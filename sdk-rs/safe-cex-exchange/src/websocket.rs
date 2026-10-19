@@ -4638,19 +4638,28 @@ mod tests {
     }
     #[test]
     fn auth_failure_sends_nothing_disregards_silence_and_never_auth_invalid_phrase() {
-        let (s, p, _, _) = fixture();
+        let (s, p, runtime, _) = fixture();
         let io = Rc::new(Socket::default());
         io.ready.set(1);
         s.state.borrow_mut().native = Some(io.clone());
         let called = Cell::new(false);
+        let original = crate::js_runtime::value::error_object("SignerError", "remote signer unavailable");
+        let cause = crate::js_runtime::value::Thrown::new(original.clone()).to_exchange_error();
         run(s.authenticate_and_subscribe(
-            Box::pin(async { Err(ExchangeError::new("remote signer unavailable")) }),
+            Box::pin(async move { Err(cause) }),
             |_| {
                 called.set(true);
                 Ok(())
             },
         ))
         .unwrap();
+        let reports = runtime.exceptions.borrow();
+        assert_eq!(reports.len(), 1, "signing cause reported exactly once");
+        let thrown = crate::js_runtime::value::Thrown::from(reports[0].clone());
+        assert!(thrown.value.same_reference(&original), "original signing cause identity");
+        assert_eq!(reports[0].name, "SignerError");
+        assert_eq!(reports[0].message, "remote signer unavailable");
+        drop(reports);
         assert!(!called.get());
         assert_eq!(io.closed.get(), 1);
         assert!(io.sent.borrow().is_empty());
