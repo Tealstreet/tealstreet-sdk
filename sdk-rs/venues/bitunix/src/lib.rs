@@ -67,6 +67,7 @@ pub struct BitunixFutures {
     books: HashMap<String, Book>,
     candles: HashSet<(String, String)>,
     retry: Option<TimerId>,
+    funding_times: HashMap<String, f64>,
 }
 impl BitunixFutures {
     pub fn new(options: Options) -> Self {
@@ -91,6 +92,7 @@ impl BitunixFutures {
             books: HashMap::new(),
             candles: HashSet::new(),
             retry: None,
+            funding_times: HashMap::new(),
         }
     }
     fn markets(&mut self, cx: &mut Cx<'_, Pending>) {
@@ -175,19 +177,30 @@ impl BitunixFutures {
                 });
             }
             "price" => {
-                let d: Price = serde_json::from_str(text).map_err(|e| e.to_string())?;
+                let d: Price<'_> = serde_json::from_str(text).map_err(|e| e.to_string())?;
+                let funding = if d.nft.is_empty() { &d.ft } else { &d.nft };
+                let funding_time = if let Some(v) = self.funding_times.get(funding.as_ref()) {
+                    *v
+                } else {
+                    let v = time_ms(funding);
+                    if self.funding_times.len() >= 64 {
+                        self.funding_times.clear();
+                    }
+                    self.funding_times.insert(funding.to_string(), v);
+                    v
+                };
                 cx.store.update_ticker(&m.symbol, |t| {
                     t.mark = d.mp.0;
                     t.index = d.ip.0;
                     t.funding_rate = d.fr.0;
-                    t.funding_time = d.ft.0;
+                    t.funding_time = funding_time;
                 });
             }
             "depth_book1" => {
                 let d: Top = serde_json::from_str(text).map_err(|e| e.to_string())?;
                 cx.store.update_ticker(&m.symbol, |t| {
-                    t.bid = d.b.first().map_or(0.0, |v| v[0].0);
-                    t.ask = d.a.first().map_or(0.0, |v| v[0].0);
+                    t.bid = d.b.first().map_or(0.0, |v| v.0);
+                    t.ask = d.a.first().map_or(0.0, |v| v.0);
                 });
             }
             _ => {}
@@ -198,8 +211,8 @@ impl BitunixFutures {
                 if let Some(book) = self.books.get_mut(&symbol) {
                     let d: Depth = serde_json::from_str(text).map_err(|e| e.to_string())?;
                     // Legacy depthop frames are complete sorted snapshots, without sequence ids.
-                    book.load_sorted(BookSide::Bids, d.bids.into_iter().map(|v| (v[0].0, v[1].0)));
-                    book.load_sorted(BookSide::Asks, d.asks.into_iter().map(|v| (v[0].0, v[1].0)));
+                    book.load_sorted(BookSide::Bids, d.bids.into_iter().map(|v| (v.0, v.1)));
+                    book.load_sorted(BookSide::Asks, d.asks.into_iter().map(|v| (v.0, v.1)));
                     cx.book_changed(&symbol);
                 }
             } else if let Some((symbol, native)) = rest.split_once("_klineop_") {
@@ -240,6 +253,24 @@ fn interval(i: &str) -> &str {
         "1w" => "1week",
         _ => i,
     }
+}
+fn interval_ms(i: &str) -> Option<f64> {
+    let minutes = match i {
+        "1m" => 1,
+        "3m" => 3,
+        "5m" => 5,
+        "15m" => 15,
+        "30m" => 30,
+        "1h" => 60,
+        "2h" => 120,
+        "4h" => 240,
+        "6h" => 360,
+        "12h" => 720,
+        "1d" => 1440,
+        "1w" => 10080,
+        _ => return None,
+    };
+    Some(f64::from(minutes) * 60_000.0)
 }
 fn candle(k: &Kline, rest: bool) -> Candle {
     Candle {
@@ -369,8 +400,8 @@ impl Venue for BitunixFutures {
                             quote: m.quote.into_owned(),
                             active: true,
                             precision: Precision {
-                                amount: 10f64.powf(-m.base_precision.0),
-                                price: 10f64.powf(-m.quote_precision.0),
+                                amount: 10f64.powi(m.base_precision.0 as i32).recip(),
+                                price: 10f64.powi(m.quote_precision.0 as i32).recip(),
                             },
                             limits: Limits {
                                 amount: MinMax {
@@ -614,6 +645,10 @@ impl Venue for BitunixFutures {
                 symbol,
                 interval: i,
             } => {
+                if interval_ms(&i).is_none() {
+                    cx.log(LogLevel::Error, "Unsupported Bitunix candle interval");
+                    return;
+                }
                 if self.candles.insert((symbol.clone(), i.clone())) {
                     self.send_topic(
                         cx,
@@ -630,6 +665,9 @@ impl Venue for BitunixFutures {
                 symbol,
                 interval: i,
             } => {
+                if interval_ms(&i).is_none() {
+                    return;
+                }
                 self.candles.remove(&(symbol.clone(), i.clone()));
                 self.send_topic(
                     cx,
@@ -649,19 +687,14 @@ impl Venue for BitunixFutures {
                 from_ms,
                 to_ms,
             } => {
+                let Some(duration) = interval_ms(&interval) else {
+                    cx.done(command, Err("Unsupported Bitunix candle interval".into()));
+                    return;
+                };
                 let explicit_limit = limit;
                 let limit = limit.unwrap_or(200).clamp(1, 200);
                 let end = to_ms.unwrap_or(cx.now);
-                let minutes = interval[..interval.len().saturating_sub(1)]
-                    .parse::<f64>()
-                    .unwrap_or(1.0);
-                let factor = match interval.chars().last() {
-                    Some('h') => 60.0,
-                    Some('d') => 1440.0,
-                    Some('w') => 10080.0,
-                    _ => 1.0,
-                };
-                let derived = end - minutes * factor * 60_000.0 * f64::from(limit);
+                let derived = end - duration * f64::from(limit);
                 let start = if explicit_limit.is_some() {
                     derived
                 } else {

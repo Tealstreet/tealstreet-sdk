@@ -24,37 +24,56 @@ const started = Date.now();
 const write = (record) => tape.write(`${JSON.stringify({ t: Date.now() - started, ...record })}\n`);
 
 const live = nativeTransport();
+const connections = new Map();
+let sawClose = false;
 const recording = {
   ...live,
   connect(url, handlers) {
-    return live.connect(url, {
+    const connection = connections.get(url) ?? 0;
+    connections.set(url, connection + 1);
+    write({ type: 'connect', url, connection, initial: !sawClose });
+    let closed = false;
+    const closeRecord = (code, local = false) => {
+      if (closed) return;
+      closed = true;
+      sawClose = true;
+      write({ type: 'close', url, connection, code, local });
+    };
+    const socket = live.connect(url, {
       onOpen: () => {
-        write({ type: 'open', url });
+        write({ type: 'open', url, connection });
         handlers.onOpen();
       },
       onMessage: (text) => {
-        write({ type: 'ws', url, text });
+        write({ type: 'ws', url, connection, text });
         handlers.onMessage(text);
       },
       onClose: (code) => {
-        write({ type: 'close', url, code });
+        closeRecord(code);
         handlers.onClose(code);
       },
     });
+    return { send: (text) => socket.send(text), close: () => { closeRecord(1000, true); socket.close(); } };
   },
   async request(request) {
     const response = await live.request(request);
-    const body = new TextDecoder().decode(response.body);
-    write({ type: 'http', method: request.method, url: request.url, status: response.status, body });
-    return response;
+    const chunks = [];
+    if (response.body instanceof Uint8Array) chunks.push(response.body);
+    else for await (const chunk of response.body) chunks.push(chunk);
+    const bytes = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.length, 0));
+    let at = 0;
+    for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.length; }
+    const body = new TextDecoder().decode(bytes);
+    write({ type: 'http', method: request.method, url: request.url, requestBody: request.body, status: response.status, body });
+    return { ...response, body: bytes };
   },
 };
 
 const { WasmEngine } = await loadEngine();
 let frames = 0;
 let updates = 0;
-const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: false })), recording, {
-  onStoreUpdate: () => updates++,
+const host = new EngineHost(new WasmEngine(values.venue, JSON.stringify({ publicDataOnly: true })), recording, {
+  onFrame: () => { updates++; frames++; },
   onLog: (level, message) => console.error(`[${level}] ${message}`),
 });
 host.start();

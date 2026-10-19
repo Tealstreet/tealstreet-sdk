@@ -115,6 +115,9 @@ fn position_key(symbol: &str, side: PositionSide) -> String {
 impl BitunixFutures {
     pub(crate) fn private_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.credentials.is_none() {
+            cx.store.set_balance(Balance::default());
+            cx.store.set_positions(vec![]);
+            cx.store.set_orders(vec![]);
             return;
         }
         let settings: Vec<_> = cx

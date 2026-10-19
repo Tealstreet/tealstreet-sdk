@@ -278,3 +278,78 @@ fn watchdog_closes_a_silent_connection_and_reconnects() {
             .any(|a| matches!(a,Action::WsClose {socket:s} if s==socket))
     );
 }
+
+#[test]
+fn accepts_extended_legacy_levels_and_documented_iso_next_funding_time() {
+    let (mut e, s) = ready();
+    e.handle(
+        0.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTCUSDT".into(),
+        }),
+    );
+    e.handle(1.0,Event::WsMessage {socket:s,text:r#"{"channel":"market_btcusdt_depthop_0.1","data":{"bids":[["96000","2","",""]],"asks":[["96001","3","",""]]}}"#});
+    assert_eq!(e.book("BTCUSDT").unwrap().bids(), [(96000.0, 2.0)]);
+    // Official websocket/public/MarketPrice Channel example, also seen in the live tape.
+    e.handle(1.0,Event::WsMessage {socket:s,text:r#"{"ch":"price","symbol":"BTCUSDT","data":{"mp":"10000","ip":"0.0010","fr":"0.013461","ft":"2024-12-04T11:00:00Z","nft":"2024-12-04T12:00:00Z"}}"#});
+    assert_eq!(
+        e.store().ticker("BTCUSDT").unwrap().funding_time,
+        1733313600000.0
+    );
+}
+
+#[test]
+fn candle_requests_reject_malformed_intervals_and_compute_supported_durations() {
+    let (mut e, _) = ready();
+    e.drain_actions().for_each(drop);
+    for interval in ["", "é", "1é", "1", "0m", "NaNh", "1m&limit=1"] {
+        e.handle(
+            100_000_000.0,
+            Event::Command(Command::FetchCandles {
+                command: 90,
+                symbol: "BTCUSDT".into(),
+                interval: interval.into(),
+                limit: Some(2),
+                from_ms: None,
+                to_ms: Some(100_000_000.0),
+            }),
+        );
+        let actions: Vec<_> = e.drain_actions().collect();
+        assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+        assert!(
+            actions.iter().any(|a| matches!(
+                a,
+                Action::Notice(safe_cex_engine::Notice::CommandDone {
+                    command: 90,
+                    result: Err(_)
+                })
+            )),
+            "{interval:?}"
+        );
+    }
+    for (interval, duration) in [("1m", 60_000), ("2h", 7_200_000), ("1w", 604_800_000)] {
+        e.handle(
+            100_000_000.0,
+            Event::Command(Command::FetchCandles {
+                command: 91,
+                symbol: "BTCUSDT".into(),
+                interval: interval.into(),
+                limit: Some(2),
+                from_ms: None,
+                to_ms: Some(100_000_000.0),
+            }),
+        );
+        let request = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r),
+                _ => None,
+            })
+            .unwrap();
+        assert!(
+            request
+                .url
+                .contains(&format!("startTime={}", 100_000_000 - duration * 2))
+        );
+    }
+}

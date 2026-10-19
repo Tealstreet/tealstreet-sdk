@@ -3,6 +3,13 @@
 const root = '../../packages/safe-cex/src/exchanges';
 
 export const VENUES = {
+  bitunix: {
+    rust: 'bitunix',
+    ts: { module: `${root}/bitunix/bitunix.exchange.ts`, className: 'BitunixExchange', name: 'bitunix' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.futuresWebsocket.messageHandlers).filter((key) => key.includes('_depthop_')).length >= count,
+    privateSocket: '/private/',
+  },
   binance: {
     rust: 'binance',
     ts: { module: `${root}/binance/binance.exchange.ts`, className: 'BinanceExchange', name: 'binance' },

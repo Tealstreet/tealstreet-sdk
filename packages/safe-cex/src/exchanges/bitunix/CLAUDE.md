@@ -686,3 +686,20 @@ the still-old browser — a real symptom of a stale deploy, not of a broken fix.
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `clientId`. Bitunix publishes no length limit; the rule refuses only empty or whitespace-bearing IDs. The TIF / reduce-only caches key on whichever `clientId` is sent.
+
+## Rust futures engine
+
+The sans-I/O implementation is `sdk-rs/venues/bitunix/`; the wasm factory name
+is `bitunix`. It preserves the USDT futures scope and legacy full-snapshot
+`depthop` books. Binary futures frames are decoded by the hosts (gzip or zlib).
+
+`realizedPNL` already includes fees and funding. Carry it verbatim for positions
+and realized income; the commission ledger still exposes `-fee`, including
+positive rebates. Do not subtract fee/funding again or synthesize funding rows.
+
+Intentional Rust corrections are listed in the replay gate: failed reads preserve
+state, cumulative order executions emit once, historical fills dedupe by trade ID,
+regular orders retain client IDs, split generated IDs are unique, and a
+cancel/recreate amendment requires acknowledged cancellation and final remaining
+quantity. Public `ft`/`nft` may be ISO strings: the next funding time uses `nft`
+(or `ft` if absent), converted to epoch milliseconds rather than the ISO year.
