@@ -97,13 +97,53 @@ jobs:
   # Replays recorded traffic through TS and Rust: output must be identical, and
   # on public data Rust must use less CPU and less memory (see the plan's gates).
   gate:
-    name: Rust / replay gate
+    name: Rust / replay gate (${{ matrix.venue }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - venue: binance
+            books: BTCUSDT,ETHUSDT,SOLUSDT
+            private_script: rust:private-tape
+          - venue: bitget
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-bitget
+          - venue: backpack
+            books: SOL_USDC_PERP,BTC_USDC_PERP
+            private_script: rust:private-tape-backpack
+          - venue: blofin
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape:blofin
+          - venue: mexc
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-mexc
+          - venue: bingx
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-bingx
+          - venue: bybit
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-bybit
+          - venue: okx
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape-okx
+          - venue: cryptocom
+            books: BTCUSD-PERP,ETHUSD-PERP
+            private_script: rust:private-tape-cryptocom
+          - venue: weex
+            books: BTCUSDT,ETHUSDT
+            private_script: rust:private-tape:weex
+          - venue: bitrue
+            books: E-BTC-USDT,E-ETH-USDT
+            private_script: rust:private-tape-bitrue
+          - venue: hyperliquid
+            books: BTC-PERP,ETH-PERP
+            private_script: rust:private-tape-hyperliquid
     env:
       WASM_BINDGEN_VERSION: 0.2.129
-      # Eleven venues: measured 3,759,020 bytes; fixed 3.75 MiB aggregate budget.
-      WASM_BUDGET_BYTES: 3932160
+      # Budget per single-venue browser bundle.
+      WASM_BUDGET_BYTES: 1258291
     defaults:
       run:
         working-directory: .
@@ -129,85 +169,35 @@ jobs:
             cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked --force
           fi
       - run: yarn install --frozen-lockfile --network-timeout 600000
-      - name: Build the wasm engine
+      - name: Build the combined wasm engine
+        if: matrix.venue == 'binance'
         run: yarn rust:build-wasm
       - name: The TS exchange on the wasm engine
+        if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex test-wasm
       - name: The Cloudflare Workers host
+        if: matrix.venue == 'binance'
         run: yarn workspace @tealstreet/safe-cex-wasm test
+      - name: Build the venue wasm engine
+        run: yarn rust:build-wasm --venue ${{ matrix.venue }}
       - name: Check the wasm size budget
         run: |
           size=$(stat -c%s sdk-rs/hosts/wasm/pkg/node/safe_cex_wasm_bg.wasm)
           echo "wasm: $size bytes (budget $WASM_BUDGET_BYTES)"
           test "$size" -le "$WASM_BUDGET_BYTES"
-      - name: Binance public data (correctness, CPU and memory)
-        run: yarn rust:gate --tape sdk-rs/harness/fixtures/binance-public.jsonl.gz
-      - name: Binance account and trading (correctness)
-        run: |
-          yarn rust:private-tape
-          yarn rust:gate --tape sdk-rs/harness/tapes/binance-private.jsonl --runs 1 --books ''
-      - name: MEXC public data (correctness, CPU and memory)
-        run: yarn rust:gate --venue mexc --tape sdk-rs/harness/fixtures/mexc-public.jsonl.gz --books BTCUSDT,ETHUSDT
-      - name: MEXC account and trading (correctness)
-        run: |
-          yarn rust:private-tape-mexc
-          yarn rust:gate --venue mexc --tape sdk-rs/harness/tapes/mexc-private.jsonl --runs 1 --books ''
-      - name: Bybit public data (correctness, CPU and memory)
-        run: yarn rust:gate --venue bybit --tape sdk-rs/harness/fixtures/bybit-public.jsonl.gz --books BTCUSDT,ETHUSDT
-      - name: Bybit account and trading (correctness)
-        run: |
-          yarn rust:private-tape-bybit
-          yarn rust:gate --venue bybit --tape sdk-rs/harness/tapes/bybit-private.jsonl --runs 1 --books ''
-
-      - name: Bitget public data (correctness, CPU and memory)
-        run: yarn rust:gate --venue bitget --tape sdk-rs/harness/fixtures/bitget-public.jsonl.gz --books BTCUSDT,ETHUSDT
-      - name: Bitget account and trading (correctness)
-        run: |
-          yarn rust:private-tape-bitget
-          yarn rust:gate --venue bitget --tape sdk-rs/harness/tapes/bitget-private.jsonl --runs 1 --books ''
-      - name: Backpack public data (correctness, CPU and memory)
-        run: corepack yarn -s rust:gate --venue backpack --tape sdk-rs/harness/fixtures/backpack-public.jsonl.gz --books SOL_USDC_PERP,BTC_USDC_PERP
-      - name: Backpack private account and trading
-        run: |
-          corepack yarn -s rust:private-tape-backpack
-          corepack yarn -s rust:gate --venue backpack --tape sdk-rs/harness/tapes/backpack-private.jsonl --runs 1 --books ''
-      - name: BloFin public data (correctness, CPU and memory)
-        run: yarn rust:gate --venue blofin --tape sdk-rs/harness/fixtures/blofin-public.jsonl.gz --books BTCUSDT,ETHUSDT
-      - name: BloFin account and trading (correctness)
-        run: |
-          yarn rust:private-tape:blofin
-          yarn rust:gate --venue blofin --tape sdk-rs/harness/tapes/blofin-private.jsonl --runs 1 --books ''
-      - name: Harness protocol regressions
+      - name: Replay request normalization
         run: yarn rust:test-harness
-      - name: BingX public data (correctness, CPU and memory)
-        run: yarn rust:gate --venue bingx --tape sdk-rs/harness/fixtures/bingx-public.jsonl.gz --books BTCUSDT,ETHUSDT
-      - name: BingX account and trading (correctness)
+      - name: Public data (correctness, CPU and memory)
+        run: yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}'
+      - name: Account and trading (correctness)
+        if: matrix.venue != 'okx'
         run: |
-          yarn rust:private-tape-bingx
-          yarn rust:gate --venue bingx --tape sdk-rs/harness/tapes/bingx-private.jsonl --runs 1 --books ''
-      - name: Crypto.com public data (correctness, CPU and memory)
-        run: yarn rust:gate --venue cryptocom --tape sdk-rs/harness/fixtures/cryptocom-public.jsonl.gz --books BTCUSD-PERP,ETHUSD-PERP
-      - name: Crypto.com account and trading (correctness)
-        run: |
-          yarn rust:private-tape-cryptocom
-          yarn rust:gate --venue cryptocom --tape sdk-rs/harness/tapes/cryptocom-private.jsonl --runs 1 --books ''
-      - name: OKX public data (correctness, CPU and memory)
-        run: yarn rust:gate --venue okx --tape sdk-rs/harness/fixtures/okx-public.jsonl.gz --books BTCUSDT,ETHUSDT
+          yarn ${{ matrix.private_script }}
+          yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs 1 --books ''
       - name: OKX account and trading variants (correctness)
+        if: matrix.venue == 'okx'
         run: |
           for venue in okx okxeu okxdemo okxeudemo; do
             yarn rust:private-tape-okx --venue "$venue"
             yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue-private.jsonl" --runs 1 --books ''
           done
-      - name: WEEX public data (correctness, CPU and memory)
-        run: corepack yarn -s rust:gate --venue weex --tape sdk-rs/harness/fixtures/weex-public.jsonl.gz --books BTCUSDT,ETHUSDT
-      - name: WEEX account and trading (correctness)
-        run: |
-          corepack yarn -s rust:private-tape:weex
-          corepack yarn -s rust:gate --venue weex --tape sdk-rs/harness/tapes/weex-private.jsonl --runs 1 --books ''
-      - name: Bitrue public data (correctness, CPU and memory)
-        run: corepack yarn -s rust:gate --venue bitrue --tape sdk-rs/harness/fixtures/bitrue-public.jsonl.gz --books E-BTC-USDT,E-ETH-USDT
-      - name: Bitrue account and trading (correctness)
-        run: |
-          corepack yarn -s rust:private-tape-bitrue
-          corepack yarn -s rust:gate --venue bitrue --tape sdk-rs/harness/tapes/bitrue-private.jsonl --runs 1 --books ''

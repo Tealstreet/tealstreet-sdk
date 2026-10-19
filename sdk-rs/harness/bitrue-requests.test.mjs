@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { requestKey } from './requests.mjs';
+import { requestKey, subscriptionKeys } from './requests.mjs';
 import { venueOf } from './venues.mjs';
 import { Tape } from './tape.mjs';
 const venue = venueOf('bitrue');
@@ -120,4 +120,16 @@ test('an invalid signed read remains a gate failure after a valid retry', () => 
   assert.equal(tape.respond(method, base + path, undefined, headers).status, 200);
   assert.equal(tape.invalidSignatures, 1);
   assert.equal(tape.unserved, 0);
+});
+
+
+test('Bitrue subscription identity retains channels while normalizing callback IDs and heartbeat clocks', () => {
+  const url = 'wss://fmarket-ws.bitrue.com/kline-api/ws';
+  const keys = (message) => subscriptionKeys(url, JSON.stringify(message), new Set(), venue);
+  const sub = (channel, cb_id) => ({ event: 'sub', params: { channel, cb_id } });
+  assert.deepEqual(keys(sub('market_e_btcusdt_ticker', 'ts-random')), keys(sub('market_e_btcusdt_ticker', 'engine')));
+  assert.notDeepEqual(keys(sub('market_e_btcusdt_ticker', 'same')), keys(sub('market_e_ethusdt_ticker', 'same')));
+  assert.notDeepEqual(keys(sub('market_e_btcusdt_ticker', 'same')), keys({ event: 'unsub', params: { channel: 'market_e_btcusdt_ticker', cb_id: 'same' } }));
+  assert.deepEqual(keys({ pong: 123 }), []);
+  assert.deepEqual(keys({ event: 'pong', ts: 456 }), []);
 });

@@ -62,6 +62,80 @@ fn nested_chunked_lists_seed_markets_and_tickers() {
     assert_eq!(engine.store().markets()[0].precision.amount, 0.0001);
 }
 #[test]
+fn automatic_seed_budget_ignores_early_books_and_counts_unique_channels() {
+    for market_count in [200, 351] {
+        let mut engine = Engine::new(Cryptocom::new(Options {
+            public_data_only: true,
+            ..Default::default()
+        }));
+        engine.start(0.0);
+        for symbol in ["M000USD-PERP", "M001USD-PERP"] {
+            engine.handle(
+                0.0,
+                Event::Command(Command::SubscribeOrderBook {
+                    symbol: symbol.into(),
+                }),
+            );
+        }
+        let instruments = (0..market_count).map(|i| format!(
+        r#"{{"symbol":"M{i:03}USD-PERP","inst_type":"PERPETUAL_SWAP","tradable":true,"base_ccy":"M{i:03}","quote_ccy":"USD","quote_decimals":1,"quantity_decimals":4,"max_leverage":"50","underlying_symbol":"SHAREDUSD-INDEX"}}"#
+    )).collect::<Vec<_>>().join(",");
+        answer(
+            &mut engine,
+            &format!(r#"{{"code":0,"result":{{"data":[{instruments}]}}}}"#),
+        );
+        answer(&mut engine, r#"{"code":0,"result":{"data":[]}}"#);
+        let socket = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::WsConnect { socket, .. } => Some(socket),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(0.0, Event::WsOpened { socket });
+        let timer = engine
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::SetTimer {
+                    timer,
+                    at_ms: 1000.0,
+                } => Some(timer),
+                _ => None,
+            })
+            .unwrap();
+        engine.handle(1000.0, Event::TimerFired { timer });
+        let channels = engine
+            .drain_actions()
+            .filter_map(|a| match a {
+                Action::WsSend { text, .. } => Some(text),
+                _ => None,
+            })
+            .flat_map(|text| {
+                let body: serde_json::Value = serde_json::from_str(&text).unwrap();
+                let channels = body["params"]["channels"].as_array().unwrap();
+                assert!(channels.len() <= 100);
+                channels
+                    .iter()
+                    .map(|channel| channel.as_str().unwrap().to_owned())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(channels.len(), 352);
+        for i in 0..market_count.min(350) {
+            assert!(channels.contains(&format!("ticker.M{i:03}USD-PERP")));
+        }
+        if market_count > 350 {
+            assert!(!channels.contains("ticker.M350USD-PERP"));
+        } else {
+            assert!(channels.contains("index.SHAREDUSD-INDEX"));
+            assert!(channels.contains("mark.M074USD-PERP"));
+            assert!(!channels.contains("funding.M074USD-PERP"));
+        }
+        assert!(channels.contains("book.M000USD-PERP.50"));
+        assert!(channels.contains("book.M001USD-PERP.50"));
+    }
+}
+#[test]
 fn snapshots_replace_both_sides_and_heartbeats_keep_the_id() {
     let (mut engine, socket) = ready();
     engine.handle(

@@ -7,19 +7,35 @@ publish.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+bitrue = ["dep:safe-cex-venue-bitrue"]
+bitget = ["dep:safe-cex-venue-bitget"]
+backpack = ["dep:safe-cex-venue-backpack"]
+blofin = ["dep:safe-cex-venue-blofin"]
+mexc = ["dep:safe-cex-venue-mexc"]
+bingx = ["dep:safe-cex-venue-bingx"]
+weex = ["dep:safe-cex-venue-weex"]
+default = ["bitrue", "binance", "bybit", "hyperliquid", "okx", "cryptocom", "weex", "bingx", "mexc", "blofin", "backpack", "bitget"]
+cryptocom = ["dep:safe-cex-venue-cryptocom"]
+binance = ["dep:safe-cex-venue-binance"]
+bybit = ["dep:safe-cex-venue-bybit"]
+hyperliquid = ["dep:safe-cex-venue-hyperliquid"]
+okx = ["dep:safe-cex-venue-okx"]
+
 [dependencies]
+safe-cex-venue-bitrue = { workspace = true, optional = true }
+safe-cex-venue-bitget = { path = "../../venues/bitget", optional = true }
+safe-cex-venue-backpack = { path = "../../venues/backpack", optional = true }
+safe-cex-venue-blofin = { workspace = true, optional = true }
+safe-cex-venue-mexc = { workspace = true, optional = true }
+safe-cex-venue-bingx = { workspace = true, optional = true }
+safe-cex-venue-weex = { workspace = true, optional = true }
 safe-cex-engine.workspace = true
-safe-cex-venue-binance.workspace = true
-safe-cex-venue-backpack = { path = "../../venues/backpack" }
-safe-cex-venue-blofin.workspace = true
-safe-cex-venue-bitrue.workspace = true
-safe-cex-venue-mexc.workspace = true
-safe-cex-venue-bingx.workspace = true
-safe-cex-venue-bitget = { path = "../../venues/bitget" }
-safe-cex-venue-bybit.workspace = true
-safe-cex-venue-cryptocom.workspace = true
-safe-cex-venue-okx.workspace = true
-safe-cex-venue-weex.workspace = true
+safe-cex-venue-cryptocom = { workspace = true, optional = true }
+safe-cex-venue-binance = { workspace = true, optional = true }
+safe-cex-venue-bybit = { workspace = true, optional = true }
+safe-cex-venue-hyperliquid = { workspace = true, optional = true }
+safe-cex-venue-okx = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 wasm-bindgen.workspace = true

@@ -13,7 +13,7 @@ const limit = Number(values.seconds) * 1000;
 const lines = readFileSync(values.tape, 'utf8').split('\n').filter(Boolean);
 const kept = lines.filter((line) => {
   const record = JSON.parse(line);
-  return record.type === 'meta' || record.t <= limit;
+  return record.type === 'config' || record.type === 'meta' || record.t <= limit;
 });
 writeFileSync(values.out, gzipSync(`${kept.join('\n')}\n`, { level: 9 }));
 console.log(JSON.stringify({ out: values.out, records: kept.length, of: lines.length }));

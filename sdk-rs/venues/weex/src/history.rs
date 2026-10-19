@@ -360,12 +360,24 @@ impl WeexFutures {
         command: CommandId,
         read: Query,
     ) {
-        if self.credentials.is_none() && !matches!(read, Query::PublicTrades { .. }) {
+        if self.credentials.is_none()
+            && !matches!(
+                read,
+                Query::PublicTrades { .. } | Query::OrderByClientId { .. }
+            )
+        {
             cx.done(command, Ok("[]".into()));
             return;
         }
         let mut requests = VecDeque::new();
         let (kind, order_id, symbol) = match read {
+            Query::OrderByClientId { .. } => {
+                cx.done(
+                    command,
+                    Err("WEEX client order lookup is not supported by the Rust engine".into()),
+                );
+                return;
+            }
             Query::Fills {
                 symbol,
                 order_id,
