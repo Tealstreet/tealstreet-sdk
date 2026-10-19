@@ -2175,3 +2175,8 @@ The 906-frame Phemex binding probe compares all 19 maintained-source callbacks.
 Private authentication recovery reports the supplied ExchangeError through the
 runtime exception sink before warning/reconnect, preserving its retained cause.
 See `PRIVATE_OPEN_REVIEW.md` for the bounded disposal/recovery differences.
+
+Native sockets with a separate callback owner use `install_native_handler_stats`
+to bind selected-key live counts into Base's record/pong/cleanup/reconciliation
+algorithm. They never copy callbacks into Base's registry or bypass the shared
+statistics writes. See [the owner census](NATIVE_HANDLER_STATS_REVIEW.md).

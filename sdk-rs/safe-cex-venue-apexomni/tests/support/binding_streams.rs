@@ -216,3 +216,33 @@ fn invalid_caller_id_fails_before_network() {
     assert!(h.http.requests.borrow().is_empty());
     done(&h);
 }
+
+#[test]
+fn recorded_public_pong_uses_registered_native_handlers() {
+    use safe_cex_exchange::{socket_lifecycle::SocketSlot, websocket::WsEvent};
+    use safe_cex_transport::socket::SocketFrame;
+    let h = fixture();
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let recorded: Value = serde_json::from_str(include_str!("../recorded-pong.json")).unwrap();
+    let socket = public_socket(&h);
+    socket
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Text(
+            recorded["payload"].as_str().unwrap().into(),
+        )));
+    h.runtime.pump();
+    let core = h.venue().base().get_socket(SocketSlot::Public).unwrap();
+    let stats = core.message_handlers_stats.borrow()["pong"].clone();
+    assert_eq!(
+        stats.had_handlers,
+        Some(true),
+        "actual recorded pong has its registered native callback"
+    );
+    assert!(matches!(
+        stats.last_callbacks_count,
+        safe_cex_num::PrototypeScalar::Number(1.0)
+    ));
+    done(&h);
+}
