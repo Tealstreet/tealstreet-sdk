@@ -36366,5 +36366,81 @@
     },
     "reason": "Constructs only a native scheduler capability over an existing ExchangeRuntime. Its reset runs as one independently owned Timer operation; no serialized input or model decoding occurs. Limiter Drop cancels the registration. The scheduler holds only a weak reference to the existing BaseExchange task registry; dispose cancels its timers even while JS clients are retained.",
     "evidence": "The actual constructed Bybit fetchTickers route reproduces master failure and restored controlled-clock advance, subsequent HTTP and timer cancellation in ticker_prototype_native::constructed_public_reads_do_not_strand_idle_limiter_replay_deadlines. Maintained installed axios-rate-limit executes the frozen-Date timer profile in the same test."
+  },
+  "safe_cex_exchange::js_runtime::promise::race_iterable": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "race_iterable",
+      "signature": {
+        "inputs": [
+          [
+            "runtime",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_exchange::runtime::ExchangeRuntime",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::promise::Promise",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Iterates the existing native iterable and resolves each item through the canonical Promise algorithm. It schedules first-settlement observations, retains original values or thrown causes, and drops losing observations without cancelling the source operation. It neither parses serialized input nor constructs a decoded model.",
+    "evidence": "safe-cex-venue-hyperliquid/src/host/socket_tests.rs::constructed_startup_race_releases_canceled_timeout_reactions executes the installed Promise.race through the real constructed withStartupTimeout binding on both NativeRuntime and controlled replay runtime; it asserts original result reference identity, zero pending jobs and zero blocking tasks after timeout cancellation. See safe-cex-venue-hyperliquid/SHARED_RUNTIME_REVIEW.md."
   }
 }

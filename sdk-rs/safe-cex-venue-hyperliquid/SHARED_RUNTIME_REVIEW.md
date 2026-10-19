@@ -31,6 +31,11 @@ value carrier, conversion fallback or runtime-selection flag.
   The old binding leaves an UNKNOWN task at `realm/promise.rs:103`; the shared
   binding reports classified timer work before cancellation and no work after.
   The maintained classes run independently against Node's real timeout handles.
+- The installed `Promise.race` observes existing iterable values through the
+  canonical resolver. The constructed `withStartupTimeout` test preserves the
+  original result reference and reaches zero pending/blocking jobs on real and
+  controlled clocks after cancellation of the losing timeout. This is promise
+  scheduling, not domain decoding.
 - Native `post()` follows the Axios promise-tail/interceptor checkpoint before
   adapter dispatch. All four weight-limiter scenarios compare the original
   source: adapter count zero at call return, FIFO reservations at 0/150/200,
