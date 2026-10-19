@@ -9,6 +9,7 @@ import { parseArgs } from 'node:util';
 import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
 import { venueOf } from './venues.mjs';
+import { canonicalUrl } from './requests.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 
 const { values } = parseArgs({
@@ -24,24 +25,29 @@ mkdirSync(dirname(out), { recursive: true });
 const tape = createWriteStream(out);
 const started = Date.now();
 const write = (record) => tape.write(`${JSON.stringify({ t: Date.now() - started, ...record })}\n`);
+write({ type: 'meta', epoch: started, private: false });
 
 const live = nativeTransport();
+const ordinals = new Map();
 const recording = {
   ...live,
   connect(url, handlers) {
+    const key = canonicalUrl(url);
+    const socket = ordinals.get(key) ?? 0;
+    ordinals.set(key, socket + 1);
     return live.connect(url, {
       headers: handlers.headers,
       onOpen: () => {
-        write({ type: 'open', url });
+        write({ type: 'open', url, socket });
         handlers.onOpen();
       },
       onMessage: (text) => {
         frames++;
-        write({ type: 'ws', url, text });
+        write({ type: 'ws', url, socket, text });
         handlers.onMessage(text);
       },
       onClose: (code) => {
-        write({ type: 'close', url, code });
+        write({ type: 'close', url, socket, code });
         handlers.onClose(code);
       },
     });

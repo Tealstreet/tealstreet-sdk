@@ -49,6 +49,34 @@ const okx = (name) => ({
   compareFillPrices: true,
 });
 
+// MEXC accepts snowflake IDs as either JSON numbers or strings. Keep every
+// economic field's JSON type and every caller-provided client ID exact.
+export const mexcRequestBody = (body, { url = '' } = {}) => {
+  const ids = new Set(['id', 'orderId', 'positionId']);
+  const visit = (value, key = '') => {
+    if (ids.has(key) || (key === '<root-id>' && /\/private\/order\/cancel$/.test(new URL(url).pathname))) {
+      if (JSON.isRawJSON(value)) return value.rawJSON;
+      if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+    }
+    if (JSON.isRawJSON(value)) return value;
+    if (Array.isArray(value)) return value.map((item) => visit(item, key === '' ? '<root-id>' : key));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, visit(v, k)]));
+    return value;
+  };
+  return visit(body);
+};
+export const mexcRequestUrl = (url) => {
+  const parsed = new URL(url);
+  const params = parsed.searchParams;
+  if (parsed.hostname === 'api.mexc.com' && /^\/api\/v1\/private\/(planorder|stoporder)\/list\/orders$/.test(parsed.pathname)
+    && (params.get('states') === '1' || params.get('is_finished') === '0')
+    && /^\d+$/.test(params.get('start_time') ?? '') && /^\d+$/.test(params.get('end_time') ?? '')) {
+    params.set('start_time', String(BigInt(params.get('start_time')) - BigInt(params.get('end_time'))));
+    params.set('end_time', 'now');
+  }
+  return parsed.href;
+};
+
 export const VENUES = {
   hyperliquid: {
     rust: 'hyperliquid',
@@ -58,6 +86,44 @@ export const VENUES = {
     privateSocket: undefined,
     publicOptions: { key: '' },
     recordOptions: { publicDataOnly: true, key: '' },
+  },
+  mexc: {
+    rust: 'mexc',
+    mexcProtocol: true,
+    requestBody: mexcRequestBody,
+    requestUrl: mexcRequestUrl,
+    generatedBodyId: (key) => key === 'externalOid',
+    validateSocketMessage(socket, text, now = Date.now()) {
+      const frame = JSON.parse(text);
+      if (frame.method !== 'login') return;
+      const { apiKey, reqTime, signature } = frame.param ?? {};
+      if (!validWeexTimestamp(reqTime, now) || apiKey !== 'replay-key'
+        || signature !== createHmac('sha256', 'replay-secret').update(`${apiKey}${reqTime}`).digest('hex')) {
+        throw new Error('invalid MEXC socket login');
+      }
+      socket.loginVerified = true;
+    },
+    validateSocketFrame(socket, text) {
+      const frame = JSON.parse(text);
+      if (frame.channel === 'rs.login' && frame.data === 'success' && !socket.loginVerified) throw new Error('MEXC login acknowledgement preceded valid login');
+    },
+    matchRequestBody: true,
+    ts: { module: `${root}/mexc/mexc.exchange.ts`, className: 'MexcExchange', name: 'mexc' },
+    tsBooksSubscribed: (exchange, count) =>
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depth.')).length >= count,
+    // Public/private sockets share this URL; tapes identify their ordinal.
+    privateSocket: undefined,
+    independentLeverage: true,
+    tsSettings: (exchange, store) =>
+      store.markets.map((market) => {
+        const config = exchange.symbolSettings.get(market.symbol) ?? exchange.deriveSymbolConfig(market.symbol);
+        return {
+          symbol: market.symbol,
+          marginType: config.marginType,
+          buyLeverage: config.buyLeverage,
+          sellLeverage: config.sellLeverage,
+        };
+      }),
   },
   bingx: {
     rust: 'bingx',
@@ -216,7 +282,8 @@ export const VENUES = {
     ts: { module: `${root}/binance/binance.exchange.ts`, className: 'BinanceExchange', name: 'binance' },
     /** Depth topics are registered once each book subscription reaches the socket. */
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >= count,
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >=
+      count,
     privateSocket: '/private/ws',
     volatileBodyFields: true,
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
@@ -245,6 +312,10 @@ export const VENUES = {
         .concat(books.map((symbol) => `orderbook.1000.${symbol}`)) });
     },
     privateSocket: '/v5/private',
+    tsRejectReason: (order) =>
+      order.status === 'canceled' && order.info?.rejectReason === 'EC_PostOnlyWillTakeLiquidity'
+        ? 'PostOnly'
+        : undefined,
     isWrite: (method) => method === 'POST',
     matchRequestBody: true,
     volatileBodyFields: true,

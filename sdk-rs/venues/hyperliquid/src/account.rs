@@ -261,6 +261,8 @@ impl Hyperliquid {
                     i as u32,
                     MarketSetting {
                         leverage: 20.0,
+                        buy_leverage: None,
+                        sell_leverage: None,
                         margin_type: Some(MarginType::Cross),
                     },
                 )
@@ -1502,6 +1504,8 @@ impl Hyperliquid {
             };
             let setting = cx.store.setting(symbol).unwrap_or(MarketSetting {
                 leverage: 20.0,
+                buy_leverage: None,
+                sell_leverage: None,
                 margin_type: Some(MarginType::Cross),
             });
             let ps = if end > 0.0 {

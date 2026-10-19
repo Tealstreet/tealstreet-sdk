@@ -8,12 +8,13 @@
     feature = "bybit",
     feature = "cryptocom",
     feature = "bingx",
+    feature = "mexc",
     feature = "weex",
     feature = "hyperliquid",
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, bingx, hyperliquid, okx or weex"
+    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, bingx, mexc, hyperliquid, okx or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -30,6 +31,8 @@ use safe_cex_venue_bybit::{BybitLinear, Options as BybitOptions};
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 #[cfg(feature = "hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
+#[cfg(feature = "mexc")]
+use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 #[cfg(feature = "okx")]
 use safe_cex_venue_okx::{Okx, Options as OkxOptions};
 #[cfg(feature = "weex")]
@@ -76,6 +79,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "bybit",
     feature = "cryptocom",
     feature = "bingx",
+    feature = "mexc",
     feature = "weex",
     feature = "hyperliquid",
     feature = "okx"
@@ -285,6 +289,10 @@ enum CommandIn {
         command: u32,
         hedged: bool,
     },
+    FetchLeverage {
+        command: u32,
+        symbol: String,
+    },
     #[serde(rename_all = "camelCase")]
     FetchFills {
         command: u32,
@@ -398,6 +406,7 @@ impl From<CommandIn> for Command {
             CommandIn::SetPositionMode { command, hedged } => {
                 Self::SetPositionMode { command, hedged }
             }
+            CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchFills {
                 command,
                 symbol,
@@ -511,6 +520,7 @@ impl WasmEngine {
         feature = "bybit",
         feature = "cryptocom",
         feature = "bingx",
+        feature = "mexc",
         feature = "weex",
         feature = "hyperliquid",
         feature = "okx"
@@ -526,6 +536,12 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "mexc")]
+            "mexc" => Box::new(Engine::new(MexcFutures::new(MexcOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+            }))),
             #[cfg(feature = "binance")]
             "binance" | "binancepm" => Box::new(Engine::new(BinanceFutures::new(BinanceOptions {
                 testnet: options.testnet,
@@ -702,5 +718,21 @@ impl WasmEngine {
         self.inner
             .frame(now, market_only)
             .map(js_sys::Uint8Array::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forwards_leverage_metadata_command() {
+        let wire: CommandIn =
+            serde_json::from_str(r#"{"op":"fetchLeverage","command":17,"symbol":"BTCUSDT"}"#)
+                .unwrap();
+        assert!(matches!(
+            Command::from(wire),
+            Command::FetchLeverage { command: 17, symbol } if symbol == "BTCUSDT"
+        ));
     }
 }

@@ -84,7 +84,7 @@ export const canonicalUrl = (url, callerIds = new Set()) => {
 };
 
 export const requestKey = (method, url, body, callerIds = new Set(), options = {}) => {
-  const prefix = `${method.toUpperCase()} ${canonicalUrl(url, callerIds)}`;
+  const prefix = `${method.toUpperCase()} ${canonicalUrl(options.requestUrl?.(url, method) ?? url, callerIds)}`;
   if (body == null || body === '') return prefix;
   if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
   if (body instanceof URLSearchParams) return `${prefix} ${canonicalParams(body, callerIds)}`;
@@ -94,7 +94,7 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
     return `${prefix} ${typeof body === 'string' && body.includes('=')
       ? canonicalParams(new URLSearchParams(body), callerIds) : body}`;
   }
-  parsed = options.requestBody?.(parsed) ?? parsed;
+  parsed = options.requestBody?.(parsed, { method, url, callerIds }) ?? parsed;
   return `${prefix} ${JSON.stringify(normalize(parsed, callerIds, true, options))}`;
 };
 
@@ -115,6 +115,9 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
     if (options.cryptoProtocol) {
       delete message.nonce;
       if (method === 'public/auth') message.sig = '<signature>';
+    }
+    if (options.mexcProtocol && method === 'login' && message.param) {
+      message.param = { ...message.param, reqTime: '<timestamp>', signature: '<signature>' };
     }
     // OKX login signatures and clocks are checked against credentials by Tape;
     // the outbound identity retains API key and passphrase for comparison.

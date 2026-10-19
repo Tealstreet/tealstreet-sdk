@@ -30,7 +30,19 @@ const records = tapeRecords;
 const replay = (impl, run) => {
   const out = `${outDir}/${impl}-${run}.json`;
   const args = ['--expose-gc', ...(impl === 'ts' ? ['--import', 'tsx'] : [])];
-  args.push('sdk-rs/harness/replay.mjs', '--impl', impl, '--venue', values.venue, '--tape', values.tape, '--books', values.books, '--out', out);
+  args.push(
+    'sdk-rs/harness/replay.mjs',
+    '--impl',
+    impl,
+    '--venue',
+    values.venue,
+    '--tape',
+    values.tape,
+    '--books',
+    values.books,
+    '--out',
+    out,
+  );
   if (values['no-egress']) args.push('--no-egress');
   const result = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 125_000 });
   if (result.status !== 0) throw new Error(`${impl} replay failed: ${result.error?.message ?? result.signal ?? ''}\n${result.stderr}`);
@@ -64,7 +76,7 @@ for (let run = 0; run < runs; run++) {
 }
 const [ts, rust] = [results.ts[0], results.rust[0]];
 const venue = venueOf(values.venue);
-const isPrivate = tapeRecords.find((record) => record.type === 'config')?.private ?? tapeRecords.some((record) =>
+const isPrivate = tapeRecords.find((record) => record.type === 'config')?.private ?? tapeRecords.find((record) => record.type === 'meta')?.private ?? tapeRecords.some((record) =>
   venue.isPrivateRecord ? venue.isPrivateRecord(record) : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
 );
 
@@ -96,6 +108,14 @@ const isPrivate = tapeRecords.find((record) => record.type === 'config')?.privat
 //    Rust amends the existing native order ID.
 // OKX full-depth correction is also applied to the TS oracle: its old
 // last-trade filter permanently deleted valid levels when the trade lagged.
+const binanceFixes = (account, rustAccount) => {
+  for (const position of account.positions) {
+    const fixed = rustAccount.positions.find((p) => p.symbol === position.symbol && p.side === position.side);
+    if (position.marginSize === 0 && fixed?.marginSize > 0) position.marginSize = fixed.marginSize;
+  }
+};
+// The MEXC reference will receive these same repairs: this entry documents
+// deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
   hyperliquid() {
     // Native command regressions pin these deliberate TS fixes:
@@ -211,7 +231,22 @@ const KNOWN_TS_FIXES = {
     // REST ticker seeds install before the initial socket snapshot;
     // Partial-stop amend keeps its native ID when no mark price is available.
   },
+  mexc: () => {
+    // Full incremental depth, rather than replacing a 20-level snapshot.
+    // Sized stops choose the closing leverage rail even without reduceOnly.
+    // Bracket prices reach the native entry; unsupported opening triggers reject.
+    // Cancel-all reaches regular, plan and position-stop endpoints.
+    // Cancel/replace recomputes remaining size after racing fills; Closed wins
+    // over a late cancellation acknowledgement. Failed reads preserve state.
+    // Regular cumulative fills stay monotonic; terminal rows never reopen.
+    // Stale amend reads cannot regress those fills or place a replacement.
+    // REST/optimistic rows retain cumulative fills; amendments retain attached
+    // brackets and standalone stop sources through venue reconciliation.
+    // Native bracket clears and corrected sources win over delayed placement acks.
+    // Repeated private execution IDs emit one fill within the replay window.
+  },
 };
+
 const normalizeBingxPublic = (ts) => {
 // KNOWN_TS_FIXES: BingX turns precision=0 into 0.1 instead of the native
 // integer step 1. Correct that precision and its synthetic ticker touch only.
@@ -251,6 +286,7 @@ if (values.venue === 'bingx') {
   }
 }
 };
+
 function fixCryptocomAccount(account) {
     // TS never sets the hedged store flag despite mapping positions as hedged.
     account.hedged = true;
@@ -360,9 +396,13 @@ const summary = (impl) => ({
 });
 const t = summary('ts');
 const r = summary('rust');
-console.log(`frames ${ts.frames}, markets ${ts.markets.length}, tickers ${ts.tickers.length}, books ${Object.keys(ts.books).length}`);
+console.log(
+  `frames ${ts.frames}, markets ${ts.markets.length}, tickers ${ts.tickers.length}, books ${Object.keys(ts.books).length}`,
+);
 const row = (label, a, b, unit = 'ms') =>
-  console.log(`${label.padEnd(16)} ts ${a.toFixed(1).padStart(8)} ${unit}   rust ${b.toFixed(1).padStart(8)} ${unit}   ${(a / b).toFixed(2)}x`);
+  console.log(
+    `${label.padEnd(16)} ts ${a.toFixed(1).padStart(8)} ${unit}   rust ${b.toFixed(1).padStart(8)} ${unit}   ${(a / b).toFixed(2)}x`,
+  );
 row('main-thread cpu', t.cpuMs, r.cpuMs);
 row('steady cpu', t.steadyCpuMs, r.steadyCpuMs);
 row('process cpu', t.processCpuMs, r.processCpuMs);

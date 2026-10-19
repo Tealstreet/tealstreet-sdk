@@ -27,6 +27,7 @@ safe-cex-crypto = { path = "crypto" }
 safe-cex-engine = { path = "engine" }
 safe-cex-venue-binance = { path = "venues/binance" }
 safe-cex-venue-hyperliquid = { path = "venues/hyperliquid" }
+safe-cex-venue-mexc = { path = "venues/mexc" }
 safe-cex-venue-bingx = { path = "venues/bingx" }
 safe-cex-venue-bybit = { path = "venues/bybit" }
 safe-cex-venue-cryptocom = { path = "venues/cryptocom" }

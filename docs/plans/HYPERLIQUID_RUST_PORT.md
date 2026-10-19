@@ -305,3 +305,26 @@ tests passed); repeat in isolation after builds. Harness union passes 61 tests,
 including strict identity/timing checks and symmetric Bybit startup readiness.
 The host/CI/query union passed independent review; final harness audit and
 settled-tree Wasm replay gates remain pending.
+
+MEXC landing integration at 63d521a860: keep eight optional venue features and
+constructors, default all eight, and add its per-venue CI matrix entry at the
+unchanged byte budget. Preserve native placement-unit frame metadata and
+independent leverage rails; Hyperliquid explicitly leaves those hedge-only rails
+absent. MEXC rejects the Hyperliquid-only lookup query. The incoming leverage
+metadata bridge was missing from the first resolution; independent review caught
+it and the implicit public-mode guard. Restored its Deserialize/conversion arms,
+added a bridge regression, and use isPublicDataOnly. Reviewer verified every
+incoming host change against the merge base and accepted the correction.
+
+Harness integration audit caught a lost Crypto.com inbound audit callback after
+the MEXC socket routing change. Central delivery now observes each actual frame
+before its callback, covered by an auth/subscription/heartbeat regression. MEXC
+socket ordinals/epoch/public timer clock and HTTP trim anchors coexist with HL
+legacy shared-URL fanout and explicit private classification. Actual replay keeps
+strict write queues/count/order, caller IDs and economic number/string types;
+MEXC compatibility is limited to ID fields and generated externalOid. Active-only
+rolling windows retain exact width; historical windows stay absolute. All 78
+harness tests and syntax checks pass. Workspace523 native tests, native/wasm
+Clippy, bans, fmt, root typecheck/lint pass; new host regression, combined bridge,
+root tests and all settled-tree replay gates are running. Independent final
+harness correction review remains pending before the gate completion claim.
