@@ -179,3 +179,30 @@ thresholds, normalizations or size budgets changed for this transport work.
   wall-clock-sensitive HOW assertion expecting exactly 20,000 ms after setup;
   freeze that routing test's clock while keeping the real deadline regressions
   and production request budget unchanged.
+
+### Bitget integration phase
+
+- Bitget landed as `3a7b46407d` while CI was starting. Merged as `688ef2ac6d`.
+  Its two old action patterns need `..` for the optional socket metadata.
+- Independent review found three public sockets sharing one real URL, a
+  hardcoded Tealstreet fallback inside the venue, and Classic/UTA recovery
+  differences. Resolve these at the host boundary before landing this PR.
+- Add generic `SocketContext { feed, recover }` to connect effects. Stable feed
+  identity isolates simultaneous connections and persists across reconnects;
+  recovery is a one-connect protocol-health hint. Bitget emits only real v2/v3
+  URLs. Hosts keep the selected fallback sticky when a candidate is declared.
+- Extend the existing TS routing descriptor with generic initial silent count,
+  exact ignored messages and exact direct-only URLs. Bitget starts at one silent
+  attempt, private `pong` is ignored, and UTA stays on its real v3 endpoint.
+  Native consumes these resolved fields without a venue table. Independent
+  enumeration confirmed counter equivalence with TS across 512 traffic patterns.
+- Verify independent public feeds, Classic recovery, private pong/auth behavior,
+  UTA direct routing and absent-provider fallback, then re-review the integrated
+  policy and run the ten-venue CI gates. Inherit the landing size budget.
+- Implemented and independently reviewed: **87 focused TS**, **28 native**,
+  **78 Bitget**, **28 real SDK/wasm**, and **34 JS host** tests pass. Root
+  typecheck **44/44**, lint **28/28**, workspace/all-target Clippy, bans and
+  formatting pass. The shared TS/native fixture now has **31 cases**; URL
+  goldens retain their hosts and gain only Bitget's declared policy fields.
+- Ten-venue wasm: **3,499,657 bytes**, below the inherited **3,670,016-byte**
+  budget. Public/private Bitget and Binance replays and final CI are running.

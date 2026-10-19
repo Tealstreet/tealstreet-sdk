@@ -47,7 +47,10 @@ handling share one 20-second deadline. Transport recovery never replays a sent
 HTTP write.
 
 Private socket relays hide tunnel authentication and report open only after the
-upstream is ready, under a 15-second deadline. Two consecutive silent connections
+upstream is ready, under a 15-second deadline. Per-feed silent connections
 advance the sticky candidate chain, matching the SDK's `WsDirectFallback`.
-Any venue message resets the silent streak. The native TLS WebSocket upgrade uses
+Resolved policy supplies initial silence, exact ignored messages and real URLs
+that stay direct. Protocol recovery hints prefer a declared fallback; stable
+feed identities isolate sockets that share a role and URL. Other decoded venue
+messages reset the silent streak. The native TLS WebSocket upgrade uses
 HTTP/1.1; Tealstreet upgrade and REST headers come from the resolved policy.

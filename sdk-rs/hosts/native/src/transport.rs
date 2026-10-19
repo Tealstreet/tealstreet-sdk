@@ -51,6 +51,18 @@ pub trait Transport {
             self.connect_with_headers(socket, url, headers, events)
         }
     }
+    /// Feed identity and host recovery hints stay outside venue routing policy.
+    fn connect_context(
+        &self,
+        socket: SocketId,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        channel: Option<safe_cex_engine::SocketChannel>,
+        _context: Option<safe_cex_engine::SocketContext>,
+        events: Events,
+    ) -> mpsc::UnboundedSender<String> {
+        self.connect_channel(socket, url, headers, channel, events)
+    }
     /// Run a request, reporting its start, body chunks and end on `events`.
     /// Bound its lifetime and report `HttpFailed` on timeout, including the body.
     fn request(&self, request: HttpRequest, events: Events);
@@ -137,6 +149,18 @@ impl Transport for NetworkTransport {
         channel: Option<safe_cex_engine::SocketChannel>,
         events: Events,
     ) -> mpsc::UnboundedSender<String> {
+        self.connect_context(socket, url, headers, channel, None, events)
+    }
+
+    fn connect_context(
+        &self,
+        socket: SocketId,
+        url: String,
+        headers: Vec<(&'static str, String)>,
+        channel: Option<safe_cex_engine::SocketChannel>,
+        context: Option<safe_cex_engine::SocketContext>,
+        events: Events,
+    ) -> mpsc::UnboundedSender<String> {
         let (outgoing, mut pending) = mpsc::unbounded_channel::<String>();
         let routing = self.routing.clone();
         let headers = headers
@@ -144,7 +168,10 @@ impl Transport for NetworkTransport {
             .map(|(name, value)| (name.to_owned(), value))
             .collect();
         let (selected, direct_headers) = if let Some(state) = &routing {
-            (Some(state.socket(&url, headers, channel)), Vec::new())
+            (
+                Some(state.socket(&url, headers, channel, context)),
+                Vec::new(),
+            )
         } else {
             (None, headers)
         };
@@ -197,7 +224,7 @@ impl Transport for NetworkTransport {
                 tokio::select! {
                     message = ws.next() => match message {
                         Some(Ok(Message::Text(text))) => {
-                            if let (Some(state), Some(key)) = (&routing, &key) { state.message(key); }
+                            if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
                             let _ = events.send(HostEvent::WsMessage(socket, text.to_string()));
                         }
                         Some(Ok(Message::Binary(bytes))) => {
@@ -206,7 +233,7 @@ impl Transport for NetworkTransport {
                                 else if bytes.first() == Some(&0x78) { flate2::read::ZlibDecoder::new(bytes.as_ref()).read_to_end(&mut decoded) }
                                 else { decoded.extend_from_slice(&bytes); Ok(decoded.len()) };
                             let Ok(text) = result.and_then(|_| String::from_utf8(decoded).map_err(std::io::Error::other)) else { break 1007 };
-                            if let (Some(state), Some(key)) = (&routing, &key) { state.message(key); }
+                            if let (Some(state), Some(key)) = (&routing, &key) { state.message(key, &text); }
                             let _ = events.send(HostEvent::WsMessage(socket, text));
                         }
                         Some(Ok(Message::Ping(_))) => { let _ = ws.flush().await; }

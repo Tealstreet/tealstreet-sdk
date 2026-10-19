@@ -168,12 +168,14 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     socket,
                     url,
                     channel,
+                    context,
                 } => {
-                    let outgoing = self.transport.connect_channel(
+                    let outgoing = self.transport.connect_context(
                         socket,
                         url,
                         vec![],
                         channel,
+                        context,
                         self.events.clone(),
                     );
                     self.sockets.insert(socket, outgoing);
@@ -183,12 +185,14 @@ impl<V: Venue, T: Transport> Host<V, T> {
                     url,
                     headers,
                     channel,
+                    context,
                 } => {
-                    let outgoing = self.transport.connect_channel(
+                    let outgoing = self.transport.connect_context(
                         socket,
                         url,
                         headers,
                         channel,
+                        context,
                         self.events.clone(),
                     );
                     self.sockets.insert(socket, outgoing);

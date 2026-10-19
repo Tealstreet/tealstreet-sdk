@@ -219,7 +219,9 @@ memory.
 ### 4. Hosts
 
 Account-backed hosts reuse safe-cex's TS transport provider and routing resolver.
-Venues emit real URLs and explicit public/private/business socket roles. The JS
+Venues emit real URLs and explicit public/private/business socket roles. Stable
+feed identities isolate parallel sockets sharing a role and URL; protocol-health
+recovery hints let hosts prefer a declared fallback. The JS
 host applies proxy prefixes and per-operation authorization, package HOW/relay,
 and sticky fallback selection. Workers provide a header-capable raw socket
 constructor to those same protocol clients. Native launchers consume the
@@ -302,7 +304,7 @@ compacts lanes at checkpoints, watches gates and keeps this list current.
 | Backpack | done (#1299) |
 | Bitget (USDT-M, USDC) | done (#1308); inverse sizing and UTA ledger/trailing parity next |
 | Hyperliquid, Bitunix | wave 1, PRs in review |
-| Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | lane starting |
+| Engine transport routing (Tealstreet proxy and tunnel for venues that require them) | Implemented; [PR #1313](https://github.com/Tealstreet/tealstreet-sdk/pull/1313) |
 | KuCoin, Phemex | wave 2 lanes running |
 | Engine performance: batched message delivery, per-venue wasm builds | lane running |
 | WOO, Lighter, Paradex, GRVT, AsterDEX, Orderly family, ApeX Omni, Kraken, Coinbase, Bitrue, Polymarket, BreakoutProp, TxFlow, Binance spot and inverse, Bybit inverse/spot/demo | wave 2, as wave 1 lanes merge |

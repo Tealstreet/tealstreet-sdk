@@ -32,6 +32,9 @@ export interface EngineWsRoute {
   host?: string;
   fallback?: string;
   relay?: string;
+  initialSilentConnects?: number;
+  ignoredMessages?: string[];
+  directUrls?: string[];
 }
 
 /** Serializable host policy; contains no venue credentials or proxy JWT. */
@@ -69,6 +72,9 @@ const wsRoute = (route: ResolvedWs): EngineWsRoute => ({
   ...(route.tunnelled && route.host ? { host: route.host } : {}),
   ...(route.fallback ? { fallback: route.fallback } : {}),
   ...(isWsRelayEnabled() && route.relay ? { relay: route.relay } : {}),
+  ...(route.initialSilentConnects !== undefined ? { initialSilentConnects: route.initialSilentConnects } : {}),
+  ...(route.ignoredMessages ? { ignoredMessages: route.ignoredMessages } : {}),
+  ...(route.directUrls ? { directUrls: route.directUrls } : {}),
 });
 
 const resolved = (exchange: ExchangeName, options: ExchangeOptions, provider: TransportProvider) => {
@@ -323,14 +329,17 @@ export const createEngineTransport = (
     connect: (url, handlers) => {
       const channel =
         handlers.channel ?? socketChannels.find((rule) => url.includes(rule.contains))?.channel ?? 'public';
-      const route = routes[channel];
-      const key = `${channel}:${url.split('?')[0]}`;
-      let fallback = fallbacks.get(key);
-      if (!fallback) {
-        fallback = new WsDirectFallback();
+      const declared = routes[channel];
+      const bypass = declared.directUrls?.includes(url);
+      const route: EngineWsRoute = bypass ? {} : declared;
+      const key = `${channel}:${handlers.context?.feed ?? ''}:${url.split('?')[0]}`;
+      let fallback = bypass ? undefined : fallbacks.get(key);
+      if (!bypass && !fallback) {
+        fallback = new WsDirectFallback(2, route.initialSilentConnects);
         fallbacks.set(key, fallback);
       }
-      const target = fallback.resolveUrl(route.host ?? url, route.relay, route.fallback);
+      if (handlers.context?.recover && route.fallback) fallback?.preferFallback();
+      const target = fallback?.resolveUrl(route.host ?? url, route.relay, route.fallback) ?? url;
       const connection = provider.wsConnection(target);
       const upgrade = AxiosHeaders.from(handlers.headers ?? {});
       if (transport.webSocketHeaders) {
@@ -339,7 +348,7 @@ export const createEngineTransport = (
       }
       const headers = upgrade.toJSON() as Record<string, string>;
       const receive = (text: string) => {
-        fallback.onMessage();
+        if (!route.ignoredMessages?.includes(text)) fallback?.onMessage();
         handlers.onMessage(text);
       };
       if (connection?.kind !== 'relay') return transport.connect(target, { ...handlers, headers, onMessage: receive });

@@ -1,11 +1,13 @@
 import type { Transport } from '@tealstreet/safe-cex-wasm/host';
 import type { ExchangeName, ExchangeOptions } from '../types';
+import type { ResolvedWs } from './types';
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { BASE_WS_PRIVATE_URL, BASE_WS_PRIVATE_UTA_URL, BASE_WS_URL } from '../exchanges/bitget/bitget.types';
 import { directTransport } from './direct';
 import { createEngineTransport, resolveEngineRoutingPlan } from './engine';
 import { resolveExchangeRouting } from './tealstreet/routing/resolveExchangeRouting';
@@ -29,6 +31,7 @@ interface Case {
   direct?: boolean;
   how?: boolean;
   relay?: boolean;
+  bitget?: 'classic' | 'uta' | 'pong' | 'ack' | 'recover' | 'direct';
 }
 
 const cases: Case[] = [
@@ -136,6 +139,31 @@ const cases: Case[] = [
     baseURL: 'https://api-contract.weex.com',
     options: { tealstreetProxy: true, tealstreetTunnel: false },
   },
+  {
+    name: 'bitget-classic-feeds',
+    exchange: 'bitget',
+    baseURL: 'https://api.bitget.com',
+    options: {},
+    bitget: 'classic',
+  },
+  { name: 'bitget-uta-direct', exchange: 'bitget', baseURL: 'https://api.bitget.com', options: {}, bitget: 'uta' },
+  { name: 'bitget-private-pong', exchange: 'bitget', baseURL: 'https://api.bitget.com', options: {}, bitget: 'pong' },
+  { name: 'bitget-private-login', exchange: 'bitget', baseURL: 'https://api.bitget.com', options: {}, bitget: 'ack' },
+  {
+    name: 'bitget-write-recovery',
+    exchange: 'bitget',
+    baseURL: 'https://api.bitget.com',
+    options: {},
+    bitget: 'recover',
+  },
+  {
+    name: 'bitget-direct-recovery',
+    exchange: 'bitget',
+    baseURL: 'https://api.bitget.com',
+    options: {},
+    bitget: 'direct',
+    direct: true,
+  },
 ];
 
 const fixturePath = resolve(__dirname, '../../../../sdk-rs/hosts/native/tests/fixtures/routing-plans.json');
@@ -202,23 +230,61 @@ const buildCase = async (input: Case) => {
       },
     });
   }
-  const sockets = (['public', 'private', 'business'] as const).map((channel) => {
-    const route = routing[channel === 'public' ? 'wsPublic' : channel === 'private' ? 'wsPrivate' : 'wsBusiness'];
-    const url = `wss://venue.invalid/opaque-${channel}`;
+  const socketInputs: Array<{
+    channel: 'public' | 'private' | 'business';
+    url: string;
+    context?: { feed: string; recover: boolean };
+  }> = input.bitget
+    ? [
+        ...(input.bitget === 'classic'
+          ? ['primary', 'secondary-1', 'secondary-2'].map((feed) => ({
+              channel: 'public' as const,
+              url: BASE_WS_URL,
+              context: { feed, recover: false },
+            }))
+          : []),
+        {
+          channel: 'private',
+          url: input.bitget === 'uta' ? BASE_WS_PRIVATE_UTA_URL : BASE_WS_PRIVATE_URL,
+          context: { feed: 'private', recover: false },
+        },
+      ]
+    : (['public', 'private', 'business'] as const).map((channel) => ({
+        channel,
+        url: `wss://venue.invalid/opaque-${channel}`,
+      }));
+  const sockets = socketInputs.map(({ channel, url, context }) => {
+    const declared = routing[channel === 'public' ? 'wsPublic' : channel === 'private' ? 'wsPrivate' : 'wsBusiness'];
+    const route: Partial<ResolvedWs> = declared.directUrls?.includes(url) ? {} : declared;
     const candidates = [
       route.host ?? url,
       ...(input.relay && route.relay ? [route.relay] : []),
       ...(route.fallback ? [route.fallback] : []),
     ];
     const attempts = Array.from({ length: 5 }, (_, attempt) => {
-      const target = candidates[Math.min(Math.floor(attempt / 2), candidates.length - 1)];
+      const recover = input.bitget === 'recover' || input.bitget === 'direct' || input.bitget === 'uta';
+      const message =
+        input.bitget === 'pong' ? 'pong' : input.bitget === 'ack' ? '{"event":"login","code":"0"}' : undefined;
+      const proved = message !== undefined && !route.ignoredMessages?.includes(message);
+      const index = recover
+        ? candidates.length - 1
+        : proved
+          ? 0
+          : Math.floor((attempt + (route.initialSilentConnects ?? 0)) / 2);
+      const target = candidates[Math.min(index, candidates.length - 1)];
       const parsed = new URL(target);
       const relay = parsed.searchParams.get('ts-relay');
       if (relay) parsed.searchParams.delete('ts-relay');
       const headers = { 'X-Venue-Header': 'keep', ...siteHeaders, ...(provider.wsConnection(target)?.headers ?? {}) };
-      return { url: relay ? parsed.toString() : target, relay, headers };
+      return {
+        url: relay ? parsed.toString() : target,
+        relay,
+        headers,
+        ...(recover && attempt === 0 && context ? { context: { ...context, recover: true } } : {}),
+        ...(message !== undefined ? { message } : {}),
+      };
     });
-    return { channel, original: url, headers: { 'X-Venue-Header': 'keep' }, attempts };
+    return { channel, original: url, headers: { 'X-Venue-Header': 'keep' }, ...(context ? { context } : {}), attempts };
   });
   return { name: input.name, exchange: input.exchange, plan, http, sockets };
 };

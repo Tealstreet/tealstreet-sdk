@@ -132,6 +132,7 @@ export class EngineHost {
         }
         const socket = transport.connect(action.url, {
           channel: action.channel,
+          context: action.context,
           headers: action.headers && Object.fromEntries(action.headers),
           onOpen: () => { if (!this.disposed) this.run(engine.wsOpen(id, transport.now())); },
           onMessage: (text) => { if (!this.disposed) this.run(engine.wsMessage(id, text, transport.now())); },

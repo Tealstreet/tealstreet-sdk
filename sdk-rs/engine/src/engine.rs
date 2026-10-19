@@ -82,12 +82,20 @@ pub enum SocketChannel {
     Business,
 }
 
+/// Stable feed identity and protocol recovery; hosts choose transport routes.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct SocketContext {
+    pub feed: &'static str,
+    pub recover: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     WsConnect {
         socket: SocketId,
         url: String,
         channel: Option<SocketChannel>,
+        context: Option<SocketContext>,
     },
     /// Upgrade authentication; hosts must fail closed if headers are unsupported.
     WsConnectWithHeaders {
@@ -95,6 +103,7 @@ pub enum Action {
         url: String,
         headers: Vec<(&'static str, String)>,
         channel: Option<SocketChannel>,
+        context: Option<SocketContext>,
     },
     WsSend {
         socket: SocketId,
@@ -353,11 +362,31 @@ impl<P> Cx<'_, P> {
         url: impl Into<String>,
         channel: Option<SocketChannel>,
     ) -> SocketId {
+        self.connect_context(url, channel, None)
+    }
+
+    pub fn connect_feed(
+        &mut self,
+        url: impl Into<String>,
+        channel: SocketChannel,
+        feed: &'static str,
+        recover: bool,
+    ) -> SocketId {
+        self.connect_context(url, Some(channel), Some(SocketContext { feed, recover }))
+    }
+
+    fn connect_context(
+        &mut self,
+        url: impl Into<String>,
+        channel: Option<SocketChannel>,
+        context: Option<SocketContext>,
+    ) -> SocketId {
         let socket = SocketId(self.io.next());
         self.io.actions.push(Action::WsConnect {
             socket,
             url: url.into(),
             channel,
+            context,
         });
         socket
     }
@@ -391,6 +420,7 @@ impl<P> Cx<'_, P> {
             url: url.into(),
             headers,
             channel,
+            context: None,
         });
         socket
     }

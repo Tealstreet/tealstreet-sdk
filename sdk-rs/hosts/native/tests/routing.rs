@@ -948,3 +948,243 @@ async fn how_response_header_values_match_js_string_coercion_on_the_wire() {
     ));
     server.await.unwrap();
 }
+
+async fn feed_connection(
+    transport: &NetworkTransport,
+    url: String,
+    channel: safe_cex_engine::SocketChannel,
+    feed: Option<&'static str>,
+    recover: bool,
+) -> Vec<String> {
+    let (send, mut events) = mpsc::unbounded_channel();
+    let outgoing = transport.connect_context(
+        SocketId(100),
+        url,
+        vec![],
+        Some(channel),
+        feed.map(|feed| safe_cex_engine::SocketContext { feed, recover }),
+        send,
+    );
+    assert!(matches!(next(&mut events).await, HostEvent::WsOpened(_)));
+    let mut messages = Vec::new();
+    loop {
+        match next(&mut events).await {
+            HostEvent::WsMessage(_, text) => messages.push(text),
+            HostEvent::WsClosed(_, _) => break,
+            event => panic!("unexpected feed event {event:?}"),
+        }
+    }
+    drop(outgoing);
+    messages
+}
+
+#[tokio::test]
+async fn independent_feeds_on_one_url_keep_their_own_silent_fallback_history() {
+    let (listener, origin) = listener().await;
+    let origin = origin.replacen("http:", "ws:", 1);
+    let server = tokio::spawn(async move {
+        for expected in [
+            "/direct",
+            "/fallback",
+            "/direct",
+            "/direct",
+            "/fallback",
+            "/fallback",
+        ] {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_hdr_async(
+                stream,
+                move |request: &Request, response: Response| {
+                    assert_eq!(request.uri().path(), expected);
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            ws.close(None).await.unwrap();
+        }
+    });
+    let mut plan = RoutingPlan::default();
+    plan.ws.public.initial_silent_connects = Some(1);
+    plan.ws.public.fallback = Some(format!("{origin}/fallback"));
+    let transport = NetworkTransport::with_routing(plan, tokens());
+    // Empty and absent feed names denote the legacy feed; named feeds stay independent.
+    for feed in [
+        Some("primary"),
+        Some("primary"),
+        Some("secondary"),
+        None,
+        Some(""),
+        Some("primary"),
+    ] {
+        feed_connection(
+            &transport,
+            format!("{origin}/direct"),
+            safe_cex_engine::SocketChannel::Public,
+            feed,
+            false,
+        )
+        .await;
+    }
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn initial_silence_and_ignored_private_pongs_select_the_second_connect_fallback() {
+    let (listener, origin) = listener().await;
+    let origin = origin.replacen("http:", "ws:", 1);
+    let server = tokio::spawn(async move {
+        for expected in ["/direct", "/fallback", "/fallback", "/direct", "/direct"] {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_hdr_async(
+                stream,
+                move |request: &Request, response: Response| {
+                    assert_eq!(request.uri().path(), expected);
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            ws.send(Message::text("pong")).await.unwrap();
+            ws.close(None).await.unwrap();
+        }
+    });
+    let mut plan = RoutingPlan::default();
+    plan.ws.private.initial_silent_connects = Some(1);
+    plan.ws.private.ignored_messages = vec!["pong".into()];
+    plan.ws.private.fallback = Some(format!("{origin}/fallback"));
+    plan.ws.public.initial_silent_connects = Some(1);
+    plan.ws.public.fallback = Some(format!("{origin}/fallback"));
+    let transport = NetworkTransport::with_routing(plan, tokens());
+    for channel in [
+        safe_cex_engine::SocketChannel::Private,
+        safe_cex_engine::SocketChannel::Private,
+        safe_cex_engine::SocketChannel::Private,
+        safe_cex_engine::SocketChannel::Public,
+        safe_cex_engine::SocketChannel::Public,
+    ] {
+        let messages = feed_connection(
+            &transport,
+            format!("{origin}/direct"),
+            channel,
+            Some("same-feed-name"),
+            false,
+        )
+        .await;
+        assert_eq!(
+            messages,
+            ["pong"],
+            "ignored liveness frames must still reach the venue"
+        );
+    }
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn recovery_sticks_to_the_final_declared_fallback_after_a_healthy_connection() {
+    let (listener, origin) = listener().await;
+    let origin = origin.replacen("http:", "ws:", 1);
+    let server = tokio::spawn(async move {
+        for expected in ["/direct", "/fallback", "/fallback", "/ordinary-proxy"] {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_hdr_async(
+                stream,
+                move |request: &Request, response: Response| {
+                    assert_eq!(request.uri().path(), expected);
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            ws.send(Message::text("authenticated-payload"))
+                .await
+                .unwrap();
+            ws.close(None).await.unwrap();
+        }
+    });
+    let mut plan = RoutingPlan::default();
+    plan.ws.private.relay =
+        Some("ws://127.0.0.1:1/unwanted-relay?ts-relay=wss%3A%2F%2Fvenue.invalid%2Fprivate".into());
+    plan.ws.private.fallback = Some(format!("{origin}/fallback"));
+    let transport = NetworkTransport::with_routing(plan, tokens());
+    for recover in [false, true, false] {
+        assert_eq!(
+            feed_connection(
+                &transport,
+                format!("{origin}/direct"),
+                safe_cex_engine::SocketChannel::Private,
+                Some("private"),
+                recover
+            )
+            .await,
+            ["authenticated-payload"]
+        );
+    }
+    let mut no_fallback = RoutingPlan::default();
+    no_fallback.ws.private.host = Some(format!("{origin}/ordinary-proxy"));
+    // A recovery hint with no declared fallback preserves the provider's normal route.
+    let transport = NetworkTransport::with_routing(no_fallback, tokens());
+    feed_connection(
+        &transport,
+        format!("{origin}/direct"),
+        safe_cex_engine::SocketChannel::Private,
+        Some("private"),
+        true,
+    )
+    .await;
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn explicit_direct_urls_bypass_recovery_and_do_not_mutate_query_variant_counters() {
+    let (listener, origin) = listener().await;
+    let origin = origin.replacen("http:", "ws:", 1);
+    let server = tokio::spawn(async move {
+        for expected in ["/v3/private", "/v3/private", "/v3/private", "/proxy"] {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_hdr_async(
+                stream,
+                move |request: &Request, response: Response| {
+                    assert_eq!(request.uri().path(), expected);
+                    assert_eq!(
+                        request.headers().contains_key("origin"),
+                        expected == "/proxy"
+                    );
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            ws.close(None).await.unwrap();
+        }
+    });
+    let direct = format!("{origin}/v3/private");
+    let mut plan = RoutingPlan::default();
+    plan.ws.private.host = Some(format!("{origin}/proxy"));
+    plan.ws.private.relay = Some("ws://127.0.0.1:1/unused-relay".into());
+    plan.ws.private.fallback = Some(format!("{origin}/fallback"));
+    plan.ws.private.initial_silent_connects = Some(1);
+    plan.ws.private.direct_urls = vec![direct.clone()];
+    plan.ws_headers
+        .insert("Origin".into(), "https://preview.tealstreet.io".into());
+    let transport = NetworkTransport::with_routing(plan, tokens());
+    for recover in [true, false, false] {
+        feed_connection(
+            &transport,
+            direct.clone(),
+            safe_cex_engine::SocketChannel::Private,
+            Some("private"),
+            recover,
+        )
+        .await;
+    }
+    feed_connection(
+        &transport,
+        format!("{direct}?not-an-exact-match=1"),
+        safe_cex_engine::SocketChannel::Private,
+        Some("private"),
+        false,
+    )
+    .await;
+    server.await.unwrap();
+}

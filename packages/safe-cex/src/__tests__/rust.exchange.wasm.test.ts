@@ -494,6 +494,36 @@ describe('RustEngineExchange', () => {
     expect(tape.requests).toEqual([]);
   });
 
+  it('keeps all three real Bitget public feeds direct on their first connection', async () => {
+    const opened: Array<{ url: string; channel?: string; context?: { feed: string; recover: boolean } }> = [];
+    const raw: Transport = {
+      ...recordedTransport().transport,
+      connect: (url, handlers) => {
+        opened.push({ url, channel: handlers.channel, context: handlers.context });
+        setTimeout(handlers.onOpen, 0);
+        return { send() {}, close() {} };
+      },
+      request: async ({ url }) => {
+        const path = new URL(url).pathname;
+        const data = path.endsWith('/contracts')
+          ? [{ symbol: 'BTCUSDT', baseCoin: 'BTC', quoteCoin: 'USDT', symbolStatus: 'normal', pricePlace: '1', priceEndStep: '1', sizeMultiplier: '0.001', minTradeNum: '0.001', maxOrderQty: '120', maxLever: '125' }]
+          : [{ symbol: 'BTCUSDT', bidPr: '99.9', askPr: '100.1', lastPr: '100', indexPrice: '99', changeUtc24h: '0.01', baseVolume: '1000', quoteVolume: '100000', fundingRate: '0.0001' }];
+        return { status: 200, body: new TextEncoder().encode(JSON.stringify({ code: '00000', data })) };
+      },
+    };
+    setWasmEngineLoader(loadNodeEngine);
+    setRustEngineTransport(() => raw);
+    exchange = new RustEngineExchange('bitget', {
+      key: '', secret: '', publicDataOnly: true, tealstreetProxy: false, tealstreetTunnel: false,
+      transport: tealstreetTransport,
+    }, new DefaultStore());
+    await exchange.start();
+    await until(() => opened.length === 3);
+    expect(opened.map(({ url }) => url)).toEqual(Array(3).fill('wss://ws.bitget.com/v2/ws/public'));
+    expect(opened.every(({ channel, context }) => channel === 'public' && context?.recover === false)).toBe(true);
+    expect(new Set(opened.map(({ context }) => context?.feed))).toEqual(new Set(['primary', 'secondary-1', 'secondary-2']));
+  });
+
   it.each(['bitget', 'bitgetusdc'] as const)('rejects private %s without a nonempty passphrase', async (venue) => {
     const { WasmEngine } = await loadNodeEngine();
     for (const passphrase of [undefined, '']) {

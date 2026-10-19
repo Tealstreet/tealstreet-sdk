@@ -22,7 +22,7 @@ export interface Transport {
   now(): number;
   connect(
     url: string,
-    handlers: { channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
+    handlers: { context?: { feed: string; recover: boolean }; channel?: 'public' | 'private' | 'business'; headers?: Record<string, string>; onOpen(): void; onMessage(text: string): void; onClose(code?: number): void },
   ): Socket;
   request(request: {
     method: string;

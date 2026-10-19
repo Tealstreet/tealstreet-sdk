@@ -60,6 +60,12 @@ pub struct WsRoute {
     pub fallback: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_silent_connects: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignored_messages: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub direct_urls: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -111,6 +117,7 @@ struct SocketAttempts {
     message: bool,
     silent: usize,
     candidate: usize,
+    ignored_messages: Vec<String>,
 }
 
 pub(crate) struct SelectedSocket {
@@ -149,6 +156,7 @@ impl RoutingState {
         original: &str,
         mut headers: Vec<(String, String)>,
         explicit: Option<safe_cex_engine::SocketChannel>,
+        context: Option<safe_cex_engine::SocketContext>,
     ) -> SelectedSocket {
         for (name, value) in &self.plan.venue_ws_headers {
             insert_header(&mut headers, name.clone(), value.clone());
@@ -169,29 +177,49 @@ impl RoutingState {
             SocketChannel::Private => &self.plan.ws.private,
             SocketChannel::Business => &self.plan.ws.business,
         };
+        let feed = context.as_ref().map_or("", |context| context.feed);
+        let recover = context.as_ref().is_some_and(|context| context.recover);
         let key = format!(
-            "{channel:?}:{}",
+            "{channel:?}:{feed}:{}",
             original.split('?').next().unwrap_or(original)
         );
+        if route.direct_urls.iter().any(|url| url == original) {
+            return SelectedSocket {
+                url: original.into(),
+                headers,
+                key: format!("direct:{key}"),
+                relay: None,
+            };
+        }
         let mut sockets = self.sockets.lock().unwrap();
-        let attempts = sockets.entry(key.clone()).or_default();
+        let attempts = sockets
+            .entry(key.clone())
+            .or_insert_with(|| SocketAttempts {
+                silent: route.initial_silent_connects.unwrap_or(0),
+                ignored_messages: route.ignored_messages.clone(),
+                ..SocketAttempts::default()
+            });
         if attempts.connected {
             attempts.silent = if attempts.message {
                 0
             } else {
-                attempts.silent + 1
+                attempts.silent.saturating_add(1)
             };
         }
         attempts.connected = true;
         attempts.message = false;
+        let fallback = route.fallback.as_deref().filter(|url| !url.is_empty());
         let mut candidates = vec![route.host.as_deref().unwrap_or(original)];
         candidates.extend(
-            [route.relay.as_deref(), route.fallback.as_deref()]
+            [route.relay.as_deref(), fallback]
                 .into_iter()
                 .flatten()
                 .filter(|url| !url.is_empty()),
         );
-        if attempts.silent >= 2 && attempts.candidate + 1 < candidates.len() {
+        if recover && fallback.is_some() {
+            attempts.candidate = candidates.len() - 1;
+            attempts.silent = 0;
+        } else if attempts.silent >= 2 && attempts.candidate + 1 < candidates.len() {
             attempts.candidate += 1;
             attempts.silent = 0;
         }
@@ -227,8 +255,13 @@ impl RoutingState {
         }
     }
 
-    pub fn message(&self, key: &str) {
-        if let Some(attempts) = self.sockets.lock().unwrap().get_mut(key) {
+    pub fn message(&self, key: &str, text: &str) {
+        if let Some(attempts) = self.sockets.lock().unwrap().get_mut(key)
+            && !attempts
+                .ignored_messages
+                .iter()
+                .any(|ignored| ignored == text)
+        {
             attempts.message = true;
         }
     }
@@ -686,17 +719,17 @@ mod tests {
         let url = "wss://venue.invalid/shared?requestId=one";
         let private = Some(safe_cex_engine::SocketChannel::Private);
         let public = Some(safe_cex_engine::SocketChannel::Public);
-        let first = state.socket(url, vec![], private.clone());
-        state.message(&first.key);
-        assert_eq!(state.socket(url, vec![], private.clone()).url, url);
-        assert_eq!(state.socket(url, vec![], private.clone()).url, url);
+        let first = state.socket(url, vec![], private.clone(), None);
+        state.message(&first.key, "venue-message");
+        assert_eq!(state.socket(url, vec![], private.clone(), None).url, url);
+        assert_eq!(state.socket(url, vec![], private.clone(), None).url, url);
         assert_eq!(
-            state.socket(url, vec![], private.clone()).url,
+            state.socket(url, vec![], private.clone(), None).url,
             "wss://fallback.invalid/private"
         );
-        assert_eq!(state.socket(url, vec![], public).url, url);
+        assert_eq!(state.socket(url, vec![], public, None).url, url);
         assert_eq!(
-            state.socket(url, vec![], private.clone()).url,
+            state.socket(url, vec![], private.clone(), None).url,
             "wss://fallback.invalid/private"
         );
     }
@@ -711,6 +744,7 @@ mod tests {
         let selected = state(plan).socket(
             "wss://venue.invalid/public",
             vec![("X-Api-Key".into(), "keep".into())],
+            None,
             None,
         );
         assert_eq!(
@@ -761,11 +795,12 @@ mod tests {
     #[test]
     fn native_selectors_consume_the_exact_ts_generated_golden_matrix() {
         #[derive(Deserialize)]
-        struct Example {
+        struct Example<'a> {
             name: String,
             plan: RoutingPlan,
             http: Vec<HttpExample>,
-            sockets: Vec<SocketExample>,
+            #[serde(borrow)]
+            sockets: Vec<SocketExample<'a>>,
         }
         #[derive(Deserialize)]
         struct Request {
@@ -784,22 +819,35 @@ mod tests {
             route: HttpRoute,
         }
         #[derive(Deserialize)]
-        struct SocketExample {
+        struct SocketExample<'a> {
             channel: SocketChannel,
             original: String,
             headers: BTreeMap<String, String>,
-            attempts: Vec<ExpectedSocket>,
+            #[serde(default, borrow)]
+            context: Option<Context<'a>>,
+            #[serde(borrow)]
+            attempts: Vec<ExpectedSocket<'a>>,
         }
         #[derive(Deserialize)]
-        struct ExpectedSocket {
+        struct Context<'a> {
+            feed: &'a str,
+            #[serde(default)]
+            recover: bool,
+        }
+        #[derive(Deserialize)]
+        struct ExpectedSocket<'a> {
             url: String,
             relay: Option<String>,
             headers: BTreeMap<String, String>,
+            #[serde(default, borrow)]
+            context: Option<Context<'a>>,
+            #[serde(default)]
+            message: Option<String>,
         }
 
-        let examples: Vec<Example> =
+        let examples: Vec<Example<'static>> =
             serde_json::from_str(include_str!("../tests/fixtures/routing-plans.json")).unwrap();
-        assert_eq!(examples.len(), 25);
+        assert_eq!(examples.len(), 31);
         for example in examples {
             let state = state(example.plan);
             for http in example.http {
@@ -864,6 +912,14 @@ mod tests {
                         &socket.original,
                         socket.headers.clone().into_iter().collect(),
                         Some(role.clone()),
+                        expected
+                            .context
+                            .as_ref()
+                            .or(socket.context.as_ref())
+                            .map(|context| safe_cex_engine::SocketContext {
+                                feed: context.feed,
+                                recover: context.recover,
+                            }),
                     );
                     assert_eq!(
                         actual.url, expected.url,
@@ -881,6 +937,9 @@ mod tests {
                         "{} WS upgrade headers",
                         example.name
                     );
+                    if let Some(message) = expected.message {
+                        state.message(&actual.key, &message);
+                    }
                 }
             }
         }

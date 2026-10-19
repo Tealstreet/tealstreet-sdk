@@ -82,6 +82,8 @@ enum ActionOut<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         channel: Option<&'static str>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        context: Option<&'a safe_cex_engine::SocketContext>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         headers: Option<Vec<(&'static str, &'a str)>>,
     },
     WsSend {
@@ -138,10 +140,12 @@ fn encode(actions: &[Action]) -> String {
                 socket,
                 url,
                 channel,
+                context,
             } => ActionOut::WsConnect {
                 socket: socket.0,
                 url,
                 channel: channel.as_ref().map(socket_channel),
+                context: context.as_ref(),
                 headers: None,
             },
             Action::WsConnectWithHeaders {
@@ -149,10 +153,12 @@ fn encode(actions: &[Action]) -> String {
                 url,
                 headers,
                 channel,
+                context,
             } => ActionOut::WsConnect {
                 socket: socket.0,
                 url,
                 channel: channel.as_ref().map(socket_channel),
+                context: context.as_ref(),
                 headers: Some(headers.iter().map(|(k, v)| (*k, v.as_str())).collect()),
             },
             Action::WsSend { socket, text } => ActionOut::WsSend {

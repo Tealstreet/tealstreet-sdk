@@ -12,6 +12,12 @@ export interface ResolvedWs {
   fallback?: string;
   relay?: string;
   readonly?: string;
+  /** Account for a venue's first-connect silence check before any reconnect. */
+  initialSilentConnects?: number;
+  /** Frames still reach the engine, but do not prove the current route works. */
+  ignoredMessages?: string[];
+  /** Exact upstream URLs which bypass every fallback and recovery policy. */
+  directUrls?: string[];
 }
 
 export interface ResolvedRouting {

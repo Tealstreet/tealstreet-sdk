@@ -355,7 +355,11 @@ describe('engine HTTP routing at the raw transport boundary', () => {
   it.each(['weex', 'mexc'] as const)('%s never installs HOW, matching its TS API factory', async (exchange) => {
     const raw = makeRaw();
     await createEngineTransport(exchange, options({ tealstreetTunnel: true }), raw).request(
-      request(exchange === 'weex' ? 'https://api-contract.weex.com/capi/v2/account/assets' : 'https://api.mexc.com/api/v1/private/account/assets'),
+      request(
+        exchange === 'weex'
+          ? 'https://api-contract.weex.com/capi/v2/account/assets'
+          : 'https://api.mexc.com/api/v1/private/account/assets',
+      ),
     );
     expect(raw.request).toHaveBeenCalledTimes(1);
     expect(mocks.createAdapter).not.toHaveBeenCalled();
@@ -768,4 +772,90 @@ describe('relay binary frames obey the native transport text contract', () => {
     expect(handler.onMessage).not.toHaveBeenCalled();
     expect(handler.onClose).not.toHaveBeenCalled();
   });
+});
+
+describe('Bitget host routing keeps engine feeds and recovery independent', () => {
+  const publicUrl = 'wss://ws.bitget.com/v2/ws/public';
+  const privateUrl = 'wss://ws.bitget.com/v2/ws/private';
+  const utaUrl = 'wss://ws.bitget.com/v3/ws/private';
+  const withContext = (feed: string, recover = false, channel: 'public' | 'private' = 'public') => ({
+    ...handlers(channel),
+    context: { feed, recover },
+  });
+
+  it('starts all three same-URL public feeds directly and advances each feed independently', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options(), raw);
+    for (const feed of ['tickers', 'books', 'candles']) routed.connect(publicUrl, withContext(feed));
+    expect(raw.connect.mock.calls.map(([url]) => url)).toEqual([publicUrl, publicUrl, publicUrl]);
+    routed.connect(publicUrl, withContext('tickers'));
+    expect(raw.connect.mock.lastCall![0]).toBe('wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public');
+    // A working books feed remains direct while its sibling has fallen back.
+    raw.connect.mock.calls[1][1].onMessage('pong');
+    routed.connect(publicUrl, withContext('books'));
+    expect(raw.connect.mock.lastCall![0]).toBe(publicUrl);
+    routed.connect(publicUrl, withContext('candles'));
+    expect(raw.connect.mock.lastCall![0]).toBe('wss://bitget-public-proxy-ja.tealstreet.io/v2/ws/public');
+  });
+
+  it.each(['bitget', 'bitgetinverse', 'bitgetusdc'] as const)(
+    '%s classic post-write recovery selects and sticks to the declared private fallback',
+    (exchange) => {
+      const raw = makeRaw();
+      const routed = createEngineTransport(exchange, options(), raw);
+      routed.connect(privateUrl, withContext('account', false, 'private'));
+      raw.connect.mock.lastCall![1].onMessage('{"event":"login","code":"0"}');
+      routed.connect(privateUrl, withContext('account', true, 'private'));
+      expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private');
+      routed.connect(privateUrl, withContext('account', false, 'private'));
+      expect(raw.connect.mock.lastCall![0]).toBe('wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private');
+    },
+  );
+
+  it('the direct provider keeps recovery on the real venue host', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options({ transport: directTransport }), raw);
+    for (let attempt = 0; attempt < 5; attempt++) routed.connect(privateUrl, withContext('account', true, 'private'));
+    expect(raw.connect.mock.calls.every(([url]) => url === privateUrl)).toBe(true);
+  });
+
+  it('UTA private sockets bypass v2 fallbacks even during recovery and repeated silence', () => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options({ tealstreetProxy: true }), raw);
+    for (let attempt = 0; attempt < 10; attempt++) routed.connect(utaUrl, withContext('account', true, 'private'));
+    expect(raw.connect.mock.calls.every(([url]) => url === utaUrl)).toBe(true);
+    expect(raw.connect.mock.calls.every(([, handler]) => Object.keys(handler.headers ?? {}).length === 0)).toBe(true);
+  });
+
+  it.each([
+    ['pong', true],
+    ['{"event":"login","code":"0"}', false],
+  ] as const)('private frame %s counts toward stream proof=%s', (message, fallbackExpected) => {
+    const raw = makeRaw();
+    const routed = createEngineTransport('bitget', options(), raw);
+    routed.connect(privateUrl, withContext('account', false, 'private'));
+    raw.connect.mock.lastCall![1].onMessage(message);
+    routed.connect(privateUrl, withContext('account', false, 'private'));
+    expect(raw.connect.mock.lastCall![0]).toBe(
+      fallbackExpected ? 'wss://fsjnpy143pbz.asia.tealstreet.io/bitget/v2/private' : privateUrl,
+    );
+  });
+});
+
+it('a recovery hint preserves direct routing when the only candidate is a relay', () => {
+  setWsRelayEnabled(true);
+  const raw = makeRaw();
+  const provider = {
+    ...tealstreetTransport,
+    wsRouting: (exchange: ExchangeName, opts: Partial<ExchangeOptions>) => {
+      const routing = tealstreetTransport.wsRouting(exchange, opts);
+      return { ...routing, wsPrivate: { ...routing.wsPrivate, fallback: undefined } };
+    },
+  };
+  createEngineTransport('bybit', options({ transport: provider }), raw).connect('wss://stream.bybit.com/v5/private', {
+    ...handlers('private'),
+    context: { feed: 'account', recover: true },
+  });
+  expect(raw.connect.mock.lastCall![0]).toBe('wss://stream.bybit.com/v5/private');
+  expect(mocks.relay).not.toHaveBeenCalled();
 });

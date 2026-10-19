@@ -256,3 +256,18 @@ test('an asynchronous binary message cannot enter a disposed engine', async () =
   await decoded;
   assert.equal(calls, 0);
 });
+
+
+test('socket feed identity and protocol recovery reach the account transport', () => {
+  let received;
+  const host = new EngineHost({}, {
+    connect: (url, handlers) => {
+      received = { url, channel: handlers.channel, context: handlers.context };
+      return { send() {}, close() {} };
+    },
+  });
+  const context = { feed: 'book-2', recover: true };
+  host.execute({ op: 'wsConnect', socket: 1, url: 'wss://venue.test/shared', channel: 'public', context });
+  assert.deepEqual(received, { url: 'wss://venue.test/shared', channel: 'public', context });
+  host.dispose();
+});
