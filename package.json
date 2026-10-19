@@ -20,6 +20,7 @@
     "rust:private-tape": "node sdk-rs/harness/private-tape.mjs",
     "rust:private-tape-bitget": "node sdk-rs/harness/private-tape-bitget.mjs",
     "rust:private-tape-bybit": "node sdk-rs/harness/private-tape-bybit.mjs",
+    "rust:private-tape-okx": "node sdk-rs/harness/private-tape-okx.mjs",
     "rust:trim-tape": "node sdk-rs/harness/trim-tape.mjs",
     "rust:gate": "node sdk-rs/harness/gate.mjs",
     "rust:test-harness": "node --test sdk-rs/harness/tape.test.mjs"

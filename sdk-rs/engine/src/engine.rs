@@ -344,7 +344,8 @@ impl<P> Cx<'_, P> {
 
     /// Issue a request whose successful body holds a large array: each element
     /// goes to [`Venue::on_item`] as it arrives, then [`Venue::on_response`]
-    /// runs with the envelope, its array emptied. Error bodies arrive whole.
+    /// runs with the envelope for `EnvelopeField` or `Path` (array emptied),
+    /// or an empty body for legacy `Root`/`Field`. Error bodies arrive whole.
     pub fn request_streamed(
         &mut self,
         method: Method,
@@ -610,7 +611,9 @@ impl<V: Venue> Engine<V> {
         if let Some(splitter) = &incoming.splitter {
             let outside = splitter.outside();
             if !splitter.finished() {
-                if let Some(body) = splitter.envelope()
+                if let Some(body) = splitter
+                    .envelope()
+                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
                     && serde_json::from_str::<serde::de::IgnoredAny>(body).is_ok()
                 {
                     self.venue.on_stream_error(
@@ -634,7 +637,10 @@ impl<V: Venue> Engine<V> {
             let response = Response {
                 status: incoming.status,
                 headers: &incoming.headers,
-                body: splitter.envelope().unwrap_or(""),
+                body: splitter
+                    .envelope()
+                    .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                    .unwrap_or(""),
             };
             self.venue.on_response(&mut cx, pending, response);
             return;

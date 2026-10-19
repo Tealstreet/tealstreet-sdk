@@ -104,6 +104,8 @@ pub enum ArrayAt {
     Root,
     /// The array is this field of the top-level object.
     Field(&'static str),
+    /// Retain the surrounding object for this top-level array.
+    EnvelopeField(&'static str),
     /// The array sits under these nested object fields.
     Path(&'static [&'static str]),
     /// Stream the first matching array and retain its envelope with `[]` in
@@ -167,14 +169,19 @@ impl ArraySplitter {
     pub fn finished(&self) -> bool {
         self.phase == Phase::Done
             && !self.invalid
-            && !self.envelope_overflow
-            && serde_json::from_slice::<IgnoredAny>(&self.envelope).is_ok()
+            && (self.envelope().is_none()
+                || (!self.envelope_overflow
+                    && serde_json::from_slice::<IgnoredAny>(&self.envelope).is_ok()))
     }
 
-    pub fn envelope(&self) -> Option<&str> {
-        std::str::from_utf8(&self.envelope).ok()
+    pub fn envelope(&self) -> Option<&[u8]> {
+        matches!(
+            self.at,
+            ArrayAt::Envelope(_) | ArrayAt::EnvelopeField(_) | ArrayAt::Path(_)
+        )
+        .then_some(self.envelope.as_slice())
     }
-    /// The body with the streamed array emptied, bounded to 128 KiB.
+    /// The body with the streamed array emptied, bounded to 16 KiB.
     pub fn outside(&self) -> &[u8] {
         &self.envelope
     }
@@ -182,7 +189,7 @@ impl ArraySplitter {
     pub fn feed(&mut self, data: &[u8], mut on_item: impl FnMut(&str)) {
         for &byte in data {
             if self.phase != Phase::InArray {
-                if self.envelope.len() < 131_072 {
+                if self.envelope.len() < 16_384 {
                     self.envelope.push(byte);
                 } else {
                     self.envelope_overflow = true;
@@ -226,7 +233,9 @@ impl ArraySplitter {
                 }
                 b':' if self.phase == Phase::Seeking => {
                     self.armed = match self.at {
-                        ArrayAt::Field(name) => self.depth == 1 && name.as_bytes() == self.key,
+                        ArrayAt::Field(name) | ArrayAt::EnvelopeField(name) => {
+                            self.depth == 1 && name.as_bytes() == self.key
+                        }
                         ArrayAt::Path(path) => {
                             path.len() == self.depth as usize
                                 && path
@@ -252,7 +261,9 @@ impl ArraySplitter {
                         let found = byte == b'['
                             && match self.at {
                                 ArrayAt::Root => self.depth == 1,
-                                ArrayAt::Field(_) => self.armed && self.depth == 2,
+                                ArrayAt::Field(_) | ArrayAt::EnvelopeField(_) => {
+                                    self.armed && self.depth == 2
+                                }
                                 ArrayAt::Path(path) => {
                                     self.armed || (path.is_empty() && self.depth == 1)
                                 }
@@ -289,7 +300,7 @@ impl ArraySplitter {
                     self.emit(&mut on_item);
                     continue;
                 }
-                b' ' | b'\n' | b'\r' | b'\t' if at_array_level => continue,
+                b' ' | b'\n' | b'\r' | b'\t' if at_array_level && self.item.is_empty() => continue,
                 b' ' | b'\n' | b'\r' | b'\t' => {}
                 _ if self.phase == Phase::Seeking && self.depth == 1 => self.armed = false,
                 _ => {}
@@ -303,7 +314,7 @@ impl ArraySplitter {
     fn emit(&mut self, on_item: &mut impl FnMut(&str)) {
         if !self.item.is_empty() {
             if let Ok(text) = std::str::from_utf8(&self.item) {
-                on_item(text);
+                on_item(text.trim());
             } else {
                 self.invalid = true;
             }
@@ -316,7 +327,7 @@ impl ArraySplitter {
 mod tests {
     use super::*;
 
-    fn split(at: ArrayAt, body: &str, chunk: usize) -> Vec<String> {
+    pub(super) fn split(at: ArrayAt, body: &str, chunk: usize) -> Vec<String> {
         let mut splitter = ArraySplitter::new(at);
         let mut items = Vec::new();
         for part in body.as_bytes().chunks(chunk) {
@@ -404,7 +415,7 @@ mod envelope_tests {
             assert!(splitter.finished());
             assert_eq!(items, [r#"{"id":"a"}"#, r#"{"id":"b"}"#]);
             assert_eq!(
-                splitter.envelope().unwrap(),
+                std::str::from_utf8(splitter.envelope().unwrap()).unwrap(),
                 r#"{"code":"00000","data":{"entrustedList":[],"endId":"b"},"msg":"ok"}"#
             );
         }
@@ -428,6 +439,16 @@ mod envelope_tests {
 mod malformed_stream_tests {
     use super::*;
     #[test]
+    fn whitespace_cannot_join_separate_json_values() {
+        let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
+        let mut invalid = false;
+        splitter.feed(br#"{"data":[1 2]}"#, |item| {
+            invalid = serde_json::from_str::<IgnoredAny>(item).is_err();
+        });
+        assert!(invalid);
+    }
+
+    #[test]
     fn streamed_arrays_reject_missing_elements_trailing_commas_and_bad_utf8() {
         for body in [
             b"{\"data\":[,]}".as_slice(),
@@ -438,5 +459,81 @@ mod malformed_stream_tests {
             splitter.feed(body, |_| {});
             assert!(!splitter.finished());
         }
+    }
+    #[test]
+    fn splits_a_nested_array_and_keeps_its_envelope() {
+        let body = r#"{"retCode":0,"list":[9],"result":{"category":"linear","list":[{"s":"a"},{"s":"]"}],"nextPageCursor":"c%3D1"},"time":1}"#;
+        for chunk in [1, 4, 1024] {
+            let at = ArrayAt::Path(&["result", "list"]);
+            assert_eq!(
+                super::tests::split(at, body, chunk),
+                [r#"{"s":"a"}"#, r#"{"s":"]"}"#]
+            );
+            let mut splitter = ArraySplitter::new(at);
+            for part in body.as_bytes().chunks(chunk) {
+                splitter.feed(part, |_| {});
+            }
+            assert_eq!(splitter.envelope(), Some(splitter.outside()));
+            assert_eq!(
+                std::str::from_utf8(splitter.outside()).unwrap(),
+                r#"{"retCode":0,"list":[9],"result":{"category":"linear","list":[],"nextPageCursor":"c%3D1"},"time":1}"#
+            );
+        }
+        let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
+        splitter.feed(
+            br#"{"retCode":10001,"retMsg":"params error","result":{}}"#,
+            |_| {},
+        );
+        assert!(!splitter.finished());
+    }
+
+    #[test]
+    fn preserves_metadata_with_every_chunk_boundary() {
+        let body = br#"{"code":"0","data":[{"s":"a"},{"s":"b"}],"msg":"ok"}"#;
+        for size in 1..body.len() {
+            let mut splitter = ArraySplitter::new(ArrayAt::EnvelopeField("data"));
+            let mut items = Vec::new();
+            for bytes in body.chunks(size) {
+                splitter.feed(bytes, |s| items.push(s.to_owned()));
+            }
+            assert!(splitter.finished());
+            assert_eq!(items, [r#"{"s":"a"}"#, r#"{"s":"b"}"#]);
+            assert_eq!(
+                splitter.envelope().unwrap(),
+                br#"{"code":"0","data":[],"msg":"ok"}"#
+            );
+        }
+    }
+    #[test]
+    fn legacy_modes_do_not_opt_into_response_metadata() {
+        for (at, body) in [
+            (ArrayAt::Root, b"[]".as_slice()),
+            (ArrayAt::Field("data"), br#"{"data":[]}"#.as_slice()),
+        ] {
+            let mut splitter = ArraySplitter::new(at);
+            splitter.feed(body, |_| {});
+            splitter.feed(&[b' '; 16_384], |_| {});
+            assert!(splitter.finished());
+            assert!(splitter.envelope().is_none());
+        }
+    }
+
+    #[test]
+    fn nested_metadata_modes_keep_array_validation_and_overflow_guards() {
+        for body in [
+            br#"{"result":{"list":[, ]}}"#.as_slice(),
+            br#"{"result":{"list":[1,]}}"#,
+            b"{\"result\":{\"list\":[\xff]}}",
+        ] {
+            let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
+            for byte in body.chunks(1) {
+                splitter.feed(byte, |_| {});
+            }
+            assert!(!splitter.finished());
+        }
+        let mut splitter = ArraySplitter::new(ArrayAt::Path(&["result", "list"]));
+        splitter.feed(br#"{"result":{"list":[]}}"#, |_| {});
+        splitter.feed(&[b' '; 16_384], |_| {});
+        assert!(!splitter.finished());
     }
 }

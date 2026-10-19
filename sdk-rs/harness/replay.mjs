@@ -4,11 +4,11 @@
 //   node --expose-gc --import tsx sdk-rs/harness/replay.mjs --impl ts --tape <file>
 //   node --expose-gc sdk-rs/harness/replay.mjs --impl rust --tape <file>
 import { readFileSync } from 'node:fs';
+import { createTape, within } from './tape.mjs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { ORDER_COLUMNS, POSITION_COLUMNS, orderEnums, positionEnums } from '../hosts/wasm/js/wire.mjs';
 import { axiosClients, venueOf } from './venues.mjs';
-import { createTape } from './tape.mjs';
 
 const { values } = parseArgs({
   options: {
@@ -29,11 +29,22 @@ const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes
   .filter(Boolean)
   .map((line) => JSON.parse(line));
 const bookSymbols = values.books.split(',').filter(Boolean);
+// A wrong startup URL, missing socket or lost command must fail the gate.
+const replayDeadline = setTimeout(() => {
+  console.error('Replay exceeded its 120-second deadline');
+  process.exit(1);
+}, 120_000);
+replayDeadline.unref();
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
-const isPrivate = records.some((r) => r.url?.includes(venue.privateSocket));
+const isPrivate = records.some((r) =>
+  venue.isPrivateRecord
+    ? venue.isPrivateRecord(r)
+    : Boolean(venue.privateSocket && r.url?.includes(venue.privateSocket)),
+);
 const KEY = 'replay-key';
 const SECRET = 'replay-secret';
+const PASSPHRASE = 'replay-passphrase';
 
 const settle = async () => {
   for (let i = 0; i < 20; i++) await new Promise(setImmediate);
@@ -83,6 +94,7 @@ const tickerFields = [
   'fundingTime',
   'volume',
   'quoteVolume',
+  'openInterest',
 ];
 const marketFields = (m) => ({
   id: m.id,
@@ -90,6 +102,7 @@ const marketFields = (m) => ({
   base: m.base,
   quote: m.quote,
   active: m.active,
+  contractSize: m.contractSize ?? null,
   precision: m.precision,
   limits: { amount: m.limits.amount },
 });
@@ -115,16 +128,27 @@ async function runRust() {
     now: () => Date.now(),
     connect: (url, { onOpen, onMessage }) => {
       const socket = tape.connect(url, onOpen, onMessage);
-      return { send: (text) => tape.sent(socket, text), close: () => (socket.closed = true) };
+      return { send: (text) => tape.send(socket, text), close: () => (socket.closed = true) };
     },
     request: async ({ method, url, body: requestBody }) => {
-      const { status, body } = tape.respond(method, url, requestBody);
-      return { status, headers: '', body: encoder.encode(body) };
+      const { status, headers = '', body } = tape.respond(method, url, requestBody);
+      // Model nativeTransport's chunks so streamed lists do not allocate a whole
+      // response in wasm before the venue sees the first item.
+      const chunks = async function* () {
+        const bytes = encoder.encode(body);
+        for (let offset = 0; offset < bytes.length; offset += 16 * 1024) {
+          yield bytes.subarray(offset, offset + 16 * 1024);
+        }
+      };
+      return { status, headers, body: chunks() };
     },
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (handle) => clearTimeout(handle),
   };
-  const options = { ...venue.options, ...(isPrivate ? { key: KEY, secret: SECRET } : { publicDataOnly: true }) };
+  const options = {
+    ...venue.options,
+    ...(isPrivate ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE } : { publicDataOnly: true }),
+  };
   const host = new EngineHost(new WasmEngine(venue.rust, JSON.stringify(options)), transport, {
     onFrame: (buffer) => {
       // Model postMessage(buffer, [buffer]) to main, then main reading it.
@@ -144,6 +168,7 @@ async function runRust() {
           market: executed.market[i],
           side: executed.side[i],
           amount: executed.rows[i * 2 + 1],
+          price: executed.rows[i * 2],
           id: executed.orderId(i),
         });
       }
@@ -173,6 +198,7 @@ async function runRust() {
     },
   );
   await settle();
+  tape.assertWritesConsumed();
   clearInterval(flushTimer);
   host.flush();
   const metrics = measure(cpuStart, wallStart, heapBefore, wasmMemoryBytes(), tape.warmMark);
@@ -187,6 +213,7 @@ async function runRust() {
       base: markets.base(i),
       quote: markets.quote(i),
       active: (markets.flags[i] & 1) !== 0,
+      contractSize: markets.contractSize[i] || undefined,
       precision: { amount: markets[MARKET_COLUMNS[0]][i], price: markets[MARKET_COLUMNS[1]][i] },
       limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
     });
@@ -255,6 +282,7 @@ function rustAccount({ markets, orders, positions, balance, settings, status, fi
       symbol: symbol(f.market),
       side: f.side === 0 ? 'buy' : 'sell',
       amount: f.amount,
+      ...(venue.compareFillPrices ? { price: f.price } : {}),
     })),
   };
 }
@@ -290,7 +318,7 @@ async function runTs() {
       this.listeners[type] = (this.listeners[type] ?? []).filter((f) => f !== fn);
     }
     send(text) {
-      tape.sent(this.socket, text);
+      tape.send(this.socket, text);
     }
     close() {
       this.readyState = 3;
@@ -320,9 +348,12 @@ async function runTs() {
   const store = new DefaultStore();
   const options = {
     ...venue.options,
-    ...(isPrivate ? { key: KEY, secret: SECRET } : { key: '', secret: '', publicDataOnly: true }),
+    ...(isPrivate
+      ? { key: KEY, secret: SECRET, passphrase: PASSPHRASE }
+      : { key: '', secret: '', publicDataOnly: true }),
   };
   const exchange = new Exchange(venue.ts.name, options, store);
+  venue.configureTs?.(exchange);
   const executions = [];
   exchange.emitter.on('fill', (fill) => executions.push(fill));
   for (const client of axiosClients(exchange)) client.defaults.adapter = adapter;
@@ -352,41 +383,11 @@ async function runTs() {
       const loaded = () => Object.values(store.loaded).every(Boolean);
       while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
     },
-    async (record) => {
-      if (record.op === 'placeOrders') return exchange.placeOrders(record.orders);
-      if (record.op === 'cancelOrders') {
-        await exchange.cancelOrders(store.orders.filter((order) => record.ids.includes(order.id)));
-        return [];
-      }
-      if (record.op === 'amendOrder') {
-        const order = store.orders.find((o) => o.id === record.id);
-        if (!order) throw new Error(`order ${record.id} missing before amend`);
-        const update = Object.fromEntries(
-          ['price', 'amount'].filter((key) => record[key] !== undefined).map((key) => [key, record[key]]),
-        );
-        return exchange.updateOrder({ order, update });
-      }
-      if (record.op === 'setLeverage') {
-        await exchange.setLeverage(record.symbol, record.leverage);
-        return [];
-      }
-      if (record.op === 'setMarginType') {
-        await exchange.changeMarginType(record.isolated, record.symbol);
-        return [];
-      }
-      if (record.op === 'setPositionMode') {
-        await exchange.changePositionMode(record.hedged);
-        return [];
-      }
-      if (record.op === 'cancelSymbolOrders') {
-        await exchange.cancelSymbolOrders(record.symbol);
-        return [];
-      }
-      throw new Error(`unknown command ${record.op}`);
-    },
+    (record) => runTsCommand(exchange, store, record),
   );
-  await Promise.all([started, subscribed]);
+  await within(Promise.all([started, subscribed]), 15_000, 'TS startup/subscriptions');
   await settle();
+  tape.assertWritesConsumed();
   const metrics = measure(cpuStart, wallStart, heapBefore, 0, tape.warmMark);
   const snapshot = {
     markets: store.markets.map((m) => ({ ...m })),
@@ -414,7 +415,13 @@ async function runTs() {
               .map((p) => [p.symbol, { symbol: p.symbol, leverage: p.leverage, marginType: p.marginType }]),
           ).values(),
         ],
-        fills: executions.map((f) => ({ id: f.id, symbol: f.symbol, side: f.side, amount: f.amount })),
+        fills: executions.map((f) => ({
+          id: f.id,
+          symbol: f.symbol,
+          side: f.side,
+          amount: f.amount,
+          ...(venue.compareFillPrices ? { price: f.price } : {}),
+        })),
       }
     : undefined;
   exchange.dispose();
@@ -428,6 +435,51 @@ async function runTs() {
     account,
     commands: tape.results,
   };
+}
+
+async function runTsCommand(exchange, store, record) {
+  const { op, ...args } = commandArgs(record);
+  switch (op) {
+    case 'placeOrders':
+      return exchange.placeOrders(args.orders);
+    case 'cancelOrders':
+      await exchange.cancelOrders(store.orders.filter((order) => args.ids.includes(order.id)));
+      return [];
+    case 'cancelSymbolOrders':
+      await exchange.cancelSymbolOrders(args.symbol);
+      return [];
+    case 'amendOrder': {
+      const order = store.orders.find((o) => o.id === args.id);
+      if (!order) throw new Error(`unknown order ${args.id}`);
+      const update = Object.fromEntries(
+        ['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]),
+      );
+      return exchange.updateOrder({ order, update });
+    }
+    case 'setLeverage':
+      await exchange.setLeverage(args.symbol, args.leverage);
+      return [];
+    case 'setMarginType':
+      await exchange.changeMarginType(args.isolated, args.symbol);
+      return [];
+    case 'setPositionMode':
+      await exchange.changePositionMode(args.hedged);
+      return [];
+    case 'fetchFills':
+      return exchange.fetchHistoricalFills(args);
+    case 'fetchOrderHistory':
+      return exchange.fetchHistoricalOrders(args);
+    case 'fetchIncome': {
+      const { from, to, ...options } = args;
+      return exchange.fetchIncomeHistory({ ...options, startTime: from, endTime: to });
+    }
+    case 'fetchPublicTrades':
+      return exchange.fetchPublicTrades(args.symbol, args.limit);
+    case 'fetchCandles':
+      return exchange.fetchOHLCV(args);
+    default:
+      throw new Error(`unknown command ${op}`);
+  }
 }
 
 /** The fields both implementations carry, in one shape. */
@@ -490,4 +542,5 @@ writeFileSync(
     commands: result.commands,
   }),
 );
+clearTimeout(replayDeadline);
 process.exit(0);

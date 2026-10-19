@@ -213,3 +213,17 @@ of three runs (Bybit regression: one run); private tapes gate correctness only.
   push PR into feat/rust-rewrite, adversarial PR reviews/comments, green CI, merge,
   and create a fresh follow-up branch. Inverse sizing and pre-existing unsupported
   UTA bills/trailing remain outside this port's verified scope.
+
+## OKX landing merge
+
+- Integrated landing 693ad4f139 (OKX), retaining its staged HTTP snapshots,
+  authentication/subscription validation, all-run comparisons, missing seed/book
+  checks, fill-price comparison and replay deadlines. Shared tape transport keeps
+  Bitget exact write bodies, consumed mutations, generated-ID validation and
+  same-URL socket routing. All four venue registrations remain available.
+- Sub-agent integration review caught misplaced parser test/helper and dropped
+  in-item whitespace. Fixed both; added regression coverage for `[1 2]` so it
+  cannot become `12`. Native workspace tests/clippy and WASM clippy pass.
+- Four-venue WASM is 1,918,946 bytes, within unchanged 2 MiB CI budget.
+- Post-merge venue replay regressions running before push; earlier measurements
+  remain above for comparison. No gate threshold was relaxed.

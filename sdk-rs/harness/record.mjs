@@ -33,6 +33,7 @@ const recording = {
         handlers.onOpen();
       },
       onMessage: (text) => {
+        frames++;
         write({ type: 'ws', url, text });
         handlers.onMessage(text);
       },
@@ -44,21 +45,24 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const chunks = [];
-    if (response.body?.[Symbol.asyncIterator]) {
-      for await (const chunk of response.body) chunks.push(chunk);
-    } else chunks.push(response.body);
-    const bytes = Buffer.concat(chunks);
-    const body = new TextDecoder().decode(bytes);
-    write({
-      type: 'http',
-      method: request.method,
-      url: request.url,
-      status: response.status,
-      requestBody: request.body,
-      body,
+    const recorded = (body) => write({
+      type: 'http', method: request.method, url: request.url,
+      ...(request.body === undefined ? {} : { requestBody: request.body }),
+      status: response.status, headers: response.headers ?? '', body,
     });
-    return { ...response, body: bytes };
+    if (response.body instanceof Uint8Array) {
+      recorded(new TextDecoder().decode(response.body));
+      return response;
+    }
+    return { ...response, body: (async function* () {
+      const decoder = new TextDecoder();
+      let body = '';
+      for await (const chunk of response.body) {
+        body += decoder.decode(chunk, { stream: true });
+        yield chunk;
+      }
+      recorded(body + decoder.decode());
+    })() };
   },
 };
 
