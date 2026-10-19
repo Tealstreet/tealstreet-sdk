@@ -117,6 +117,39 @@ fn core_error(e: Thrown) -> ExchangeError {
     e.to_exchange_error()
 }
 
+// `handlers` is captured once, but its length is read at both source record
+// expressions. Reconciliation asks only for the second expression (missing=0).
+fn read_handler_stats(
+    core: &SocketCore,
+    topic: &str,
+    missing: usize,
+) -> Result<(bool, safe_cex_num::PrototypeScalar), Thrown> {
+    use safe_cex_num::PrototypeScalar as Scalar;
+    let this = core.this.borrow().clone();
+    let handlers = this.get("messageHandlers")?.get(topic)?;
+    let has = missing == 1 && handlers.truthy() && handlers.get("length")?.truthy();
+    let count = if handlers.truthy() {
+        handlers.get("length")?
+    } else {
+        Js::Number(missing as f64)
+    };
+    let count = match count {
+        Js::Undefined => Scalar::Undefined,
+        Js::Null => Scalar::Null,
+        Js::Bool(value) => Scalar::Boolean(value),
+        Js::Number(value) => Scalar::Number(value),
+        Js::String(value) => Scalar::String(String::from_utf16(&value).map_err(|_| {
+            Thrown::type_error("lone UTF-16 surrogate at a statistics scalar boundary")
+        })?),
+        _ => {
+            return Err(Thrown::type_error(
+                "statistics handler length is outside the builtin property vocabulary",
+            ));
+        }
+    };
+    Ok((has, count))
+}
+
 fn connection_options(value: &Js) -> Result<WebSocketConnectionOptions, Thrown> {
     let optional = |name| -> Result<Js, Thrown> {
         if value.is_nullish() {
@@ -531,6 +564,13 @@ impl SocketCore {
             Rc::new(JsProtocol(Rc::downgrade(self))),
         );
         base.set_last_received(self.last_received.get());
+        let weak = Rc::downgrade(self);
+        base.set_handler_stats_reader(Rc::new(move |topic, missing| {
+            let core = weak
+                .upgrade()
+                .ok_or_else(|| ExchangeError::new("socket facade was dropped"))?;
+            read_handler_stats(&core, topic, missing).map_err(core_error)
+        }));
         let _ = self.base.set(base.clone());
         self.apply_pong_policy(&base)?;
         Ok(base)
