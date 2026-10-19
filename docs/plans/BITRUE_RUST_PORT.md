@@ -103,3 +103,20 @@ create a clean follow-up branch. Never stash, rebase, force-push or touch master
   5-second import timeouts are being rechecked after compilation settles.
 - No budget increase: inherited landing budget is 3,145,728 bytes. Final head
   must pass every CI check before merge; no outstanding review waiver.
+
+### Final artifact checkpoint
+
+- Final required gates PASS: Bitrue public CPU 252.5/196.1 ms, steady
+  164.5/121.2 ms, retained 3.7/2.4 MB; 3,287 frames/776 markets/two books.
+  Private 20 frames PASS. Binance public CPU 258.5/130.0 ms, retained 4.2/2.3
+  MB; public and 14-frame private gates PASS.
+- Final WASM 3,138,885 bytes, below inherited 3,145,728-byte budget.
+- Workspace tests PASS (641 including doctests), Bitrue tests PASS (53),
+  complete SDK WASM tests PASS (22), host tests PASS (25), harness PASS (78),
+  targeted Bitrue TS PASS (56). Native/wasm clippy, fmt and bans PASS.
+- Final package typecheck and lint PASS. Updated older history tests to use
+  documented native trade IDs and to expect rejected reads to propagate; no
+  production exceptions were added for outdated test fixtures.
+- Opening a draft PR for required local adversarial review and CI while the
+  complete TS suite's local 30-second import-timeout recheck finishes. It must
+  be ready and every CI check green before merging.
