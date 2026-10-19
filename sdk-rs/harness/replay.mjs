@@ -139,6 +139,7 @@ const marketFields = (m) => ({
   base: m.base,
   quote: m.quote,
   active: m.active,
+  ...(venue.inverseNativeAmounts ? { isInverse: Boolean(m.isInverse) } : {}),
   contractSize: m.contractSize ?? null,
   precision: { amount: m.precision.amount, price: m.precision.price },
   limits: { amount: m.limits.amount },
@@ -171,13 +172,15 @@ async function runRust() {
       const socket = tape.connect(url, onOpen, onMessage, onClose);
       return { send: (text) => tape.send(socket, text), close: () => tape.close(socket) };
     },
-    request: async ({ method, url, body: requestBody, headers }) => {
+    request: async ({ method, url, body: requestBody, headers, signal }) => {
+      signal?.throwIfAborted();
       const { status, headers: responseHeaders = '', body } = tape.respond(method, url, requestBody, headers);
       // Model nativeTransport's chunks so streamed lists do not allocate a whole
       // response in wasm before the venue sees the first item.
       const chunks = async function* () {
         const bytes = encoder.encode(body);
         for (let offset = 0; offset < bytes.length; offset += 16 * 1024) {
+          signal?.throwIfAborted();
           yield bytes.subarray(offset, offset + 16 * 1024);
         }
       };
@@ -272,6 +275,7 @@ async function runRust() {
       base: markets.base(i),
       quote: markets.quote(i),
       active: (markets.flags[i] & 1) !== 0,
+      isInverse: (markets.flags[i] & 2) !== 0,
       contractSize: markets.contractSize[i] || undefined,
       precision: { amount: markets[MARKET_COLUMNS[0]][i], price: markets[MARKET_COLUMNS[1]][i] },
       limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
