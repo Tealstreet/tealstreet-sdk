@@ -11,7 +11,8 @@
       "probe": "tests/journal.rs::journal_read_starts_at_call_and_finishes_after_waiter_drop",
       "source": "scripts/journal-oracle.cjs::buildTimingCases",
       "controls": "Original production body compiled RED separately on immediate-entry and held-read/drop assertions; exact fixed body GREEN",
-      "remaining_scope": "Arbitrary malformed income/Execution outputs and external JournalFolder installation are not closed by this scheduling batch"
+      "remaining_scope": "Arbitrary malformed income/Execution outputs and external JournalFolder installation are not closed by this scheduling batch",
+      "consumer_migration": "Binance NativeImports, Bitget ReceiverFolder, Hyperliquid Realm facade and Paradex NativeJournal pass owning runtimes/read callbacks; the JournalFolder resolver owns its captured Store. Existing constructed venue regressions verify the actual composed readers; arbitrary external composition is still separate scope."
     },
     {
       "row": 14,

@@ -1001,8 +1001,11 @@ native cause and source name. Settlement callback failures propagate their
 original native error and stop record construction. Typed shared read rows retain
 their separate model boundary; arbitrary malformed income objects are not claimed.
 Read symbols in first-seen order, request the 14-day straddle lookback, fold
-account-wide fills per symbol, then omit pre-window/open intervals. The existing
-JournalFolder host seam is not automatically bound to this implementation.
+account-wide fills per symbol, then omit pre-window/open intervals. The native
+Binance, Bitget, Hyperliquid and Paradex consumers pass their actual runtimes
+and read receivers. JournalFolder settlement callbacks own the captured
+Store so eager work can outlive its observer; arbitrary external host composition
+remains explicit.
 
 
 Venue callbacks that test `this.ws` must use BaseWebSocket::has_websocket, not

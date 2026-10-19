@@ -132,3 +132,9 @@ the await fence and original error referent. The original 12 build scenarios,
 192 interval/funding cases and mixed-ID/nonfinite sort profiles remain exercised.
 The closed input/model and host JournalFolder composition choices are separate
 from this measured scheduling repair.
+
+The production Binance NativeImports, Bitget ReceiverFolder, Hyperliquid Realm
+facade and Paradex NativeJournal consumers use that same owned reader API and
+their existing runtime/receiver. The host JournalFolder settlement callback owns
+its Store capture rather than borrowing the awaiting fold. This consumer migration
+does not claim each outer SDK wrapper has independently measured eager timing.

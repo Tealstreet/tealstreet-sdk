@@ -58,3 +58,18 @@ maintained throwing callback and asserts exact name/message/original referent,
 one callback, no later record and the ready-read await fence. Ownership of the
 immutable account string is the accepted owned-snapshot boundary (decision 2),
 not a lost option or diagnostic. The cutover preserves all five options fields.
+
+## Journal consumer migration
+
+The owned eager-reader cutover also reaches four production consumers: Binance's
+NativeImports folder, Bitget ReceiverFolder, Hyperliquid's Realm facade and
+Paradex NativeJournal. Each now passes its actual owning runtime, captured read
+receiver and owned settlement callback to the shared reader. JournalFolder's
+resolver no longer borrows the awaiting caller; the core captures the Store Rc.
+Paradex upgrades its existing constructor-registered receiver, preserving the
+real trait fill/income methods and reporting a missing owner explicitly.
+CI's consumer ABI errors exposed these previously missed adapters. The local
+workspace all-target/all-feature check covers every dependent crate; existing
+constructed history/fold regressions cover signed requests and output records.
+Malformed typed-row outputs and arbitrary external folder composition remain
+separate row-1 audit scope.
