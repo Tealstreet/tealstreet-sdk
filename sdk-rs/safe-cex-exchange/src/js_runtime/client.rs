@@ -191,6 +191,7 @@ pub fn create(host: Host, defaults: Js) -> Js {
 
 fn merged_config(defaults: &Js, request: &Js) -> Result<Js, Thrown> {
     let config = defaults.spread_object()?;
+    config.set_prototype(Js::Null)?;
     let headers = axios_headers()?;
     for (k, v) in defaults.get("headers")?.spread_object()?.own_entries()? {
         set_header(&headers, Js::utf16(&k), v, Js::Undefined)?;
@@ -516,6 +517,81 @@ async fn send_once(
 }
 
 async fn dispatch_request(host: &Host, config: Js) -> Result<Js, Thrown> {
+    // Axios 1.20 materializes interceptor accessors before dispatch, excluding
+    // unsafe keys and the shared Object.prototype boundary.
+    let config = {
+        let unsafe_key = |key: &Js| matches!(key, Js::String(text) if ["__proto__", "constructor", "prototype"].iter().any(|name| text.iter().copied().eq(name.encode_utf16())));
+        let keys = |value: &Js| -> Result<Vec<Js>, Thrown> {
+            let mut keys: Vec<_> = value
+                .own_property_names()?
+                .into_iter()
+                .map(|key| Js::utf16(&key))
+                .collect();
+            if !value
+                .own_property_descriptor_for(&Js::SymbolIterator)?
+                .is_undefined()
+            {
+                keys.push(Js::SymbolIterator);
+            }
+            Ok(keys)
+        };
+        let source_prototype = config.prototype();
+        let mut mutable = source_prototype.is_none() && config.is_extensible()?;
+        if mutable {
+            for key in keys(&config)? {
+                let descriptor = config.own_property_descriptor_for(&key)?;
+                if unsafe_key(&key)
+                    || !descriptor.get("configurable")?.truthy()
+                    || !matches!(descriptor.get("writable")?, Js::Bool(true))
+                {
+                    mutable = false;
+                    break;
+                }
+            }
+        }
+        if mutable {
+            config
+        } else {
+            let flat = Js::object(vec![]);
+            flat.set_prototype(Js::Null)?;
+            let object_prototype = Js::Builtin(
+                safe_cex_num::PrototypeRealm::current()
+                    .reference(safe_cex_num::ProtoMember::Prototype),
+            );
+            let mut current = Some(config.clone());
+            let mut seen = Vec::<Js>::new();
+            let mut merged = Vec::<Js>::new();
+            while let Some(value) = current {
+                if seen.iter().any(|old| old.same_reference(&value)) {
+                    break;
+                }
+                let prototype = value.prototype();
+                if value.same_reference(&object_prototype)
+                    || (!seen.is_empty() && prototype.is_none())
+                {
+                    break;
+                }
+                seen.push(value.clone());
+                for key in keys(&value)? {
+                    if unsafe_key(&key) || merged.iter().any(|old| old.strict_equals(&key)) {
+                        continue;
+                    }
+                    flat.define_property_for(
+                        &key,
+                        &Js::object(vec![
+                            ("value", config.get_property(&key)?),
+                            ("writable", Js::Bool(true)),
+                            ("enumerable", Js::Bool(true)),
+                            ("configurable", Js::Bool(true)),
+                        ]),
+                    )?;
+                    merged.push(key);
+                }
+                current = prototype;
+            }
+            flat
+        }
+    };
     let adapter = config.get("adapter")?;
     let custom_adapter = adapter.is_callable();
     let response = if custom_adapter {
