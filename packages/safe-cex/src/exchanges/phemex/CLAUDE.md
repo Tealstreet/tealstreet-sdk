@@ -62,6 +62,12 @@ throwing from nested destructuring.
 
 ## Startup Sequence
 
+Periodic account reads and terminal-order reconciliation share a checked
+authority revision. Private account/position pushes, socket lifecycle changes,
+and accepted REST commits advance it before updating the store. A pending read
+may commit only while its captured revision still matches, including after any
+symbol-scoped recovery await; stale reads cannot clear newer positions/balances.
+
 The `start()` method (`phemex.exchange.ts:108`) orchestrates initialization:
 
 1. **Parallel fetch** (`Promise.all`):

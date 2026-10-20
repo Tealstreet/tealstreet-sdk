@@ -59,7 +59,7 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   'tealstreet-dex': load(
     () => require('./rust/rust.exchange').RustEngineExchange,
   ),
-  txflow: load(() => require('./txflow/txflow.exchange').TxFlowExchange),
+  txflow: load(() => require('./rust/rust.exchange').RustEngineExchange),
   what: load(() => require('./rust/rust.exchange').RustEngineExchange),
   woofi: load(() => require('./rust/rust.exchange').RustEngineExchange),
 };

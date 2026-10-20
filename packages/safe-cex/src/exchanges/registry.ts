@@ -211,9 +211,8 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
 
   'tealstreet-dex': () => import('./rust/rust.exchange').then((m) => m.RustEngineExchange),
 
-  // TxFlow (Phase 0 scaffold only)
-  txflow: () =>
-    import(/* webpackChunkName: "exchange-txflow" */ './txflow/txflow.exchange').then((m) => m.TxFlowExchange),
+  // TxFlow testnet
+  txflow: () => import('./rust/rust.exchange').then((m) => m.RustEngineExchange),
 
   what: () => import('./rust/rust.exchange').then((m) => m.RustEngineExchange),
 

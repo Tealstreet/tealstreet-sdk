@@ -16,6 +16,7 @@ coinbase = ["dep:safe-cex-venue-coinbase", "text-ingress"]
 breakoutprop = ["dep:safe-cex-venue-breakoutprop", "text-ingress"]
 paradex = ["dep:safe-cex-venue-paradex"]
 apexomni = ["dep:safe-cex-venue-apexomni", "text-ingress", "safe-cex-engine/command-apexomni"]
+txflow = ["dep:safe-cex-venue-txflow", "text-ingress"]
 kraken = ["dep:safe-cex-venue-kraken", "text-ingress"]
 asterdex = ["dep:safe-cex-venue-asterdex", "text-ingress", "safe-cex-engine/command-asterdex"]
 lighter = ["dep:safe-cex-venue-lighter", "text-ingress"]
@@ -35,6 +36,7 @@ default = [
     "coinbase",
     "paradex",
     "apexomni",
+    "txflow",
     "kraken",
     "asterdex",
     "lighter",
@@ -72,6 +74,7 @@ safe-cex-venue-polymarket = { path = "../../venues/polymarket", optional = true 
 safe-cex-venue-coinbase = { path = "../../venues/coinbase", optional = true }
 safe-cex-venue-paradex = { path = "../../venues/paradex", optional = true }
 safe-cex-venue-apexomni = { path = "../../venues/apexomni", optional = true }
+safe-cex-venue-txflow = { path = "../../venues/txflow", optional = true }
 safe-cex-venue-kraken = { path = "../../venues/kraken", optional = true }
 safe-cex-venue-asterdex = { path = "../../venues/asterdex", optional = true }
 safe-cex-venue-lighter = { path = "../../venues/lighter", optional = true }

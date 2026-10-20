@@ -343,3 +343,21 @@ All local gates are green; next are the PR correctness reviews and exact-head CI
 Final evidence review caught a manifest key collision between the combined
 artifact hash and build-log hash. The fields are now distinct (`sha256` and
 `logSha256`), checked against both actual binaries and every recorded log.
+
+## PR landing integration refresh
+
+Opened [PR #1338](https://github.com/Tealstreet/tealstreet-sdk/pull/1338) into
+`feat/rust-rewrite` after all local gates passed. The target then advanced to
+`0a0b3453e9` with TxFlow, the native server session adapter and replay-finalize
+changes. Resolved conflicts preserving both venue registrations, feature gates,
+typed signing, request ordinals, financial projections and all landing behavior.
+The native adapter forwards raw commands/IDs to the shared decoder; independent
+merge review passes. The Spot registration also updates the nearby census to
+45 Rust names (36 opt-in, nine defaults) and four names without a Rust adapter.
+
+Merged formatting and all 562 harness tests pass. The engine, crypto and native
+host implementation sources are unchanged, but replay now snapshots before
+asynchronous GC and includes reconstruction cost in measurement. Consequently,
+the frozen `41e28f774a` proofs above remain historical until all six artifact
+replays are refreshed. Full checks, combined host/SDK checks, PR correctness
+reviews and exact-head CI are required on the merged source before landing.
