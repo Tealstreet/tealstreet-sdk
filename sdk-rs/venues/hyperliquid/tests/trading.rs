@@ -665,7 +665,7 @@ fn queued_amend_reserves_source_and_rechecks_terminal_order_before_cancel() {
         let rejected = e.drain_actions().collect::<Vec<_>>();
         assert!(rejected.iter().any(|a| matches!(a,
             Action::Notice(Notice::CommandDone { command: 3, result: Err(error) })
-            if error.contains("amendment pending"))));
+            if error == "Order amendment or cancellation is already in flight")));
         assert!(!rejected.iter().any(|a| matches!(a, Action::Http(_))));
         reply_at(
             &mut e,
