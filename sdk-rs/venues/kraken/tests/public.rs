@@ -346,3 +346,26 @@ fn capped_candle_page_continues_to_the_newest_bars() {
     );
     assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::CommandDone { command: 8, result: Ok(s) }) if s.contains("1699999880.0") && s.contains("1699999940.0"))));
 }
+// Kraken Futures used to chart unsupported intervals as 1h candles.
+#[test]
+fn unsupported_chart_intervals_are_rejected_not_served_as_one_hour() {
+    let (mut e, _) = public();
+    e.handle(
+        NOW,
+        Event::Command(Command::FetchCandles {
+            command: 8,
+            symbol: "PF_XBTUSD".into(),
+            interval: safe_cex_engine::model::Interval::M3,
+            limit: Some(2),
+            from_ms: None,
+            to_ms: None,
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::CommandDone { command: 8, result: Err(e) })
+            if e == "Kraken does not support 3m candles"
+    )));
+}
