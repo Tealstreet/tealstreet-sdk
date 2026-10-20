@@ -1855,6 +1855,7 @@ mod tests {
         ) -> Result<(), &'static str> {
             Err("message-only test engine")
         }
+        fn set_account_startup(&mut self, _: bool) {}
         fn apply_public_feed(
             &mut self,
             _now: f64,
