@@ -118,6 +118,11 @@ const binanceFixes = (account, rustAccount) => {
 // The MEXC reference will receive these same repairs: this entry documents
 // deliberate corrections without replacing the TS result with Rust output.
 const KNOWN_TS_FIXES = {
+  // Paired TS fixes: retain both rolling-volume sides and open price across
+  // ticker deltas; derive quote volume/change from current last; accept native
+  // empty-string clears and nanosecond funding timestamps in either JSON form.
+  // Rust also anchors sequences from subscribe ACKs and isolates candle intervals.
+  grvt() {},
   // Paired TS fixes: contract-sized public volumes; private cumulative z/native
   // units, execution L prices, monotonic terminal state and ping timestamp echo.
   // Cancel native identities and protective defaults now match metadata. Rust

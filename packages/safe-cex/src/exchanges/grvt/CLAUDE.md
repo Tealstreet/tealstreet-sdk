@@ -595,6 +595,13 @@ Both order and position WebSocket events trigger a throttled REST fetch to ensur
 
 GRVT creates "fake" zero-size positions for every market (one-way mode). Real positions are merged with fake positions -- fake positions are filtered out for symbols that have real positions (`grvt.exchange.ts:797-800`). This ensures the UI always shows a position entry for every market.
 
+### Ticker deltas
+
+The rolling buy/sell volumes and open price are retained independently across
+partial updates. Quote volume and percentage use the current last price even
+when a frame omits the corresponding input. GRVT empty strings clear numeric
+fields to zero; next funding time is nanoseconds in either JSON numeric form.
+
 ### Ticker Population
 
 Initial tickers are placeholders with all zeros (`fetchTickers()` just creates stubs from markets). Real values are populated via WebSocket `v1.ticker.d` delta stream.
