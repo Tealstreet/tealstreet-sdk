@@ -1,7 +1,9 @@
 //! Typed, streamed rare reads. Native SWAP quantities are contract counts.
-use crate::{Okx, Pending, scaled};
-use safe_cex_engine::{CommandId, Cx, LogLevel, Query, Response, TimerId, num};
+use crate::{Okx, Pending};
+use safe_cex_engine::model::{Order, OrderExtra, OrderSide, OrderStatus, OrderType, TimeInForce};
+use safe_cex_engine::{CommandId, Cx, LogLevel, Method, Query, Response, TimerId, num};
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use std::collections::HashMap;
 
 const PAGE: usize = 100;
@@ -13,6 +15,7 @@ pub struct HistoryState {
 }
 
 pub struct Request {
+    lookup: Option<String>,
     command: CommandId,
     endpoint: &'static str,
     symbol: Option<String>,
@@ -38,6 +41,28 @@ enum Rows {
     Income(Vec<Income>),
     Trades(Vec<Trade>),
 }
+
+#[derive(Serialize)]
+struct Found<'a> {
+    found: bool,
+    order: LookupOrder<'a>,
+}
+#[derive(Serialize)]
+struct LookupOrder<'a> {
+    #[serde(flatten)]
+    order: Order,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    info: Option<&'a RawValue>,
+}
+fn found(order: Order, info: Option<&RawValue>) -> Result<String, String> {
+    serde_json::to_string(&Found {
+        found: true,
+        order: LookupOrder { order, info },
+    })
+    .map_err(|e| e.to_string())
+}
+const UNKNOWN: &str = r#"{"found":false,"definitive":false}"#;
+const ABSENT: &str = r#"{"found":false,"definitive":true}"#;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -256,6 +281,9 @@ fn id_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 impl Request {
+    pub(crate) fn is_lookup(&self) -> bool {
+        self.lookup.is_some()
+    }
     fn within(&self, timestamp: f64) -> bool {
         self.from.is_none_or(|v| timestamp >= v) && self.to.is_none_or(|v| timestamp <= v)
     }
@@ -307,6 +335,14 @@ impl Okx {
         command: CommandId,
         query: Query,
     ) {
+        if let Query::OrderByClientId {
+            symbol,
+            client_order_id,
+        } = query
+        {
+            self.start_lookup(cx, command, symbol, client_order_id);
+            return;
+        }
         if self.credentials.is_none()
             && !matches!(
                 query,
@@ -317,13 +353,7 @@ impl Okx {
             return;
         }
         let (endpoint, symbol, order_id, income_kind, from, to, limit, rows) = match query {
-            Query::OrderByClientId { .. } => {
-                cx.done(
-                    command,
-                    Err("OKX client order lookup is not supported by the Rust engine".into()),
-                );
-                return;
-            }
+            Query::OrderByClientId { .. } => unreachable!(),
             Query::Fills {
                 symbol,
                 order_id,
@@ -409,6 +439,7 @@ impl Okx {
         self.history_request(
             cx,
             Request {
+                lookup: None,
                 command,
                 endpoint,
                 symbol,
@@ -430,6 +461,203 @@ impl Okx {
         );
     }
 
+    fn start_lookup(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        command: CommandId,
+        symbol: String,
+        client_order_id: String,
+    ) {
+        if client_order_id.is_empty()
+            || client_order_id.len() > 32
+            || !client_order_id.bytes().all(|b| b.is_ascii_alphanumeric())
+        {
+            cx.done(command, Err("Invalid OKX client order ID".into()));
+            return;
+        }
+        let Some(market) = cx.store.market(&symbol) else {
+            cx.done(command, Ok(UNKNOWN.into()));
+            return;
+        };
+        if let Some(order) = cx.store.orders().iter().find(|order| {
+            order.symbol == symbol && order.client_order_id.as_deref() == Some(&client_order_id)
+        }) {
+            cx.done(command, found(order.clone(), None));
+            return;
+        }
+        if self.credentials.is_none() || self.options.public_data_only {
+            cx.done(
+                command,
+                Err("OKX client order lookup requires credentials".into()),
+            );
+            return;
+        }
+        let instrument = market.id.clone();
+        let path = format!(
+            "/api/v5/trade/order?instId={}&clOrdId={}",
+            encode(&instrument),
+            encode(&client_order_id)
+        );
+        let headers = self.primary_headers(cx.now, Method::Get, &path, "");
+        let request = cx.request(
+            Method::Get,
+            format!("{}{path}", self.rest()),
+            headers,
+            None,
+            Pending::History(Request {
+                lookup: Some(client_order_id),
+                command,
+                endpoint: "/api/v5/trade/order",
+                symbol: Some(symbol),
+                instrument: Some(instrument),
+                order_id: None,
+                income_kind: None,
+                from: None,
+                to: None,
+                limit: 1,
+                pages: 0,
+                rows_seen: 0,
+                count: 0,
+                after: None,
+                oldest: None,
+                invalid: false,
+                indices: HashMap::new(),
+                rows: Rows::Orders(Vec::new()),
+            }),
+        );
+        cx.route_request(request, safe_cex_engine::RequestRoute::Primary);
+    }
+
+    pub(crate) fn history_lookup_response(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        r: Request,
+        response: Response<'_>,
+    ) {
+        let result = (|| {
+            let envelope: crate::wire::Envelope<'_> = serde_json::from_str(response.body)
+                .map_err(|e| format!("Malformed OKX lookup: {e}"))?;
+            if envelope.code == "51603" && (200..300).contains(&response.status) {
+                return Ok(ABSENT.into());
+            }
+            if envelope.code != "0" {
+                return Err(format!("OKX {}: {}", envelope.code, envelope.msg));
+            }
+            if !(200..300).contains(&response.status) {
+                return Err(format!("OKX HTTP {}", response.status));
+            }
+            let raw = envelope
+                .data
+                .ok_or_else(|| "Missing OKX lookup data".to_owned())?;
+            let rows: Vec<&RawValue> = serde_json::from_str(raw.get())
+                .map_err(|e| format!("Malformed OKX lookup list: {e}"))?;
+            if rows.is_empty() {
+                return Ok(UNKNOWN.into());
+            }
+            if rows.len() != 1 {
+                return Err("Ambiguous OKX lookup rows".into());
+            }
+            let row: crate::wire::OrderRow<'_> = serde_json::from_str(rows[0].get())
+                .map_err(|e| format!("Malformed OKX lookup row: {e}"))?;
+            if Some(row.inst_id) != r.instrument.as_deref()
+                || Some(row.cl_ord_id) != r.lookup.as_deref()
+            {
+                return Err("OKX lookup identity mismatch".into());
+            }
+            let status = match row.state {
+                "live" | "partially_filled" => OrderStatus::Open,
+                "filled" => OrderStatus::Closed,
+                "canceled" | "mmp_canceled" => OrderStatus::Canceled,
+                _ => return Err("Invalid OKX lookup status".into()),
+            };
+            let parse = |text: &str| {
+                text.parse::<f64>()
+                    .ok()
+                    .filter(|value| value.is_finite() && *value >= 0.0)
+                    .ok_or_else(|| "Invalid OKX lookup number".to_owned())
+            };
+            let amount = parse(row.sz)?;
+            let filled_native = parse(row.acc_fill_sz)?;
+            if row.ord_id.is_empty()
+                || !matches!(row.side, "buy" | "sell")
+                || amount <= 0.0
+                || filled_native > amount
+            {
+                return Err("Invalid OKX lookup order".into());
+            }
+            let kind = match row.ord_type {
+                "market" | "optimal_limit_ioc" => OrderType::Market,
+                "limit" | "post_only" | "fok" | "ioc" => OrderType::Limit,
+                _ => return Err("Invalid OKX lookup order type".into()),
+            };
+            let symbol = r
+                .symbol
+                .as_deref()
+                .ok_or_else(|| "Missing OKX lookup symbol".to_owned())?;
+            let market = cx
+                .store
+                .market(symbol)
+                .ok_or_else(|| "Unknown OKX lookup symbol".to_owned())?;
+            let price = if row.px.is_empty() {
+                0.0
+            } else {
+                parse(row.px)?
+            };
+            let reference_text = first(&[row.px, row.avg_px, row.fill_px, row.last]);
+            let reference = if reference_text.is_empty() {
+                0.0
+            } else {
+                parse(reference_text)?
+            };
+            let filled = self.contracts_to_base(cx, market, filled_native, reference);
+            let remaining_native = (amount - filled_native).max(0.0);
+            let remaining = self.contracts_to_base(cx, market, remaining_native, reference);
+            if !filled.is_finite() || !remaining.is_finite() {
+                return Err("Invalid OKX lookup converted size".into());
+            }
+            let order = Order {
+                id: row.ord_id.into(),
+                parent_id: None,
+                status,
+                symbol: symbol.into(),
+                kind,
+                side: if row.side == "buy" {
+                    OrderSide::Buy
+                } else {
+                    OrderSide::Sell
+                },
+                price,
+                amount,
+                filled,
+                remaining,
+                reduce_only: row.reduce_only,
+                close: None,
+                client_order_id: Some(row.cl_ord_id.into()),
+                time_in_force: Some(match row.ord_type {
+                    "post_only" => TimeInForce::PostOnly,
+                    "fok" => TimeInForce::FillOrKill,
+                    "ioc" | "optimal_limit_ioc" => TimeInForce::ImmediateOrCancel,
+                    _ => TimeInForce::GoodTillCancel,
+                }),
+                last_update: if row.u_time.is_empty() {
+                    cx.now
+                } else {
+                    parse(row.u_time)?
+                },
+                trigger_type: None,
+                take_profit: None,
+                stop_loss: None,
+                extra: Some(OrderExtra {
+                    remaining_native: Some(remaining_native),
+                    filled_in_placement_units: Some(filled_native),
+                    ..OrderExtra::default()
+                }),
+            };
+            found(order, Some(rows[0]))
+        })();
+        cx.done(r.command, result);
+    }
+
     fn history_request(&self, cx: &mut Cx<'_, Pending>, mut r: Request) {
         r.count = 0;
         r.oldest = None;
@@ -440,7 +668,14 @@ impl Okx {
         };
         let mut path = format!("{}?", r.endpoint);
         if !matches!(r.rows, Rows::Trades(_)) {
-            path.push_str("instType=SWAP&");
+            let kind = if matches!(r.rows, Rows::Fills(_)) {
+                r.instrument
+                    .as_deref()
+                    .map_or("SWAP", |id| self.instrument_type(id))
+            } else {
+                "SWAP"
+            };
+            path.push_str(&format!("instType={kind}&"));
         }
         if let Some(id) = &r.instrument {
             path.push_str(&format!("instId={id}&"));
@@ -509,7 +744,7 @@ impl Okx {
                 {
                     return;
                 }
-                let qty = scaled(size, m.contract_size.unwrap_or(1.0));
+                let qty = self.contracts_to_base(cx, m, size, price);
                 if !qty.is_finite() || qty <= 0.0 {
                     return;
                 }
@@ -575,8 +810,22 @@ impl Okx {
                     },
                     price: positive(row.px),
                     average_price: positive(row.avg_px),
-                    amount: scaled(num::parse(row.sz), m.contract_size.unwrap_or(1.0)),
-                    filled: scaled(num::parse(row.acc_fill_sz), m.contract_size.unwrap_or(1.0)),
+                    amount: self.contracts_to_base(
+                        cx,
+                        m,
+                        num::parse(row.sz),
+                        positive(row.avg_px)
+                            .or_else(|| positive(row.px))
+                            .unwrap_or(0.0),
+                    ),
+                    filled: self.contracts_to_base(
+                        cx,
+                        m,
+                        num::parse(row.acc_fill_sz),
+                        positive(row.avg_px)
+                            .or_else(|| positive(row.px))
+                            .unwrap_or(0.0),
+                    ),
                     reduce_only: matches!(
                         row.reduce_only,
                         Some(Bool::Flag(true) | Bool::Text("true"))
@@ -672,7 +921,7 @@ impl Okx {
                 {
                     return;
                 }
-                let qty = scaled(size, m.contract_size.unwrap_or(1.0));
+                let qty = self.contracts_to_base(cx, m, size, price);
                 if !qty.is_finite() || qty <= 0.0 || !(price * qty).is_finite() {
                     return;
                 }
@@ -753,7 +1002,14 @@ impl Okx {
 
     pub(crate) fn history_failed(&mut self, cx: &mut Cx<'_, Pending>, r: Request, error: &str) {
         cx.log(LogLevel::Error, format!("OKX history: {error}"));
-        cx.done(r.command, Ok("[]".into()));
+        cx.done(
+            r.command,
+            if r.is_lookup() {
+                Err(error.into())
+            } else {
+                Ok("[]".into())
+            },
+        );
     }
 
     pub(crate) fn history_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) -> bool {

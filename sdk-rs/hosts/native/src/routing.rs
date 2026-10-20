@@ -99,6 +99,10 @@ pub struct RoutingPlan {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_http: Option<HttpRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_header: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_public: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_cors_http: Option<HttpRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_header: Option<String>,
@@ -142,6 +146,7 @@ impl RoutingState {
 
     pub fn http(&self, request: &HttpRequest) -> Result<HttpRoute, String> {
         match request.route {
+            Some(safe_cex_engine::RequestRoute::Primary) => return Ok(self.plan.http.clone()),
             Some(safe_cex_engine::RequestRoute::Direct) => return Ok(HttpRoute::default()),
             Some(safe_cex_engine::RequestRoute::PublicCors) => {
                 return self
@@ -158,14 +163,28 @@ impl RoutingState {
                 .iter()
                 .any(|(name, value)| name.eq_ignore_ascii_case(header) && !value.is_empty())
         });
-        Ok(if public {
-            self.plan.public_http.as_ref().unwrap_or(&self.plan.http)
-        } else if request.method == safe_cex_engine::Method::Get {
-            self.plan.read_http.as_ref().unwrap_or(&self.plan.http)
-        } else {
-            &self.plan.http
-        }
-        .clone())
+        let read = request.method == safe_cex_engine::Method::Get
+            && (self.plan.read_public
+                || self
+                    .plan
+                    .read_header
+                    .as_ref()
+                    .or(self.plan.public_header.as_ref())
+                    .is_some_and(|header| {
+                        request.headers.iter().any(|(name, value)| {
+                            name.eq_ignore_ascii_case(header) && !value.is_empty()
+                        })
+                    }));
+        Ok(
+            if let Some(route) = self.plan.read_http.as_ref().filter(|_| read) {
+                route
+            } else if public {
+                self.plan.public_http.as_ref().unwrap_or(&self.plan.http)
+            } else {
+                &self.plan.http
+            }
+            .clone(),
+        )
     }
 
     pub fn socket(
@@ -725,6 +744,37 @@ mod tests {
     }
 
     #[test]
+    fn unsigned_get_uses_declared_dynamic_client_but_primary_hint_and_post_do_not() {
+        let state = state(RoutingPlan {
+            http: HttpRoute {
+                prefix: "primary".into(),
+                ..HttpRoute::default()
+            },
+            read_http: Some(HttpRoute {
+                prefix: "secondary".into(),
+                ..HttpRoute::default()
+            }),
+            read_public: true,
+            ..RoutingPlan::default()
+        });
+        let mut request = HttpRequest {
+            id: RequestId(0),
+            method: Method::Get,
+            route: None,
+            timeout_ms: None,
+            url: "https://venue.test/catalog".into(),
+            headers: vec![],
+            body: None,
+        };
+        assert_eq!(state.http(&request).unwrap().prefix, "secondary");
+        request.route = Some(safe_cex_engine::RequestRoute::Primary);
+        assert_eq!(state.http(&request).unwrap().prefix, "primary");
+        request.route = None;
+        request.method = Method::Post;
+        assert_eq!(state.http(&request).unwrap().prefix, "primary");
+    }
+
+    #[test]
     fn secondary_read_route_applies_only_to_signed_gets() {
         let state = state(RoutingPlan {
             http: HttpRoute {
@@ -755,6 +805,9 @@ mod tests {
         };
         assert_eq!(state.http(&request).unwrap().prefix, "secondary-cors");
         assert_eq!(state.http(&request).unwrap().mode, HttpRouteMode::How);
+        request.route = Some(safe_cex_engine::RequestRoute::Primary);
+        assert_eq!(state.http(&request).unwrap().prefix, "primary");
+        request.route = None;
         for method in [Method::Post, Method::Put, Method::Delete] {
             request.method = method;
             assert_eq!(state.http(&request).unwrap().prefix, "primary");

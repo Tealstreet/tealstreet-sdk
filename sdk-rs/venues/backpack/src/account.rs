@@ -231,10 +231,24 @@ impl Backpack {
         pending: Pending,
         stream: bool,
     ) -> Result<(), String> {
-        let credentials = self
-            .account
-            .credentials
+        let read_credentials = self
+            .options
+            .read_credentials
             .as_ref()
+            .filter(|_| method == Method::Get)
+            .map(|read| {
+                let mut c = Credentials::new(read.key.clone(), &read.secret)?;
+                c.window = self
+                    .account
+                    .credentials
+                    .as_ref()
+                    .map_or(60000, |primary| primary.window);
+                Ok::<_, String>(c)
+            })
+            .transpose()?;
+        let credentials = read_credentials
+            .as_ref()
+            .or(self.account.credentials.as_ref())
             .ok_or("Backpack credentials unavailable")?;
         let headers = credentials.headers(
             instruction(method, path),

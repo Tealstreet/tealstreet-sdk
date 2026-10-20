@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 #[derive(Clone)]
 pub struct Credentials {
+    pub read: Option<safe_cex_engine::ReadCredentials>,
     pub key: String,
     pub secret: String,
 }
@@ -83,11 +84,14 @@ impl Params {
     ) -> RequestParts {
         let mut headers = vec![("X-SOURCE-KEY", "Tealstreet".into())];
         if let Some(c) = credentials {
-            headers.push(("X-BX-APIKEY", c.key.clone()));
+            let read = c.read.as_ref().filter(|_| method == Method::Get);
+            let key = read.map_or(c.key.as_str(), |r| &r.key);
+            let secret = read.map_or(c.secret.as_str(), |r| &r.secret);
+            headers.push(("X-BX-APIKEY", key.to_owned()));
             if path != "/openApi/user/auth/userDataStream" {
                 self = self.num("timestamp", now.floor());
                 let signature =
-                    hmac_sha256(c.secret.as_bytes(), self.query().as_bytes(), Encoding::Hex);
+                    hmac_sha256(secret.as_bytes(), self.query().as_bytes(), Encoding::Hex);
                 self = self.str("signature", &signature);
             }
         }

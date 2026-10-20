@@ -263,3 +263,14 @@ remain readable. Bybit leaves those extras absent on legacy frames; Bitget
 inverse publishes native amount/filled, so its adapter can subtract those values
 when the exact optional tail is absent. Order rejection metadata must survive
 alongside the native sizing fields.
+
+
+OKX frame bridges keep native contract-count placement amounts separately from
+base-sized fills and remaining quantities. Exact native leaves populate
+`remainingNative`; regular order cumulative native fills are amount minus those
+leaves. Position `contractsNative` is base contracts divided by ctVal for linear
+markets and quote notional divided by ctVal for inverse markets. OKX inverse
+PnL is already converted to USD, so do not relabel it as coin-native PnL. Both
+the worker and main-thread frame appliers use this OKX profile; other venue
+quantity profiles keep their existing conventions. Strictly admitted X-Perp
+market IDs retain their dated identity and their base/quote XPERP display label.

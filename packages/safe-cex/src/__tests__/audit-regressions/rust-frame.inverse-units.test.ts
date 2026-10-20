@@ -15,7 +15,7 @@ type OrderRow = { id: string; parentId?: string; amount: number; filled: number;
 
 // Independent encoder of the documented format-1 layout. The optional native
 // tail must not change offsets in the original seven-column ORDERS table.
-const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], positions = false, markets = true } = {}) => {
+const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], positions = false, markets = true, contractSize = NaN } = {}) => {
   const strings = ['BTCUSD', 'BTC', 'USD', ...orders.flatMap((row) => [row.id, ...(row.parentId ? [row.parentId] : [])])];
   const ref = (s: string | undefined) => s === undefined ? 0xffffffff : strings.indexOf(s);
   const sections: Array<{ kind: number; bytes: Uint8Array }> = [];
@@ -30,7 +30,7 @@ const fixture = ({ native = false, inverse = true, orders = [] as OrderRow[], po
     }
     sections.push({ kind, bytes });
   };
-  if (markets) table(2, [1, 0, 0, 1, 2, inverse ? 3 : 1], [1, 0.1, 1, 100000, 1, 100, NaN, NaN, NaN, NaN].map((n) => [n]));
+  if (markets) table(2, [1, 0, 0, 1, 2, inverse ? 3 : 1], [1, 0.1, 1, 100000, 1, 100, NaN, contractSize, NaN, NaN].map((n) => [n]));
   const columns = [
     orders.map(() => 54321), orders.map((o) => o.amount), orders.map((o) => o.filled),
     orders.map((o) => o.remaining), orders.map(() => 1234), orders.map(() => NaN), orders.map(() => NaN),
@@ -145,5 +145,37 @@ describe('Rust frames preserve inverse native units', () => {
         exchange.dispose();
       }
     }
+  });
+});
+
+describe('OKX native contract count bridge', () => {
+  it.each(['okx', 'okxeu', 'okxdemo', 'okxeudemo'] as const)('%s preserves native copier and chaser counts through worker frames', (name) => {
+    const store = new DefaultStore();
+    const exchange = new BaseExchange(name, { key: '', secret: '' }, store);
+    exchange.applyWorkerFrame(fixture({ contractSize: 100, native: true, positions: true, orders: [
+      { id: 'entry', amount: 10, filled: 0.004, remaining: 0.016, native: 8 },
+      { id: 'full-stop', amount: 0, filled: 0, remaining: 0.02, native: 10, enums: 3 << 8 },
+    ] }).buffer);
+    expect(store.orders[0]).toMatchObject({ amount: 10, filled: 0.004, remaining: 0.016, extra: { remainingNative: 8, filledInPlacementUnits: 2 } });
+    expect(store.orders[0].extra).not.toHaveProperty('remainingNotional');
+    expect(store.orders[1].extra).toEqual({ remainingNative: 10 });
+    expect(store.positions[0].extra).toEqual({ contractsNative: 10 });
+    expect(store.positions[0].unrealizedPnl).toBe(0.002);
+    exchange.dispose();
+  });
+  it('retains linear native placement counts separately from displayed base size', () => {
+    const store = new DefaultStore();
+    new FrameApplier(store, false, false, true).apply(fixture({ inverse: false, contractSize: 0.001, positions: true, orders: [
+      { id: 'linear', amount: 10, filled: 0.002, remaining: 0.008 },
+    ] }));
+    expect(store.orders[0].extra).toEqual({ remainingNative: 8, filledInPlacementUnits: 2 });
+    expect(store.positions[0].extra).toEqual({ contractsNative: 20 });
+  });
+  it('cannot infer exact inverse order leaves from a legacy base-sized remainder', () => {
+    const store = new DefaultStore();
+    new FrameApplier(store, false, false, true).apply(fixture({ contractSize: 100, orders: [
+      { id: 'legacy', amount: 10, filled: 0.004, remaining: 0.016 },
+    ] }));
+    expect(store.orders[0].extra).toBeUndefined();
   });
 });

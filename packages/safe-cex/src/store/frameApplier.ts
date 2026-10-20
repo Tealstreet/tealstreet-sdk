@@ -21,7 +21,7 @@ export class FrameApplier {
   private marketSymbols: string[] = [];
   private contractSizes: number[] = [];
 
-  constructor(private readonly store: Store, private readonly nativePlacementAmounts = false, private readonly inverseNativeAmounts = false) {}
+  constructor(private readonly store: Store, private readonly nativePlacementAmounts = false, private readonly inverseNativeAmounts = false, private readonly contractCountAmounts = false) {}
 
   /** Apply the frame's store sections. Books, candles and fills are decoded on request. */
   apply(frame: Frame): void {
@@ -39,6 +39,9 @@ export class FrameApplier {
         rows.push({
           id: markets.id(i),
           symbol: markets.symbol(i),
+          ...(this.contractCountAmounts && !markets.id(i).endsWith('-SWAP') && {
+            prettySymbol: `${markets.base(i)}/${markets.quote(i)} XPERP`,
+          }),
           base: markets.base(i),
           quote: markets.quote(i),
           active: (flags & MARKET_FLAG.ACTIVE) !== 0,
@@ -98,11 +101,22 @@ export class FrameApplier {
         const symbol = this.symbol(orders.market[i]);
         const market = update.markets?.[orders.market[i]] ?? this.store.marketsBySymbol[symbol];
         const native = orders.remainingNative?.[i];
-        const nativeExtra = market?.isInverse && native !== undefined && Number.isFinite(native)
-          ? { remainingNative: native, remainingNotional: native }
-          : this.inverseNativeAmounts
-            ? { remainingNative: Math.max(0, subtract(orders.amount[i], orders.filled[i])) }
-            : undefined;
+        const regular = enums.type === 'limit' || enums.type === 'market';
+        const nativeExtra = this.contractCountAmounts
+          ? native !== undefined && Number.isFinite(native)
+            ? { remainingNative: native,
+                ...(regular && orders.amount[i] >= native && { filledInPlacementUnits: subtract(orders.amount[i], native) }),
+              }
+            : !market?.isInverse
+              ? { remainingNative: divide(orders.remaining[i], this.contractSizes[orders.market[i]]),
+                  ...(regular && { filledInPlacementUnits: divide(orders.filled[i], this.contractSizes[orders.market[i]]) }),
+                }
+              : undefined
+          : market?.isInverse && native !== undefined && Number.isFinite(native)
+            ? { remainingNative: native, remainingNotional: native }
+            : this.inverseNativeAmounts
+              ? { remainingNative: Math.max(0, subtract(orders.amount[i], orders.filled[i])) }
+              : undefined;
         const extra = nativeExtra || enums.rejectReason || this.nativePlacementAmounts
           ? {
               ...nativeExtra,
@@ -158,11 +172,13 @@ export class FrameApplier {
           leverage: positions.leverage[i],
           unrealizedPnl: positions.unrealizedPnl[i],
           contracts: positions.contracts[i],
-          ...((this.nativePlacementAmounts || market?.isInverse || this.inverseNativeAmounts) && { extra: {
+          ...((this.nativePlacementAmounts || this.contractCountAmounts || market?.isInverse || this.inverseNativeAmounts) && { extra: {
             ...(this.nativePlacementAmounts && {
               contractsNative: divide(positions.contracts[i], this.contractSizes[positions.market[i]]),
             }),
-            ...((market?.isInverse || this.inverseNativeAmounts) && { contractsNative: positions.notional[i], unrealizedPnlNative: positions.unrealizedPnl[i] }),
+            ...(this.contractCountAmounts
+              ? { contractsNative: divide(market?.isInverse ? positions.notional[i] : positions.contracts[i], this.contractSizes[positions.market[i]]) }
+              : (market?.isInverse || this.inverseNativeAmounts) && { contractsNative: positions.notional[i], unrealizedPnlNative: positions.unrealizedPnl[i] }),
           } }),
           liquidationPrice: positions.liquidationPrice[i],
           ...(mode !== undefined && { positionMode: mode }),

@@ -1108,6 +1108,10 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 
 - Sends `clOrdId`, rule `^[A-Za-z0-9]{1,32}$` (OKX: case-sensitive alphanumeric). Replaces the generated `BROKER_ID…` ID; no prefix is composed. Inherited by OKX EU and both demo variants.
 - The native amend keeps the order and its `clOrdId`; no new client ID is sent.
+- Definitive client-ID lookup always uses the primary REST client that placed
+  the order. A secondary read key can belong to another account; its not-found
+  response cannot establish absence from the primary account. Rust also tags
+  this request with the explicit primary routing hint.
 
 ## Rust replay depth correction
 
@@ -1141,3 +1145,9 @@ Rust oracle audit: historical fill windows compare native millisecond timestamps
 before truncating public execution timestamps to seconds. Positive protective
 dust must not become close-all; ambiguous standalone protective limit amends
 fail before cancellation in Rust, preserving the existing execution price.
+
+
+Untraded X-Perps can appear live with empty REST `last` and `open24h` fields
+(observed in the keyless EEA catalog). They seed finite zero prices and a zero
+percentage; they do not invalidate the complete market/ticker startup or
+publish NaN into the TS store. Rust still rejects nonempty malformed numbers.

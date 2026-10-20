@@ -134,7 +134,7 @@ export class OKXExchange extends BaseExchange {
     try {
       const {
         data: { data },
-      } = await this.xhr.get<{ data: Array<Record<string, any>> }>(ENDPOINTS.ORDER_DETAIL, {
+      } = await (this._primaryXhr ?? this.xhr).get<{ data: Array<Record<string, any>> }>(ENDPOINTS.ORDER_DETAIL, {
         params: { instId: market.id, clOrdId: clientOrderId },
       });
       const row = data?.[0];
@@ -450,23 +450,23 @@ export class OKXExchange extends BaseExchange {
 
         if (!market) return acc;
 
-        const open = parseFloat(t.open24h);
-        const last = parseFloat(t.last);
-        const percentage = roundUSD(((last - open) / open) * 100);
+        const open = this.toFiniteNumber(t.open24h);
+        const last = this.toFiniteNumber(t.last);
+        const percentage = open > 0 ? roundUSD(((last - open) / open) * 100) : 0;
 
         const ticker = {
           id: market.id,
           symbol: market.symbol,
-          bid: parseFloat(t.bidPx),
-          ask: parseFloat(t.askPx),
+          bid: this.toFiniteNumber(t.bidPx),
+          ask: this.toFiniteNumber(t.askPx),
           last,
           mark: last,
           index: last,
           percentage,
           fundingRate: 0,
           fundingTime: 0,
-          volume: parseFloat(t.volCcy24h),
-          quoteVolume: parseFloat(t.vol24h),
+          volume: this.toFiniteNumber(t.volCcy24h),
+          quoteVolume: this.toFiniteNumber(t.vol24h),
           openInterest: 0,
         };
 

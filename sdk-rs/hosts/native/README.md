@@ -38,6 +38,12 @@ engine socket channels select public/private/business routes; substring rules in
 the plan support older untagged effects. The engine continues to sign and emit
 the venue's actual URLs and headers.
 
+Optional `readHttp`, `readHeader` and `readPublic` fields preserve the TS
+secondary client's GET-only egress. The engine selects its read credentials;
+this routing policy contains no read key or secret. Explicit `primary` request
+hints retain the account route for definitive order lookups and independent
+primary-only reads. Mutations and posted reads never select `readHttp`.
+
 The native host applies proxy prefixes before sending, refreshes proxy tokens
 per operation, preserves original request bodies, and streams HTTP results in
 16 KiB chunks. A HOW request uses a dedicated tunnel connection with raw response

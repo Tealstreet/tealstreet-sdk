@@ -41,6 +41,7 @@ const MARKETS_PATH: &[&str] = &["result", "list"];
 
 #[derive(Clone, Debug, Default)]
 pub struct Options {
+    pub read_credentials: Option<safe_cex_engine::ReadCredentials>,
     pub variant: Variant,
     pub endpoints: Option<Endpoints>,
     pub testnet: bool,
@@ -197,6 +198,7 @@ pub struct BybitLinear {
     paths: Paths,
     config_error: Option<String>,
     credentials: Option<Credentials>,
+    read_credentials: Option<safe_cex_engine::ReadCredentials>,
     public: Connection,
     private: Connection,
     books: HashMap<String, BookState>,
@@ -287,6 +289,7 @@ impl BybitLinear {
             paths,
             config_error,
             credentials,
+            read_credentials: options.read_credentials,
             public: Connection::new(),
             private: Connection::new(),
             books: HashMap::new(),
@@ -332,7 +335,16 @@ impl BybitLinear {
             url.push('?');
             url.push_str(&rest.payload);
         }
-        let headers = match (&self.credentials, rest.signed) {
+        let read_credentials = self
+            .read_credentials
+            .as_ref()
+            .filter(|_| rest.method == Method::Get)
+            .map(|read| Credentials {
+                key: read.key.clone(),
+                secret: read.secret.clone(),
+            });
+        let credentials = read_credentials.as_ref().or(self.credentials.as_ref());
+        let headers = match (credentials, rest.signed) {
             (Some(credentials), true) => {
                 credentials.headers(cx.now + self.clock_offset_ms, &rest.payload)
             }
@@ -1150,6 +1162,12 @@ impl Venue for BybitLinear {
     type Pending = Pending;
 
     fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+        if let Some(read) = &self.read_credentials
+            && let Err(error) = read.validate()
+        {
+            cx.log(LogLevel::Error, error);
+            return;
+        }
         if let Some(error) = &self.config_error {
             cx.log(LogLevel::Error, error.clone());
             return;
@@ -1368,3 +1386,6 @@ mod public_decoder_tests {
         assert_eq!(book.asks(), [(101.0, 2.0)]);
     }
 }
+
+#[cfg(test)]
+mod secondary_tests;

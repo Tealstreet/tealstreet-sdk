@@ -25,6 +25,12 @@ pub fn envelope(text: &str) -> Result<&str, String> {
 #[serde(rename_all = "camelCase", default)]
 pub struct Instrument<'a> {
     pub inst_id: &'a str,
+    pub inst_type: &'a str,
+    pub rule_type: &'a str,
+    pub uly: &'a str,
+    pub inst_family: &'a str,
+    pub base_ccy: &'a str,
+    pub quote_ccy: &'a str,
     pub ct_type: &'a str,
     pub ct_val: &'a str,
     pub ct_val_ccy: &'a str,
@@ -40,6 +46,18 @@ pub struct Instrument<'a> {
     pub max_trigger_sz: &'a str,
     pub max_twap_sz: &'a str,
     pub lever: &'a str,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TickerSeed<'a> {
+    pub inst_id: &'a str,
+    pub bid_px: &'a str,
+    pub ask_px: &'a str,
+    pub last: &'a str,
+    pub open24h: &'a str,
+    pub vol_ccy24h: &'a str,
+    pub vol24h: &'a str,
 }
 
 #[derive(Deserialize, Default)]
@@ -114,6 +132,7 @@ pub fn candle(row: &[&str]) -> Option<safe_cex_engine::model::Candle> {
 #[serde(rename_all = "camelCase", default)]
 pub struct Config<'a> {
     pub pos_mode: &'a str,
+    pub acct_lv: &'a str,
 }
 
 #[derive(Deserialize, Default)]
@@ -123,6 +142,8 @@ pub struct PositionRow<'a> {
     pub pos: &'a str,
     pub pos_side: &'a str,
     pub avg_px: &'a str,
+    pub mark_px: &'a str,
+    pub ccy: &'a str,
     pub lever: &'a str,
     pub upl: &'a str,
     pub liq_px: &'a str,
@@ -138,6 +159,7 @@ pub struct OrderRow<'a> {
     pub ord_id: &'a str,
     pub algo_id: &'a str,
     pub cl_ord_id: &'a str,
+    pub ccy: &'a str,
     pub algo_cl_ord_id: &'a str,
     pub ord_type: &'a str,
     pub state: &'a str,
@@ -145,6 +167,7 @@ pub struct OrderRow<'a> {
     pub sz: &'a str,
     pub acc_fill_sz: &'a str,
     pub px: &'a str,
+    pub avg_px: &'a str,
     pub fill_px: &'a str,
     pub fill_sz: &'a str,
     pub fill_time: &'a str,

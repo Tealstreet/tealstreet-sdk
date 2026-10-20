@@ -68,3 +68,30 @@ with evidence, plus each gate's counts and CPU/memory/artifact measurements.
   evidence in the census; these are not mislabeled TS-unsupported/live-only.
 - Implementation divided into disjoint query, OKX product/account/trading,
   and secondary-signer scopes. Primary owns Phemex, wrapper, harness and docs.
+
+### Public/private/trading/query implementation checkpoint
+
+- Independent phase reviews accepted Phemex income+lookup, Binance/OKX
+  lookup, OKX public/private/trading products, and secondary GET signers.
+  Findings fixed: unknown-market lookup verdict, contradictory HTTP absence
+  codes, exact collateral ticker selection, five secondary identity/route/nonce
+  cases, and a live-capture untraded-X-Perp startup failure.
+- Phemex money identity retains raw decimal digits; finite numeric output
+  cannot collapse distinct running balances above binary-float precision.
+- OKX mixed snapshots commit complete SWAP/FUTURES unions; native contract
+  counts survive both worker/main frame bridges without growing the frame ABI.
+- Paired TS fixes: primary-only OKX definitive lookup; Binance
+  EXPIRED_IN_MATCH is canceled; blank untraded OKX ticker prices and zero-open
+  percentages remain finite in both REST seed and stream.
+- Focused current OKX suite85/85 and strict clippy PASS; Phemex96 and
+  Binance39 passed in the preceding combined run; lookup15/15, independent
+  frame16/16, transport/HOW251/251, harness331/331 PASS. Root typecheck
+  44/44 tasks and lint28/28 PASS. Full final-head gates still pending.
+- Actual public capture: OKX inverse books BTCUSD/ETHUSD,20seconds,100463
+  frames/two books; trimmed8-second fixture retains41502records. First EEA
+  capture correctly failed startup on an untraded placeholder and is not
+  counted as coverage. Required-shape seed fix reviewed; rebuild/recapture next.
+- Expanded global/EEA private development replays PASS with inverse coin
+  collateral and X-Perp positions/orders. Harness review then corrected fake
+  position financial arithmetic and added inverse/X-Perp trading lifecycles;
+  final fixture/source replays and CI remain phase5 work.

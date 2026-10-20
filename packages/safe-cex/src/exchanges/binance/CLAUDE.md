@@ -1083,3 +1083,14 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 - **USD-M** sends `newClientOrderId`, rule `^[.A-Z:/a-z0-9_-]{1,36}$`; **PM** the same charset capped at 32. **Spot's documented legal range is narrower**, `^[A-Za-z0-9_-]{1,36}$` — `.`, `:` and `/` that USD-M accepts are rejected by Spot, so it has its own rule.
 - A caller ID replaces the generated `x-s3vFFRQp…` ID outright; no broker prefix is composed. PM and Spot return `newClientOrderId` as the order ID, so the placement result is the caller's ID there.
 - `updateOrder` is cancel+replace on all three; the replacement gets a generated ID (Spot refuses a reused ID until the old order fills).
+
+
+## Rust definitive client-ID lookup
+
+USD-M and PM engine lookups query the primary placement account through the
+correct fapi/papi order endpoint, even when ordinary GET reads use secondary
+credentials. Only the venue's explicit order-not-found code on an accepted
+HTTP status establishes a definitive miss. Unknown markets are non-definitive;
+malformed, mismatched, authentication and transport failures are errors.
+`EXPIRED_IN_MATCH` is canceled, like `EXPIRED`, in both TS history/lookup and
+Rust; an STP expiration does not mean the order filled.

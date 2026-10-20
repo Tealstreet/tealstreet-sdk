@@ -607,3 +607,32 @@ Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor ve
 - The Rust wrapper uses the same rule and `Tealstreet_…` mint format. Both paths
   share `BROKER_ID` from `phemex.types.ts`; `phemex.api.ts` re-exports it for
   existing callers.
+
+
+## Rust income and client-ID reads
+
+The Rust engine adds reported account income through the documented
+`/api-data/futures/v2/tradeAccountDetail` route. It preserves `amountRv` signs
+and `typeDesc` verbatim; it does not derive gross PnL, funding, fees or closed
+positions from the running balance. Both USDT and USDC are walked with the
+shared span pager. Unknown types remain `other`. A failed sibling currency,
+malformed row, oversized page or incomplete coverage is an error, never an
+empty/partial success. These documented schema fixtures are not live account
+validation and do not remove the ingestion/tunnel canary restriction above.
+
+Ledger rows have no documented symbol or transaction ID. Symbol filtering
+therefore fails explicitly. Returned `tranId` is a stable composite of currency,
+creation time, type, amount, running balance and duplicate occurrence. The
+default range is the last 30 days; explicit inclusive bounds use milliseconds.
+
+Rust definitive lookup uses
+`/api-data/g-futures/orders/by-order-id?symbol=...&clOrdID=...`, which includes
+closed orders. Only a successful exact-ID empty result is definitive; failures
+propagate and mismatched/malformed rows fail. Unknown markets return a
+non-definitive miss without I/O. The primary key and primary egress always
+perform this lookup even when ordinary GETs use secondary read credentials.
+`Triggered` still maps to Closed without becoming a terminal store tombstone.
+
+TS still has inert income/order-history fallbacks and a non-definitive lookup
+fallback. Its implemented fill history is a symbol-scoped latest page capped
+at 200, so this sweep does not claim unbounded Phemex TS history.

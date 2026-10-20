@@ -14,6 +14,11 @@ import { BASE_WS_URLS } from './okx.types';
 import { resolveTransportRouting } from '../../transport/registry';
 import { WsDirectFallback } from '../../utils/wsDirectFallback';
 
+const tickerNumber = (value: unknown): number => {
+  const parsed = Number.parseFloat(String(value ?? ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 type Data = Record<string, any>;
 type MessageHandlers = {
   [channel: string]: Array<(json: Data) => void>;
@@ -225,19 +230,19 @@ export class OKXPublicWebsocket extends BaseWebSocket<OKXExchange> {
   };
 
   handleTickerEvents = ({ data: [update] }: Data) => {
-    const open = parseFloat(update.open24h);
-    const last = parseFloat(update.last);
-    const percentage = roundUSD(((last - open) / open) * 100);
+    const open = tickerNumber(update.open24h);
+    const last = tickerNumber(update.last);
+    const percentage = open > 0 ? roundUSD(((last - open) / open) * 100) : 0;
 
     this.store.updateTicker(
       { id: update.instId },
       {
-        bid: parseFloat(update.bidPx),
-        ask: parseFloat(update.askPx),
+        bid: tickerNumber(update.bidPx),
+        ask: tickerNumber(update.askPx),
         last,
         percentage,
-        volume: parseFloat(update.volCcy24h),
-        quoteVolume: parseFloat(update.vol24h),
+        volume: tickerNumber(update.volCcy24h),
+        quoteVolume: tickerNumber(update.vol24h),
       },
     );
   };
