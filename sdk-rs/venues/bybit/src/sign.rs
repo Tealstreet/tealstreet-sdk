@@ -44,47 +44,7 @@ impl Credentials {
     }
 }
 
-/// A query string under construction, percent-encoded as it is built.
-#[derive(Clone, Default)]
-pub struct Query(String);
-
-impl Query {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn str(mut self, name: &str, value: &str) -> Self {
-        if !self.0.is_empty() {
-            self.0.push('&');
-        }
-        self.0.push_str(name);
-        self.0.push('=');
-        encode_into(&mut self.0, value);
-        self
-    }
-
-    pub fn num(self, name: &str, value: f64) -> Self {
-        self.str(name, &num::format(value))
-    }
-
-    pub fn opt_str(self, name: &str, value: Option<&str>) -> Self {
-        match value {
-            Some(value) => self.str(name, value),
-            None => self,
-        }
-    }
-
-    pub fn opt_num(self, name: &str, value: Option<f64>) -> Self {
-        match value {
-            Some(value) => self.num(name, value),
-            None => self,
-        }
-    }
-
-    pub fn into_string(self) -> String {
-        self.0
-    }
-}
+pub use safe_cex_engine::url::Query;
 
 /// A JSON object written in field order, so the signed bytes are the sent bytes.
 #[derive(Clone, Default)]
@@ -141,20 +101,6 @@ impl Body {
         }
         self.0.push('}');
         self.0
-    }
-}
-
-/// RFC 3986: everything but unreserved characters is escaped, as `qs` does.
-fn encode_into(out: &mut String, value: &str) {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(byte as char);
-        } else {
-            out.push('%');
-            out.push(HEX[(byte >> 4) as usize] as char);
-            out.push(HEX[(byte & 0xf) as usize] as char);
-        }
     }
 }
 

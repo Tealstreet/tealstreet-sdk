@@ -731,7 +731,7 @@ impl BinanceFutures {
                     } else {
                         "?listenKey="
                     });
-                    url.push_str(&crate::sign::encode(&key.listen_key));
+                    url.push_str(&safe_cex_engine::url::encode(&key.listen_key));
                     self.connect_url(cx, Channel::Private, &url);
                 }
                 Err(error) => {
@@ -1382,7 +1382,8 @@ impl BinanceFutures {
         let price = o.last_price.as_deref().map_or(0.0, num::parse);
         // Execution identity is independent of lifecycle ordering: a cancellation
         // or stop-trigger EXPIRED can arrive before its final TRADE.
-        let fresh_execution = if o.x.as_deref() == Some("TRADE")
+        // CALCULATED is a liquidation execution and carries its own trade id.
+        let fresh_execution = if matches!(o.x.as_deref(), Some("TRADE" | "CALCULATED"))
             && last_quantity.is_finite()
             && last_quantity > 0.0
             && price.is_finite()

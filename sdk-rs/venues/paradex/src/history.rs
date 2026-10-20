@@ -2,6 +2,7 @@
 use crate::{Pending, account::Account};
 use safe_cex_engine::model::{OrderSide, OrderStatus, OrderType};
 use safe_cex_engine::num::parse_decimal;
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response, json::ArrayAt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -176,18 +177,6 @@ fn number(s: &str) -> f64 {
 }
 fn optional_number(s: &str) -> Option<f64> {
     parse_decimal(s).filter(|n| *n != 0.)
-}
-fn encode(text: &str) -> String {
-    let mut output = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-            output.push(char::from(b));
-        } else {
-            use std::fmt::Write;
-            write!(output, "%{b:02X}").unwrap();
-        }
-    }
-    output
 }
 fn side(s: &str) -> Option<OrderSide> {
     match s {
