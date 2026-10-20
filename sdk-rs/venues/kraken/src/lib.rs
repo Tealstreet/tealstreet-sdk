@@ -72,6 +72,7 @@ struct CandleState {
 pub struct Kraken {
     options: Options,
     discovery: safe_cex_engine::startup::Backoff<bool>,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
     signer: Option<sign::Signer>,
     read_signer: Option<sign::Signer>,
     account: account::Account,
@@ -105,6 +106,7 @@ impl Kraken {
         Self {
             options,
             discovery: Default::default(),
+            live_tickers: Default::default(),
             read_signer,
             signer,
             account: account::Account::default(),
@@ -156,6 +158,7 @@ impl Kraken {
             return;
         }
         self.ticker_in_flight = true;
+        self.live_tickers.begin();
         cx.request_streamed(
             Method::Get,
             format!("{}/derivatives/api/v3/tickers", self.host()),
@@ -472,6 +475,19 @@ impl Venue for Kraken {
                 let Ok(row) = serde_json::from_str::<WsTicker>(text) else {
                     return;
                 };
+                let supplied = u16::from(row.bid.is_some())
+                    | (u16::from(row.ask.is_some()) << 1)
+                    | (u16::from(row.last.is_some()) << 2)
+                    | (u16::from(row.mark.is_some()) << 3)
+                    | (u16::from(row.index.is_some()) << 4)
+                    | (u16::from(
+                        row.change.is_some() || row.open_24h.is_some() && row.last.is_some(),
+                    ) << 5)
+                    | (u16::from(row.open_interest.is_some()) << 6)
+                    | (1 << 7)
+                    | (u16::from(row.next_funding_rate_time.is_some()) << 8)
+                    | (u16::from(row.volume.is_some()) << 9)
+                    | (u16::from(row.volume_quote.is_some()) << 10);
                 self.ticker_revision += 1;
                 self.ticker_sources
                     .insert(msg.product_id.to_string(), self.ticker_revision);
@@ -513,6 +529,8 @@ impl Venue for Kraken {
                         t.percentage = (last - open) / open * 100.0;
                     }
                 });
+                self.live_tickers
+                    .record(cx.store, &msg.product_id, supplied);
             }
             "book_snapshot" => self.depth(cx, &msg.product_id, text, true),
             "book" => self.depth(cx, &msg.product_id, text, false),
@@ -609,9 +627,7 @@ impl Venue for Kraken {
                     }
                 }
             }
-            Pending::Tickers {
-                rows, failed: _, ..
-            } => match serde_json::from_str::<RestTicker<'_>>(item) {
+            Pending::Tickers { rows, .. } => match serde_json::from_str::<RestTicker<'_>>(item) {
                 Ok(row) => {
                     if let Some(m) = cx.store.market(&row.symbol) {
                         let last = row.last.filter(|v| *v > 0.0).unwrap_or(row.mark_price);
@@ -716,17 +732,18 @@ impl Venue for Kraken {
                 self.tickers_request(cx);
             }
             Pending::Tickers {
-                rows,
+                mut rows,
                 failed,
                 revision,
             } => {
                 self.ticker_in_flight = false;
-                if failed {
+                if failed || rows.is_empty() {
                     self.discovery.failed(cx, true);
-                    cx.log(LogLevel::Warning, "Invalid Kraken tickers");
+                    cx.log(LogLevel::Warning, "Invalid or empty Kraken tickers");
                     return;
                 }
                 self.discovery.succeeded(cx, &true);
+                self.live_tickers.finish(cx.store, &mut rows);
                 if !cx.store.loaded().tickers {
                     cx.store.set_tickers(rows);
                 } else {

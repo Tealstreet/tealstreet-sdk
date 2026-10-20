@@ -107,8 +107,9 @@ fn socket_roles_and_control_plane_are_distinct() {
         })
         .unwrap();
     reply(&mut e, &r, 200, META);
-    let r = e
-        .drain_actions()
+    let startup = e.drain_actions().collect::<Vec<_>>();
+    let r = startup
+        .iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -117,7 +118,7 @@ fn socket_roles_and_control_plane_are_distinct() {
             }
         })
         .unwrap();
-    reply(&mut e, &r, 200, TICKER);
+    reply(&mut e, r, 200, TICKER);
     let (timer, at) = e
         .drain_actions()
         .find_map(|a| {
@@ -129,8 +130,9 @@ fn socket_roles_and_control_plane_are_distinct() {
         })
         .unwrap();
     e.handle(at, Event::TimerFired { timer });
-    let sockets = e
-        .drain_actions()
+    let sockets = startup
+        .into_iter()
+        .chain(e.drain_actions())
         .filter_map(|a| {
             if let Action::WsConnect {
                 socket,
@@ -555,14 +557,19 @@ fn mismatched_rest_ticker_keeps_seed_unloaded_until_valid_retry() {
         .unwrap();
     reply(&mut e, &r, 200, META);
     assert!(!e.store().loaded().tickers);
-    let r = e
-        .drain_actions()
-        .find_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert_eq!(
+        actions
+            .iter()
+            .filter(|a| matches!(a, Action::WsConnect { .. }))
+            .count(),
+        2
+    );
+    let r = actions
+        .into_iter()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
         })
         .unwrap();
     reply(
@@ -573,10 +580,64 @@ fn mismatched_rest_ticker_keeps_seed_unloaded_until_valid_retry() {
     );
     assert!(!e.store().loaded().tickers);
     assert!(e.store().tickers().is_empty());
-    assert!(
-        !e.drain_actions()
-            .any(|a| matches!(a, Action::WsConnect { .. }))
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    let retry = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 2000.0,
+            } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    let pace = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 1025.0,
+            } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1025.0, Event::TimerFired { timer: pace });
+    assert!(!e.store().loaded().tickers);
+    assert!(e.store().tickers().is_empty());
+    e.drain_actions().for_each(drop);
+    e.handle(2000.0, Event::TimerFired { timer: retry });
+    let request = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(
+        2000.0,
+        Event::HttpResponse {
+            request: request.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: TICKER,
+            },
+        },
     );
+    let timer = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 2025.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(2025.0, Event::TimerFired { timer });
+    assert!(e.store().loaded().tickers);
+    assert_eq!(e.store().tickers().len(), 1);
+    assert_eq!(e.store().ticker("BTC-USDC").unwrap().last, 65000.0);
 }
 
 #[test]
@@ -611,8 +672,9 @@ fn book_and_chart_intents_before_metadata_subscribe_once_when_ready() {
         })
         .unwrap();
     reply(&mut e, &r, 200, META);
-    let r = e
-        .drain_actions()
+    let startup = e.drain_actions().collect::<Vec<_>>();
+    let r = startup
+        .iter()
         .find_map(|a| {
             if let Action::Http(r) = a {
                 Some(r)
@@ -621,7 +683,7 @@ fn book_and_chart_intents_before_metadata_subscribe_once_when_ready() {
             }
         })
         .unwrap();
-    reply(&mut e, &r, 200, TICKER);
+    reply(&mut e, r, 200, TICKER);
     let (timer, at) = e
         .drain_actions()
         .find_map(|a| {
@@ -633,8 +695,9 @@ fn book_and_chart_intents_before_metadata_subscribe_once_when_ready() {
         })
         .unwrap();
     e.handle(at, Event::TimerFired { timer });
-    let sockets = e
-        .drain_actions()
+    let sockets = startup
+        .into_iter()
+        .chain(e.drain_actions())
         .filter_map(|a| {
             if let Action::WsConnect { socket, .. } = a {
                 Some(socket)
@@ -982,4 +1045,140 @@ fn historical_metadata_alias_conflicts_reject_before_active_markets_commit() {
     reply(&mut e, &r, 200, &meta.to_string());
     assert!(e.store().markets().is_empty());
     assert!(!e.drain_actions().any(|a| matches!(a, Action::Http(_))));
+}
+
+#[test]
+fn ambiguous_native_identity_preserves_store_and_retries_with_backoff() {
+    let (previous, _, _) = ready();
+    let prior_markets = previous.store().markets().to_vec();
+    let prior_tickers = previous.store().tickers().to_vec();
+    let mut e = Engine::new(TxFlow::new(Options {
+        testnet: true,
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.store_mut().set_markets(prior_markets.clone());
+    e.store_mut().set_tickers(prior_tickers.clone());
+    e.start(1000.0);
+    let request = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    let mut meta: serde_json::Value = serde_json::from_str(META).unwrap();
+    let duplicate = meta["data"]["universe"][0].clone();
+    meta["data"]["universe"]
+        .as_array_mut()
+        .unwrap()
+        .push(duplicate);
+    reply(&mut e, &request, 200, &meta.to_string());
+    assert_eq!(e.store().markets(), prior_markets);
+    assert_eq!(e.store().tickers(), prior_tickers);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(safe_cex_engine::Notice::Log { message, .. }) if message.contains("Duplicate or ambiguous TxFlow"))));
+    let timer = actions
+        .iter()
+        .find_map(|a| match a {
+            Action::SetTimer {
+                timer,
+                at_ms: 2000.0,
+            } => Some(*timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(2000.0, Event::TimerFired { timer });
+    let request = e
+        .drain_actions()
+        .find_map(|a| match a {
+            Action::Http(r) => Some(r),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(
+        2000.0,
+        Event::HttpResponse {
+            request: request.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: META,
+            },
+        },
+    );
+    assert_eq!(e.store().markets(), prior_markets);
+    assert_eq!(e.store().tickers(), prior_tickers);
+}
+
+#[test]
+fn late_rest_seed_preserves_supplied_live_context_fields_and_seed_only_statistics() {
+    let mut engine = Engine::new(TxFlow::new(Options {
+        testnet: true,
+        public_data_only: true,
+        ..Default::default()
+    }));
+    engine.start(1000.);
+    let metadata = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    reply(&mut engine, &metadata, 200, META);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let node = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::WsConnect { socket, url, .. } if url.ends_with("/ws") => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let ticker = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(request) => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(1000., Event::WsOpened { socket: node });
+    message(
+        &mut engine,
+        node,
+        1100.,
+        r#"{"channel":"activeAssetCtx","data":{"coin":"1","ctx":{"markPx":"70000","funding":"0","midPx":"70001"}}}"#,
+    );
+    engine.handle(
+        1200.,
+        Event::HttpResponse {
+            request: ticker.id,
+            response: safe_cex_engine::Response {
+                status: 200,
+                headers: "",
+                body: TICKER,
+            },
+        },
+    );
+    let timer = engine
+        .drain_actions()
+        .find_map(|action| match action {
+            Action::SetTimer {
+                timer,
+                at_ms: 1225.0,
+            } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(1225., Event::TimerFired { timer });
+    let ticker = engine.store().ticker("BTC-USDC").unwrap();
+    assert_eq!(
+        (ticker.mark, ticker.funding_rate, ticker.mid_price),
+        (70000., 0., Some(70001.))
+    );
+    assert_eq!(
+        (ticker.last, ticker.index, ticker.volume),
+        (65000., 65000., 3.)
+    );
+    assert!(engine.store().loaded().tickers);
 }

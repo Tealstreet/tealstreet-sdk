@@ -104,6 +104,10 @@ pub struct Polymarket {
     seed_tickers: Vec<Ticker>,
     seeded_tokens: HashSet<String>,
     public_retry: safe_cex_engine::startup::Backoff<Option<usize>>,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
+    midpoint_next: Option<usize>,
+    midpoint_inflight: HashSet<usize>,
+    midpoint_failed: HashSet<usize>,
     quote_times: HashMap<String, f64>,
     trade_times: HashMap<String, f64>,
     tick_times: HashMap<String, f64>,
@@ -158,6 +162,10 @@ impl Polymarket {
             seed_tickers: vec![],
             seeded_tokens: Default::default(),
             public_retry: Default::default(),
+            live_tickers: Default::default(),
+            midpoint_next: None,
+            midpoint_inflight: Default::default(),
+            midpoint_failed: Default::default(),
             quote_times: Default::default(),
             trade_times: Default::default(),
             tick_times: Default::default(),
@@ -208,18 +216,48 @@ impl Polymarket {
             },
         );
     }
-    fn midpoints(&mut self, cx: &mut Cx<'_, Pending>, offset: usize) {
-        let rows = cx.store.markets();
-        if offset >= rows.len() {
-            let rows = std::mem::take(&mut self.seed_tickers)
-                .into_iter()
-                .filter(|t| self.seeded_tokens.contains(&t.id))
-                .collect();
-            self.seeded_tokens.clear();
-            cx.store.set_tickers(rows);
-
+    fn flush_midpoints(&mut self, cx: &mut Cx<'_, Pending>) {
+        let accepted: Vec<_> = std::mem::take(&mut self.seed_tickers)
+            .into_iter()
+            .filter(|t| self.seeded_tokens.contains(&t.id))
+            .collect();
+        self.seeded_tokens.clear();
+        if accepted.is_empty() {
             return;
         }
+        let mut rows = cx.store.tickers().to_vec();
+        for ticker in accepted {
+            if let Some(old) = rows.iter_mut().find(|old| old.id == ticker.id) {
+                *old = ticker;
+            } else {
+                rows.push(ticker);
+            }
+        }
+        if self.midpoint_next.is_none()
+            && self.midpoint_inflight.is_empty()
+            && self.midpoint_failed.is_empty()
+        {
+            self.live_tickers.finish(cx.store, &mut rows);
+        } else {
+            self.live_tickers.overlay(cx.store, &mut rows);
+        }
+        cx.store.set_tickers(rows);
+    }
+    fn advance_midpoints(&mut self, cx: &mut Cx<'_, Pending>, offset: usize) {
+        if self.midpoint_next == Some(offset) {
+            let next = offset + 100;
+            self.midpoint_next = (next < cx.store.markets().len()).then_some(next);
+            if let Some(next) = self.midpoint_next {
+                self.midpoints(cx, next);
+            }
+        }
+    }
+    fn midpoints(&mut self, cx: &mut Cx<'_, Pending>, offset: usize) {
+        let rows = cx.store.markets();
+        if offset >= rows.len() || !self.midpoint_inflight.insert(offset) {
+            return;
+        }
+        self.live_tickers.begin();
         #[derive(Serialize)]
         struct Token<'a> {
             token_id: &'a str,
@@ -420,6 +458,10 @@ impl Polymarket {
                         .best_ask
                         .map(|n| n.0)
                         .filter(|v| (0.0..=1.0).contains(v));
+                    let supplied = u16::from(bid.is_some())
+                        | (u16::from(ask.is_some()) << 1)
+                        | (u16::from(bid.is_some() && ask.is_some()) << 3)
+                        | (u16::from(bid.is_some() && ask.is_some()) << 4);
                     cx.store.update_ticker(&symbol, |t| {
                         if let Some(bid) = bid {
                             t.bid = bid;
@@ -432,6 +474,7 @@ impl Polymarket {
                             t.index = t.mark;
                         }
                     });
+                    self.live_tickers.record(cx.store, &symbol, supplied);
                 }
             }
             "last_trade_price" => {
@@ -448,6 +491,7 @@ impl Polymarket {
                     *previous = timestamp;
                     if (0.0..=1.0).contains(&p.0) {
                         cx.store.update_ticker(&symbol, |t| t.last = p.0);
+                        self.live_tickers.record(cx.store, &symbol, 1 << 2);
                     }
                 }
             }
@@ -684,14 +728,14 @@ impl Venue for Polymarket {
             } => {
                 if invalid {
                     cx.log(
-                        LogLevel::Error,
+                        LogLevel::Warning,
                         "Invalid Polymarket market page; preserving previous snapshot",
                     );
                     self.public_retry.failed(cx, None);
                     return;
                 }
                 if count > GAMMA_PAGE {
-                    cx.log(LogLevel::Error, "Oversized Polymarket Gamma page");
+                    cx.log(LogLevel::Warning, "Oversized Polymarket Gamma page");
                     self.public_retry.failed(cx, None);
                     return;
                 }
@@ -702,12 +746,12 @@ impl Venue for Polymarket {
                     next_cursor: Option<std::borrow::Cow<'a, str>>,
                 }
                 let Ok(page) = serde_json::from_str::<Page>(response.body) else {
-                    cx.log(LogLevel::Error, "Invalid Polymarket keyset envelope");
+                    cx.log(LogLevel::Warning, "Invalid Polymarket keyset envelope");
                     self.public_retry.failed(cx, None);
                     return;
                 };
                 if !page.markets.is_empty() {
-                    cx.log(LogLevel::Error, "Unstreamed Polymarket market page");
+                    cx.log(LogLevel::Warning, "Unstreamed Polymarket market page");
                     self.public_retry.failed(cx, None);
                     return;
                 }
@@ -716,7 +760,10 @@ impl Venue for Polymarket {
                         || self.market_cursors.len() >= 10000
                         || !self.market_cursors.insert(cursor.to_string())
                     {
-                        cx.log(LogLevel::Error, "Polymarket market cursor did not advance");
+                        cx.log(
+                            LogLevel::Warning,
+                            "Polymarket market cursor did not advance",
+                        );
                         self.public_retry.failed(cx, None);
                         return;
                     }
@@ -725,9 +772,14 @@ impl Venue for Polymarket {
                 }
                 if count == GAMMA_PAGE {
                     cx.log(
-                        LogLevel::Error,
+                        LogLevel::Warning,
                         "Polymarket market page is missing its next cursor",
                     );
+                    self.public_retry.failed(cx, None);
+                    return;
+                }
+                if rows.is_empty() {
+                    cx.log(LogLevel::Warning, "No supported Polymarket market rows");
                     self.public_retry.failed(cx, None);
                     return;
                 }
@@ -745,47 +797,95 @@ impl Venue for Polymarket {
                     })
                     .collect();
                 self.seed_tickers = tickers;
+                self.seeded_tokens.clear();
+                self.midpoint_inflight.clear();
+                self.midpoint_failed.clear();
+                self.midpoint_next = Some(0);
                 self.public_ready(cx);
                 self.midpoints(cx, 0);
             }
             Pending::Midpoints { offset } => {
+                self.midpoint_inflight.remove(&offset);
+                let requested: HashSet<String> = cx
+                    .store
+                    .markets()
+                    .iter()
+                    .skip(offset)
+                    .take(100)
+                    .map(|market| market.id.clone())
+                    .collect();
+                let mut rejected = false;
+                let mut accepted = 0;
                 match serde_json::from_str::<HashMap<String, &serde_json::value::RawValue>>(
                     response.body,
                 ) {
                     Ok(prices) => {
                         for (id, raw) in prices {
+                            // A price from another batch cannot satisfy this request's
+                            // coverage or overwrite that batch's live/seeded quote.
+                            if !requested.contains(&id) {
+                                continue;
+                            }
                             let Ok(p) = serde_json::from_str::<wire::PublicNumber>(raw.get())
                             else {
+                                rejected = true;
                                 safe_cex_engine::startup::skipped_row(cx);
                                 continue;
                             };
                             if !(0.0..=1.0).contains(&p.0) {
+                                rejected = true;
                                 safe_cex_engine::startup::skipped_row(cx);
                                 continue;
                             }
-                            if let Some(i) = cx.store.market_index_by_id(&id)
-                                && let Some(t) = self.seed_tickers.get_mut(i as usize)
+                            let Some(market) = cx.store.market_by_id(&id) else {
+                                continue;
+                            };
+                            let symbol = market.symbol.clone();
+                            let ticker = if let Some(index) =
+                                self.seed_tickers.iter().position(|t| t.id == id)
                             {
-                                t.bid = p.0;
-                                t.ask = p.0;
-                                t.last = p.0;
-                                t.mark = p.0;
-                                t.index = p.0;
-                                self.seeded_tokens.insert(id);
-                            }
+                                &mut self.seed_tickers[index]
+                            } else {
+                                self.seed_tickers.push(
+                                    cx.store.ticker(&symbol).cloned().unwrap_or_else(|| Ticker {
+                                        id: id.clone(),
+                                        symbol,
+                                        ..Ticker::default()
+                                    }),
+                                );
+                                self.seed_tickers.last_mut().unwrap()
+                            };
+                            ticker.bid = p.0;
+                            ticker.ask = p.0;
+                            ticker.last = p.0;
+                            ticker.mark = p.0;
+                            ticker.index = p.0;
+                            self.seeded_tokens.insert(id);
+                            accepted += 1;
                         }
                     }
-                    Err(e) => {
+                    Err(_) => {
                         self.on_request_failed(
                             cx,
                             Pending::Midpoints { offset },
-                            &format!("Invalid Polymarket midpoints: {e}"),
+                            "Invalid Polymarket midpoints",
                         );
                         return;
                     }
                 }
-                self.public_retry.succeeded(cx, &Some(offset));
-                self.midpoints(cx, offset + 100);
+                if rejected || accepted != requested.len() || accepted == 0 {
+                    cx.log(
+                        LogLevel::Warning,
+                        "Incomplete Polymarket midpoint rows; preserving prior quotes",
+                    );
+                    self.midpoint_failed.insert(offset);
+                    self.public_retry.failed(cx, Some(offset));
+                } else {
+                    self.midpoint_failed.remove(&offset);
+                    self.public_retry.succeeded(cx, &Some(offset));
+                }
+                self.advance_midpoints(cx, offset);
+                self.flush_midpoints(cx);
             }
             Pending::Candles {
                 command,
@@ -840,7 +940,6 @@ impl Venue for Polymarket {
                 count,
                 rows,
                 metadata,
-                invalid: _,
                 ..
             } => {
                 *count += 1;
@@ -959,10 +1058,25 @@ impl Venue for Polymarket {
                 return;
             }
             Pending::Markets { .. } => Some(None),
-            Pending::Midpoints { offset } => Some(Some(offset)),
+            Pending::Midpoints { offset } => {
+                self.midpoint_inflight.remove(&offset);
+                self.midpoint_failed.insert(offset);
+                cx.log(LogLevel::Warning, "Polymarket midpoint read failed");
+                self.public_retry.failed(cx, Some(offset));
+                self.advance_midpoints(cx, offset);
+                self.flush_midpoints(cx);
+                return;
+            }
             _ => None,
         };
-        cx.log(LogLevel::Error, error);
+        cx.log(
+            if retry.is_some() {
+                LogLevel::Warning
+            } else {
+                LogLevel::Error
+            },
+            error,
+        );
         if let Some(offset) = retry {
             self.public_retry.failed(cx, offset);
         }

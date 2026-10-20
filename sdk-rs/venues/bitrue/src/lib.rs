@@ -799,7 +799,7 @@ impl Venue for Bitrue {
                 failed,
             } => {
                 if failed || !(200..300).contains(&response.status) || rows.is_empty() {
-                    cx.log(LogLevel::Error, "Bitrue contracts read failed");
+                    cx.log(LogLevel::Warning, "Bitrue contracts read failed");
                     self.startup_retry.failed(cx, ());
                     return;
                 }
@@ -860,7 +860,7 @@ impl Venue for Bitrue {
         }
         match pending.job {
             Job::Markets { .. } => {
-                cx.log(LogLevel::Error, format!("Bitrue contracts: {error}"));
+                cx.log(LogLevel::Warning, format!("Bitrue contracts: {error}"));
                 self.startup_retry.failed(cx, ());
             }
             Job::Account(r) => self.account_failed(cx, r, error),

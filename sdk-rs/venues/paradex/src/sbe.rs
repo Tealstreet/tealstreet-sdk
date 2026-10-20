@@ -110,7 +110,7 @@ fn required(value: Option<f64>) -> Result<f64, &'static str> {
 }
 
 pub(crate) fn public(bytes: &[u8]) -> Result<Public<'_>, &'static str> {
-    use super::wire::{Bbo, Depth, Level, Number, Tick, Trade};
+    use super::wire::{Bbo, Depth, Level, Number, StrictNumber, Tick, Trade};
     let mut f = Frame::parse(bytes)?;
     let decoded = match f.template {
         1 => {
@@ -171,8 +171,8 @@ pub(crate) fn public(bytes: &[u8]) -> Result<Public<'_>, &'static str> {
                     }
                     levels.push(Level {
                         side: side.into(),
-                        price: Number(price),
-                        size: Number(size),
+                        price: StrictNumber(price),
+                        size: StrictNumber(size),
                     });
                 }
             }

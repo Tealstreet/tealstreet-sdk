@@ -172,6 +172,8 @@ impl OrderRow<'_> {
 #[serde(rename_all = "camelCase")]
 struct Holding<'a> {
     asset: &'a str,
+    #[serde(default)]
+    slug: &'a str,
     size: Number,
     avg_price: Number,
     #[serde(default)]
@@ -572,13 +574,38 @@ impl Polymarket {
                     return;
                 }
                 let Some(market) = cx.store.market_by_id(row.asset) else {
+                    let outside_selection = !row.slug.is_empty()
+                        && self
+                            .options
+                            .polymarket
+                            .as_ref()
+                            .and_then(|options| options.market_slugs.as_ref())
+                            .is_some_and(|slugs| !slugs.iter().any(|slug| slug == row.slug));
+                    if !outside_selection {
+                        snapshot.invalid = true;
+                        cx.log(LogLevel::Warning,
+                            "Polymarket owned holding has unavailable market metadata; preserving previous positions");
+                    }
                     return;
                 };
-                let price = row
-                    .cur_price
-                    .map(|p| p.0)
-                    .or_else(|| cx.store.ticker(&market.symbol).map(|t| t.last))
-                    .unwrap_or(row.avg_price.0);
+                let price = row.cur_price.map(|p| p.0).or_else(|| {
+                    // BBO/book presence does not prove a default last=0 was observed.
+                    cx.store
+                        .ticker(&market.symbol)
+                        .map(|ticker| ticker.last)
+                        .filter(|price| {
+                            price.is_finite()
+                                && (*price > 0.0 || self.trade_times.contains_key(&market.symbol))
+                        })
+                });
+                let Some(price) = price else {
+                    snapshot.invalid = true;
+                    cx.log(
+                        LogLevel::Warning,
+                        "Polymarket owned holding price unavailable; preserving previous positions",
+                    );
+                    return;
+                };
                 if !(0.0..=1.0).contains(&price) {
                     snapshot.invalid = true;
                     return;

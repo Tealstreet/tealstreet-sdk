@@ -45,6 +45,7 @@ struct DepthState {
 pub struct KrakenSpot {
     options: Options,
     discovery: safe_cex_engine::startup::Backoff<bool>,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
     signer: Option<sign::Signer>,
     public: Connection,
     account: account::Account,
@@ -77,6 +78,7 @@ impl KrakenSpot {
         Self {
             options,
             discovery: Default::default(),
+            live_tickers: Default::default(),
             signer,
             account: account::Account::default(),
             trading: trading::Trading::default(),
@@ -128,6 +130,7 @@ impl KrakenSpot {
     fn tickers(&mut self, cx: &mut Cx<'_, Pending>) {
         if !self.tickers_in_flight {
             self.tickers_in_flight = true;
+            self.live_tickers.begin();
             self.read(cx, "Ticker", "", Pending::Tickers { retries: 0 });
         }
     }
@@ -263,6 +266,9 @@ impl KrakenSpot {
             });
         })
         .map_err(|_| "Kraken Spot invalid markets")?;
+        if markets.is_empty() {
+            return Err("No supported Kraken Spot market rows".into());
+        }
         self.ws_symbols = markets
             .iter()
             .map(|m| (m.symbol.clone(), format!("{}/{}", m.base, m.quote)))
@@ -328,8 +334,16 @@ impl KrakenSpot {
             });
         })
         .map_err(|_| "Kraken Spot invalid tickers")?;
+        if rows.is_empty() {
+            return Err("No valid Kraken Spot ticker rows".into());
+        }
         self.discovery.succeeded(cx, &true);
+        self.live_tickers.finish(cx.store, &mut rows);
+        let first_quotes = !cx.store.loaded().tickers;
         cx.store.set_tickers(rows);
+        if first_quotes {
+            self.revalue_initial_balances(cx);
+        }
         if self.public.socket.is_none() {
             self.connect(cx);
         }
@@ -401,6 +415,13 @@ impl Venue for KrakenSpot {
                         .ws_canonical
                         .get(&*t.symbol)
                         .map_or(&*t.symbol, String::as_str);
+                    let supplied = u16::from(t.bid.is_some())
+                        | (u16::from(t.ask.is_some()) << 1)
+                        | (u16::from(t.last.is_some()) << 2)
+                        | (u16::from(t.last.is_some()) << 3)
+                        | (u16::from(t.last.is_some()) << 4)
+                        | (u16::from(t.change_pct.is_some()) << 5)
+                        | (u16::from(t.volume.is_some()) << 9);
                     cx.store.update_ticker(symbol, |old| {
                         if let Some(n) = t.bid {
                             old.bid = n
@@ -420,6 +441,7 @@ impl Venue for KrakenSpot {
                             old.percentage = n
                         }
                     });
+                    self.live_tickers.record(cx.store, symbol, supplied);
                 });
             }
             "book" => {

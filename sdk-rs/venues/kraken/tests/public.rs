@@ -145,8 +145,6 @@ fn public_socket_role_is_explicit() {
     e.start(NOW);
     let r = requests(&mut e).pop().unwrap();
     reply(&mut e, &r, 200, META);
-    let r = requests(&mut e).pop().unwrap();
-    reply(&mut e, &r, 200, TICKERS);
     assert!(e.drain_actions().any(|a| matches!(
         a,
         Action::WsConnect {
@@ -310,4 +308,83 @@ fn full_ticker_refreshes_native_statistics_after_rest_seed() {
         (t.percentage, t.volume, t.quote_volume, t.open_interest),
         (20.0, 0.0, 0.0, 0.0)
     );
+}
+
+#[test]
+fn blank_stream_book_quantity_never_deletes_a_live_level() {
+    let (mut engine, socket) = public();
+    engine.handle(
+        NOW,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "PF_XBTUSD".into(),
+        }),
+    );
+    message(
+        &mut engine,
+        socket,
+        NOW,
+        r#"{"feed":"book_snapshot","product_id":"PF_XBTUSD","seq":1,"bids":[{"price":99,"qty":2}],"asks":[{"price":101,"qty":3}]}"#,
+    );
+    message(
+        &mut engine,
+        socket,
+        NOW,
+        r#"{"feed":"book","product_id":"PF_XBTUSD","seq":2,"side":"buy","price":99,"qty":""}"#,
+    );
+    assert_eq!(engine.book("PF_XBTUSD").unwrap().bids(), [(99.0, 2.0)]);
+}
+
+#[test]
+fn initial_rest_tickers_keep_newer_live_fields_and_omitted_live_peers() {
+    let mut engine = Engine::new(Kraken::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    engine.start(NOW);
+    let metadata = requests(&mut engine).pop().unwrap();
+    reply(&mut engine, &metadata, 200, META);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let socket = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                channel: Some(SocketChannel::Public),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let ticker = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.ends_with("/tickers") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    engine.handle(NOW, Event::WsOpened { socket });
+    message(
+        &mut engine,
+        socket,
+        NOW + 1.,
+        r#"{"feed":"ticker","product_id":"PF_XBTUSD","bid":0}"#,
+    );
+    message(
+        &mut engine,
+        socket,
+        NOW + 2.,
+        r#"{"feed":"ticker","product_id":"PF_ETHUSD","last":75,"markPrice":76}"#,
+    );
+    assert!(!engine.store().loaded().tickers);
+    let mut body: serde_json::Value = serde_json::from_str(TICKERS).unwrap();
+    body["tickers"].as_array_mut().unwrap().pop();
+    reply(&mut engine, ticker, 200, &body.to_string());
+    let btc = engine.store().ticker("PF_XBTUSD").unwrap();
+    assert_eq!(
+        (btc.bid, btc.last, btc.mark, btc.volume),
+        (0., 100., 101., 2.)
+    );
+    let eth = engine.store().ticker("PF_ETHUSD").unwrap();
+    assert_eq!((eth.last, eth.mark), (75., 76.));
+    assert!(engine.store().loaded().tickers);
 }

@@ -29,6 +29,16 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         );
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(
+            !actions.iter().any(|action| matches!(
+                action,
+                Action::Notice(Notice::Log {
+                    level: safe_cex_engine::LogLevel::Error,
+                    ..
+                })
+            )),
+            "public retry must not invalidate account credentials: {actions:?}"
+        );
+        assert!(
             !actions.iter().any(|a| matches!(a, Action::Http(_))),
             "read retried without backoff: {actions:?}"
         );
@@ -55,4 +65,118 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
     assert_eq!(engine.store().markets().len(), 2);
     let actions = engine.drain_actions().collect::<Vec<_>>();
     assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+}
+
+#[test]
+fn empty_or_all_malformed_catalogue_retains_current_state_and_recovers_after_backoff() {
+    const GOOD: &str = r#"{"r":[{"i":"BTC_USDT_Perp","ih":"0x030501","b":"BTC","q":"USDT","k":"PERPETUAL","ts":"0.1","ms":"0.001","mp":"1000","bd":9,"qd":6}]}"#;
+    for seeded in [false, true] {
+        for bad in [
+            r#"{"r":[]}"#,
+            r#"{"r":[{"broken":true},{"i":"BTC_USDT_Perp","ih":"0xinvalid","k":"PERPETUAL","ts":"invalid","ms":"0.001"}]}"#,
+        ] {
+            let mut engine = Engine::new(Grvt::new(Options {
+                public_data_only: true,
+                ..Options::default()
+            }));
+            engine.start(0.0);
+            let mut request = engine
+                .drain_actions()
+                .find_map(|action| match action {
+                    Action::Http(request) => Some(request),
+                    _ => None,
+                })
+                .unwrap();
+            let now = if seeded {
+                engine.handle(
+                    0.0,
+                    Event::HttpResponse {
+                        request: request.id,
+                        response: Response {
+                            status: 200,
+                            headers: "",
+                            body: GOOD,
+                        },
+                    },
+                );
+                engine
+                    .store_mut()
+                    .update_ticker("BTC_USDT_PERP", |ticker| ticker.last = 123.0);
+                let refresh = engine
+                    .drain_actions()
+                    .find_map(|action| match action {
+                        Action::SetTimer {
+                            timer,
+                            at_ms: 300_000.0,
+                        } => Some(timer),
+                        _ => None,
+                    })
+                    .unwrap();
+                engine.handle(300_000.0, Event::TimerFired { timer: refresh });
+                request = engine
+                    .drain_actions()
+                    .find_map(|action| match action {
+                        Action::Http(request) => Some(request),
+                        _ => None,
+                    })
+                    .unwrap();
+                300_000.0
+            } else {
+                0.0
+            };
+            let before = engine.snapshot_frame(0.0).to_vec();
+            engine.handle(
+                now,
+                Event::HttpResponse {
+                    request: request.id,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: bad,
+                    },
+                },
+            );
+            assert_eq!(engine.snapshot_frame(0.0), before);
+            assert_eq!(engine.store().loaded().markets, seeded);
+            let actions: Vec<_> = engine.drain_actions().collect();
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, Action::Http(_)))
+            );
+            assert!(actions.iter().any(|action| matches!(action, Action::Notice(Notice::Log { message, .. }) if message.contains("Invalid or empty GRVT instrument catalog"))));
+            let retry = actions
+                .iter()
+                .find_map(|action| match action {
+                    Action::SetTimer { timer, at_ms } if *at_ms == now + 1000.0 => Some(*timer),
+                    _ => None,
+                })
+                .unwrap();
+            engine.handle(now + 1000.0, Event::TimerFired { timer: retry });
+            let recovered = engine
+                .drain_actions()
+                .find_map(|action| match action {
+                    Action::Http(request) => Some(request),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(recovered.url, request.url);
+            engine.handle(
+                now + 1000.0,
+                Event::HttpResponse {
+                    request: recovered.id,
+                    response: Response {
+                        status: 200,
+                        headers: "",
+                        body: GOOD,
+                    },
+                },
+            );
+            assert_eq!(engine.store().markets().len(), 1);
+            assert!(engine.store().loaded().markets);
+            if seeded {
+                assert_eq!(engine.store().ticker("BTC_USDT_PERP").unwrap().last, 123.0);
+            }
+        }
+    }
 }

@@ -36,14 +36,14 @@ fn engine() -> Engine<TxFlow> {
             },
         },
     );
-    let ticker = e
-        .drain_actions()
-        .find_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
+    let mut startup = e.drain_actions().collect::<Vec<_>>();
+    let ticker = startup
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(request) if account_support::kind(request) == "activeAssetCtx" => {
+                Some(request.clone())
             }
+            _ => None,
         })
         .unwrap();
     ack(
@@ -55,15 +55,16 @@ fn engine() -> Engine<TxFlow> {
     let timer = e
         .drain_actions()
         .find_map(|a| {
-            if let Action::SetTimer { timer, .. } = a {
-                Some(timer)
+            if let Action::SetTimer { timer, at_ms } = a {
+                (at_ms == NOW + 25.0).then_some(timer)
             } else {
                 None
             }
         })
         .unwrap();
     e.handle(NOW + 25.0, Event::TimerFired { timer });
-    let initial = e.drain_actions().collect::<Vec<_>>();
+    startup.extend(e.drain_actions());
+    let initial = startup;
     let node = initial
         .iter()
         .find_map(|a| match a {

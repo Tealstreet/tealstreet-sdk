@@ -566,7 +566,7 @@ impl Coinbase {
             Request::Instruments {
                 markets,
                 tickers,
-                invalid: _,
+                invalid,
                 ..
             } => match serde_json::from_str::<Instrument>(item) {
                 Ok(row) => {
@@ -574,6 +574,7 @@ impl Coinbase {
                         return;
                     }
                     if row.base_increment <= 0. || row.quote_increment <= 0. {
+                        *invalid = true;
                         safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
@@ -612,6 +613,7 @@ impl Coinbase {
                         .iter()
                         .any(|n| *n < 0.)
                         {
+                            *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                             return;
                         }
@@ -641,12 +643,15 @@ impl Coinbase {
                         });
                     }
                 }
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                Err(_) => {
+                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
             },
             Request::Products {
                 markets,
                 tickers,
-                invalid: _,
+                invalid,
                 kind,
                 ..
             } => match serde_json::from_str::<Product>(item) {
@@ -655,6 +660,7 @@ impl Coinbase {
                     if (row.product_type == "FUTURE" && !future)
                         || (row.product_type == "SPOT" && future)
                     {
+                        *invalid = true;
                         safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
@@ -685,6 +691,7 @@ impl Coinbase {
                     });
                     let Some(contract) = contract.filter(|n| n.is_finite() && *n > 0.) else {
                         if !expiring {
+                            *invalid = true;
                             safe_cex_engine::startup::skipped_row(cx);
                         }
                         return;
@@ -694,6 +701,7 @@ impl Coinbase {
                         || row.base_min_size < 0.
                         || row.base_max_size < row.base_min_size
                     {
+                        *invalid = true;
                         safe_cex_engine::startup::skipped_row(cx);
                         return;
                     }
@@ -757,7 +765,10 @@ impl Coinbase {
                         ..Ticker::default()
                     });
                 }
-                Err(_) => safe_cex_engine::startup::skipped_row(cx),
+                Err(_) => {
+                    *invalid = true;
+                    safe_cex_engine::startup::skipped_row(cx);
+                }
             },
             Request::Candles { rows, invalid, .. } | Request::Daily { rows, invalid, .. } => {
                 match serde_json::from_str::<CandleRow>(item)
@@ -811,7 +822,7 @@ impl Coinbase {
                 invalid,
                 initial,
             } => {
-                if invalid {
+                if invalid && markets.is_empty() {
                     self.public_failed(
                         cx,
                         Request::Instruments {
@@ -824,10 +835,15 @@ impl Coinbase {
                     );
                     return;
                 }
-                self.public.retry.succeeded(cx, &());
+                let missing_quotes = invalid && tickers.is_empty();
+                if !missing_quotes {
+                    self.public.retry.succeeded(cx, &());
+                }
                 if initial {
                     cx.store.set_markets(markets);
-                    cx.store.set_tickers(tickers);
+                    if !missing_quotes {
+                        cx.store.set_tickers(tickers);
+                    }
                     self.public_pending(cx);
                     self.connect_public(cx);
                     if self.options.public_data_only || self.options.key.is_empty() {
@@ -835,11 +851,26 @@ impl Coinbase {
                         cx.store.set_positions(vec![]);
                         cx.store.set_balance(Default::default());
                     }
+                } else if !cx.store.loaded().tickers && !tickers.is_empty() {
+                    cx.store.set_tickers(tickers);
                 } else {
                     for ticker in tickers {
                         cx.store
                             .update_ticker(&ticker.symbol.clone(), |old| *old = ticker);
                     }
+                }
+                if missing_quotes {
+                    self.public_failed(
+                        cx,
+                        Request::Instruments {
+                            markets: vec![],
+                            tickers: vec![],
+                            invalid: true,
+                            initial: false,
+                        },
+                        "No valid Coinbase instrument quote rows",
+                    );
+                    return;
                 }
                 if self.public.poll.is_none() {
                     self.public.poll = Some(cx.set_timer(1000.));
@@ -854,21 +885,6 @@ impl Coinbase {
                 invalid,
             } => {
                 if generation != self.public.generation {
-                    return;
-                }
-                if invalid {
-                    self.public_failed(
-                        cx,
-                        Request::Products {
-                            kind,
-                            generation,
-                            cursors: vec![],
-                            markets: vec![],
-                            tickers: vec![],
-                            invalid: true,
-                        },
-                        "Malformed Coinbase products",
-                    );
                     return;
                 }
                 #[derive(serde::Deserialize)]
@@ -927,9 +943,24 @@ impl Coinbase {
                             cursors,
                             markets,
                             tickers,
-                            invalid: false,
+                            invalid,
                         },
                         Some(&next),
+                    );
+                    return;
+                }
+                if invalid && markets.is_empty() {
+                    self.public_failed(
+                        cx,
+                        Request::Products {
+                            kind,
+                            generation,
+                            cursors: vec![],
+                            markets: vec![],
+                            tickers: vec![],
+                            invalid: true,
+                        },
+                        "Malformed Coinbase products",
                     );
                     return;
                 }

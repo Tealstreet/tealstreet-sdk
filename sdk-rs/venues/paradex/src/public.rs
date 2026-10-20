@@ -44,6 +44,7 @@ pub(crate) struct Public {
     subscriptions: HashMap<u64, Subscription>,
     retries: Vec<(TimerId, String, u8)>,
     seed_retry: safe_cex_engine::startup::Backoff<bool>,
+    live_tickers: safe_cex_engine::startup::LiveTickers,
     pub(crate) books: HashMap<String, BookState>,
     pub(crate) price_bands: HashMap<String, f64>,
     candles: HashMap<(String, String), CandleState>,
@@ -130,7 +131,10 @@ impl Paradex {
     pub(crate) fn public_start(&mut self, cx: &mut Cx<'_, Pending>) {
         self.public_seed(cx, true);
     }
-    fn public_seed(&self, cx: &mut Cx<'_, Pending>, markets: bool) {
+    fn public_seed(&mut self, cx: &mut Cx<'_, Pending>, markets: bool) {
+        if !markets {
+            self.public.live_tickers.begin();
+        }
         let (path, request) = if markets {
             (
                 "/markets",
@@ -399,6 +403,9 @@ impl Paradex {
             &row.market
         };
         self.public.received = cx.now;
+        let supplied = u16::from(row.bid_price.0 > 0.)
+            | (u16::from(row.ask_price.0 > 0.) << 1)
+            | (u16::from(row.index_price.0 > 0.) << 4);
         cx.store.update_ticker(symbol, |t| {
             if row.bid_price.0 > 0. {
                 t.bid = row.bid_price.0;
@@ -410,9 +417,21 @@ impl Paradex {
                 t.index = row.index_price.0;
             }
         });
+        self.public.live_tickers.record(cx.store, symbol, supplied);
     }
     fn public_summary(&mut self, cx: &mut Cx<'_, Pending>, row: &Tick<'_>) {
         self.public.received = cx.now;
+        let supplied = u16::from(row.bid.0 > 0.)
+            | (u16::from(row.ask.0 > 0.) << 1)
+            | (u16::from(row.last_traded_price.0 > 0.) << 2)
+            | (u16::from(row.mark_price.0 > 0.) << 3)
+            | (u16::from(
+                row.oracle_price.0 > 0. || row.index_price.0 > 0. || row.underlying_price.0 > 0.,
+            ) << 4)
+            | (1 << 5)
+            | (1 << 6)
+            | (1 << 7)
+            | (1 << 9);
         cx.store.update_ticker(&row.symbol, |t| {
             if row.bid.0 > 0. {
                 t.bid = row.bid.0;
@@ -441,6 +460,9 @@ impl Paradex {
             t.open_interest = row.open_interest.0;
             t.funding_rate = row.funding_rate.0;
         });
+        self.public
+            .live_tickers
+            .record(cx.store, &row.symbol, supplied);
     }
     fn public_trade(&mut self, cx: &mut Cx<'_, Pending>, fallback: &str, row: &Trade<'_>) {
         let symbol = if row.market.is_empty() {
@@ -456,6 +478,9 @@ impl Paradex {
             t.last = row.price.0;
             t.mark = row.price.0;
         });
+        self.public
+            .live_tickers
+            .record(cx.store, symbol, (1 << 2) | (1 << 3));
         self.trade_candles(
             cx,
             symbol,
@@ -735,6 +760,15 @@ impl Paradex {
             self.public_failed(cx, request, &e);
             return;
         }
+        let empty = match &request {
+            Request::Markets { rows, .. } => rows.is_empty(),
+            Request::Tickers { rows, .. } => rows.is_empty(),
+            _ => false,
+        };
+        if empty {
+            self.public_failed(cx, request, "No valid Paradex discovery rows");
+            return;
+        }
         match request {
             Request::Markets {
                 rows,
@@ -781,10 +815,11 @@ impl Paradex {
                 self.public_seed(cx, false);
             }
             Request::Tickers {
-                rows,
+                mut rows,
                 invalid: false,
             } => {
                 self.public.seed_retry.succeeded(cx, &false);
+                self.public.live_tickers.finish(cx.store, &mut rows);
                 cx.store.set_tickers(rows);
                 if self.options.public_data_only
                     || self.options.key.as_ref().is_none_or(String::is_empty)

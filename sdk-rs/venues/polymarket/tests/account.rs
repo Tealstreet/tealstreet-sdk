@@ -12,25 +12,34 @@ struct H {
     now: f64,
     http: Vec<HttpRequest>,
     private: Option<SocketId>,
+    public: Option<SocketId>,
     opened: bool,
     sends: Vec<String>,
+    logs: Vec<String>,
     timers: Vec<(TimerId, f64)>,
 }
 impl H {
     fn with(options: Options) -> Self {
+        Self::with_seed(options, true)
+    }
+    fn with_seed(options: Options, seed: bool) -> Self {
         let mut h = Self {
             e: Engine::new(Polymarket::new(options)),
             now: 1_700_000_000_000.0,
             http: vec![],
             private: None,
+            public: None,
             opened: false,
             sends: vec![],
+            logs: vec![],
             timers: vec![],
         };
         h.e.start(h.now);
         h.collect();
         h.response("/markets", 200, MARKETS);
-        h.response("/midpoints", 200, r#"{"1":"0.5","2":"0.5"}"#);
+        if seed {
+            h.response("/midpoints", 200, r#"{"1":"0.5","2":"0.5"}"#);
+        }
         h
     }
     fn new() -> Self {
@@ -54,7 +63,15 @@ impl H {
                     channel: Some(safe_cex_engine::SocketChannel::Private),
                     ..
                 } => self.private = Some(socket),
+                Action::WsConnect {
+                    socket,
+                    channel: Some(safe_cex_engine::SocketChannel::Public),
+                    ..
+                } => self.public = Some(socket),
                 Action::WsSend { text, .. } => self.sends.push(text),
+                Action::Notice(safe_cex_engine::Notice::Log { message, .. }) => {
+                    self.logs.push(message)
+                }
                 Action::SetTimer { timer, at_ms } => self.timers.push((timer, at_ms)),
                 Action::ClearTimer { timer } => self.timers.retain(|(t, _)| *t != timer),
                 _ => {}
@@ -332,9 +349,7 @@ fn offset_positions_commit_only_after_last_successful_page() {
     h.poll();
     let mut rows = vec![r#"{"asset":"1","size":99,"avgPrice":0.5,"curPrice":0.6}"#.to_string()];
     for i in 1..500 {
-        rows.push(format!(
-            r#"{{"asset":"unknown{i}","size":1,"avgPrice":0.5}}"#
-        ));
+        rows.push(format!(r#"{{"asset":"zero{i}","size":0,"avgPrice":0.5}}"#));
     }
     h.response("/positions", 200, &format!("[{}]", rows.join(",")));
     assert_eq!(h.e.store().positions()[0].contracts, 10.0);
@@ -523,4 +538,93 @@ fn authoritative_empty_orders_cannot_be_reopened_by_older_live_event() {
         h.e.store().orders().is_empty(),
         "old LIVE notification reopened an order absent from authoritative snapshot"
     );
+}
+
+#[test]
+fn unknown_owned_token_is_visible_failure_and_retains_previous_holdings() {
+    let mut h = H::new();
+    h.initial();
+    let before = h.e.store().positions().to_vec();
+    h.poll();
+    h.response(
+        "/positions",
+        200,
+        &POSITIONS.replace("\"asset\":\"1\"", "\"asset\":\"unknown\""),
+    );
+    assert_eq!(h.e.store().positions(), before);
+    let mut h = H::new();
+    h.response(
+        "/positions",
+        200,
+        &POSITIONS.replace("\"asset\":\"1\"", "\"asset\":\"unknown\""),
+    );
+    assert!(!h.e.store().loaded().positions);
+    assert!(
+        h.logs
+            .iter()
+            .any(|message| message.contains("owned holding has unavailable market metadata"))
+    );
+}
+
+#[test]
+fn explicitly_unselected_holding_does_not_block_selected_positions() {
+    let mut h = H::with(Options {
+        key: Some(KEY.into()),
+        polymarket: Some(PolymarketOptions {
+            market_slugs: Some(vec!["election".into()]),
+            api_key: Some("api".into()),
+            api_secret: Some("c2VjcmV0".into()),
+            api_passphrase: Some("pass".into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let selected = &POSITIONS[1..POSITIONS.len() - 1];
+    h.response("/positions", 200, &format!(r#"[{selected},{{"asset":"unselected-token","slug":"elsewhere","size":2,"avgPrice":0.5,"curPrice":0.6}}]"#));
+    assert!(h.e.store().loaded().positions);
+    assert_eq!(h.e.store().positions().len(), 1);
+    assert_eq!(h.e.store().positions()[0].contracts, 10.0);
+}
+
+#[test]
+fn bbo_only_peer_never_uses_placeholder_zero_to_value_funded_holdings() {
+    for partial_seed in [false, true] {
+        let mut h = H::with_seed(
+            Options {
+                key: Some(KEY.into()),
+                polymarket: Some(PolymarketOptions {
+                    api_key: Some("api".into()),
+                    api_secret: Some("c2VjcmV0".into()),
+                    api_passphrase: Some("pass".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            false,
+        );
+        h.event(Event::Command(
+            safe_cex_engine::Command::SubscribeOrderBook {
+                symbol: "election-No".into(),
+            },
+        ));
+        let socket = h.public.unwrap();
+        h.event(Event::WsOpened { socket });
+        h.event(Event::WsMessage { socket, text: r#"{"event_type":"price_change","timestamp":"1700000000000","price_changes":[{"asset_id":"2","price":"0.4","size":"1","side":"BUY","best_bid":"0.4","best_ask":"0.6"}]}"# });
+        assert_eq!(h.e.store().ticker("election-No").unwrap().last, 0.0);
+        if partial_seed {
+            h.response("/midpoints", 200, r#"{"1":"0.5"}"#);
+            assert!(h.e.store().loaded().tickers);
+        }
+        h.response(
+            "/positions",
+            200,
+            r#"[{"asset":"2","size":10,"avgPrice":0.5}]"#,
+        );
+        assert!(!h.e.store().loaded().positions);
+        assert!(
+            h.logs
+                .iter()
+                .any(|message| message.contains("owned holding price unavailable"))
+        );
+    }
 }

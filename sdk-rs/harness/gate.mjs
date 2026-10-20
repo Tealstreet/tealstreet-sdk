@@ -281,6 +281,8 @@ const KNOWN_TS_FIXES = {
   // cannot silently reauthenticate and retarget a reused client identity.
   grvt() {},
   polymarket() {
+    // Missing native holding prices cannot use a BBO-only default last=0 or
+    // entry price as observed valuation; unavailable owned metadata fails visibly.
     // Reference repairs (not output normalization): preserve initial array books,
     // every sorted absolute depth change, dynamic ticks and event watermarks;
     // use complete Gamma keyset discovery and interval-minute sampled candles.

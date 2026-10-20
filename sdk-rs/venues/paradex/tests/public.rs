@@ -886,3 +886,65 @@ fn polls_cannot_rewind_a_bucket_or_quantity_known_before_the_request_started() {
         assert_eq!(emitted(&mut h), expected);
     }
 }
+
+#[test]
+fn blank_book_size_is_rejected_atomically_and_explicit_zero_remains_a_delete() {
+    let mut h = Harness::new();
+    h.command(Command::SubscribeOrderBook { symbol: BTC.into() });
+    depth(
+        &mut h,
+        r#"{"update_type":"s","seq_no":100,"inserts":[{"side":"BUY","price":"100","size":"2"}],"updates":[],"deletes":[]}"#,
+    );
+    depth(
+        &mut h,
+        r#"{"update_type":"d","seq_no":101,"inserts":[],"updates":[{"side":"BUY","price":"100","size":""}],"deletes":[]}"#,
+    );
+    assert_eq!(h.e.book(BTC).unwrap().bids(), [(100., 2.)]);
+    depth(
+        &mut h,
+        r#"{"update_type":"s","seq_no":102,"inserts":[{"side":"BUY","price":"100","size":"2"}],"updates":[],"deletes":[]}"#,
+    );
+    depth(
+        &mut h,
+        r#"{"update_type":"d","seq_no":103,"inserts":[],"updates":[{"side":"BUY","price":"100","size":"0"}],"deletes":[]}"#,
+    );
+    assert!(h.e.book(BTC).unwrap().bids().is_empty());
+}
+
+#[test]
+fn late_rest_summary_keeps_early_live_bbo_without_suppressing_last_and_statistics() {
+    let mut h = Harness::empty(Options {
+        public_data_only: true,
+        ..Default::default()
+    });
+    h.reply("/markets", MARKETS);
+    h.public = h
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                channel: Some(SocketChannel::Public),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    h.e.handle(h.now, Event::WsOpened { socket: h.public });
+    h.collect();
+    h.ws(r#"{"jsonrpc":"2.0","method":"subscription","params":{"channel":"bbo.BTC-USD-PERP","data":{"market":"BTC-USD-PERP","bid_price":"110","ask_price":"112"}}}"#);
+    assert!(!h.e.store().loaded().tickers);
+    h.reply("summary", TICKERS);
+    let ticker = h.e.store().ticker(BTC).unwrap();
+    assert_eq!(
+        (
+            ticker.bid,
+            ticker.ask,
+            ticker.last,
+            ticker.mark,
+            ticker.volume
+        ),
+        (110., 112., 100., 100.5, 200.)
+    );
+    assert!(h.e.store().loaded().tickers);
+}

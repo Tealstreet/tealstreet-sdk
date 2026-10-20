@@ -381,6 +381,39 @@ impl KrakenSpot {
         ));
         true
     }
+    // Private balances can arrive before the first public quote seed. Revalue
+    // those retained native holdings once, without changing later poll cadence.
+    pub(super) fn revalue_initial_balances(&mut self, cx: &mut Cx<'_, Pending>) {
+        let Some(currencies) = cx.store.currency_balances() else {
+            return;
+        };
+        let mut total = 0.0;
+        for holding in currencies {
+            let rate = if matches!(holding.currency.as_str(), "USD" | "USDT" | "USDC") {
+                1.0
+            } else {
+                cx.store
+                    .tickers()
+                    .iter()
+                    .find(|ticker| {
+                        cx.store.market(&ticker.symbol).is_some_and(|market| {
+                            market.base == holding.currency
+                                && matches!(market.quote.as_str(), "USD" | "USDT")
+                        })
+                    })
+                    .map_or(0.0, |ticker| ticker.last.max(0.0))
+            };
+            total += holding.balance.total * rate;
+        }
+        if total.is_finite() {
+            cx.store.set_balance(Balance {
+                total,
+                free: total,
+                used: 0.0,
+                upnl: 0.0,
+            });
+        }
+    }
     fn balance_response(
         &mut self,
         cx: &mut Cx<'_, Pending>,

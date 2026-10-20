@@ -107,3 +107,37 @@ fn missing_initial_native_pnl_keeps_exposure_without_using_entry_as_a_market_pri
     assert_eq!(h.engine.store().balance().upnl, 0.0);
     assert!(h.logs.iter().any(|s| s.contains("PnL unavailable")));
 }
+
+#[test]
+fn unmappable_owned_position_cannot_replace_a_funded_snapshot_with_empty() {
+    let mut h = Harness::new();
+    h.snapshot(Some(4.0));
+    let before = h.engine.store().positions().to_vec();
+    h.poll();
+    h.reply(
+        "/v3/account",
+        &account(Some(4.0)).replace("BTC-USDT", "UNKNOWN"),
+    );
+    assert_eq!(h.engine.store().positions(), before);
+    assert!(
+        h.logs
+            .iter()
+            .any(|s| s.contains("invalid account snapshot"))
+    );
+}
+
+#[test]
+fn unmappable_owned_order_cannot_clear_the_existing_order_snapshot() {
+    let mut h = Harness::new();
+    h.reply("/v3/account", &account(Some(4.0)));
+    let known = r#"{"code":0,"data":[{"id":"owned","symbol":"BTC-USDT","status":"OPEN","type":"LIMIT","side":"BUY","size":"2","price":"100","cumSuccessFillSize":"0","timeInForce":"GOOD_TIL_CANCEL"}]}"#;
+    h.reply("/v3/open-orders", known);
+    h.reply("/v3/account-balance", BALANCE);
+    let before = h.engine.store().orders().to_vec();
+    assert_eq!(before.len(), 1);
+    h.poll();
+    h.reply("/v3/account", &account(Some(4.0)));
+    h.reply("/v3/open-orders", &known.replace("BTC-USDT", "UNKNOWN"));
+    assert_eq!(h.engine.store().orders(), before);
+    assert!(h.logs.iter().any(|s| s.contains("invalid orders snapshot")));
+}

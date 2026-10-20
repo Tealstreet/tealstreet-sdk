@@ -1058,7 +1058,7 @@ impl Account {
     }
     pub fn on_item(&mut self, cx: &mut Cx<'_, Pending>, request: &mut Request, item: &str) {
         if matches!(request, Request::Positions { .. } | Request::Orders { .. }) {
-            match registered_market(cx, item) {
+            match registered_market(cx, item, matches!(request, Request::Positions { .. })) {
                 Ok(false) => return,
                 Err(()) => {
                     match request {
@@ -1367,8 +1367,19 @@ impl Account {
         };
         let mut valid = false;
         for raw in rows {
-            if registered_market(cx, raw.get()) != Ok(true) {
-                continue;
+            match registered_market(cx, raw.get(), false) {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(()) => {
+                    cx.log(
+                        LogLevel::Warning,
+                        "Paradex private update contains an unmappable market",
+                    );
+                    if self.repair_orders.is_none() {
+                        self.repair_orders = Some(cx.set_timer(500.));
+                    }
+                    continue;
+                }
             }
             if let Ok(row) = serde_json::from_str::<NativeOrder>(raw.get()) {
                 valid |= self.apply_order(cx, row);
@@ -1491,8 +1502,19 @@ impl Account {
         };
         let mut valid = false;
         for raw in rows {
-            if registered_market(cx, raw.get()) != Ok(true) {
-                continue;
+            match registered_market(cx, raw.get(), true) {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(()) => {
+                    cx.log(
+                        LogLevel::Warning,
+                        "Paradex private update contains an unmappable market",
+                    );
+                    if self.repair_positions.is_none() {
+                        self.repair_positions = Some(cx.set_timer(500.));
+                    }
+                    continue;
+                }
             }
             if let Ok(row) = serde_json::from_str::<PositionRow<'_>>(raw.get()) {
                 valid |= self.apply_position(cx, row);
@@ -1615,7 +1637,7 @@ impl Account {
         };
         let mut valid = false;
         for raw in rows {
-            if registered_market(cx, raw.get()) != Ok(true) {
+            if registered_market(cx, raw.get(), false) != Ok(true) {
                 continue;
             }
             if let Ok(row) = serde_json::from_str::<FillRow<'_>>(raw.get()) {
@@ -1945,17 +1967,42 @@ fn decimal8(mantissa: i64) -> String {
     format!("{sign}{integer}.{}", fraction.trim_end_matches('0'))
 }
 
-fn registered_market(cx: &Cx<'_, Pending>, raw: &str) -> Result<bool, ()> {
+fn registered_market(cx: &Cx<'_, Pending>, raw: &str, position: bool) -> Result<bool, ()> {
     #[derive(Deserialize)]
     struct Identity<'a> {
         #[serde(borrow)]
         market: &'a str,
+        #[serde(default, borrow)]
+        size: Option<&'a serde_json::value::RawValue>,
+        #[serde(default, borrow)]
+        status: Option<&'a serde_json::value::RawValue>,
     }
     let identity: Identity<'_> = serde_json::from_str(raw).map_err(|_| ())?;
     if identity.market.is_empty() {
         return Err(());
     }
-    Ok(cx.store.market(identity.market).is_some())
+    if cx.store.market(identity.market).is_some() {
+        return Ok(true);
+    }
+    // Options/spot are intentionally outside this perpetual adapter. An unknown
+    // perpetual may be a skipped catalogue row, so it cannot prove absence of
+    // working orders or positions in an authoritative account snapshot.
+    if identity.market.ends_with("-PERP") {
+        if position
+            && (identity
+                .status
+                .and_then(|status| serde_json::from_str::<&str>(status.get()).ok())
+                == Some("CLOSED")
+                || identity
+                    .size
+                    .and_then(|size| serde_json::from_str::<Number>(size.get()).ok())
+                    .is_some_and(|size| size.0 == 0.0))
+        {
+            return Ok(false);
+        }
+        return Err(());
+    }
+    Ok(false)
 }
 
 fn raw_rows(text: &str) -> Result<Vec<&serde_json::value::RawValue>, serde_json::Error> {

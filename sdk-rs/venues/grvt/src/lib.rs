@@ -831,8 +831,11 @@ impl Venue for Grvt {
                 metadata,
                 failed,
             } => {
-                if failed {
-                    cx.log(LogLevel::Warning, "Invalid GRVT instrument catalog");
+                if failed || rows.is_empty() {
+                    cx.log(
+                        LogLevel::Warning,
+                        "Invalid or empty GRVT instrument catalog",
+                    );
                     self.startup_retry.failed(cx, ());
                     return;
                 }

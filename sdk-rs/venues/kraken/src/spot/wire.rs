@@ -1,4 +1,4 @@
-use crate::wire::{public_number as number, public_optional_number as optional_number};
+use crate::wire::{number, optional_number};
 use serde::{
     Deserialize, Deserializer,
     de::{MapAccess, Visitor},

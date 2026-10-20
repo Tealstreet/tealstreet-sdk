@@ -98,6 +98,9 @@ fn valid_candle(c: &Candle) -> bool {
 }
 impl ApexOmni {
     fn revalue_positions(cx: &mut Cx<'_, Pending>, symbol: &str, reference: f64) {
+        if !reference.is_finite() || reference <= 0.0 {
+            return;
+        }
         if !cx
             .store
             .positions()
@@ -108,13 +111,16 @@ impl ApexOmni {
         }
         cx.store.update_positions(|p| {
             if p.symbol == symbol && p.contracts != 0.0 {
-                p.unrealized_pnl = (reference - p.entry_price)
+                let pnl = (reference - p.entry_price)
                     * p.contracts
                     * if p.side == PositionSide::Long {
                         1.0
                     } else {
                         -1.0
                     };
+                if pnl.is_finite() {
+                    p.unrealized_pnl = pnl;
+                }
             }
         });
     }
@@ -133,7 +139,7 @@ impl ApexOmni {
                 // An explicit zero mark falls back to last, even with a live index.
                 [ticker.mark, ticker.last]
                     .into_iter()
-                    .find(|price| *price != 0.0)
+                    .find(|price| price.is_finite() && *price > 0.0)
                     .map(|price| (ticker.symbol.clone(), price))
             })
             .collect();
@@ -158,7 +164,7 @@ impl ApexOmni {
                 "perpetualContract",
             ])),
         ) {
-            cx.log(LogLevel::Error, error);
+            cx.log(LogLevel::Warning, error);
             self.public.seed_retry.failed(cx, ());
         }
     }
@@ -330,7 +336,7 @@ impl ApexOmni {
     ) {
         match request {
             Request::Markets { .. } => {
-                cx.log(LogLevel::Error, format!("ApeX markets: {error}"));
+                cx.log(LogLevel::Warning, format!("ApeX markets: {error}"));
                 self.public.seed_retry.failed(cx, ());
             }
             Request::Candles { command, .. } => cx.done(command, Err(error.to_owned())),

@@ -582,7 +582,7 @@ fn mixed_instrument_snapshots_and_streams_only_emit_registered_perpetual_markets
         request,
         200,
         &format!(
-            "{{\"results\":[{POSITION},{{\"market\":\"BTC-USD-250101-100000-C\",\"size\":null}}]}}"
+            "{{\"results\":[{POSITION},{{\"market\":\"BTC-USD-250101-100000-C\",\"size\":null,\"status\":null}}]}}"
         ),
     );
     assert_eq!(h.e.store().positions().len(), 1);
@@ -831,4 +831,77 @@ fn amend_invalidation_keeps_fill_watermarks_and_exact_decimal_size_changes_remai
             .unwrap()
             .contains("\"price\":\"100\"")
     );
+}
+
+#[test]
+fn unmapped_perpetual_private_snapshots_cannot_erase_confirmed_exposure() {
+    let (mut h, socket) = loaded();
+    authenticate(&mut h, socket);
+    let old_orders = h.e.store().orders().to_vec();
+    let old_positions = h.e.store().positions().to_vec();
+    for (channel, row) in [
+        (
+            "positions",
+            POSITION.replace("BTC-USD-PERP", "UNKNOWN-USD-PERP"),
+        ),
+        (
+            "orders.ALL",
+            ORDER.replace("BTC-USD-PERP", "UNKNOWN-USD-PERP"),
+        ),
+    ] {
+        message(
+            &mut h,
+            socket,
+            &format!(
+                r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"{channel}","data":{row}}}}}"#
+            ),
+        );
+    }
+    assert_eq!(h.e.store().orders(), old_orders);
+    assert_eq!(h.e.store().positions(), old_positions);
+    h.timer(h.now + 10_000.);
+    for (path, row) in [
+        (
+            "/positions",
+            POSITION.replace("BTC-USD-PERP", "UNKNOWN-USD-PERP"),
+        ),
+        ("/orders", ORDER.replace("BTC-USD-PERP", "UNKNOWN-USD-PERP")),
+    ] {
+        let request = h.take(path);
+        h.respond(request, 200, &format!(r#"{{"results":[{row}]}}"#));
+        if path == "/positions" {
+            h.reply(
+                "/account",
+                r#"{"total_collateral":"1000","free_collateral":"800"}"#,
+            );
+        }
+    }
+    h.reply(
+        "/account/margin",
+        r#"{"configs":[{"market":"BTC-USD-PERP","leverage":20}]}"#,
+    );
+    assert_eq!(h.e.store().orders(), old_orders);
+    assert_eq!(h.e.store().positions(), old_positions);
+    // The next complete, genuinely empty scopes still remove closed exposure.
+    h.timer(h.now + 10_000.);
+    for path in ["/positions", "/orders"] {
+        let request = h.take(path);
+        h.respond(
+            request,
+            200,
+            if path == "/positions" {
+                r#"{"results":[{"market":"UNKNOWN-USD-PERP","size":"0"}]}"#
+            } else {
+                r#"{"results":[]}"#
+            },
+        );
+        if path == "/positions" {
+            h.reply(
+                "/account",
+                r#"{"total_collateral":"1000","free_collateral":"800"}"#,
+            );
+        }
+    }
+    assert!(h.e.store().orders().is_empty());
+    assert!(h.e.store().positions().is_empty());
 }

@@ -387,7 +387,11 @@ impl ApexOmni {
             .market_by_id(&raw.symbol)
             .or_else(|| store.market(&raw.symbol))
         else {
-            return Ok(None);
+            return if raw.size == Some(0.0) {
+                Ok(None)
+            } else {
+                Err("ApeX owned position has unavailable market metadata".into())
+            };
         };
         let side = match raw.side.as_ref() {
             "LONG" => PositionSide::Long,
@@ -760,7 +764,14 @@ impl ApexOmni {
             Request::Orders { rows, bad, .. } => {
                 match serde_json::from_str::<wire::OrderRow<'_>>(item)
                     .map_err(|e| e.to_string())
-                    .and_then(|raw| map_order(cx.store, &raw, cx.now))
+                    .and_then(|raw| {
+                        if cx.store.market_by_id(&raw.symbol)
+                            .or_else(|| cx.store.market(&raw.symbol)).is_none() {
+                            cx.log(LogLevel::Warning, "ApeX owned order has unavailable market metadata; preserving previous orders");
+                            return Err("unknown owned order market".into());
+                        }
+                        map_order(cx.store, &raw, cx.now)
+                    })
                 {
                     Ok(mapped) => rows.extend(mapped),
                     Err(_) => *bad = true,
@@ -1173,7 +1184,11 @@ impl ApexOmni {
                         "ApeX position PnL unavailable; retaining prior valuation",
                     );
                 }
-                if let Ok(Some(mut position)) = self.map_position(cx.store, &raw, cx.now) {
+                let mapped = self.map_position(cx.store, &raw, cx.now);
+                if let Err(error) = &mapped {
+                    cx.log(LogLevel::Warning, error);
+                }
+                if let Ok(Some(mut position)) = mapped {
                     if let Some((_, at, leverage)) =
                         self.account.leverage_versions.get(&position.symbol)
                         && cx.now - at < 5000.0
@@ -1305,10 +1320,18 @@ impl ApexOmni {
         raw: &wire::OrderRow<'_>,
         snapshot: bool,
     ) {
-        let Ok(rows) = map_order(cx.store, raw, cx.now) else {
-            return;
+        let rows = match map_order(cx.store, raw, cx.now) {
+            Ok(rows) => rows,
+            Err(error) => {
+                cx.log(LogLevel::Warning, error);
+                return;
+            }
         };
         let Some(order) = rows.first() else {
+            cx.log(
+                LogLevel::Warning,
+                "ApeX owned order has unavailable market metadata; preserving previous orders",
+            );
             return;
         };
         if raw.status == "FILLED"

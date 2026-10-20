@@ -16,15 +16,15 @@ fn poll(e: &mut Engine<Kraken>, socket: SocketId) -> Vec<safe_cex_engine::HttpRe
     // Empty execution payload schedules the reconciliation debounce.
     let timer = e.drain_actions().find_map(|a| {
         if let Action::SetTimer { timer, at_ms } = a
-            && at_ms == NOW + 1000.0
+            && (NOW + 1000.0..=NOW + 1001.0).contains(&at_ms)
         {
-            Some(timer)
+            Some((timer, at_ms))
         } else {
             None
         }
     });
-    let timer = timer.expect("heal timer");
-    e.handle(NOW + 1000.0, Event::TimerFired { timer });
+    let (timer, at_ms) = timer.expect("heal timer");
+    e.handle(at_ms, Event::TimerFired { timer });
     requests(e)
 }
 #[test]
@@ -877,4 +877,53 @@ fn local_price_ack_preserves_the_last_native_execution_clock() {
         (order.price, order.filled, order.remaining),
         (110.0, 0.5, 1.5)
     );
+}
+
+#[test]
+fn unmapped_perpetual_snapshots_preserve_owned_exposure_while_other_products_stay_out_of_scope() {
+    let (mut e, s) = ready();
+    snapshot(&mut e, s);
+    message(&mut e, s, NOW, POSITION);
+    let orders = e.store().orders().to_vec();
+    let positions = e.store().positions().to_vec();
+    for text in [
+        r#"{"feed":"open_orders_snapshot","orders":[{"instrument":"PF_UNKNOWNUSD","order_id":"unknown","qty":2}]}"#,
+        r#"{"feed":"open_positions_snapshot","positions":[{"instrument":"PF_UNKNOWNUSD","balance":2}]}"#,
+    ] {
+        message(&mut e, s, NOW, text);
+        assert_eq!(e.store().orders(), orders);
+        assert_eq!(e.store().positions(), positions);
+    }
+    let reqs = poll(&mut e, s);
+    for (path, body) in [
+        (
+            "openorders",
+            r#"{"result":"success","openOrders":[{"symbol":"PF_UNKNOWNUSD","order_id":"unknown","qty":2}]}"#,
+        ),
+        (
+            "openpositions",
+            r#"{"result":"success","openPositions":[{"symbol":"PF_UNKNOWNUSD","size":2}]}"#,
+        ),
+    ] {
+        let request = reqs.iter().find(|r| r.url.contains(path)).unwrap();
+        reply(&mut e, request, 200, body);
+        assert_eq!(e.store().orders(), orders);
+        assert_eq!(e.store().positions(), positions);
+    }
+    // Unsupported dated products and explicit zero positions carry no owned
+    // perpetual exposure; they do not make otherwise valid empty scopes fatal.
+    message(
+        &mut e,
+        s,
+        NOW,
+        r#"{"feed":"open_orders","orders":[{"instrument":"FI_XBTUSD_260626","order_id":"dated","qty":2}]}"#,
+    );
+    message(
+        &mut e,
+        s,
+        NOW,
+        r#"{"feed":"open_positions_snapshot","positions":[{"instrument":"FI_XBTUSD_260626","size":2},{"instrument":"PF_UNKNOWNUSD","balance":0}]}"#,
+    );
+    assert!(e.store().orders().is_empty());
+    assert!(e.store().positions().is_empty());
 }

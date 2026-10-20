@@ -32,6 +32,16 @@ fn public_discovery_retries_with_backoff_and_skips_one_malformed_row() {
         );
         let actions = engine.drain_actions().collect::<Vec<_>>();
         assert!(
+            !actions.iter().any(|action| matches!(
+                action,
+                Action::Notice(Notice::Log {
+                    level: safe_cex_engine::LogLevel::Error,
+                    ..
+                })
+            )),
+            "public retry must not invalidate account credentials: {actions:?}"
+        );
+        assert!(
             !actions.iter().any(|a| matches!(a, Action::Http(_))),
             "read retried without backoff: {actions:?}"
         );

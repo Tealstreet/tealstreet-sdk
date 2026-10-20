@@ -260,3 +260,88 @@ fn dogecoin_rest_identity_is_preserved_while_v2_ticker_and_book_use_doge() {
     );
     assert_eq!(e.venue().book("XDG/USD").unwrap().bids(), &[(0.16, 120.)]);
 }
+
+#[test]
+fn blank_stream_quantities_cannot_delete_a_book_level_or_zero_a_live_quote() {
+    let (mut engine, socket, _) = ready(true);
+    engine.handle(
+        NOW,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "XBT/USD".into(),
+        }),
+    );
+    message(
+        &mut engine,
+        socket,
+        r#"{"channel":"book","type":"snapshot","data":[{"symbol":"BTC/USD","bids":[{"price":99,"qty":2}],"asks":[{"price":101,"qty":3}]}]}"#,
+    );
+    message(
+        &mut engine,
+        socket,
+        r#"{"channel":"book","type":"update","data":[{"symbol":"BTC/USD","bids":[{"price":99,"qty":""}]}]}"#,
+    );
+    assert_eq!(
+        engine.venue().book("XBT/USD").unwrap().bids(),
+        [(99.0, 2.0)]
+    );
+    message(
+        &mut engine,
+        socket,
+        r#"{"channel":"ticker","type":"update","data":[{"symbol":"BTC/USD","last":""}]}"#,
+    );
+    assert_eq!(engine.store().ticker("XBT/USD").unwrap().last, 100.0);
+    let blank = TICKERS.replace("\"100\"", "\"\"");
+    let (rest, _, _) = ready_with_payloads(true, META, &blank, BALANCE);
+    assert_eq!(rest.store().ticker("XBT/USD").unwrap().last, 0.0);
+}
+
+#[test]
+fn first_rest_seed_retains_live_quotes_and_values_early_native_holdings_with_them() {
+    let mut engine =
+        safe_cex_engine::Engine::new(safe_cex_venue_kraken::KrakenSpot::new(options()));
+    engine.start(NOW);
+    let metadata = requests(&mut engine).pop().unwrap();
+    reply(&mut engine, &metadata, META);
+    let actions: Vec<_> = engine.drain_actions().collect();
+    let socket = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::WsConnect {
+                socket,
+                channel: Some(safe_cex_engine::SocketChannel::Public),
+                ..
+            } => Some(*socket),
+            _ => None,
+        })
+        .unwrap();
+    let ticker = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.ends_with("Ticker") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    let balance = actions
+        .iter()
+        .find_map(|action| match action {
+            Action::Http(request) if request.url.ends_with("Balance") => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    reply(&mut engine, balance, BALANCE);
+    assert_eq!(engine.store().balance().total, 1005.);
+    engine.handle(NOW, Event::WsOpened { socket });
+    message(
+        &mut engine,
+        socket,
+        r#"{"channel":"ticker","type":"update","data":[{"symbol":"BTC/USD","last":120},{"symbol":"ETH/USD","last":55}]}"#,
+    );
+    let mut body: serde_json::Value = serde_json::from_str(TICKERS).unwrap();
+    body["result"].as_object_mut().unwrap().remove("XETHZUSD");
+    reply(&mut engine, ticker, &body.to_string());
+    assert_eq!(engine.store().ticker("XBT/USD").unwrap().last, 120.);
+    assert_eq!(engine.store().ticker("ETH/USD").unwrap().last, 55.);
+    assert_eq!(engine.store().ticker("XBT/USD").unwrap().bid, 99.);
+    assert_eq!(engine.store().balance().total, 1410.);
+    assert_eq!(engine.store().currency_balances().unwrap().len(), 4);
+}

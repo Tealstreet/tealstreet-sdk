@@ -41,21 +41,21 @@ fn streams_nested_symbols_and_seeds_zero_tickers_before_socket() {
 }
 #[test]
 fn error_seed_does_not_commit_partial_markets() {
-    for body in [MARKETS.replace("\"code\":0", "\"code\":20016")] {
-        let mut e = Engine::new(ApexOmni::new(Options {
-            public_data_only: true,
-            ..Default::default()
-        }));
-        e.start(0.0);
-        let r = requests(&mut e).remove(0);
-        response(&mut e, &r, 1.0, &body);
-        assert!(e.store().markets().is_empty());
-        assert!(
-            !e.drain_actions()
-                .any(|a| matches!(a, Action::WsConnect { .. }))
-        );
-    }
+    let body = MARKETS.replace("\"code\":0", "\"code\":20016");
+    let mut e = Engine::new(ApexOmni::new(Options {
+        public_data_only: true,
+        ..Default::default()
+    }));
+    e.start(0.0);
+    let r = requests(&mut e).remove(0);
+    response(&mut e, &r, 1.0, &body);
+    assert!(e.store().markets().is_empty());
+    assert!(
+        !e.drain_actions()
+            .any(|a| matches!(a, Action::WsConnect { .. }))
+    );
 }
+
 #[test]
 fn instrument_batch_maps_native_id_mark_fallback_and_signed_funding() {
     let (mut e, s) = started();

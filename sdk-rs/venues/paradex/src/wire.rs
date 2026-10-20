@@ -185,8 +185,8 @@ impl<T> Many<T> {
 pub struct Level<'a> {
     #[serde(borrow)]
     pub side: Str<'a>,
-    pub price: Number,
-    pub size: Number,
+    pub price: StrictNumber,
+    pub size: StrictNumber,
 }
 #[derive(Deserialize)]
 pub struct Depth<'a> {

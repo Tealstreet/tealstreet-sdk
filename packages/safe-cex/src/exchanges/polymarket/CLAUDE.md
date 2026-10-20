@@ -180,3 +180,12 @@ neighbours remain usable. Private account initialization starts once the usable
 catalogue is available, without waiting for REST ticker seeds. Account snapshots,
 mutation acknowledgements and signing validation retain their stricter rules.
 See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regressions.
+
+### Rust partial-catalogue account safety
+
+An owned Data API holding with unavailable token metadata fails visibly and
+preserves the prior snapshot. A documented `slug` outside an explicit
+`marketSlugs` selection remains intentionally out of scope. Missing `curPrice`
+requires an observed positive last price or an actual last-trade observation;
+a BBO-only row's default zero is not a price. Explicit native `curPrice: 0`
+remains valid. Full rejected-row isolation is tracked separately.

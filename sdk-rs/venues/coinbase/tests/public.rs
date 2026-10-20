@@ -1047,3 +1047,119 @@ fn product_online_status_respects_disabled_flags_and_unknown_statuses() {
         );
     }
 }
+
+#[test]
+fn malformed_future_product_keeps_valid_spot_peer_and_warns() {
+    let mut e = Engine::new(
+        Coinbase::new(Options {
+            public_data_only: true,
+            spot_only: true,
+            ..Options::default()
+        })
+        .unwrap(),
+    );
+    e.start(1000.);
+    let r = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &r,
+        200,
+        r#"{"products":[
+        {"product_type":"FUTURE","product_id":"BTC-CDE","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"1","price_increment":"0.01","base_min_size":"1","base_max_size":"10000","price":"60000","volume_24h":"100","price_percentage_change_24h":"2"},
+        {"product_type":"SPOT","product_id":"BTC-USD","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.0001","price_increment":"0.01","base_min_size":"0.0001","base_max_size":"10000","price":"60000","volume_24h":"100","price_percentage_change_24h":"2"}
+    ]}"#,
+    );
+    assert!(e.store().loaded().markets);
+    assert_eq!(e.store().markets().len(), 1);
+    assert_eq!(e.store().markets()[0].symbol, "BTC-USD");
+    assert!(e.drain_actions().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+}
+
+#[test]
+fn malformed_first_product_page_does_not_hide_a_valid_later_page() {
+    let mut e = Engine::new(
+        Coinbase::new(Options {
+            public_data_only: true,
+            spot_only: true,
+            ..Options::default()
+        })
+        .unwrap(),
+    );
+    e.start(1000.);
+    let first = requests(&mut e).pop().unwrap();
+    reply(
+        &mut e,
+        &first,
+        200,
+        r#"{"products":[{"product_type":"FUTURE","product_id":"BTC-CDE","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"1","price_increment":"0.01","base_min_size":"1","base_max_size":"10000","price":"60000","volume_24h":"100","price_percentage_change_24h":"2"}],"pagination":{"has_next":true,"next_cursor":"after-malformed"}}"#,
+    );
+    assert!(!e.store().loaded().markets);
+    let actions = e.drain_actions().collect::<Vec<_>>();
+    assert!(actions.iter().any(|a| matches!(a, Action::Notice(Notice::Log { message, .. }) if message.contains("Skipped malformed public discovery row"))));
+    let timer = actions
+        .into_iter()
+        .find_map(|action| match action {
+            Action::SetTimer { timer, .. } => Some(timer),
+            _ => None,
+        })
+        .unwrap();
+    e.handle(1334., Event::TimerFired { timer });
+    let next = requests(&mut e).pop().unwrap();
+    assert!(next.url.contains("after-malformed"));
+    reply(
+        &mut e,
+        &next,
+        200,
+        r#"{"products":[{"product_type":"SPOT","product_id":"BTC-USD","base_currency_id":"BTC","quote_currency_id":"USD","status":"TRADING","base_increment":"0.0001","price_increment":"0.01","base_min_size":"0.0001","base_max_size":"10000","price":"60000","volume_24h":"100","price_percentage_change_24h":"2"}],"pagination":{"has_next":false}}"#,
+    );
+    assert!(e.store().loaded().markets);
+    assert_eq!(e.store().markets().len(), 1);
+    assert_eq!(e.store().markets()[0].symbol, "BTC-USD");
+}
+
+#[test]
+fn valid_catalogue_with_rejected_quotes_starts_markets_and_retries_without_clearing_prices() {
+    for prior_quote in [false, true] {
+        let mut e = Engine::new(
+            Coinbase::new(Options {
+                public_data_only: true,
+                ..Options::default()
+            })
+            .unwrap(),
+        );
+        if prior_quote {
+            let (previous, _) = ready();
+            e.store_mut()
+                .set_markets(previous.store().markets().to_vec());
+            e.store_mut()
+                .set_tickers(previous.store().tickers().to_vec());
+        }
+        e.start(1000.);
+        let request = requests(&mut e).pop().unwrap();
+        let before = serde_json::to_value(e.store().tickers()).unwrap();
+        reply(
+            &mut e,
+            &request,
+            200,
+            &INSTRUMENTS.replace("\"trade_price\":\"60000\"", "\"trade_price\":\"-1\""),
+        );
+        assert!(e.store().loaded().markets);
+        assert_eq!(serde_json::to_value(e.store().tickers()).unwrap(), before);
+        assert_eq!(e.store().loaded().tickers, prior_quote);
+        let timer = e
+            .drain_actions()
+            .find_map(|action| match action {
+                Action::SetTimer {
+                    timer,
+                    at_ms: 2000.0,
+                } => Some(timer),
+                _ => None,
+            })
+            .unwrap();
+        e.handle(2000., Event::TimerFired { timer });
+        let retry = requests(&mut e).pop().unwrap();
+        reply(&mut e, &retry, 200, INSTRUMENTS);
+        assert_eq!(e.store().ticker(SYMBOL).unwrap().last, 60000.);
+        assert!(e.store().loaded().tickers);
+    }
+}

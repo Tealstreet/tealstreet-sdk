@@ -213,3 +213,52 @@ fn shared_quotes_do_not_seed_private_state_and_survive_delayed_local_prices() {
         10.
     );
 }
+
+#[test]
+fn invalid_or_overflowing_public_reference_retains_native_position_pnl() {
+    let (mut engine, _, public, http) = pending(PublicFeedPolicy::Direct);
+    private_seed(&mut engine, http);
+    ws(
+        &mut engine,
+        public.unwrap(),
+        50.,
+        r#"{"topic":"instrumentInfo.all","data":[{"s":"BTCUSDT","p":"-1","mp":"-2"}]}"#,
+    );
+    assert_eq!(
+        engine
+            .store()
+            .position("BTCUSDT:long")
+            .unwrap()
+            .unrealized_pnl,
+        4.0
+    );
+    assert_eq!(
+        engine
+            .store()
+            .position("BTCUSDT:short")
+            .unwrap()
+            .unrealized_pnl,
+        3.0
+    );
+    ws(
+        &mut engine,
+        public.unwrap(),
+        60.,
+        r#"{"topic":"instrumentInfo.all","data":[{"s":"BTCUSDT","p":"1e308","mp":"1e308"}]}"#,
+    );
+    assert_eq!(
+        engine
+            .store()
+            .position("BTCUSDT:long")
+            .unwrap()
+            .unrealized_pnl,
+        4.0
+    );
+    assert!(
+        engine
+            .store()
+            .positions()
+            .iter()
+            .all(|position| position.unrealized_pnl.is_finite())
+    );
+}
