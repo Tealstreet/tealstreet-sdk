@@ -1038,26 +1038,42 @@ fn live_fill_financials_preserve_optional_zero_and_absolute_fee_without_changing
     for _ in 0..2 {
         e.handle(NOW, Event::WsMessage { socket, text });
     }
-    let frame = e.take_market_frame(NOW).unwrap();
+    assert!(
+        e.take_market_frame(NOW).is_none(),
+        "pending catalog identity fences market-only emission"
+    );
+    let frame = e.take_frame(NOW).unwrap();
     let payload = safe_cex_engine::wire::sections(frame)
         .find(|(kind, _)| *kind == safe_cex_engine::wire::section::FILLS)
         .unwrap()
         .1;
     assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 4);
-    assert_eq!(payload.len(), 184);
+    assert_eq!(payload.len(), 200);
+    let symbol_refs: Vec<_> = payload[120..136]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|value| u32::from_le_bytes(*value))
+        .collect();
+    assert_eq!(symbol_refs.len(), 4);
+    assert!(
+        symbol_refs
+            .iter()
+            .all(|value| *value != u32::MAX && *value == symbol_refs[0])
+    );
     let value = |at| f64::from_le_bytes(payload[at..at + 8].try_into().unwrap());
     for row in 0..4 {
         assert_eq!([value(56 + row * 16), value(64 + row * 16)], [1000., 0.1]);
     }
-    assert!(value(120).is_nan());
-    assert_eq!([value(128), value(136)], [0., -3.]);
+    assert!(value(136).is_nan());
+    assert_eq!([value(144), value(152)], [0., -3.]);
     assert!(
-        value(144).is_nan(),
+        value(160).is_nan(),
         "malformed metadata cannot discard a valid fill"
     );
-    assert!(value(152).is_nan());
-    assert_eq!([value(160), value(168)], [2., 0.]);
-    assert!(value(176).is_nan());
+    assert!(value(168).is_nan());
+    assert_eq!([value(176), value(184)], [2., 0.]);
+    assert!(value(192).is_nan());
     assert!(e.take_market_frame(NOW).is_none());
 }
 fn logs(actions: &[Action], level: LogLevel) -> Vec<String> {
