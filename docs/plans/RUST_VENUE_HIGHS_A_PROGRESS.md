@@ -49,3 +49,30 @@ commit below. Stable points are committed; never stash, rebase or force-push.
   retry-policy edits planned in this lane pending that coordination.
 - Venue workers are revalidating findings and preparing bounded implementation
   plans before source edits. Shared harness changes wait for their findings.
+
+### MEXC phase — implemented and independently reviewed
+
+All four non-startup findings reproduced. The public socket now subscribes to
+the documented sparse all-contract `sub.tickers` feed and reconciles detailed
+`SetTickerSymbols` interest across selection changes and reconnects. Sparse
+fields preserve detailed metadata; known open-interest quantity is revalued at
+the new mark. Explicit selections may exceed 100: no official constraint was
+found that would justify retaining the TS default cap for explicit interest.
+
+Typed, identifiable unmappable order rows log and preserve an existing copy of
+that ID while usable siblings commit. A missing native ID remains a failed
+snapshot. Full-position TP/SL snaps native volume to `volUnit`. Singletons use
+the regular submit route and 450 ms spacing; multi-order fallback and 510
+cooldown retain 1,500 ms pacing. Startup retry policy is untouched.
+
+Validation: 73 native tests and strict all-target clippy pass. Eight added
+regression functions cover >100 freshness/interest/reconnect, sparse/invalid
+quotes, unmappable rows and malformed identities, stop steps and pacing.
+Independent review found the missing-ID snapshot hole; fixed with both initial
+and already-loaded regressions, then re-reviewed PASS. A proposed 100-interest
+cap was withdrawn because TS's cap alone is not a production constraint.
+
+TS divergences are explicit: the gate adds only the exact documented expected
+TS mini subscription, never prices or Rust output. The private tape separately
+requires TS's rejected singleton market-maker batch attempt and the shared
+accepted submit. Request/signature/write-consumption checks remain active.
