@@ -765,3 +765,126 @@ fn malformed_selected_perpetual_numbers_still_reject_the_entire_market_snapshot(
         assert!(h.pending[0].url.ends_with("/markets"));
     }
 }
+
+#[test]
+fn json_book_arrays_apply_snapshot_and_every_delta_in_wire_order() {
+    let mut h = Harness::new();
+    h.command(Command::SubscribeOrderBook { symbol: BTC.into() });
+    let sent = h.sent().len();
+    depth(
+        &mut h,
+        r#"[
+        {"update_type":"s","seq_no":1,"inserts":[{"side":"BUY","price":"100","size":"1"}],"updates":[],"deletes":[]},
+        {"update_type":"d","seq_no":2,"inserts":[],"updates":[{"side":"BUY","price":"100","size":"2"}],"deletes":[]},
+        {"update_type":"d","seq_no":3,"inserts":[{"side":"SELL","price":"101","size":"3"}],"updates":[{"side":"BUY","price":"100","size":"4"}],"deletes":[]}
+    ]"#,
+    );
+    assert_eq!(h.e.book(BTC).unwrap().bids(), [(100., 4.)]);
+    assert_eq!(h.e.book(BTC).unwrap().asks(), [(101., 3.)]);
+    depth(
+        &mut h,
+        r#"{"update_type":"d","seq_no":4,"inserts":[],"updates":[{"side":"BUY","price":"100","size":"5"}],"deletes":[]}"#,
+    );
+    assert_eq!(h.e.book(BTC).unwrap().bids(), [(100., 5.)]);
+    assert_eq!(h.sent().len(), sent);
+}
+
+#[test]
+fn malformed_json_book_array_does_not_partially_apply_or_advance_sequence() {
+    let mut h = Harness::new();
+    h.command(Command::SubscribeOrderBook { symbol: BTC.into() });
+    depth(
+        &mut h,
+        r#"{"update_type":"s","seq_no":10,"inserts":[{"side":"BUY","price":"100","size":"1"}],"updates":[],"deletes":[]}"#,
+    );
+    depth(
+        &mut h,
+        r#"[
+        {"update_type":"d","seq_no":11,"inserts":[],"updates":[{"side":"BUY","price":"100","size":"2"}],"deletes":[]},
+        {"update_type":"d","seq_no":12,"inserts":[],"updates":[{"side":"BUY","price":"100","size":"invalid"}],"deletes":[]}
+    ]"#,
+    );
+    assert_eq!(h.e.book(BTC).unwrap().bids(), [(100., 1.)]);
+    let sent = h.sent().len();
+    depth(
+        &mut h,
+        r#"{"update_type":"d","seq_no":11,"inserts":[],"updates":[{"side":"BUY","price":"100","size":"3"}],"deletes":[]}"#,
+    );
+    assert_eq!(h.e.book(BTC).unwrap().bids(), [(100., 3.)]);
+    assert_eq!(h.sent().len(), sent);
+}
+
+#[test]
+fn json_book_array_gap_waits_for_snapshot_before_later_deltas() {
+    let mut h = Harness::new();
+    h.command(Command::SubscribeOrderBook { symbol: BTC.into() });
+    depth(
+        &mut h,
+        r#"{"update_type":"s","seq_no":10,"inserts":[{"side":"BUY","price":"100","size":"1"}],"updates":[],"deletes":[]}"#,
+    );
+    let sent = h.sent().len();
+    depth(
+        &mut h,
+        r#"[
+        {"update_type":"d","seq_no":12,"inserts":[],"updates":[{"side":"BUY","price":"100","size":"2"}],"deletes":[]},
+        {"update_type":"d","seq_no":13,"inserts":[],"updates":[{"side":"BUY","price":"100","size":"3"}],"deletes":[]}
+    ]"#,
+    );
+    assert!(h.e.book(BTC).unwrap().is_empty());
+    assert_eq!(h.sent().len(), sent + 2);
+    depth(
+        &mut h,
+        r#"[
+        {"update_type":"s","seq_no":9,"inserts":[{"side":"BUY","price":"99","size":"9"}],"updates":[],"deletes":[]},
+        {"update_type":"s","seq_no":10,"inserts":[{"side":"BUY","price":"100","size":"4"}],"updates":[],"deletes":[]},
+        {"update_type":"d","seq_no":11,"inserts":[],"updates":[{"side":"BUY","price":"100","size":"5"}],"deletes":[]}
+    ]"#,
+    );
+    assert_eq!(h.e.book(BTC).unwrap().bids(), [(100., 5.)]);
+    assert_eq!(h.sent().len(), sent + 2);
+}
+
+#[test]
+fn polls_cannot_rewind_a_bucket_or_quantity_known_before_the_request_started() {
+    fn emitted(h: &mut Harness) -> Option<[f64; 6]> {
+        let frame = h.e.take_market_frame(h.now)?;
+        safe_cex_engine::wire::sections(frame).find_map(|(kind, payload)| {
+            if kind != safe_cex_engine::wire::section::CANDLES {
+                return None;
+            }
+            assert_eq!(u32::from_le_bytes(payload[..4].try_into().unwrap()), 1);
+            let row = &payload[payload.len() - 48..];
+            Some(std::array::from_fn(|i| {
+                f64::from_le_bytes(row[i * 8..i * 8 + 8].try_into().unwrap())
+            }))
+        })
+    }
+    let mut h = Harness::new();
+    let bucket = (h.now / 60_000.).floor() * 60_000.;
+    h.command(Command::SubscribeCandles {
+        symbol: BTC.into(),
+        interval: "1m".into(),
+    });
+    h.reply("klines", r#"{"results":[]}"#);
+    let _ = h.e.take_market_frame(h.now);
+    h.ws(&format!(r#"{{"jsonrpc":"2.0","method":"subscription","params":{{"channel":"trades.BTC-USD-PERP","data":{{"price":"100","size":"2","created_at":{}}}}}}}"#, h.now));
+    assert_eq!(emitted(&mut h), Some([bucket, 100., 100., 100., 100., 2.]));
+    for (timestamp, price, volume, expected) in [
+        (bucket - 60_000., 90., 99., None),
+        (bucket, 90., 1., None),
+        (bucket, 101., 3., Some([bucket, 101., 101., 101., 101., 3.])),
+        (
+            bucket + 60_000.,
+            120.,
+            1.,
+            Some([bucket + 60_000., 120., 120., 120., 120., 1.]),
+        ),
+    ] {
+        h.timer(h.now + 3_000.);
+        h.reply(
+            "klines",
+            &format!(r#"{{"results":[[{timestamp},{price},{price},{price},{price},{volume}]]}}"#),
+        );
+        assert_eq!(emitted(&mut h), expected);
+    }
+}

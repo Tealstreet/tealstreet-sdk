@@ -775,13 +775,19 @@ export class ParadexPublicWebSocket extends BaseWebSocket<ParadexExchange> {
         if (candles.length > 0 && revision === (this.ohlcvRevisions.get(pollKey) || 0)) {
           const latestCandle = candles[candles.length - 1];
           const previousCandle = this.lastCandleCache.get(pollKey);
+          // REST can lag a trade that was already present before this poll began.
+          const advances = !previousCandle || latestCandle.timestamp > previousCandle.timestamp || (
+            latestCandle.timestamp === previousCandle.timestamp && latestCandle.volume >= previousCandle.volume
+          );
 
           // Only emit if the candle has changed
           if (
-            !previousCandle ||
-            previousCandle.timestamp !== latestCandle.timestamp ||
-            previousCandle.close !== latestCandle.close ||
-            previousCandle.volume !== latestCandle.volume
+            advances && (
+              !previousCandle ||
+              previousCandle.timestamp !== latestCandle.timestamp ||
+              previousCandle.close !== latestCandle.close ||
+              previousCandle.volume !== latestCandle.volume
+            )
           ) {
             this.lastCandleCache.set(pollKey, latestCandle);
             this.ohlcvCallbacks.get(pollKey)?.forEach((activeCallback) => activeCallback(latestCandle));

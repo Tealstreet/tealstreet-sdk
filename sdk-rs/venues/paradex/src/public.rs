@@ -358,10 +358,10 @@ impl Paradex {
                 }
             }
             "order_book" => {
-                if let Ok(rows) = serde_json::from_str::<Many<Depth<'_>>>(params.data.get())
-                    && let Some(row) = rows.rows().into_iter().next()
-                {
-                    self.public_depth(cx, symbol, row);
+                if let Ok(rows) = serde_json::from_str::<Many<Depth<'_>>>(params.data.get()) {
+                    for row in rows.rows() {
+                        self.public_depth(cx, symbol, row);
+                    }
                 }
             }
             _ => {}
@@ -975,6 +975,10 @@ impl Paradex {
                 };
                 if state.revision == revision
                     && let Some(c) = rows.last().copied()
+                    && state.last.is_none_or(|old| {
+                        c.timestamp > old.timestamp
+                            || (c.timestamp == old.timestamp && c.volume >= old.volume)
+                    })
                     && state.last.is_none_or(|old| {
                         old.timestamp != c.timestamp
                             || old.close != c.close

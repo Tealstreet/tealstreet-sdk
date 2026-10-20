@@ -313,6 +313,10 @@ liveness during idle periods. The stale-message watchdog reconnects after 90 sec
 - Uses documented `/markets/klines` for 1m through 1h; wider intervals temporarily retain the public `/tradingview/history` compatibility route
 - Polls every 3 seconds (`paradex.ws-public.ts:578`)
 - Between polls, `updateOHLCVFromTrade()` constructs/updates candles from trade feed
+- Poll replies cannot replace a newer candle bucket or decrease its known volume.
+  A revision fence also retains trades received while a poll was in flight.
+  The REST candle has no observation timestamp, so equal-bucket, equal-volume
+  replies cannot prove whether their close is newer than a cached trade.
 - Only emits callback when candle data actually changes
 - `pollKey` format: `"{symbol}:{interval}"` used to track active subscriptions
 - Cleanup function stops polling, clears callbacks, clears cache

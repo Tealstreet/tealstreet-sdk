@@ -33,3 +33,36 @@ it('retains newer trade candles when an old poll or an older trade bucket arrive
   stop();
   exchange.dispose();
 });
+
+it('rejects older buckets and decreased quantity from polls started after the latest trade', async () => {
+  vi.useFakeTimers();
+  const now = 1_710_000_120_000;
+  vi.setSystemTime(now);
+  const exchange = new ParadexExchange('paradex', { key: '', secret: '', publicDataOnly: true }, new DefaultStore());
+  const row = (timestamp: number, close: number, volume: number): Candle => ({ timestamp, open: close, high: close, low: close, close, volume });
+  const fetch = vi.spyOn(exchange, 'fetchOHLCV')
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([row(now - 60_000, 90, 99)])
+    .mockResolvedValueOnce([row(now, 90, 1)])
+    .mockResolvedValueOnce([row(now, 101, 3)])
+    .mockResolvedValueOnce([row(now + 60_000, 120, 1)]);
+  const candles: Candle[] = [];
+  const stop = exchange.publicWebsocket.listenOHLCV({ symbol: 'BTC-USD-PERP', interval: '1m' }, (candle) => candles.push(candle));
+  await Promise.resolve();
+  exchange.publicWebsocket.onMessage({ data: JSON.stringify({
+    jsonrpc: '2.0', method: 'subscription', params: { channel: 'trades.BTC-USD-PERP',
+      data: { market: 'BTC-USD-PERP', price: '100', size: '2', created_at: now } },
+  }) } as MessageEvent);
+  expect(candles).toEqual([row(now, 100, 2)]);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(candles).toEqual([row(now, 100, 2)]);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(candles).toEqual([row(now, 100, 2)]);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(candles).toEqual([row(now, 100, 2), row(now, 101, 3)]);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(candles).toEqual([row(now, 100, 2), row(now, 101, 3), row(now + 60_000, 120, 1)]);
+  expect(fetch).toHaveBeenCalledTimes(5);
+  stop();
+  exchange.dispose();
+});
