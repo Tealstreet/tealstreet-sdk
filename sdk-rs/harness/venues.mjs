@@ -17,6 +17,7 @@ import {
   validateApexRequest,
 } from './apexomni-protocol.mjs';
 import { createRequire } from 'node:module';
+import { createBinanceSpotSocketAudit, prepareBinanceSpot, spotSocketRequest, spotSocketResponse, validateBinanceRequest, binanceSubscriptionMessage, binanceTickerSymbols } from './binance-protocol.mjs';
 import { parseRequestJson } from './request-json.mjs';
 import { kucoin } from './kucoin.mjs';
 import { breakoutprop } from './breakoutprop-requests.mjs';
@@ -1637,18 +1638,38 @@ export const VENUES = {
       }
     },
   },
-  binance: {
-    rust: 'binance',
+  ...Object.fromEntries([
+    ['binance', 'BinanceExchange'], ['binancepm', 'BinancePMExchange'],
+    ['binanceinverse', 'BinanceInverseExchange'], ['binancespot', 'BinanceSpotExchange'],
+  ].map(([name, className]) => [name, {
+    rust: name,
     requestKey: typedRequest,
-    ts: { module: `${root}/binance/binance.exchange.ts`, className: 'BinanceExchange', name: 'binance' },
-    /** Depth topics are registered once each book subscription reaches the socket. */
+    validateRequest: validateBinanceRequest,
+    subscriptionMessage: binanceSubscriptionMessage,
+    recordTickerSymbols: binanceTickerSymbols,
+    ts: { module: `${root}/binance/${name}.exchange.ts`, className, name },
     tsBooksSubscribed: (exchange, count) =>
-      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >=
-      count,
-    privateSocket: '/private/ws',
+      Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('depthUpdate.')).length >= count,
+    privateSocket: name === 'binancespot' ? '/ws-api/v3' : name === 'binancepm' ? '/pm/ws' : name === 'binanceinverse' ? '/ws/' : '/private/ws',
     volatileBodyFields: true,
+    ...(name === 'binanceinverse' ? { coinNativeAmounts: true } : {}),
+    ...(name === 'binancespot' ? {
+      compareFillPrices: true,
+      compareCoins: true,
+      compareBalanceCurrencies: true,
+      // Wire currencies carry native numeric balances, without TS's opaque info.
+      tsBalanceCurrencies: (currencies) => Object.fromEntries(Object.entries(currencies).map(([asset, row]) =>
+        [asset, { free: row.free, used: row.used, total: row.total, upnl: row.upnl }])),
+    } : {}),
     isWrite: (method, url) => method !== 'GET' && !new URL(url).pathname.endsWith('/listenKey'),
-  },
+    ...(name === 'binancespot' ? {
+      bootstrapPrivateFromTape: true,
+      socketRequest: spotSocketRequest,
+      socketResponse: spotSocketResponse,
+      createSocketAudit: createBinanceSpotSocketAudit,
+      prepareTs: prepareBinanceSpot,
+    } : {}),
+  }])),
   polymarket,
   kucoin: {
     ...kucoin,
