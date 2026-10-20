@@ -632,3 +632,50 @@ Prior headfb4563a52b reached complete green CI before WOO landed. Publish this
 reviewed head and require all new-head checks green, including all32 replay
 gates and four Bitget ledger/trailing integrations across14venue jobs, before
 merging PR1312 into feat/rust-rewrite and cutting the follow-up branch.
+
+### Lighter landing integration plan
+
+Landing31ec401f60 adds Lighter (#1319) while WOO-integrated36623d933c CI
+starts. Resolve feature/CI/build/venue and harness conflicts through disjoint
+workers, then independent cross-review. Preserve Lighter native signing and
+replay initialization/body/matched-response validation, WOO connected audits,
+KuCoin signed headers in both response call signatures, exact token/ordinal
+welcomes, seven independent read contracts and all prior native hydration fixes.
+Cargo.lock takes the incoming lock plus KuCoin's exact package/host dependency,
+without dependency version changes. No new common engine option requires a
+KuCoin adaptation.
+
+Verify workspace fmt/bans/native+Wasm clippy/tests, full harness, combined actual
+Wasm/host-wire and root typecheck/lint. Repeat required KuCoin/Binance gates plus
+Lighter public/private using its native ETH/BTC book names. Keep the unchanged
+1,258,291-byte per-venue budget and all performance/correctness assertions.
+Commit reviews/results and push, then require all final-commit CI checks across
+15 venue jobs (34 public/private gates plus four Bitget integrations), merge
+PR1312 into feat/rust-rewrite and create the follow-up branch.
+
+### Fifteen-venue Lighter integration checkpoint
+
+All six required/compatibility replays pass: KuCoin, Binance and Lighter
+public/private. Public three-run medians TS/Rust:
+
+| Venue | CPU ms | Steady CPU ms | Retained MB | Bundle bytes |
+| --- | ---: | ---: | ---: | ---: |
+| KuCoin | 933.3 / 689.7 | 696.8 / 423.0 | 7.0 / 3.2 | 745,857 |
+| Binance | 211.9 / 105.2 | 118.5 / 40.5 | 4.2 / 2.2 | 752,597 |
+| Lighter | 694.8 / 448.4 | 428.7 / 271.9 | 3.0 / 1.8 | 964,467 |
+
+All exact output/request/write/signature/socket audits and the fixed
+1,258,291-byte limit remain enabled. KuCoin covers16,157publicframes/692markets/
+two books and32privateframes/17commands. No retry was needed in this run.
+
+Final workspace1,183 tests (98 KuCoin), fmt/bans/native+Wasm clippy, harness197,
+complete combined actualWasm38 (including Lighter/BloFin/Bitrue boundaries),
+host/wire35 and root typecheck44/lint28 pass. Independent harness/signing and
+host/SDK/lockfile cross-reviews pass, no outstanding P1/P2. Cargo.lock adds only
+the expected Lighter package/dependency relative to our previous parent; versions
+and sources remain unchanged. All R1–R12 repairs, main-native hydration, WOO
+audits and KuCoin slippage preflight remain intact.
+
+Publish this checkpoint with reviews/results on PR1312, require all final-commit
+CI checks green across15venue jobs (34replay gates plus4Bitget native-contract
+integrations), then merge into feat/rust-rewrite and create the follow-up branch.

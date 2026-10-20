@@ -16,11 +16,12 @@
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
+    feature = "lighter",
     feature = "okx",
     feature = "kucoin"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kucoin, okx, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, kucoin, lighter, okx, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -47,6 +48,8 @@ use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
 #[cfg(feature = "kucoin")]
 use safe_cex_venue_kucoin::{Kucoin, Options as KucoinOptions};
+#[cfg(feature = "lighter")]
+use safe_cex_venue_lighter::{Lighter, Options as LighterOptions};
 #[cfg(feature = "mexc")]
 use safe_cex_venue_mexc::{MexcFutures, Options as MexcOptions};
 #[cfg(feature = "okx")]
@@ -113,12 +116,23 @@ struct KucoinExtra {
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
+    feature = "lighter",
     feature = "okx",
     feature = "kucoin"
 ))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[cfg(feature = "lighter")]
+    #[serde(default)]
+    api_key_index: Option<String>,
+    #[cfg(feature = "lighter")]
+    #[serde(default)]
+    #[serde(deserialize_with = "optional_lighter_index")]
+    lighter_integrator_account_index: Option<u64>,
+    #[cfg(feature = "lighter")]
+    #[serde(default)]
+    lighter_stop_slippage_pct: Option<f64>,
     #[cfg(any(
         feature = "binance",
         feature = "blofin",
@@ -126,6 +140,7 @@ struct EngineOptions {
         feature = "woo",
         feature = "cryptocom",
         feature = "hyperliquid",
+        feature = "lighter",
         feature = "bitget",
         feature = "okx",
         feature = "kucoin"
@@ -150,7 +165,7 @@ struct EngineOptions {
     ))]
     #[serde(default)]
     passphrase: Option<String>,
-    #[cfg(any(feature = "hyperliquid", feature = "woo"))]
+    #[cfg(any(feature = "hyperliquid", feature = "lighter", feature = "woo"))]
     #[serde(default)]
     application_id: Option<String>,
     #[cfg(feature = "hyperliquid")]
@@ -175,6 +190,22 @@ struct EngineOptions {
 struct HyperliquidBuilder {
     address: String,
     fee_tenths_bps: u32,
+}
+
+#[cfg(feature = "lighter")]
+fn optional_lighter_index<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Index {
+        Number(u64),
+        Text(String),
+    }
+    Option::<Index>::deserialize(d)?
+        .map(|index| match index {
+            Index::Number(n) => Ok(n),
+            Index::Text(s) => s.parse::<u64>().map_err(serde::de::Error::custom),
+        })
+        .transpose()
 }
 
 #[derive(Serialize)]
@@ -599,6 +630,7 @@ impl WasmEngine {
         feature = "backpack",
         feature = "weex",
         feature = "hyperliquid",
+        feature = "lighter",
         feature = "okx",
         feature = "kucoin"
     ))]
@@ -613,6 +645,17 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "lighter")]
+            "lighter" => Box::new(Engine::new(Lighter::new(LighterOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                application_id: options.application_id,
+                api_key_index: options.api_key_index,
+                integrator_account_index: options.lighter_integrator_account_index,
+                stop_slippage_pct: options.lighter_stop_slippage_pct.unwrap_or(1.0),
+            }))),
             #[cfg(feature = "bitrue")]
             "bitrue" => Box::new(Engine::new(Bitrue::new(BitrueOptions {
                 public_data_only: options.public_data_only,

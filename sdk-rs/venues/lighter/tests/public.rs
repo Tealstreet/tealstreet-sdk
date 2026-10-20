@@ -1,0 +1,357 @@
+// Payloads follow https://apidocs.lighter.xyz/docs/websocket-reference.
+use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId};
+use safe_cex_venue_lighter::{Lighter, Options};
+const MARKETS: &str = r#"{"code":200,"order_book_details":[{"market_id":0,"symbol":"ETH","status":"active","market_type":"perp","supported_size_decimals":4,"supported_price_decimals":2,"min_base_amount":"0.001","min_quote_amount":"10","min_initial_margin_fraction":"200"},{"market_id":1,"symbol":"BTC","status":"active","supported_size_decimals":5,"supported_price_decimals":1,"min_initial_margin_fraction":"100"},{"market_id":2048,"symbol":"ETH/USDC","status":"active","market_type":"spot"}]}"#;
+fn reply(e: &mut Engine<Lighter>, id: RequestId, body: &str) {
+    e.handle(
+        1_000.0,
+        Event::HttpResponse {
+            request: id,
+            response: Response {
+                status: 200,
+                headers: "",
+                body,
+            },
+        },
+    )
+}
+fn seeded() -> (Engine<Lighter>, SocketId) {
+    let mut e = Engine::new(Lighter::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(1_000.0);
+    let id = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r.id)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    reply(&mut e, id, MARKETS);
+    let socket = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::WsConnect { socket, .. } = a {
+                Some(socket)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(1_000.0, Event::WsOpened { socket });
+    e.drain_actions().for_each(drop);
+    (e, socket)
+}
+fn send(e: &mut Engine<Lighter>, s: SocketId, t: f64, text: &str) {
+    e.handle(t, Event::WsMessage { socket: s, text });
+}
+fn book(e: &mut Engine<Lighter>) {
+    e.handle(
+        1_000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "ETH".into(),
+        }),
+    );
+}
+#[test]
+fn streamed_metadata_filters_spot_and_preserves_precision() {
+    let (e, _) = seeded();
+    assert_eq!(e.store().markets().len(), 2);
+    let m = e.store().market("ETH").unwrap();
+    assert_eq!(m.base, "ETH");
+    assert_eq!(m.quote, "USDC");
+    assert_eq!(m.precision.amount, 0.0001);
+    assert_eq!(m.limits.leverage.max, 50.0);
+    assert!(e.store().loaded().markets);
+}
+#[test]
+fn keyed_stats_bbo_optional_updates_and_funding_units() {
+    let (mut e, s) = seeded();
+    send(
+        &mut e,
+        s,
+        2_000.0,
+        r#"{"type":"update/market_stats","channel":"market_stats:all","market_stats":{"0":{"market_id":0,"mark_price":"2000","index_price":"2001","current_funding_rate":"0.0012","funding_rate":"0.0008","daily_price_change":40.52,"daily_base_token_volume":10,"daily_quote_token_volume":20000}}}"#,
+    );
+    let t = e.store().ticker("ETH").unwrap();
+    assert_eq!(t.mark, 2000.0);
+    assert_eq!(t.funding_rate, 0.0001);
+    assert_eq!(t.percentage, 40.52);
+    send(
+        &mut e,
+        s,
+        3_000.0,
+        r#"{"type":"update/ticker","channel":"ticker:0","ticker":{"s":"ETH","a":{"price":"2002","size":"1"},"b":{"price":"2000","size":"2"}}}"#,
+    );
+    let t = e.store().ticker("ETH").unwrap();
+    assert_eq!((t.bid, t.ask, t.mark), (2000.0, 2002.0, 2000.0));
+    send(
+        &mut e,
+        s,
+        4_000.0,
+        r#"{"channel":"ticker:0","ticker":{"index_price":"2100"}}"#,
+    );
+    assert_eq!(e.store().ticker("ETH").unwrap().mark, 2100.0);
+}
+#[test]
+fn book_nonce_chain_ignores_offsets_and_rejects_gap() {
+    let (mut e, s) = seeded();
+    book(&mut e);
+    e.drain_actions().for_each(drop);
+    send(
+        &mut e,
+        s,
+        2_000.0,
+        r#"{"channel":"order_book:0","type":"subscribed/order_book","offset":500,"order_book":{"nonce":10,"bids":[{"price":"100","size":"1"},{"price":"100","size":"2"}],"asks":[{"price":"102","size":"3"}]}}"#,
+    );
+    assert_eq!(e.book("ETH").unwrap().bids(), [(100.0, 3.0)]);
+    send(
+        &mut e,
+        s,
+        3_000.0,
+        r#"{"channel":"order_book:0","type":"update/order_book","offset":9000,"order_book":{"begin_nonce":10,"nonce":20,"bids":[{"price":"100","size":"0"},{"price":"99","size":"5"}]}}"#,
+    );
+    assert_eq!(e.book("ETH").unwrap().bids(), [(99.0, 5.0)]);
+    send(
+        &mut e,
+        s,
+        4_000.0,
+        r#"{"channel":"order_book:0","type":"update/order_book","order_book":{"begin_nonce":9,"nonce":21,"bids":[{"price":"98","size":"5"}]}}"#,
+    );
+    assert!(e.book("ETH").unwrap().is_empty());
+    assert_eq!(
+        e.drain_actions()
+            .filter(|a| matches!(a, Action::WsSend { .. }))
+            .count(),
+        2
+    );
+}
+#[test]
+fn rest_book_seed_cannot_replace_newer_ws_and_depth_is_not_truncated() {
+    let (mut e, s) = seeded();
+    book(&mut e);
+    let request = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r.id)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let bids = (1..=200)
+        .map(|n| format!(r#"{{"price":"{n}","size":"1"}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    send(
+        &mut e,
+        s,
+        2_000.0,
+        &format!(
+            r#"{{"channel":"order_book:0","type":"subscribed/order_book","order_book":{{"nonce":10,"bids":[{bids}],"asks":[]}}}}"#
+        ),
+    );
+    reply(
+        &mut e,
+        request,
+        r#"{"code":200,"bids":[{"price":"1","remaining_base_amount":"20"}],"asks":[]}"#,
+    );
+    assert_eq!(e.book("ETH").unwrap().bids().len(), 200);
+    assert_eq!(e.book("ETH").unwrap().bids()[0], (200.0, 1.0));
+}
+#[test]
+fn candle_ms_seconds_ordering_and_invalid_interval() {
+    let (mut e, s) = seeded();
+    e.handle(
+        1_000.0,
+        Event::Command(Command::SubscribeCandles {
+            symbol: "ETH".into(),
+            interval: "1m".into(),
+        }),
+    );
+    e.drain_actions().for_each(drop);
+    send(
+        &mut e,
+        s,
+        2_000.0,
+        r#"{"channel":"candle:0:1m","type":"update/candle","candles":[{"t":1700000040000,"o":10,"h":12,"l":9,"c":11,"v":2}]}"#,
+    );
+    assert!(e.take_frame(2_000.0).is_some());
+    e.handle(
+        2_000.0,
+        Event::Command(Command::FetchCandles {
+            command: 7,
+            symbol: "ETH".into(),
+            interval: "3m".into(),
+            limit: None,
+            from_ms: None,
+            to_ms: None,
+        }),
+    );
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(safe_cex_engine::Notice::CommandDone {
+            command: 7,
+            result: Err(_)
+        })
+    )));
+}
+#[test]
+fn watchdog_reconnects_silent_socket_and_rejects_old_socket() {
+    let mut e = Engine::new(Lighter::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(1_000.0);
+    let id = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r.id)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    reply(&mut e, id, MARKETS);
+    let actions: Vec<_> = e.drain_actions().collect();
+    let socket = actions
+        .iter()
+        .find_map(|a| {
+            if let Action::WsConnect { socket, .. } = a {
+                Some(*socket)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    let timer = actions
+        .iter()
+        .find_map(|a| {
+            if let Action::SetTimer { timer, at_ms } = a {
+                (*at_ms == 11_000.0).then_some(*timer)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(1_000.0, Event::WsOpened { socket });
+    e.drain_actions().for_each(drop);
+    e.handle(122_000.0, Event::TimerFired { timer });
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a,Action::WsClose{socket:s}if *s==socket))
+    );
+    send(
+        &mut e,
+        socket,
+        123_000.0,
+        r#"{"channel":"ticker:0","ticker":{"mark_price":"999"}}"#,
+    );
+    assert_eq!(e.store().ticker("ETH").unwrap().mark, 0.0);
+}
+#[test]
+fn metadata_failure_falls_back_but_invalid_success_never_clears() {
+    let mut e = Engine::new(Lighter::new(Options::default()));
+    e.start(1_000.0);
+    let id = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r.id)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    reply(&mut e, id, r#"{"code":404,"message":"unsupported"}"#);
+    assert!(
+        e.drain_actions()
+            .any(|a| matches!(a,Action::Http(r)if r.url.ends_with("orderBooks")))
+    );
+}
+
+#[test]
+fn subscription_can_be_cancelled_before_markets_arrive() {
+    let mut e = Engine::new(Lighter::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(1000.0);
+    let request = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r.id)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    e.handle(
+        1000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "ETH".into(),
+        }),
+    );
+    e.handle(
+        1001.0,
+        Event::Command(Command::UnsubscribeOrderBook {
+            symbol: "ETH".into(),
+        }),
+    );
+    reply(&mut e, request, MARKETS);
+    assert!(e.book("ETH").is_none());
+}
+
+#[test]
+fn rest_book_cannot_establish_websocket_nonce_continuity() {
+    let (mut e, s) = seeded();
+    book(&mut e);
+    let request = e
+        .drain_actions()
+        .find_map(|a| {
+            if let Action::Http(r) = a {
+                Some(r.id)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    reply(
+        &mut e,
+        request,
+        r#"{"code":200,"bids":[{"price":"100","remaining_base_amount":"2"}],"asks":[]}"#,
+    );
+    assert_eq!(e.book("ETH").unwrap().bids(), [(100.0, 2.0)]);
+    send(
+        &mut e,
+        s,
+        2_000.0,
+        r#"{"channel":"order_book:0","type":"update/order_book","order_book":{"begin_nonce":10,"nonce":11,"bids":[{"price":"99","size":"1"}],"asks":[]}}"#,
+    );
+    assert!(e.book("ETH").unwrap().is_empty());
+}
+
+#[test]
+fn empty_quotes_and_bad_market_rows_do_not_drop_other_market_statistics() {
+    let (mut e, s) = seeded();
+    send(
+        &mut e,
+        s,
+        2_000.0,
+        r#"{"channel":"market_stats:all","type":"subscribed/market_stats","market_stats":{"0":{"market_id":0,"mark_price":"100","best_bid_price":"","best_ask_price":""},"1":{"market_id":1,"mark_price":"200","current_funding_rate":"0.0012"},"bad":{"market_id":999,"mark_price":{}}}}"#,
+    );
+    assert_eq!(e.store().ticker("ETH").unwrap().mark, 100.0);
+    assert_eq!(e.store().ticker("BTC").unwrap().mark, 200.0);
+    assert_eq!(e.store().ticker("BTC").unwrap().funding_rate, 0.0001);
+}

@@ -63,6 +63,7 @@ export const callerIdsOf = (records) => {
 };
 
 const normalize = (value, callerIds, root = true, options = {}) => {
+  if (typeof value === 'bigint') return JSON.rawJSON(String(value));
   if (JSON.isRawJSON(value)) return value;
   if (Array.isArray(value)) return value.map((item) => normalize(item, callerIds, false, options));
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()
@@ -97,12 +98,22 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
   const prefix = `${method.toUpperCase()} ${canonicalUrl(options.requestUrl?.(url, method) ?? url, callerIds, options)}`;
   if (body == null || body === '') return prefix;
   if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
-  if (body instanceof URLSearchParams) return `${prefix} ${canonicalParams(body, callerIds)}`;
+  if (body instanceof URLSearchParams) {
+    if (!options.requestBody) return `${prefix} ${canonicalParams(body, callerIds)}`;
+    body = Object.fromEntries(body);
+  }
   let parsed;
   try { parsed = typeof body === 'string' ? parseJson(body) : body; }
   catch {
-    return `${prefix} ${typeof body === 'string' && body.includes('=')
-      ? canonicalParams(new URLSearchParams(body), callerIds) : body}`;
+    if (typeof body === 'string' && body.includes('=')) {
+      const form = new URLSearchParams(body);
+      if (options.requestBody) {
+        const transformed = options.requestBody(Object.fromEntries(form), { method, url, callerIds });
+        return `${prefix} ${JSON.stringify(normalize(transformed, callerIds))}`;
+      }
+      return `${prefix} ${canonicalParams(form, callerIds)}`;
+    }
+    return `${prefix} ${body}`;
   }
   parsed = options.requestBody?.(parsed, { method, url, callerIds }) ?? parsed;
   return `${prefix} ${JSON.stringify(normalize(parsed, callerIds, true, options.ignoreGeneratedBodyId
@@ -114,6 +125,7 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
   try { message = typeof text === 'string' ? JSON.parse(text) : text; }
   catch { return `WS ${canonicalUrl(url, callerIds, options)} ${text}`; }
+  message = options.subscriptionMessage?.(message) ?? message;
   const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.type ?? message?.event ?? '').toLowerCase();
   if (options.bitrueProtocol) {
     if (message?.ping !== undefined || message?.pong !== undefined) return undefined;
