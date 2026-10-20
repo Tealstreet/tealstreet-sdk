@@ -718,6 +718,30 @@ fn hyro_streamed_venue_refusal_is_transient_but_repeated_failures_reconnect() {
     );
 }
 
+/// Every closed socket is a public one the supervisor dropped for idling (code 4000):
+/// the harness feeds no public traffic, so those closes are expected.
+fn only_public_idle_closes(h: &Harness) {
+    for closed in &h.closed {
+        let url = &h.sockets.iter().find(|(s, _)| s == closed).unwrap().1;
+        assert!(url.contains("/v5/public"), "unexpected close of {url}");
+    }
+    let closes = h
+        .logs
+        .iter()
+        .filter(|m| m.contains("Bybit socket closed"))
+        .count();
+    let idle = h
+        .logs
+        .iter()
+        .filter(|m| m.contains("Bybit socket closed (4000)"))
+        .count();
+    assert_eq!(
+        closes, idle,
+        "a close other than the idle timeout: {:?}",
+        h.logs
+    );
+}
+
 #[test]
 fn hyro_steady_stream_frames_never_turn_reconciliation_into_a_reconnect_loop() {
     let mut h = startup(Variant::Hyrotrader);
@@ -735,7 +759,12 @@ fn hyro_steady_stream_frames_never_turn_reconciliation_into_a_reconnect_loop() {
             h.respond("/v5/account/wallet-balance", 200, &richer);
         }
     }
-    assert!(h.closed.is_empty(), "steady frames forced a reconnect");
+    // The harness feeds no public traffic, so only the private stream is in question.
+    assert!(
+        !h.closed.contains(&socket),
+        "steady frames forced a reconnect"
+    );
+    only_public_idle_closes(&h);
     assert_eq!(h.socket("/v5/private"), Some(socket));
     assert!(
         h.engine.store().balance().total > 1000.0,
@@ -769,6 +798,7 @@ fn hyro_overtaken_but_successful_reads_reset_the_transient_streak() {
     let mut h = startup(Variant::Hyrotrader);
     handshake(&mut h);
     hyro_snapshot(&mut h);
+    let private = h.socket("/v5/private").unwrap();
     let refusal =
         r#"{"retCode":10006,"retMsg":"Too many visits!","result":{},"retExtInfo":{},"time":1}"#;
     for _ in 0..5 {
@@ -784,7 +814,8 @@ fn hyro_overtaken_but_successful_reads_reset_the_transient_streak() {
         h.requests.clear();
     }
     assert!(
-        h.closed.is_empty(),
+        !h.closed.contains(&private),
         "spaced-out transient blips accumulated into a reconnect"
     );
+    only_public_idle_closes(&h);
 }
