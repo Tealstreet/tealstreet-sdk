@@ -252,3 +252,17 @@ Reference-only TS for deleted families is inspected in
 | binancespot | 848.5 / 671.5 | 373.2 / 314.8 | 27.6 / 10.8 | 979150 |
 | binanceinverse | 227.0 / 91.8 | 149.1 / 53.3 | 13.9 / 1.9 | 979150 |
 | binancepm | 236.2 / 124.4 | 135.8 / 64.9 | 18.0 / 4.0 | 979150 |
+
+### Broker/cancellation integration
+
+- Landing PR #1347 (`9c34020741`) merged as `4677fc0ba7`. Four append conflicts
+  retained both documentation sections and both clamp/cancellation test groups.
+  Independent integration review PASS: attribution/cancel guards, probe waiting,
+  selected-leg/scalar effects and optional side/symbol plumbing all survive.
+- Fresh full native workspace: 2,860 tests pass. Workspace all-target clippy,
+  wasm32 clippy, bans and formatting pass. Root typecheck 44/44, lint 28/28 and
+  tests 27/27 pass; each SDK runner passes 7,772 tests in 526 files.
+- Release WASM and compiled-host/consumer checks are refreshing on the merged
+  tree, followed by canonical replays and all 30 size gates. The controlled
+  combined Bitget comparison now uses the new landing base `9c34020741` and
+  the integrated branch, with identical fixture, toolchain and release flags.
