@@ -104,6 +104,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Legacy DXtrade has no anonymous API; this public fixture is documented/scripted.
+          - venue: breakoutprop
+            books: BTCUSD,ETHUSD
+            private_script: rust:private-tape-breakoutprop
           - venue: apexomni
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-apexomni
@@ -122,6 +126,9 @@ jobs:
           - venue: orderly
             books: BTCUSDC,ETHUSDC
             private_script: rust:private-tape-orderly
+          - venue: coinbase
+            books: BTC-USD,ETH-USD
+            private_script: rust:private-tape-coinbase
           - venue: bitget
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-bitget
@@ -134,6 +141,9 @@ jobs:
           - venue: mexc
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-mexc
+          - venue: polymarket
+            books: xi-jinping-out-before-2027-Yes,will-gavin-newsom-win-the-2028-democratic-presidential-nomination-568-Yes
+            private_script: rust:private-tape-polymarket
           - venue: kucoin
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape-kucoin
@@ -152,6 +162,9 @@ jobs:
           - venue: weex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape:weex
+          - venue: grvt
+            books: BTC_USDT_PERP,ETH_USDT_PERP
+            private_script: rust:private-tape-grvt
           - venue: phemex
             books: BTCUSDT,ETHUSDT
             private_script: rust:private-tape:phemex
@@ -220,10 +233,13 @@ jobs:
       - name: Public data (correctness, CPU and memory)
         run: yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/fixtures/${{ matrix.venue }}-public.jsonl.gz --books '${{ matrix.books }}'
       - name: Account and trading (correctness)
-        if: matrix.venue != 'okx' && matrix.venue != 'orderly'
+        if: matrix.venue != 'okx' && matrix.venue != 'orderly' && matrix.venue != 'coinbase'
         run: |
           yarn ${{ matrix.private_script }}
           yarn rust:gate --venue ${{ matrix.venue }} --tape sdk-rs/harness/tapes/${{ matrix.venue }}-private.jsonl --runs 1 --books ''
+      - name: Breakout compiled account, startup and polling controls
+        if: matrix.venue == 'breakoutprop'
+        run: yarn rust:test-breakoutprop-parity
       - name: Aster V3 wallet auth, builder, STP and native query contracts
         if: matrix.venue == 'asterdex'
         run: |
@@ -273,4 +289,19 @@ jobs:
               yarn rust:private-tape-orderly --venue "$venue" "${extra[@]}"
               yarn rust:gate --venue "$venue" --tape "sdk-rs/harness/tapes/$venue$suffix-private.jsonl" --runs 1 --books ''
             done
+          done
+      - name: Coinbase product and CDP algorithm variants (correctness)
+        if: matrix.venue == 'coinbase'
+        run: |
+          for profile in intx cfm spot; do
+            for algorithm in ES256 EdDSA; do
+              tape="sdk-rs/harness/tapes/coinbase-$profile-$algorithm-private.jsonl"
+              yarn rust:private-tape-coinbase --venue coinbase --profile "$profile" --algorithm "$algorithm" --out "$tape"
+              yarn rust:gate --venue coinbase --tape "$tape" --runs 1 --books ''
+            done
+          done
+          for algorithm in ES256 EdDSA; do
+            tape="sdk-rs/harness/tapes/coinbasespot-spot-$algorithm-private.jsonl"
+            yarn rust:private-tape-coinbase --venue coinbasespot --profile spot --algorithm "$algorithm" --out "$tape"
+            yarn rust:gate --venue coinbasespot --tape "$tape" --runs 1 --books ''
           done

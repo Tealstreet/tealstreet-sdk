@@ -1,12 +1,12 @@
 import dayjs from 'dayjs';
 import { nanoid } from 'nanoid';
-import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
-import { Candle, OHLCVOptions, OrderBook, timeframeToSeconds } from '../../types';
+import { ENABLE_RECONNECTING_WEBSOCKET } from '../../../config/config';
+import { Candle, OHLCVOptions, OrderBook, timeframeToSeconds } from '../../../types';
 import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
-import { calcOrderBookTotal, sortOrderBook } from '../../utils/orderbook';
-import { add } from '../../utils/safe-math';
-import { updateOrderBook } from '../../utils/updateOrderBook';
-import { BaseWebSocket } from '../base.ws';
+import { calcOrderBookTotal, sortOrderBook } from '../../../utils/orderbook';
+import { add } from '../../../utils/safe-math';
+import { updateOrderBook } from '../../../utils/updateOrderBook';
+import { BaseWebSocket } from '../../../exchanges/base.ws';
 import type { CoinbaseExchange } from './coinbase.exchange';
 import { BASE_WS_URL, CANDLE_EVENT, LEVEL2_EVENT, TRADE_EVENT } from './coinbase.types';
 import { normalizeCoinbaseUsdEquivalentProductId } from './coinbase.utils';

@@ -51,7 +51,7 @@ export class Responses {
     }
     const stage = Math.max(...eligible.map((r) => r.afterCommand ?? 0));
     let current = eligible.filter((r) => (r.afterCommand ?? 0) === stage);
-    const timed = !write && queue.some((r) => r.after !== undefined || r.effectiveAt !== undefined || r.availableAfter !== undefined || r.availableAt !== undefined);
+    const timed = !write && current.some((r) => r.after !== undefined || r.effectiveAt !== undefined || r.availableAfter !== undefined || r.availableAt !== undefined);
     if (timed) {
       const after = Math.max(...current.map((r) => Math.max(r.after ?? 0, r.effectiveAt ?? 0, r.availableAfter ?? 0, r.availableAt ?? 0)));
       current = current.filter((r) => Math.max(r.after ?? 0, r.effectiveAt ?? 0, r.availableAfter ?? 0, r.availableAt ?? 0) === after);

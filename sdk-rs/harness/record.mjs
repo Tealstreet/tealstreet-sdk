@@ -10,6 +10,7 @@ import { EngineHost, nativeTransport } from '../hosts/wasm/js/host.mjs';
 import { loadEngine } from './engine.mjs';
 import { canonicalUrl } from './tape.mjs';
 import { configuredOptions, venueOf } from './venues.mjs';
+import { createRecordingPolicy, createRecordingTimeline, recordingReady } from './polling.mjs';
 import { Frame } from '../hosts/wasm/js/wire.mjs';
 
 const { values } = parseArgs({
@@ -18,17 +19,27 @@ const { values } = parseArgs({
     seconds: { type: 'string', default: '60' },
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
     out: { type: 'string' },
+    'options-env': { type: 'string' },
   },
 });
 const out = values.out ?? `sdk-rs/harness/tapes/${values.venue}.jsonl`;
 const venue = venueOf(values.venue);
+const credentialed = Boolean(values['options-env']);
+if (venue.recordSession && !credentialed) throw new Error('Session recording requires --options-env');
+const extraOptions = credentialed ? JSON.parse(process.env[values['options-env']] ?? 'null') : {};
+if (!extraOptions || typeof extraOptions !== 'object' || Array.isArray(extraOptions)) throw new Error('Recording options must be an object');
+const options = { ...configuredOptions(values.venue), ...venue.publicOptions, ...venue.recordOptions, publicDataOnly: true, ...extraOptions };
+const policy = createRecordingPolicy(venue, options, credentialed);
+const timeline = createRecordingTimeline(venue);
+let loaded = false, httpResponses = 0, windowStarted;
 mkdirSync(dirname(out), { recursive: true });
 const tape = createWriteStream(out);
 const started = Date.now();
 let capturing = true;
-const write = (record) => { if (capturing) tape.write(`${JSON.stringify({ t: Date.now() - started, ...record })}\n`); };
+const write = (record) => { if (capturing) tape.write(`${JSON.stringify(policy.sanitize(timeline({ t: Date.now() - started, ...record }, loaded)))}\n`); };
 
 write({ type: 'meta', epoch: started, private: false });
+if (policy.replayOptions || options.endpoints) write({ type: 'config', options: policy.replayOptions ?? options });
 
 const live = nativeTransport();
 const connections = new Map();
@@ -83,11 +94,11 @@ const recording = {
   },
   async request(request) {
     const response = await live.request(request);
-    const recorded = (body) => write({
+    const recorded = (body) => { httpResponses++; write({
       type: 'http', method: request.method, url: request.url,
       ...(request.body === undefined ? {} : { requestBody: request.body }),
       status: response.status, headers: response.headers ?? '', body,
-    });
+    }); };
     if (response.body instanceof Uint8Array) {
       recorded(new TextDecoder().decode(response.body));
       return response;
@@ -104,8 +115,6 @@ const recording = {
   },
 };
 
-const options = { ...configuredOptions(values.venue), ...venue.publicOptions, ...venue.recordOptions, publicDataOnly: true };
-if (options.endpoints) write({ type: 'config', options });
 const { WasmEngine } = await loadEngine(venue.rust, options);
 let frames = 0;
 let updates = 0;
@@ -119,9 +128,12 @@ const host = new EngineHost(
   {
     onFrame: (buffer) => {
       updates++;
-      for (const book of new Frame(buffer).books()) seenBooks.add(book.market);
+      const frame = new Frame(buffer);
+      loaded = Boolean(frame.status()?.loaded & 3) && ((frame.status()?.loaded & 3) === 3) || loaded;
+      if (loaded && windowStarted === undefined) windowStarted = Date.now();
+      for (const book of frame.books()) seenBooks.add(book.market);
     },
-    onLog: (level, message) => console.error(`[${level}] ${message}`),
+    onLog: policy.log,
   },
 );
 host.start();
@@ -129,13 +141,19 @@ for (const symbol of values.books.split(',').filter(Boolean)) {
   host.command({ op: 'subscribeOrderBook', symbol });
 }
 const flush = setInterval(() => host.flush(), 250);
-setTimeout(() => {
+const stop = () => {
   clearInterval(flush);
   host.flush();
   capturing = false;
   host.dispose();
   tape.end(() => {
     console.log(JSON.stringify({ out, seconds: Number(values.seconds), storeUpdates: updates, frames, books: seenBooks.size }));
-    process.exit(frames > 0 && seenBooks.size >= values.books.split(',').filter(Boolean).length ? 0 : 1);
+    process.exit(recordingReady(venue, { frames, httpResponses, loaded, books: seenBooks.size, requestedBooks: values.books.split(',').filter(Boolean).length }) ? 0 : 1);
   });
-}, Number(values.seconds) * 1000);
+};
+const duration = Number(values.seconds) * 1000;
+if (venue.recordAfterReady) {
+  const deadline = setInterval(() => {
+    if (windowStarted !== undefined && Date.now() - windowStarted >= duration || Date.now() - started >= 120_000 + duration) { clearInterval(deadline); stop(); }
+  }, 50);
+} else setTimeout(stop, duration);

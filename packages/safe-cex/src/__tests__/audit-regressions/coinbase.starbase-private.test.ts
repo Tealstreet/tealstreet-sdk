@@ -422,13 +422,13 @@ describe('Coinbase Starbase inert read-only private state', () => {
   it('remains absent from active Coinbase runtime, routing, and metadata imports', () => {
     const coinbaseDirectory = resolve(process.cwd(), 'src/exchanges/coinbase');
     const activeFiles = [
-      'coinbase.api.ts',
-      'coinbase.exchange.ts',
-      'coinbase.types.ts',
-      'coinbase.utils.ts',
-      'coinbase.ws-private.ts',
-      'coinbase.ws-public.ts',
-      'coinbasespot.exchange.ts',
+      '../../__tests__/reference/coinbase/coinbase.api.ts',
+      '../../__tests__/reference/coinbase/coinbase.exchange.ts',
+      '../../__tests__/reference/coinbase/coinbase.types.ts',
+      '../../__tests__/reference/coinbase/coinbase.utils.ts',
+      '../../__tests__/reference/coinbase/coinbase.ws-private.ts',
+      '../../__tests__/reference/coinbase/coinbase.ws-public.ts',
+      '../../__tests__/reference/coinbase/coinbasespot.exchange.ts',
     ];
     for (const file of activeFiles) {
       const source = readFileSync(resolve(coinbaseDirectory, file), 'utf8');

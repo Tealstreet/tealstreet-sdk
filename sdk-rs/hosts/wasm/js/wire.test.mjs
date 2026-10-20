@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 
 import { Frame, NONE, SECTION, TICKER_FIELDS, TickerState } from './wire.mjs';
 
@@ -230,15 +231,17 @@ test('position IDs survive transfer and legacy frames never read the next sectio
   assert.equal(legacy.status().loaded, 31);
 });
 
-function balanceFrame(coins, currencies) {
-  const currencyRows = Object.entries(currencies ?? {});
+function balanceFrame(coins, currencies, currencyMode) {
+  const currencyRows = Array.isArray(currencies)
+    ? currencies.map(({ currency, ...balance }) => [currency, balance]) : Object.entries(currencies ?? {});
   const strings = [...(coins?.map((c) => c.base) ?? []), ...currencyRows.map(([currency]) => currency)];
   const stringBuffer = stringFrame(strings).buffer;
   const count = coins?.length ?? 0;
   const at = (36 + count * 4 + 7) & ~7;
-  const coinLength = coins || currencies ? at + count * 16 : 32;
-  const currencyAt = (coinLength + 4 + currencyRows.length * 4 + 7) & ~7;
-  const length = currencies ? currencyAt + currencyRows.length * 32 : coinLength;
+  const tail = at + count * 16;
+  const currencyAt = (tail + 4 + currencyRows.length * 4 + 7) & ~7;
+  const currencyEnd = currencyAt + currencyRows.length * 32;
+  const length = currencies ? currencyEnd + (currencyMode === undefined ? 0 : 8) : coins ? tail : 32;
   const result = new ArrayBuffer(16 + 8 + length + stringBuffer.byteLength - 16);
   const view = new DataView(result);
   new Uint8Array(result).set(new Uint8Array(stringBuffer, 0, 16));
@@ -255,13 +258,17 @@ function balanceFrame(coins, currencies) {
     });
   }
   if (currencies) {
-    view.setUint32(24 + coinLength, currencyRows.length, true);
-    currencyRows.forEach(([, values], i) => {
-      view.setUint32(24 + coinLength + 4 + i * 4, count + i, true);
+    view.setUint32(24 + tail, currencyRows.length, true);
+    currencyRows.forEach(([, balance], i) => {
+      view.setUint32(24 + tail + 4 + i * 4, count + i, true);
       ['used', 'free', 'total', 'upnl'].forEach((field, column) => {
-        view.setFloat64(24 + currencyAt + column * currencyRows.length * 8 + i * 8, values[field], true);
+        view.setFloat64(24 + currencyAt + (column * currencyRows.length + i) * 8, balance[field], true);
       });
     });
+    if (currencyMode !== undefined) {
+      view.setUint32(24 + currencyEnd, 0x314d4342, true);
+      view.setUint32(24 + currencyEnd + 4, currencyMode, true);
+    }
   }
   new Uint8Array(result, 24 + length).set(new Uint8Array(stringBuffer, 16));
   return result;
@@ -275,6 +282,64 @@ test('optional collateral columns survive buffer transfer and distinguish absent
   const transferred = structuredClone(buffer, { transfer: [buffer] });
   assert.equal(buffer.byteLength, 0);
   assert.deepEqual(new Frame(transferred).balance().coins, { BTC: coins[0], ETH: coins[1] });
+});
+
+test('prediction metadata is optional, lossless and isolated from following sections', () => {
+  const strings = stringFrame(['0xcondition', 'Yes', 'Will café open?', 'Exact description', '2026-12-31T00:00:00Z', 'cafe-open']);
+  const data = numericFrame([
+    { kind: SECTION.PREDICTION_MARKETS, length: 48, write(view, offset) {
+      view.setUint32(offset, 1, true);
+      view.setUint32(offset + 4, 7, true);
+      for (let i = 0; i < 6; i++) view.setUint32(offset + 8 + i * 4, i, true);
+      view.setUint32(offset + 32, 1, true);
+      view.setFloat64(offset + 40, 0.001, true);
+    } },
+    { kind: SECTION.PREDICTION_HOLDINGS, length: 24, write(view, offset) {
+      view.setUint32(offset, 2, true);
+      view.setUint32(offset + 4, 7, true);
+      view.setUint32(offset + 8, 9, true);
+      view.setUint32(offset + 12, 1, true);
+      view.setUint32(offset + 16, 2, true);
+    } },
+  ]);
+  data.strings = strings.strings;
+  const markets = data.predictionMarkets();
+  assert.deepEqual([...markets.market], [7]);
+  assert.deepEqual([...markets.flags], [1]);
+  assert.deepEqual([...markets.tickSize], [0.001]);
+  assert.equal(markets.conditionId(0), '0xcondition');
+  assert.equal(markets.outcome(0), 'Yes');
+  assert.equal(markets.question(0), 'Will café open?');
+  assert.equal(markets.description(0), 'Exact description');
+  assert.equal(markets.endDate(0), '2026-12-31T00:00:00Z');
+  assert.equal(markets.slug(0), 'cafe-open');
+  assert.deepEqual([...data.predictionHoldings().market], [7, 9]);
+  assert.deepEqual([...data.predictionHoldings().flags], [1, 2]);
+  assert.equal(strings.predictionMarkets(), undefined);
+  assert.equal(strings.predictionHoldings(), undefined);
+  const empty = numericFrame([
+    { kind: SECTION.PREDICTION_MARKETS, length: 8, write(view, offset) { view.setUint32(offset, 0, true); } },
+    { kind: SECTION.PREDICTION_HOLDINGS, length: 8, write(view, offset) { view.setUint32(offset, 0, true); } },
+  ]);
+  assert.equal(empty.predictionMarkets().count, 0);
+  assert.equal(empty.predictionHoldings().count, 0);
+});
+
+test('spot currency columns retain reserved quantities and explicitly clear an empty snapshot', () => {
+  const coins = [{ base: 'BTC', amount: 0.1, notional: 5000 }];
+  const currencies = [{ currency: 'BTC', total: 2, free: 1.25, used: 0.75, upnl: 0 },
+    { currency: '__proto__', total: 3, free: 0, used: 3, upnl: -1 }];
+  const source = balanceFrame(coins, currencies);
+  const result = new Frame(structuredClone(source, { transfer: [source] })).balance();
+  assert.deepEqual(result.coins, { BTC: coins[0] });
+  assert.deepEqual(result.currencies.BTC, { total: 2, free: 1.25, used: 0.75, upnl: 0 });
+  assert.equal(Object.getPrototypeOf(result.currencies), Object.prototype);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(result.currencies, '__proto__').value,
+    { total: 3, free: 0, used: 3, upnl: -1 });
+  assert.deepEqual(new Frame(balanceFrame([], [])).balance().currencies, {});
+  assert.equal(new Frame(balanceFrame(coins)).balance().currencies, undefined);
+  assert.equal(new Frame(balanceFrame(undefined, currencies, 1)).balance().coins, undefined);
+  assert.deepEqual(new Frame(balanceFrame([], [])).balance().coins, {});
 });
 
 test('optional currency balances preserve full values, coexist with coins, and clear explicitly', () => {
@@ -348,4 +413,61 @@ test('orphan ticker identities survive transfer and packed deltas without changi
   assert.deepEqual(state.identity(1), { symbol: 'OLDUSDT', id: 'native-retired-id' });
   state.apply(new Frame(tickerFrame(false)));
   assert.equal(state.identity, undefined, 'a later legacy replacement clears the old identity closure');
+});
+
+
+test('frozen legacy balance frames retain original columns at 0/1/2/63/64 rows', () => {
+  const fixtures = JSON.parse(readFileSync(new URL('./fixtures/balance-legacy.json', import.meta.url), 'utf8'));
+  for (const { kind, count, base64 } of fixtures.cases) {
+    const source = Uint8Array.from(Buffer.from(base64, 'base64')).buffer;
+    const frame = new Frame(structuredClone(source, { transfer: [source] }));
+    const balance = frame.balance();
+    assert.deepEqual([balance.used, balance.free, balance.total, balance.upnl], [1, 2, 3, 4]);
+    assert.equal(Object.keys(balance.coins).length, kind === 'coins' ? count : 0);
+    if (kind === 'coins') {
+      assert.equal(balance.currencies, undefined);
+      for (let i = 0; i < count; i++) assert.deepEqual(balance.coins[`C${i}`], { base: `C${i}`, amount: i + 0.125, notional: 100 + i });
+    } else {
+      assert.equal(Object.keys(balance.currencies).length, count);
+      for (let i = 0; i < count; i++) assert.deepEqual(balance.currencies[`C${i}`], { used: i + 0.25, free: i + 2.5, total: i + 3.75, upnl: -i - 0.5 });
+    }
+  }
+});
+
+test('BCM1 appends an explicit mode without changing a legacy currency byte', () => {
+  const currencies = { USDT: { used: 1.25, free: 8.75, total: 10, upnl: -3 }, USDC: { used: 2, free: 4, total: 6, upnl: 0.5 } };
+  const old = balanceFrame(undefined, currencies);
+  const modern = balanceFrame(undefined, currencies, 1);
+  const oldLength = new DataView(old).getUint32(20, true);
+  assert.deepEqual(new Uint8Array(modern, 24, oldLength), new Uint8Array(old, 24, oldLength));
+  assert.equal(new DataView(modern).getUint32(20, true), oldLength + 8);
+  const balance = new Frame(structuredClone(modern, { transfer: [modern] })).balance();
+  assert.equal(balance.coins, undefined);
+  assert.deepEqual(balance.currencies, currencies);
+  assert.deepEqual(new Frame(balanceFrame(undefined, {}, 1)).balance().currencies, {});
+  assert.equal(new Frame(balanceFrame(undefined, {}, 1)).balance().coins, undefined);
+  assert.deepEqual(new Frame(balanceFrame([], {})).balance().coins, {});
+});
+
+test('balance readers reject bad modes and truncated arrays before the next section', () => {
+  const currencies = { USDT: { used: 1, free: 2, total: 3, upnl: 4 } };
+  const badMagic = balanceFrame(undefined, currencies, 1);
+  const length = new DataView(badMagic).getUint32(20, true);
+  new DataView(badMagic).setUint32(24 + length - 8, 0x314d4343, true);
+  assert.throws(() => new Frame(badMagic).balance(), /balance currency mode footer/);
+  assert.throws(() => new Frame(balanceFrame(undefined, currencies, 2)).balance(), /balance currency mode footer/);
+  assert.throws(() => new Frame(balanceFrame([{ base: 'BTC', amount: 1, notional: 100 }], currencies, 1)).balance(), /balance currency mode footer/);
+  for (const [length, write] of [
+    [24, () => {}],
+    [40, (view, at) => view.setUint32(at + 32, 2, true)],
+    [48, (view, at) => view.setUint32(at + 40, 2, true)],
+    [64, (view, at) => { view.setUint32(at + 48, 0x314d4342, true); view.setUint32(at + 52, 1, true); }],
+  ]) {
+    const frame = numericFrame([
+      { kind: SECTION.BALANCE, length, write },
+      { kind: SECTION.STATUS, length: 16, write(view, at) { view.setUint32(at, 31, true); } },
+    ]);
+    assert.throws(() => frame.balance(), /balance/);
+    assert.equal(frame.status().loaded, 31);
+  }
 });

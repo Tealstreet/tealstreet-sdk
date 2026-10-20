@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { parseRequestJson } from './request-json.mjs';
 import { Responses, implementationRecords } from './responses.mjs';
-import { isRead, subscriptionKeys, requestKey as typedRequestKey, subscriptionMessage } from './requests.mjs';
+import { isRead, subscriptionKeys, requestKey as typedRequestKey, subscriptionMessage, selectResponse } from './requests.mjs';
 import { setTimeout as realTimeout, clearTimeout as realClearTimeout } from 'node:timers';
 import { LOADED_FLAG } from '../hosts/wasm/js/wire.mjs';
 
@@ -66,7 +66,7 @@ export const canonicalBody = (body, callerIds = new Set(), venue = {}, context =
               v !== undefined &&
               !(
                 ((!venue.matchRequestBody || venue.volatileBodyFields) &&
-                  VOLATILE.has(k) &&
+                  VOLATILE.has(k) && !venue.preserveBodyFields?.includes(k) &&
                   !callerIds.has(String(v))) ||
                 (k === 'clientId' && !venue.preserveClientId && !callerIds.has(String(v)) &&
                   (!venue.ignoreGeneratedBodyId || venue.ignoreGeneratedBodyId(k, v, callerIds, context))) ||
@@ -285,21 +285,27 @@ export class ReplayClock {
     }
     this.time = target;
   }
-  async wait(promise, label, timeoutMs) {
+  async wait(promise, label, timeoutMs, { maxSteps = Infinity, maxIdleSteps = Infinity, progress } = {}) {
     let done = false;
     const result = Promise.resolve(promise).finally(() => {
       done = true;
     });
     const pump = (async () => {
+      let steps = 0, idle = 0, previous = progress?.();
       while (!done) {
         await new Promise(setImmediate);
         if (done) break;
+        if (++steps > maxSteps) throw new Error(`replay timeout: ${label} virtual step budget exceeded`);
+        const current = progress?.();
+        if (current !== previous) { previous = current; idle = 0; }
+
         let next;
         for (const timer of this.timers.values()) if (!next || timer.at < next.at) next = timer;
         if (next) {
+          idle = 0;
           this.time = Math.max(this.time, next.at);
           this.fire(next);
-        }
+        } else if (++idle > maxIdleSteps) throw new Error(`replay timeout: ${label} idle step budget exceeded`);
       }
       return result;
     })();
@@ -462,7 +468,9 @@ export class Tape {
       Array.from(venue.startupSubscriptions?.(records, books) ?? [], (key) => [key, false]),
     );
     this.pendingStartupSubscriptions = this.startupSubscriptions.size;
-    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books, tickers: venue.publicTickers?.(records), records });
+    this.requestAudit = venue.createRequestAudit?.();
+    this.audit = venue.createSocketAudit?.(impl, { isPrivate, books, tickers: venue.publicTickers?.(records), records, ...(this.requestAudit ? { requestAudit: this.requestAudit } : {}) });
+    if (venue.polling) { this.selectedPollingResponses = new Set(); this.polledRequestKeys = new Set(); }
     this.callerIds = new Set();
     const collectCallerIds = (value) => {
       if (!value || typeof value !== 'object') return;
@@ -489,10 +497,10 @@ export class Tape {
       this.responses.get(key).push(record);
       if (this.isWrite(record.method, record.url)) this.writeOrder.push(record);
     }
-    if (!venue.responses && (this.contract || venue.checkRequest || venue.requestKey || venue.requestBodies || venue.requestBody || venue.validateMatchedRequest)) {
+    if (!venue.responses && (this.contract || venue.checkRequest || venue.requestKey || venue.requestBodies || venue.requestBody || venue.validateMatchedRequest || venue.polling)) {
       const responseKey = (method, url, body) => {
         if (this.requestKey) return this.requestKey(method, url, body, this.callerIds);
-        if (venue.requestBodies || venue.requestBody) return typedRequestKey(method, url, body, this.callerIds, venue);
+        if (venue.requestBodies || venue.requestBody || venue.polling) return typedRequestKey(method, url, body, this.callerIds, venue);
         const base = `${method} ${canonicalUrl(url, this.callerIds, this.venue)}`;
         const exact = `${base} BODY ${canonicalBody(body, this.callerIds, venue)}`;
         return this.responses.has(exact) ? exact : base;
@@ -516,7 +524,7 @@ export class Tape {
     // Share immutable canonical URL strings across every frame and both samples.
     const urls = new Map();
     const recordedContext = { books, isPrivate, tickers: venue.publicTickers?.(records) ?? [] };
-    this.frames = records.filter((r) => ['ws', 'command', 'open', 'close', 'wait'].includes(r.type)).map((frame) => {
+    this.frames = records.filter((r) => (['ws', 'command', 'open', 'close', 'wait'].includes(r.type) || (venue.polling && r.type === 'http'))).map((frame) => {
       frame = venue.recordedFrame?.(frame, recordedContext) ?? frame;
       if (frame.type === 'wait' && (!Number.isFinite(frame.t) || frame.t < 0)) throw new Error('Invalid replay wait timestamp');
       if (frame.binary !== undefined) frame = { ...frame, data: Uint8Array.from(Buffer.from(frame.binary, 'base64')) };
@@ -578,6 +586,7 @@ export class Tape {
   }
 
   pendingResponses = new Set();
+  responseDeliveries = new WeakMap();
   async waitForResponse(response) {
     // A recorded completion follows any depth frames received while its request
     // was in flight. Serialized commands cannot await a later tape timer; their
@@ -589,6 +598,8 @@ export class Tape {
         await new Promise((resolve) => setTimeout(resolve, completion.at - this.responseTime));
       } finally { this.pendingResponses.delete(completion); }
     }
+    const delivery = this.responseDeliveries.get(response);
+    if (delivery) { this.responseDeliveries.delete(response); delivery(); }
     return response;
   }
 
@@ -622,7 +633,24 @@ export class Tape {
   requests = new Set();
   writes = [];
   respond(method, url, body, headers) {
-    const response = this.respondMatched(method, url, body, headers);
+    let response;
+    const rejectedBefore = this.unserved;
+    try { response = this.respondMatched(method, url, body, headers); }
+    catch (error) {
+      if (this.selectedPollingResponses && this.unserved === rejectedBefore) {
+        if (this.responseStore) this.responseStore.unserved++;
+        else this._unserved++;
+      }
+      this.pollingFence?.reject(error); throw error;
+    }
+    if (response.status === 599) this.pollingFence?.reject(new Error('Polling replay sent an unmatched HTTP request'));
+    if (this.requestAudit && response.status !== 599) {
+      const delivered = () => this.requestAudit.response({ method, url, body, headers, response });
+      // Standalone protocol probes have no asynchronous transport. Production
+      // activates sessions only after waitForResponse delivers recorded bytes.
+      if (this.venue.deferResponseAudit || this.replayClock) this.responseDeliveries.set(response, delivered);
+      else delivered();
+    }
     const compared = Object.hasOwn(response, 'comparisonRequestBody') ? response.comparisonRequestBody : body;
     const key = this.requestKey ? this.requestKey(method, url, compared, this.callerIds)
       : typedRequestKey(method, url, compared, this.callerIds, this.venue);
@@ -632,21 +660,26 @@ export class Tape {
   }
 
   respondMatched(method, url, body, headers) {
-    try { this.validateRequest?.({ method, url, body, headers, callerIds: this.callerIds }); }
+    try { this.validateRequest?.({ method, url, body, headers, callerIds: this.callerIds }); this.requestAudit?.validate({ method, url, body, headers }); }
     catch (error) { this.invalidSignatures++; throw error; }
-    if (this.isPrivate && this.venue.verifyRequest) {
+    if ((this.isPrivate || this.venue.verifyPublicRequest) && this.venue.verifyRequest) {
       try { if (!this.venue.verifyRequest({ method, url, body, headers, callerIds: this.callerIds })) throw new Error(`invalid replay signature: ${method} ${url}`); }
       catch (error) { this.invalidSignatures++; throw error; }
     }
     const validateMatch = (record) => {
       this.contract?.match(record, method, url, body);
+      if (this.selectedPollingResponses && !this.isWrite(method, url)) {
+        const key = this.responseStore?.key(method, url, body) ?? this.requestKey(method, url, body, this.callerIds);
+        this.polledRequestKeys.add(key); this.selectedPollingResponses.add(record);
+        this.pollingFence?.matched(key, record);
+      }
       if (this.venue.compareWriteOrder && this.isWrite(method, url) && this.writeOrder[0] !== record)
         throw new Error('Unexpected replay write order');
       this.venue.validateMatchedRequest?.(record, { method, url, body, headers, commandIndex: this.commandIndex });
       if (this.isWrite(method, url)) this.writeOrder.splice(this.writeOrder.indexOf(record), 1);
     };
     if (typeof this.responses.respond === 'function') return this.responses.respond(method, url, body, this.commandIndex, this.responseTime,
-      this.venue.validateMatchedRequest ? validateMatch : undefined, headers);
+      this.venue.validateMatchedRequest || this.selectedPollingResponses ? validateMatch : undefined, headers);
     const now = this.responseTime;
     if (this.responseStore) {
       if (this.venue.compareWriteOrder && this.isWrite(method, url)) {
@@ -658,7 +691,7 @@ export class Tape {
         }
       }
       const response = this.responseStore.respond(method, url, body, this.commandIndex, now,
-        this.contract || this.venue.validateMatchedRequest || this.venue.compareWriteOrder ? validateMatch : undefined, headers);
+        this.contract || this.venue.validateMatchedRequest || this.venue.compareWriteOrder || this.selectedPollingResponses ? validateMatch : undefined, headers);
       this._unserved = this.responseStore.unserved;
       return response;
     }
@@ -708,6 +741,47 @@ export class Tape {
       // Only an exactly validated fixture exception may repair the TS oracle.
       ...(this.impl === 'ts' && record.tsRequestBody !== undefined ? { comparisonRequestBody: record.requestBody } : {}),
       ...(Number.isFinite(record.t) ? { recordedAt: record.t } : {}) };
+  }
+
+  async finishPolling(clock) {
+    if (!this.selectedPollingResponses) return;
+    if (this.unserved) throw new Error('Polling replay contains unmatched HTTP requests');
+    const targets = new Map();
+    for (const [key, queue] of (this.responseStore ?? this.responses).queues) {
+      if (!this.polledRequestKeys.has(key) || !queue.length || this.isWrite(queue[0].method, queue[0].url)) continue;
+      const target = selectResponse([...queue], this.time, { commandIndex: this.commandIndex });
+      if (target && (target.availableAt !== undefined || target.effectiveAt !== undefined || target.availableAfter !== undefined)
+          && !this.selectedPollingResponses.has(target)) targets.set(key, target);
+    }
+    if (!targets.size) return;
+    const label = `polling final HTTP anchors (${[...targets.values()].map((record) => `${record.method} ${new URL(record.url).pathname}`).join(', ')})`;
+    if (!clock) throw new Error(`${label} require a replay clock`);
+    let resolve;
+    let reject;
+    const pending = new Promise((accept, fail) => { resolve = accept; reject = fail; });
+    const attempts = new Map();
+    this.pollingFence = {
+      reject,
+      matched(key, record) {
+        const target = targets.get(key);
+        if (!target) return;
+        if (record === target) {
+          targets.delete(key);
+          if (!targets.size) resolve();
+        } else {
+          const count = (attempts.get(key) ?? 0) + 1;
+          attempts.set(key, count);
+          if (count >= 2) reject(new Error(`${label} were superseded before a natural poll selected them`));
+        }
+      },
+    };
+    try {
+      await clock.wait(pending, label, this.timeoutMs, {
+        maxSteps: 4096 * (targets.size + 1), maxIdleSteps: 64, progress: () => targets.size,
+      });
+    } finally {
+      this.pollingFence = undefined;
+    }
   }
 
   connect(url, onOpen, onMessage, onClose, metadata = {}) {
@@ -798,10 +872,13 @@ export class Tape {
         socket.requestIds.add(request.id);
         this.sentRequests.add(JSON.stringify(stable({ url: socket.url, request: request.key })));
       }
-      if (this.venue.socketResponse && parsed.event) {
+      if (subscriptionMessage(parsed)) {
         const subscription = subscriptionMessage(parsed);
         for (const topic of subscription?.topics ?? []) {
-          if (typeof topic !== 'string' || !topic) throw new Error('invalid websocket subscription topic');
+          if (typeof topic !== 'string' || !topic) {
+            if (this.venue.socketResponse) throw new Error('invalid websocket subscription topic');
+            continue;
+          }
           if (subscription.op === 'subscribe') socket.subscriptions.add(topic);
           else socket.subscriptions.delete(topic);
         }
@@ -1180,7 +1257,7 @@ export class Tape {
     for (const frame of this.frames) {
       startupCeiling = frame.t;
       if (delivered === warm) this.warmMark = { thread: process.threadCpuUsage(), wall: performance.now() };
-      if (this.isPrivate) {
+      if (this.isPrivate && !this.venue.polling) {
         const wait = frame.t - (performance.now() - start);
         if (wait > 0) await new Promise((resolve) => realTimeout(resolve, wait));
       }
@@ -1188,7 +1265,9 @@ export class Tape {
       if (clock && !clock.active && startupReady) clock.start(frame.t);
       await clock?.advance(frame.t, this.synchronousTicks === true);
       if (logicalStartup && clock.startup) clock.invalidateStartup();
-      if (frame.type === 'wait') {
+      if (frame.type === 'http') {
+        // Polling read anchors advance time; only real requests select replies.
+      } else if (frame.type === 'wait') {
         this.venue.validateWait?.(frame, this);
       } else if (frame.type === 'command') {
         await ensureReady();
@@ -1227,6 +1306,7 @@ export class Tape {
     await ensureReady();
     if (logicalStartup && clock.startup) clock.start();
     if (clock && !clock.active) clock.start(this.time);
+    await this.finishPolling(clock);
     await this.finishResponses();
     return delivered;
   }

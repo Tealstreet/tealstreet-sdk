@@ -16,6 +16,8 @@ export const SECTION = {
   STATUS: 10,
   FILLS: 11,
   SETTINGS: 12,
+  PREDICTION_MARKETS: 13,
+  PREDICTION_HOLDINGS: 14,
 };
 
 export const NONE = 0xffffffff;
@@ -157,6 +159,37 @@ export class Frame {
     };
   }
 
+  /** Optional outcome identity/signing metadata, keyed by current market index. */
+  predictionMarkets() {
+    const section = this.first(SECTION.PREDICTION_MARKETS);
+    if (!section) return undefined;
+    const { buffer } = this;
+    const count = this.view.getUint32(section.offset, true);
+    const market = new Uint32Array(buffer, section.offset + 4, count);
+    const refs = new Uint32Array(buffer, section.offset + 4 + count * 4, count * 6);
+    const flags = new Uint32Array(buffer, section.offset + 4 + count * 28, count);
+    const tickSize = new Float64Array(buffer, align8(section.offset + 4 + count * 32), count);
+    return { count, market, flags, tickSize,
+      conditionId: (i) => this.string(refs[i * 6]),
+      outcome: (i) => this.string(refs[i * 6 + 1]),
+      question: (i) => this.string(refs[i * 6 + 2]),
+      description: (i) => this.string(refs[i * 6 + 3]),
+      endDate: (i) => this.string(refs[i * 6 + 4]),
+      slug: (i) => this.string(refs[i * 6 + 5]),
+    };
+  }
+
+  /** Optional holding settlement flags; an empty table clears previous flags. */
+  predictionHoldings() {
+    const section = this.first(SECTION.PREDICTION_HOLDINGS);
+    if (!section) return undefined;
+    const count = this.view.getUint32(section.offset, true);
+    return { count,
+      market: new Uint32Array(this.buffer, section.offset + 4, count),
+      flags: new Uint32Array(this.buffer, section.offset + 4 + count * 4, count),
+    };
+  }
+
   /** Tickers, replacing any earlier table: `market[i]` and one column per field. */
   tickers() {
     const section = this.first(SECTION.TICKERS);
@@ -250,33 +283,57 @@ export class Frame {
   balance() {
     const section = this.first(SECTION.BALANCE);
     if (!section) return undefined;
-    const [used, free, total, upnl] = new Float64Array(this.buffer, section.offset, 4);
-    if (section.length <= 32) return { used, free, total, upnl };
-    const count = new Uint32Array(this.buffer, section.offset + 32, 1)[0];
-    const refs = new Uint32Array(this.buffer, section.offset + 36, count);
-    const at = align8(section.offset + 36 + count * 4);
-    const amounts = new Float64Array(this.buffer, at, count);
-    const notionals = new Float64Array(this.buffer, at + count * 8, count);
+    const { buffer } = this;
+    const end = section.offset + section.length;
+    const requireBytes = (at, bytes) => {
+      if (at < section.offset || bytes < 0 || at + bytes > end || end > buffer.byteLength)
+        throw new RangeError('Malformed balance section');
+    };
+    requireBytes(section.offset, 32);
+    const [used, free, total, upnl] = new Float64Array(buffer, section.offset, 4);
+    if (section.length === 32) return { used, free, total, upnl };
+    requireBytes(section.offset + 32, 4);
+    const count = this.view.getUint32(section.offset + 32, true);
+    requireBytes(section.offset + 36, count * 4);
+    const refs = new Uint32Array(buffer, section.offset + 36, count);
+    const at = Math.ceil((section.offset + 36 + count * 4) / 8) * 8;
+    requireBytes(at, count * 16);
+    const amounts = new Float64Array(buffer, at, count);
+    const notionals = new Float64Array(buffer, at + count * 8, count);
     const coins = {};
     for (let i = 0; i < count; i++) {
       const base = this.string(refs[i]);
       Object.defineProperty(coins, base, { value: { base, amount: amounts[i], notional: notionals[i] }, enumerable: true, configurable: true });
     }
-    const currencyOffset = at + count * 16;
-    if (currencyOffset >= section.offset + section.length) return { used, free, total, upnl, coins };
-    const currencyCount = new Uint32Array(this.buffer, currencyOffset, 1)[0];
-    const currencyRefs = new Uint32Array(this.buffer, currencyOffset + 4, currencyCount);
-    const currencyAt = align8(currencyOffset + 4 + currencyCount * 4);
-    const currencyValues = new Float64Array(this.buffer, currencyAt, currencyCount * 4);
+    const tail = at + count * 16;
+    if (tail === end) return { used, free, total, upnl, coins };
+    requireBytes(tail, 4);
+    const n = this.view.getUint32(tail, true);
+    requireBytes(tail + 4, n * 4);
+    const names = new Uint32Array(buffer, tail + 4, n);
+    const data = Math.ceil((tail + 4 + n * 4) / 8) * 8;
+    requireBytes(data, n * 32);
+    const currencyEnd = data + n * 32;
+    let flags = 0;
+    if (currencyEnd !== end) {
+      requireBytes(currencyEnd, 8);
+      flags = this.view.getUint32(currencyEnd + 4, true);
+      if (currencyEnd + 8 !== end || this.view.getUint32(currencyEnd, true) !== 0x314d4342
+        || (flags & ~1) || ((flags & 1) && count !== 0))
+        throw new RangeError('Malformed balance currency mode footer');
+    }
+    const held = new Float64Array(buffer, data, n);
+    const available = new Float64Array(buffer, data + n * 8, n);
+    const totals = new Float64Array(buffer, data + n * 16, n);
+    const unrealized = new Float64Array(buffer, data + n * 24, n);
     const currencies = {};
-    for (let i = 0; i < currencyCount; i++) {
-      const currency = this.string(currencyRefs[i]);
-      Object.defineProperty(currencies, currency, {
-        value: { used: currencyValues[i], free: currencyValues[currencyCount + i], total: currencyValues[currencyCount * 2 + i], upnl: currencyValues[currencyCount * 3 + i] },
+    for (let i = 0; i < n; i++) {
+      Object.defineProperty(currencies, this.string(names[i]), {
+        value: { used: held[i], free: available[i], total: totals[i], upnl: unrealized[i] },
         enumerable: true, configurable: true,
       });
     }
-    return { used, free, total, upnl, coins, currencies };
+    return { used, free, total, upnl, ...(flags & 1 ? {} : { coins }), currencies };
   }
 
   status() {

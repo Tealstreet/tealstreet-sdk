@@ -53,6 +53,7 @@ import {
   GrvtBuilderInfo,
   GrvtBuilderUnauthorizedError,
 } from './grvt.builder';
+import { grvtNanoseconds, grvtScaledUint64, grvtUint64 } from './grvt.integer';
 import { validatePrivateKey } from './grvt.signing';
 import { ENDPOINTS, GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC, GrvtCandlestickInterval } from './grvt.types';
 import { GrvtPrivateWebSocket } from './grvt.ws-private';
@@ -980,7 +981,7 @@ export class GrvtExchange extends BaseExchange {
           totalEquity = parseFloat(aggData.te || aggData.total_equity || '0');
           // Available balance from aggregated summary
           availableBalance = parseFloat(
-            aggData.ts2 || aggData.total_sub_account_available_balance || aggData.te || aggData.total_equity || '0',
+            aggData.ts2 ?? aggData.total_sub_account_available_balance ?? aggData.te ?? aggData.total_equity ?? '0',
           );
           const totalUpnlRaw = aggData.tu ?? aggData.total_upnl;
           if (totalUpnlRaw !== undefined && totalUpnlRaw !== null) {
@@ -1014,7 +1015,7 @@ export class GrvtExchange extends BaseExchange {
 
       return {
         total: totalEquity,
-        free: availableBalance > 0 ? availableBalance : totalEquity,
+        free: availableBalance,
         used: totalEquity - availableBalance,
         upnl: unrealizedPnl,
         currencies: currencies as any,
@@ -1111,7 +1112,7 @@ export class GrvtExchange extends BaseExchange {
 
         const side = size > 0 ? PositionSide.Long : PositionSide.Short;
         const contracts = Math.abs(size);
-        const entryPrice = parseFloat(grvtPos.ep || grvtPos.entry_price || grvtPos.ep1 || '0');
+        const entryPrice = parseFloat(grvtPos.ep ?? grvtPos.entry_price ?? '0');
         const unrealizedPnl = parseFloat(grvtPos.up || grvtPos.unrealized_pnl || '0');
         const realizedPnl = parseFloat(grvtPos.rp || grvtPos.realized_pnl || '0');
 
@@ -1142,7 +1143,7 @@ export class GrvtExchange extends BaseExchange {
           unrealizedPnl,
           realizedPnl,
           liquidationPrice,
-          marginType: MarginType.Isolated,
+          marginType: (grvtPos.mt ?? grvtPos.margin_type) === 'CROSS' ? MarginType.Cross : MarginType.Isolated,
           positionMode,
           lastUpdate: virtualClock.getCurrentTimeMs(),
           info: grvtPos,
@@ -1300,6 +1301,7 @@ export class GrvtExchange extends BaseExchange {
 
     return {
       id: orderId,
+      ...(clientOrderId ? { clientOrderId: String(clientOrderId) } : {}),
       symbol: symbol,
       type,
       side: isBuying ? OrderSide.Buy : OrderSide.Sell,
@@ -1344,8 +1346,26 @@ export class GrvtExchange extends BaseExchange {
     return this.fetchOpenOrders();
   };
 
-  placeOrder = async (opts: PlaceOrderOpts): Promise<string[]> => {
+  placeOrder = async (opts: PlaceOrderOpts, execution?: { isMarket: boolean; limitPrice: number }): Promise<string[]> => {
     const callerClientOrderId = this.resolveCallerClientOrderId(opts);
+    if ((opts.type === OrderType.Market || opts.type === OrderType.Limit) && (opts.takeProfit !== undefined || opts.stopLoss !== undefined)) {
+      for (const price of [opts.takeProfit, opts.stopLoss]) {
+        if (price !== undefined && (!Number.isFinite(price) || price <= 0)) throw new Error('Invalid GRVT bracket trigger price');
+      }
+      const { takeProfit, stopLoss, tpTriggerType, slTriggerType, ...entry } = opts;
+      const ids = await this.placeOrder(entry);
+      const side = opts.side === OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy;
+      try {
+        for (const [type, price] of [[OrderType.StopLoss, stopLoss], [OrderType.TakeProfit, takeProfit]] as const) {
+          if (price === undefined) continue;
+          ids.push(...await this.placeOrder({ symbol: opts.symbol, type, side, amount: opts.amount, price,
+            triggerPrice: price, reduceOnly: true, close: false, tpTriggerType, slTriggerType }));
+        }
+      } catch {
+        throw new Error(`GRVT bracket placement failed after creating ${ids.join(',')}; reconcile these orders`);
+      }
+      return ids;
+    }
     try {
       // Wallet is required for order signing
       if (!this.wallet) {
@@ -1377,7 +1397,7 @@ export class GrvtExchange extends BaseExchange {
 
       // Map safe-cex types to GRVT types
       const side: GrvtOrderSide = opts.side === OrderSide.Buy ? 'BUY' : 'SELL';
-      const type: GrvtOrderType = opts.type === OrderType.Market ? 'MARKET' : 'LIMIT';
+      const type: GrvtOrderType = execution ? (execution.isMarket ? 'MARKET' : 'LIMIT') : [OrderType.Market, OrderType.StopLoss, OrderType.TakeProfit].includes(opts.type) ? 'MARKET' : 'LIMIT';
 
       // Map time in force
       let timeInForce: GrvtTimeInForce = 'GOOD_TILL_TIME';
@@ -1389,7 +1409,8 @@ export class GrvtExchange extends BaseExchange {
 
       // market.precision.amount and market.precision.price are step sizes (e.g., 0.001)
       // Round to the nearest multiple of the step size
-      const price = opts.price ? adjust(opts.price, market.precision.price) : 0;
+      const executionPrice = execution?.limitPrice ?? opts.price;
+      const price = type === 'LIMIT' && executionPrice ? adjust(executionPrice, market.precision.price) : 0;
       const size = adjust(opts.amount, market.precision.amount);
 
       this.log(`Precision - price: ${market.precision.price}, amount: ${market.precision.amount}`, LogSeverity.Debug);
@@ -1404,7 +1425,7 @@ export class GrvtExchange extends BaseExchange {
 
       // Generate nonce and expiration for signature (following SDK pattern)
       const nonce = Math.floor(Math.random() * 1e9); // Random nonce up to 1 billion
-      const expirationStr = ((Date.now() + 3600 * 1000) * 1e6).toString(); // 1 hour from now in nanoseconds
+      const expirationStr = grvtNanoseconds(Date.now() + 3600 * 1000); // 1 hour from now in nanoseconds
       // Keep expiration as string - too large for JS number (exceeds MAX_SAFE_INTEGER)
       const expiration = expirationStr;
 
@@ -1433,10 +1454,9 @@ export class GrvtExchange extends BaseExchange {
       // - contractSize: size * 10^base_decimals
       // - limitPrice: price * PRICE_MULTIPLIER (always 1e9)
       // The signing library (eth-sig-util) will auto-convert hex string to uint256
-      const PRICE_MULTIPLIER = 1_000_000_000; // Python SDK constant
 
       const eip712Message: Record<string, any> = {
-        subAccountID: this.grvtTradingAccountId ? parseInt(this.grvtTradingAccountId, 10) : 0,
+        subAccountID: grvtUint64(this.grvtTradingAccountId ?? '0'),
         isMarket: type === 'MARKET',
         timeInForce: this.mapTimeInForceToEnum(timeInForce),
         postOnly: opts.timeInForce === OrderTimeInForce.PostOnly,
@@ -1444,11 +1464,8 @@ export class GrvtExchange extends BaseExchange {
         legs: [
           {
             assetID: instrumentHash, // HEX STRING! Python SDK passes "0x030501" directly
-            // Use Math.round to avoid floating-point precision errors.
-            // E.g. 0.03 in IEEE 754 is 0.02999... so Math.floor(x * 1e9) would be off by 1.
-            // The server uses exact decimal arithmetic, so Math.round matches its result.
-            contractSize: Math.round(size * Math.pow(10, baseDecimals)),
-            limitPrice: type === 'LIMIT' && price > 0 ? Math.round(price * PRICE_MULTIPLIER) : 0,
+            contractSize: grvtScaledUint64(size.toString(), baseDecimals),
+            limitPrice: type === 'LIMIT' && price > 0 ? grvtScaledUint64(price.toString(), 9) : '0',
             isBuyingContract: side === 'BUY',
           },
         ],
@@ -1491,7 +1508,7 @@ export class GrvtExchange extends BaseExchange {
       // API uses regular decimal values as strings, NOT multiplied
       // Generate unique client order ID (simple uint32 like Python SDK) and create time
       const clientOrderId = callerClientOrderId ?? nonce.toString(); // Generated: nonce as client_order_id (uint32)
-      const createTime = (Date.now() * 1_000_000).toString(); // Current time in nanoseconds
+      const createTime = grvtNanoseconds(Date.now()); // Current time in nanoseconds
 
       // Prepare trigger for TP/SL if provided
       // This handles both:
@@ -1531,20 +1548,7 @@ export class GrvtExchange extends BaseExchange {
             trigger_by: triggerBy,
             trigger_price: triggerPrice.toString(),
             close_position: opts.close || false,
-          },
-        };
-      } else if (opts.takeProfit || opts.stopLoss) {
-        // Attached TP/SL to a regular order
-        const triggerPrice = opts.takeProfit || opts.stopLoss;
-        const triggerType = opts.takeProfit ? 'TAKE_PROFIT' : 'STOP_LOSS';
-        const triggerBy = getTriggerBy(opts.takeProfit ? opts.tpTriggerType : opts.slTriggerType);
-
-        trigger = {
-          trigger_type: triggerType,
-          tpsl: {
-            trigger_by: triggerBy,
-            trigger_price: triggerPrice!.toString(),
-            close_position: opts.close || false,
+            is_split_position: false,
           },
         };
       }
@@ -1748,13 +1752,14 @@ export class GrvtExchange extends BaseExchange {
       }
 
       // Convert uppercased symbol to GRVT format (e.g., BTC_USDT_PERP → BTC_USDT_Perp)
-      const instrumentId = this.symbolToInstrumentId(symbol);
+      const market = this.store.marketsBySymbol[symbol];
+      if (!market) throw new Error('Unknown GRVT cancellation market');
 
-      // Use the SDK's TDG client to cancel all orders for a symbol
+      // Native filters must survive the SDK's full-to-lite conversion.
       await (this.grvtClient as any).tdgClient.cancelAllOrders(
         {
           sub_account_id: this.grvtTradingAccountId,
-          instrument_id: instrumentId,
+          kind: ['PERPETUAL'], base: [market.base], quote: [market.quote],
         },
         await (this.grvtClient as any).authenticatedEndpoint(),
       );
@@ -1809,13 +1814,24 @@ export class GrvtExchange extends BaseExchange {
         symbol: order.symbol,
         type: order.type,
         side: order.side,
-        amount: 'amount' in update ? update.amount : order.amount,
+        amount: ('amount' in update ? update.amount : order.amount) - order.filled,
         price: 'price' in update ? update.price : order.price,
         reduceOnly: order.reduceOnly,
         timeInForce: order.timeInForce,
       };
 
+      let replacementExecution: { isMarket: boolean; limitPrice: number } | undefined;
+      if (!Number.isFinite(newOrderOpts.amount) || newOrderOpts.amount <= 0) throw new Error('GRVT replacement has no remaining quantity');
       if (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit) {
+        const info = order.info;
+        const legs = info?.legs ?? info?.l;
+        const isMarket = info?.is_market ?? info?.im ?? false;
+        const limitPrice = Number(legs?.[0]?.limit_price ?? legs?.[0]?.lp ?? 0);
+        if (typeof isMarket !== 'boolean' || !Array.isArray(legs) || legs.length !== 1 || !Number.isFinite(limitPrice)
+          || (!isMarket && limitPrice <= 0) || (isMarket && order.timeInForce === OrderTimeInForce.PostOnly)) {
+          throw new Error('Cannot safely update GRVT order: invalid native execution semantics');
+        }
+        replacementExecution = { isMarket, limitPrice: isMarket ? 0 : limitPrice };
         const trigger = getGrvtTriggerMetadata(order.info);
         if (!trigger || trigger.type !== (order.type === OrderType.StopLoss ? 'STOP_LOSS' : 'TAKE_PROFIT')) {
           throw new Error(`Cannot safely update GRVT order ${order.id}: missing trigger metadata`);
@@ -1844,12 +1860,31 @@ export class GrvtExchange extends BaseExchange {
         };
       }
 
+      const market = this.store.marketsBySymbol[newOrderOpts.symbol];
+      if (!market) throw new Error('Unknown GRVT replacement market');
+      const { bd: baseDecimals } = this.getInstrumentSigningMetadata(market);
+      const replacementSize = adjust(newOrderOpts.amount, market.precision.amount);
+      if (!Number.isFinite(replacementSize) || replacementSize <= 0 || replacementSize < market.limits.amount.min || (market.limits.amount.max > 0 && replacementSize > market.limits.amount.max)) {
+        throw new Error('GRVT replacement amount is outside market precision or limits');
+      }
+      grvtScaledUint64(replacementSize.toString(), baseDecimals);
+      const replacementIsMarket = replacementExecution?.isMarket ?? (newOrderOpts.type === OrderType.Market || newOrderOpts.type === OrderType.StopLoss || newOrderOpts.type === OrderType.TakeProfit);
+      if (!replacementIsMarket) {
+        const replacementPrice = adjust(replacementExecution?.limitPrice ?? newOrderOpts.price ?? 0, market.precision.price);
+        if (!Number.isFinite(replacementPrice) || replacementPrice <= 0) throw new Error('Invalid GRVT replacement limit price');
+        grvtScaledUint64(replacementPrice.toString(), 9);
+      }
+      if (newOrderOpts.triggerPrice !== undefined) {
+        if (!Number.isFinite(newOrderOpts.triggerPrice) || newOrderOpts.triggerPrice <= 0) throw new Error('Invalid GRVT replacement trigger price');
+        grvtScaledUint64(newOrderOpts.triggerPrice.toString(), 9);
+      }
+
       // Step 1: Cancel the existing order only after the replacement is safe.
       await this.cancelOrder(order);
       this.log(`Order ${order.id} cancelled for update`, LogSeverity.Debug);
 
       // Step 2: Create the semantically equivalent replacement.
-      const newOrderIds = await this.placeOrder(newOrderOpts);
+      const newOrderIds = replacementExecution ? await this.placeOrder(newOrderOpts, replacementExecution) : await this.placeOrder(newOrderOpts);
       this.log(
         `Order updated successfully: cancelled ${order.id}, created ${newOrderIds.join(', ')}`,
         LogSeverity.Info,

@@ -2,8 +2,8 @@ import type { ExchangeOptions, Market } from '../../types';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { CoinbaseExchange } from '../../exchanges/coinbase/coinbase.exchange';
-import type { ORDER_EVENT } from '../../exchanges/coinbase/coinbase.types';
+import { CoinbaseExchange } from '../reference/coinbase/coinbase.exchange';
+import type { ORDER_EVENT } from '../reference/coinbase/coinbase.types';
 import { DefaultStore } from '../../store/store.base';
 
 const makeMarket = (overrides: Partial<Market> = {}): Market => ({

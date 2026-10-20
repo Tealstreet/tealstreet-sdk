@@ -28,6 +28,16 @@ pub mod section {
     pub const FILLS: u16 = 11;
     /// Scalar leverage retains its offset; optional buy/sell f64 columns follow it.
     pub const SETTINGS: u16 = 12;
+    /// Optional typed prediction outcome identity and signing metadata.
+    pub const PREDICTION_MARKETS: u16 = 13;
+    /// Optional typed prediction holding settlement flags.
+    pub const PREDICTION_HOLDINGS: u16 = 14;
+}
+
+/// Optional footer after legacy currency columns; little-endian bytes `BCM1`.
+pub mod balance_currency_mode {
+    pub const MAGIC: u32 = 0x314d4342;
+    pub const COLLATERAL_UNSPECIFIED: u32 = 1;
 }
 
 pub mod status_flag {
@@ -463,60 +473,229 @@ mod tests {
 
     #[test]
     fn currency_snapshot_reservation_includes_empty_collateral_and_all_columns() {
-        for count in [0, 63, 64] {
-            for collateral in [false, true] {
-                let mut store = Store::default();
-                if collateral {
-                    store.set_coin_balances(
+        for preserve in [false, true] {
+            for count in [0, 63, 64] {
+                for collateral in [false, true] {
+                    let mut store = Store::default();
+                    if preserve {
+                        store.preserve_unspecified_collateral();
+                    }
+                    if collateral {
+                        store.set_coin_balances(
+                            (0..count)
+                                .map(|index| crate::model::CoinBalance {
+                                    base: format!("COIN{index}"),
+                                    amount: 1.0,
+                                    notional: 100.0,
+                                })
+                                .collect(),
+                        );
+                    }
+                    store.set_currency_balances(
                         (0..count)
-                            .map(|index| crate::model::CoinBalance {
-                                base: format!("COIN{index}"),
-                                amount: 1.0,
-                                notional: 100.0,
+                            .map(|index| crate::model::CurrencyBalance {
+                                currency: format!("CURRENCY{index}"),
+                                balance: crate::model::Balance {
+                                    used: 1.0,
+                                    free: 2.0,
+                                    total: 3.0,
+                                    upnl: 4.0,
+                                },
                             })
                             .collect(),
                     );
+                    let pending = store.everything();
+                    let mut writer = FrameWriter::new(Vec::new(), 1.0);
+                    store.reserve_test_tables(&pending, &mut writer);
+                    let before = (
+                        writer.buf.as_ptr(),
+                        writer.buf.capacity(),
+                        writer.strings.capacity(),
+                        writer.string_index.capacity(),
+                    );
+                    store.write(&pending, &mut writer);
+                    assert_eq!(
+                        before,
+                        (
+                            writer.buf.as_ptr(),
+                            writer.buf.capacity(),
+                            writer.strings.capacity(),
+                            writer.string_index.capacity()
+                        ),
+                        "all currency allocations precede serialization"
+                    );
+                    let capacity = writer.buf.capacity();
+                    assert_eq!(
+                        writer.strings.capacity(),
+                        count * if collateral { 2 } else { 1 }
+                    );
+                    let pointer = writer.buf.as_ptr();
+                    let frame = writer.finish();
+                    assert_eq!(frame.as_ptr(), pointer, "currency strings must fit");
+                    assert!(
+                        capacity < frame.len() + 16,
+                        "reserve the full currency tail"
+                    );
+                    let payload = sections(&frame)
+                        .find(|(kind, _)| *kind == section::BALANCE)
+                        .unwrap()
+                        .1;
+                    let coins = if collateral { count } else { 0 };
+                    assert_eq!(
+                        payload.len(),
+                        32 + (4 + coins * 4).next_multiple_of(8)
+                            + coins * 16
+                            + (4 + count * 4).next_multiple_of(8)
+                            + count * 32
+                            + if preserve && !collateral { 8 } else { 0 }
+                    );
                 }
-                store.set_currency_balances(
+            }
+        }
+    }
+
+    #[test]
+    fn prediction_snapshot_reservation_covers_both_tables_and_all_six_strings() {
+        for count in [0usize, 63, 64] {
+            for shared in [false, true] {
+                let mut store = Store::default();
+                store.set_markets(
                     (0..count)
-                        .map(|index| crate::model::CurrencyBalance {
-                            currency: format!("CURRENCY{index}"),
-                            balance: crate::model::Balance {
-                                used: 1.0,
-                                free: 2.0,
-                                total: 3.0,
-                                upnl: 4.0,
+                        .map(|index| Market {
+                            id: format!("token-{index}"),
+                            symbol: format!("market-{index}"),
+                            pretty_symbol: None,
+                            base: format!("outcome-{index}"),
+                            quote: "pUSD".into(),
+                            active: true,
+                            precision: Precision {
+                                amount: 0.01,
+                                price: 0.001,
                             },
+                            limits: Limits {
+                                amount: MinMax {
+                                    min: 5.,
+                                    max: f64::INFINITY,
+                                },
+                                leverage: MinMax { min: 1., max: 1. },
+                                price: None,
+                            },
+                            contract_size: Some(1.),
+                            is_expiring: None,
+                            is_inverse: None,
+                            is_spot: Some(true),
+                            is_perpetual: None,
+                            is_read_only: None,
+                            taker_fee: None,
+                            maker_fee: None,
+                        })
+                        .collect(),
+                );
+                store.set_positions(
+                    (0..count)
+                        .map(|index| crate::model::Position {
+                            id: format!("holding-{index}"),
+                            symbol: format!("market-{index}"),
+                            side: PositionSide::Long,
+                            entry_price: 0.4,
+                            notional: 6.,
+                            leverage: 1.,
+                            margin_type: None,
+                            position_mode: None,
+                            unrealized_pnl: 2.,
+                            realized_pnl: None,
+                            contracts: 10.,
+                            liquidation_price: 0.,
+                            margin_size: None,
+                            last_update: None,
+                        })
+                        .collect(),
+                );
+                let text = |column, index| {
+                    format!(
+                        "{column}-{}-café-{}",
+                        if shared { 0 } else { index },
+                        "é".repeat(17)
+                    )
+                };
+                store.set_prediction_markets(
+                    (0..count)
+                        .map(|index| crate::model::PredictionMarket {
+                            market: index as u32,
+                            condition_id: text("condition", index),
+                            outcome: text("outcome", index),
+                            question: text("question", index),
+                            description: text("description", index),
+                            end_date: text("end", index),
+                            slug: text("slug", index),
+                            tick_size: 0.001,
+                            neg_risk: index % 2 == 0,
+                        })
+                        .collect(),
+                );
+                store.set_prediction_holdings(
+                    (0..count)
+                        .map(|index| crate::model::PredictionHolding {
+                            market: index as u32,
+                            redeemable: index % 2 == 0,
+                            mergeable: index % 2 != 0,
                         })
                         .collect(),
                 );
                 let pending = store.everything();
-                let mut writer = FrameWriter::new(Vec::new(), 1.0);
-                store.write(&pending, &mut writer);
-                let capacity = writer.buf.capacity();
-                assert_eq!(
+                let mut writer = FrameWriter::new(vec![], 1.);
+                store.reserve_test_tables(&pending, &mut writer);
+                let before = (
+                    writer.buf.as_ptr(),
+                    writer.buf.capacity(),
                     writer.strings.capacity(),
-                    count * if collateral { 2 } else { 1 }
+                    writer.string_index.capacity(),
+                );
+                store.write(&pending, &mut writer);
+                assert_eq!(
+                    before,
+                    (
+                        writer.buf.as_ptr(),
+                        writer.buf.capacity(),
+                        writer.strings.capacity(),
+                        writer.string_index.capacity()
+                    ),
+                    "prediction tables and dictionary must never grow while writing"
                 );
                 let pointer = writer.buf.as_ptr();
+                let capacity = writer.buf.capacity();
                 let frame = writer.finish();
-                assert_eq!(frame.as_ptr(), pointer, "currency strings must fit");
-                assert!(
-                    capacity < frame.len() + 16,
-                    "reserve the full currency tail"
+                assert_eq!(
+                    frame.as_ptr(),
+                    pointer,
+                    "prediction UTF-8 bytes already reserved"
                 );
-                let payload = sections(&frame)
-                    .find(|(kind, _)| *kind == section::BALANCE)
+                if !shared {
+                    assert!(
+                        capacity < frame.len() + 16,
+                        "unique metadata needs no geometric slack"
+                    );
+                }
+                let metadata = sections(&frame)
+                    .find(|(kind, _)| *kind == section::PREDICTION_MARKETS)
                     .unwrap()
                     .1;
-                let coins = if collateral { count } else { 0 };
                 assert_eq!(
-                    payload.len(),
-                    32 + (4 + coins * 4).next_multiple_of(8)
-                        + coins * 16
-                        + (4 + count * 4).next_multiple_of(8)
-                        + count * 32
+                    metadata.len(),
+                    (4 + count * 32).next_multiple_of(8) + count * 8
                 );
+                let holdings = sections(&frame)
+                    .find(|(kind, _)| *kind == section::PREDICTION_HOLDINGS)
+                    .unwrap()
+                    .1;
+                assert_eq!(holdings.len(), (4 + count * 8).next_multiple_of(8));
+                for index in 0..count {
+                    assert_eq!(u32_at(metadata, 4 + index * 4), index as u32);
+                    assert_eq!(
+                        u32_at(holdings, 4 + count * 4 + index * 4),
+                        if index % 2 == 0 { 1 } else { 2 }
+                    );
+                }
             }
         }
     }

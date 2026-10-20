@@ -1,3 +1,7 @@
+import { COINBASE_REPLAY, verifyCoinbaseRequest, verifyCoinbaseSubscribe, coinbaseSubscription, createCoinbaseSocketAudit } from './coinbase-protocol.mjs';
+import { polymarket } from './polymarket.mjs';
+import { breakoutprop } from './breakoutprop-requests.mjs';
+import { uniqueRequestHeaders } from './protocol-headers.mjs';
 // How the harness drives each venue: the TS exchange class it replays
 // against, and the name the Rust engine is built with.
 import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:crypto';
@@ -519,7 +523,336 @@ export const mexcRequestUrl = (url) => {
   return parsed.href;
 };
 
+const coinbase = (name) => ({
+  family: 'coinbase',
+  preserveBodyFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
+  preserveQueryFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
+  generatedId: () => false,
+  currencyBalances: true,
+  rust: name,
+  ts: {
+    module: `${root}/../__tests__/reference/coinbase/${name}.exchange.ts`,
+    className: name === 'coinbasespot' ? 'CoinbaseSpotExchange' : 'CoinbaseExchange',
+    name,
+  },
+  publicOptions: { spotOnly: true, extra: { coinbasePublicSpot: true } },
+  options: { testnet: false, ...(name === 'coinbasespot' ? { spotOnly: true } : {}) },
+  replayCredentials: COINBASE_REPLAY,
+  privateSocket: 'advanced-trade-ws-user.coinbase.com',
+  tsBooksSubscribed: (exchange, count) =>
+    Object.keys(exchange.publicWebsocket.messageHandlers).filter((key) => key.startsWith('level2.')).length >= count,
+  verifyRequest: verifyCoinbaseRequest,
+  verifyPublicRequest: true,
+  verifySubscribe: verifyCoinbaseSubscribe,
+  subscriptionMessage: coinbaseSubscription,
+  createSocketAudit: createCoinbaseSocketAudit,
+  streamOf: (text) => {
+    try {
+      const message = JSON.parse(text);
+      const channel = message.channel === 'l2_data' ? 'level2' : message.channel;
+      if (['heartbeats', 'user'].includes(channel)) return channel;
+      const product = message.events?.[0]?.product_id;
+      return product ? `${channel}.${product}` : undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  subscriptionGenerations: true,
+  matchRequestBody: true,
+  requestBodies: true,
+  compareWriteOrder: true,
+  compareClientIds: true,
+  compareFillPrices: true,
+  isWrite: (method) => method !== 'GET',
+  requestKey: typedRequest,
+  requestOptions: (method, url) => ({ generatedBodyId: (key, value) => method === 'POST' && url.pathname === '/api/v3/brokerage/orders'
+    && key === 'client_order_id' && typeof value === 'string' && value.startsWith('tealstreet-')
+    && value.length > 11 && value.length <= 32 && !/[^A-Za-z0-9]/.test(value.slice(11)) }),
+});
+
 export const VENUES = {
+  grvt: (() => {
+    // Public deterministic replay key. Never use this well-known key for funds.
+    const secret = '0x' + '01'.repeat(32);
+    const signer = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1';
+    let crypto;
+    const initializeCrypto = () => crypto ??= createRequire(import.meta.url)('ethers');
+    const account = 'fixture-account';
+    const builder = '0xee8f3559f298fffa79b8253437969d15b5dccff3';
+    const instruments = {
+      BTC_USDT_Perp: { hash: '0x030501', decimals: 9 },
+      ETH_USDT_Perp: { hash: '0x030502', decimals: 9 },
+    };
+    // This schema is independent of the venue encoder and the GRVT SDK signer.
+    const types = {
+      OrderWithBuilderFee: [
+        { name: 'subAccountID', type: 'uint64' }, { name: 'isMarket', type: 'bool' },
+        { name: 'timeInForce', type: 'uint8' }, { name: 'postOnly', type: 'bool' },
+        { name: 'reduceOnly', type: 'bool' }, { name: 'legs', type: 'OrderLeg[]' },
+        { name: 'builder', type: 'address' }, { name: 'builderFee', type: 'uint32' },
+        { name: 'nonce', type: 'uint32' }, { name: 'expiration', type: 'int64' },
+      ],
+      OrderLeg: [
+        { name: 'assetID', type: 'uint256' }, { name: 'contractSize', type: 'uint64' },
+        { name: 'limitPrice', type: 'uint64' }, { name: 'isBuyingContract', type: 'bool' },
+      ],
+    };
+    return {
+      rust: 'grvt',
+      preserveBodyFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
+      preserveQueryFields: ['timestamp', 'recvWindow', 'signature', 'requestId'],
+      initializeReplay(_impl, options) {
+        if (!options.publicDataOnly) initializeCrypto();
+      },
+      ts: { module: `${root}/grvt/grvt.exchange.ts`, className: 'GrvtExchange', name: 'grvt' },
+      tsBooksSubscribed: (exchange, count) => Object.keys(exchange.publicWebsocket.messageHandlers).filter((k) => k.startsWith('orderbook.')).length >= count,
+      options: { grvtSessionProxy: true, grvtTradingAccountId: '777' },
+      replayCredentials: { key: 'grvt-replay-key', secret },
+      marketFilter: (row) => row.symbol.endsWith('_PERP'),
+      requestBodies: true,
+      requestKey: typedRequest,
+      generatedId: () => false,
+      compareClientIds: true,
+      compareFillPrices: true,
+      compareSubscriptions: true,
+      compareWriteOrder: true,
+      isPrivateRecord: (record) => record.type === 'ws' && new URL(record.url).hostname.startsWith('trades.'),
+      privateSocket: 'wss://trades.grvt.io/ws',
+      isWrite: (_method, url) => /\/(create_order|cancel_order|cancel_all_orders|set_initial_leverage|set_position_config)$/.test(new URL(url).pathname),
+      prepareTs(exchange) {
+        // The production private stream requires a proxy-selected host. Supply
+        // only that host boundary, using the recorded real upstream identity;
+        // leave its first-frame auth, subscriptions and handlers untouched.
+        exchange.options = { ...exchange.options, transport: {
+          name: 'grvt-tape-routing',
+          rest: ({ config }) => ({ baseURL: config?.baseURL, proxied: false }),
+          restAdapter: () => undefined, proxyPrefix: () => '', publicCorsProxy: () => undefined,
+          privateProxy: () => undefined, serverProxyUrl: () => undefined,
+          requireProxy: (options) => options, wsConnection: () => undefined,
+          wsRouting: () => ({ restProxyHost: '', howEgress: 'sg',
+            wsPublic: { tunnelled: false }, wsBusiness: { tunnelled: false },
+            wsPrivate: { tunnelled: false, host: 'wss://trades.grvt.io/ws' },
+          }),
+        } };
+      },
+      requestBody(body, { url }) {
+        if (!new URL(url).pathname.endsWith('/create_order') || !body?.o) return body;
+        const order = body.o;
+        // Only independently verified signature entropy and clock values vary.
+        // Preserve field presence, signer, chain ID, caller/native IDs and fees.
+        return { ...body, o: { ...order,
+          s: Object.fromEntries(Object.entries(order.s ?? {}).map(([key, value]) => [key,
+            ['r', 's1', 'v', 'e', 'n'].includes(key) ? `<${key}>` : value])),
+          m: Object.fromEntries(Object.entries(order.m ?? {}).map(([key, value]) => [key, key === 'ct' ? '<ct>' : value])),
+        } };
+      },
+      validateSocket(url) {
+        const parsed = new URL(url);
+        if (parsed.protocol !== 'wss:' || !['market-data.grvt.io', 'trades.grvt.io'].includes(parsed.hostname))
+          throw new Error('GRVT must emit a real upstream socket URL');
+      },
+      validateRequest({ method, url, body, headers }) {
+        const parsed = new URL(url);
+        if (method !== 'POST' || parsed.protocol !== 'https:' || !['market-data.grvt.io', 'trades.grvt.io', 'edge.grvt.io'].includes(parsed.hostname))
+          throw new Error('GRVT must emit a real upstream REST URL');
+        const h = uniqueRequestHeaders(headers);
+        if (parsed.hostname === 'market-data.grvt.io') {
+          if (['cookie', 'x-ts-grvt-session', 'x-grvt-account-id', 'x-api-key'].some((key) => h[key]))
+            throw new Error('GRVT public market data must not carry private credentials');
+          return;
+        }
+        if (ArrayBuffer.isView(body) || body instanceof ArrayBuffer) body = new TextDecoder().decode(body);
+        const data = typeof body === 'string' ? parseRequestJson(body) : body;
+        if (parsed.hostname === 'edge.grvt.io') {
+          if (parsed.pathname !== '/auth/api_key/login' || data?.api_key !== 'grvt-replay-key' || h['x-grvt-remember-me'] !== 'true')
+            throw new Error('Invalid GRVT login credentials');
+          return;
+        }
+        const session = h['x-ts-grvt-session'];
+        if (!['fixture-session-1', 'fixture-session-2'].includes(session) || h['x-grvt-account-id'] !== account
+          || (h.cookie !== undefined && !h.cookie.split(';').map((v) => v.trim()).includes(`gravity=${session}`)))
+          throw new Error('Invalid GRVT private session credentials');
+        if (!parsed.pathname.endsWith('/create_order')) return;
+        const o = data?.o, sig = o?.s;
+        if (!o || !sig || !Array.isArray(o.l) || o.l.length !== 1 || !o.m || o.sa !== '777'
+          || typeof o.im !== 'boolean' || typeof o.po !== 'boolean' || typeof o.ro !== 'boolean'
+          || !['GOOD_TILL_TIME', 'ALL_OR_NONE', 'IMMEDIATE_OR_CANCEL', 'FILL_OR_KILL'].includes(o.ti)
+          || sig.ci !== '325' || sig.s?.toLowerCase() !== signer.toLowerCase()
+          || ![27, 28].includes(sig.v) || !Number.isInteger(sig.n) || sig.n < 0 || sig.n > 0xffff_ffff
+          || typeof sig.e !== 'string' || typeof o.m.ct !== 'string' || typeof o.m.co !== 'string'
+          || (!sig.e || /[^0-9]/.test(sig.e)) || (!o.m.ct || /[^0-9]/.test(o.m.ct))
+          || !/^[1-9]\d*$/.test(o.m.co) || BigInt(o.m.co) <= 0n || BigInt(o.m.co) > 0x7fff_ffff_ffff_ffffn
+          || typeof o.b !== 'string' || o.b.toLowerCase() !== builder || o.bf !== '0.03')
+          throw new Error('Invalid GRVT signed order fields');
+        const created = BigInt(o.m.ct), expires = BigInt(sig.e), now = BigInt(Date.now()) * 1_000_000n;
+        if (created < now - 30_000_000_000n || created > now + 30_000_000_000n
+          || expires < now + 3_570_000_000_000n || expires > now + 3_630_000_000_000n)
+          throw new Error('Invalid GRVT signature clock');
+        const { Signature, parseUnits, verifyTypedData } = initializeCrypto();
+        const message = {
+          subAccountID: o.sa, isMarket: o.im,
+          timeInForce: { GOOD_TILL_TIME: 1, ALL_OR_NONE: 2, IMMEDIATE_OR_CANCEL: 3, FILL_OR_KILL: 4 }[o.ti],
+          postOnly: o.po, reduceOnly: o.ro,
+          legs: o.l.map((leg) => {
+            const instrument = instruments[leg.i];
+            if (!instrument || typeof leg.s !== 'string' || typeof leg.ib !== 'boolean'
+              || (o.im ? leg.lp !== undefined : typeof leg.lp !== 'string')) throw new Error('Invalid GRVT signed leg');
+            const size = parseUnits(leg.s, instrument.decimals), price = o.im ? 0n : parseUnits(leg.lp, 9);
+            if (size <= 0n || size > 0xffff_ffff_ffff_ffffn || (o.im ? price !== 0n : price <= 0n) || price > 0xffff_ffff_ffff_ffffn)
+              throw new Error('Invalid GRVT native integer units');
+            return { assetID: instrument.hash, contractSize: size, limitPrice: price, isBuyingContract: leg.ib };
+          }),
+          builder: o.b, builderFee: parseUnits(o.bf, 4), nonce: sig.n, expiration: sig.e,
+        };
+        const recovered = verifyTypedData({ name: 'GRVT Exchange', version: '0', chainId: 325 }, types, message,
+          Signature.from({ r: sig.r, s: sig.s1, v: sig.v }));
+        if (recovered.toLowerCase() !== signer.toLowerCase()) throw new Error('Invalid GRVT EIP-712 signature');
+      },
+      createRequestAudit() {
+        // Credentials become valid only after the transport actually returns
+        // a successful login. Requests alone cannot create or rotate a session.
+        let current;
+        const attempts = new Map();
+        const fields = uniqueRequestHeaders;
+        return {
+          current: () => current && { ...current },
+          validate({ url, headers, body }) {
+            if (new URL(url).hostname !== 'trades.grvt.io') return;
+            const h = fields(headers);
+            if (!current || h['x-ts-grvt-session'] !== current.cookie || h['x-grvt-account-id'] !== current.account
+              || (h.cookie !== undefined && !h.cookie.split(';').map((v) => v.trim()).includes(`gravity=${current.cookie}`)))
+              throw new Error('GRVT request did not use the current authenticated session');
+            if (new URL(url).pathname.endsWith('/create_order')) {
+              const serialized = typeof body === 'string' ? body : JSON.stringify(body);
+              const data = typeof body === 'string' ? parseRequestJson(body) : body;
+              const previous = attempts.get(data?.o?.m?.co);
+              if (previous && previous !== serialized) throw new Error('GRVT auth resend changed the signed order');
+            }
+          },
+          response({ url, response, body: requestBody }) {
+            const parsed = new URL(url);
+            if (!['edge.grvt.io', 'trades.grvt.io'].includes(parsed.hostname)) return;
+            let body;
+            try { body = parseRequestJson(response.body); } catch { return; }
+            const code = body?.c ?? body?.code ?? body?.e?.c ?? body?.e?.code ?? body?.error?.c ?? body?.error?.code;
+            if (parsed.hostname === 'trades.grvt.io') {
+              if (String(code) === '1000') {
+                current = undefined;
+                if (parsed.pathname.endsWith('/create_order')) {
+                  const serialized = typeof requestBody === 'string' ? requestBody : JSON.stringify(requestBody);
+                  const data = typeof requestBody === 'string' ? parseRequestJson(requestBody) : requestBody;
+                  attempts.set(data?.o?.m?.co, serialized);
+                }
+              }
+              return;
+            }
+            if (parsed.pathname !== '/auth/api_key/login' || response.status < 200 || response.status >= 300
+              || (code !== undefined && String(code) !== '0')) return;
+            const pairs = String(response.headers ?? '').split('\n').filter(Boolean).map((line) => {
+              const colon = line.indexOf(':');
+              return [line.slice(0, colon).trim(), line.slice(colon + 1).trim()];
+            });
+            const h = uniqueRequestHeaders(pairs.filter(([key]) => key.toLowerCase() !== 'set-cookie'));
+            const cookieHeader = pairs.filter(([key]) => key.toLowerCase() === 'set-cookie')
+              .map(([, value]) => value).find((value) => /(?:^|[,;]\s*)gravity=/.test(value));
+            const cookie = h['x-ts-grvt-session'] ?? cookieHeader?.match(/(?:^|[,;]\s*)gravity=([^;,\s]+)/)?.[1];
+            if (!cookie || !h['x-grvt-account-id']) {
+              current = undefined;
+              throw new Error('GRVT login response omitted authenticated session credentials');
+            }
+            current = { cookie, account: h['x-grvt-account-id'] };
+          },
+        };
+      },
+      createSocketAudit: (_impl, { isPrivate, books, requestAudit }) => {
+        const states = new Map(), failures = [];
+        const state = (url, generation) => {
+          const key = generation && typeof generation === 'object' ? generation : `${url}#${generation ?? 1}`;
+          if (!states.has(key)) states.set(key, { url, closed: false, authSent: false, ack: false, streams: new Set(), pings: 0, messages: 0 });
+          return states.get(key);
+        };
+        const fail = (message) => failures.push(message);
+        return {
+          connected(url, generation) { state(url, generation); },
+          closed(url, generation) { state(url, generation).closed = true; },
+          sent(url, text, generation) {
+            const current = state(url, generation), privateSocket = new URL(url).hostname === 'trades.grvt.io';
+            const first = current.messages++ === 0;
+            if (current.closed) fail('GRVT sent a frame on a closed socket generation');
+            if (text === 'pong') {
+              if (privateSocket && !current.authSent) fail('GRVT private first frame was not authentication');
+              if (current.pings <= 0) fail('unexpected GRVT pong'); else current.pings--;
+              return;
+            }
+            if (text === 'ping') {
+              if (privateSocket && !current.authSent) fail('GRVT private first frame was not authentication');
+              return;
+            }
+            const frame = JSON.parse(text);
+            if (privateSocket && frame.type === 'auth') {
+              const credentials = requestAudit?.current();
+              const validCookie = credentials
+                ? frame.session_cookie === `rm=true; gravity=${credentials.cookie}`
+                : !requestAudit && ['rm=true; gravity=fixture-session-1', 'rm=true; gravity=fixture-session-2'].includes(frame.session_cookie);
+              if (!first || current.authSent || !validCookie
+                || frame.account_id !== (credentials?.account ?? account) || frame.testnet !== false)
+                fail('invalid GRVT first-frame auth for socket generation');
+              else current.authSent = true;
+            } else if (privateSocket) {
+              if (!current.ack || frame.method !== 'subscribe' || !['v1.order', 'v1.position', 'v1.fill'].includes(frame.stream)
+                || JSON.stringify(frame.feed) !== '["777"]' || frame.is_full !== false)
+                fail('GRVT private subscription preceded auth acknowledgement or changed selector');
+              else current.streams.add(frame.stream);
+            } else if (frame.method === 'subscribe') {
+              for (const selector of frame.params?.selectors ?? []) current.streams.add(`${frame.params.stream}:${selector}`);
+            } else if (frame.method === 'unsubscribe') {
+              for (const selector of frame.params?.selectors ?? []) current.streams.delete(`${frame.params.stream}:${selector}`);
+            }
+          },
+          received(url, text, generation) {
+            const current = state(url, generation);
+            if (current.closed) fail('GRVT received a frame on a closed socket generation');
+            if (text === 'ping') { current.pings++; return; }
+            if (text === 'pong') return;
+            const frame = JSON.parse(text), stream = frame.s ?? frame.stream;
+            if (frame.type === 'auth_success') {
+              if (!current.authSent || current.ack) fail('GRVT auth ACK preceded credentials or repeated on the same socket generation');
+              else current.ack = true;
+            }
+            if (new URL(url).hostname === 'trades.grvt.io' && stream && (frame.f ?? frame.feed)) {
+              if (!current.ack || !current.streams.has(stream)) fail('unsubscribed GRVT private data: ' + stream);
+              const feed = frame.f ?? frame.feed, selector = frame.s1 ?? frame.selector;
+              if ((feed.sa !== undefined && feed.sa !== '777') || (selector && !selector.startsWith('777-')))
+                fail('GRVT private data changed sub-account selector');
+            }
+            if (new URL(url).hostname === 'market-data.grvt.io' && stream && (frame.f ?? frame.feed)) {
+              const instrument = (frame.f ?? frame.feed).i ?? (frame.f ?? frame.feed).instrument;
+              if (![...current.streams].some((key) => key.startsWith(`${stream}:${instrument}@`)))
+                fail('unsubscribed GRVT public data: ' + stream + ':' + instrument);
+            }
+          },
+          ready() { return !isPrivate || [...states.values()].some((s) => !s.closed && s.authSent); },
+          errors() {
+            for (const current of states.values()) {
+              const { url } = current;
+              if (current.pings) fail('missing GRVT pong');
+              if (new URL(url).hostname === 'trades.grvt.io' && isPrivate && !current.closed)
+                for (const stream of ['v1.order', 'v1.position', 'v1.fill']) if (!current.streams.has(stream)) fail('missing GRVT private stream: ' + stream);
+              if (new URL(url).hostname === 'market-data.grvt.io' && !current.closed) for (const symbol of books) {
+                const native = symbol.replace(/_PERP$/, '_Perp');
+                if (!current.streams.has(`v1.book.s:${native}@500-50`)) fail('missing GRVT book subscription: ' + symbol);
+              }
+            }
+            return failures;
+          },
+        };
+      },
+    };
+  })(),
+  coinbase: coinbase('coinbase'),
+  coinbasespot: coinbase('coinbasespot'),
+  polymarket,
+  breakoutprop,
   phemex: {
     rust: 'phemex',
     requestKey: typedRequest,
@@ -1258,7 +1591,7 @@ export const venueOf = (name) => {
 
 /** Every axios instance the exchange owns, so all of its REST goes to the tape. */
 export const axiosClients = (exchange) =>
-  [...new Set(Object.values(exchange).flatMap((value) => [value, value?.axiosInstance]))]
+  [...new Set(Object.values(exchange).flatMap((value) => [value, value?.axiosInstance, ...Object.values(value && typeof value === 'object' ? value : {})]))]
     .filter((value) => value?.defaults && value?.interceptors);
 
 /** Native Hyro callers supply endpoints; the harness uses the same public config as TS. */

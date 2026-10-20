@@ -1,10 +1,10 @@
-import { ORDER_EVENT } from '@tealstreet/safe-cex/src/exchanges/coinbase/coinbase.types';
+import { ORDER_EVENT } from './coinbase.types';
 import { OrderStatus, OrderType } from '@tealstreet/safe-cex/src/types';
 import { hashes, sign as ed25519Sign } from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
 
-import { uuid } from '../../utils/uuid';
-import { virtualClock } from '../../utils/virtualClock';
+import { uuid } from '../../../utils/uuid';
+import { virtualClock } from '../../../utils/virtualClock';
 
 const COINBASE_USDC_ALIAS_EXCEPTIONS = new Set(['USDT-USDC', 'EURC-USDC']);
 const COINBASE_KEY_NAME_PATTERN = /^organizations\/[^/]+\/apiKeys\/[^/]+$/;

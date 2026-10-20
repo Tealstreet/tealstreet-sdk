@@ -5,13 +5,17 @@
 //! JSON array string, or an empty string when there are none. `wsMessageActions`
 //! and `wsMessageBytes` return `undefined` instead, avoiding empty-string decoding.
 #[cfg(not(any(
+    feature = "grvt",
     feature = "paradex",
     feature = "bitrue",
+    feature = "coinbase",
     feature = "binance",
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
+    feature = "breakoutprop",
     feature = "kucoin",
+    feature = "polymarket",
     feature = "blofin",
     feature = "bybit",
     feature = "woo",
@@ -29,7 +33,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: paradex, apexomni, kraken, asterdex, bitrue, binance, bitunix, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, lighter, orderly, okx, phemex, woo or weex"
+    "safe-cex-wasm requires at least one venue feature: breakoutprop, paradex, apexomni, asterdex, bitrue, binance, bitunix, kucoin, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, grvt, hyperliquid, kraken, coinbase, lighter, orderly, polymarket, okx, phemex, woo or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -56,12 +60,18 @@ use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
 use safe_cex_venue_bitunix::{BitunixFutures, Options as BitunixOptions};
 #[cfg(feature = "blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
+#[cfg(feature = "breakoutprop")]
+use safe_cex_venue_breakoutprop::{BreakoutProp, Options as BreakoutOptions};
 #[cfg(feature = "bybit")]
 use safe_cex_venue_bybit::{
     BybitLinear, Endpoints as BybitEndpoints, Options as BybitOptions, Variant as BybitVariant,
 };
+#[cfg(feature = "coinbase")]
+use safe_cex_venue_coinbase::{Coinbase, Options as CoinbaseOptions};
 #[cfg(feature = "cryptocom")]
 use safe_cex_venue_cryptocom::{Cryptocom, Options as CryptocomOptions};
+#[cfg(feature = "grvt")]
+use safe_cex_venue_grvt::{Grvt, Options as GrvtOptions};
 #[cfg(feature = "hyperliquid")]
 use safe_cex_venue_hyperliquid::{Builder, Hyperliquid, Options as HyperliquidOptions};
 #[cfg(feature = "kraken")]
@@ -80,6 +90,10 @@ use safe_cex_venue_orderly::{Broker as OrderlyBroker, Options as OrderlyOptions,
 use safe_cex_venue_paradex::{Options as ParadexOptions, Paradex};
 #[cfg(feature = "phemex")]
 use safe_cex_venue_phemex::{Options as PhemexOptions, PhemexPerpetuals};
+#[cfg(feature = "polymarket")]
+use safe_cex_venue_polymarket::{
+    Options as PolymarketOptions, Polymarket, PolymarketOptions as PolymarketAccountOptions,
+};
 #[cfg(feature = "weex")]
 use safe_cex_venue_weex::{Options as WeexOptions, WeexFutures};
 #[cfg(feature = "woo")]
@@ -88,6 +102,7 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 trait AnyEngine {
+    fn account_id(&self) -> Option<String>;
     fn start(&mut self, now: f64);
     fn handle(&mut self, now: f64, event: Event<'_>);
     fn drain(&mut self) -> Vec<Action>;
@@ -96,6 +111,9 @@ trait AnyEngine {
 }
 
 impl<V: Venue> AnyEngine for Engine<V> {
+    fn account_id(&self) -> Option<String> {
+        Engine::account_id(self).map(str::to_owned)
+    }
     fn start(&mut self, now: f64) {
         Engine::start(self, now);
     }
@@ -130,12 +148,15 @@ struct KucoinExtra {
 }
 
 #[cfg(any(
+    feature = "coinbase",
     feature = "paradex",
     feature = "binance",
     feature = "bitunix",
     feature = "apexomni",
     feature = "asterdex",
+    feature = "breakoutprop",
     feature = "kucoin",
+    feature = "polymarket",
     feature = "blofin",
     feature = "bybit",
     feature = "woo",
@@ -143,6 +164,7 @@ struct KucoinExtra {
     feature = "bingx",
     feature = "mexc",
     feature = "bitget",
+    feature = "grvt",
     feature = "bitrue",
     feature = "backpack",
     feature = "phemex",
@@ -156,6 +178,12 @@ struct KucoinExtra {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EngineOptions {
+    #[cfg(feature = "coinbase")]
+    #[serde(default)]
+    spot_only: bool,
+    #[cfg(feature = "polymarket")]
+    #[serde(default)]
+    polymarket: Option<PolymarketAccountOptions>,
     #[cfg(feature = "lighter")]
     #[serde(default)]
     api_key_index: Option<String>,
@@ -167,6 +195,8 @@ struct EngineOptions {
     #[serde(default)]
     lighter_stop_slippage_pct: Option<f64>,
     #[cfg(any(
+        feature = "grvt",
+        feature = "coinbase",
         feature = "paradex",
         feature = "binance",
         feature = "bitunix",
@@ -192,10 +222,13 @@ struct EngineOptions {
     #[serde(default)]
     key: Option<String>,
     #[cfg(any(
+        feature = "grvt",
+        feature = "coinbase",
         feature = "binance",
         feature = "bitunix",
         feature = "apexomni",
         feature = "asterdex",
+        feature = "breakoutprop",
         feature = "kucoin",
         feature = "blofin",
         feature = "bybit",
@@ -222,7 +255,7 @@ struct EngineOptions {
     #[cfg(feature = "paradex")]
     #[serde(default)]
     subkey_address: Option<String>,
-    #[cfg(any(feature = "backpack", feature = "bitrue"))]
+    #[cfg(any(feature = "backpack", feature = "bitrue", feature = "breakoutprop"))]
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
@@ -266,12 +299,27 @@ struct EngineOptions {
     #[cfg(feature = "weex")]
     #[serde(default)]
     private_ws_headers: bool,
+    #[cfg(feature = "grvt")]
+    #[serde(default)]
+    grvt_trading_account_id: Option<String>,
+    #[cfg(feature = "grvt")]
+    #[serde(default)]
+    grvt_signer_address: Option<String>,
+    #[cfg(feature = "grvt")]
+    #[serde(default)]
+    grvt_session_proxy: bool,
     #[cfg(feature = "bybit")]
     #[serde(default)]
     endpoints: Option<EndpointOptions>,
-    #[cfg(feature = "orderly")]
+    #[cfg(any(feature = "orderly", feature = "breakoutprop"))]
     #[serde(default)]
     tick_interval: Option<f64>,
+    #[cfg(feature = "breakoutprop")]
+    #[serde(default)]
+    subaccount: Option<String>,
+    #[cfg(feature = "breakoutprop")]
+    #[serde(default)]
+    polling_enabled: Option<bool>,
 }
 #[cfg(feature = "asterdex")]
 #[derive(Deserialize, Default)]
@@ -529,11 +577,11 @@ enum CommandIn {
     FetchStpMode {
         command: u32,
     },
-    #[cfg(feature = "asterdex")]
+    #[cfg(any(feature = "asterdex", feature = "polymarket"))]
     FetchAccount {
         command: u32,
     },
-    #[cfg(feature = "asterdex")]
+    #[cfg(any(feature = "asterdex", feature = "polymarket"))]
     FetchOrderBook {
         command: u32,
         symbol: String,
@@ -670,9 +718,9 @@ impl From<CommandIn> for Command {
             }
             #[cfg(feature = "asterdex")]
             CommandIn::FetchStpMode { command } => Self::FetchStpMode { command },
-            #[cfg(feature = "asterdex")]
+            #[cfg(any(feature = "asterdex", feature = "polymarket"))]
             CommandIn::FetchAccount { command } => Self::FetchAccount { command },
-            #[cfg(feature = "asterdex")]
+            #[cfg(any(feature = "asterdex", feature = "polymarket"))]
             CommandIn::FetchOrderBook {
                 command,
                 symbol,
@@ -794,12 +842,15 @@ pub struct WasmEngine {
 #[wasm_bindgen]
 impl WasmEngine {
     #[cfg(any(
+        feature = "coinbase",
         feature = "paradex",
         feature = "binance",
         feature = "bitunix",
         feature = "apexomni",
         feature = "asterdex",
+        feature = "breakoutprop",
         feature = "kucoin",
+        feature = "polymarket",
         feature = "blofin",
         feature = "bybit",
         feature = "woo",
@@ -807,6 +858,7 @@ impl WasmEngine {
         feature = "bingx",
         feature = "mexc",
         feature = "bitget",
+        feature = "grvt",
         feature = "bitrue",
         feature = "backpack",
         feature = "phemex",
@@ -850,6 +902,49 @@ impl WasmEngine {
                 public_data_only: options.public_data_only,
                 key: options.key,
                 secret: options.secret,
+            }))),
+            #[cfg(feature = "breakoutprop")]
+            "breakoutprop" => Box::new(Engine::new(BreakoutProp::new(BreakoutOptions {
+                key: options.key.unwrap_or_default(),
+                secret: options.secret.unwrap_or_default(),
+                subaccount: options.subaccount,
+                public_data_only: options.public_data_only,
+                tick_interval: if options.polling_enabled == Some(false) {
+                    f64::INFINITY
+                } else {
+                    options.tick_interval.unwrap_or(2_000.0)
+                },
+                timeout_ms: options
+                    .recv_window
+                    .unwrap_or(20_000.0)
+                    .clamp(1.0, u32::MAX as f64) as u32,
+            }))),
+            #[cfg(feature = "grvt")]
+            "grvt" => Box::new(Engine::new(Grvt::new(GrvtOptions {
+                testnet: options.testnet,
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                trading_account_id: options.grvt_trading_account_id,
+                signer_address: options.grvt_signer_address,
+                session_proxy: options.grvt_session_proxy,
+            }))),
+            #[cfg(feature = "coinbase")]
+            "coinbase" | "coinbasespot" => Box::new(Engine::new(
+                Coinbase::new(CoinbaseOptions {
+                    key: options.key.unwrap_or_default(),
+                    secret: options.secret.unwrap_or_default(),
+                    public_data_only: options.public_data_only,
+                    spot_only: venue == "coinbasespot" || options.spot_only,
+                    testnet: options.testnet,
+                })
+                .map_err(|error| JsError::new(&error))?,
+            )),
+            #[cfg(feature = "polymarket")]
+            "polymarket" => Box::new(Engine::new(Polymarket::new(PolymarketOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                polymarket: options.polymarket,
             }))),
             #[cfg(feature = "paradex")]
             "paradex" => Box::new(Engine::new(Paradex::new(ParadexOptions {
@@ -1195,9 +1290,45 @@ impl WasmEngine {
     }
 
     pub fn command(&mut self, command_json: &str, now: f64) -> Result<String, JsError> {
+        #[derive(Deserialize)]
+        struct Header<'a> {
+            #[serde(borrow)]
+            op: std::borrow::Cow<'a, str>,
+        }
+        let header: Header<'_> = serde_json::from_str(command_json)?;
+        if header.op == "setTickInterval" {
+            #[derive(Deserialize)]
+            #[serde(untagged)]
+            enum Interval {
+                Millis(f64),
+                Paused(()),
+            }
+            #[derive(Deserialize)]
+            struct Control {
+                interval: Interval,
+            }
+            let control: Control = serde_json::from_str(command_json)?;
+            let interval_ms = match control.interval {
+                Interval::Millis(ms) => ms,
+                Interval::Paused(()) => f64::INFINITY,
+            };
+            if interval_ms.is_nan() || interval_ms <= 0.0 {
+                return Err(JsError::new(
+                    "Polling interval must be positive or null to pause",
+                ));
+            }
+            self.inner
+                .handle(now, Event::TickIntervalChanged { interval_ms });
+            return Ok(self.flush());
+        }
         let command: CommandIn = serde_json::from_str(command_json)?;
         self.inner.handle(now, Event::Command(command.into()));
         Ok(self.flush())
+    }
+
+    #[wasm_bindgen(js_name = accountId)]
+    pub fn account_id(&self) -> Option<String> {
+        self.inner.account_id()
     }
 
     /// Everything that changed since the previous call as one flush frame
@@ -1231,7 +1362,10 @@ mod tests {
     fn account_command_aliases_share_the_engine_read() {
         for (op, enabled) in [
             ("getAccount", cfg!(feature = "apexomni")),
-            ("fetchAccount", cfg!(feature = "asterdex")),
+            (
+                "fetchAccount",
+                cfg!(any(feature = "asterdex", feature = "polymarket")),
+            ),
         ] {
             let parsed =
                 serde_json::from_str::<CommandIn>(&format!(r#"{{"op":"{op}","command":77}}"#));
@@ -1291,6 +1425,10 @@ mod tests {
     }
 
     impl AnyEngine for Messages {
+        fn account_id(&self) -> Option<String> {
+            None
+        }
+
         fn start(&mut self, _now: f64) {}
         fn handle(&mut self, _now: f64, event: Event<'_>) {
             if let Event::WsMessage { socket, text } = event
@@ -1386,9 +1524,7 @@ mod tests {
         );
     }
 
-    // These methods are exposed by the SDK only for Aster. Keep their wire
-    // parsers out of other single-venue builds while retaining the shared
-    // engine command types for native hosts.
+    // Compile command parsers only for venues that expose each SDK method.
     #[test]
     fn aster_commands_follow_the_compiled_venue_feature() {
         let commands = [
@@ -1439,10 +1575,26 @@ mod tests {
                 _ => panic!("Aster command {index} changed its wire mapping"),
             }
             #[cfg(not(feature = "asterdex"))]
-            assert!(
-                parsed.is_err(),
-                "unsupported Aster command {index} must reject"
-            );
+            if cfg!(feature = "polymarket") && matches!(index, 2 | 3) {
+                let command = Command::from(parsed.unwrap());
+                assert!(matches!(
+                    (index, command),
+                    (2, Command::FetchAccount { command: 19 })
+                        | (
+                            3,
+                            Command::FetchOrderBook {
+                                command: 19,
+                                symbol: _,
+                                limit: Some(50)
+                            }
+                        )
+                ));
+            } else {
+                assert!(
+                    parsed.is_err(),
+                    "unsupported venue command {index} must reject"
+                );
+            }
         }
     }
 

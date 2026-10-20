@@ -35,6 +35,14 @@ interface Case {
 }
 
 const cases: Case[] = [
+  { name: 'breakout-direct-provider', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: {}, direct: true },
+  { name: 'breakout-tealstreet-direct', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: {} },
+  { name: 'breakout-proxy', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: { tealstreetProxy: true, tealstreetTunnel: false } },
+  { name: 'breakout-how', exchange: 'breakoutprop', baseURL: 'https://breakout.prosp.devexperts.com', options: { tealstreetTunnel: true }, how: true },
+  { name: 'coinbase-direct-jwt', exchange: 'coinbase', baseURL: 'https://api.coinbase.com', options: {} },
+  { name: 'coinbase-proxy-jwt', exchange: 'coinbase', baseURL: 'https://api.coinbase.com', options: { tealstreetProxy: true } },
+  { name: 'coinbasespot-proxy-jwt', exchange: 'coinbasespot', baseURL: 'https://api.coinbase.com', options: { tealstreetProxy: true } },
+  { name: 'coinbase-how-jwt', exchange: 'coinbase', baseURL: 'https://api.coinbase.com', options: { tealstreetProxy: true, tealstreetTunnel: true }, how: true },
   { name: 'direct-provider', exchange: 'bybit', baseURL: 'https://api.bybit.com', options: {}, direct: true },
   { name: 'tealstreet-direct', exchange: 'bybit', baseURL: 'https://api.bybit.com', options: {} },
   { name: 'asia-pool', exchange: 'bybit', baseURL: 'https://api.bybit.com', options: { tealstreetProxy: true } },
@@ -257,6 +265,8 @@ const buildCase = async (input: Case) => {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(keyed ? { 'x-mbx-apikey': 'fixture-venue-key' } : {}),
+      ...(input.exchange === 'breakoutprop' ? { Authorization: 'DXAPI documented-session' } : {}),
+      ...(['coinbase', 'coinbasespot'].includes(input.exchange) ? { Authorization: 'Bearer fixture-venue-jwt' } : {}),
     };
     const publicBinance = input.exchange.startsWith('binance') && !keyed;
     // Reproduce the TS public-client bypass; other requests go through the real
@@ -283,6 +293,13 @@ const buildCase = async (input: Case) => {
     const deliveredHeaders = input.how ? delivered.headers.toJSON() : delivered.headers;
     expect(delivered.url).toBe(target);
     const expectedHeaders: Record<string, string> = { ...headers, ...selected.headers };
+    const expectedAliases: Record<string, string> = ['coinbase', 'coinbasespot'].includes(input.exchange) && route.proxied && !input.how
+      ? { Authorization: 'Coinbase-Authorization' } : {};
+    expect(selected.headerAliases ?? {}, input.name).toEqual(expectedAliases);
+    for (const [source, target] of Object.entries(expectedAliases)) {
+      expectedHeaders[target] = expectedHeaders[source];
+      delete expectedHeaders[source];
+    }
     if (route.proxied) expectedHeaders[selected.authorizationHeader] = 'Bearer fixture-proxy-token';
     expect(deliveredHeaders).toEqual(expectedHeaders);
     http.push({
@@ -294,6 +311,7 @@ const buildCase = async (input: Case) => {
         authorize: route.proxied,
         authorizationHeader: selected.authorizationHeader,
         headers: selected.headers,
+        ...(Object.keys(expectedAliases).length ? { headerAliases: expectedAliases } : {}),
         tunnelUrl: selected.tunnelUrl ?? null,
       },
     });

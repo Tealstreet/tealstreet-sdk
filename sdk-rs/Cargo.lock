@@ -3702,6 +3702,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-breakoutprop"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+ "time",
+]
+
+[[package]]
 name = "safe-cex-venue-bybit"
 version = "0.1.0"
 dependencies = [
@@ -3712,9 +3723,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-coinbase"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "p256",
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+ "zeroize",
+]
+
+[[package]]
 name = "safe-cex-venue-cryptocom"
 version = "0.1.0"
 dependencies = [
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "safe-cex-venue-grvt"
+version = "0.1.0"
+dependencies = [
+ "alloy-dyn-abi",
+ "alloy-signer",
+ "alloy-signer-local",
  "safe-cex-crypto",
  "safe-cex-engine",
  "serde",
@@ -3828,6 +3865,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-polymarket"
+version = "0.1.0"
+dependencies = [
+ "alloy-dyn-abi",
+ "alloy-primitives",
+ "base64 0.22.1",
+ "getrandom 0.2.17",
+ "safe-cex-crypto",
+ "safe-cex-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "safe-cex-venue-weex"
 version = "0.1.0"
 dependencies = [
@@ -3862,8 +3913,11 @@ dependencies = [
  "safe-cex-venue-bitrue",
  "safe-cex-venue-bitunix",
  "safe-cex-venue-blofin",
+ "safe-cex-venue-breakoutprop",
  "safe-cex-venue-bybit",
+ "safe-cex-venue-coinbase",
  "safe-cex-venue-cryptocom",
+ "safe-cex-venue-grvt",
  "safe-cex-venue-hyperliquid",
  "safe-cex-venue-kraken",
  "safe-cex-venue-kucoin",
@@ -3873,6 +3927,7 @@ dependencies = [
  "safe-cex-venue-orderly",
  "safe-cex-venue-paradex",
  "safe-cex-venue-phemex",
+ "safe-cex-venue-polymarket",
  "safe-cex-venue-weex",
  "safe-cex-venue-woo",
  "serde",

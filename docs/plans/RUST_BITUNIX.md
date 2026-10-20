@@ -1448,3 +1448,87 @@ quantification, no retimingwithoutconcretegatecausality.
 Independentphase+adversarialreviews, fullnative/SDK/helpers androotchecks,
 3newvenuebuild/public/privategates precedereadiness. Expected25matrixrows,
 29public/54private plusBitget4/Aster3cases; require35exactheadgreenCIchecks.
+
+Merge execution correction: the shared origin ref advanced during planning;
+actual MERGE_HEAD is 74b0a7dd14, adding BreakoutProp PR1328 to the three
+reviewed ports. Preserve all four incoming ports. Owners expanded their scopes
+to its typed polling controls, TS wrapper and harness policy. Expected matrix
+is now 26 venues / 30 public / 55 private, plus Bitget4/Aster3 and Breakout
+compiled parity cases. Require at least36 exact-head green checks. Future
+merges pin the reviewed SHA explicitly. Root README resolves to a single
+Bitunix build example; native and host production released for Coinbase build
+while independent owners finish tests and harness adaptation. No gate runs on
+partially merged harness source, and no source-gate thresholds are changed.
+
+Native/host integration review: engine88 proof tests, strict workspace native
+clippy, bans/fmt, host84, focusedSDK315 and actual CoinbaseWASM10 PASS.
+Root44typecheck/28lint PASS; full repository unit run still in progress.
+Independent reviewer found Coinbase native accepted FEFF inside caller IDs
+while ECMAScript whitespace rejected it. Whole-batch regression fails before
+fix by observing a POST; native now rejects FEFF alongside controls. Full
+Coinbase114 tests and strict package clippy PASS after fix. Rebuild its artifact
+before replay. Root owns full workspace test/WASM-clippy completion, since the
+released owner's background session did not survive turn completion; its
+partial test log is not a completed gate. Protocol auth work delegated into
+disjoint CB/Poly/Breakout modules while shared replay/Tape owner completes
+polling and GRVT delivered-response credential activation.
+
+Root-owned fullnative gate COMPLETE: 2,375 passed, zero failures; strict
+workspaceWASM clippy PASS20.92s. PackageCoinbase114 already includes FEFF
+regression. Native/host/SDK independent review PASS, wire16/16 independently
+rechecked; no further findings. Fullroot test-ci safe-cex505files/7,326tests
+PASS; root scheduler still completing other declared tasks. Combined26-venue
+artifact/WASM bridge suite now building, separate from public CPU gates.
+
+Combined26-venue WASM build PASS2m40s; all7 compiled SDK files /106 tests
+PASS25.72s. Root shared-harness review caught private/no-clock session audit
+activating credentials before body delivery; production now explicitly opts
+into deferred audit independently of ReplayClock. GRVT production TS private
+refresh also exposed fake WebSocket localclose missing standard close event;
+owner added once-only queued event and actual refresh probe now passes all5
+commands with no protocol/unserved errors. Independent fence review found
+idle64 counted useful timer progress, rejecting a valid100ms poll at84ms
+under1ms housekeeping; fix preserves64/8192 limits and counts actual idle.
+Harness aggregate and all8 Coinbase TS private profiles remain in progress.
+
+Root full repository quality COMPLETE: all27 test tasks PASS10m46s, alongside
+44typecheck/28lint tasks. Final shared/protocol adversarial review PASS after
+fixes: 59protocol/production-wrapper,40logical-startup/wrapper and14Poly checks
+independently green. Fixed generic typed matcher ignoring explicit preservation
+of unknown signature/clock/client-ID fields for the four new profiles: valid
+HMAC cannot normalize a changed cancellation into the recorded ACK. Verified
+entropy stays scoped to independently authenticated nested fields. Poly public
+credential leakage regression fails before, passes after across16routes×7
+private header names; actual production publicTape rejects before matching,
+then clean POST/books succeeds, no unserved requests. Coinbase public signature
+checks now also run on the actual public Tape path. These findings are closed;
+aggregate605 passed before the added Poly case, final606 run pending. No CPU,
+memory, timeout, frame/hash or peak thresholds changed. Final new-venue gates
+and Bitunix/Binance rebuilt controls follow source checkpoint.
+
+Actual TS functional integration COMPLETE: all8 Coinbase profiles each61frames/
+15commands, GRVT18/5 including session refresh, Poly20/8, Breakout24/6; zero
+unserved, unused writes, signature or socket protocol errors throughout.
+PublicTS profiles also PASS with two books each: Coinbase201frames,GRVT4695,
+Poly182,Breakout15. Breakout private has a playback clock without public
+startup mode: preserve real subscription preparation in that case. Axios
+relative paths now use the correct slash when joining dxsca-web/marketdata,
+with production adapter regression. Final aggregate adds these controls and
+fallback canonicalBody preservation; 607/608 first run isolated that fallback
+assertion (typed production already preserved fields), owner correcting it
+without removing the regression. Final608 and reviewed merge checkpoint next.
+
+Combined landing integration RELEASED: final609/609 helpers PASS, all4 public
+and11 private TS functional variants PASS, no background probe jobs. All merge
+conflicts resolved and staged. Prior independent native/host/shared/protocol
+reviews PASS; final small fallback/subscription/URL-join deltas receiving a
+last bounded independent audit before gates. Coinbase rebuilt991,290bytes.
+Checkpoint this reviewed source, then run unchanged three-run public gates,
+all8Coinbase private gates and GRVT/Poly/Breakout private/compiled parity,
+followed by rebuilt Bitunix/Binance controls. Preserve26/30/55 matrix and all
+gate thresholds; only exact-head green CI permits landing PR1309.
+
+Final three-delta independent audit PASS:10/10 targeted tests and exact/changed
+signature fallback probe. Legacy normalization defaults, logical startup
+observers and repeated serialized query parameters remain intact. No findings
+or background jobs remain. Source review closed; start rebuilt gates now.

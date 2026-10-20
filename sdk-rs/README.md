@@ -35,7 +35,11 @@ Venues emit real URLs and logical socket roles; the core never chooses a proxy.
 `createEngineTransport`, reusing TS routing, proxy authorization and HOW/relay.
 Explicit headless/direct options stay direct. `createEngineObject` accepts the
 same factory as `createTransport` for account-backed Workers deployments and
-refuses proxy/tunnel flags when no factory is configured.
+refuses proxy/tunnel flags when no factory is configured. The returned
+transport's credential-free `engineOptions` carry protocol choices derived from
+those same routes. SDK and Workers constructors apply them after caller options;
+GRVT therefore uses first-frame session auth on its proxy and cookie upgrade
+headers on a direct connection.
 
 Native launchers serialize the TS-resolved, token-free routing policy and supply
 a context token callback to `NetworkTransport::with_routing`; see
@@ -44,7 +48,7 @@ into the native host. Secondary signing keys remain unsupported and fail before
 engine startup, so the host cannot silently bypass their distinct read egress.
 
 From the repository root, `corepack yarn rust:build-wasm` builds the combined
-host. Use `corepack yarn rust:build-wasm --venue hyperliquid` (or `backpack` / `blofin` / `mexc` / `bingx` / `binance` / `bitunix` / `bitrue` / `bitget` / `bybit` / `cryptocom` / `okx` / `weex`) to
+host. Use `corepack yarn rust:build-wasm --venue bitunix` to
 build a single-venue browser/Workers bundle. Each build replaces the bindings
 under `hosts/wasm/pkg/`; its constructor accepts only the compiled venues.
 The default Cargo features retain all registered venues. CI replays each single-venue

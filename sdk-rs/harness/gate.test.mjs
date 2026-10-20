@@ -13,7 +13,7 @@ const gate = (venue, isPrivate = false, defect) => {
   const cwd = mkdtempSync(join(tmpdir(), 'safe-cex-gate-'));
   const tape = join(cwd, 'tape.jsonl');
   const records = [{ type: 'meta', private: isPrivate }];
-  if (defect === 'orderly-missing-result') records.push({ type: 'command', op: 'fetchFills' });
+  if (defect === 'orderly-missing-result' || defect === 'coinbase-missing-result') records.push({ type: 'command', op: 'fetchFills' });
   if (defect?.startsWith('impl-plans')) {
     for (const [impl, filters] of [
       ['ts', [undefined]],
@@ -74,14 +74,14 @@ const gate = (venue, isPrivate = false, defect) => {
         books: { BTCUSDT: { bids: [[99, 1]], asks: [[101, 1]] } },
         // Orderly's strict oracle requires exactly one result per taped command.
         // This smoke tape has none; populated command comparisons run below.
-        commands: isOrderly || venue === 'kucoin' ? [] : [{ ok: { count: 1, ids: ['one', 'two'] } }],
+        commands: isOrderly || venue === 'kucoin' || ['coinbase','coinbasespot'].includes(venue) ? [] : [{ ok: { count: 1, ids: ['one', 'two'] } }],
         ...(isPrivate ? { account: {
           hedged: ['backpack', 'cryptocom'].includes(venue),
           balance: { used: 0, free: 100, total: 100, upnl: 0 },
           orders: [], positions: [], settings: [], fills: [],
         } } : {}),
       };
-      if (defect === 'orderly-extra-result') output.commands.push({ ok: [] });
+      if (defect === 'orderly-extra-result' || defect === 'coinbase-extra-result') output.commands.push({ ok: [] });
       if (rust && defect === 'comparisons') {
         output.markets[0].precision.price = 0.2;
         output.tickers[0].last = 101;
@@ -165,7 +165,7 @@ test('gate CLI rejects negative absolute and net memory counters on later privat
   for (const field of ['retainedBytes', 'wasmBytes']) {
     const result = gate('bybitinverse', true, `memory:${field}`);
     assert.equal(result.status, 1, result.stderr);
-    assert.ok(result.stdout.includes(`rust: invalid ${field} (-1); baseline is invalid`), result.stdout);
+    assert.match(result.stdout, new RegExp(`rust: (?:invalid|inconsistent) ${field}`), result.stdout);
   }
 });
 
@@ -212,4 +212,32 @@ test('Kraken gate rejects wrong intermediate hashes while its final book matches
   assert.equal(result.status,1,result.stderr);
   assert.match(result.stdout,/bookEvents:/);
   assert.doesNotMatch(result.stdout,/book BTCUSDT differs/);
+});
+
+test('gate CLI retains the strict Coinbase command count oracle for both aliases', () => {
+  for (const venue of ['coinbase', 'coinbasespot']) {
+    for (const defect of ['coinbase-extra-result', 'coinbase-missing-result']) {
+      const result = gate(venue, true, defect);
+      assert.equal(result.status, 1, result.stdout);
+      assert.match(result.stderr, /missing Coinbase TS command result/);
+    }
+  }
+});
+
+test('gate CLI validates every memory component on later private runs', () => {
+  for (const field of ['retainedBytes', 'heapRetainedBytes', 'bufferRetainedBytes', 'wasmBytes']) {
+    const result = gate('bybitinverse', true, `memory:${field}`);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, new RegExp(`rust: (?:invalid|inconsistent) ${field}`), result.stdout);
+  }
+});
+
+
+test('new venue oracles reject an incorrect intermediate book hash with matching final depth', () => {
+  for (const name of ['coinbase','coinbasespot','polymarket','grvt','breakoutprop']) {
+    const result = gate(name, false, 'book-events');
+    assert.equal(result.status, 1, name + result.stderr + result.stdout);
+    assert.match(result.stdout, /bookEvents:/);
+    assert.doesNotMatch(result.stdout, /book BTCUSDT differs/);
+  }
 });

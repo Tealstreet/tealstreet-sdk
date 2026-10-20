@@ -10,7 +10,7 @@ const stable =
     if (value === undefined || options.defaultBodyValues?.[name] === value) return false;
     if (options.ignoreGeneratedBodyId?.(name, value, callerIds, options.bodyContext)) return false;
     if (callerIds.has(value)) return true;
-    if ((VOLATILE.has(name) && !(body && options.preserveBodyFields?.includes(name))) || options.generatedId?.(name, String(value))) return false;
+    if ((VOLATILE.has(name) && !(body ? options.preserveBodyFields?.includes(name) : options.preserveQueryFields?.includes(name))) || options.generatedId?.(name, String(value))) return false;
     return !CLIENT_IDS.has(name) || Boolean(options.generatedId);
   };
 
@@ -195,7 +195,7 @@ const normalize = (value, callerIds, root = true, options = {}) => {
   if (JSON.isRawJSON(value)) return value;
   if (Array.isArray(value)) return value.map((item) => normalize(item, callerIds, false, options));
   if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort()
-    .filter((key) => !(root && (IDENTITY_CLOCKS.has(key) || (key === 'nonce' && value.action))))
+    .filter((key) => !(root && (IDENTITY_CLOCKS.has(key) && !options.preserveBodyFields?.includes(key) || (key === 'nonce' && value.action))))
     .filter((key) => options.defaultBodyValues?.[key] !== value[key])
     .filter((key) => !options.ignoreGeneratedBodyId?.(key, value[key], callerIds, options.bodyContext))
     .filter((key) => !IDENTITY_CLIENT_IDS.has(key) || callerIds.has(value[key])
@@ -206,12 +206,12 @@ const normalize = (value, callerIds, root = true, options = {}) => {
 };
 
 const canonicalParams = (params, callerIds, options = {}) => new URLSearchParams([...params]
-  .filter(([key]) => !IDENTITY_URL_VOLATILE.has(key) && !options.volatileQueryFields?.includes(key))
-  .filter(([key, value]) => !IDENTITY_CLIENT_IDS.has(key) || callerIds.has(value))
+  .filter(([key]) => (!IDENTITY_URL_VOLATILE.has(key) || options.preserveQueryFields?.includes(key)) && !options.volatileQueryFields?.includes(key))
+  .filter(([key, value]) => !IDENTITY_CLIENT_IDS.has(key) || callerIds.has(value) || (options.generatedId && !options.generatedId(key, value)))
   .map(([key, value]) => {
     if (IDENTITY_CLIENT_IDS.has(key)) return [key, value];
     if (!/^[\[{]/.test(value.trimStart())) return [key, value];
-    try { return [key, JSON.stringify(normalize(parseJson(value), callerIds))]; }
+    try { return [key, JSON.stringify(normalize(parseJson(value), callerIds, true, options))]; }
     catch { return [key, value]; }
   })
   .sort(([a, av], [b, bv]) => a.localeCompare(b) || av.localeCompare(bv))).toString();
@@ -223,9 +223,13 @@ export const canonicalUrl = (url, callerIds = new Set(), options = {}) => {
 
 
 export const subscriptionMessage = (message) => {
-  const method = String(message.method ?? message.reqType ?? message.op ?? message.event ?? '').toUpperCase();
+  const method = String(message.method ?? message.reqType ?? message.op ?? message.event ?? message.type ?? '').toUpperCase();
   if (!['SUBSCRIBE', 'UNSUBSCRIBE', 'SUB', 'UNSUB'].includes(method)) return undefined;
   const op = ['SUBSCRIBE', 'SUB'].includes(method) ? 'subscribe' : 'unsubscribe';
+  if (typeof message.channel === 'string' && Array.isArray(message.product_ids)) return {
+    op, topics: ['heartbeats', 'user'].includes(message.channel) ? [message.channel] : message.product_ids.map((product) => `${message.channel}.${product}`),
+  };
+  if (typeof message.channel === 'string' && message.product_ids === undefined) return { op, topics: [message.channel] };
   const topics =
     message.params?.channels ??
     message.params ??
@@ -311,6 +315,7 @@ const fullSubscriptionKeys = (url, text, callerIds = new Set(), options = {}) =>
     const key = subscriptionKey(url, text, callerIds, options);
     return key === undefined ? [] : [key];
   }
+  message = options.subscriptionMessage?.(message) ?? message;
   const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
     if (options.rust === 'kucoin' && typeof message.topic === 'string') {
@@ -322,8 +327,8 @@ const fullSubscriptionKeys = (url, text, callerIds = new Set(), options = {}) =>
       return message.params.channels.map((channel) => subscriptionKey(url,
         { ...message, params: { ...message.params, channels: [channel] } }, callerIds, options));
     }
-    if (options.productSubscriptions && Array.isArray(message.product_ids)) return message.product_ids.map((product) =>
-      subscriptionKey(url, { ...message, product_ids: [product] }, callerIds, options));
+    if ((options.productSubscriptions || typeof message.channel === 'string') && Array.isArray(message.product_ids)) return (['user','heartbeats'].includes(message.channel) ? [undefined] : message.product_ids).map((product) =>
+      subscriptionKey(url, { ...message, product_ids: product === undefined ? [] : [product] }, callerIds, options));
     const field = Array.isArray(message.params) ? 'params' : Array.isArray(message.args) ? 'args' : undefined;
     if (field) return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds, options));
   }

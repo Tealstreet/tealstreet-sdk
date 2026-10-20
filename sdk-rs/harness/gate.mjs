@@ -8,6 +8,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { applyKucoinRequestContracts } from './kucoin-request-contracts.mjs';
+import { fixCoinbase, COINBASE_TS_FIXES } from './known-ts-fixes-coinbase.mjs';
 import { memoryMetricErrors } from './memory.mjs';
 import { fixWeexConditionals, fixLighterFills, fixLighterCommands, fixKrakenOutput, fixPhemexAccount } from './known-ts-fixes.mjs';
 import { parseRequestJson } from './request-json.mjs';
@@ -67,6 +68,16 @@ const venue = venueOf(values.venue);
 const isPrivate = tape.find((record) => record.type === 'config')?.private ?? tape.find((record) => record.type === 'meta')?.private ?? tape.some((record) =>
   venue.isPrivateRecord ? venue.isPrivateRecord(record) : Boolean(venue.privateSocket && record.url?.includes(venue.privateSocket)),
 );
+// Paired production reference repairs for the new ports, without output waivers:
+// GRVT keeps sparse ticker fields, exact native units/IDs, session refresh and
+// private execution state; failed/stale reads do not clear live account state.
+// Polymarket retains array depth/absolute changes and event watermarks, complete
+// Gamma discovery, owned executions and cancellation/replacement race fences.
+// Breakout selects the exact account, retains same-symbol positionCode lots,
+// validates portfolio sections atomically, fences session/write-stale reads,
+// polls public quotes, returns string order IDs and sends If-Match cancellation.
+// Coinbase's explicit independent input oracle is in known-ts-fixes-coinbase.mjs.
+// Every port still compares all intermediate book timestamps/hashes unchanged.
 // TS defects Rust fixes on purpose; each rewrites the TS value Rust replaces.
 // BingX additionally fixes write/read defects covered by native contract tests:
 // - closePosition=true STOP_MARKET/TAKE_PROFIT_MARKET requires quantity.
@@ -525,6 +536,7 @@ for (let run = 0; run < runs; run++) {
   const result = { ts: results.ts[run], rust: results.rust[run] };
   const { ts, rust } = result;
   if (values.venue === 'kraken') fixKrakenOutput(ts, tape);
+  if (venue.family === 'coinbase') fixCoinbase(ts, tape);
   if (values.venue === 'phemex') {
     if (ts.account) fixPhemexAccount(ts.account, tape);
     for (const ticker of ts.tickers) if (ticker.percentage === null) ticker.percentage = 0;
@@ -732,6 +744,7 @@ if (isPrivate) console.log('(private tape: correctness only; CPU and memory are 
 if (venue.family === 'orderly') console.log(`(documented Orderly corrections: ${ORDERLY_TS_FIXES.length}; native protocol and independent oracles checked)`);
 if (values.venue.startsWith('okx')) console.log(`(documented OKX corrections: ${KNOWN_TS_FIXES.okx.length}; output is compared without OKX-specific normalization)`);
 
+if (venue.family === 'coinbase') console.log(`(documented Coinbase corrections: ${COINBASE_TS_FIXES.length}; input-derived corrections only)`);
 const failures = [...differences];
 // A private tape is paced in real time, so it gates correctness only.
 if (!isPrivate) {

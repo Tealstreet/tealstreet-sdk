@@ -638,3 +638,112 @@ test('production Phemex refuses a signed out-of-order mutation before consuming 
   assert.equal(send('PUT',create.replace('Tealstreet_recorded','Tealstreet_runtime')).status,200);assert.equal(tape.missingWrites,1);
   assert.equal(send('DELETE',cancel).status,200);assert.equal(tape.missingWrites,0);
 });
+
+
+test('production native WebSocket local close emits one queued event and permits reconnect', async () => {
+  const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('  class TapeWebSocket {');
+  const end = source.indexOf('  globalThis.WebSocket = TapeWebSocket;', start);
+  assert(start >= 0 && end > start);
+  const tape = new Tape([]);
+  const Socket = new Function('tape', 'venue', 'exchange', `${source.slice(start, end)}; return TapeWebSocket;`)(tape, {}, undefined);
+  const socket = new Socket('wss://example.test');
+  let closes = 0;
+  socket.addEventListener('close', () => { closes++; new Socket('wss://example.test'); });
+  await new Promise(setImmediate);
+  socket.close(); socket.close();
+  assert.equal(closes, 0);
+  assert.equal(socket.socket.closed, true);
+  await new Promise(setImmediate);
+  assert.equal(closes, 1);
+  assert.equal(tape.sockets.length, 2);
+});
+
+test('production private GRVT activates a session only on HTTP delivery without a replay clock', async () => {
+  const url = 'https://edge.grvt.io/auth/api_key/login';
+  const body = '{"api_key":"grvt-replay-key"}';
+  const tape = productionTapeFor('grvt', [{ type:'http', method:'POST', url, requestBody:body, status:200, body:'{}',
+    headers:'X-Ts-Grvt-Session: fixture-session-1\nX-Grvt-Account-Id: fixture-account' }]);
+  assert.equal(tape.replayClock, undefined);
+  const response = tape.respond('POST', url, body, {'X-Grvt-Remember-Me':'true'});
+  assert.equal(tape.requestAudit.current(), undefined);
+  await new Promise(setImmediate);
+  assert.equal(tape.requestAudit.current(), undefined);
+  await tape.waitForResponse(response);
+  assert.deepEqual(tape.requestAudit.current(), {cookie:'fixture-session-1', account:'fixture-account'});
+  const other = productionTapeFor('grvt', []);
+  assert.equal(other.requestAudit.current(), undefined);
+});
+
+
+test('production Coinbase route-scoped minted IDs preserve original types and declared callers', async () => {
+  const {createPrivateKey,sign} = await import('node:crypto');
+  const {COINBASE_REPLAY} = await import('./coinbase-protocol.mjs');
+  const url='https://api.coinbase.com/api/v3/brokerage/orders';
+  const body={client_order_id:'tealstreet-recorded',product_id:'BTC-USD',side:'BUY',order_configuration:{limit_limit_gtc:{base_size:'1',limit_price:'100'}}};
+  const record={type:'http',method:'POST',url,requestBody:body,status:200,body:'{}'};
+  const tape=productionTapeFor('coinbase',[record]);
+  const key=createPrivateKey({key:Buffer.concat([Buffer.from('302e020100300506032b657004220420','hex'),Buffer.from(COINBASE_REPLAY.secret,'base64')]),format:'der',type:'pkcs8'});
+  const part=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
+  const now=Math.floor(Date.now()/1000);
+  const payload=part({alg:'EdDSA',typ:'JWT',kid:COINBASE_REPLAY.key,nonce:'production-nonce'})+'.'+part({sub:COINBASE_REPLAY.key,iss:'cdp',aud:['cdp_service'],nbf:now,exp:now+120,uri:'POST api.coinbase.com/api/v3/brokerage/orders'});
+  const headers={Authorization:'Bearer '+payload+'.'+sign(null,Buffer.from(payload),key).toString('base64url')};
+  for(const client_order_id of [123,null,true,'','tealstreet-x\n','tealstreet-'+'x'.repeat(22)]) {
+    assert.equal(tape.respond('POST',url,JSON.stringify({...body,client_order_id}),headers).status,599);
+    assert.equal(tape.missingWrites,1);
+  }
+  assert.equal(tape.respond('POST',url,JSON.stringify({...body,client_order_id:'tealstreet-generated'}),headers).status,200);
+  assert.equal(tape.missingWrites,0);
+  const caller='tealstreet-caller';
+  const declared=productionTapeFor('coinbase',[{type:'command',op:'placeOrders',orders:[{clientOrderId:caller}]},{...record,requestBody:{...body,client_order_id:caller}}]);
+  assert.equal(declared.respond('POST',url,JSON.stringify({...body,client_order_id:'tealstreet-other'}),headers).status,599);
+  assert.equal(declared.missingWrites,1);
+  assert.equal(declared.respond('POST',url,JSON.stringify({...body,client_order_id:caller}),headers).status,200);
+});
+
+test('production GRVT keeps unsupported root clock, signature and client fields exact after auth', async () => {
+  const loginUrl='https://edge.grvt.io/auth/api_key/login',url='https://trades.grvt.io/lite/v1/cancel_order';
+  const body={sa:'777',oi:'0x300'};
+  const tape=productionTapeFor('grvt',[
+    {type:'http',method:'POST',url:loginUrl,requestBody:{api_key:'grvt-replay-key'},status:200,body:'{}',headers:'X-Ts-Grvt-Session: fixture-session-1\nX-Grvt-Account-Id: fixture-account'},
+    {type:'http',method:'POST',url,requestBody:body,status:200,body:'{}'},
+  ]);
+  await tape.waitForResponse(tape.respond('POST',loginUrl,'{"api_key":"grvt-replay-key"}',{'X-Grvt-Remember-Me':'true'}));
+  const headers={'X-Ts-Grvt-Session':'fixture-session-1','X-Grvt-Account-Id':'fixture-account'};
+  for(const key of ['timestamp','recvWindow','signature','requestId','clientOrderId','newClientOrderId','clientAlgoId']) {
+    assert.equal(tape.respond('POST',url,JSON.stringify({...body,[key]:'unrecognized-business-field'}),headers).status,599,key);
+    assert.equal(tape.missingWrites,1);
+  }
+  assert.equal(tape.respond('POST',url+'?signature=extra',JSON.stringify(body),headers).status,599);
+  assert.equal(tape.missingWrites,1);
+  assert.equal(tape.respond('POST',url,JSON.stringify(body),headers).status,200);
+  assert.equal(tape.missingWrites,0);
+});
+
+
+test('production Axios adapter combines relative paths and preserves explicit nested parameter serialization', async () => {
+  const source=readFileSync(new URL('./replay.mjs',import.meta.url),'utf8');
+  const start=source.indexOf('  const adapter = async (config) => {');
+  const end=source.indexOf("  const { ExchangeWorker }",start);
+  const seen=[];
+  const tape={respond(method,url,body,headers){seen.push({method,url,body,headers});return {status:200,body:'{}'};},waitForResponse:async response=>response};
+  const adapter=new Function('tape','clock',`${source.slice(start,end)};return adapter;`)(tape,undefined);
+  for(const [baseURL,url] of [['https://example.test/dxsca-web','marketdata'],['https://example.test/dxsca-web/','/marketdata']]) {
+    await adapter({baseURL,url,method:'post',params:{token_id:['1','2']},paramsSerializer:{serialize:()=> 'token_id=1&token_id=2'},data:'{}'});
+  }
+  assert.deepEqual(seen.map(row=>row.url),['https://example.test/dxsca-web/marketdata?token_id=1&token_id=2','https://example.test/dxsca-web/marketdata?token_id=1&token_id=2']);
+});
+
+test('production polling private startup prepares subscriptions before playback clock activation', () => {
+  const source=readFileSync(new URL('./replay.mjs',import.meta.url),'utf8');
+  const start=source.indexOf('  if (clock) tape.prepareReadiness = subscribeBooks;');
+  const end=source.indexOf('  // Model the worker posting each subscribed book',start);
+  assert(start>=0&&end>start);
+  const prepare=new Function('clock',`const tape={};let subscribedDone=false;const subscribeBooks=()=>{subscribedDone=true;};${source.slice(start,end)};return {tape,subscribed:()=>subscribedDone};`);
+  const privateStartup=prepare({active:false,startup:false});
+  assert.equal(privateStartup.subscribed(),true);
+  const logical=prepare({active:true,startup:true});
+  assert.equal(logical.subscribed(),false);
+  logical.tape.prepareReadiness();
+  assert.equal(logical.subscribed(),true);
+});

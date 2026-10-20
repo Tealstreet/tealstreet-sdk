@@ -143,6 +143,17 @@ test('disposing during binary decoding suppresses queued messages and closure', 
 import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
 
+test('account identity is read from the live engine and unavailable after disposal', () => {
+  let account;
+  const host = new EngineHost({ accountId: () => account }, {});
+  assert.equal(host.accountId(), undefined);
+  account = 'selected-portfolio';
+  assert.equal(host.accountId(), 'selected-portfolio');
+  host.dispose();
+  assert.throws(() => host.accountId(), /disposed/);
+  assert.equal(new EngineHost({}, {}).accountId(), undefined);
+});
+
 for (const entry of ['legacy', 'actions', 'bytes']) {
   test(`WebSocket actions preserve ordering and empty results with ${entry}`, () => {
     const calls = [];

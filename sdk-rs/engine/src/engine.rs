@@ -293,6 +293,10 @@ impl<'a> Response<'a> {
 
 #[derive(Debug)]
 pub enum Event<'a> {
+    /// Host configuration update; infinity pauses optional venue polling.
+    TickIntervalChanged {
+        interval_ms: f64,
+    },
     WsOpened {
         socket: SocketId,
     },
@@ -671,6 +675,11 @@ pub trait Venue {
     /// Per-request continuation: what to do with the response.
     type Pending;
 
+    /// Account identity is available only after authenticated discovery.
+    fn account_id(&self) -> Option<&str> {
+        None
+    }
+
     fn start(&mut self, cx: &mut Cx<'_, Self::Pending>);
     fn on_open(&mut self, cx: &mut Cx<'_, Self::Pending>, socket: SocketId);
     fn on_binary(&mut self, _cx: &mut Cx<'_, Self::Pending>, _socket: SocketId, _data: &[u8]) {}
@@ -713,6 +722,7 @@ pub trait Venue {
         pending: Self::Pending,
         error: &str,
     );
+    fn on_tick_interval(&mut self, _cx: &mut Cx<'_, Self::Pending>, _interval_ms: f64) {}
     fn on_timer(&mut self, cx: &mut Cx<'_, Self::Pending>, timer: TimerId);
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
     fn book(&self, symbol: &str) -> Option<&Book>;
@@ -749,6 +759,10 @@ impl<V: Venue> Engine<V> {
         &self.venue
     }
 
+    pub fn account_id(&self) -> Option<&str> {
+        self.venue.account_id()
+    }
+
     pub fn start(&mut self, now: f64) {
         if std::mem::replace(&mut self.started, true) {
             return;
@@ -768,6 +782,9 @@ impl<V: Venue> Engine<V> {
             io: &mut self.io,
         };
         match event {
+            Event::TickIntervalChanged { interval_ms } => {
+                self.venue.on_tick_interval(&mut cx, interval_ms)
+            }
             Event::WsOpened { socket } => self.venue.on_open(&mut cx, socket),
             Event::WsBinary { socket, data } => self.venue.on_binary(&mut cx, socket, data),
             Event::WsMessage { socket, text } => self.venue.on_message(&mut cx, socket, text),
