@@ -102,3 +102,47 @@ all 26 packages. No assertions or thresholds were relaxed. The original
 `86ed5e3d2e` control is building separately; all 264 production Rust/config/host/
 build entries are byte-identical to `02e9db0e8b`, whose changes affect GRVT
 fixtures/tests/docs. Final shared fixtures/helpers will match in both arms.
+
+## Release checkpoint and fixed measurement method
+
+All 26 isolated release builds and isolated WASM Clippy pass. There are 234
+matching browser/Node bindings; prior 198 family/aggregate artifacts remain
+archived. All 52 size checks pass. Five new caps use actual release bytes plus
+3%, rounded up KiB. One reviewed exception updates Binance from 846,848 to
+960,512 bytes: its old measured 799,014-byte engine supported USD-M/PM, while
+the current 932,417-byte family also includes Spot/COIN-M and subsequent
+lifecycle fixes (2,216 net runtime lines added). Shared boundary changes also
+contribute; no exact byte attribution is claimed. The other 20 existing caps
+remain fixed. The old cap breach and measurements are retained in the proof.
+
+Actual WASM checks pass: SDK 411 tests/13 files, host 154 tests, supplementary
+parity and scripted lifecycle 20 tests. Rust-to-JS BOOK_DELTA and real native
+WebSocket session adapter integrations each pass. Earlier four loader transform
+failures from missing family artifacts are retained; the complete built test
+run passes without changing assertions/timeouts. Source, tool, artifact and
+log hashes are in `RUST_PERF_DELIVERY26_RELEASE.json.gz`.
+
+Before any new performance child, freeze this fixed collection: 61 candidate
+private gates once each (`--runs 1 --books ''`), then exactly one official
+three-run public gate per arm for each of 34 profiles, in CI roster order.
+Alternate control/candidate order by profile (17 AB, 17 BA); each gate uses
+recorded cadence and the identical final helpers/TS/dependencies/fixtures.
+This provides global order balance, with three samples per arm/profile; ranges
+and TS drift will be reported, with no statistical significance claim.
+
+The original control is physical `86ed5e3d2e`, whose 264 production
+Rust/config/host/build entries match `02e9db0e8b` exactly. Its original immediate
+host, aggregate loader and 11,179,592-byte aggregate browser/Node binary remain
+unchanged. Both arms share current helpers and fixtures, including the latest
+GRVT futures fixture and snapshot construction inside the measurement window.
+Normal gates have profiling disabled.
+
+Retain every numerical threshold or narrower-margin failure and continue the
+fixed roster. Stop on operational/parity/invalid-metric failures; retain partial
+raw outputs and logs. No numerical retry, extra warmup, profile or tuning run is
+allowed within this collection. Compare all same-implementation public outputs
+across runs/arms exactly after removing only top-level metrics. Freeze full
+runtime/dependency inventories before/after the whole collection, with smaller
+helper/host/selected-binding/fixture guards per gate. All owned compiler/test
+jobs must be finished before measurements. This checkpoint passes prerequisites;
+the requested final public/private gate and margin results remain pending.

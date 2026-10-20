@@ -1,5 +1,5 @@
 {
-  "binance": 846848,
+  "binance": 960512,
   "bybit": 1016832,
   "okx": 835584,
   "cryptocom": 740352,
@@ -19,5 +19,10 @@
   "kraken": 949248,
   "apexomni": 1071104,
   "paradex": 1311744,
-  "phemex": 788480
+  "phemex": 788480,
+  "coinbase": 1058816,
+  "polymarket": 902144,
+  "grvt": 1015808,
+  "breakoutprop": 698368,
+  "txflow": 1003520
 }
