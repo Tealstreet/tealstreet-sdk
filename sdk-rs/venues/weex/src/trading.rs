@@ -6,7 +6,9 @@ use safe_cex_engine::model::{
     MarginType, Order, OrderExtra, OrderIdentityKind, OrderIdentityReceipt, OrderSide, OrderStatus,
     OrderType, PlaceOrderOpts, PositionSide, StopTriggerType, TimeInForce,
 };
-use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response, num};
+use safe_cex_engine::{
+    Command, CommandId, Cx, ErrorKind, LogLevel, Method, Outcome, Response, VenueError, num,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -23,10 +25,22 @@ struct Brackets {
 struct Job {
     steps: VecDeque<Step>,
     ids: Vec<String>,
-    error: Option<String>,
+    error: Option<VenueError>,
     continue_on_error: bool,
     refresh: bool,
     hedged: Option<bool>,
+    /// A step took effect, so a later rejection cannot mean nothing happened.
+    effective: bool,
+}
+impl Job {
+    /// The first failure names the error; any unproven one makes it unknown.
+    fn record(&mut self, error: VenueError) {
+        let unknown = error.outcome == Some(Outcome::Unknown);
+        let recorded = self.error.get_or_insert(error);
+        if unknown {
+            recorded.outcome = Some(Outcome::Unknown);
+        }
+    }
 }
 pub(crate) struct Request {
     command: CommandId,
@@ -338,9 +352,45 @@ fn rounded(value: f64, step: f64) -> Result<f64, String> {
 fn price(value: Option<f64>, step: f64) -> Result<Option<String>, String> {
     value.map(|v| rounded(v, step).map(num::format)).transpose()
 }
-fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: String) {
-    cx.command_error(command, &error);
-    cx.done(command, Err(error));
+fn reject(cx: &mut Cx<'_, Pending>, command: CommandId, error: impl Into<VenueError>) {
+    let error = error.into();
+    cx.command_error(command, &error.message);
+    cx.fail(command, error);
+}
+/// A rejected HTTP write: 408 and 5xx do not prove the venue refused it.
+pub(crate) fn http_failure(status: u16, body: &str) -> VenueError {
+    #[derive(Deserialize)]
+    struct Envelope {
+        code: Option<Code>,
+        msg: Option<String>,
+    }
+    let message = format!("HTTP {status}: {body}");
+    let mut error = match status {
+        408 | 500.. => unknown(message),
+        401 => VenueError::new(message).kind(ErrorKind::AuthInvalid),
+        403 => VenueError::new(message).kind(ErrorKind::AuthPermission),
+        429 => VenueError::new(message).kind(ErrorKind::RateLimited),
+        _ => VenueError::new(message).kind(ErrorKind::Rejected),
+    };
+    if error.outcome.is_none() {
+        error.outcome = Some(Outcome::Rejected);
+    }
+    if let Ok(envelope) = serde_json::from_str::<Envelope>(body) {
+        error.venue_code = envelope.code.map(|code| match code {
+            Code::Text(text) => text,
+            Code::Number(number) => number.to_string(),
+        });
+        error.venue_message = envelope.msg.filter(|msg| !msg.is_empty());
+    }
+    error
+}
+/// Refused before any request was sent.
+fn not_sent(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::NotSent)
+}
+/// The write may have executed; reconcile before resending.
+pub(crate) fn unknown(message: impl Into<String>) -> VenueError {
+    VenueError::new(message).outcome(Outcome::Unknown)
 }
 fn post(path: &'static str, body: String, call: Call) -> Step {
     Step {
@@ -728,7 +778,9 @@ impl WeexFutures {
                 reject(
                     cx,
                     *id,
-                    "WEEX account settings update is already in flight; wait for its result".into(),
+                    not_sent(
+                        "WEEX account settings update is already in flight; wait for its result",
+                    ),
                 );
             }
             return None;
@@ -1042,12 +1094,16 @@ impl WeexFutures {
         let steps = match planned {
             Ok(v) => v,
             Err(error) => {
-                reject(cx, id, error);
+                reject(cx, id, not_sent(error).kind(ErrorKind::InvalidInput));
                 return None;
             }
         };
         if !steps.is_empty() && self.credentials.is_none() {
-            reject(cx, id, "WEEX private credentials required".into());
+            reject(
+                cx,
+                id,
+                not_sent("WEEX private credentials required").kind(ErrorKind::AuthInvalid),
+            );
             return None;
         }
         if self.trading.jobs.contains_key(&id) {
@@ -1063,6 +1119,7 @@ impl WeexFutures {
                 continue_on_error,
                 refresh,
                 hedged,
+                effective: false,
             },
         );
         self.trade_next(cx, id);
@@ -1153,7 +1210,10 @@ impl WeexFutures {
             if job.refresh {
                 self.refresh_account(cx);
             }
-            if let Some(error) = job.error {
+            if let Some(mut error) = job.error {
+                if job.effective && error.outcome == Some(Outcome::Rejected) {
+                    error.outcome = None;
+                }
                 reject(cx, command, error);
             } else {
                 if let Some(hedged) = job.hedged {
@@ -1164,7 +1224,12 @@ impl WeexFutures {
         }
     }
 
-    pub(crate) fn trade_failed(&mut self, cx: &mut Cx<'_, Pending>, request: Request, error: &str) {
+    pub(crate) fn trade_failed(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        request: Request,
+        error: VenueError,
+    ) {
         rollback(
             cx,
             &request.call,
@@ -1172,7 +1237,7 @@ impl WeexFutures {
         );
         self.account.invalidate_orders();
         if let Some(job) = self.trading.jobs.get_mut(&request.command) {
-            job.error.get_or_insert_with(|| error.into());
+            job.record(error);
         }
         // Reconcile ambiguous outcomes through reads; never resend the write.
         self.refresh_account(cx);
@@ -1185,14 +1250,6 @@ impl WeexFutures {
         request: Request,
         response: Response<'_>,
     ) {
-        if response.status >= 400 {
-            self.trade_failed(
-                cx,
-                request,
-                &format!("WEEX HTTP {}: {}", response.status, response.body),
-            );
-            return;
-        }
         let owned = request.revision == self.account.order_revision();
         // A fill frame can revoke ownership before the cumulative order frame
         // changes cached quantities. Never replace from that stale amount.
@@ -1231,10 +1288,11 @@ impl WeexFutures {
                 job.error.get_or_insert_with(||"WEEX order changed while canceling; replacement not submitted; reconcile before retrying".into());
             }
             match result {
-                Ok(ids) => job.ids.extend(ids),
-                Err(error) => {
-                    job.error.get_or_insert(error);
+                Ok(ids) => {
+                    job.effective = true;
+                    job.ids.extend(ids);
                 }
+                Err(error) => job.record(error),
             }
         }
         self.trade_next(cx, request.command);
@@ -1246,7 +1304,7 @@ impl WeexFutures {
         call: &Call,
         body: &str,
         owned: bool,
-    ) -> Result<Vec<String>, String> {
+    ) -> Result<Vec<String>, VenueError> {
         let result = (|| match call {
             Call::Place {
                 orders,
@@ -1269,9 +1327,9 @@ impl WeexFutures {
             } => apply_cancel(cx, before, native, *all, body, owned),
             Call::Amend { before, price } => {
                 let response = serde_json::from_str::<ResultRow>(body)
-                    .map_err(|_| "WEEX malformed TP/SL amendment response".to_owned())?;
+                    .map_err(|_| unknown("WEEX malformed TP/SL amendment response"))?;
                 if !response.success {
-                    Err(response.error())
+                    Err(response.error().into())
                 } else {
                     cx.store.update_order(&before.id, |o| {
                         if owned && o.status == OrderStatus::Updating {
@@ -1419,14 +1477,15 @@ fn apply_place(
     batch: bool,
     protective: bool,
     body: &str,
-) -> Result<Vec<String>, String> {
-    let decoded: Rows = serde_json::from_str(body).map_err(|_| "WEEX malformed order response")?;
+) -> Result<Vec<String>, VenueError> {
+    let decoded: Rows =
+        serde_json::from_str(body).map_err(|_| unknown("WEEX malformed order response"))?;
     if batch && !matches!(&decoded, Rows::Many(_)) {
-        return Err("WEEX batch response must be an array".into());
+        return Err(unknown("WEEX batch response must be an array"));
     }
     let rows = decoded.into_vec();
     if rows.len() != orders.len() {
-        return Err("WEEX order response row count mismatch".into());
+        return Err(unknown("WEEX order response row count mismatch"));
     }
     let mut correlated = HashMap::new();
     let mut native_ids = HashSet::new();
@@ -1435,22 +1494,22 @@ fn apply_place(
         let client = match row.client() {
             Some(client) if !protective => client,
             _ if protective || !batch => orders[i].client_order_id.as_deref().unwrap(),
-            _ => return Err("WEEX response missing echoed clientOrderId".into()),
+            _ => return Err(unknown("WEEX response missing echoed clientOrderId")),
         };
         if !orders
             .iter()
             .any(|o| o.client_order_id.as_deref() == Some(client))
             || correlated.insert(client, row).is_some()
         {
-            return Err("WEEX response has unknown/duplicate clientOrderId".into());
+            return Err(unknown("WEEX response has unknown/duplicate clientOrderId"));
         }
         if row.success {
             let id = row
                 .native()
-                .ok_or("WEEX accepted order missing orderId")?
+                .ok_or_else(|| unknown("WEEX accepted order missing orderId"))?
                 .id()?;
             if !native_ids.insert(id) {
-                return Err("WEEX response duplicated a native orderId".into());
+                return Err(unknown("WEEX response duplicated a native orderId"));
             }
         }
     }
@@ -1460,7 +1519,7 @@ fn apply_place(
         let client = order.client_order_id.as_deref().unwrap();
         let row = correlated
             .get(client)
-            .ok_or("WEEX response omitted a clientOrderId")?;
+            .ok_or_else(|| unknown("WEEX response omitted a clientOrderId"))?;
         cx.store.remove_orders(&[&order.id]);
         if row.success {
             let id = row.native().unwrap().id()?;
@@ -1491,7 +1550,7 @@ fn apply_place(
     if errors.is_empty() {
         Ok(ids)
     } else {
-        Err(errors.join("; "))
+        Err(errors.join("; ").into())
     }
 }
 fn apply_cancel(
@@ -1501,24 +1560,26 @@ fn apply_cancel(
     all: bool,
     body: &str,
     owned: bool,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, VenueError> {
     let rows = serde_json::from_str::<Rows>(body)
-        .map_err(|_| "WEEX malformed cancellation response")?
+        .map_err(|_| unknown("WEEX malformed cancellation response"))?
         .into_vec();
     let mut seen = HashSet::new();
     let mut results = Vec::new();
     for row in rows {
         let id = row
             .native()
-            .ok_or("WEEX cancellation missing orderId")?
+            .ok_or_else(|| unknown("WEEX cancellation missing orderId"))?
             .id()?;
         if !seen.insert(id.clone()) || (!all && !native.contains(&id)) {
-            return Err("WEEX cancellation returned unknown/duplicate orderId".into());
+            return Err(unknown(
+                "WEEX cancellation returned unknown/duplicate orderId",
+            ));
         }
         results.push((id, row));
     }
     if !all && seen.len() != native.len() {
-        return Err("WEEX cancellation response row count mismatch".into());
+        return Err(unknown("WEEX cancellation response row count mismatch"));
     }
     let mut errors = Vec::new();
     for (id, row) in results {
@@ -1557,18 +1618,19 @@ fn apply_cancel(
     if errors.is_empty() {
         Ok(vec![])
     } else {
-        Err(errors.join("; "))
+        Err(errors.join("; ").into())
     }
 }
-fn metadata(body: &str, symbol: Option<&String>) -> Result<(), String> {
+fn metadata(body: &str, symbol: Option<&String>) -> Result<(), VenueError> {
     let row = serde_json::from_str::<MetadataResult>(body)
-        .map_err(|_| "WEEX malformed settings response")?;
+        .map_err(|_| unknown("WEEX malformed settings response"))?;
     if row.success == Some(false) || row.code.as_ref().is_some_and(|c| !c.success()) {
         return Err(if row.msg.is_empty() {
-            "WEEX settings update rejected".into()
+            "WEEX settings update rejected".to_owned()
         } else {
             row.msg
-        });
+        }
+        .into());
     }
     if row.success == Some(true) || row.code.as_ref().is_some_and(Code::success) {
         return Ok(());
@@ -1581,5 +1643,7 @@ fn metadata(body: &str, symbol: Option<&String>) -> Result<(), String> {
     {
         return Ok(());
     }
-    Err("WEEX settings response has no success acknowledgement".into())
+    Err(unknown(
+        "WEEX settings response has no success acknowledgement",
+    ))
 }

@@ -14,22 +14,32 @@ const construct = (options) => {
   const { WasmEngine } = createRequire(import.meta.url)('../pkg/node/safe_cex_wasm.js');
   return new WasmEngine('phemex', JSON.stringify(options));
 };
-const initialize = (engine) => {
-  const reply = (request, body) => {
-    engine.httpStart(request, 200, '', now);
-    engine.httpChunk(request, new TextEncoder().encode(body), now);
-    return actions(engine.httpEnd(request, now));
+const initialize = (engine, privateExpected = false) => {
+  const pending = actions(engine.start(now));
+  const reply = (path, body) => {
+    const index = pending.findIndex((action) => action.op === 'http' && new URL(action.url).pathname === path);
+    assert.ok(index >= 0, `pending request for ${path}`);
+    const [{ request }] = pending.splice(index, 1);
+    pending.push(...actions(engine.httpStart(request, 200, '', now)));
+    pending.push(...actions(engine.httpChunk(request, new TextEncoder().encode(body), now)));
+    pending.push(...actions(engine.httpEnd(request, now)));
   };
-  const initial = actions(engine.start(now));
-  const seeded = reply(initial.find((action) => action.op === 'http').request, products);
-  return reply(seeded.find((action) => action.op === 'http').request, tickers);
+  reply('/public/products', products);
+  assert.equal(pending.filter((action) => action.op === 'wsConnect' && action.channel === 'private').length,
+    Number(privateExpected), 'private authentication does not wait for the ticker seed');
+  if (privateExpected) {
+    assert.ok(pending.some((action) => action.op === 'http' && action.url.includes('/g-accounts/accountPositions')));
+  }
+  assert.ok(!pending.some((action) => action.op === 'wsConnect' && action.channel === 'public'));
+  reply('/md/v3/ticker/24hr/all', tickers);
+  return pending;
 };
 
 test('compiled socket policy keeps private authentication and suppresses public sockets', enabled, () => {
   for (const options of [{}, { privateOnly: true }, { publicFeed: { mode: 'disabled' } }, { publicFeed: { mode: 'shared' } }]) {
     const engine = construct({ key: 'test-key', secret: 'test-secret', ...options });
     try {
-      const pending = initialize(engine);
+      const pending = initialize(engine, true);
       const connects = pending.filter((action) => action.op === 'wsConnect');
       const expectedPublic = !options.privateOnly && !options.publicFeed;
       assert.equal(connects.filter((action) => action.channel === 'public').length, Number(expectedPublic));

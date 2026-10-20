@@ -1,4 +1,5 @@
 use super::*;
+use safe_cex_engine::test_support::{ProbeVenue, http_requests};
 use safe_cex_engine::{Action, Engine, Event, Notice, Query, ReadCredentials};
 fn options() -> Options {
     Options {
@@ -14,12 +15,10 @@ fn options() -> Options {
     }
 }
 
-struct Probe(Kucoin);
-impl Venue for Probe {
-    type Pending = Pending;
-    fn start(&mut self, cx: &mut Cx<'_, Pending>) {
+fn probe(venue: Kucoin) -> ProbeVenue<Kucoin, impl FnMut(&mut Kucoin, &mut Cx<'_, Pending>)> {
+    ProbeVenue::new(venue, |venue, cx| {
         for method in [Method::Get, Method::Post, Method::Put, Method::Delete] {
-            self.0.signed(
+            venue.signed(
                 cx,
                 method,
                 "/secondary-test",
@@ -30,7 +29,7 @@ impl Venue for Probe {
                 },
             );
         }
-        self.0.signed_streamed(
+        venue.signed_streamed(
             cx,
             Method::Get,
             "/secondary-test-streamed",
@@ -41,35 +40,14 @@ impl Venue for Probe {
                 invalid: false,
             },
         );
-    }
-
-    fn on_open(&mut self, _: &mut Cx<'_, Pending>, _: SocketId) {}
-    fn on_close(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: u16) {}
-    fn on_message(&mut self, _: &mut Cx<'_, Pending>, _: SocketId, _: &str) {}
-    fn on_response(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: Response<'_>) {}
-    fn on_request_failed(&mut self, _: &mut Cx<'_, Pending>, _: Pending, _: &str) {}
-    fn on_timer(&mut self, _: &mut Cx<'_, Pending>, _: TimerId) {}
-    fn on_command(&mut self, _: &mut Cx<'_, Pending>, _: Command) {}
-    fn book(&self, _: &str) -> Option<&Book> {
-        None
-    }
-    fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_> {
-        Box::new(std::iter::empty())
-    }
+    })
 }
 #[test]
 fn secondary_get_keeps_primary_mutations() {
-    let mut engine = Engine::new(Probe(Kucoin::new(options())));
+    let mut engine = Engine::new(probe(Kucoin::new(options())));
     engine.start(1700000000000.0);
-    let requests: Vec<_> = engine
-        .drain_actions()
-        .filter_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
+    let requests: Vec<_> = http_requests(&mut engine)
+        .into_iter()
         .filter(|r| r.url.contains("secondary-test"))
         .collect();
     assert_eq!(requests.len(), 5);
@@ -142,15 +120,9 @@ fn public_only_options() -> Options {
 }
 #[test]
 fn public_only_signing_helpers_do_not_reintroduce_secondary_identity() {
-    let mut engine = Engine::new(Probe(Kucoin::new(public_only_options())));
+    let mut engine = Engine::new(probe(Kucoin::new(public_only_options())));
     engine.start(1700000000000.0);
-    let requests = engine
-        .drain_actions()
-        .filter_map(|a| match a {
-            Action::Http(r) => Some(r),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    let requests = http_requests(&mut engine);
     assert_eq!(requests.len(), 5);
     for request in requests {
         // Attribution remains public; no primary, secondary or partner auth leaks.
@@ -192,13 +164,7 @@ fn public_only_secondary_trade_history_is_unsigned_and_private_queries_remain_bl
             },
         }),
     );
-    let requests = engine
-        .drain_actions()
-        .filter_map(|a| match a {
-            Action::Http(r) => Some(r),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    let requests = http_requests(&mut engine);
     assert_eq!(requests.len(), 1);
     let request = &requests[0];
     assert_eq!(request.method, Method::Get);

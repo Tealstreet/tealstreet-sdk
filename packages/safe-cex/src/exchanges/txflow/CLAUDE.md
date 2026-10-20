@@ -172,3 +172,20 @@ The initially empty TS scaffold was implemented as the testnet replay reference;
 it must not be substituted with Hyperliquid's protocol in the harness. The
 public fixture comes from a live testnet recording; private tapes use documented
 payloads and the official disposable signing-vector key only.
+
+
+## Rust public discovery resilience
+
+Rust catalogue/ticker reads retry through the shared engine capped exponential
+backoff. A malformed typed public row is skipped with a warning while valid
+neighbours remain usable. Private account initialization starts once the usable
+catalogue is available, without waiting for REST ticker seeds. Account snapshots,
+mutation acknowledgements and signing validation retain their stricter rules.
+See `docs/plans/RUST_STARTUP_AUDIT.md` and the native startup resilience regressions.
+
+TxFlow retains an explicit catalogue-level refusal for duplicate or ambiguous
+historical native identities/aliases: ignoring such a conflict could send a
+signed order or label history with the wrong instrument. That failure is logged,
+preserves the prior store, and retries with the public discovery backoff. Ticker
+read failures retry independently by native asset while later seed reads and the
+private account continue.

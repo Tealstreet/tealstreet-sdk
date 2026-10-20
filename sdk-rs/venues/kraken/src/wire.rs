@@ -1,7 +1,13 @@
 //! Borrowed public rows; numeric strings are decoded directly.
-pub use safe_cex_engine::de::{number, optional_number};
+pub use safe_cex_engine::de::{number, number_or_blank_zero, optional_number};
 use serde::Deserialize;
 use std::borrow::Cow;
+/// Public ticker overlay: null is absent, blank reads as 0, malformed skips the row.
+fn public_optional_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    #[derive(Deserialize)]
+    struct N(#[serde(deserialize_with = "number_or_blank_zero")] f64);
+    Ok(Option::<N>::deserialize(d)?.map(|n| n.0))
+}
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
     #[serde(default, borrow)]
@@ -56,25 +62,25 @@ pub struct MarginLevel {
 pub struct RestTicker<'a> {
     #[serde(borrow)]
     pub symbol: Cow<'a, str>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "public_optional_number")]
     pub bid: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "public_optional_number")]
     pub ask: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "public_optional_number")]
     pub last: Option<f64>,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub mark_price: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub index_price: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub change24h: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub funding_rate: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub open_interest: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub vol24h: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub volume_quote: f64,
 }
 #[derive(Deserialize)]
