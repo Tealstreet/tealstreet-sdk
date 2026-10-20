@@ -1,20 +1,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpuObjectiveMet } from './cpu-objective.mjs';
+import { cpuObjectiveMet, pairsFor, SMALL_WINDOW_PAIRS } from './cpu-objective.mjs';
 
-test('objectives of 10 ms or more stay strict', () => {
-  assert.equal(cpuObjectiveMet(10.9, 11), true);
-  assert.equal(cpuObjectiveMet(11, 11), false);
-  assert.equal(cpuObjectiveMet(10.1, 10), false);
+test('objectives of 100 ms or more stay strict', () => {
+  assert.equal(cpuObjectiveMet(99.9, 100), true);
+  assert.equal(cpuObjectiveMet(100, 100), false);
   assert.equal(cpuObjectiveMet(323.3, 310.6), false);
 });
 
-test('objectives under 10 ms allow Rust at most 1 ms above TS', () => {
-  // Landing CI Hyro steady misses (TS/Rust ms): runs 39441654489, 39438422053, 39433770908.
-  for (const [ts, rust] of [[5.6, 5.9], [5.3, 5.7], [5.7, 6.3]]) assert.equal(cpuObjectiveMet(rust, ts), true);
+test('objectives under 100 ms allow Rust max(1 ms, 5%) above TS', () => {
+  // Under 20 ms the 1 ms floor dominates (landing Hyro steady misses).
+  for (const [ts, rust] of [[5.6, 5.9], [5.3, 5.7], [5.7, 6.3], [11.3, 12.2]]) assert.equal(cpuObjectiveMet(rust, ts), true);
   assert.equal(cpuObjectiveMet(6.5, 5.5), true);
   assert.equal(cpuObjectiveMet(6.51, 5.5), false);
-  assert.equal(cpuObjectiveMet(11, 9.9), false);
+  // Above 20 ms the 5% allowance dominates.
+  assert.equal(cpuObjectiveMet(42.0, 40.0), true);
+  assert.equal(cpuObjectiveMet(42.1, 40.0), false);
+  assert.equal(cpuObjectiveMet(103.9, 99.0), true);
+  assert.equal(cpuObjectiveMet(104.0, 99.0), false);
 });
 
 test('missing or invalid measurements never pass', () => {
@@ -22,11 +25,10 @@ test('missing or invalid measurements never pass', () => {
     assert.equal(cpuObjectiveMet(rust, ts), false);
 });
 
-test('small TS windows get more pairs; larger ones keep the requested count', async () => {
-  const { pairsFor, SMALL_WINDOW_PAIRS } = await import('./cpu-objective.mjs');
-  assert.equal(pairsFor(3, [65, 18.6]), SMALL_WINDOW_PAIRS);
-  assert.equal(pairsFor(3, [12, 50]), SMALL_WINDOW_PAIRS);
-  assert.equal(pairsFor(3, [65, 20]), 3);
+test('objectives under 100 ms get more pairs; larger ones keep the requested count', () => {
+  assert.equal(pairsFor(3, [165, 18.6]), SMALL_WINDOW_PAIRS);
+  assert.equal(pairsFor(3, [45, 150]), SMALL_WINDOW_PAIRS);
+  assert.equal(pairsFor(3, [165, 100]), 3);
   assert.equal(pairsFor(11, [5, 5]), 11);
   assert.equal(pairsFor(1, [NaN, NaN]), 1);
 });
