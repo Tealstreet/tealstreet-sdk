@@ -1,11 +1,71 @@
 #![allow(dead_code)]
-use safe_cex_engine::{Action, Engine, Event, HttpRequest, Response, SocketId};
+use safe_cex_engine::{Action, Event, HttpRequest, Response, SocketId, TimerId, Venue};
+use std::collections::{HashMap, VecDeque};
+use std::ops::{Deref, DerefMut};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
+/// Scripted fixtures retain all emitted actions. Only explicit HTTP-wait helpers
+/// advance causal timers. Host event time is monotonic; raw venue timestamps
+/// remain unchanged, independently exercising the account's revision fences.
+pub struct TestEngine<V: Venue> {
+    inner: safe_cex_engine::Engine<V>,
+    pending: VecDeque<Action>,
+    timers: HashMap<TimerId, f64>,
+    pub now: f64,
+}
+impl<V: Venue> Deref for TestEngine<V> {
+    type Target = safe_cex_engine::Engine<V>;
+    fn deref(&self) -> &Self::Target { &self.inner }
+}
+impl<V: Venue> DerefMut for TestEngine<V> {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.inner }
+}
+impl<V: Venue> TestEngine<V> {
+    pub fn new(venue: V) -> Self { Self { inner: safe_cex_engine::Engine::new(venue), pending: VecDeque::new(), timers: HashMap::new(), now: 0.0 } }
+    pub fn start(&mut self, now: f64) { self.now = now; self.inner.start(now); }
+    pub fn handle(&mut self, now: f64, event: Event<'_>) {
+        let now = now.max(self.now);
+        self.now = now;
+        if let Event::TimerFired { timer } = event { self.timers.remove(&timer); }
+        self.inner.handle(now, event);
+    }
+    fn collect(&mut self) {
+        for action in self.inner.drain_actions() {
+            match &action {
+                Action::SetTimer { timer, at_ms } => { self.timers.insert(*timer, *at_ms); }
+                Action::ClearTimer { timer } => { self.timers.remove(timer); }
+                _ => {}
+            }
+            self.pending.push_back(action);
+        }
+    }
+    pub fn drain_actions(&mut self) -> std::collections::vec_deque::IntoIter<Action> {
+        self.collect();
+        std::mem::take(&mut self.pending).into_iter()
+    }
+    pub fn advance_next_timer(&mut self) -> bool {
+        self.collect();
+        let Some((&timer, &at)) = self.timers.iter().min_by(|a,b| a.1.total_cmp(b.1).then_with(|| a.0.0.cmp(&b.0.0))) else { return false; };
+        self.handle(at.max(self.now), Event::TimerFired { timer });
+        true
+    }
+    pub fn wait_http(&mut self, matches: impl Fn(&HttpRequest) -> bool) -> HttpRequest {
+        for _ in 0..200 {
+            self.collect();
+            if let Some(index) = self.pending.iter().position(|action| matches!(action, Action::Http(r) if matches(r))) {
+                let Action::Http(request) = self.pending.remove(index).unwrap() else { unreachable!() };
+                return request;
+            }
+            assert!(self.advance_next_timer(), "expected an HTTP request, no live timer remains");
+        }
+        panic!("HTTP request did not appear within 200 causal timers");
+    }
+}
+use TestEngine as Engine;
 pub const META: &str = r#"[{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50},{"name":"ETH","szDecimals":4,"maxLeverage":50}]},[{"midPx":"100","markPx":"100","oraclePx":"100","prevDayPx":"90"},{"midPx":"200","markPx":"200","oraclePx":"200"}]]"#;
 pub const STATE: &str = r#"{"assetPositions":[{"position":{"coin":"BTC","szi":"2","entryPx":"100","positionValue":"200","unrealizedPnl":"0","liquidationPx":"50","marginUsed":"20","leverage":{"type":"cross","value":10}}}],"marginSummary":{"accountValue":"1000","totalMarginUsed":"20"},"time":1000}"#;
 pub fn reply(e: &mut Engine<Hyperliquid>, r: &HttpRequest, status: u16, body: &str) {
     e.handle(
-        1000.0,
+        e.now,
         Event::HttpResponse {
             request: r.id,
             response: Response {
@@ -53,10 +113,16 @@ pub fn ready_identity(
     }));
     e.start(1000.0);
     let mut socket = None;
-    for _ in 0..20 {
+    let mut answered = std::collections::HashSet::new();
+    for _ in 0..200 {
         let actions = e.drain_actions().collect::<Vec<_>>();
         if actions.is_empty() {
-            break;
+            let basic = ["userAbstraction:", "maxBuilderFee:", "clearinghouseState:", "frontendOpenOrders:"].iter().all(|key| answered.contains(*key));
+            let hip_ready = !hip || ["clearinghouseState:xyz", "frontendOpenOrders:xyz"].iter().all(|key| answered.contains(*key));
+            let spot_ready = !matches!(mode, "unifiedAccount" | "portfolioMargin") || answered.contains("spotClearinghouseState:");
+            if socket.is_some() && basic && hip_ready && spot_ready { break; }
+            assert!(e.advance_next_timer(), "private bootstrap stalled");
+            continue;
         }
         for a in actions {
             match a {
@@ -65,6 +131,7 @@ pub fn ready_identity(
                         .unwrap()["dex"]
                         .as_str()
                         .map(str::to_owned);
+                    answered.insert(format!("{}:{}", kind(&r), dex.as_deref().unwrap_or("")));
                     let body=match kind(&r).as_str(){"metaAndAssetCtxs" if dex.is_some()=>r#"[{"universe":[{"name":"xyz:FOO","szDecimals":2,"maxLeverage":10}]},[{"midPx":"50","markPx":"50","oraclePx":"50"}]]"#.into(),"metaAndAssetCtxs"=>META.to_owned(),"perpDexs"=>if hip{r#"[null,{"name":"xyz"}]"#.into()}else{"[null]".into()},"userAbstraction"=>format!("\"{mode}\""),"maxBuilderFee"=>approval.into(),"userFees"=>r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#.into(),"clearinghouseState" if dex.is_some()=>r#"{"assetPositions":[],"time":1000}"#.into(),"clearinghouseState"=>STATE.into(),"frontendOpenOrders"=>"[]".into(),"spotClearinghouseState"=>r#"{"balances":[{"coin":"USDC","total":"1100","hold":"0"}],"tokenToAvailableAfterMaintenance":[[0,"1050"]]}"#.into(),other=>panic!("unexpected read {other}")};
                     reply(&mut e, &r, 200, &body);
                 }

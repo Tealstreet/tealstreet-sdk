@@ -15,8 +15,7 @@ pub struct Trading {
     active: Option<Job>,
     inflight: bool,
     nonce: u64,
-    write_at: Option<f64>,
-    pace: Option<TimerId>,
+    queued: bool,
     builder_wait: Option<TimerId>,
     retry: Option<TimerId>,
     retry_step: usize,
@@ -32,6 +31,7 @@ struct Job {
     amend_filled: bool,
     builder_checked: bool,
 }
+#[derive(Clone)]
 enum Step {
     Place(PlaceOrderOpts),
     Cancel(Vec<Order>),
@@ -518,8 +518,8 @@ impl Hyperliquid {
     }
     pub(crate) fn pump_trades(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.trading.inflight
+            || self.trading.queued
             || self.trading.builder_wait.is_some()
-            || self.trading.pace.is_some()
         {
             return;
         }
@@ -535,11 +535,6 @@ impl Hyperliquid {
         }
         if job.amend_filled {
             self.finish_trade(cx, Err("Hyperliquid amendment source was filled".into()));
-            return;
-        }
-        if self.trading.write_at.is_some_and(|at| cx.now - at < 334.0) {
-            self.trading.pace =
-                Some(cx.set_timer(334.0 - (cx.now - self.trading.write_at.unwrap())));
             return;
         }
         if matches!(job.steps.front(), Some(Step::Cancel(_)))
@@ -564,6 +559,32 @@ impl Hyperliquid {
             return;
         }
         let command = job.command;
+        self.trading.queued = true;
+        self.http_trade(cx, command);
+    }
+    pub(crate) fn trade_queued(&self, command: CommandId) -> bool {
+        self.trading.queued && self.trading.active.as_ref().is_some_and(|job| job.command == command)
+    }
+    pub(crate) fn dispatch_trade(&mut self, cx: &mut Cx<'_, Pending>, command: CommandId) -> Option<f64> {
+        if !self.trade_queued(command) { return None; }
+        self.trading.queued = false;
+        let job = self.trading.active.as_ref()?;
+        if job.amend_filled {
+            self.finish_trade(cx, Err("Hyperliquid amendment source was filled".into()));
+            return None;
+        }
+        let remaining = job.steps.iter().filter_map(|step| match step { Step::Place(opts) => Some(opts.clone()), _ => None }).collect::<Vec<_>>();
+        if let Err(error) = self.preflight(cx, &remaining) {
+            self.finish_trade(cx, Err(error));
+            return None;
+        }
+        let step = job.steps.front()?.clone();
+        if let (Some(source), Step::Cancel(orders)) = (&job.amend_source, &step) {
+            if orders.first().is_none_or(|original| cx.store.order(source) != Some(original)) {
+                self.finish_trade(cx, Err("Hyperliquid amendment source changed while queued".into()));
+                return None;
+            }
+        }
         let step = self
             .trading
             .active
@@ -577,13 +598,18 @@ impl Hyperliquid {
             Ok(v) => v,
             Err(error) => {
                 self.finish_trade(cx, Err(error));
-                return;
+                return None;
             }
         };
         if matches!(&effect,Effect::Cancel(orders) if orders.is_empty()) {
             self.pump_trades(cx);
-            return;
+            return None;
         }
+        let weight = match &action {
+            Action::Order { orders, .. } => 1 + orders.len() / 40,
+            Action::Cancel { cancels } => 1 + cancels.len() / 40,
+            Action::Leverage { .. } => 1,
+        } as f64;
         self.trading.nonce = (cx.now.max(0.0) as u64).max(self.trading.nonce.saturating_add(1));
         let nonce = self.trading.nonce;
         let signature = match sign::sign(
@@ -597,7 +623,7 @@ impl Hyperliquid {
             Err(error) => {
                 self.restore_cancel(cx, &effect);
                 self.finish_trade(cx, Err(error));
-                return;
+                return None;
             }
         };
         #[derive(Serialize)]
@@ -647,7 +673,6 @@ impl Hyperliquid {
             self.account.preplacements.pop_front();
         }
         self.trading.inflight = true;
-        self.trading.write_at = Some(cx.now);
         cx.request(
             Method::Post,
             format!("{}/exchange", self.rest()),
@@ -655,6 +680,7 @@ impl Hyperliquid {
             Some(body),
             Pending::Trade(Request { command, effect }),
         );
+        Some(weight)
     }
     fn prepare_write(
         &self,
@@ -729,6 +755,9 @@ impl Hyperliquid {
                 ))
             }
             Step::Cancel(orders) => {
+                let orders = orders.iter().filter_map(|old| cx.store.order(&old.id))
+                    .filter(|live| matches!(live.status, OrderStatus::Open | OrderStatus::Creating))
+                    .cloned().collect::<Vec<_>>();
                 let cancels = orders
                     .iter()
                     .map(|o| {
@@ -1012,6 +1041,7 @@ impl Hyperliquid {
     }
     fn finish_trade(&mut self, cx: &mut Cx<'_, Pending>, result: Result<(), String>) {
         self.trading.inflight = false;
+        self.trading.queued = false;
         if let Some(job) = self.trading.active.take() {
             cx.done(
                 job.command,
@@ -1037,10 +1067,6 @@ impl Hyperliquid {
         self.pump_trades(cx);
     }
     pub(crate) fn trade_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
-        if self.trading.pace == Some(timer) {
-            self.trading.pace = None;
-            self.pump_trades(cx);
-        }
         if self.trading.builder_wait == Some(timer) {
             self.trading.builder_wait = None;
             self.account.builder_approved = Some(false);

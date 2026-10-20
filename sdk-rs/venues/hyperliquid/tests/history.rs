@@ -1,6 +1,7 @@
 //! Documented userFillsByTime, userFunding, historicalOrders and recentTrades shapes.
 mod support;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Query};
+use support::TestEngine as Engine;
+use safe_cex_engine::{Action, Command, Event, HttpRequest, Notice, Query};
 use safe_cex_venue_hyperliquid::Hyperliquid;
 use serde_json::Value;
 use support::*;
@@ -14,15 +15,7 @@ fn query(e: &mut Engine<Hyperliquid>, q: Query) {
     );
 }
 fn read(e: &mut Engine<Hyperliquid>) -> HttpRequest {
-    e.drain_actions()
-        .find_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .unwrap()
+    e.wait_http(|_| true)
 }
 fn result(e: &mut Engine<Hyperliquid>) -> Value {
     let result = e

@@ -1,7 +1,8 @@
 //! Command contract cases derived from the official exchange endpoint shapes.
 mod support;
+use support::TestEngine as Engine;
 use safe_cex_engine::model::PlaceOrderOpts;
-use safe_cex_engine::{Action, Command, Engine, Event, HttpRequest, Notice, Response};
+use safe_cex_engine::{Action, Command, Event, HttpRequest, Notice, Response};
 use safe_cex_venue_hyperliquid::Hyperliquid;
 use serde_json::Value;
 use support::*;
@@ -10,15 +11,7 @@ fn opts(text: &str) -> PlaceOrderOpts {
     serde_json::from_str(text).unwrap()
 }
 fn write(e: &mut Engine<Hyperliquid>) -> HttpRequest {
-    e.drain_actions()
-        .find_map(|a| {
-            if let Action::Http(r) = a {
-                (r.url.ends_with("/exchange")).then_some(r)
-            } else {
-                None
-            }
-        })
-        .unwrap()
+    e.wait_http(|request| request.url.ends_with("/exchange"))
 }
 fn body(r: &HttpRequest) -> Value {
     serde_json::from_str(r.body.as_deref().unwrap()).unwrap()

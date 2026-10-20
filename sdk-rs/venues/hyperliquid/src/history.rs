@@ -33,6 +33,9 @@ pub struct Request {
     trades: Vec<Trade>,
 }
 impl Request {
+    pub(crate) fn xhr_limited(&self) -> bool {
+        self.kind == Kind::Fills
+    }
     pub(crate) fn streamed(&self) -> bool {
         self.kind != Kind::Lookup
     }
@@ -537,7 +540,6 @@ impl Hyperliquid {
             );
             return;
         }
-        self.history_weight(cx, request.raw_count, request.streamed());
         if request.kind == Kind::Lookup {
             #[derive(Deserialize)]
             struct Lookup<'a> {

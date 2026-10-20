@@ -1,6 +1,7 @@
 //! Hyperliquid perpetuals: typed, deterministic state machines without I/O.
 mod account;
 mod history;
+mod http;
 pub mod sign;
 mod trading;
 mod wire;
@@ -10,7 +11,7 @@ use safe_cex_engine::book::{Book, BookSide};
 use safe_cex_engine::json::{self, ArrayAt};
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
+    Command, CommandId, Cx, LogLevel, Response, SocketId, TimerId, Venue,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -96,6 +97,18 @@ pub struct Hyperliquid {
     dex_queue: std::collections::VecDeque<(String, u32)>,
     dex_names: Vec<String>,
     meta_retries: HashMap<TimerId, (String, u32, u8)>,
+    http: http::Budget,
+    bootstrap: Bootstrap,
+}
+#[derive(Default)]
+struct Bootstrap {
+    core_ready: bool,
+    fees_ready: bool,
+    dexs_ready: bool,
+    failed: bool,
+    markets: Vec<Market>,
+    tickers: Vec<Ticker>,
+    fees: Option<(f64, f64)>,
 }
 impl Hyperliquid {
     pub fn new(options: Options) -> Self {
@@ -113,6 +126,8 @@ impl Hyperliquid {
             dex_queue: Default::default(),
             dex_names: Vec::new(),
             meta_retries: HashMap::new(),
+            http: http::Budget::default(),
+            bootstrap: Bootstrap::default(),
         }
     }
     pub fn new_spot(mut options: Options) -> Self {
@@ -123,10 +138,10 @@ impl Hyperliquid {
             ..Self::new(options)
         }
     }
-    fn spot_meta(&self, cx: &mut Cx<'_, Pending>) {
+    fn spot_meta(&mut self, cx: &mut Cx<'_, Pending>) {
         self.spot_meta_attempt(cx, 0);
     }
-    fn spot_meta_attempt(&self, cx: &mut Cx<'_, Pending>, attempt: u8) {
+    fn spot_meta_attempt(&mut self, cx: &mut Cx<'_, Pending>, attempt: u8) {
         self.info(
             cx,
             "{\"type\":\"spotMetaAndAssetCtxs\"}".into(),
@@ -157,20 +172,23 @@ impl Hyperliquid {
             "wss://api-ui.hyperliquid.xyz/ws"
         }
     }
-    fn info(&self, cx: &mut Cx<'_, Pending>, body: String, at: ArrayAt, pending: Pending) {
-        cx.request_streamed_body(
-            Method::Post,
-            format!("{}/info", self.rest()),
-            vec![("Content-Type", "application/json".into())],
-            Some(body),
-            at,
-            pending,
-        );
+    fn info(&mut self, cx: &mut Cx<'_, Pending>, body: String, at: ArrayAt, pending: Pending) {
+        let limited = self.spot || match &pending {
+            Pending::Meta { dex, attempt, .. } => !dex.is_empty() || *attempt > 0,
+            Pending::Dexs { .. } | Pending::Candles { .. } => true,
+            _ => false,
+        };
+        self.http_info(cx, body, Some(at), pending, limited);
     }
-    fn meta(&self, cx: &mut Cx<'_, Pending>, dex: String, offset: u32) {
+    fn bootstrap_next(&mut self, cx: &mut Cx<'_, Pending>) {
+        if self.bootstrap.core_ready && self.bootstrap.fees_ready && self.bootstrap.dexs_ready && !self.bootstrap.failed {
+            self.next_dex(cx);
+        }
+    }
+    fn meta(&mut self, cx: &mut Cx<'_, Pending>, dex: String, offset: u32) {
         self.meta_attempt(cx, dex, offset, 0);
     }
-    fn meta_attempt(&self, cx: &mut Cx<'_, Pending>, dex: String, offset: u32, attempt: u8) {
+    fn meta_attempt(&mut self, cx: &mut Cx<'_, Pending>, dex: String, offset: u32, attempt: u8) {
         #[derive(Serialize)]
         struct Read<'a> {
             r#type: &'static str,
@@ -201,6 +219,17 @@ impl Hyperliquid {
         if let Some((dex, offset)) = self.dex_queue.pop_front() {
             self.meta(cx, dex, offset);
         } else if self.connection.socket.is_none() {
+            if !self.spot {
+                let mut markets = std::mem::take(&mut self.bootstrap.markets);
+                if let Some((taker, maker)) = self.bootstrap.fees {
+                    for market in &mut markets {
+                        market.taker_fee = Some(taker);
+                        market.maker_fee = Some(maker);
+                    }
+                }
+                cx.store.set_markets(markets);
+                cx.store.set_tickers(std::mem::take(&mut self.bootstrap.tickers));
+            }
             self.account_start(cx);
             self.connection.socket = Some(cx.connect_channel(
                 self.ws(),
@@ -718,6 +747,9 @@ impl Venue for Hyperliquid {
             self.spot_meta(cx);
         } else {
             self.meta(cx, String::new(), 0);
+            self.start_fees(cx);
+            self.info(cx, "{\"type\":\"perpDexs\"}".into(), ArrayAt::Root,
+                Pending::Dexs { dexs: Vec::new(), index: 0 });
         }
     }
     fn on_open(&mut self, cx: &mut Cx<'_, Pending>, socket: SocketId) {
@@ -894,23 +926,12 @@ impl Venue for Hyperliquid {
                                 .insert(m.id.to_ascii_lowercase(), m.symbol.clone());
                         }
                     }
-                    let mut all = cx.store.markets().to_vec();
-                    all.extend(markets);
-                    cx.store.set_markets(all);
-                    let mut all = cx.store.tickers().to_vec();
-                    all.extend(tickers);
-                    cx.store.set_tickers(all);
+                    self.bootstrap.markets.extend(markets);
+                    self.bootstrap.tickers.extend(tickers);
                 }
                 if dex.is_empty() {
-                    self.info(
-                        cx,
-                        "{\"type\":\"perpDexs\"}".into(),
-                        ArrayAt::Root,
-                        Pending::Dexs {
-                            dexs: Vec::new(),
-                            index: 0,
-                        },
-                    );
+                    self.bootstrap.core_ready = true;
+                    self.bootstrap_next(cx);
                 } else {
                     self.next_dex(cx);
                 }
@@ -918,7 +939,8 @@ impl Venue for Hyperliquid {
             Pending::Dexs { dexs, .. } => {
                 self.dex_names = dexs.iter().map(|(d, _)| d.clone()).collect();
                 self.dex_queue = dexs.into();
-                self.next_dex(cx);
+                self.bootstrap.dexs_ready = true;
+                self.bootstrap_next(cx);
             }
             Pending::Candles {
                 command,
@@ -1017,7 +1039,10 @@ impl Venue for Hyperliquid {
             Pending::Trade(request) => self.trade_response(cx, request, Err(error)),
             Pending::History(request) => self.history_failed(cx, *request, error),
             Pending::Candles { command, .. } => cx.done(command, Err(error.into())),
-            Pending::Dexs { .. } => self.next_dex(cx),
+            Pending::Dexs { .. } => {
+                self.bootstrap.dexs_ready = true;
+                self.bootstrap_next(cx);
+            },
             Pending::Meta {
                 dex,
                 offset,
@@ -1032,10 +1057,17 @@ impl Venue for Hyperliquid {
                 cx.log(LogLevel::Warning, error);
                 self.next_dex(cx);
             }
+            Pending::Meta { .. } => {
+                self.bootstrap.core_ready = true;
+                self.bootstrap.failed = true;
+                cx.log(LogLevel::Error, error);
+                cx.deactivate();
+            }
             _ => cx.log(LogLevel::Error, error),
         }
     }
     fn on_timer(&mut self, cx: &mut Cx<'_, Pending>, timer: TimerId) {
+        self.http_timer(cx, timer);
         self.account_timer(cx, timer);
         self.trade_timer(cx, timer);
         if let Some((dex, offset, attempt)) = self.meta_retries.remove(&timer) {

@@ -32,24 +32,6 @@ pub enum Request {
     Builder,
     Fees,
 }
-enum ReadContinuation {
-    Account(Request),
-    History(Box<crate::history::Request>),
-}
-impl ReadContinuation {
-    fn pending(self) -> Pending {
-        match self {
-            Self::Account(r) => Pending::Account(r),
-            Self::History(r) => Pending::History(r),
-        }
-    }
-}
-struct QueuedRead {
-    body: String,
-    request: ReadContinuation,
-    streamed: bool,
-    weight: u32,
-}
 struct SettingBarrier {
     at: f64,
     revision: u64,
@@ -63,12 +45,9 @@ pub struct Account {
     mode_resolved: bool,
     mode_timer: Option<TimerId>,
     role_timer: Option<TimerId>,
+    role_expired: bool,
     sync_timer: Option<TimerId>,
     last_order_refresh: f64,
-    read_timer: Option<TimerId>,
-    read_window: f64,
-    read_weight: u32,
-    reads: VecDeque<QueuedRead>,
     pub refresh_timer: Option<TimerId>,
     spot_at: f64,
     spot_forced_at: Option<f64>,
@@ -199,75 +178,47 @@ impl Hyperliquid {
         request: Request,
         streamed: bool,
     ) {
-        let weight = match &request {
-            Request::Role => 60,
-            Request::State { .. } | Request::Spot { .. } => 2,
-            _ => 20,
-        };
-        self.account.reads.push_back(QueuedRead {
-            body,
-            request: ReadContinuation::Account(request),
-            streamed,
-            weight,
-        });
-        self.pump_reads(cx);
+        // Builder approval uses a direct fetch in the TS reference and bypasses
+        // both Axios limiters. All other reads retain their actual client scope.
+        let limited = self.spot || matches!(&request, Request::Orders { .. })
+            || matches!(&request, Request::State { dex, .. } if !dex.is_empty());
+        if matches!(request, Request::Builder) {
+            cx.request(Method::Post, format!("{}/info", self.rest()),
+                vec![("Content-Type", "application/json".into())], Some(body), Pending::Account(request));
+        } else {
+            self.http_info(cx, body, streamed.then_some(ArrayAt::Root), Pending::Account(request), limited);
+        }
     }
-    pub(crate) fn history_read(
-        &mut self,
-        cx: &mut Cx<'_, Pending>,
-        body: String,
-        request: crate::history::Request,
-    ) {
+    pub(crate) fn account_read_live(&mut self, request: &Request) -> bool {
+        match request {
+            Request::Role => !self.account.role_expired,
+            Request::Mode => !self.account.mode_resolved,
+            Request::State { dex, revision, .. } => {
+                let live = self.account.state_revision.get(dex).copied().unwrap_or(0) == *revision;
+                if !live { self.account.inflight.remove(&format!("state:{dex}")); }
+                live
+            }
+            Request::Orders { dex, revision, .. } => {
+                let live = self.account.orders_revision.get(dex).copied().unwrap_or(0) == *revision;
+                if !live { self.account.inflight.remove(&format!("orders:{dex}")); }
+                live
+            }
+            Request::Spot { revision } => {
+                let live = self.account.spot_revision == *revision;
+                if !live { self.account.spot_inflight = false; }
+                live
+            }
+            Request::Asset { symbol, revision } => self.account.settings_barriers.get(symbol).map_or(0, |b| b.revision) == *revision,
+            _ => true,
+        }
+    }
+    pub(crate) fn start_fees(&mut self, cx: &mut Cx<'_, Pending>) {
+        self.account_read(cx, "userFees", None, Request::Fees, false);
+    }
+    pub(crate) fn history_read(&mut self, cx: &mut Cx<'_, Pending>, body: String, request: crate::history::Request) {
         let streamed = request.streamed();
-        let weight = if streamed { 120 } else { 2 };
-        self.account.reads.push_back(QueuedRead {
-            body,
-            request: ReadContinuation::History(Box::new(request)),
-            streamed,
-            weight,
-        });
-        self.pump_reads(cx);
-    }
-    pub(crate) fn history_weight(&mut self, cx: &mut Cx<'_, Pending>, rows: u32, reserved: bool) {
-        if cx.now - self.account.read_window >= 60_000.0 {
-            self.account.read_window = cx.now;
-            self.account.read_weight = 0;
-        }
-        if reserved {
-            self.account.read_weight = self.account.read_weight.saturating_sub(100);
-        }
-        self.account.read_weight = self.account.read_weight.saturating_add(rows.div_ceil(20));
-        self.pump_reads(cx);
-    }
-    fn pump_reads(&mut self, cx: &mut Cx<'_, Pending>) {
-        if cx.now - self.account.read_window >= 60_000.0 {
-            self.account.read_window = cx.now;
-            self.account.read_weight = 0;
-        }
-        while let Some(read) = self.account.reads.front() {
-            // Leave headroom for chart reads and trading in the shared IP budget.
-            if self.account.read_weight + read.weight > 1000 {
-                if self.account.read_timer.is_none() {
-                    self.account.read_timer = Some(
-                        cx.set_timer((60_000.0 - (cx.now - self.account.read_window)).max(1.0)),
-                    );
-                }
-                return;
-            }
-            let read = self.account.reads.pop_front().unwrap();
-            self.account.read_weight += read.weight;
-            if read.streamed {
-                self.info(cx, read.body, ArrayAt::Root, read.request.pending());
-            } else {
-                cx.request(
-                    Method::Post,
-                    format!("{}/info", self.rest()),
-                    vec![("Content-Type", "application/json".into())],
-                    Some(read.body),
-                    read.request.pending(),
-                );
-            }
-        }
+        let limited = request.xhr_limited();
+        self.http_info(cx, body, streamed.then_some(ArrayAt::Root), Pending::History(Box::new(request)), limited);
     }
     pub(crate) fn account_start(&mut self, cx: &mut Cx<'_, Pending>) {
         if self.account.started {
@@ -319,7 +270,6 @@ impl Hyperliquid {
             }
             return;
         }
-        self.account_read(cx, "userFees", None, Request::Fees, false);
         if self.options.public_data_only {
             return;
         }
@@ -606,6 +556,7 @@ impl Hyperliquid {
         let raw = response.body;
         match request {
             Request::Role => {
+                if self.account.role_expired { return; }
                 if self.account.role_timer.is_none() {
                     return;
                 }
@@ -635,6 +586,7 @@ impl Hyperliquid {
                 }
             }
             Request::Mode => {
+                if self.account.mode_resolved { return; }
                 if self.account.mode_resolved {
                     return;
                 }
@@ -660,11 +612,10 @@ impl Hyperliquid {
                     user_add_rate: f64,
                 }
                 if let Ok(f) = serde_json::from_str::<Fees>(raw) {
-                    cx.store.update_markets(|m| {
-                        m.taker_fee = Some(f.user_cross_rate);
-                        m.maker_fee = Some(f.user_add_rate);
-                    });
+                    self.bootstrap.fees = Some((f.user_cross_rate, f.user_add_rate));
                 }
+                self.bootstrap.fees_ready = true;
+                self.bootstrap_next(cx);
             }
             Request::State {
                 dex,
@@ -837,7 +788,10 @@ impl Hyperliquid {
                 }
             }
             Request::Builder => self.account.builder_approved = None,
-            Request::Fees => {}
+            Request::Fees => {
+                self.bootstrap.fees_ready = true;
+                self.bootstrap_next(cx);
+            }
         }
         cx.log(LogLevel::Warning, error);
     }
@@ -864,16 +818,13 @@ impl Hyperliquid {
                 self.account.state_refresh_timer = Some(cx.set_timer(350.0));
             }
         }
-        if self.account.read_timer == Some(timer) {
-            self.account.read_timer = None;
-            self.pump_reads(cx);
-        }
         if self.account.mode_timer == Some(timer) {
             self.account.mode_timer = None;
             self.mode_ready(cx);
         }
         if self.account.role_timer == Some(timer) {
             self.account.role_timer = None;
+            self.account.role_expired = true;
             cx.log(
                 LogLevel::Warning,
                 "Hyperliquid identity resolution timed out",

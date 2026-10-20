@@ -1,6 +1,8 @@
 //! Payloads from the official info/perpetuals and websocket/subscriptions docs.
 //! https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api
-use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId};
+mod support;
+use support::TestEngine as Engine;
+use safe_cex_engine::{Action, Command, Event, RequestId, Response, SocketId};
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 
 fn response(engine: &mut Engine<Hyperliquid>, request: RequestId, body: &str) {
@@ -17,16 +19,7 @@ fn response(engine: &mut Engine<Hyperliquid>, request: RequestId, body: &str) {
     );
 }
 fn request(engine: &mut Engine<Hyperliquid>) -> RequestId {
-    engine
-        .drain_actions()
-        .find_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r.id)
-            } else {
-                None
-            }
-        })
-        .unwrap()
+    engine.wait_http(|_| true).id
 }
 fn start() -> (Engine<Hyperliquid>, SocketId) {
     let mut e = Engine::new(Hyperliquid::new(Options {
@@ -40,6 +33,8 @@ fn start() -> (Engine<Hyperliquid>, SocketId) {
         id,
         r#"[{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50},{"name":"ETH","szDecimals":4,"maxLeverage":50}]},[{"midPx":"97500.5","markPx":"97500.5","oraclePx":"97500","prevDayPx":"95000","dayNtlVlm":"195001","openInterest":"2","funding":"0.0001"},{"midPx":"3650.25","markPx":"3650.25","szDecimals":4}]]"#,
     );
+    let fee = e.wait_http(|r| support::kind(r) == "userFees");
+    support::reply(&mut e, &fee, 200, r#"{"userCrossRate":"0.00045","userAddRate":"0.00015"}"#);
     let id = request(&mut e);
     response(&mut e, id, "[null]");
     let socket = e
@@ -74,6 +69,8 @@ fn dex_mids_subscription_matches_ts_account_session_requirement() {
         e.start(1000.0);
         let id = request(&mut e);
         response(&mut e, id, r#"[{"universe":[]},[]]"#);
+        let fee = e.wait_http(|r| support::kind(r) == "userFees");
+        support::reply(&mut e, &fee, 200, "{}");
         let id = request(&mut e);
         response(&mut e, id, r#"[null,{"name":"xyz"}]"#);
         let id = request(&mut e);
@@ -180,16 +177,7 @@ fn posted_candle_read_preserves_body_and_streams() {
             to_ms: Some(60000.0),
         }),
     );
-    let req = e
-        .drain_actions()
-        .find_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .unwrap();
+    let req = e.wait_http(|r| support::kind(r) == "candleSnapshot");
     assert_eq!(
         req.body.as_deref(),
         Some(
@@ -274,16 +262,7 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
             to_ms: Some(90_000_000.0),
         }),
     );
-    let r = e
-        .drain_actions()
-        .find_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .unwrap();
+    let r = e.wait_http(|r| support::kind(r) == "candleSnapshot");
     assert!(r.body.as_deref().unwrap().contains("\"startTime\":0"));
     response(
         &mut e,
@@ -294,4 +273,22 @@ fn invalid_interval_is_a_command_error_and_limit_caps_at_1500() {
         a,
         Action::Notice(safe_cex_engine::Notice::CommandDone { result: Err(_), .. })
     )));
+}
+
+#[test]
+fn bootstrap_does_not_publish_a_partial_catalog_before_fees_and_dexs() {
+    let mut e = Engine::new(Hyperliquid::new(Options {
+        public_data_only: true,
+        ..Options::default()
+    }));
+    e.start(0.0);
+    let core = request(&mut e);
+    e.handle(573.0, Event::HttpResponse {
+        request: core,
+        response: Response { status: 200, headers: "", body: r#"[{"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":50}]},[{"midPx":"100","markPx":"100","oraclePx":"100"}]]"# },
+    });
+    assert!(!e.store().loaded().markets, "core metadata alone is not the complete startup catalog");
+    assert!(!e.store().loaded().tickers);
+    assert!(e.store().markets().is_empty());
+    assert!(!e.drain_actions().any(|action| matches!(action, Action::WsConnect { .. })));
 }

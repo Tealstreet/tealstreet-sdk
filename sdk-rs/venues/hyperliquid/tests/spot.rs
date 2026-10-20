@@ -1,9 +1,10 @@
 //! Documented spot metadata, balances and spot asset ID payloads.
 //! https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/spot
 mod support;
+use support::TestEngine as Engine;
 use safe_cex_engine::model::*;
 use safe_cex_engine::{
-    Action, Command, Engine, Event, HttpRequest, Notice, Query, SocketId, Venue,
+    Action, Command, Event, HttpRequest, Notice, Query, SocketId, Venue,
 };
 use safe_cex_venue_hyperliquid::{Hyperliquid, Options};
 const META: &str = r#"[{"tokens":[{"name":"USDC","index":0,"szDecimals":8},{"name":"PURR","index":1,"szDecimals":0},{"name":"HFUN","index":2,"szDecimals":2}],"universe":[{"name":"PURR/USDC","tokens":[1,0],"index":0},{"name":"@1","tokens":[2,0],"index":1}]},[{"coin":"@1","midPx":"0.00093722","markPx":"0.00094","prevDayPx":"0.0009","dayNtlVlm":"937.22"},{"coin":"PURR/USDC","midPx":"0.209265","markPx":"0.14","prevDayPx":"0.20432","dayNtlVlm":"8906.0"}]]"#;
@@ -19,36 +20,18 @@ fn ready(private: bool) -> (Engine<Hyperliquid>, SocketId) {
     let r = take_http(&mut e);
     assert_eq!(support::kind(&r), "spotMetaAndAssetCtxs");
     support::reply(&mut e, &r, 200, META);
-    let mut socket = None;
-    for a in e.drain_actions().collect::<Vec<_>>() {
-        match a {
-            Action::WsConnect { socket: s, .. } => socket = Some(s),
-            Action::Http(r) => {
-                assert_eq!(support::kind(&r), "spotClearinghouseState");
-                support::reply(
-                    &mut e,
-                    &r,
-                    200,
-                    r#"{"balances":[{"coin":"USDC","token":0,"hold":"2","total":"14.625485"},{"coin":"PURR","token":1,"hold":"10","total":"2000"}]}"#,
-                );
-            }
-            _ => {}
-        }
+    if private {
+        let balance = e.wait_http(|r| support::kind(r) == "spotClearinghouseState");
+        support::reply(&mut e, &balance, 200,
+            r#"{"balances":[{"coin":"USDC","token":0,"hold":"2","total":"14.625485"},{"coin":"PURR","token":1,"hold":"10","total":"2000"}]}"#);
     }
+    let socket = e.drain_actions().find_map(|action| match action { Action::WsConnect { socket, .. } => Some(socket), _ => None });
     let s = socket.unwrap();
     e.handle(1000.0, Event::WsOpened { socket: s });
     (e, s)
 }
 fn take_http(e: &mut Engine<Hyperliquid>) -> HttpRequest {
-    e.drain_actions()
-        .find_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .unwrap()
+    e.wait_http(|_| true)
 }
 #[test]
 fn metadata_joins_by_coin_and_uses_token_size_precision() {
@@ -160,7 +143,7 @@ fn signed_spot_order_uses_shifted_asset_and_eight_decimal_cap() {
             orders: vec![order("HFUN/USDC")],
         }),
     );
-    let r = take_http(&mut e);
+    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
     let payload: serde_json::Value = serde_json::from_str(r.body.as_deref().unwrap()).unwrap();
     let w = &payload["action"]["orders"][0];
     assert_eq!(w["a"], 10001);
@@ -285,7 +268,7 @@ fn spot_limit_brackets_preserve_caller_cloid_and_never_reduce_only() {
             orders: vec![o],
         }),
     );
-    let r = take_http(&mut e);
+    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
     let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
     let wires = p["action"]["orders"].as_array().unwrap();
     assert_eq!(p["action"]["grouping"], "normalTpsl");
@@ -314,7 +297,7 @@ fn spot_zero_bracket_prices_disable_only_the_requested_child() {
                 orders: vec![o],
             }),
         );
-        let r = take_http(&mut e);
+        let r = e.wait_http(|r| r.url.ends_with("/exchange"));
         let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
         let wires = p["action"]["orders"].as_array().unwrap();
         assert_eq!(wires.len(), 1 + children.len());
@@ -376,7 +359,7 @@ fn spot_market_order_uses_last_mid_with_five_percent_gtc_envelope() {
             orders: vec![o],
         }),
     );
-    let r = take_http(&mut e);
+    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
     let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
     assert_eq!(p["action"]["orders"][0]["p"], "0.21973");
     assert_eq!(p["action"]["orders"][0]["t"]["limit"]["tif"], "Gtc");
@@ -495,7 +478,7 @@ fn placed() -> (Engine<Hyperliquid>, SocketId) {
             orders: vec![order("HFUN/USDC")],
         }),
     );
-    let r = take_http(&mut e);
+    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
     acknowledge(
         &mut e,
         &r,
@@ -516,7 +499,7 @@ fn cancel_uses_the_same_shifted_native_asset_id_and_removes_acknowledged_order()
             ids: vec!["101".into()],
         }),
     );
-    let r = take_http(&mut e);
+    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
     let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
     assert_eq!(p["action"]["cancels"][0]["a"], 10001);
     assert_eq!(p["action"]["cancels"][0]["o"], 101);
@@ -540,7 +523,7 @@ fn amend_waits_for_cancel_then_places_with_new_client_id() {
             amount: Some(6000.0),
         }),
     );
-    let r = take_http(&mut e);
+    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
     acknowledge(
         &mut e,
         &r,
@@ -558,7 +541,7 @@ fn amend_waits_for_cancel_then_places_with_new_client_id() {
         })
         .unwrap();
     e.handle(5500.0, Event::TimerFired { timer });
-    let r = take_http(&mut e);
+    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
     let p: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
     let w = &p["action"]["orders"][0];
     assert_eq!(w["a"], 10001);
@@ -578,7 +561,7 @@ fn fill_during_amend_cancel_stops_the_replacement_and_deduplicates_executions() 
             amount: None,
         }),
     );
-    let r = take_http(&mut e);
+    let r = e.wait_http(|r| r.url.ends_with("/exchange"));
     let fill = r#"{"channel":"userFills","data":{"isSnapshot":false,"fills":[{"coin":"@1","side":"B","px":"0.000937","sz":"1","time":5001,"tid":9,"oid":101}]}}"#;
     support::message(&mut e, s, 5001.0, fill);
     support::message(&mut e, s, 5001.0, fill);
@@ -623,8 +606,10 @@ fn spot_metadata_failures_retry_three_reads_without_committing_partial_markets()
     e.start(1000.0);
     for attempt in 0..3 {
         let r = take_http(&mut e);
+        let before = e.drain_actions().collect::<Vec<_>>();
+        assert!(!before.iter().any(|a| matches!(a, Action::Http(_))));
         e.handle(
-            1000.0,
+            e.now,
             Event::HttpResponse {
                 request: r.id,
                 response: safe_cex_engine::Response {
@@ -667,7 +652,7 @@ fn fills_before_resting_ack_preserve_native_executed_quantity() {
                 orders: vec![order("HFUN/USDC")],
             }),
         );
-        let r = take_http(&mut e);
+        let r = e.wait_http(|r| r.url.ends_with("/exchange"));
         for (index, size) in sizes.iter().enumerate() {
             let fill = format!(
                 r#"{{"channel":"userFills","data":{{"isSnapshot":false,"fills":[{{"coin":"@1","side":"B","px":"0.000937","sz":"{size}","time":3001,"tid":{},"oid":101}}]}}}}"#,
@@ -851,7 +836,7 @@ fn duplicate_base_tokens_keep_each_quote_symbol_and_native_action_identity() {
                 to_ms: None,
             }),
         );
-        let r = take_http(&mut e);
+        let r = e.wait_http(|r| support::kind(r) == "candleSnapshot");
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(r.body.as_ref().unwrap()).unwrap()["req"]["coin"],
             coin
@@ -866,7 +851,7 @@ fn duplicate_base_tokens_keep_each_quote_symbol_and_native_action_identity() {
                 orders: vec![o],
             }),
         );
-        let r = take_http(&mut e);
+        let r = e.wait_http(|r| r.url.ends_with("/exchange"));
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(r.body.as_ref().unwrap()).unwrap()["action"]
                 ["orders"][0]["a"],
@@ -1017,16 +1002,7 @@ fn spot_local_signer_identity_is_separate_from_main_wallet_and_vault() {
             .iter()
             .any(|a| matches!(a, Action::Notice(Notice::Deactivate)))
     );
-    let r = actions
-        .iter()
-        .find_map(|a| {
-            if let Action::Http(r) = a {
-                Some(r)
-            } else {
-                None
-            }
-        })
-        .unwrap();
+    let r = e.wait_http(|r| support::kind(r) == "spotClearinghouseState");
     let read: serde_json::Value = serde_json::from_str(r.body.as_ref().unwrap()).unwrap();
     assert_eq!(read["type"], "spotClearinghouseState");
     assert_eq!(read["user"], "0x0000000000000000000000000000000000000003");
