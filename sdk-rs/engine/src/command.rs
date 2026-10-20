@@ -120,6 +120,13 @@ enum CommandIn {
         command: u32,
         mode: StpMode,
     },
+    FetchAccountTier {
+        command: u32,
+    },
+    SetAccountTier {
+        command: u32,
+        tier: String,
+    },
     FetchLeverage {
         command: u32,
         symbol: String,
@@ -298,6 +305,14 @@ impl From<CommandIn> for Command {
             },
             #[cfg(feature = "command-asterdex")]
             CommandIn::SetStpMode { command, mode } => Self::SetStpMode { command, mode },
+            CommandIn::FetchAccountTier { command } => Self::Venue {
+                command,
+                action: crate::VenueAction::FetchAccountTier,
+            },
+            CommandIn::SetAccountTier { command, tier } => Self::Venue {
+                command,
+                action: crate::VenueAction::SetAccountTier { tier },
+            },
             CommandIn::FetchLeverage { command, symbol } => Self::FetchLeverage { command, symbol },
             CommandIn::FetchMaxLeverage { command, symbol } => {
                 Self::FetchMaxLeverage { command, symbol }

@@ -178,6 +178,20 @@ pub enum Action {
     Notice(Notice),
 }
 
+/// Venue-specific actions outside the shared trading surface.
+#[derive(Clone, Debug, PartialEq)]
+pub enum VenueAction {
+    /// Lighter: the cached account tier as a JSON string, or `null`.
+    FetchAccountTier,
+    /// Lighter: switch the account tier (`standard`, `premium` or `plus`).
+    SetAccountTier { tier: String },
+}
+
+/// The shared rejection for a venue action the venue does not implement.
+pub fn unsupported_venue_action<P>(cx: &mut Cx<'_, P>, command: CommandId) {
+    cx.done(command, Err("This action is not supported on this venue".into()));
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     FetchOptionChain {
@@ -269,6 +283,12 @@ pub enum Command {
     SetStpMode {
         command: CommandId,
         mode: crate::model::StpMode,
+    },
+    /// A venue-specific action; the engine rejects it unless the venue implements
+    /// `Venue::on_venue_action`, so venue `on_command` matches never see it.
+    Venue {
+        command: CommandId,
+        action: VenueAction,
     },
     /// Refresh account-specific leverage rails and margin mode for a symbol.
     FetchLeverage {
@@ -889,6 +909,15 @@ pub trait Venue {
         false
     }
     fn on_command(&mut self, cx: &mut Cx<'_, Self::Pending>, command: Command);
+    /// Venue-specific actions; the engine never passes `Command::Venue` to `on_command`.
+    fn on_venue_action(
+        &mut self,
+        cx: &mut Cx<'_, Self::Pending>,
+        command: CommandId,
+        _action: VenueAction,
+    ) {
+        unsupported_venue_action(cx, command);
+    }
     fn book(&self, symbol: &str) -> Option<&Book>;
     /// Every synchronized book, for snapshot frames.
     fn books(&self) -> Box<dyn Iterator<Item = (&str, &Book)> + '_>;
@@ -1245,6 +1274,9 @@ impl<V: Venue> Engine<V> {
                 if cx.io.timers.remove(&timer).is_some() {
                     self.venue.on_timer(&mut cx, timer);
                 }
+            }
+            Event::Command(Command::Venue { command, action }) => {
+                self.venue.on_venue_action(&mut cx, command, action);
             }
             Event::Command(Command::AmendOrderWithSymbol { command, .. })
                 if !self.venue.supports_amend_order_with_symbol() =>
