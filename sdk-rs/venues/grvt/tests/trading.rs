@@ -487,11 +487,107 @@ fn cancellation_preflights_all_identities_and_symbol_filter_is_native() {
     );
     assert_eq!(
         r.body.as_deref(),
-        Some(r#"{"sa":"9007199254740993","k":"PERPETUAL","b":"BTC","q":"USDT"}"#)
+        Some(r#"{"sa":"9007199254740993","k":["PERPETUAL"],"b":["BTC"],"q":["USDT"]}"#)
     );
     let actions = reply(&mut e, &r, 200, r#"{"r":{"a":false}}"#);
     assert!(done(&actions, 8).unwrap().is_err());
     assert_eq!(e.store().order("42").unwrap().status, OrderStatus::Open);
+}
+#[test]
+fn symbol_cancellation_ack_requires_reconciliation_without_inventing_terminal_state() {
+    for body in [r#"{"r":{"a":true}}"#, r#"{"result":{"ack":"true"}}"#] {
+        let mut e = boot();
+        seed(&mut e);
+        let r = http(
+            command(
+                &mut e,
+                Command::CancelSymbolOrders {
+                    command: 81,
+                    symbol: "BTC_USDT_PERP".into(),
+                },
+            ),
+            "cancel_all_orders",
+        );
+        let actions = reply(&mut e, &r, 200, body);
+        assert!(done(&actions, 81).unwrap().is_ok());
+        assert_eq!(
+            e.store().order("42").unwrap().status,
+            OrderStatus::Canceling
+        );
+        assert!(actions.iter().any(
+            |action| matches!(action,Action::Http(request) if request.url.ends_with("open_orders"))
+        ));
+    }
+}
+#[test]
+fn global_cancellation_reaches_native_orders_without_a_local_snapshot() {
+    for body in [r#"{"r":{"a":true}}"#, r#"{"r":{"a":false}}"#] {
+        let mut e = boot();
+        e.store_mut().set_orders(vec![]);
+        let request = http(
+            command(
+                &mut e,
+                Command::CancelSymbolOrders {
+                    command: 82,
+                    symbol: String::new(),
+                },
+            ),
+            "cancel_all_orders",
+        );
+        assert_eq!(
+            request.body.as_deref(),
+            Some(r#"{"sa":"9007199254740993"}"#)
+        );
+        let actions = reply(&mut e, &request, 200, body);
+        assert_eq!(done(&actions, 82).unwrap().is_ok(), body.contains("true"));
+        assert!(e.store().orders().is_empty());
+    }
+}
+#[test]
+fn global_cancellation_tracks_all_known_symbols_until_reconciliation() {
+    for ack in [true, false] {
+        let mut e = boot();
+        seed(&mut e);
+        let mut other = e.store().order("42").unwrap().clone();
+        other.id = "43".into();
+        other.client_order_id = Some("43".into());
+        other.symbol = "ETH_USDT_PERP".into();
+        e.store_mut().upsert_order(other);
+        let request = http(
+            command(
+                &mut e,
+                Command::CancelSymbolOrders {
+                    command: 83,
+                    symbol: String::new(),
+                },
+            ),
+            "cancel_all_orders",
+        );
+        for id in ["42", "43"] {
+            assert_eq!(e.store().order(id).unwrap().status, OrderStatus::Canceling);
+        }
+        let actions = reply(
+            &mut e,
+            &request,
+            200,
+            if ack {
+                r#"{"r":{"a":true}}"#
+            } else {
+                r#"{"r":{"a":false}}"#
+            },
+        );
+        assert_eq!(done(&actions, 83).unwrap().is_ok(), ack);
+        for id in ["42", "43"] {
+            assert_eq!(
+                e.store().order(id).unwrap().status,
+                if ack {
+                    OrderStatus::Canceling
+                } else {
+                    OrderStatus::Open
+                }
+            );
+        }
+    }
 }
 #[test]
 fn amendment_waits_for_final_cancellation_and_preserves_post_only() {

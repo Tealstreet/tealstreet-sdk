@@ -115,3 +115,9 @@ Branch `feat/rust-grvt`, based on `origin/feat/rust-rewrite`. PR and merge targe
 ### PR checkpoint
 
 - Published https://github.com/Tealstreet/tealstreet-sdk/pull/1321 into `feat/rust-rewrite` after all gates passed. Three adversarial reviewers are auditing the actual PR diff. Findings/resolutions will be posted on the PR; CI is running. Merge remains gated on green checks, then a fresh follow-up branch.
+
+### PR cancellation review
+
+- Auth/account/history and public/routing/harness adversarial reviews PASS, posted on PR #1321. Trading review found a P2 native symbol-cancellation request defect: GRVT requires arrays for kind/base/quote, while the Rust request and its regression pinned scalars. Corrected to singleton arrays; current official API requires ACK responses, with reconciliation retaining truthful pending state.
+- Review also reproduced a global cancel-all parity gap: the SDK inherited a Store-symbol loop and sent no request when local orders were empty. GRVT now uses its native account-wide cancellation path, matching the TS account filter, independently of local Store completeness. Added both symbol and empty-Store global cancellation to the private tape as exact, single-use mutations.
+- The landing branch advanced to the Bybit variants merge 922b5fdc89 and PR #1321 now conflicts. Commit the cancellation repair, merge landing preserving all registrations and shared harness invariants, then re-run affected gates and final adversarial review before green-CI landing.

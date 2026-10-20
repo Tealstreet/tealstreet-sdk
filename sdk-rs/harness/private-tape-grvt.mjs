@@ -76,6 +76,16 @@ http('/lite/v1/get_all_initial_leverage', leverage(15), { sa: '777' }, { afterCo
 http('/lite/v1/positions', { r: [position(15)] }, { sa: '777' }, { afterCommand: 3 });
 ws(PRIVATE, 'ping');
 ws(PRIVATE, 'pong');
+command({ op: 'cancelSymbolOrders', symbol: 'BTC_USDT_PERP' });
+http('/lite/v1/cancel_all_orders', { r: { a: true } }, {
+  sa: '777', k: ['PERPETUAL'], b: ['BTC'], q: ['USDT'],
+}, { afterCommand: 4 });
+http('/lite/v1/open_orders', { r: [] }, { sa: '777' }, { afterCommand: 4 });
+ws(PRIVATE, { s: 'v1.order', s1: '777-BTC_USDT_Perp', sn: '0', f: order('100', '0x100', 'CANCELLED', 4000) });
+// Native cancel-all must still execute after the local order store is empty.
+command({ op: 'cancelSymbolOrders', symbol: '' });
+http('/lite/v1/cancel_all_orders', { r: { a: true } }, { sa: '777' }, { afterCommand: 5 });
+http('/lite/v1/open_orders', { r: [] }, { sa: '777' }, { afterCommand: 5 });
 mkdirSync(dirname(values.out), { recursive: true });
 records.sort((a, b) => a.t - b.t);
 writeFileSync(values.out, records.map(JSON.stringify).join('\n') + '\n');

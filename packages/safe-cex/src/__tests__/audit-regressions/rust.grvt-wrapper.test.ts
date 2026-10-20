@@ -45,3 +45,26 @@ it.each([true, false])('GRVT SDK uses the transport-selected authentication prot
     exchange.dispose();
   }
 });
+
+it.each(['grvt', 'woo'] as const)('%s cancel-all reaches the engine even with an empty local order snapshot', async (name) => {
+  const exchange = new RustEngineExchange(name, { publicDataOnly: true }, new DefaultStore());
+  const command = vi.fn().mockResolvedValue([]);
+  Object.assign(exchange, { host: { command, dispose: vi.fn() } });
+  try {
+    await exchange.cancelAllOrders();
+    expect(command).toHaveBeenCalledExactlyOnceWith({ op: 'cancelSymbolOrders', symbol: '' });
+  } finally {
+    exchange.dispose();
+  }
+});
+
+it('GRVT global cancellation does not inherit WOO journal position folding', async () => {
+  const exchange = new RustEngineExchange('grvt', { publicDataOnly: true }, new DefaultStore());
+  const orders = vi.spyOn(exchange, 'fetchHistoricalOrders').mockResolvedValue([]);
+  try {
+    await expect(exchange.fetchHistoricalPositions({ account: 'fixture' })).rejects.toThrow('no journal records path declared');
+    expect(orders).not.toHaveBeenCalled();
+  } finally {
+    exchange.dispose();
+  }
+});

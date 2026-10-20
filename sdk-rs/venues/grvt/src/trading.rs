@@ -692,29 +692,39 @@ impl Grvt {
                 }
             }
             Command::CancelSymbolOrders { symbol, .. } => {
-                let market = cx
-                    .store
-                    .market(&symbol)
-                    .ok_or("Unknown GRVT cancellation market")?;
+                let market = if symbol.is_empty() {
+                    None
+                } else {
+                    Some(
+                        cx.store
+                            .market(&symbol)
+                            .ok_or("Unknown GRVT cancellation market")?,
+                    )
+                };
                 #[derive(Serialize)]
                 struct Filter<'a> {
                     sa: &'a str,
-                    k: &'static str,
-                    b: &'a str,
-                    q: &'a str,
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    k: Option<[&'static str; 1]>,
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    b: Option<[&'a str; 1]>,
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    q: Option<[&'a str; 1]>,
                 }
                 let body = serde_json::to_string(&Filter {
                     sa: self.trade_account()?,
-                    k: "PERPETUAL",
-                    b: &market.base,
-                    q: &market.quote,
+                    k: market.map(|_| ["PERPETUAL"]),
+                    b: market.map(|m| [m.base.as_str()]),
+                    q: market.map(|m| [m.quote.as_str()]),
                 })
                 .map_err(|e| e.to_string())?;
                 plan.affected.extend(
                     cx.store
                         .orders()
                         .iter()
-                        .filter(|o| o.symbol == symbol && !terminal(o.status))
+                        .filter(|o| {
+                            (symbol.is_empty() || o.symbol == symbol) && !terminal(o.status)
+                        })
                         .map(|o| o.id.clone()),
                 );
                 plan.steps.push_back(Step {
@@ -877,7 +887,11 @@ impl Grvt {
             }
             Effect::CancelSymbol(symbol) => {
                 for id in &plan.affected {
-                    if cx.store.order(id).is_some_and(|o| o.symbol == *symbol) {
+                    if cx
+                        .store
+                        .order(id)
+                        .is_some_and(|o| symbol.is_empty() || o.symbol == *symbol)
+                    {
                         cx.store.set_order_status(id, OrderStatus::Canceling);
                     }
                 }

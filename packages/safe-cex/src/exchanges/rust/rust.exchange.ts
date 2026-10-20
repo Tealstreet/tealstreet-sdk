@@ -203,10 +203,12 @@ export class RustEngineExchange extends BaseExchange {
     }
     this.applier = new FrameApplier(store, this.name === 'mexc', this.name === 'bitgetinverse');
     this.on('activeTickerSymbols:changed', this.updateTickerSymbols);
-    if (this.name === 'woo') {
+    if (this.name === 'woo' || this.name === 'grvt') {
       this.cancelAllOrders = async () => {
         await this.command({ op: 'cancelSymbolOrders', symbol: '' });
       };
+    }
+    if (this.name === 'woo') {
       this.fetchHistoricalPositions = async (opts) => {
         const to = opts.to ?? Date.now();
         const from = opts.from ?? to - 30 * 24 * 60 * 60 * 1000;
