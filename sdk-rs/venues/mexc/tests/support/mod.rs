@@ -73,6 +73,7 @@ pub fn private_started_with_markets(
     safe_cex_engine::TimerId,
 ) {
     let mut e = Engine::new(MexcFutures::new(Options {
+        recv_window: None,
         read_credentials: None,
         public_data_only: false,
         key: Some("replay-key".into()),

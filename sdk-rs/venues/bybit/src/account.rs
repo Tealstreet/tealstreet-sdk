@@ -16,6 +16,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// Positions and the wallet are re-read this often; the stream carries
 /// changes in between, so this only repairs what a dropped frame missed.
 const RECONCILE_INTERVAL_MS: f64 = 5_000.0;
+/// Consecutive Hyro reads the private stream may overtake before one is admitted.
+const HYRO_OVERTAKEN_READS: u8 = 2;
 const FILL_REPAIR_GRACE_MS: f64 = 8_000.0;
 /// A failed order snapshot is retried this often until one succeeds.
 const ORDERS_RETRY_MS: f64 = 15_000.0;
@@ -155,7 +157,8 @@ pub struct AccountState {
     revision: u32,
     handshake: Option<&'static str>,
     handshake_timer: Option<TimerId>,
-    snapshot_attempts: u8,
+    /// Admits the third read in a row that the private stream overtook.
+    snapshot_guard: safe_cex_engine::fence::StaleGuard,
     snapshot: Option<HyroSnapshot>,
     pub margin_type: Option<MarginType>,
     /// `unifiedMarginStatus` 1 is a classic account: USDT only, CONTRACT wallet.
@@ -266,6 +269,22 @@ fn valid_hyro_position(row: &PositionRow<'_>) -> bool {
                 && [&row.avg_price, &row.mark_price, &row.unrealised_pnl]
                     .into_iter()
                     .all(|value| float_of(value).is_finite())))
+}
+
+/// The first account of a wallet-balance body, verbatim.
+fn raw_wallet_account(body: &str) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct Envelope<'a> {
+        #[serde(borrow)]
+        result: Option<Result<'a>>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Result<'a> {
+        #[serde(borrow)]
+        list: Vec<&'a serde_json::value::RawValue>,
+    }
+    let envelope: Envelope<'_> = serde_json::from_str(body).ok()?;
+    Some(envelope.result?.list.first()?.get().to_owned())
 }
 
 fn valid_hyro_wallet(row: &WalletAccount<'_>) -> bool {
@@ -1062,7 +1081,7 @@ impl BybitLinear {
             cx.log(LogLevel::Warning, format!("HyroTrader {message}; retrying"));
             // Orphan this snapshot's other reads so they cannot fill the next one.
             self.account.snapshot = None;
-            self.account.snapshot_attempts = 0;
+            self.account.snapshot_guard = Default::default();
             self.account.orders = None;
             self.account.positions = None;
             self.account.orders_generation += 1;
@@ -1111,14 +1130,13 @@ impl BybitLinear {
             }
         } else {
             self.account.handshake = None;
-            self.account.snapshot_attempts = 0;
+            self.account.snapshot_guard = Default::default();
             self.start_hyro_snapshot(cx);
             self.account.tick_timer = Some(cx.set_timer(RECONCILE_INTERVAL_MS));
         }
     }
 
     fn start_hyro_snapshot(&mut self, cx: &mut Cx<'_, Pending>) {
-        self.account.snapshot_attempts += 1;
         self.account.snapshot = Some(HyroSnapshot {
             revision: self.account.revision,
             orders: None,
@@ -1140,7 +1158,11 @@ impl BybitLinear {
         }
         let snapshot = self.account.snapshot.take().expect("checked above");
         let moved = snapshot.revision != self.account.revision;
-        if moved && self.account.snapshot_attempts < 3 {
+        if !self
+            .account
+            .snapshot_guard
+            .admit(!moved, HYRO_OVERTAKEN_READS)
+        {
             if self.account.ready {
                 // Hyro streams no wallet, so order/position frames cannot make it stale.
                 self.account.wallet = snapshot.wallet;
@@ -1151,8 +1173,9 @@ impl BybitLinear {
             self.start_hyro_snapshot(cx);
             return;
         }
-        // Steady frames must not turn reconciliation into a reconnect loop: after
-        // three overtaken reads, admit this one; the next tick reconciles again.
+        // Steady frames must not turn reconciliation into a reconnect loop: the guard
+        // admits the third overtaken read; the next tick (not an immediate re-read,
+        // which steady frames would turn into continuous polling) corrects it.
         if moved {
             cx.log(
                 LogLevel::Warning,
@@ -1227,7 +1250,6 @@ impl BybitLinear {
         self.commit_balance(cx);
         self.account.orders_snapshot_version += 1;
         self.account.ready = true;
-        self.account.snapshot_attempts = 0;
     }
 
     fn settle_coins(&self) -> &'static [&'static str] {
@@ -2213,6 +2235,7 @@ impl BybitLinear {
                     return;
                 }
                 self.account.hyro_transient |= outcome.is_err();
+                let outcome_body = outcome.as_ref().ok().copied();
                 let account = outcome.and_then(|body| {
                     serde_json::from_str::<WalletEnvelope>(body)
                         .ok()
@@ -2224,6 +2247,10 @@ impl BybitLinear {
                 });
                 match account {
                     Ok((wallet, coins)) => {
+                        // TS keeps the venue's first account verbatim as `balance.info`.
+                        self.balance_info = outcome_body
+                            .and_then(raw_wallet_account)
+                            .or(self.balance_info.take());
                         if self.variant.is_hyro() {
                             if let Some(snapshot) = &mut self.account.snapshot {
                                 snapshot.wallet = Some(wallet);

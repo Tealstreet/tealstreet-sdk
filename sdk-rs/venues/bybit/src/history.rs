@@ -189,7 +189,7 @@ fn side_name(side: Option<OrderSide>) -> &'static str {
 }
 
 /// `[from, to]` as windows Bybit accepts, newest first.
-fn windows(from: Option<f64>, to: Option<f64>) -> VecDeque<(Option<f64>, Option<f64>)> {
+pub(crate) fn windows(from: Option<f64>, to: Option<f64>) -> VecDeque<(Option<f64>, Option<f64>)> {
     let (Some(from), Some(to)) = (from, to) else {
         return VecDeque::from([(from, to)]);
     };
