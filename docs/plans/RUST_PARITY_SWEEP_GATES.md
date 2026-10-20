@@ -68,7 +68,6 @@ Public gates use three runs. CPU values are main-thread and steady CPU, retained
 | asterdex | 197.7 / 103.4 | 72.4 / 49.1 | 25.4 / 5.6 |
 | grvt | 178.6 / 171.1 | 112.1 / 106.6 | 26.1 / 1.5 |
 | breakoutprop | 50.2 / 14.7 | 6.3 / 3.9 | 12.5 / 0.8 |
-
 | okx linear | 488.2 / 419.4 | 339.4 / 277.0 | 17.5 / 4.2 |
 | okx inverse | 2046.0 / 1906.9 | 1484.1 / 1415.9 | 18.3 / 4.9 |
 | okxeu X-Perp | 1707.3 / 1596.3 | 1305.2 / 1217.1 | 19.7 / 5.8 |
