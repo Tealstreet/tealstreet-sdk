@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRustVenue, RustEngineExchange } from '../../exchanges/rust/rust.exchange';
 import { DefaultStore } from '../../store/store.base';
 import { OrderSide, OrderType } from '../../types';
+import { adoptEngineCapabilities } from '../fixtures/engineCapabilities';
 
 describe('Rust WOO execution history boundary', () => {
   const exchanges: RustEngineExchange[] = [];
@@ -12,6 +13,7 @@ describe('Rust WOO execution history boundary', () => {
     const command = vi.fn().mockResolvedValue([]);
     // Observe the engine boundary without loading a built WASM artifact.
     Object.assign(exchange, { host: { command, dispose: vi.fn() } });
+    adoptEngineCapabilities(exchange);
     return { exchange, command };
   };
   afterEach(() => exchanges.splice(0).forEach((exchange) => exchange.dispose()));

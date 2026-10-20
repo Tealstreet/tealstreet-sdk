@@ -527,6 +527,12 @@ fn candle(row: &CandleRow) -> Candle {
 }
 
 impl Venue for BitgetFutures {
+    fn capabilities(&self) -> safe_cex_engine::Capabilities {
+        safe_cex_engine::Capabilities {
+            cancel_all: safe_cex_engine::CancelAll::EachPlacedSymbol,
+            ..safe_cex_engine::Capabilities::BASE
+        }
+    }
     fn guard_pending_placements(&self) -> bool {
         true
     }

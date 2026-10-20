@@ -201,6 +201,14 @@ pub fn venue_rejected(response: &safe_cex_engine::Response<'_>) -> bool {
     let code = code(response);
     response.status < 500 && !code.is_empty() && code != "0"
 }
+/// A failed write is rejected only when GRVT answered below 5xx with an error code.
+pub fn write_outcome(response: &safe_cex_engine::Response<'_>) -> safe_cex_engine::Outcome {
+    if venue_rejected(response) {
+        safe_cex_engine::Outcome::Rejected
+    } else {
+        safe_cex_engine::Outcome::Unknown
+    }
+}
 impl Feed<'_> {
     pub fn candle(&self) -> Option<safe_cex_engine::model::Candle> {
         let c = safe_cex_engine::model::Candle {
