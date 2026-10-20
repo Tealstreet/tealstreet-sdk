@@ -45,7 +45,9 @@ if [[ $(uname) == Darwin ]]; then
   export DYLD_LIBRARY_PATH="$(rustc --print sysroot)/lib"
 fi
 if [[ ${1:-} == --families ]]; then
-  for venue in $(node --input-type=module -e "import('./hosts/wasm/js/venues.mjs').then(({ venueFamilies }) => console.log(venueFamilies.join(' ')))"); do
+  # Assigned first so a failing node fails the build instead of looping over nothing.
+  families=$(node --input-type=module -e "import('./hosts/wasm/js/venues.mjs').then(({ venueFamilies }) => console.log(venueFamilies.join(' ')))")
+  for venue in $families; do
     family_args "$venue"
     cargo build "${build_args[@]}"
     bind "hosts/wasm/pkg/web/$family" "hosts/wasm/pkg/node/$family"

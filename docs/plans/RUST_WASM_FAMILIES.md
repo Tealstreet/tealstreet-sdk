@@ -22,10 +22,10 @@ purpose, since they serve many venues from one artifact.
 2. Decide: ship only on a clear byte and cold-load win with no CPU regression
    (family median ≤ combined median plus noise on main and steady for every
    venue). Otherwise close with the numbers.
-3. If shipping: build per-family packages (`pkg/{web,node}/<family>`), add family
-   exports, and have the default web/Node loaders load the venue's family with
-   per-family initialization caching. Keep the combined exports for the CLI,
-   React Native and MCP.
+3. If shipping: build per-family packages (`pkg/{web,node}/<family>`) and have
+   the default browser/Workers loader load the venue's family with per-family
+   initialization caching. Node, the CLI, React Native and MCP keep the
+   combined build and exports.
 
 ## Results
 

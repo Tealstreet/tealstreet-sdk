@@ -10,19 +10,20 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { brotliCompressSync, gzipSync } from 'node:zlib';
 import { venueOf } from './venues.mjs';
+import { venueFamily } from '../hosts/wasm/js/venues.mjs';
 
 const { values } = parseArgs({
   options: {
     venue: { type: 'string' },
     tape: { type: 'string' },
-    books: { type: 'string', default: '' },
+    books: { type: 'string' },
     combined: { type: 'string' },
     family: { type: 'string' },
     pairs: { type: 'string', default: '7' },
     out: { type: 'string' },
   },
 });
-for (const name of ['venue', 'tape', 'combined', 'family', 'out'])
+for (const name of ['venue', 'tape', 'books', 'combined', 'family', 'out'])
   if (!values[name]) throw new Error(`--${name} is required`);
 const pairs = Number(values.pairs);
 if (!Number.isInteger(pairs) || pairs < 1) throw new Error('--pairs must be a positive integer');
@@ -122,7 +123,7 @@ const summary = (arm) => ({
 });
 const report = {
   venue: values.venue,
-  family: venue.rust,
+  family: venueFamily(venue.rust),
   pairs,
   differences,
   combined: summary('combined'),
