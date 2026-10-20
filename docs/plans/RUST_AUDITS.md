@@ -388,12 +388,17 @@ per-venue canary holding the circular-evidence venues last.
 
 ### Hyperliquid
 Signing hash, order payload and price/size rounding match TS; no new highs.
-- Medium: HIP-3 leverage change sends cross where TS sends isolated
+- ~~Medium: HIP-3 leverage change sends cross where TS sends isolated
   (`hyperliquid/src/trading.rs:758`); read `onlyIsolated`/`marginMode`. HIP-3
   margin-type change with no position fails (default leverage 20 > market max,
   `trading.rs:759`). Spot open orders never reconciled and can go stale
   (`account.rs:426,1604`). Edit aborts when the source order already filled
-  (TS places a second order) — confirm fail-closed is intended.
+  (TS places a second order) — confirm fail-closed is intended.~~ Fixed:
+  `onlyIsolated`/`marginMode` seed isolated settings with leverage capped at the
+  market maximum, and cross on an isolated-only asset is refused before signing;
+  standalone spot reads `frontendOpenOrders` at startup, on every refresh and
+  every 10 s. Edit fail-closed is kept: placing a replacement for a filled source
+  doubles exposure, which is worse than a visible edit error.
 - Low/confirm: spot testnet signing and spot size rounding (TS bugs Rust fixed);
   spot vault signs as vault (TS as master) — confirm; more terminal statuses;
   `stopLoss: 0` rejects whole order; signed fees; unified balance spot slices
@@ -429,7 +434,9 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
 - High: Brazil inverse/option sockets routed to the linear host (engine
   transport keys routes by channel, `packages/safe-cex/src/transport/engine.ts:552`,
   `bybit/src/lib.rs:407`).
-- High: per-coin balances never set (`account.rs:662`).
+- ~~High: per-coin balances never set (`account.rs:662`).~~ Fixed: `Balance.coins`
+  (equity, else wallet balance; USD value, else amount) from every accepted wallet
+  read, merged from stream pushes with explicit zeros; failed reads keep holdings.
 - ~~High: fills history includes funding/settlement rows (`history.rs:564`).~~
   Fixed: Funding/Settle/Settlement/Delivery/SessionSettlePnl (any case) and rows
   without a valid side, price, quantity or time are excluded from REST fills.
@@ -442,9 +449,14 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   documentation explicitly permits `baseCoin=All` for `category=option`.
 - Medium: live candles lack trade aggregation and seconds intervals.
 - Medium: option WS ticker field names likely wrong.
-- Medium: no UNIFIED retry on the wallet call.
+- ~~Medium: no UNIFIED retry on the wallet call.~~ Fixed: a CONTRACT read refused
+  with `accountType only support UNIFIED` switches the account to UTA and retries
+  once; other errors never change the account type.
 - Medium: demo reduce-only fill check missing.
-- Medium: Hyro tears down on one bad poll (`account.rs:1838`).
+- ~~Medium: Hyro tears down on one bad poll (`account.rs:1838`).~~ Fixed: a periodic
+  read failing in transport or at the venue keeps the ready stream and last-good
+  state and retries next tick; malformed content and initial snapshots still
+  reconnect.
 - ~~Medium: order/income history caps.~~ Fixed for orders: an omitted limit reads
   every page up to TS's 20 × 50 per window (then warns and keeps the rows, as TS)
   instead of truncating to 50; explicit
@@ -453,7 +465,10 @@ Signing hash, order payload and price/size rounding match TS; no new highs.
   do not amend in place~~ ([owner-selected cancel/recreate regressions](RUST_AUDIT_BINANCE_BYBIT_FOLLOWUP.md)).
 - ~~Medium: spot create params (`marketUnit`).~~ Kept: `baseCoin` for market orders
   is a documented TS correction in `harness/gate.mjs` `KNOWN_TS_FIXES`.
-- Medium: one unmappable order invalidates every later snapshot (`account.rs:1569`).
+- ~~Medium: one unmappable order invalidates every later snapshot (`account.rs:1569`).~~
+  Fixed: a well-formed row of an unsupported type keeps its last known state (or is
+  reported as not shown) while other orders commit; malformed rows still preserve
+  the whole last-good snapshot. Hyro stays strict.
 - Low: OHLCV from+limit; no market refresh; Hyro market filter; subscription
   breadth; split-lot error handling; classic upnl; inverse reference price;
   demo key hint, recvWindow, rate limiter; Hyro early pings.
@@ -604,8 +619,9 @@ backpack, binance, bingx, bitget, bitrue, blofin, coinbase, breakoutprop, bybit,
   ~~one unknown order status/type drops the whole private frame incl. positions
   and balances (`account_wire.rs:298`, `account.rs:601`)~~ (that row is skipped,
   its executions still emit, the store keeps its copy).
-- Medium: one bad public row stops startup; one bad position row freezes a
-  currency slice (`account.rs:286`); no fallback read when a symbol's mode or
+- Medium: one bad public row stops startup; ~~one bad position row freezes a
+  currency slice (`account.rs:286`)~~ (REST and stream rows skip, keeping the
+  store copy; the slice balance still commits); no fallback read when a symbol's mode or
   leverage context is uncached (`trading.rs:229,713`) — re-verified as low
   impact: `accountPositions` (size-0 rows included) reconciles every 2 s, so the
   gap is the first cycle; TS also refuses a symbol that read omits.

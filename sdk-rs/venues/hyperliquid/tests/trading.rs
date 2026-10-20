@@ -1115,3 +1115,53 @@ fn cancellation_missing_from_store_errors_before_any_write_even_in_a_mixed_batch
         assert_eq!(e.store().order("123").unwrap().status, OrderStatus::Open);
     }
 }
+#[test]
+fn flat_isolated_only_hip3_leverage_write_is_isolated_like_ts() {
+    let (mut e, _) = ready_with_dex("disabled", true);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetLeverage {
+            command: 1,
+            symbol: "XYZ|FOO-PERP".into(),
+            leverage: 3.0,
+            side: None,
+        }),
+    );
+    let b = body(&write(&mut e));
+    assert_eq!(b["action"]["type"], "updateLeverage");
+    assert_eq!(b["action"]["isCross"], false);
+    assert_eq!(b["action"]["leverage"], 3);
+}
+#[test]
+fn flat_hip3_margin_change_uses_a_leverage_within_the_market_maximum() {
+    let (mut e, _) = ready_with_dex("disabled", true);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetMarginType {
+            command: 1,
+            symbol: "XYZ|FOO-PERP".into(),
+            isolated: true,
+        }),
+    );
+    let b = body(&write(&mut e));
+    assert_eq!(b["action"]["isCross"], false);
+    assert_eq!(b["action"]["leverage"], 10);
+}
+#[test]
+fn cross_on_an_isolated_only_market_is_rejected_before_signing() {
+    let (mut e, _) = ready_with_dex("disabled", true);
+    e.handle(
+        2000.0,
+        Event::Command(Command::SetMarginType {
+            command: 1,
+            symbol: "XYZ|FOO-PERP".into(),
+            isolated: false,
+        }),
+    );
+    let out: Vec<_> = e.drain_actions().collect();
+    assert!(
+        !out.iter()
+            .any(|a| matches!(a, Action::Http(r) if r.url.ends_with("/exchange")))
+    );
+    assert!(out.iter().any(|a| matches!(a, Action::Notice(Notice::CommandDone { result: Err(m), .. }) if m.contains("isolated margin only"))));
+}

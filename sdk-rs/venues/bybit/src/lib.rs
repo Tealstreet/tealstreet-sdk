@@ -19,6 +19,7 @@ use safe_cex_engine::model::{
 use safe_cex_engine::{
     Command, CommandId, Cx, LogLevel, Method, Response, SocketId, TimerId, Venue,
 };
+use safe_cex_engine::{ErrorKind, VenueError};
 use sign::{Credentials, Query};
 use std::collections::{HashMap, HashSet, VecDeque};
 use wire::*;
@@ -232,6 +233,8 @@ pub struct BybitLinear {
     config_error: Option<String>,
     credentials: Option<Credentials>,
     read_credentials: Option<safe_cex_engine::ReadCredentials>,
+    /// Set once a startup read proved the key unusable; startup never retries it.
+    credentials_rejected: bool,
     public: Connection,
     private: Connection,
     books: HashMap<String, BookState>,
@@ -265,6 +268,11 @@ fn interval_code(interval: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+/// Definitive key rejections: invalid key, bad signature after the re-signed
+/// resend, IP not allowed, expired key. 10005 (permission) is left out: a key
+/// lacking only this read's scope may still trade.
+const CREDENTIAL_REJECTIONS: [i64; 4] = [10003, 10004, 10010, 33004];
 
 /// Bybit's message for a rejected request, from any envelope or body.
 pub(crate) fn venue_error(response: &Response<'_>) -> Option<(i64, String)> {
@@ -361,6 +369,7 @@ impl BybitLinear {
             config_error,
             credentials,
             read_credentials: options.read_credentials,
+            credentials_rejected: false,
             public: Connection::new(),
             private: Connection::new(),
             books: HashMap::new(),
@@ -717,6 +726,7 @@ impl BybitLinear {
         }
         if !self.startup.markets_loaded
             && self.credentials.is_some()
+            && !self.credentials_rejected
             && self.startup.fees.is_none()
             && !self.startup.fees_in_flight
         {
@@ -727,6 +737,39 @@ impl BybitLinear {
                 Rest::get("/v5/account/fee-rate", query).streamed().signed(),
                 Then::Fees(HashMap::new()),
             );
+        }
+    }
+
+    /// The signed startup fee read proved the key unusable; retrying cannot
+    /// fix it, so startup fails instead of waiting for an account that never loads.
+    /// Only the trading key's own invalid, bad-signature or expired verdicts
+    /// deactivate: an IP mismatch or a rejected read-only key leaves it usable.
+    fn reject_credentials(&mut self, cx: &mut Cx<'_, Pending>, code: i64, message: &str) {
+        if std::mem::replace(&mut self.credentials_rejected, true) {
+            return;
+        }
+        let kind = match code {
+            33004 => ErrorKind::AuthExpired,
+            10010 => ErrorKind::AuthPermission,
+            _ => ErrorKind::AuthInvalid,
+        };
+        // Signed GETs use the read-only key when one is configured.
+        let read_key = self.read_credentials.is_some();
+        let which = if read_key {
+            "read-only API key"
+        } else {
+            "API key"
+        };
+        let text = format!("Bybit rejected the {which} ({code}): {message}");
+        cx.log(LogLevel::Error, &text);
+        cx.startup_failed(
+            VenueError::new(text)
+                .kind(kind)
+                .venue_code(code.to_string())
+                .venue_message(message),
+        );
+        if !read_key && code != 10010 {
+            cx.deactivate();
         }
     }
 
@@ -1283,6 +1326,14 @@ impl BybitLinear {
             }
             Then::Fees(fees) => {
                 self.startup.fees_in_flight = false;
+                let rejected = response
+                    .as_ref()
+                    .ok()
+                    .and_then(venue_error)
+                    .filter(|(code, _)| CREDENTIAL_REJECTIONS.contains(code));
+                if let Some((code, message)) = rejected {
+                    return self.reject_credentials(cx, code, &message);
+                }
                 if let Some(error) = failure {
                     cx.log(LogLevel::Warning, format!("Bybit fee rates: {error}"));
                 }
@@ -1714,6 +1765,26 @@ impl Venue for BybitLinear {
             return;
         };
         self.on_public_response(cx, then, Ok(response));
+    }
+
+    fn on_stream_error(
+        &mut self,
+        cx: &mut Cx<'_, Pending>,
+        pending: Pending,
+        response: Response<'_>,
+    ) {
+        // A rejected fee read carries `result: {}`; its retCode decides startup.
+        if matches!(pending.then, Then::Fees(_)) {
+            return self.on_response(cx, pending, response);
+        }
+        self.on_request_failed(
+            cx,
+            pending,
+            &format!(
+                "response did not contain the expected list: {}",
+                response.body
+            ),
+        );
     }
 
     fn on_item(&mut self, cx: &mut Cx<'_, Pending>, pending: &mut Pending, item: &str) {
