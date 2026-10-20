@@ -1,5 +1,7 @@
 //! Oracles: https://phemex-docs.github.io/ USDⓈ-M public response examples.
-use safe_cex_engine::{Action, Command, Engine, Event, RequestId, Response, SocketId, Venue};
+use safe_cex_engine::{
+    Action, Command, Engine, Event, Notice, RequestId, Response, SocketId, Venue,
+};
 use safe_cex_venue_phemex::{Options, PhemexPerpetuals};
 const PRODUCTS: &str = r#"{"code":0,"data":{"perpProductsV2":[{"symbol":"BTCUSDT","type":"PerpetualV2","settleCurrency":"USDT","baseCurrency":"BTC","quoteCurrency":"USDT","qtyStepSize":"0.001","tickSize":"0.1","maxOrderQtyRq":"500","maxLeverage":"100"}]}}"#;
 const DAILY: &str = r#"{"error":null,"result":[{"symbol":"BTCUSDT","bidRp":"20690.1","askRp":"20690.2","lastRp":"20690.2","markRp":"20690.3","indexRp":"20690","openRp":"20000","openInterestRv":"250","fundingRateRr":"0.0001","volumeRq":"10"}]}"#;
@@ -60,6 +62,122 @@ fn real_value_products_and_packed_ticker() {
     assert_eq!(t.last, 21000.);
     assert_eq!(t.quote_volume, 252000.);
     assert_eq!(t.percentage, 5.);
+}
+
+#[test]
+fn candle_limit_selects_a_bounded_recent_window_even_with_an_old_from() {
+    let now = 1_700_000_000_000.;
+    let week_ago = now - 7. * 24. * 60. * 60. * 1000.;
+    for (limit, expected_from) in [(500, 1_699_970_000u64), (5_000, 1_699_940_000)] {
+        let (mut e, _) = started();
+        e.handle(
+            now,
+            Event::Command(Command::FetchCandles {
+                command: 7,
+                symbol: "BTCUSDT".into(),
+                interval: "1m".into(),
+                from_ms: Some(week_ago),
+                to_ms: Some(now),
+                limit: Some(limit),
+            }),
+        );
+        let url = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r.url),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            url,
+            format!(
+                "https://api.phemex.com/exchange/public/md/v2/kline/list?symbol=BTCUSDT&resolution=60&from={expected_from}&to=1700000000"
+            )
+        );
+    }
+}
+
+#[test]
+fn candle_from_only_and_default_500_bar_windows_keep_their_existing_semantics() {
+    let now = 1_700_000_000_000.;
+    for (limit, from_ms, expected_from) in [
+        (None, None, 1_699_970_000u64),
+        (None, Some(1_699_395_200_000.), 1_699_395_200),
+        (Some(0), None, 1_699_970_000),
+        (Some(0), Some(1_699_395_200_000.), 1_699_395_200),
+    ] {
+        let (mut e, _) = started();
+        e.handle(
+            now,
+            Event::Command(Command::FetchCandles {
+                command: 7,
+                symbol: "BTCUSDT".into(),
+                interval: "1m".into(),
+                from_ms,
+                to_ms: Some(now),
+                limit,
+            }),
+        );
+        let url = e
+            .drain_actions()
+            .find_map(|a| match a {
+                Action::Http(r) => Some(r.url),
+                _ => None,
+            })
+            .unwrap();
+        assert!(url.ends_with(&format!("&from={expected_from}&to=1700000000")));
+    }
+}
+
+#[test]
+fn candle_reads_fail_without_http_during_the_shared_rate_limit_pause() {
+    let (mut e, _) = started();
+    let now = 1_700_000_000_000.;
+    let candles = |command| {
+        Event::Command(Command::FetchCandles {
+            command,
+            symbol: "BTCUSDT".into(),
+            interval: "1m".into(),
+            from_ms: None,
+            to_ms: None,
+            limit: Some(500),
+        })
+    };
+    e.handle(now, candles(7));
+    let id = request(&mut e, "/kline/list");
+    e.handle(
+        now,
+        Event::HttpResponse {
+            request: id,
+            response: Response {
+                status: 429,
+                headers: "x-ratelimit-retry-after-contract: 60",
+                body: "{}",
+            },
+        },
+    );
+    assert!(e.drain_actions().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 7,
+            result: Err(_)
+        })
+    )));
+    e.handle(now + 59_999., candles(8));
+    let actions: Vec<_> = e.drain_actions().collect();
+    assert!(!actions.iter().any(|a| matches!(a, Action::Http(_))));
+    assert!(actions.iter().any(|a| matches!(
+        a,
+        Action::Notice(Notice::CommandDone {
+            command: 8,
+            result: Err(error)
+        }) if error.contains("rate limited")
+    )));
+    e.handle(now + 60_000., candles(9));
+    assert!(e.drain_actions().any(|a| matches!(
+        a,
+        Action::Http(r) if r.url == "https://api.phemex.com/exchange/public/md/v2/kline/list?symbol=BTCUSDT&resolution=60&from=1699970060&to=1700000060"
+    )));
 }
 #[test]
 fn delayed_snapshot_applies_newer_diffs_and_discards_old() {

@@ -531,21 +531,45 @@ export const VENUES = {
       if (get('x-phemex-access-token') !== 'replay-key' || get('x-phemex-request-signature') !== expected || !Number.isSafeInteger(Number(expiry)) || Math.abs(Number(expiry) - Date.now() / 1000 - 60) > 5) throw new Error(`invalid Phemex request: ${parsed.pathname}`);
     },
     createSocketAudit(_impl, { isPrivate, books }) {
-      const failures = [], topics = new Set(); let auth = false, acknowledged = false;
+      const failures = [], topics = new Set(), sockets = new Map();
+      const socket = (url, generation = 1) => {
+        const key = `${url} ${generation}`;
+        if (!sockets.has(key)) sockets.set(key, { private: false, auth: false, acknowledged: false, subscribed: false, closed: false });
+        return sockets.get(key);
+      };
       return {
-        sent(_url, text) {
-          const m = JSON.parse(text);
+        connected(url, generation) { socket(url, generation); },
+        closed(url, generation) { socket(url, generation).closed = true; },
+        sent(url, text, generation) {
+          const m = JSON.parse(text), state = socket(url, generation);
           if (m.method === 'user.auth') {
-            const [kind, key, sig, expiry] = m.params;
-            auth = kind === 'API' && key === 'replay-key' && Number.isSafeInteger(expiry) && Math.abs(expiry - Date.now() / 1000 - 60) < 5 && sig === createHmac('sha256', 'replay-secret').update(key + expiry).digest('hex');
-            if (!auth) failures.push('invalid Phemex WS auth');
+            state.private = true;
+            state.acknowledged = false;
+            state.subscribed = false;
+            const [kind, key, sig, expiry] = m.params ?? [];
+            state.auth = !state.closed && m.id === 999 && kind === 'API' && key === 'replay-key' && Number.isSafeInteger(expiry) && Math.abs(expiry - Date.now() / 1000 - 60) < 5 && sig === createHmac('sha256', 'replay-secret').update(key + expiry).digest('hex');
+            if (!state.auth) failures.push('invalid Phemex WS auth');
           }
           if (m.method === 'orderbook_p.subscribe' && (m.params?.length !== 3 || m.params[1] !== false || m.params[2] !== 0)) failures.push('Phemex books require full depth0 at20ms');
-          if (m.method === 'aop_p.subscribe' && !acknowledged) failures.push('Phemex private subscribe preceded auth acknowledgement');
+          if (m.method === 'aop_p.subscribe') {
+            state.private = true;
+            if (state.closed || !state.acknowledged) failures.push('Phemex private subscribe preceded auth acknowledgement');
+            else state.subscribed = true;
+          }
           if (m.method?.endsWith('.subscribe')) topics.add(m.method + ':' + (m.params?.[0] ?? ''));
         },
-        received(_url, text) { const m = JSON.parse(text); if (m.id === 999 && !m.error) { if (!auth) failures.push('Phemex auth ACK without request'); acknowledged = auth; } },
-        ready() { return topics.has('perp_market24h_pack_p.subscribe:') && books.every((s) => topics.has('orderbook_p.subscribe:' + s)) && (!isPrivate || acknowledged && topics.has('aop_p.subscribe:')); },
+        received(url, text, generation) {
+          const m = JSON.parse(text), state = socket(url, generation);
+          if (m.id !== 999 || state.closed) return;
+          state.acknowledged = false;
+          if (!state.auth) failures.push('Phemex auth ACK without request');
+          else if (m.error != null || m.result?.status !== 'success') failures.push('Phemex auth ACK did not confirm success');
+          else state.acknowledged = true;
+        },
+        ready() {
+          const privateSockets = [...sockets.values()].filter((state) => state.private && !state.closed);
+          return topics.has('perp_market24h_pack_p.subscribe:') && books.every((s) => topics.has('orderbook_p.subscribe:' + s)) && (!isPrivate || privateSockets.length > 0 && privateSockets.every((state) => state.acknowledged && state.subscribed));
+        },
         errors() { return failures; },
       };
     },

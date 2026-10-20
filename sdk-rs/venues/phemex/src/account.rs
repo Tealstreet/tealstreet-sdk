@@ -613,6 +613,7 @@ impl PhemexPerpetuals {
         // consuming the sequence; a corrected retry with the same sequence must work.
         let mut staged_positions = Vec::new();
         let mut staged_contexts = HashMap::new();
+        let mut staged_versions: HashMap<String, (u64, bool)> = HashMap::new();
         if let Some(rows) = positions {
             for row in rows {
                 let symbol = row.symbol.to_ascii_uppercase();
@@ -640,8 +641,52 @@ impl PhemexPerpetuals {
                     );
                     return true;
                 }
+                let version = if row.transact_time_ns > 0 {
+                    row.transact_time_ns
+                } else {
+                    message.timestamp
+                };
+                let key = position_key(&row, context);
+                let staged_version = staged_versions.get(&key).copied();
+                let present = staged_version
+                    .map_or_else(|| cx.store.position(&key).is_some(), |(_, absent)| !absent);
+                let (last, absent) = staged_version.unwrap_or_else(|| {
+                    (
+                        self.account
+                            .position_versions
+                            .get(&key)
+                            .copied()
+                            .unwrap_or(0),
+                        self.account.position_absent.contains(&key)
+                            || cx.store.position(&key).is_none(),
+                    )
+                });
+                // Simulate accepted rows before advancing sequence or publishing any
+                // authority. Rejected rows cannot supply another leg's context.
+                if (position.is_some() && absent && version <= last)
+                    || (version == 0 && present && last > 0)
+                    || (version > 0 && version < last)
+                    || cx.store.position(&key).is_some_and(|position| {
+                        position
+                            .last_update
+                            .is_some_and(|time| version > 0 && (version as f64 / 1e6) < time)
+                    })
+                {
+                    continue;
+                }
+                staged_versions.insert(
+                    key.clone(),
+                    (
+                        if position.is_some() {
+                            version
+                        } else {
+                            last.max(version)
+                        },
+                        position.is_none(),
+                    ),
+                );
                 staged_contexts.insert(symbol, context);
-                staged_positions.push((row, currency, context, position));
+                staged_positions.push((row, currency, context, position, version, key, last));
             }
         }
         if accounts.as_ref().is_some_and(|rows| {
@@ -742,51 +787,7 @@ impl PhemexPerpetuals {
             }
         }
         if message.positions_p.is_some() {
-            for (row, currency, context, position) in staged_positions {
-                let version = if row.transact_time_ns > 0 {
-                    row.transact_time_ns
-                } else {
-                    message.timestamp
-                };
-                let key = position_key(&row, context);
-                let last = self
-                    .account
-                    .position_versions
-                    .get(&key)
-                    .copied()
-                    .unwrap_or(0);
-                let absent = self.account.position_absent.contains(&key)
-                    || cx.store.position(&key).is_none();
-                // Fence known omitted IDs using only their native observations;
-                // local time and another symbol's timestamp cannot order this key.
-                if position.is_some() && absent && version <= last {
-                    continue;
-                }
-                // Untimestamped flat context rows may retain settings while already flat,
-                // but cannot erase a versioned live exposure.
-                if version == 0 && cx.store.position(&key).is_some() && last > 0 {
-                    continue;
-                }
-                if self
-                    .account
-                    .position_versions
-                    .get(&key)
-                    .is_some_and(|last| version > 0 && version < *last)
-                {
-                    continue;
-                }
-                if cx
-                    .store
-                    .positions()
-                    .iter()
-                    .filter(|p| p.id == key)
-                    .any(|p| {
-                        p.last_update
-                            .is_some_and(|time| version > 0 && (version as f64 / 1e6) < time)
-                    })
-                {
-                    continue;
-                }
+            for (row, currency, context, position, version, key, last) in staged_positions {
                 if position.is_some() {
                     self.account.position_absent.remove(&key);
                     self.account.position_versions.insert(key.clone(), version);

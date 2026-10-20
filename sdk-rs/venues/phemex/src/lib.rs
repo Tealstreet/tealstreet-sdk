@@ -721,13 +721,28 @@ impl Venue for PhemexPerpetuals {
                 from_ms,
                 to_ms,
             } => {
+                if cx.now < self.paused_until {
+                    cx.done(
+                        command,
+                        Err("Phemex requests are rate limited; candle read was not sent".into()),
+                    );
+                    return;
+                }
                 let Some(n) = resolution(&interval) else {
                     cx.done(command, Err("unsupported Phemex candle interval".into()));
                     return;
                 };
                 let to = to_ms.unwrap_or(cx.now);
-                let from = from_ms
-                    .unwrap_or(to - n as f64 * 1000. * limit.unwrap_or(500).clamp(1, 1000) as f64);
+                let requested_limit = limit.filter(|n| *n > 0);
+                let default_from =
+                    to - n as f64 * 1000. * requested_limit.unwrap_or(500).min(1000) as f64;
+                // Match the TS boundary: a positive limit selects the recent
+                // window; zero behaves like an absent limit.
+                let from = if requested_limit.is_some() {
+                    default_from
+                } else {
+                    from_ms.unwrap_or(default_from)
+                };
                 self.request(
                     cx,
                     Method::Get,

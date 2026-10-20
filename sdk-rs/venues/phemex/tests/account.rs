@@ -575,6 +575,126 @@ fn native_versions_take_precedence_over_fresh_outer_timestamp() {
     assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.01);
 }
 
+#[test]
+fn stale_hedge_leg_cannot_supply_context_to_a_fresh_opposite_leg() {
+    let base = 1_700_000_000_000_000_000u64;
+    let long = |leverage: u32, version: u64| {
+        BTC.replace("OneWay", "Hedged")
+            .replace("Merged", "Long")
+            .replace("\"-20\"", &format!("\"{leverage}\""))
+            .replace(&base.to_string(), &version.to_string())
+    };
+    // A row may be stale against a previous frame or against an earlier row
+    // in this same frame. Neither can change the accepted opposite-side rail.
+    for same_frame in [false, true] {
+        let (mut e, a, socket) = started();
+        let seed_long = long(
+            if same_frame { 10 } else { 20 },
+            base + if same_frame { 50 } else { 300 },
+        );
+        response(
+            &mut e,
+            NOW,
+            request(&a, "currency=USDT").id,
+            200,
+            &envelope("USDT", 1000., 69., &seed_long),
+        );
+        response(
+            &mut e,
+            NOW,
+            request(&a, "currency=USDC").id,
+            200,
+            &envelope("USDC", 200., 19., ETH),
+        );
+        authenticate(&mut e, socket);
+        let stale_long = long(5, base + 100);
+        let fresh_short = long(15, base + 400)
+            .replace("\"Long\"", "\"Short\"")
+            .replace("\"Buy\"", "\"Sell\"");
+        let rows = if same_frame {
+            format!("{},{stale_long},{fresh_short}", long(20, base + 300))
+        } else {
+            format!("{stale_long},{fresh_short}")
+        };
+        ws(
+            &mut e,
+            socket,
+            &format!(r#"{{"sequence":1,"positions_p":[{rows}]}}"#),
+        );
+        assert_eq!(e.store().position("BTCUSDT:long").unwrap().leverage, 20.);
+        assert_eq!(e.store().position("BTCUSDT:short").unwrap().leverage, 15.);
+        assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.);
+        assert_eq!(
+            e.store().setting("BTCUSDT").unwrap().margin_type,
+            Some(MarginType::Isolated)
+        );
+    }
+}
+
+#[test]
+fn untimestamped_flat_cannot_erase_a_new_live_row_in_the_same_frame() {
+    let (mut e, actions, socket) = started();
+    response(
+        &mut e,
+        NOW,
+        request(&actions, "currency=USDT").id,
+        200,
+        &envelope("USDT", 1000., 0., ""),
+    );
+    response(
+        &mut e,
+        NOW,
+        request(&actions, "currency=USDC").id,
+        200,
+        &envelope("USDC", 200., 19., ETH),
+    );
+    authenticate(&mut e, socket);
+    ws(
+        &mut e,
+        socket,
+        &format!(r#"{{"sequence":1,"positions_p":[{BTC},{FLAT}]}}"#),
+    );
+    assert_eq!(e.store().position("BTCUSDT").unwrap().contracts, 0.01);
+    assert_eq!(e.store().position("BTCUSDT").unwrap().leverage, 20.);
+    assert_eq!(e.store().setting("BTCUSDT").unwrap().leverage, 20.);
+}
+
+#[test]
+fn rejected_position_cannot_supply_the_only_mode_for_snapshot_authority() {
+    let (mut e, _, socket) = started();
+    authenticate(&mut e, socket);
+    let long = BTC
+        .replace("OneWay", "Hedged")
+        .replace("Merged", "Long")
+        .replace("1700000000000000000", "0");
+    let short = long
+        .replace("\"posMode\":\"Hedged\",", "")
+        .replace("\"Long\"", "\"Short\"")
+        .replace("\"Buy\"", "\"Sell\"")
+        .replace("\"transactTimeNs\":0", "\"transactTimeNs\":2");
+    ws(
+        &mut e,
+        socket,
+        &format!(
+            r#"{{"type":"snapshot","sequence":1,"orders_p":[],"positions_p":[{long},{short}]}}"#
+        ),
+    );
+    assert!(!e.store().loaded().orders);
+    assert!(e.store().positions().is_empty());
+    assert!(e.store().setting("BTCUSDT").is_none());
+    let corrected_long = long.replace("\"transactTimeNs\":0", "\"transactTimeNs\":1");
+    let corrected_short = short.replace("\"posSide\"", "\"posMode\":\"Hedged\",\"posSide\"");
+    ws(
+        &mut e,
+        socket,
+        &format!(
+            r#"{{"type":"snapshot","sequence":1,"orders_p":[],"positions_p":[{corrected_long},{corrected_short}]}}"#
+        ),
+    );
+    assert!(e.store().loaded().orders);
+    assert_eq!(e.store().positions().len(), 2);
+}
+
 fn refresh(e: &mut Engine<PhemexPerpetuals>, at: f64) -> Vec<Action> {
     let actions: Vec<_> = e.drain_actions().collect();
     e.handle(
