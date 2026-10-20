@@ -31,6 +31,7 @@ pub struct Store {
     /// Changed-field bits per ticker, in [`TICKER_FIELDS`] order.
     ticker_masks: Vec<u16>,
     dirty_tickers: Vec<u32>,
+    ticker_deltas_spare: Vec<(u32, u16)>,
 }
 
 /// Packed ticker delta field order; matches `PACKED_TICKER_FIELDS` in
@@ -457,7 +458,10 @@ impl Store {
     /// Drain change tracking for one frame.
     pub fn take_pending(&mut self) -> Pending {
         let changes = std::mem::take(&mut self.changes);
-        let mut ticker_deltas = Vec::with_capacity(self.dirty_tickers.len());
+        let mut ticker_deltas = std::mem::take(&mut self.ticker_deltas_spare);
+        if !changes.tickers_replaced {
+            ticker_deltas.reserve(self.dirty_tickers.len());
+        }
         for index in self.dirty_tickers.drain(..) {
             let mask = std::mem::take(&mut self.ticker_masks[index as usize]);
             // A replaced list already carries every value.
@@ -469,6 +473,12 @@ impl Store {
             changes,
             ticker_deltas,
         }
+    }
+
+    /// Return drained row storage after its frame has finished serialization.
+    pub(crate) fn recycle_pending(&mut self, mut pending: Pending) {
+        pending.ticker_deltas.clear();
+        self.ticker_deltas_spare = pending.ticker_deltas;
     }
 
     /// Write the drained changes as frame sections.
@@ -587,6 +597,15 @@ impl Store {
         if changes.orders {
             let count = self.orders.len();
             size += 8 + (4 + 20 * count).next_multiple_of(8) + 56 * count;
+            if self.orders.iter().any(|order| {
+                order
+                    .extra
+                    .as_ref()
+                    .and_then(|extra| extra.remaining_native)
+                    .is_some()
+            }) {
+                size += 8 * count;
+            }
             for order in &self.orders {
                 for value in [
                     Some(order.id.as_str()),
@@ -743,6 +762,19 @@ impl Store {
         ];
         for column in columns {
             w.f64s(orders.iter().map(column));
+        }
+        // Native leavesQty cannot be recovered from rounded base quantities or
+        // amount=0 full-position stops. Older readers ignore this optional tail.
+        if orders
+            .iter()
+            .any(|o| o.extra.as_ref().and_then(|e| e.remaining_native).is_some())
+        {
+            w.f64s(orders.iter().map(|o| {
+                o.extra
+                    .as_ref()
+                    .and_then(|e| e.remaining_native)
+                    .unwrap_or(f64::NAN)
+            }));
         }
         w.end();
     }
@@ -1219,6 +1251,60 @@ mod tests {
         let mut writer = FrameWriter::new(vec![], 0.0);
         store.write(&pending, &mut writer);
         writer.finish()
+    }
+
+    #[test]
+    fn native_order_remainder_frame_hint_preserves_wire_without_buffer_growth() {
+        use crate::model::{OrderExtra, OrderSide, OrderStatus, OrderType};
+
+        for count in [0, 1, 2, 257] {
+            for native in [false, true] {
+                let mut store = Store::default();
+                store.set_orders(
+                    (0..count)
+                        .map(|index| Order {
+                            id: format!("order雪{index}"),
+                            parent_id: None,
+                            status: OrderStatus::Open,
+                            symbol: "BTCUSD".into(),
+                            kind: OrderType::StopLoss,
+                            side: OrderSide::Sell,
+                            price: 54321.0,
+                            amount: 0.0,
+                            filled: 0.0,
+                            remaining: 0.00013,
+                            reduce_only: true,
+                            close: Some(true),
+                            client_order_id: None,
+                            time_in_force: None,
+                            last_update: 1000.0,
+                            trigger_type: None,
+                            take_profit: None,
+                            stop_loss: None,
+                            // A single native value enables the tail for every row.
+                            extra: (native && index == count - 1).then_some(OrderExtra {
+                                remaining_native: Some(7.0),
+                                ..OrderExtra::default()
+                            }),
+                        })
+                        .collect(),
+                );
+                let pending = store.take_pending();
+                let size = 16 + store.frame_size_hint(&pending);
+                let buffer = Vec::with_capacity(size);
+                let capacity = buffer.capacity();
+                let pointer = buffer.as_ptr();
+                let mut writer = FrameWriter::new(buffer, 1.0);
+                store.write(&pending, &mut writer);
+                let frame = writer.finish();
+                assert_eq!(frame.len(), size, "rows={count}, native={native}");
+                assert_eq!(frame.capacity(), capacity);
+                assert_eq!(frame.as_ptr(), pointer);
+                let mut plain = FrameWriter::new(Vec::new(), 1.0);
+                store.write(&pending, &mut plain);
+                assert_eq!(frame, plain.finish());
+            }
+        }
     }
 
     #[test]

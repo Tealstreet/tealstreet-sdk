@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('./gate.mjs', import.meta.url), 'utf8');
-const createOutput = source.slice(source.indexOf('const outDir ='), source.indexOf('const records = tapeRecords;'));
+const createOutput = source.slice(source.indexOf('const outDir ='), source.indexOf('const replay = '));
 
 test('a reused gate process directory cannot overwrite retained replay evidence', () => {
   const root = mkdtempSync(join(tmpdir(), 'gate-output-'));

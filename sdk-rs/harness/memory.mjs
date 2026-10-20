@@ -5,12 +5,18 @@ import { setTimeout as realTimeout } from 'node:timers';
 export const retainedMemory = (before, after, wasmBytes = 0) =>
   after.heapUsed - before.heapUsed + after.arrayBuffers - before.arrayBuffers + wasmBytes;
 
-// This measures net growth from loaded code, not allocation volume. Either
-// signed component can shrink as setup storage is released during replay.
-// Validate its absolute counters and arithmetic without discarding that release.
+// Net growth from loaded code permits signed releases of setup storage.
+// Validate absolute counters, the aggregate and exact component arithmetic.
 export const memoryMetricErrors = (metrics) => {
   const errors = [];
-  for (const field of ['heapBeforeBytes', 'heapUsedBytes', 'buffersBefore', 'buffersAfter', 'wasmBytes', 'retainedBytes']) {
+  for (const field of [
+    'heapBeforeBytes',
+    'heapUsedBytes',
+    'buffersBefore',
+    'buffersAfter',
+    'wasmBytes',
+    'retainedBytes',
+  ]) {
     const value = metrics?.[field];
     if (!Number.isFinite(value) || value < 0) errors.push(`invalid ${field} (${value})`);
   }
@@ -39,15 +45,22 @@ export const settledMemory = async ({
   quietMs = 100,
   timeoutMs = 10_000,
 } = {}) => {
-  const deadline = now() + timeoutMs;
+  const started = now();
+  const deadline = started + timeoutMs;
   let previous;
   let stableSince = now();
   let stable = 0;
+  let sampleCount = 0;
+  let transitionCount = 0;
+  let lastArrayBuffers;
   while (now() <= deadline) {
     collect();
     await pause();
     const memory = sample();
     const time = now();
+    sampleCount++;
+    if (sampleCount > 1 && memory.arrayBuffers !== lastArrayBuffers) transitionCount++;
+    lastArrayBuffers = memory.arrayBuffers;
     if (time > deadline) break;
     if (memory.arrayBuffers === previous) stable++;
     else {
@@ -57,5 +70,11 @@ export const settledMemory = async ({
     if (stable >= 2 && time - stableSince >= quietMs) return memory;
     previous = memory.arrayBuffers;
   }
-  throw new Error('Backing-buffer memory did not settle');
+  const elapsedMs = now() - started;
+  throw Object.assign(
+    new Error(
+      `Backing-buffer memory did not settle (samples=${sampleCount}, transitions=${transitionCount}, lastArrayBuffers=${lastArrayBuffers}, elapsedMs=${elapsedMs})`,
+    ),
+    { sampleCount, transitionCount, lastArrayBuffers, elapsedMs },
+  );
 };

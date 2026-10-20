@@ -44,11 +44,7 @@ test('released setup buffers remain a signed component of positive net retention
 });
 
 test('heap shrinkage can accompany larger retained backing buffers and WASM', () => {
-  const metrics = metricsFor(
-    { heapUsed: 1000, arrayBuffers: 200 },
-    { heapUsed: 900, arrayBuffers: 500 },
-    100,
-  );
+  const metrics = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 900, arrayBuffers: 500 }, 100);
   assert.equal(metrics.heapRetainedBytes, -100);
   assert.equal(metrics.retainedBytes, 300);
   assert.deepEqual(memoryMetricErrors(metrics), []);
@@ -56,14 +52,27 @@ test('heap shrinkage can accompany larger retained backing buffers and WASM', ()
 
 test('invalid absolute counters and nonfinite signed deltas fail validation', () => {
   const valid = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 300 }, 100);
-  for (const field of ['heapBeforeBytes', 'heapUsedBytes', 'buffersBefore', 'buffersAfter', 'wasmBytes', 'retainedBytes']) {
+  for (const field of [
+    'heapBeforeBytes',
+    'heapUsedBytes',
+    'buffersBefore',
+    'buffersAfter',
+    'wasmBytes',
+    'retainedBytes',
+  ]) {
     for (const value of [-1, NaN, Infinity, -Infinity, null, undefined]) {
-      assert(memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)), `${field}=${value}`);
+      assert(
+        memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)),
+        `${field}=${value}`,
+      );
     }
   }
   for (const field of ['heapRetainedBytes', 'bufferRetainedBytes']) {
     for (const value of [NaN, Infinity, -Infinity, null, undefined]) {
-      assert(memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)), `${field}=${value}`);
+      assert(
+        memoryMetricErrors({ ...valid, [field]: value }).some((error) => error.startsWith(`invalid ${field} (`)),
+        `${field}=${value}`,
+      );
     }
   }
   assert(memoryMetricErrors(undefined).length > 0);
@@ -78,9 +87,17 @@ test('negative aggregate retention still invalidates the baseline', () => {
 test('reported deltas and aggregate must exactly match the absolute samples', () => {
   const valid = metricsFor({ heapUsed: 1000, arrayBuffers: 200 }, { heapUsed: 1500, arrayBuffers: 300 }, 100);
   for (const field of ['heapRetainedBytes', 'bufferRetainedBytes', 'retainedBytes']) {
-    assert(memoryMetricErrors({ ...valid, [field]: valid[field] + 1 }).some((error) => error.startsWith(`inconsistent ${field} (`)), field);
+    assert(
+      memoryMetricErrors({ ...valid, [field]: valid[field] + 1 }).some((error) =>
+        error.startsWith(`inconsistent ${field} (`),
+      ),
+      field,
+    );
   }
-  assert.deepEqual(memoryMetricErrors(metricsFor({ heapUsed: 0, arrayBuffers: 0 }, { heapUsed: 0, arrayBuffers: 0 })), []);
+  assert.deepEqual(
+    memoryMetricErrors(metricsFor({ heapUsed: 0, arrayBuffers: 0 }, { heapUsed: 0, arrayBuffers: 0 })),
+    [],
+  );
 });
 
 test('three equal samples do not hide a delayed loader-buffer release', async () => {
@@ -110,17 +127,32 @@ test('backing stores that never settle fail instead of choosing or clamping a sa
       sample: () => ({ arrayBuffers: time, heapUsed: 1000 }),
       timeoutMs: 200,
     }),
-    /Backing-buffer memory did not settle/,
+    (error) => {
+      assert.match(error.message, /Backing-buffer memory did not settle/);
+      assert.equal(error.sampleCount, 21);
+      assert.equal(error.transitionCount, 20);
+      assert.equal(error.lastArrayBuffers, 210);
+      assert.equal(error.elapsedMs, 210);
+      assert.match(error.message, /samples=21, transitions=20, lastArrayBuffers=210, elapsedMs=210/);
+      return true;
+    },
   );
 });
 
 test('settled samples use real time when replay replaces global timers', async () => {
   const original = globalThis.setTimeout;
-  globalThis.setTimeout = () => { throw new Error('virtual timer must not pace memory samples'); };
+  globalThis.setTimeout = () => {
+    throw new Error('virtual timer must not pace memory samples');
+  };
   try {
-    assert.deepEqual(await settledMemory({
-      collect() {}, sample: () => ({ arrayBuffers: 42, heapUsed: 1000 }), quietMs: 0,
-    }), { arrayBuffers: 42, heapUsed: 1000 });
+    assert.deepEqual(
+      await settledMemory({
+        collect() {},
+        sample: () => ({ arrayBuffers: 42, heapUsed: 1000 }),
+        quietMs: 0,
+      }),
+      { arrayBuffers: 42, heapUsed: 1000 },
+    );
   } finally {
     globalThis.setTimeout = original;
   }

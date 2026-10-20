@@ -6,7 +6,7 @@ import { memoryMetricErrors, retainedMemory } from './memory.mjs';
 
 // Evaluate the actual measurement function without starting a fixture replay.
 const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
-const measureSource = source.slice(source.indexOf('const measure = '), source.indexOf('/** Loaded code'));
+const measureSource = source.slice(source.indexOf('const measure = '), source.indexOf('const baseline = '));
 
 test('replay reports complete memory samples with CPU before GC and WASM after GC', async () => {
   const events = [];

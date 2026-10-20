@@ -777,3 +777,26 @@ No15public/profile samples exist. While15release/control builds were running,
 origin advanced to922b5fdc89 with Bybitspot/inverse/demo/Hyro and sharedengine
 changes. Hold sampling, retain partial15builds/logs and merge again before
 freezing the final source/baseline; this checkpoint is not performance evidence.
+
+
+Bybit variants integration phase: merge922b5fdc89 adds inverse/spot/demo/Hyro
+profiles within the existing Bybit family. Preserve cfg-isolated15builds and
+shared-loader familyidentity, incoming retained book/ticker delta reuse, and
+our combined frame hints (nowincluding optional native-order remainders).
+Focused engine+Bybit188tests pass; all271harness tests pass after adapting VM
+slice anchors. Review caught and fixed missingRustHTTPencoder and unintended
+TSbaseline movement. Keep loadedconstructed-engine net-memory methodology,
+exact signed-component arithmetic and postCPU GC/lazyWASMbytes. Adopt
+ESBUILD_WORKER_THREADS=0 beforetsx for bothgate subprocesses and replayCLI;
+refreshbothsides with this sharedcontext. Preserve independent tagged-write
+plans, category/generation subscription checks, effectiveAt and stagedHyro
+startup. Independent harness/engine/loader reviews pass. IncomingSDKno-action
+test now observes actualqueuedbatch delivery and selectsBybit explicitly.
+
+Partial15build and f66aggregate control are retained asunmeasured/superseded.
+Predeclare19publicfixturecomparison/36privatevariants in RUST_PERF_CROSSOVER19;
+no15or19CPU samples collected. CodedNodeerror headers mustnot hide behind
+settled-memory exclusions; tighten exactclassifier beforeanynew measurements.
+Next: frozen15release+exact922control, allworkspace/repository checks,36private
+gates andBitgetparity, fourfixedoptionalprofiles, then19official3-run public
+gates+balanced10-pairbefore/after cohort. Performancewidening stillunproven.

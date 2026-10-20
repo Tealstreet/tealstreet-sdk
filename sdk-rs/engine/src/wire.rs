@@ -284,7 +284,7 @@ pub const TICKER_COLUMNS: usize = TICKER_FIELDS.len();
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Candle, Limits, Market, MinMax, Precision, Ticker};
+    use crate::model::{Candle, Limits, Market, MinMax, Order, OrderExtra, Precision, Ticker};
     use crate::store::Store;
 
     fn u32_at(buf: &[u8], at: usize) -> u32 {
@@ -445,5 +445,72 @@ mod tests {
                 section::STRINGS
             ]
         );
+    }
+
+    #[test]
+    fn optional_order_native_column_preserves_full_stop_leaves_without_changing_legacy_columns() {
+        let order = Order {
+            id: "full-stop".into(),
+            parent_id: None,
+            status: OrderStatus::Open,
+            symbol: "BTCUSD".into(),
+            kind: OrderType::StopLoss,
+            side: OrderSide::Sell,
+            price: 54321.0,
+            amount: 0.0,
+            filled: 0.0,
+            remaining: 0.00013,
+            reduce_only: true,
+            close: Some(true),
+            client_order_id: None,
+            time_in_force: None,
+            last_update: 1000.0,
+            trigger_type: None,
+            take_profit: None,
+            stop_loss: None,
+            extra: None,
+        };
+        for native in [None, Some(7.0)] {
+            let mut store = Store::default();
+            store.set_orders(vec![Order {
+                extra: native.map(|remaining_native| OrderExtra {
+                    remaining_native: Some(remaining_native),
+                    ..OrderExtra::default()
+                }),
+                ..order.clone()
+            }]);
+            let pending = store.take_pending();
+            let mut writer = FrameWriter::new(Vec::new(), 1000.0);
+            store.write(&pending, &mut writer);
+            let frame = writer.finish();
+            let payload = sections(&frame)
+                .find_map(|(kind, payload)| (kind == section::ORDERS).then_some(payload))
+                .unwrap();
+            assert_eq!(u32_at(payload, 0), 1);
+            // One row: 24 bytes of aligned references/enums, then seven columns.
+            assert_eq!(
+                payload.len(),
+                24 + 7 * 8 + usize::from(native.is_some()) * 8
+            );
+            let number =
+                |offset| f64::from_le_bytes(payload[offset..offset + 8].try_into().unwrap());
+            assert_eq!(
+                number(24 + 8),
+                0.0,
+                "Full stops retain their amount-zero sentinel"
+            );
+            assert_eq!(
+                number(24 + 3 * 8),
+                0.00013,
+                "base remainder stays in its existing column"
+            );
+            if let Some(native) = native {
+                assert_eq!(
+                    number(24 + 7 * 8),
+                    native,
+                    "native quantity is exact, not rounded base x price"
+                );
+            }
+        }
     }
 }

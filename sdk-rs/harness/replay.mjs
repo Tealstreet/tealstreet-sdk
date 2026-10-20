@@ -37,7 +37,11 @@ const records = (values.tape.endsWith('.gz') ? gunzipSync(tapeBytes) : tapeBytes
   .toString('utf8')
   .split('\n')
   .filter(Boolean)
-  .map((line) => JSON.parse(line));
+  .map((line) => {
+    const record = JSON.parse(line);
+    if (record.effectiveAt !== undefined) record.availableAfter ??= record.effectiveAt;
+    return record;
+  });
 const bookSymbols = values.books.split(',').filter(Boolean);
 // A tape with a user stream replays an account: signed, paced in real time,
 // and compared on its private state rather than its books.
@@ -47,7 +51,7 @@ let clockStart = performance.now();
 if (Number.isFinite(metadata?.epoch)) Date.now = () => metadata.epoch + Math.floor(performance.now() - clockStart);
 const config = records.find((record) => record.type === 'config') ?? {};
 const isPrivate =
-  config.private ?? metadata?.private ?? records.some(venue.isPrivateRecord ?? ((r) => r.url?.includes(venue.privateSocket)));
+  config.private ?? metadata?.private ?? records.some(venue.isPrivateRecord ?? ((r) => Boolean(venue.privateSocket && r.url?.includes(venue.privateSocket))));
 const replayOptions = {
   ...venue.options,
   ...metadata?.options,
@@ -57,6 +61,11 @@ const replayOptions = {
     : { key: '', secret: '', publicDataOnly: true, ...venue.publicOptions }),
   ...config.options,
 };
+if (values.venue === 'hyrotrader' && replayOptions.endpoints) {
+  process.env.NEXT_PUBLIC_HYROTRADER_PROD_REST_URL = replayOptions.endpoints.rest;
+  process.env.NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL = replayOptions.endpoints.publicWs;
+  process.env.NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL = replayOptions.endpoints.privateWs;
+}
 const publicReplayClock = !isPrivate && (values.venue === 'mexc' || venue.orderlyProtocol === true);
 const credentials = { key: replayOptions.key, secret: replayOptions.secret, passphrase: replayOptions.passphrase };
 const replayDeadline = realTimeout(() => {
@@ -104,7 +113,7 @@ const measure = async (cpuStart, wallStart, heapBefore, wasmBytes = 0, warmMark,
   };
 };
 
-/** Loaded code is excluded; collect before I/O and after replay state settles. */
+/** Loaded code and constructors precede the baseline; collect settled net growth. */
 const baseline = () => settledMemory({ pause: () => new Promise((resolve) => realTimeout(resolve, 10)) });
 
 const sortBook = (book) => ({
@@ -131,7 +140,9 @@ const marketFields = (m) => ({
   base: m.base,
   quote: m.quote,
   active: m.active,
-  ...(venue.inverseNativeAmounts ? { isInverse: Boolean(m.isInverse) } : {}),
+  isInverse: Boolean(m.isInverse),
+  isSpot: Boolean(m.isSpot),
+  isExpiring: Boolean(m.isExpiring),
   contractSize: m.contractSize ?? null,
   // The engine frame carries trading increments (RUST_REWRITE.md MARKETS).
   precision: { amount: m.precision.amount, price: m.precision.price },
@@ -143,11 +154,11 @@ async function runRust() {
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
   const { WasmEngine, wasmMemoryBytes } = await loadEngine(venue.rust, replayOptions);
+  const encoder = new TextEncoder();
   const tape = createTape(records, venue, isPrivate, { impl: 'rust', books: bookSymbols, credentials, cadence: values.cadence, engineOptions: replayOptions });
   tape.cadence = values.cadence;
   const clock = publicReplayClock ? new ReplayClock(metadata?.epoch ?? Date.now()) : undefined;
   clock?.install();
-  const encoder = new TextEncoder();
   // What the main thread keeps: the latest market table, ticker columns, books.
   let markets;
   const tickers = new TickerState();
@@ -242,10 +253,10 @@ async function runRust() {
           lastFlush = t;
         }
       },
-      async () => {
+      async (accountReady) => {
         const deadline = performance.now() + 15000;
         while (
-          !replayStoreReady(status?.loaded ?? 0, isPrivate) ||
+          !replayStoreReady(status?.loaded ?? 0, isPrivate && accountReady) ||
           (tape.audit && !tape.audit.ready()) ||
           !tape.open.size
         ) {
@@ -299,6 +310,8 @@ async function runRust() {
       quote: markets.quote(i),
       active: (markets.flags[i] & 1) !== 0,
       isInverse: (markets.flags[i] & 2) !== 0,
+      isSpot: (markets.flags[i] & 4) !== 0,
+      isExpiring: (markets.flags[i] & 16) !== 0,
       contractSize: markets.contractSize[i] || undefined,
       precision: { amount: markets[MARKET_COLUMNS[0]][i], price: markets[MARKET_COLUMNS[1]][i] },
       limits: { amount: { min: markets.minAmount[i], max: markets.maxAmount[i] } },
@@ -327,7 +340,7 @@ async function runRust() {
     requests: [...tape.requests].sort(),
     writes: tape.writes,
     missingWrites: tape.missingWrites,
-    unusedWrites: tape.missingWrites,
+    unusedWrites: tape.unusedWrites(),
     protocolErrors,
     invalidSignatures: tape.invalidSignatures,
     wsRequests: [...tape.sentRequests].sort(),
@@ -550,12 +563,13 @@ async function runTs() {
         lastFlush = t;
       }
     },
-    async () => {
-      await Promise.all([started, subscribed]);
+    async (accountReady) => {
+      await (accountReady ? Promise.all([started, subscribed]) : subscribed);
       await prepareTsReplaySockets(tape, () => venue.prepareTsReady?.(exchange, { isPrivate }), until);
-      while (!venue.tsBooksSubscribed(exchange, bookSymbols.length)) await new Promise((r) => setTimeout(r, 5));
-      const loaded = () => Object.values(store.loaded).every(Boolean);
-      while (isPrivate && !loaded()) await new Promise((r) => setTimeout(r, 5));
+      await until(() => venue.tsBooksSubscribed(exchange, bookSymbols.length), 'TS book subscriptions');
+      const loaded = () => accountReady ? Object.values(store.loaded).every(Boolean) : store.loaded.markets && store.loaded.tickers;
+      await until(() => !isPrivate || loaded(), 'TS account startup');
+      await until(() => tape.open.size > 0, 'TS initial socket');
     },
     (record) => runTsCommand(exchange, store, record),
     clock,
@@ -619,7 +633,7 @@ async function runTs() {
     requests: [...tape.requests].sort(),
     writes: tape.writes,
     missingWrites: tape.missingWrites,
-    unusedWrites: tape.missingWrites,
+    unusedWrites: tape.unusedWrites(),
     protocolErrors,
     invalidSignatures: tape.invalidSignatures,
     wsRequests: [...tape.sentRequests].sort(),
@@ -650,10 +664,8 @@ async function runTsCommand(exchange, store, record) {
         ['price', 'amount'].filter((key) => args[key] !== undefined).map((key) => [key, args[key]]),
       );
       const result = await exchange.updateOrder({ order, update });
-      if (values.venue === 'hyperliquid') {
-        const ids = result ?? [];
-        return ids.clientOrderId ? { orderIds: [...ids], clientOrderId: ids.clientOrderId } : ids;
-      }
+      if (result?.clientOrderId) return { orderIds: [...result], clientOrderId: result.clientOrderId };
+      if (values.venue === 'hyperliquid' || ['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'].includes(values.venue)) return result ?? [];
       return ['mexc', 'backpack'].includes(values.venue) ? result ?? [] : result;
     }
     case 'setLeverage':
@@ -747,6 +759,8 @@ writeFileSync(
     impl: values.impl,
     frames: result.frames,
     unserved: result.unserved,
+    missingWrites: result.missingWrites,
+    invalidSignatures: result.invalidSignatures,
     requests: result.requests,
     writes: result.writes,
     writeCount: result.writes.length,

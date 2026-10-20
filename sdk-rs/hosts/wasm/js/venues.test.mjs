@@ -12,7 +12,7 @@ const aliases = {
   bitget: ['bitget', 'bitgetusdc', 'bitgetinverse'],
   bitrue: ['bitrue'],
   blofin: ['blofin'],
-  bybit: ['bybit'],
+  bybit: ['bybit', 'bybitinverse', 'bybitspot', 'bybitdemo', 'hyrotrader'],
   cryptocom: ['cryptocom'],
   hyperliquid: ['hyperliquid'],
   lighter: ['lighter'],
@@ -28,7 +28,10 @@ for (const [family, names] of Object.entries(aliases)) {
     const { WasmEngine } = require(`../pkg/node/${family}/safe_cex_wasm.js`);
     for (const venue of names) {
       assert.equal(venueFamily(venue), family);
-      const engine = new WasmEngine(venue, '{"publicDataOnly":true}');
+      const options = venue === 'hyrotrader'
+        ? { publicDataOnly: true, endpoints: { rest: 'https://example.test', publicWs: 'wss://example.test/public', privateWs: 'wss://example.test/private' } }
+        : { publicDataOnly: true };
+      const engine = new WasmEngine(venue, JSON.stringify(options));
       engine.free();
     }
     for (const other of Object.keys(aliases).filter((name) => name !== family)) {

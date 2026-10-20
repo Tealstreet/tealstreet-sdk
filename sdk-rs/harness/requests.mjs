@@ -12,15 +12,17 @@ export const isWriteRequest = (method, url) => {
   const parsed = new URL(url);
   if (['POST', 'PUT', 'DELETE'].includes(method) && /\/(listenKey|userDataStream)$/.test(parsed.pathname)) return false;
   // Hyperliquid's /info POSTs are reads, including account/history polling.
-  return !(method === 'POST' && parsed.pathname === '/info'
-    && /(^|\.)hyperliquid(?:-testnet)?\.xyz$/.test(parsed.hostname));
+  return !(
+    method === 'POST' &&
+    parsed.pathname === '/info' &&
+    /(^|\.)hyperliquid(?:-testnet)?\.xyz$/.test(parsed.hostname)
+  );
 };
 
 export const selectResponse = (queue, elapsed, { write = false, commandIndex = 0 } = {}) => {
   if (!queue?.length) return undefined;
   const at = (record) => record.availableAt ?? record.effectiveAt ?? record.availableAfter ?? 0;
-  const available = (record) => (record.afterCommand ?? 0) <= commandIndex
-    && at(record) <= elapsed;
+  const available = (record) => (record.afterCommand ?? 0) <= commandIndex && at(record) <= elapsed;
   if (write) {
     // An acknowledgement proves one attempt. Never replay it for another write,
     // or skip an earlier outstanding write to consume a later staged one.
@@ -30,7 +32,12 @@ export const selectResponse = (queue, elapsed, { write = false, commandIndex = 0
   if (!eligible.length) return undefined;
   const stage = Math.max(...eligible.map((record) => record.afterCommand ?? 0));
   const current = eligible.filter((record) => (record.afterCommand ?? 0) === stage);
-  if (!current.some((record) => record.availableAt !== undefined || record.effectiveAt !== undefined || record.availableAfter !== undefined)) {
+  if (
+    !current.some(
+      (record) =>
+        record.availableAt !== undefined || record.effectiveAt !== undefined || record.availableAfter !== undefined,
+    )
+  ) {
     const record = current[0];
     if (current.length > 1) queue.splice(queue.indexOf(record), 1);
     return record;
@@ -47,9 +54,12 @@ export const selectResponse = (queue, elapsed, { write = false, commandIndex = 0
   return selected;
 };
 
-const parseJson = (text) => JSON.parse(text, (_key, value, context) =>
-  typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)
-    ? JSON.rawJSON(context.source) : value);
+const parseJson = (text) =>
+  JSON.parse(text, (_key, value, context) =>
+    typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)
+      ? JSON.rawJSON(context.source)
+      : value,
+  );
 
 export const callerIdsOf = (records) => {
   const ids = new Set();
@@ -117,8 +127,9 @@ export const requestKey = (method, url, body, callerIds = new Set(), options = {
     body = Object.fromEntries(body);
   }
   let parsed;
-  try { parsed = typeof body === 'string' ? parseJson(body) : body; }
-  catch {
+  try {
+    parsed = typeof body === 'string' ? parseJson(body) : body;
+  } catch {
     if (typeof body === 'string' && body.includes('=')) {
       const form = new URLSearchParams(body);
       if (options.requestBody) parsed = Object.fromEntries(form);
@@ -148,8 +159,11 @@ export const subscriptionMessage = (message) => {
 export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) => {
   let message;
   if (options.bingxProtocol && ['Ping', 'Pong'].includes(text)) return undefined;
-  try { message = typeof text === 'string' ? JSON.parse(text) : text; }
-  catch { return `WS ${canonicalUrl(url, callerIds)} ${text}`; }
+  try {
+    message = typeof text === 'string' ? JSON.parse(text) : text;
+  } catch {
+    return `WS ${canonicalUrl(url, callerIds)} ${text}`;
+  }
   message = options.subscriptionMessage?.(message) ?? message;
   const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
   if (options.bitrueProtocol) {
@@ -180,8 +194,12 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
     // OKX login signatures and clocks are checked against credentials by Tape;
     // the outbound identity retains API key and passphrase for comparison.
     if (method === 'login' && Array.isArray(message.args)) {
-      message.args = message.args.map((arg) => ({ ...arg, timestamp: '<timestamp>', sign: '<signature>',
-        ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}) }));
+      message.args = message.args.map((arg) => ({
+        ...arg,
+        timestamp: '<timestamp>',
+        sign: '<signature>',
+        ...(options.blofinProtocol ? { nonce: '<nonce>' } : {}),
+      }));
     }
     if (options.wooProtocol && method === 'auth' && message.params) {
       message.params = { ...message.params, timestamp: '<timestamp>', sign: '<signature>' };
@@ -203,20 +221,28 @@ export const subscriptionKey = (url, text, callerIds = new Set(), options = {}) 
 // Subscription batches and one-topic sends have the same required feed set.
 export const subscriptionKeys = (url, text, callerIds = new Set(), options = {}) => {
   let message;
-  try { message = typeof text === 'string' ? parseJson(text) : text; }
-  catch {
+  try {
+    message = typeof text === 'string' ? parseJson(text) : text;
+  } catch {
     const key = subscriptionKey(url, text, callerIds, options);
     return key === undefined ? [] : [key];
   }
   const method = String(message?.method ?? message?.reqType ?? message?.op ?? message?.event ?? message?.type ?? '').toLowerCase();
   if (['subscribe', 'unsubscribe'].includes(method)) {
     if (options.cryptoProtocol && Array.isArray(message.params?.channels)) {
-      return message.params.channels.map((channel) => subscriptionKey(url,
-        { ...message, params: { ...message.params, channels: [channel] } }, callerIds, options));
+      return message.params.channels.map((channel) =>
+        subscriptionKey(url, { ...message, params: { ...message.params, channels: [channel] } }, callerIds, options),
+      );
     }
     const field = Array.isArray(message.params) ? 'params' : Array.isArray(message.args) ? 'args' : undefined;
-    if (field) return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds, options));
+    if (field)
+      return message[field].map((topic) => subscriptionKey(url, { ...message, [field]: [topic] }, callerIds, options));
   }
   const key = subscriptionKey(url, message, callerIds, options);
   return key === undefined ? [] : [key];
 };
+
+// Compatibility for existing helper callers; response selection stays centralized.
+export const isRead = (method, url) => !isWriteRequest(method, url);
+export const takeResponse = (queue, method, url, time = 0, commandIndex = Infinity, repeat = isRead(method, url)) =>
+  selectResponse(queue, time, { commandIndex, write: !repeat });
