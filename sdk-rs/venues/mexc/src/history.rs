@@ -252,7 +252,8 @@ impl MexcFutures {
         if matches!(kind, Kind::Funding | Kind::Trades) || order_id.is_some() {
             windows.push_back((None, None));
         } else if let (Some(a), Some(b)) = (window_from, window_to) {
-            let Some(tiles) = paging::windows(a, b, WINDOW, WindowOrder::OldestFirst, 1000) else {
+            // Newest first: a limited read stops with the most recent rows.
+            let Some(tiles) = paging::windows(a, b, WINDOW, WindowOrder::NewestFirst, 1000) else {
                 cx.done(command, Err("MEXC query range exceeds 1000 windows".into()));
                 return;
             };
