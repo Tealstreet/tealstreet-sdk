@@ -3,47 +3,11 @@ use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
 pub type Str<'a> = Cow<'a, str>;
 
+/// Public rows: blank reads as 0, null and malformed reject the row.
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
 #[serde(transparent)]
-pub struct Number(#[serde(deserialize_with = "number")] pub f64);
-#[derive(Clone, Copy, Debug, Default, Deserialize)]
-#[serde(transparent)]
-pub struct StrictNumber(#[serde(deserialize_with = "strict_number")] pub f64);
-fn strict_number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Bare(n) => n,
-        N::Text(s) => s.parse::<f64>().map_err(serde::de::Error::custom)?,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
-}
-fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Bare(f64),
-        Text(#[serde(borrow)] Str<'a>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Bare(n) => n,
-        N::Text(s) => safe_cex_engine::startup::number_or_zero(&s)
-            .ok_or_else(|| serde::de::Error::custom("invalid public number"))?,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
-}
+pub struct Number(#[serde(deserialize_with = "safe_cex_engine::de::number_or_blank_zero")] pub f64);
+pub use safe_cex_engine::de::Number as StrictNumber;
 
 fn summary_number<'de, D: Deserializer<'de>>(d: D) -> Result<Number, D::Error> {
     // Summary fields use TS's `value || '0'`; do not widen instrument,

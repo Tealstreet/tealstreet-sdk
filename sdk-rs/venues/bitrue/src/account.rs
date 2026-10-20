@@ -577,7 +577,7 @@ impl Bitrue {
             Method::Get,
             &format!(
                 "/fapi/v2/openOrders?contractName={}",
-                crate::history::query_component(&symbol)
+                safe_cex_engine::url::encode(&symbol)
             ),
             None,
             Some(ArrayAt::Field("data")),
@@ -1283,7 +1283,7 @@ impl Bitrue {
                 Method::Get,
                 &format!(
                     "/fapi/v2/leverageBracket?contractName={}",
-                    crate::history::query_component(contract)
+                    safe_cex_engine::url::encode(contract)
                 ),
                 None,
                 None,

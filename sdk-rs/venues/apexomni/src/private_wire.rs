@@ -1,29 +1,9 @@
 //! Borrowed account records and exact venue identifiers.
-use crate::public_wire::{number, optional_number};
+use safe_cex_engine::de::{number, optional_number_or_blank};
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 use std::borrow::Cow;
 use std::fmt;
-
-fn optional_blank_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Input<'a> {
-        Text(Cow<'a, str>),
-        Number(f64),
-    }
-    let value = match Option::<Input<'_>>::deserialize(d)? {
-        None => return Ok(None),
-        Some(Input::Text(text)) if text.is_empty() => return Ok(None),
-        Some(Input::Text(text)) => text.parse().map_err(serde::de::Error::custom)?,
-        Some(Input::Number(value)) => value,
-    };
-    if value.is_finite() {
-        Ok(Some(value))
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
-}
 
 pub fn identifier<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     #[derive(Deserialize)]
@@ -192,33 +172,39 @@ pub struct PositionRow<'a> {
     pub symbol: Cow<'a, str>,
     #[serde(borrow, deserialize_with = "text")]
     pub side: Cow<'a, str>,
-    #[serde(deserialize_with = "optional_number", alias = "avg_price")]
+    #[serde(deserialize_with = "optional_number_or_blank", alias = "avg_price")]
     pub avg_price: Option<f64>,
-    #[serde(deserialize_with = "optional_number", alias = "entry_price")]
+    #[serde(deserialize_with = "optional_number_or_blank", alias = "entry_price")]
     pub entry_price: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub size: Option<f64>,
-    #[serde(deserialize_with = "optional_number", alias = "custom_imr")]
+    #[serde(deserialize_with = "optional_number_or_blank", alias = "custom_imr")]
     pub custom_imr: Option<f64>,
     #[serde(
-        deserialize_with = "optional_number",
+        deserialize_with = "optional_number_or_blank",
         alias = "custom_initial_margin_rate"
     )]
     pub custom_initial_margin_rate: Option<f64>,
-    #[serde(deserialize_with = "optional_number", alias = "unrealised_pnl")]
+    #[serde(
+        deserialize_with = "optional_number_or_blank",
+        alias = "unrealised_pnl"
+    )]
     pub unrealised_pnl: Option<f64>,
-    #[serde(deserialize_with = "optional_number", alias = "cur_realised_pnl")]
+    #[serde(
+        deserialize_with = "optional_number_or_blank",
+        alias = "cur_realised_pnl"
+    )]
     pub cur_realised_pnl: Option<f64>,
-    #[serde(deserialize_with = "optional_number", alias = "realized_pnl")]
+    #[serde(deserialize_with = "optional_number_or_blank", alias = "realized_pnl")]
     pub realized_pnl: Option<f64>,
-    #[serde(deserialize_with = "optional_number", alias = "liq_price")]
+    #[serde(deserialize_with = "optional_number_or_blank", alias = "liq_price")]
     pub liq_price: Option<f64>,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Leg {
-    #[serde(deserialize_with = "optional_blank_number", alias = "trigger_price")]
+    #[serde(deserialize_with = "optional_number_or_blank", alias = "trigger_price")]
     pub trigger_price: Option<f64>,
     #[serde(deserialize_with = "identifier")]
     pub trigger_price_type: String,
@@ -237,28 +223,34 @@ pub struct OrderRow<'a> {
     pub status: Cow<'a, str>,
     #[serde(borrow, rename = "type", deserialize_with = "text")]
     pub kind: Cow<'a, str>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub price: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub size: Option<f64>,
-    #[serde(deserialize_with = "optional_number", alias = "cum_success_fill_size")]
+    #[serde(
+        deserialize_with = "optional_number_or_blank",
+        alias = "cum_success_fill_size"
+    )]
     pub cum_success_fill_size: Option<f64>,
-    #[serde(deserialize_with = "optional_number", alias = "cum_success_fill_fee")]
+    #[serde(
+        deserialize_with = "optional_number_or_blank",
+        alias = "cum_success_fill_fee"
+    )]
     pub cum_success_fill_fee: Option<f64>,
-    #[serde(deserialize_with = "optional_number", alias = "trigger_price")]
+    #[serde(deserialize_with = "optional_number_or_blank", alias = "trigger_price")]
     pub trigger_price: Option<f64>,
     #[serde(
-        deserialize_with = "optional_blank_number",
+        deserialize_with = "optional_number_or_blank",
         alias = "latest_match_fill_price"
     )]
     pub latest_match_fill_price: Option<f64>,
-    #[serde(deserialize_with = "optional_blank_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub average_price: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub updated_at: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub updated_time: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub created_at: Option<f64>,
     #[serde(borrow, deserialize_with = "text")]
     pub time_in_force: Cow<'a, str>,
@@ -293,15 +285,15 @@ pub struct FillRow<'a> {
     pub symbol: Cow<'a, str>,
     #[serde(borrow, deserialize_with = "text")]
     pub side: Cow<'a, str>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub price: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub size: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub fee: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub created_at: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub updated_at: Option<f64>,
     #[serde(borrow, deserialize_with = "text")]
     pub token: Cow<'a, str>,
@@ -329,15 +321,15 @@ pub struct WalletRow<'a> {
     pub account_id: Cow<'a, str>,
     #[serde(borrow, deserialize_with = "text")]
     pub token: Cow<'a, str>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub balance: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub pending_deposit_amount: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub pending_withdraw_amount: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub pending_transfer_in_amount: Option<f64>,
-    #[serde(deserialize_with = "optional_number")]
+    #[serde(deserialize_with = "optional_number_or_blank")]
     pub pending_transfer_out_amount: Option<f64>,
 }
 

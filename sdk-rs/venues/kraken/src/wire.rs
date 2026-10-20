@@ -1,44 +1,11 @@
 //! Borrowed public rows; numeric strings are decoded directly.
-use serde::{Deserialize, Deserializer};
+pub use safe_cex_engine::de::{number, number_or_blank_zero, optional_number};
+use serde::Deserialize;
 use std::borrow::Cow;
-pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+/// Public ticker overlay: null is absent, blank reads as 0, malformed skips the row.
+fn public_optional_number<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Number(f64),
-        Text(#[serde(borrow)] Cow<'a, str>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Number(n) => n,
-        N::Text(t) => t.parse().map_err(serde::de::Error::custom)?,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("nonfinite number"))
-    }
-}
-pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    struct N(#[serde(deserialize_with = "number")] f64);
-    Ok(Option::<N>::deserialize(d)?.map(|v| v.0))
-}
-pub fn public_number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Number(f64),
-        Text(#[serde(borrow)] Cow<'a, str>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Number(n) => Some(n).filter(|n| n.is_finite()),
-        N::Text(s) => safe_cex_engine::startup::number_or_zero(&s),
-    };
-    n.ok_or_else(|| serde::de::Error::custom("invalid public number"))
-}
-pub fn public_optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    struct N(#[serde(deserialize_with = "public_number")] f64);
+    struct N(#[serde(deserialize_with = "number_or_blank_zero")] f64);
     Ok(Option::<N>::deserialize(d)?.map(|n| n.0))
 }
 #[derive(Deserialize)]
@@ -101,19 +68,19 @@ pub struct RestTicker<'a> {
     pub ask: Option<f64>,
     #[serde(default, deserialize_with = "public_optional_number")]
     pub last: Option<f64>,
-    #[serde(default, deserialize_with = "public_number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub mark_price: f64,
-    #[serde(default, deserialize_with = "public_number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub index_price: f64,
-    #[serde(default, deserialize_with = "public_number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub change24h: f64,
-    #[serde(default, deserialize_with = "public_number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub funding_rate: f64,
-    #[serde(default, deserialize_with = "public_number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub open_interest: f64,
-    #[serde(default, deserialize_with = "public_number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub vol24h: f64,
-    #[serde(default, deserialize_with = "public_number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub volume_quote: f64,
 }
 #[derive(Deserialize)]

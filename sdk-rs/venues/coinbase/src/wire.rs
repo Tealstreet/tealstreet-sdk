@@ -1,24 +1,8 @@
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::borrow::Cow;
 
-pub(crate) fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Number(f64),
-        Text(#[serde(borrow)] Cow<'a, str>),
-    }
-    let n = match N::deserialize(d)? {
-        N::Number(n) => n,
-        N::Text(s) => s.parse().map_err(serde::de::Error::custom)?,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("nonfinite number"))
-    }
-}
+pub(crate) use safe_cex_engine::de::number;
 
 #[derive(Deserialize)]
 pub(crate) struct Instrument {

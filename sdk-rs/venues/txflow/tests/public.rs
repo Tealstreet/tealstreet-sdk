@@ -211,6 +211,43 @@ fn full_snapshot_book_not_truncated_and_stale_is_ignored() {
     assert!(e.book("BTC-USDC").is_none());
 }
 #[test]
+fn snapshot_books_skip_unsynchronized_subscriptions_but_clear_stale_ones() {
+    use safe_cex_engine::Venue;
+    let listed = |e: &Engine<TxFlow>| {
+        e.venue()
+            .books()
+            .map(|(symbol, _)| symbol.to_owned())
+            .collect::<Vec<_>>()
+    };
+    let (mut e, node, _) = ready();
+    e.handle(
+        2000.0,
+        Event::Command(Command::SubscribeOrderBook {
+            symbol: "BTC-USDC".into(),
+        }),
+    );
+    // No snapshot yet: recovery frames must not publish an empty book.
+    assert!(e.book("BTC-USDC").is_none());
+    assert!(listed(&e).is_empty());
+    message(
+        &mut e,
+        node,
+        3000.0,
+        r#"{"channel":"l2Book","data":{"coin":"1","time":3000,"levels":[[{"px":"80","sz":"1"}],[{"px":"81","sz":"2"}]]}}"#,
+    );
+    assert_eq!(listed(&e), ["BTC-USDC"]);
+    e.handle(
+        4000.0,
+        Event::WsClosed {
+            socket: node,
+            code: 1006,
+        },
+    );
+    // Resyncing: not live, but still listed so recovery snapshots clear it.
+    assert!(e.book("BTC-USDC").is_none());
+    assert_eq!(listed(&e), ["BTC-USDC"]);
+}
+#[test]
 fn documented_funding_and_api_last_are_independent() {
     let (mut e, node, api) = ready();
     message(

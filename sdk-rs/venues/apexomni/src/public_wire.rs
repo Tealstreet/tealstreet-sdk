@@ -1,47 +1,8 @@
 //! Borrowed quote records. Parsing rejects non-finite financial values.
+use safe_cex_engine::de::{number_or_blank_zero, optional_number_or_blank};
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 use std::borrow::Cow;
-
-pub fn number<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Text(Cow<'a, str>),
-        Number(f64),
-    }
-    let n = match N::deserialize(d)? {
-        N::Text(s) => safe_cex_engine::startup::number_or_zero(&s)
-            .ok_or_else(|| serde::de::Error::custom("invalid public number"))?,
-        N::Number(n) => n,
-    };
-    if n.is_finite() {
-        Ok(n)
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
-}
-pub fn optional_number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum N<'a> {
-        Text(Cow<'a, str>),
-        Number(f64),
-    }
-    let Some(value) = Option::<N<'_>>::deserialize(d)? else {
-        return Ok(None);
-    };
-    let value = match value {
-        N::Text(text) if text.is_empty() => return Ok(None),
-        N::Text(text) => text.parse().map_err(serde::de::Error::custom)?,
-        N::Number(n) => n,
-    };
-    if value.is_finite() {
-        Ok(Some(value))
-    } else {
-        Err(serde::de::Error::custom("non-finite number"))
-    }
-}
 #[derive(Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Contract<'a> {
@@ -54,25 +15,25 @@ pub struct Contract<'a> {
     #[serde(borrow)]
     pub settle_asset_id: Cow<'a, str>,
     pub enable_trade: bool,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub step_size: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub tick_size: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub min_order_size: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub max_order_size: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub display_min_leverage: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub display_max_leverage: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub l2_pair_id: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub initial_margin_rate: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub default_initial_margin_rate: f64,
-    #[serde(default, deserialize_with = "number")]
+    #[serde(default, deserialize_with = "number_or_blank_zero")]
     pub max_market_price_range: f64,
 }
 /// Names a contract row that failed to parse.
@@ -87,7 +48,7 @@ pub struct ContractKey<'a> {
 }
 #[derive(Deserialize)]
 pub struct Envelope<'a> {
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub code: Option<f64>,
     #[serde(default, borrow)]
     pub data: Option<&'a RawValue>,
@@ -107,27 +68,27 @@ pub struct Message<'a> {
 pub struct Tick<'a> {
     #[serde(borrow)]
     pub s: Cow<'a, str>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub p: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub mp: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub xp: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub pr: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub o: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub fr: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number")]
+    #[serde(default, deserialize_with = "optional_number_or_blank")]
     pub v: Option<f64>,
-    #[serde(default, deserialize_with = "optional_number", rename = "to")]
+    #[serde(default, deserialize_with = "optional_number_or_blank", rename = "to")]
     pub turnover: Option<f64>,
 }
 #[derive(Deserialize)]
 pub struct Level(
-    #[serde(deserialize_with = "number")] pub f64,
-    #[serde(deserialize_with = "number")] pub f64,
+    #[serde(deserialize_with = "number_or_blank_zero")] pub f64,
+    #[serde(deserialize_with = "number_or_blank_zero")] pub f64,
 );
 #[derive(Deserialize)]
 pub struct Depth {
@@ -139,32 +100,32 @@ pub struct Depth {
 }
 #[derive(Deserialize)]
 pub struct Candle {
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub start: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub open: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub high: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub low: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub close: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub volume: f64,
 }
 #[derive(Deserialize)]
 pub struct Kline {
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub t: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub o: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub h: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub l: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub c: f64,
-    #[serde(deserialize_with = "number")]
+    #[serde(deserialize_with = "number_or_blank_zero")]
     pub v: f64,
 }
 pub struct Decimal {
@@ -200,7 +161,7 @@ impl<'de> Deserialize<'de> for Decimal {
 }
 #[derive(Deserialize)]
 pub struct Trade {
-    #[serde(deserialize_with = "number", rename = "T")]
+    #[serde(deserialize_with = "number_or_blank_zero", rename = "T")]
     pub time: f64,
     pub p: Decimal,
     pub v: Decimal,

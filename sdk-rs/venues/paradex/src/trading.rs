@@ -6,6 +6,7 @@ use crate::{
 };
 use safe_cex_engine::model::{OrderSide, OrderType, PlaceOrderOpts, TimeInForce};
 use safe_cex_engine::num;
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{Command, CommandId, Cx, LogLevel, Method, Response};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -103,18 +104,6 @@ pub struct Trading {
     amend_locks: HashSet<String>,
 }
 
-fn encode(text: &str) -> String {
-    let mut output = String::new();
-    for b in text.bytes() {
-        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-            output.push(char::from(b));
-        } else {
-            use std::fmt::Write;
-            write!(output, "%{b:02X}").unwrap();
-        }
-    }
-    output
-}
 fn positive(v: f64) -> bool {
     v.is_finite() && v > 0.
 }

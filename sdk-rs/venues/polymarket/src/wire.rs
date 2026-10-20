@@ -1,47 +1,13 @@
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::borrow::Cow;
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Number(pub f64);
-impl<'de> Deserialize<'de> for Number {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Input<'a> {
-            N(f64),
-            S(#[serde(borrow)] Cow<'a, str>),
-            Null,
-        }
-        let n = match Input::deserialize(d)? {
-            Input::N(v) => v,
-            Input::S(s) => s.parse().map_err(serde::de::Error::custom)?,
-            Input::Null => return Err(serde::de::Error::custom("missing number")),
-        };
-        if !n.is_finite() {
-            return Err(serde::de::Error::custom("nonfinite number"));
-        }
-        Ok(Self(n))
-    }
-}
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PublicNumber(pub f64);
-impl<'de> Deserialize<'de> for PublicNumber {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Input<'a> {
-            N(f64),
-            S(#[serde(borrow)] Cow<'a, str>),
-        }
-        let value = match Input::deserialize(d)? {
-            Input::N(n) => Some(n).filter(|n| n.is_finite()),
-            Input::S(s) => safe_cex_engine::startup::number_or_zero(&s),
-        };
-        value
-            .map(Self)
-            .ok_or_else(|| serde::de::Error::custom("invalid public number"))
-    }
-}
+pub use safe_cex_engine::de::Number;
+/// Public discovery fields: blank reads as 0, null and malformed reject the row.
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(transparent)]
+pub struct PublicNumber(
+    #[serde(deserialize_with = "safe_cex_engine::de::number_or_blank_zero")] pub f64,
+);
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Gamma<'a> {

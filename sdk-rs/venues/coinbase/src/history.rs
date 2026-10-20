@@ -2,6 +2,7 @@
 use crate::{Coinbase, Pending, ProductKind, account, account_wire::Decimal, public::ws_symbol};
 use safe_cex_engine::json::ArrayAt;
 use safe_cex_engine::model::{OrderStatus, OrderType};
+use safe_cex_engine::url::encode;
 use safe_cex_engine::{CommandId, Cx, Method, Query, Response};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -125,8 +126,11 @@ struct OrderTime<'a> {
     created_time: Cow<'a, str>,
     #[serde(default, borrow)]
     last_fill_time: Cow<'a, str>,
-    #[serde(default, deserialize_with = "crate::account_wire::optional_decimal")]
-    average_filled_price: Option<Decimal>,
+    #[serde(
+        default,
+        deserialize_with = "safe_cex_engine::de::optional_number_or_blank"
+    )]
+    average_filled_price: Option<f64>,
 }
 #[derive(Deserialize)]
 struct TradeRow<'a> {
@@ -140,17 +144,6 @@ struct TradeRow<'a> {
     time: Cow<'a, str>,
     #[serde(borrow)]
     side: Cow<'a, str>,
-}
-fn quote(s: &str) -> String {
-    s.bytes()
-        .map(|b| {
-            if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
-                (b as char).to_string()
-            } else {
-                format!("%{b:02X}")
-            }
-        })
-        .collect()
 }
 fn id(s: &str) -> Result<(), String> {
     if s.is_empty() || s.len() > 200 || s.chars().any(char::is_control) {
@@ -332,18 +325,18 @@ impl Coinbase {
                 ),
                 Kind::Trades => format!(
                     "/api/v3/brokerage/market/products/{}/ticker?limit={}",
-                    quote(req.native.as_deref().unwrap()),
+                    encode(req.native.as_deref().unwrap()),
                     req.limit
                 ),
             };
             if req.kind != Kind::Trades {
                 if let Some(product) = &req.native {
                     path.push_str("&product_ids=");
-                    path.push_str(&quote(product));
+                    path.push_str(&encode(product));
                 }
                 if let Some(order) = &req.order_id {
                     path.push_str("&order_ids=");
-                    path.push_str(&quote(order));
+                    path.push_str(&encode(order));
                 }
                 let product = if req.family == ProductKind::Spot {
                     "SPOT"
@@ -375,7 +368,7 @@ impl Coinbase {
                     } else {
                         from
                     };
-                    path.push_str(&quote(&rfc3339(from)?));
+                    path.push_str(&encode(&rfc3339(from)?));
                 }
                 if let Some(to) = req.to {
                     path.push_str(if req.kind == Kind::Fills {
@@ -383,11 +376,11 @@ impl Coinbase {
                     } else {
                         "&end_date="
                     });
-                    path.push_str(&quote(&rfc3339((to + 1.0).min(MAX_TIME))?));
+                    path.push_str(&encode(&rfc3339((to + 1.0).min(MAX_TIME))?));
                 }
                 if let Some(cursor) = cursor {
                     path.push_str("&cursor=");
-                    path.push_str(&quote(cursor));
+                    path.push_str(&encode(cursor));
                 }
             }
             Ok((
@@ -534,7 +527,7 @@ impl Coinbase {
                         kind: o.kind,
                         status: o.status,
                         price: (o.price > 0.0).then_some(o.price),
-                        average_price: time.average_filled_price.map(|v| v.0).filter(|n| *n > 0.0),
+                        average_price: time.average_filled_price.filter(|n| *n > 0.0),
                         amount: o.amount / scale,
                         filled: o.filled / scale,
                         reduce_only: o.reduce_only,

@@ -5,7 +5,7 @@ export const WorkersWebSocket: typeof globalThis.WebSocket;
 export function workersTransport(): Transport;
 
 export function createEngineObject<Venue extends string = string, Options = Record<string, unknown>>(configuration: {
-  loadEngine(): Promise<{ WasmEngine: new (venue: string, optionsJson: string) => WasmEngineLike }>;
+  loadEngine(venue: Venue): Promise<{ WasmEngine: new (venue: string, optionsJson: string) => WasmEngineLike }>;
   createTransport?(venue: Venue, options: Options, raw: Transport): Transport;
   flush?: { store: number; books: number };
 }): new (state: { storage: { setAlarm(at: number): unknown } }) => {

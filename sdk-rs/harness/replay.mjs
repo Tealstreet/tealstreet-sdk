@@ -22,6 +22,8 @@ const { values } = parseArgs({
     tape: { type: 'string' },
     books: { type: 'string', default: 'BTCUSDT,ETHUSDT,SOLUSDT' },
     out: { type: 'string' },
+    // Node engine package to load instead of the default build.
+    wasm: { type: 'string' },
     // Skip modelling the worker posting books to main (same work for both).
     'no-egress': { type: 'boolean', default: false },
   },
@@ -189,7 +191,7 @@ async function runRust() {
   const { EngineHost } = await import('../hosts/wasm/js/host.mjs');
   const { Frame, TickerState, MARKET_COLUMNS } = await import('../hosts/wasm/js/wire.mjs');
   const { loadEngine } = await import('./engine.mjs');
-  const { WasmEngine, wasmMemoryBytes } = await loadEngine(venue.rust, options);
+  const { WasmEngine, wasmMemoryBytes } = await loadEngine(values.wasm);
   const tape = new Tape(records, venue, isPrivate, 30000, 'rust', bookSymbols, options);
   const encoder = new TextEncoder();
   const cpuStart = { process: process.cpuUsage(), thread: process.threadCpuUsage() };
