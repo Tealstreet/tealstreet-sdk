@@ -133,3 +133,13 @@ No new error architecture or unrelated engine helper migration belongs here.
   review passed, and strict Binance Clippy passed. A trade-first execution emits
   immediately but ownership waits for regular NEW/accepted snapshot; PM
   TRIGGERED semantics remain untouched.
+- Bybit Partial-stop phase: cancel/recreate follows the owner-selected TS
+  matrix, including raw price/type projection, leg trigger defaults, total
+  native quantities, zero conversion, hedged/category routing and the distinct
+  inverse/missing-mark fallbacks. Partial replacement alone requires strict
+  matching cancellation proof. Successful shared-family writes reconcile orders
+  even with a healthy socket, using Hyro's managed snapshot path. Full/virtual/
+  trailing/free stops retain their controls. Full Bybit suite: 179 passed,
+  including 15 new focused cases; strict Clippy/format/bans passed. Independent
+  review and an independent 15-case rerun passed. Evidence is scripted, not a
+  funded private-account capture.
