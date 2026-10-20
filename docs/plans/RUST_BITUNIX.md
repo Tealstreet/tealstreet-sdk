@@ -1205,3 +1205,24 @@ boundedreview atdiminishingreturns. Ownerfinal419helperaggregate running.
 Final419/419helpers+42focusedPASS; source staged/released, no markers or
 whitespaceerrors. Unchangedthree-runParadex publicartifactgate running
 withlocalchecksquiet. Checkpoint reviewedmerge before gateoutcome.
+
+Paradex unchangedthree-runpublicartifactgatePASS12,396frames/66markets/
+tickers/2books/all38intermediateevents. TS/Rust main789.2/616.7ms, steady
+431.4/298.8ms, retained1.9/1.6MB, peak75.4/28.6MB; module1,232,780bytes
+under1,258,291cap. Private33frames/15commandsPASS; allphasereviews complete.
+
+### Next landing: Phemex
+
+Fetched45d7a3fb98(PR1310); briefprocess unchanged. Plan: integrate22ndfactory
+withBitunixsecretcfg intact, graftUTF8scratch/actions fastpath insidecurrent
+closed/connecting/bounded guards, keeprawbinary andlegacyhostcompatibility.
+IncomingTSfull-depth/sequence andhedgeleg reconciliation changesretainprior
+Kraken/KuCoin repairs. Harnesspreserves signedmemory/peak/settle policy and
+419strictbackbone, scopesPhemex realconstructor/auth/typedmatching, replaces
+URL+objectstring collisions withactualsocketidentity, activeperconnection
+topics andprivatebusiness authvalidation. Bootstrap framesmustretain times/
+framecount throughourstartupDelivered prelude ratherthanbeing discarded.
+Nativecompatibility/unusedcrypto audit, fullchecks+targetedSDK/host/helpers,
+independentadversarialreview andunchangedpublic/privateartifactgates precede
+readiness. Expected22venues/26public/44private+priorparitycases, all32CIchecks
+exactheadgreen beforemerge. Checkpoint priorcompletedphase beforemerge.
