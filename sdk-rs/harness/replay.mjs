@@ -66,7 +66,7 @@ if (values.venue === 'hyrotrader' && replayOptions.endpoints) {
   process.env.NEXT_PUBLIC_HYROTRADER_PROD_PUBLIC_WS_URL = replayOptions.endpoints.publicWs;
   process.env.NEXT_PUBLIC_HYROTRADER_PROD_PRIVATE_WS_URL = replayOptions.endpoints.privateWs;
 }
-const publicReplayClock = !isPrivate && (values.venue === 'mexc' || venue.orderlyProtocol === true);
+const publicReplayClock = !isPrivate && (values.venue === 'mexc' || values.venue === 'bitrue' || venue.orderlyProtocol === true);
 const credentials = { key: replayOptions.key, secret: replayOptions.secret, passphrase: replayOptions.passphrase };
 const replayDeadline = realTimeout(() => {
   console.error('Replay exceeded its 120-second deadline');

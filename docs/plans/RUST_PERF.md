@@ -860,3 +860,32 @@ review passes. Productionecca/control922 artifacts unchanged; shared71ad
 manifest19b SHA749c690f7c5e78bfeeacac79bca7fcc9d118086e036bc3b457fb031af576cc0b
 is independently verified. Noownedbuild/test jobs remain. Proceedwithfour
 fixedoptionalprofiles, then19officialpublic3-run gates andfixed190validpairs.
+
+
+First19public checkpointABORTED onBitruecorrectness beforeanycomparisonpairs:
+11official3-run gates pass, thenBitrue reports444subscription/missingbook
+errors across3runs. Correct primarysimple-depthsubscriptions were sent, but
+fixture starts fallbackdepth at3600ms; bothimplementations arm3000ms fallback
+and theaccelerated replay lasted124ms withoutaBitruevirtualclock. Addonly
+publicBitrue toexistingtape-timepredicate onbothsides. Actualclock/audit
+regression proves nofallback2999, send3000, subscribeddata3600; unsolicited
+fallback stillfails. Privateclockselectionunchanged. Independent5testspass.
+
+SameBitruefixture nowhas2books andidenticaloutput; the3-run gatefails solely
+mainCPU0.97x (TS87.6/Rust90.4ms), retained1.63x/steady1.15xpass. This is valid
+negativeperformanceevidence; do notrerununtilfavorable. Retain original
+/tmp/perf-crossover19.json (aborted,zero pairs), failedandcorrectedBitruelogs.
+Thefourfixed19bprofilesare valid andremain: OKX main136.866→187.113ms
+(single→batch) despite8904→355calls; Bybit128.490→96.491ms,8742→208calls.
+Profiling overheadis material; extraOKXCPU sits mostlyoutside timedengine
+methods. These arediagnostics, notthemissingbefore/aftercohort.
+
+Nextsource phase: sample exactlyoneRustbatchreplayeach forOKXandBitrue with
+optionalV8CPUprofiling, aftercorrectness/sourceprovenancecheckpoint. Diagnose
+JSqueue/packing/dispatch versusruntime/GC ratherthanblamingpuretypedparsing.
+Ifneeded addoptionalhostdrainprofiling (defaultoff) toseparate inclusivehost
+cost fromnestedengine cost, withcounterexamples. Thenimplement evidence-backed
+productionoptimization (including measuredBitrueopt3 tradeoff ifWASMdominates),
+review/verify/commit, refreshcontrol/helper/artifactproofs andpredeclarefresh
+publicgates+fixedcomparison. Keepallvalidnegativeobservations andneverchange
+publicthresholdsoracceptunsubscribeddata. NoPR/push/merge untilactualgatespass.

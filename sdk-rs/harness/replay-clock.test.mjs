@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
+import { ReplayClock } from './tape.mjs';
+import { venueOf } from './venues.mjs';
 
 const source = readFileSync(new URL('./replay.mjs', import.meta.url), 'utf8');
 const clockSource = source.slice(source.indexOf('let clockStart = '), source.indexOf('const config = '));
@@ -44,7 +46,7 @@ test('missing or nonfinite recorded epochs preserve the real clock', () => {
   }
 });
 
-test('only MEXC and Orderly public replays install the virtual timer clock in either runtime', () => {
+test('only MEXC, Bitrue and Orderly public replays install the virtual timer clock in either runtime', () => {
   const predicate = source.match(/^const publicReplayClock = .*;$/m)?.[0];
   assert.ok(predicate);
   const constructors = [...source.matchAll(/const clock = publicReplayClock \? new ReplayClock\(metadata\?\.epoch \?\? Date\.now\(\)\) : undefined;/g)];
@@ -58,7 +60,7 @@ test('only MEXC and Orderly public replays install the virtual timer clock in ei
           values: { venue: name }, venue, isPrivate, metadata: { epoch: 123 },
           ReplayClock: class { constructor(epoch) { this.epoch = epoch; } },
         });
-        const expected = !isPrivate && (name === 'mexc' || venue.orderlyProtocol);
+        const expected = !isPrivate && (name === 'mexc' || name === 'bitrue' || venue.orderlyProtocol);
         assert.equal(Boolean(clock), expected, `${name} private=${isPrivate}`);
         if (clock) assert.equal(clock.epoch, 123);
       }
@@ -82,5 +84,44 @@ test('recorded metadata options and testnet preserve credential and explicit con
     const explicit = run(isPrivate, { options: { applicationId: 'explicit', testnet: false } });
     assert.equal(explicit.applicationId, 'explicit');
     assert.equal(explicit.testnet, false);
+  }
+});
+
+
+test('both Bitrue replay clocks activate subscribed fallback depth after its protocol delay', async () => {
+  const predicate = source.match(/^const publicReplayClock = .*;$/m)[0];
+  const constructors = [...source.matchAll(/const clock = publicReplayClock \? new ReplayClock\(metadata\?\.epoch \?\? Date\.now\(\)\) : undefined;/g)];
+  assert.equal(constructors.length, 2);
+  const url = 'wss://fmarket-ws.bitrue.com/kline-api/ws';
+  const venue = venueOf('bitrue');
+  const primary = 'market_e_btcusdt_simple_depth_step0';
+  const fallback = 'market_e_btcusdt_depth_step0';
+  const frame = JSON.stringify({ channel: fallback, tick: { buys: [[100, 2]], asks: [[101, 3]] } });
+  const subscribe = (channel) => JSON.stringify({ event: 'sub', params: { channel } });
+  for (const constructor of constructors) {
+    const clock = vm.runInNewContext(`${predicate}\n${constructor[0]}\nclock`, {
+      values: { venue: 'bitrue' }, venue, isPrivate: false,
+      metadata: { epoch: 1700000000000 }, Date, ReplayClock,
+    });
+    assert.ok(clock, 'actual runtime clock selection must drive the Bitrue fallback timer');
+    const audit = venue.createSocketAudit('ts', { isPrivate: false, books: ['E-BTC-USDT'] });
+    const sent = [];
+    try {
+      clock.install();
+      clock.start();
+      audit.sent(url, subscribe(primary));
+      setTimeout(() => { sent.push(fallback); audit.sent(url, subscribe(fallback)); }, 3000);
+      await clock.advance(2999);
+      assert.deepEqual(sent, []);
+      await clock.advance(3000);
+      assert.deepEqual(sent, [fallback]);
+      await clock.advance(3600);
+      audit.received(url, frame);
+      assert.deepEqual(audit.errors(), []);
+    } finally { clock.restore(); }
+    const unsubscribed = venue.createSocketAudit('rust', { isPrivate: false, books: ['E-BTC-USDT'] });
+    unsubscribed.sent(url, subscribe(primary));
+    unsubscribed.received(url, frame);
+    assert(unsubscribed.errors().includes('data arrived without subscription: ' + fallback));
   }
 });
