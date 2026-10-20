@@ -74,8 +74,8 @@ its correctness/operational requirements remain strict. A narrowing leaves
 the objective open and requires an evidence-backed source phase, not favorable
 reruns. Label fragile small gains amid wide variation. No p-value success rule.
 
-The43 private fixtures are generated separately; their official gates have not
-run. The three optional diagnostics and25 official public/cohort jobs have not run.
+At protocol declaration, the43 private fixtures were generated separately;
+their official gates, the three diagnostics and25 public/cohort jobs had not run.
 Final manifest/driver hashes, source verification, budgets and all private
 results must be recorded before authorizing their first performance child.
 
@@ -95,3 +95,10 @@ rounded-up KiB formula; all19 existing modules shrank and retain their caps.
 The43 private gates are running. No diagnostic, public gate or paired sample
 has run. Full proofs, commands and raw supplementary logs are preserved in
 `RUST_PERF_CHECKPOINT21.json.gz`.
+
+Private checkpoint: all 43 official private gates now pass, including every
+configured alias/testnet variant, and all seven supplementary checks pass.
+Commands, tape hashes and raw logs are preserved in
+`RUST_PERF_PRIVATE43.json.gz`. Private CPU and memory remain informational;
+no widening is claimed from these correctness runs. Final manifest creation,
+three diagnostics, 25 public gates and 250 paired comparisons remain pending.
