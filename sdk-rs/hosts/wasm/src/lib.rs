@@ -4,6 +4,7 @@
 //! executes the returned actions. Every call returns the pending actions as a
 //! JSON array string, or an empty string when there are none.
 #[cfg(not(any(
+    feature = "bitrue",
     feature = "binance",
     feature = "blofin",
     feature = "bybit",
@@ -17,7 +18,7 @@
     feature = "okx"
 )))]
 compile_error!(
-    "safe-cex-wasm requires at least one venue feature: binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx or weex"
+    "safe-cex-wasm requires at least one venue feature: bitrue, binance, bybit, cryptocom, bingx, blofin, mexc, backpack, bitget, hyperliquid, okx or weex"
 );
 
 use safe_cex_engine::model::PlaceOrderOpts;
@@ -32,6 +33,8 @@ use safe_cex_venue_binance::{BinanceFutures, Options as BinanceOptions};
 use safe_cex_venue_bingx::{Bingx, Options as BingxOptions};
 #[cfg(feature = "bitget")]
 use safe_cex_venue_bitget::{BitgetFutures, Options as BitgetOptions, Product};
+#[cfg(feature = "bitrue")]
+use safe_cex_venue_bitrue::{Bitrue, Options as BitrueOptions};
 #[cfg(feature = "blofin")]
 use safe_cex_venue_blofin::{Blofin, Options as BlofinOptions};
 #[cfg(feature = "bybit")]
@@ -91,6 +94,7 @@ impl<V: Venue> AnyEngine for Engine<V> {
     feature = "bingx",
     feature = "mexc",
     feature = "bitget",
+    feature = "bitrue",
     feature = "backpack",
     feature = "weex",
     feature = "hyperliquid",
@@ -116,7 +120,7 @@ struct EngineOptions {
     key: Option<String>,
     #[serde(default)]
     secret: Option<String>,
-    #[cfg(feature = "backpack")]
+    #[cfg(any(feature = "backpack", feature = "bitrue"))]
     #[serde(default)]
     recv_window: Option<f64>,
     #[cfg(any(
@@ -568,6 +572,7 @@ impl WasmEngine {
         feature = "bingx",
         feature = "mexc",
         feature = "bitget",
+        feature = "bitrue",
         feature = "backpack",
         feature = "weex",
         feature = "hyperliquid",
@@ -584,6 +589,13 @@ impl WasmEngine {
             return Err(JsError::new("WEEX requires a passphrase"));
         }
         let inner: Box<dyn AnyEngine> = match venue {
+            #[cfg(feature = "bitrue")]
+            "bitrue" => Box::new(Engine::new(Bitrue::new(BitrueOptions {
+                public_data_only: options.public_data_only,
+                key: options.key,
+                secret: options.secret,
+                recv_window: options.recv_window.unwrap_or(20_000.0).clamp(1.0, 60_000.0) as u32,
+            }))),
             #[cfg(feature = "backpack")]
             "backpack" => Box::new(Engine::new(Backpack::new(BackpackOptions {
                 public_data_only: options.public_data_only,

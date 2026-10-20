@@ -126,7 +126,8 @@ export class BitruePublicWebsocket extends BaseWebSocket<BitrueExchange> {
     return `market_${this.convertToWsSymbol(symbol)}_kline_${INTERVAL[interval]}`;
   };
 
-  mapKline = (json: Data) => {
+  mapKline = (json: Data, symbol?: string) => {
+    const multiplier = symbol ? Number(this.parent.store.marketsBySymbol[this.resolveMarketSymbol(symbol)]?.info?.multiplier || 1) : 1;
     const rawCandles: {
       amount: number;
       close: number;
@@ -148,7 +149,7 @@ export class BitruePublicWebsocket extends BaseWebSocket<BitrueExchange> {
       high: candle.high,
       low: candle.low,
       close: candle.close,
-      volume: candle.vol,
+      volume: candle.vol * multiplier,
       info: candle,
     }));
   };
@@ -158,7 +159,7 @@ export class BitruePublicWebsocket extends BaseWebSocket<BitrueExchange> {
     const handler = topic;
 
     const parser = (json: Data) => {
-      const candle = this.mapKline([json]);
+      const candle = this.mapKline([json], opts.symbol);
       candle.forEach(callback);
     };
 
@@ -227,6 +228,7 @@ export class BitruePublicWebsocket extends BaseWebSocket<BitrueExchange> {
     const json: TICKER_WS_UPDATE = _json as any;
     const resolvedSymbol = this.resolveMarketSymbol(symbol);
     const last = +json.close;
+    const multiplier = Number(this.parent.store.marketsBySymbol[resolvedSymbol]?.info?.multiplier || 1);
 
     const ticker: Partial<Ticker> = {
       id: resolvedSymbol,
@@ -234,8 +236,8 @@ export class BitruePublicWebsocket extends BaseWebSocket<BitrueExchange> {
       last,
       mark: last,
       percentage: +json.rose * 100,
-      volume: +json.vol,
-      quoteVolume: +json.amount,
+      volume: +json.vol * multiplier,
+      quoteVolume: +json.amount * multiplier,
       info: json,
     };
     this.parent.store.updateTicker({ id: resolvedSymbol }, ticker);
@@ -276,15 +278,16 @@ export class BitruePublicWebsocket extends BaseWebSocket<BitrueExchange> {
       const data = _data as ORDER_BOOK_WS_UPDATE;
       const buys = (data.buys || (data as any).bids || []) as Array<[number, number]>;
       const asks = (data.asks || []) as Array<[number, number]>;
+      const multiplier = Number(this.parent.store.marketsBySymbol[resolvedSymbol]?.info?.multiplier || 1);
       orderBook.bids = buys.map(([price, amount]) => ({
         price: price,
-        amount: amount,
+        amount: amount * multiplier,
         total: 0,
       }));
 
       orderBook.asks = asks.map(([price, amount]) => ({
         price: price,
-        amount: amount,
+        amount: amount * multiplier,
         total: 0,
       }));
 
