@@ -185,3 +185,17 @@ for green CI, merge, and cut a fresh follow-up branch.
   private replay also passes. Full Binance gate and combined build remain.
 - Workspace1262 tests, all-target strict clippy, WASM strict clippy, bans and fmt
   pass. No shared crypto helper became unused: Aster reuses the existing primitives.
+
+### Binance regression and broad checks
+
+- Selected Binance public gate passes3runs:873frames,917markets,783tickers,
+  3books; TS/Rust main241.8/126.3ms, steady139.7/60.5ms,
+  process272.8/205.9ms, retained4.2/2.2MB; linear1.5MB.
+  Binance private14frames/3commands passes with exact writes and signatures.
+- Final fetch finds landing already integrated. Combined16-venue release build
+  and real wrapper/host checks are running before PR creation.
+- Broad safe-cex suite with two workers:474/475files,6980/6981tests pass.
+  Remaining assertion is fake timer count after disposed transport (expected0,
+  actual1); exact deadline and abort assertions pass. Focused195-case rerun and
+  four deadline cases pass; independent review is investigating timer ownership.
+  The failed broad result is retained rather than declared green.
